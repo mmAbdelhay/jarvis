@@ -1,6 +1,6 @@
 import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi } from "../src/ipc.js";
-import { detectLanguage, formatBytes, formatUptime } from "./format.js";
+import { detectLanguage, formatBytes, formatDiskUsage, formatUptime } from "./format.js";
 
 declare global {
   interface Window {
@@ -30,8 +30,9 @@ function renderMetrics(metrics: SystemMetrics): void {
     metrics.memoryTotalBytes > 0
       ? `${(metrics.memoryUsedBytes / metrics.memoryTotalBytes) * 100}%`
       : "0%";
-  $("disk-value").textContent = formatBytes(metrics.diskUsedBytes);
-  $("disk-total").textContent = `/ ${formatBytes(metrics.diskTotalBytes)}`;
+  const disk = formatDiskUsage(metrics.diskUsedBytes, metrics.diskTotalBytes);
+  $("disk-value").textContent = disk.used;
+  $("disk-total").textContent = disk.total;
   $("uptime-value").textContent = formatUptime(metrics.uptimeSeconds);
   $("net-down").textContent = `↓ ${metrics.networkDownMbps.toFixed(1)}`;
   $("net-up").textContent = `↑ ${metrics.networkUpMbps.toFixed(1)}`;
@@ -77,7 +78,9 @@ function renderSession(session: Session): HTMLElement {
   const summaryText = session.summary === "" ? summaryFallback(session.state) : session.summary;
   const summary = document.createElement("div");
   summary.className = "session__summary";
-  summary.dir = detectLanguage(summaryText) === "ar" ? "rtl" : "ltr";
+  const summaryLanguage = detectLanguage(summaryText);
+  summary.dir = summaryLanguage === "ar" ? "rtl" : "ltr";
+  if (summaryLanguage === "ar") summary.classList.add("arabic");
   summary.textContent = summaryText;
 
   const meta = document.createElement("div");
@@ -111,7 +114,7 @@ function renderTurn(turn: Turn): void {
   text.className = "turn__text";
   if (turn.language === "ar") {
     text.dir = "rtl";
-    text.classList.add("turn__text--arabic");
+    text.classList.add("arabic");
   }
   text.textContent = turn.text;
   bubble.append(text);

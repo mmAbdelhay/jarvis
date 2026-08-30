@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:"
+/>
 <title>Jarvis</title>
 <link
   rel="stylesheet"
@@ -490,8 +494,7 @@
 
   .turn--user .turn__text { color: var(--text); }
 
-  .turn__text--arabic {
-    font-family: "IBM Plex Sans Arabic", sans-serif;
+  .turn__text.arabic {
     line-height: 1.7;
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLanguage, formatBytes, formatUptime } from "./format.js";
+import { detectLanguage, formatBytes, formatDiskUsage, formatUptime } from "./format.js";
 
 describe("formatBytes", () => {
   it("formats gigabytes with one decimal", () => {
@@ -26,6 +26,29 @@ describe("formatUptime", () => {
 
   it("formats minutes below an hour", () => {
     expect(formatUptime(120)).toBe("2m");
+  });
+});
+
+describe("formatDiskUsage", () => {
+  it("shows the unit once, on the total, using the total's unit for the used value", () => {
+    expect(formatDiskUsage(335_007_449_088, 1_067_755_798_528)).toEqual({
+      used: "0.3",
+      total: "/ 1.1 TB",
+    });
+  });
+
+  it("matches the artboard's single-line GB pattern", () => {
+    expect(formatDiskUsage(312_000_000_000, 994_000_000_000)).toEqual({
+      used: "312.0",
+      total: "/ 994.0 GB",
+    });
+  });
+
+  it("handles zero used bytes", () => {
+    expect(formatDiskUsage(0, 994_000_000_000)).toEqual({
+      used: "0",
+      total: "/ 994.0 GB",
+    });
   });
 });
 
