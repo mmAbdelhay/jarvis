@@ -7,7 +7,7 @@ export type IpcChannels = {
 };
 
 export type RendererApi = {
-  send(text: string): Promise<void>;
+  send(text: string, language: "ar" | "en"): Promise<void>;
   onMetrics(cb: (m: SystemMetrics) => void): void;
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;

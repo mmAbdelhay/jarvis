@@ -1,5 +1,13 @@
 packages:
   - "packages/*"
 
+# pnpm 10.28.2 honours onlyBuiltDependencies here, but ~/.npmrc sets
+# ignore-scripts=true as a blanket pre-gate that makes this list inert
+# regardless of what's named — no listed package's install/postinstall
+# script runs. That means the Electron binary this app needs is NOT
+# fetched automatically. After `pnpm install`, run this by hand once:
+#   node node_modules/electron/install.js
+# Do not add a project-level .npmrc to override ignore-scripts — that
+# setting is deliberate supply-chain protection (see Global Constraints).
 onlyBuiltDependencies:
   - electron

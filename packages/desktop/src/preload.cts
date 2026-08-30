@@ -1,11 +1,17 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { RendererApi } from "./ipc.js";
 
-contextBridge.exposeInMainWorld("jarvis", {
-  send: (text: string, language: "ar" | "en") => ipcRenderer.invoke("input:send", text, language),
-  onMetrics: (cb: (m: unknown) => void) =>
-    ipcRenderer.on("metrics:update", (_e, m) => cb(m)),
-  onSessions: (cb: (s: unknown) => void) =>
-    ipcRenderer.on("sessions:update", (_e, s) => cb(s)),
-  onTurn: (cb: (t: unknown) => void) =>
-    ipcRenderer.on("turn:new", (_e, t) => cb(t)),
-});
+const api: RendererApi = {
+  send: (text, language) => ipcRenderer.invoke("input:send", text, language),
+  onMetrics: (cb) => {
+    ipcRenderer.on("metrics:update", (_e, m) => cb(m));
+  },
+  onSessions: (cb) => {
+    ipcRenderer.on("sessions:update", (_e, s) => cb(s));
+  },
+  onTurn: (cb) => {
+    ipcRenderer.on("turn:new", (_e, t) => cb(t));
+  },
+};
+
+contextBridge.exposeInMainWorld("jarvis", api);
