@@ -1,15 +1,24 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { AgentRegistry, Orchestrator, SessionManager } from "@jarvis/core";
-import { MacSpeech, createBrain, createMetricsReader, createSpawner } from "@jarvis/platform";
+import {
+  MacSpeech,
+  createBrain,
+  createMetricsReader,
+  createSpawner,
+  runCommand,
+} from "@jarvis/platform";
 import { buildWiring } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
+import { startupReport } from "./startup.js";
 
 app.whenReady().then(async () => {
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
+    const report = await startupReport(registry, runCommand);
+    console.log(report.message);
     const sessions = new SessionManager(createSpawner());
     const speech = new MacSpeech({ arabicVoice: "Majed" });
 
@@ -45,6 +54,13 @@ app.whenReady().then(async () => {
     });
 
     await window.loadFile(fileURLToPath(new URL("../renderer/index.html", import.meta.url)));
+
+    window.webContents.send("turn:new", {
+      role: "assistant",
+      text: report.message,
+      language: "en",
+      at: Date.now(),
+    });
 
     const wiring = buildWiring({
       send: (channel, payload) => window.webContents.send(channel, payload),
