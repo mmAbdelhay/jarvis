@@ -9,6 +9,7 @@ export type JarvisConfig = {
   registry: RegistryConfig;
   projects: Record<string, string>;
   brain: BrainConfig;
+  whisper: { binaryPath: string; modelPath: string };
 };
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
@@ -18,6 +19,9 @@ const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
 // sessions inherit hooks and skills from their cwd, so this must never
 // default to the repo or to `process.cwd()`.
 const DEFAULT_BRAIN_CWD = join(homedir(), ".config/jarvis/brain");
+
+const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
+const DEFAULT_WHISPER_MODEL_PATH = "~/.voicemode/services/whisper/models/ggml-base.bin";
 
 export function parseConfig(raw: unknown): JarvisConfig {
   if (typeof raw !== "object" || raw === null) {
@@ -35,6 +39,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
 
   const routing = parseRouting(root["routing"]);
   const projects = parseProjects(root["projects"]);
+  const whisper = parseWhisper(root["whisper"]);
 
   return {
     registry: { agents, routing },
@@ -48,6 +53,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
           : DEFAULT_SYSTEM_PROMPT,
       cwd: typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD,
     },
+    whisper,
   };
 }
 
@@ -131,6 +137,33 @@ function parseRouting(rawRouting: unknown): RoutingRule[] {
       },
     };
   });
+}
+
+function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: string } {
+  if (rawWhisper === undefined) {
+    return {
+      binaryPath: expandTilde(DEFAULT_WHISPER_BINARY_PATH),
+      modelPath: expandTilde(DEFAULT_WHISPER_MODEL_PATH),
+    };
+  }
+  if (typeof rawWhisper !== "object" || rawWhisper === null || Array.isArray(rawWhisper)) {
+    throw new Error("Config `whisper` must be an object");
+  }
+  const whisper = rawWhisper as Record<string, unknown>;
+  if (whisper["binaryPath"] !== undefined && typeof whisper["binaryPath"] !== "string") {
+    throw new Error("Config `whisper.binaryPath` must be a string");
+  }
+  if (whisper["modelPath"] !== undefined && typeof whisper["modelPath"] !== "string") {
+    throw new Error("Config `whisper.modelPath` must be a string");
+  }
+  return {
+    binaryPath: expandTilde(
+      typeof whisper["binaryPath"] === "string" ? whisper["binaryPath"] : DEFAULT_WHISPER_BINARY_PATH,
+    ),
+    modelPath: expandTilde(
+      typeof whisper["modelPath"] === "string" ? whisper["modelPath"] : DEFAULT_WHISPER_MODEL_PATH,
+    ),
+  };
 }
 
 function parseProjects(rawProjects: unknown): Record<string, string> {

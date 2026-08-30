@@ -12,6 +12,9 @@ const api: RendererApi = {
   onTurn: (cb) => {
     ipcRenderer.on("turn:new", (_e, t) => cb(t));
   },
+  onListening: (cb) => {
+    ipcRenderer.on("voice:listening", (_e, listening) => cb(listening));
+  },
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

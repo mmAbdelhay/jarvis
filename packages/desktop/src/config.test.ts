@@ -61,4 +61,30 @@ describe("parseConfig", () => {
   it("throws when agents is an array", () => {
     expect(() => parseConfig({ ...valid, agents: [] })).toThrow(/agents/);
   });
+
+  it("defaults the whisper paths when the section is absent", () => {
+    const config = parseConfig(valid);
+    expect(config.whisper.binaryPath).toContain("whisper-cli");
+    expect(config.whisper.binaryPath.startsWith("~")).toBe(false);
+  });
+
+  it("uses explicit whisper paths and expands a leading tilde", () => {
+    const config = parseConfig({
+      ...valid,
+      whisper: { binaryPath: "~/custom/whisper-cli", modelPath: "/models/ggml.bin" },
+    });
+    expect(config.whisper.binaryPath.startsWith("~")).toBe(false);
+    expect(config.whisper.binaryPath).toContain("/custom/whisper-cli");
+    expect(config.whisper.modelPath).toBe("/models/ggml.bin");
+  });
+
+  it("throws when whisper.binaryPath is not a string", () => {
+    expect(() => parseConfig({ ...valid, whisper: { binaryPath: 123 } })).toThrow(
+      /whisper\.binaryPath/,
+    );
+  });
+
+  it("throws when whisper is not an object", () => {
+    expect(() => parseConfig({ ...valid, whisper: "nope" })).toThrow(/whisper/);
+  });
 });

@@ -4,6 +4,7 @@ export type IpcChannels = {
   "metrics:update": SystemMetrics;
   "sessions:update": Session[];
   "turn:new": Turn;
+  "voice:listening": boolean;
 };
 
 export type RendererApi = {
@@ -11,6 +12,7 @@ export type RendererApi = {
   onMetrics(cb: (m: SystemMetrics) => void): void;
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;
+  onListening(cb: (listening: boolean) => void): void;
 };
 
 export type WiringDeps = {

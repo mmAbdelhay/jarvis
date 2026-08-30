@@ -17,6 +17,7 @@ const $ = (id: string): HTMLElement => {
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => renderSessions(sessions));
 window.jarvis.onTurn((turn) => renderTurn(turn));
+window.jarvis.onListening((listening) => renderListening(listening));
 
 startClock();
 wireComposer();
@@ -104,6 +105,11 @@ function summaryFallback(state: SessionState): string {
     case "dead":
       return "Stopped";
   }
+}
+
+function renderListening(listening: boolean): void {
+  document.body.classList.toggle("is-listening", listening);
+  $("voice-state").textContent = listening ? "Listening…" : "Hold ⌥Space to speak";
 }
 
 function renderTurn(turn: Turn): void {
