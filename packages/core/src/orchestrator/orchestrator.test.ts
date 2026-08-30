@@ -329,6 +329,188 @@ describe("Orchestrator", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("reports an unrecognised tool call in Arabic", async () => {
+    const orchestrator = build(
+      brainReturning({
+        text: "جاري.",
+        toolCalls: [{ name: "session.pause", input: {} }],
+      }),
+    );
+    const turn = await orchestrator.handle("أوقفها مؤقتًا", "ar");
+    expect(turn.text).toContain("لا أعرف كيف أفعل ذلك");
+    expect(speak).toHaveBeenCalledWith(turn.text, "ar");
+  });
+
+  it("reports an unknown session for session.send in Arabic", async () => {
+    const orchestrator = build(
+      brainReturning({
+        text: "جاري الإرسال.",
+        toolCalls: [{ name: "session.send", input: { sessionId: "missing", text: "go" } }],
+      }),
+    );
+    const turn = await orchestrator.handle("أرسل", "ar");
+    expect(turn.text).toContain("لا أعرف جلسة باسم");
+    expect(speak).toHaveBeenCalledWith(turn.text, "ar");
+  });
+
+  it("reports a failed session start in Arabic", async () => {
+    const throwingSessions = new SessionManager(() => {
+      throw new Error("spawn ENOENT");
+    });
+    const orchestrator = new Orchestrator({
+      brain: brainReturning({
+        text: "جاري البدء.",
+        toolCalls: [{ name: "session.start", input: { project: "acme" } }],
+      }),
+      registry,
+      sessions: throwingSessions,
+      speak,
+      projects: { acme: "/Users/x/projects/acme" },
+    });
+    const turn = await orchestrator.handle("افتح سعودي سيل", "ar");
+    expect(turn.text).toContain("تعذر بدء الجلسة");
+    expect(speak).toHaveBeenCalledWith(turn.text, "ar");
+  });
+
+  it("reports a brain failure in Arabic", async () => {
+    const orchestrator = build({ ask: async () => { throw new Error("rate limited"); } });
+    const turn = await orchestrator.handle("مرحبا", "ar");
+    expect(turn.text).toContain("حدث خطأ");
+    expect(speak).toHaveBeenCalledWith(turn.text, "ar");
+  });
+
+  it("collects notes from two failing tool calls", async () => {
+    const orchestrator = build(
+      brainReturning({
+        text: "Both failed.",
+        toolCalls: [
+          { name: "session.start", input: { project: "nope" } },
+          { name: "session.send", input: { sessionId: "missing", text: "go" } },
+        ],
+      }),
+    );
+    const turn = await orchestrator.handle("do both", "en");
+    expect(turn.text).toContain("nope");
+    expect(turn.text).toContain("missing");
+  });
+
+  it("still runs a later successful call when an earlier call fails", async () => {
+    const orchestrator = build(
+      brainReturning({
+        text: "Mixed.",
+        toolCalls: [
+          { name: "session.start", input: { project: "nope" } },
+          { name: "session.start", input: { project: "acme" } },
+        ],
+      }),
+    );
+    const turn = await orchestrator.handle("open both", "en");
+    expect(sessions.list()).toHaveLength(1);
+    expect(turn.sessionId).toBe(sessions.list()[0]?.id);
+    expect(turn.text).toContain("nope");
+  });
+
+  it("reports a distinct failure when session.send fails for a reason other than an unknown id", async () => {
+    const agent = registry.resolve({ project: "acme" });
+    const started = sessions.start({ project: "acme", projectPath: "/x", agent });
+    vi.spyOn(sessions, "send").mockImplementation(() => {
+      throw new Error("write EPIPE");
+    });
+    const orchestrator = build(
+      brainReturning({
+        text: "Sent.",
+        toolCalls: [{ name: "session.send", input: { sessionId: started.id, text: "go" } }],
+      }),
+    );
+    const turn = await orchestrator.handle("send go", "en");
+    expect(turn.text).not.toContain("I don't know a session called");
+    expect(turn.text).toContain("write EPIPE");
+  });
+
+  it("reports a distinct failure when session.kill fails for a reason other than an unknown id", async () => {
+    const agent = registry.resolve({ project: "acme" });
+    const started = sessions.start({ project: "acme", projectPath: "/x", agent });
+    vi.spyOn(sessions, "kill").mockImplementation(() => {
+      throw new Error("process already exited");
+    });
+    const orchestrator = build(
+      brainReturning({
+        text: "Stopped.",
+        toolCalls: [{ name: "session.kill", input: { sessionId: started.id } }],
+      }),
+    );
+    const turn = await orchestrator.handle("stop it", "en");
+    expect(turn.text).not.toContain("I don't know a session called");
+    expect(turn.text).toContain("process already exited");
+  });
+
+  it("includes the session id in the returned context for session.send", async () => {
+    const agent = registry.resolve({ project: "acme" });
+    const started = sessions.start({ project: "acme", projectPath: "/x", agent });
+    const orchestrator = build(
+      brainReturning({
+        text: "Sent.",
+        toolCalls: [{ name: "session.send", input: { sessionId: started.id, text: "go" } }],
+      }),
+    );
+    const turn = await orchestrator.handle("send go", "en");
+    expect(turn.sessionId).toBe(started.id);
+  });
+
+  it("includes the session id in the returned context for session.kill", async () => {
+    const agent = registry.resolve({ project: "acme" });
+    const started = sessions.start({ project: "acme", projectPath: "/x", agent });
+    const orchestrator = build(
+      brainReturning({
+        text: "Stopped.",
+        toolCalls: [{ name: "session.kill", input: { sessionId: started.id } }],
+      }),
+    );
+    const turn = await orchestrator.handle("stop it", "en");
+    expect(turn.sessionId).toBe(started.id);
+  });
+
+  it("does not let a stale model outlive its session across two session.start calls", async () => {
+    const localRegistry = new AgentRegistry({
+      agents: {
+        "claude-mm": { command: "claude-mm", model: "opus", default: true },
+        "claude-plain": { command: "claude-plain" },
+      },
+    });
+    const orchestrator = new Orchestrator({
+      brain: brainReturning({
+        text: "Starting both.",
+        toolCalls: [
+          { name: "session.start", input: { project: "a", agent: "claude-mm" } },
+          { name: "session.start", input: { project: "a", agent: "claude-plain" } },
+        ],
+      }),
+      registry: localRegistry,
+      sessions,
+      speak,
+      projects: { a: "/Users/x/projects/a" },
+    });
+    const turn = await orchestrator.handle("open both", "en");
+    const second = sessions.list()[1];
+    expect(turn.sessionId).toBe(second?.id);
+    expect(turn.agentId).toBe("claude-plain");
+    expect(turn.model).toBeUndefined();
+  });
+
+  it("does not disturb the listener loop when a listener unsubscribes itself during dispatch", async () => {
+    const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
+    const other = vi.fn();
+    let unsubscribeSelf: () => void = () => {};
+    const selfUnsubscribing = vi.fn(() => {
+      unsubscribeSelf();
+    });
+    unsubscribeSelf = orchestrator.onTurn(selfUnsubscribing);
+    orchestrator.onTurn(other);
+    await orchestrator.handle("hi", "en");
+    expect(selfUnsubscribing).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the transcript across turns", async () => {
     const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
     await orchestrator.handle("one", "en");

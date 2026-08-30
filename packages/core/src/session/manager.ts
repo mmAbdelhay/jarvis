@@ -33,7 +33,13 @@ export class SessionManager {
 
     this.#sessions.set(id, session);
 
-    const handle = this.#spawn(input.agent, input.projectPath);
+    let handle: ProcessHandle;
+    try {
+      handle = this.#spawn(input.agent, input.projectPath);
+    } catch (error) {
+      this.#sessions.delete(id);
+      throw error;
+    }
     this.#processes.set(id, handle);
     handle.onOutput((chunk) => this.#onOutput(id, chunk));
     handle.onExit((code) => this.#onExit(id, code));

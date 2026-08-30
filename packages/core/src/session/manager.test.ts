@@ -158,6 +158,16 @@ describe("SessionManager", () => {
     expect(manager.get(b.id)?.state).toBe("starting");
   });
 
+  it("does not leave an orphan session when the spawner throws", () => {
+    const manager = new SessionManager(() => {
+      throw new Error("spawn ENOENT");
+    });
+    expect(() => manager.start({ project: "p", projectPath: "/p", agent })).toThrow(
+      /spawn ENOENT/,
+    );
+    expect(manager.list()).toEqual([]);
+  });
+
   it("does not let one session's output affect another", () => {
     const first = new FakeProcess();
     const second = new FakeProcess();

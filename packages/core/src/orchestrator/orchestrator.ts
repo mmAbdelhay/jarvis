@@ -30,6 +30,14 @@ const MESSAGES = {
     language === "ar"
       ? `لا أعرف جلسة باسم "${sessionId}".`
       : `I don't know a session called "${sessionId}".`,
+  sendFailed: (message: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذر إرسال الرسالة: ${message}`
+      : `I couldn't send that message: ${message}`,
+  killFailed: (message: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذر إيقاف الجلسة: ${message}`
+      : `I couldn't stop that session: ${message}`,
   unknownTool: (name: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `لا أعرف كيف أفعل ذلك ("${name}").`
@@ -81,7 +89,7 @@ export class Orchestrator {
     for (const call of reply.toolCalls ?? []) {
       const outcome = this.#runTool(call, language);
       if (outcome.error !== undefined) notes.push(outcome.error);
-      context = { ...context, ...outcome.context };
+      if (Object.keys(outcome.context).length > 0) context = outcome.context;
     }
 
     const note = notes.join(" ");
@@ -144,20 +152,30 @@ export class Orchestrator {
     const text = stringInput(call.input, "text");
     try {
       this.#options.sessions.send(sessionId, text);
-    } catch {
-      return { context: {}, error: MESSAGES.unknownSession(sessionId, language) };
+    } catch (error) {
+      const message = this.#isUnknownSession(error, sessionId)
+        ? MESSAGES.unknownSession(sessionId, language)
+        : MESSAGES.sendFailed(errorMessage(error), language);
+      return { context: {}, error: message };
     }
-    return { context: {} };
+    return { context: { sessionId } };
   }
 
   #killSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
     const sessionId = stringInput(call.input, "sessionId");
     try {
       this.#options.sessions.kill(sessionId);
-    } catch {
-      return { context: {}, error: MESSAGES.unknownSession(sessionId, language) };
+    } catch (error) {
+      const message = this.#isUnknownSession(error, sessionId)
+        ? MESSAGES.unknownSession(sessionId, language)
+        : MESSAGES.killFailed(errorMessage(error), language);
+      return { context: {}, error: message };
     }
-    return { context: {} };
+    return { context: { sessionId } };
+  }
+
+  #isUnknownSession(error: unknown, sessionId: string): boolean {
+    return error instanceof Error && error.message === `No session ${sessionId}`;
   }
 
   async #answer(text: string, language: "ar" | "en", context: ToolContext): Promise<Turn> {
