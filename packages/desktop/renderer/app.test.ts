@@ -25,11 +25,14 @@ async function loadApp(): Promise<Callbacks> {
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
+    <button id="mic-button"></button>
   `;
 
   const callbacks: Callbacks = {};
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
     send: vi.fn(async () => {}),
+    startVoice: vi.fn(async () => {}),
+    stopVoice: vi.fn(async () => {}),
     onMetrics: vi.fn(),
     onSessions: vi.fn(),
     onTurn: vi.fn(),
@@ -43,6 +46,17 @@ async function loadApp(): Promise<Callbacks> {
 
   await import("./app.js");
   return callbacks;
+}
+
+function jarvisApi(): { startVoice: ReturnType<typeof vi.fn>; stopVoice: ReturnType<typeof vi.fn> } {
+  return (window as unknown as { jarvis: { startVoice: ReturnType<typeof vi.fn>; stopVoice: ReturnType<typeof vi.fn> } })
+    .jarvis;
+}
+
+function micButtonEl(): HTMLElement {
+  const el = document.getElementById("mic-button");
+  if (el === null) throw new Error("Missing #mic-button");
+  return el;
 }
 
 function voiceStateEl(): HTMLElement {
@@ -116,5 +130,41 @@ describe("voice-state rendering", () => {
     // and overwrite "Listening…" later.
     vi.advanceTimersByTime(10_000);
     expect(voiceStateEl().textContent).toBe("Listening…");
+  });
+});
+
+// M-b: the mic button must drive the exact same start/stop path as the
+// global hotkey, never a second unwired "click to talk" affordance.
+describe("mic button", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls startVoice when clicked while idle", async () => {
+    await loadApp();
+    micButtonEl().click();
+    expect(jarvisApi().startVoice).toHaveBeenCalledTimes(1);
+    expect(jarvisApi().stopVoice).not.toHaveBeenCalled();
+  });
+
+  it("calls stopVoice when clicked while listening", async () => {
+    const { onListening } = await loadApp();
+    onListening?.(true);
+    micButtonEl().click();
+    expect(jarvisApi().stopVoice).toHaveBeenCalledTimes(1);
+    expect(jarvisApi().startVoice).not.toHaveBeenCalled();
+  });
+
+  it("marks the mic button active while listening and clears it when stopped", async () => {
+    const { onListening } = await loadApp();
+    onListening?.(true);
+    expect(micButtonEl().classList.contains("voice-btn--active")).toBe(true);
+
+    onListening?.(false);
+    expect(micButtonEl().classList.contains("voice-btn--active")).toBe(false);
   });
 });

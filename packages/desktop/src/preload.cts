@@ -3,6 +3,8 @@ import type { RendererApi } from "./ipc.js";
 
 const api: RendererApi = {
   send: (text, language) => ipcRenderer.invoke("input:send", text, language),
+  startVoice: () => ipcRenderer.invoke("voice:start"),
+  stopVoice: () => ipcRenderer.invoke("voice:stop"),
   onMetrics: (cb) => {
     ipcRenderer.on("metrics:update", (_e, m) => cb(m));
   },

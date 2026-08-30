@@ -12,6 +12,11 @@ export type IpcChannels = {
 
 export type RendererApi = {
   send(text: string, language: "ar" | "en"): Promise<void>;
+  // Drives the exact same start/stop path as the Alt+Space / Alt+Shift+Space
+  // global hotkey — the renderer's mic button is a second control on one
+  // voice implementation, not a separate click-to-talk feature.
+  startVoice(): Promise<void>;
+  stopVoice(): Promise<void>;
   onMetrics(cb: (m: SystemMetrics) => void): void;
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;

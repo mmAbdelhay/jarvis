@@ -22,6 +22,7 @@ window.jarvis.onNotice((notice) => renderNotice(notice));
 
 startClock();
 wireComposer();
+wireMicButton();
 
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
@@ -117,10 +118,26 @@ const VOICE_LISTENING: VoiceNotice = { text: "Listening…", language: "en" };
 const NOTICE_DURATION_MS = 2500;
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+let isListening = false;
 
 function renderListening(listening: boolean): void {
+  isListening = listening;
   clearNotice();
   setVoiceState(listening ? VOICE_LISTENING : VOICE_IDLE);
+  const micButton = document.getElementById("mic-button");
+  micButton?.classList.toggle("voice-btn--active", listening);
+}
+
+// M-b: the mic button drives the exact same start/stop path as the global
+// Alt+Space / Alt+Shift+Space hotkey (via the main process's startVoice /
+// stopVoice), so voice input has one implementation regardless of which
+// control triggers it.
+function wireMicButton(): void {
+  const micButton = document.getElementById("mic-button");
+  micButton?.addEventListener("click", () => {
+    if (isListening) void window.jarvis.stopVoice();
+    else void window.jarvis.startVoice();
+  });
 }
 
 // A transient status distinct from the idle/listening state — e.g. "heard
