@@ -25,18 +25,31 @@ describe("checkAgent", () => {
     expect(health.detail).toContain("native binary not installed");
   });
 
-  it("reports unhealthy on a non-zero exit", async () => {
-    const health = await checkAgent(agent, runner({ code: 127, stdout: "", stderr: "command not found" }));
+  it("reports unhealthy on a non-zero exit with no output, falling back to the exit code", async () => {
+    const health = await checkAgent(agent, runner({ code: 2, stdout: "", stderr: "" }));
     expect(health.ok).toBe(false);
-    expect(health.detail).toContain("command not found");
+    expect(health.detail).toBe("exit 2");
   });
 
-  it("reports unhealthy when the runner throws", async () => {
+  it("reports unhealthy on a non-zero exit with unmarked error text", async () => {
+    const health = await checkAgent(agent, runner({ code: 1, stdout: "", stderr: "disk full" }));
+    expect(health.ok).toBe(false);
+    expect(health.detail).toBe("disk full");
+  });
+
+  it("reports unhealthy when the runner throws an Error", async () => {
     const health = await checkAgent(agent, async () => {
       throw new Error("spawn ENOENT");
     });
     expect(health.ok).toBe(false);
     expect(health.detail).toContain("spawn ENOENT");
+  });
+
+  it("reports unhealthy, not a thrown exception, when the runner rejects with a non-Error", async () => {
+    const health = await checkAgent(agent, async () => {
+      throw "boom";
+    });
+    expect(health).toEqual({ id: "claude-mm", ok: false, detail: "boom" });
   });
 
   it("reports unhealthy when the command prints nothing at all", async () => {
@@ -55,5 +68,44 @@ describe("checkAll", () => {
     const results = await checkAll(agents, runner({ code: 0, stdout: "1.0.0", stderr: "" }));
     expect(results.map((r) => r.id)).toEqual(["a", "b"]);
     expect(results.every((r) => r.ok)).toBe(true);
+  });
+
+  it("preserves input order even when a later agent resolves first, and runs concurrently", async () => {
+    const agents: AgentConfig[] = [
+      { id: "a", command: "a" },
+      { id: "b", command: "b" },
+    ];
+    // "a" is slow and unhealthy, "b" is fast and healthy: b's runner settles
+    // well before a's, so this only passes if checkAll preserves the input
+    // order rather than the settle order — and it only demonstrates
+    // concurrency (as opposed to a sequential await-in-a-loop, which would
+    // still finish, just slower) if we bound the wall-clock time below the
+    // sum of both delays.
+    const delayed: CommandRunner = async (command) => {
+      if (command === "a") {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return { code: 127, stdout: "", stderr: "command not found" };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { code: 0, stdout: "1.0.0", stderr: "" };
+    };
+
+    const start = Date.now();
+    const results = await checkAll(agents, delayed);
+    const elapsed = Date.now() - start;
+
+    expect(results.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(results[0]?.ok).toBe(false);
+    expect(results[1]?.ok).toBe(true);
+    expect(results.every((r) => r.ok)).toBe(false);
+    // Sequential execution would take >= 40 + 5 = 45ms; concurrent execution
+    // is bounded by the slower of the two (~40ms). Leave headroom for
+    // scheduler jitter while still being well short of the sequential sum.
+    expect(elapsed).toBeLessThan(45);
+  });
+
+  it("returns an empty array for no agents", async () => {
+    const results = await checkAll([], runner({ code: 0, stdout: "1.0.0", stderr: "" }));
+    expect(results).toEqual([]);
   });
 });

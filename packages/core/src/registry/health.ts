@@ -19,9 +19,17 @@ export async function checkAgent(
 ): Promise<AgentHealth> {
   let result: { code: number; stdout: string; stderr: string };
   try {
+    // agent.args carries mode flags for real invocations (e.g. copilot's
+    // ["-p"] selects prompt mode), not a launcher prefix — probing with
+    // those flags appended would run the wrong mode (`copilot -p --version`
+    // is not a health check). The probe always asks for --version alone.
     result = await run(agent.command, ["--version"]);
   } catch (error) {
-    return { id: agent.id, ok: false, detail: (error as Error).message };
+    return {
+      id: agent.id,
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const combined = `${result.stdout}\n${result.stderr}`;
@@ -34,6 +42,10 @@ export async function checkAgent(
     return { id: agent.id, ok: false, detail: firstLine(combined) || `exit ${result.code}` };
   }
 
+  // Version text must land on stdout to count as healthy. Widening this to
+  // the combined stream would let stderr noise (warnings, deprecation
+  // notices) read as a version string and report a broken agent as
+  // healthy — the worse failure direction than a false negative here.
   const version = result.stdout.trim();
   if (version === "") {
     return { id: agent.id, ok: false, detail: "produced no output" };
