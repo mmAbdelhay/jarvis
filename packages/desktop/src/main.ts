@@ -71,12 +71,12 @@ app.whenReady().then(async () => {
     // pair, not a genuine toggle on one key: macOS reserves plain toggling of
     // a single combo for other system uses, and a distinct stop key also
     // means "stop without holding" is unambiguous to the user.
-    globalShortcut.register("Alt+Space", () => {
+    const spaceRegistered = globalShortcut.register("Alt+Space", () => {
       recorder.start();
       window.webContents.send("voice:listening", true);
     });
 
-    globalShortcut.register("Alt+Shift+Space", () => {
+    const stopRegistered = globalShortcut.register("Alt+Shift+Space", () => {
       window.webContents.send("voice:listening", false);
       void (async () => {
         let wavPath: string;
@@ -87,34 +87,76 @@ app.whenReady().then(async () => {
           return;
         }
 
-        // transcribe() throws on a broken transcription pipeline (bad model
-        // path, corrupt wav) and returns an empty-text transcript for actual
-        // silence — two different outcomes that must not be collapsed into
-        // one another. A broken pipeline is reported; silence is a quiet
-        // no-op, the same as never having pressed the key.
-        let transcript: Awaited<ReturnType<typeof transcribe>>;
         try {
-          transcript = await transcribe(wavPath, config.whisper, runCommand);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`Transcription failed: ${message}`);
-          window.webContents.send("turn:new", {
-            role: "assistant",
-            text: `Transcription failed: ${message}`,
-            language: "en",
-            at: Date.now(),
-          });
-          return;
-        }
+          // transcribe() throws on a broken transcription pipeline (bad
+          // model path, corrupt wav, missing ffmpeg/whisper binary — a
+          // recording that never started leaves no readable wav behind,
+          // and transcription fails on that missing file) and returns an
+          // empty-text transcript for actual silence — two different
+          // outcomes that must not be collapsed into one another. A broken
+          // pipeline is reported as an assistant turn; silence gets a
+          // brief, non-turn notice so the user knows the hotkey worked and
+          // nothing was heard, rather than the UI just going quiet.
+          let transcript: Awaited<ReturnType<typeof transcribe>>;
+          try {
+            transcript = await transcribe(wavPath, config.whisper, runCommand);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`Transcription failed: ${message}`);
+            window.webContents.send("turn:new", {
+              role: "assistant",
+              text: `Transcription failed: ${message}`,
+              language: "en",
+              at: Date.now(),
+            });
+            return;
+          }
 
-        if (transcript.text.trim() === "") return;
-        await orchestrator.handle(transcript.text, transcript.language === "ar" ? "ar" : "en");
+          if (transcript.text.trim() === "") {
+            const language = transcript.language === "ar" ? "ar" : "en";
+            window.webContents.send("voice:notice", {
+              text: language === "ar" ? "لم يُسمع شيء" : "Didn't catch that",
+              language,
+            });
+            return;
+          }
+          await orchestrator.handle(transcript.text, transcript.language === "ar" ? "ar" : "en");
+        } finally {
+          // Recorder owns the wav file it created; nothing else reads it
+          // past this point on any of the branches above, so it's always
+          // deleted here rather than left behind in tmpdir().
+          await recorder.cleanup(wavPath);
+        }
       })();
     });
 
-    app.on("will-quit", () => globalShortcut.unregisterAll());
+    app.on("will-quit", () => {
+      globalShortcut.unregisterAll();
+      // A recording started but never stopped (e.g. the user quits with
+      // Alt+Space still active) would otherwise leave ffmpeg running as an
+      // orphaned process with the microphone held open indefinitely.
+      recorder.abort();
+    });
 
     await window.loadFile(fileURLToPath(new URL("../renderer/index.html", import.meta.url)));
+
+    // globalShortcut.register() does not throw on collision — a combo
+    // already claimed by another app (window managers, Alfred, Raycast and
+    // input-source switchers commonly claim Alt-combos) makes it return
+    // false silently. Left unchecked, the headline feature is inert and
+    // the UI still advertises a hotkey that will never fire.
+    for (const [combo, registered] of [
+      ["Alt+Space", spaceRegistered],
+      ["Alt+Shift+Space", stopRegistered],
+    ] as const) {
+      if (registered) continue;
+      window.webContents.send("turn:new", {
+        role: "assistant",
+        text: `Could not register the ${combo} shortcut — another app is probably already using it.`,
+        language: "en",
+        at: Date.now(),
+      });
+    }
 
     const report = await reportPromise;
     console.log(report.message);

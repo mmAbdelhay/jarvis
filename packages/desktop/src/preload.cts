@@ -15,6 +15,9 @@ const api: RendererApi = {
   onListening: (cb) => {
     ipcRenderer.on("voice:listening", (_e, listening) => cb(listening));
   },
+  onNotice: (cb) => {
+    ipcRenderer.on("voice:notice", (_e, notice) => cb(notice));
+  },
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

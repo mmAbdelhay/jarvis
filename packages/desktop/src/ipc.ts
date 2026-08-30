@@ -1,10 +1,13 @@
 import type { Session, SystemMetrics, Turn } from "@jarvis/core";
 
+export type VoiceNotice = { text: string; language: "ar" | "en" };
+
 export type IpcChannels = {
   "metrics:update": SystemMetrics;
   "sessions:update": Session[];
   "turn:new": Turn;
   "voice:listening": boolean;
+  "voice:notice": VoiceNotice;
 };
 
 export type RendererApi = {
@@ -13,6 +16,10 @@ export type RendererApi = {
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;
   onListening(cb: (listening: boolean) => void): void;
+  // A transient status, distinct from a turn: e.g. "recorded but heard
+  // nothing" — shown briefly in the voice-state element, never added to
+  // the conversation as a hollow turn.
+  onNotice(cb: (notice: VoiceNotice) => void): void;
 };
 
 export type WiringDeps = {

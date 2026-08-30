@@ -1,5 +1,5 @@
 import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
-import type { RendererApi } from "../src/ipc.js";
+import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatUptime } from "./format.js";
 
 declare global {
@@ -18,6 +18,7 @@ window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => renderSessions(sessions));
 window.jarvis.onTurn((turn) => renderTurn(turn));
 window.jarvis.onListening((listening) => renderListening(listening));
+window.jarvis.onNotice((notice) => renderNotice(notice));
 
 startClock();
 wireComposer();
@@ -107,9 +108,43 @@ function summaryFallback(state: SessionState): string {
   }
 }
 
+// Alt+Space starts a recording and Alt+Shift+Space stops it — there is no
+// hold-to-talk gesture (Electron's globalShortcut has no key-release
+// event), so the idle copy names both shortcuts rather than describing a
+// "hold" gesture that doesn't exist.
+const VOICE_IDLE: VoiceNotice = { text: "⌥Space to start · ⌥⇧Space to stop", language: "en" };
+const VOICE_LISTENING: VoiceNotice = { text: "Listening…", language: "en" };
+const NOTICE_DURATION_MS = 2500;
+
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
 function renderListening(listening: boolean): void {
-  document.body.classList.toggle("is-listening", listening);
-  $("voice-state").textContent = listening ? "Listening…" : "Hold ⌥Space to speak";
+  clearNotice();
+  setVoiceState(listening ? VOICE_LISTENING : VOICE_IDLE);
+}
+
+// A transient status distinct from the idle/listening state — e.g. "heard
+// nothing" — shown briefly and then reverted, never turned into a turn.
+function renderNotice(notice: VoiceNotice): void {
+  clearNotice();
+  setVoiceState(notice);
+  noticeTimer = setTimeout(() => {
+    noticeTimer = undefined;
+    setVoiceState(VOICE_IDLE);
+  }, NOTICE_DURATION_MS);
+}
+
+function clearNotice(): void {
+  if (noticeTimer === undefined) return;
+  clearTimeout(noticeTimer);
+  noticeTimer = undefined;
+}
+
+function setVoiceState(notice: VoiceNotice): void {
+  const el = $("voice-state");
+  el.textContent = notice.text;
+  el.dir = notice.language === "ar" ? "rtl" : "ltr";
+  el.classList.toggle("arabic", notice.language === "ar");
 }
 
 function renderTurn(turn: Turn): void {
