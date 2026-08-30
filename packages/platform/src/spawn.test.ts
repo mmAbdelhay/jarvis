@@ -57,29 +57,112 @@ describe("createSpawner", () => {
     const agent: AgentConfig = { id: "sleeper", command: "sleep", args: ["30"] };
     const handle = createSpawner()(agent, process.cwd());
 
-    const code = await new Promise<number>((resolve) => {
-      handle.onExit(resolve);
+    try {
+      const code = await new Promise<number>((resolve) => {
+        handle.onExit(resolve);
+        handle.kill();
+      });
+
+      // `handle.kill()` sends SIGTERM (signal 15); pin the exact shell
+      // convention (128 + 15 = 143) rather than just asserting non-zero, so
+      // a mutation that hardcodes every SIGNAL_NUMBERS entry to 1 still fails.
+      expect(code).toBe(143);
+    } finally {
       handle.kill();
+    }
+  }, 10_000);
+
+  it("dispatches exit exactly once when the process fails to spawn", async () => {
+    const agent: AgentConfig = { id: "missing", command: "jarvis-not-a-real-binary" };
+    const handle = createSpawner()(agent, process.cwd());
+
+    let callCount = 0;
+    await new Promise<void>((resolve) => {
+      handle.onExit(() => {
+        callCount += 1;
+        resolve();
+      });
     });
 
-    expect(code).not.toBe(0);
-    expect(code).toBeGreaterThan(0);
-  });
+    // Give any second, erroneous "close"-driven dispatch a turn to land
+    // before asserting it never arrived.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(callCount).toBe(1);
+  }, 10_000);
+
+  it("replays the exit code to a listener registered after the process has already died", async () => {
+    const agent: AgentConfig = { id: "echo", command: "sh", args: ["-c", "exit 7"] };
+    const handle = createSpawner()(agent, process.cwd());
+
+    // Simulate a consumer that awaits something else — with no subscriber
+    // yet registered — long enough for the process to actually exit
+    // before it ever calls onExit, so the terminal "close" event has
+    // nowhere to land except the internal latch.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const code = await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    expect(code).toBe(7);
+  }, 10_000);
+
+  it("does not throw when writing to a process that has already exited", async () => {
+    const agent: AgentConfig = { id: "immediate-exit", command: "sh", args: ["-c", "exit 0"] };
+    const handle = createSpawner()(agent, process.cwd());
+
+    await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    expect(() => handle.write("too late\n")).not.toThrow();
+
+    // Give the resulting EPIPE-style stdin error a turn to surface; if it
+    // were unhandled it would throw asynchronously and fail the test run.
+    await new Promise((resolve) => setImmediate(resolve));
+  }, 10_000);
+
+  it("never emits a spliced line when stdout and stderr chunks interleave mid-line", async () => {
+    // node -e script that writes partial, non-newline-terminated chunks to
+    // stdout and stderr, interleaved, so the underlying pipes race.
+    const script = [
+      "process.stdout.write('AAA-');",
+      "process.stderr.write('BBB-');",
+      "process.stdout.write('stdout-tail\\n');",
+      "process.stderr.write('stderr-tail\\n');",
+    ].join("");
+    const agent: AgentConfig = { id: "interleaved", command: "node", args: ["-e", script] };
+    const handle = createSpawner()(agent, process.cwd());
+
+    const lines: string[] = [];
+    handle.onOutput((chunk) => lines.push(chunk));
+    await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    const joined = lines.join("");
+    expect(joined).not.toContain("AAA-BBB-");
+    expect(joined).not.toContain("BBB-AAA-");
+    expect(joined).toContain("AAA-stdout-tail");
+    expect(joined).toContain("BBB-stderr-tail");
+  }, 10_000);
 
   it("writes data to the child process stdin", async () => {
     const agent: AgentConfig = { id: "cat", command: "cat" };
     const handle = createSpawner()(agent, process.cwd());
 
-    const chunks: string[] = [];
-    handle.onOutput((chunk) => {
-      chunks.push(chunk);
-      if (chunk.includes("piped input")) handle.kill();
-    });
-    handle.write("piped input\n");
-    await new Promise<number>((resolve) => handle.onExit(resolve));
+    try {
+      const chunks: string[] = [];
+      handle.onOutput((chunk) => {
+        chunks.push(chunk);
+        if (chunk.includes("piped input")) handle.kill();
+      });
+      handle.write("piped input\n");
+      await new Promise<number>((resolve) => handle.onExit(resolve));
 
-    expect(chunks.join("")).toContain("piped input");
-  });
+      expect(chunks.join("")).toContain("piped input");
+    } finally {
+      // `cat` only exits once killed above; if an assertion throws first,
+      // make sure the child doesn't outlive the test.
+      handle.kill();
+    }
+  }, 10_000);
 
   it("reports a non-zero exit code and forwards the message when the command does not exist", async () => {
     const agent: AgentConfig = { id: "missing", command: "jarvis-not-a-real-binary" };
