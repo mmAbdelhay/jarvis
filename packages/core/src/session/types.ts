@@ -12,7 +12,31 @@ export type Session = {
   summary: string;
   startedAt: number;
   lastActivityAt: number;
+  // Set the moment the session first reaches a terminal state ("done" or
+  // "dead"); absent while the session is still starting/running/waiting.
+  endedAt?: number;
+  // The spawned process's exit code, set alongside `endedAt` when a
+  // terminal state is reached via ProcessHandle.onExit. Left unset when a
+  // session is ended by SessionManager.kill() instead — a manual kill has
+  // no process-reported exit code of its own, which is itself the signal
+  // that distinguishes "the agent exited" from "the user stopped it".
+  exitCode?: number;
 };
+
+/**
+ * Persists session rows across app restarts. `core` depends only on this
+ * interface — never on the OS — the same injected-seam shape as `Spawner`
+ * and `CommandRunner`. The concrete sqlite-backed implementation lives in
+ * `@jarvis/platform`; `@jarvis/desktop` composes it into `SessionManager`.
+ */
+export interface SessionStore {
+  // Called on every session state transition (including the initial
+  // "starting" row) — upserts by `session.id`, so a session's history is
+  // exactly one row that gets updated in place as it progresses.
+  upsert(session: Session): void;
+  // All recorded sessions, most recently active first.
+  history(): Session[];
+}
 
 export interface ProcessHandle {
   write(data: string): void;

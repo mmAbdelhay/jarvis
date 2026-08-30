@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "./manager.js";
-import type { ProcessHandle, Spawner } from "./types.js";
+import type { ProcessHandle, Session, SessionStore, Spawner } from "./types.js";
 import type { AgentConfig } from "../registry/types.js";
+
+class FakeStore implements SessionStore {
+  rows = new Map<string, Session>();
+  upsert(session: Session): void {
+    this.rows.set(session.id, session);
+  }
+  history(): Session[] {
+    return [...this.rows.values()];
+  }
+}
 
 const agent: AgentConfig = { id: "claude-mm", command: "claude-mm", model: "opus" };
 
@@ -186,5 +196,61 @@ describe("SessionManager", () => {
     expect(manager.get(a.id)?.summary).toBe("only a's output");
     expect(manager.get(b.id)?.state).toBe("starting");
     expect(manager.get(b.id)?.summary).toBe("");
+  });
+
+  describe("with a SessionStore", () => {
+    it("works with no store injected (store is optional)", () => {
+      const manager = new SessionManager(spawner);
+      expect(() => manager.start({ project: "p", projectPath: "/p", agent })).not.toThrow();
+    });
+
+    it("upserts a row on start", () => {
+      const store = new FakeStore();
+      const manager = new SessionManager(spawner, store);
+      const session = manager.start({ project: "p", projectPath: "/p", agent });
+      expect(store.rows.get(session.id)).toMatchObject({ state: "starting" });
+    });
+
+    it("upserts again on every later transition, keyed by id", () => {
+      const store = new FakeStore();
+      const manager = new SessionManager(spawner, store);
+      const session = manager.start({ project: "p", projectPath: "/p", agent });
+      fake.emitOutput("working\n");
+      expect(store.rows.size).toBe(1);
+      expect(store.rows.get(session.id)).toMatchObject({ state: "running", summary: "working" });
+    });
+
+    it("records exitCode and endedAt when the process exits", () => {
+      const store = new FakeStore();
+      const manager = new SessionManager(spawner, store);
+      const session = manager.start({ project: "p", projectPath: "/p", agent });
+      fake.emitExit(1);
+      const row = store.rows.get(session.id);
+      expect(row?.state).toBe("dead");
+      expect(row?.exitCode).toBe(1);
+      expect(row?.endedAt).toEqual(expect.any(Number));
+    });
+
+    it("records endedAt with no exitCode when killed manually", () => {
+      const store = new FakeStore();
+      const manager = new SessionManager(spawner, store);
+      const session = manager.start({ project: "p", projectPath: "/p", agent });
+      manager.kill(session.id);
+      const row = store.rows.get(session.id);
+      expect(row?.state).toBe("dead");
+      expect(row?.exitCode).toBeUndefined();
+      expect(row?.endedAt).toEqual(expect.any(Number));
+    });
+
+    it("records exitCode 0 and endedAt on a clean exit", () => {
+      const store = new FakeStore();
+      const manager = new SessionManager(spawner, store);
+      const session = manager.start({ project: "p", projectPath: "/p", agent });
+      fake.emitExit(0);
+      const row = store.rows.get(session.id);
+      expect(row?.state).toBe("done");
+      expect(row?.exitCode).toBe(0);
+      expect(row?.endedAt).toEqual(expect.any(Number));
+    });
   });
 });

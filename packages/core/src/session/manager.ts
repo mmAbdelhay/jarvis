@@ -2,18 +2,25 @@ import { randomUUID } from "node:crypto";
 import type {
   ProcessHandle,
   Session,
+  SessionStore,
   Spawner,
   StartInput,
 } from "./types.js";
 
 export class SessionManager {
   readonly #spawn: Spawner;
+  readonly #store: SessionStore | undefined;
   readonly #sessions = new Map<string, Session>();
   readonly #processes = new Map<string, ProcessHandle>();
   readonly #listeners = new Set<(sessions: Session[]) => void>();
 
-  constructor(spawn: Spawner) {
+  // `store` is optional so every existing `new SessionManager(spawner)`
+  // call site (production and test) keeps working unchanged; passing one
+  // wires session history persistence with no polling — every state
+  // transition already flows through #persist below.
+  constructor(spawn: Spawner, store?: SessionStore) {
     this.#spawn = spawn;
+    this.#store = store;
   }
 
   start(input: StartInput): Session {
@@ -44,6 +51,7 @@ export class SessionManager {
     handle.onOutput((chunk) => this.#onOutput(id, chunk));
     handle.onExit((code) => this.#onExit(id, code));
 
+    this.#persist(session);
     this.#emit();
     return session;
   }
@@ -83,15 +91,24 @@ export class SessionManager {
   }
 
   #onExit(id: string, code: number): void {
-    this.#update(id, { state: code === 0 ? "done" : "dead" });
+    this.#update(id, { state: code === 0 ? "done" : "dead", exitCode: code });
   }
 
   #update(id: string, patch: Partial<Session>): void {
     const existing = this.#sessions.get(id);
     if (existing === undefined) return;
     if (existing.state === "dead" || existing.state === "done") return;
-    this.#sessions.set(id, { ...existing, ...patch, lastActivityAt: Date.now() });
+    const next: Session = { ...existing, ...patch, lastActivityAt: Date.now() };
+    if ((next.state === "dead" || next.state === "done") && next.endedAt === undefined) {
+      next.endedAt = next.lastActivityAt;
+    }
+    this.#sessions.set(id, next);
+    this.#persist(next);
     this.#emit();
+  }
+
+  #persist(session: Session): void {
+    this.#store?.upsert(session);
   }
 
   #emit(): void {
