@@ -570,14 +570,27 @@
      the Sessions panel rather than inventing a new visual language — it is
      an overlay (not a fourth grid column) because the artboard's three
      columns already fill the 1440x900 canvas. */
+  /* No `display: flex` here: an author rule on `.history-overlay` itself
+     would win the cascade over the UA stylesheet's `[hidden] { display:
+     none }`, no matter how the `hidden` attribute is toggled — flex would
+     always render regardless of `hidden`. `:not([hidden])` below keeps the
+     "shown" declaration an author rule that only ever applies when the
+     attribute is absent, so `[hidden]` is free to hide it via the UA rule
+     with nothing here to override it — see history-overlay-css.test.ts,
+     which pins this CSS source shape directly (a `getComputedStyle` check
+     can't be trusted here — jsdom special-cases `hidden` outside the real
+     cascade, so it doesn't reproduce the original bug either way). */
   .history-overlay {
     position: fixed;
     inset: 0;
     background: rgba(6, 10, 15, 0.72);
-    display: flex;
     align-items: center;
     justify-content: center;
     z-index: 50;
+  }
+
+  .history-overlay:not([hidden]) {
+    display: flex;
   }
 
   .history-panel {
