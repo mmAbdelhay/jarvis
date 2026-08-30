@@ -3,7 +3,7 @@ import { Recorder } from "./recorder.js";
 
 function deps() {
   const kill = vi.fn();
-  const spawnRecorder = vi.fn((path: string) => ({ kill, done: Promise.resolve() }));
+  const spawnRecorder = vi.fn((path: string) => ({ kill, done: Promise.resolve({}) }));
   const deleteFile = vi.fn(() => Promise.resolve());
   return { kill, spawnRecorder, deleteFile, tmpDir: "/tmp/jarvis-test" };
 }
@@ -39,6 +39,22 @@ describe("Recorder", () => {
   it("throws when stop is called without start", async () => {
     const recorder = new Recorder(deps());
     await expect(recorder.stop()).rejects.toThrow(/not recording/i);
+  });
+
+  // Important 8: a missing ffmpeg (or any recorder-start failure) must be
+  // reported as its own distinct error, not silently produce a path to a
+  // wav that was never written — which previously surfaced downstream as
+  // an opaque "whisper-cli exited with code N".
+  it("rejects with a message naming the recorder when the recording process failed to start", async () => {
+    const kill = vi.fn();
+    const spawnRecorder = vi.fn(() => ({
+      kill,
+      done: Promise.resolve({ error: "Could not start the microphone recorder: spawn ffmpeg ENOENT" }),
+    }));
+    const recorder = new Recorder({ spawnRecorder, deleteFile: vi.fn(async () => {}), tmpDir: "/tmp/jarvis-test" });
+
+    recorder.start();
+    await expect(recorder.stop()).rejects.toThrow(/microphone recorder/i);
   });
 
   it("ignores a second start while already recording", () => {
@@ -89,8 +105,8 @@ describe("Recorder", () => {
       let resolveDone: (() => void) | undefined;
       const spawnRecorder = vi.fn(() => ({
         kill,
-        done: new Promise<void>((resolve) => {
-          resolveDone = resolve;
+        done: new Promise<{ error?: string }>((resolve) => {
+          resolveDone = () => resolve({});
         }),
       }));
       const deleteFile = vi.fn(() => Promise.resolve());
@@ -145,18 +161,18 @@ describe("defaultRecorderDeps", () => {
     recording.kill();
     expect(kill).toHaveBeenCalledWith("SIGINT");
 
-    let settled = false;
-    void recording.done.then(() => {
-      settled = true;
+    let settled: { error?: string } | undefined;
+    void recording.done.then((result) => {
+      settled = result;
     });
-    expect(settled).toBe(false);
+    expect(settled).toBeUndefined();
 
     // A normal stop kills ffmpeg with SIGINT, which ffmpeg reports as a
     // non-zero close code even though the recording is perfectly usable —
-    // so a non-zero code here must still resolve `done`, not reject it.
+    // so a non-zero code here must still settle `done` with no error.
     handlers.close?.(255);
     await recording.done;
-    expect(settled).toBe(true);
+    expect(settled).toEqual({});
 
     vi.doUnmock("node:child_process");
     vi.resetModules();
@@ -183,15 +199,16 @@ describe("defaultRecorderDeps", () => {
 
     handlers.error?.(new Error("spawn ENOENT"));
     handlers.close?.(null);
-    await recording.done;
+    const result = await recording.done;
 
     expect(resolutions).toBe(1);
+    expect(result.error).toContain("spawn ENOENT");
 
     vi.doUnmock("node:child_process");
     vi.resetModules();
   });
 
-  it("resolves `done` when the spawn only fires 'error' with no listener throwing", async () => {
+  it("resolves `done` with an error naming the recorder when the spawn only fires 'error', with no listener throwing", async () => {
     vi.resetModules();
     const handlers: Record<string, (...args: unknown[]) => void> = {};
     const spawnMock = vi.fn(() => ({
@@ -209,7 +226,10 @@ describe("defaultRecorderDeps", () => {
     // throw it as an uncaught exception right here and crash the process
     // instead of letting `done` settle.
     handlers.error?.(new Error("spawn ENOENT"));
-    await recording.done;
+    const result = await recording.done;
+
+    expect(result.error).toContain("microphone recorder");
+    expect(result.error).toContain("spawn ENOENT");
 
     vi.doUnmock("node:child_process");
     vi.resetModules();

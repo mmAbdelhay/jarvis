@@ -4,8 +4,15 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// `error` (undefined on a clean settle) carries the reason the recording
+// process never produced a usable file — e.g. ffmpeg missing from PATH.
+// Recorder.stop() rejects with this instead of silently returning a path
+// to a wav that was never written, which previously surfaced as an opaque
+// whisper-cli failure on the *next* step instead of naming the real cause.
+export type RecordingResult = { error?: string };
+
 export type RecorderDeps = {
-  spawnRecorder(outputPath: string): { kill(): void; done: Promise<void> };
+  spawnRecorder(outputPath: string): { kill(): void; done: Promise<RecordingResult> };
   tmpDir: string;
   deleteFile(path: string): Promise<void>;
 };
@@ -28,19 +35,24 @@ export const defaultRecorderDeps: RecorderDeps = {
     // from whichever event arrives first and ignore the other. Every
     // normal stop() kills ffmpeg with SIGINT, which ffmpeg reports as a
     // non-zero close code even on a fully successful recording, so unlike
-    // defaultSpeechRunner there is no exit code worth distinguishing here:
-    // settling always resolves. A recording that never started leaves no
-    // usable wav behind, and the caller finds that out (and reports it)
-    // when transcription fails to read the missing file.
+    // defaultSpeechRunner there is no exit code worth distinguishing on
+    // "close" — only "error" carries a real failure. The "error" message
+    // is captured here and handed back on the settled result so the
+    // caller (Recorder.stop()) can name the actual cause — a missing
+    // recorder binary or unreachable microphone — instead of silently
+    // returning a path to a wav that was never written.
     let settled = false;
-    const done = new Promise<void>((resolve) => {
-      const settle = () => {
+    const done = new Promise<RecordingResult>((resolve) => {
+      const settle = (result: RecordingResult) => {
         if (settled) return;
         settled = true;
-        resolve();
+        resolve(result);
       };
-      child.on("error", settle);
-      child.on("close", settle);
+      child.on("error", (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        settle({ error: `Could not start the microphone recorder: ${message}` });
+      });
+      child.on("close", () => settle({}));
     });
 
     return { kill: () => child.kill("SIGINT"), done };
@@ -53,7 +65,7 @@ export const defaultRecorderDeps: RecorderDeps = {
 
 export class Recorder {
   readonly #deps: RecorderDeps;
-  #active: { path: string; process: { kill(): void; done: Promise<void> } } | undefined;
+  #active: { path: string; process: { kill(): void; done: Promise<RecordingResult> } } | undefined;
 
   constructor(deps: RecorderDeps = defaultRecorderDeps) {
     this.#deps = deps;
@@ -70,7 +82,8 @@ export class Recorder {
     if (active === undefined) throw new Error("Not recording");
     this.#active = undefined;
     active.process.kill();
-    await active.process.done;
+    const result = await active.process.done;
+    if (result.error !== undefined) throw new Error(result.error);
     return active.path;
   }
 
