@@ -42,3 +42,12 @@ export function formatUptime(seconds: number): string {
 export function detectLanguage(text: string): "ar" | "en" {
   return ARABIC_RANGE.test(text) ? "ar" : "en";
 }
+
+// Matches the clock's own en-GB, 24h formatting (startClock in app.ts) so a
+// history row's "ended" timestamp reads consistently with the topbar clock.
+export function formatEndedAt(epochMs: number): string {
+  const date = new Date(epochMs);
+  const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const time = date.toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  return `${day} · ${time}`;
+}

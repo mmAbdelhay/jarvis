@@ -2,7 +2,8 @@ import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, parseConfig } from "./config.js";
+import { homedir } from "node:os";
+import { defaultSessionsDbPath, loadConfig, parseConfig } from "./config.js";
 
 const valid = {
   agents: { "claude-mm": { command: "claude-mm", model: "opus", default: true } },
@@ -118,6 +119,12 @@ describe("parseConfig", () => {
   it("leaves an absolute brain.cwd untouched", () => {
     const config = parseConfig(valid);
     expect(config.brain.cwd).toBe("/tmp/jarvis-brain");
+  });
+
+  it("points sessionsDbPath at sessions.db beside the config directory", () => {
+    const config = parseConfig(valid);
+    expect(config.sessionsDbPath).toBe(join(homedir(), ".config/jarvis/sessions.db"));
+    expect(config.sessionsDbPath).toBe(defaultSessionsDbPath());
   });
 });
 

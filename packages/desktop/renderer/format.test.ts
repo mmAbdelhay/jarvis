@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLanguage, formatBytes, formatDiskUsage, formatUptime } from "./format.js";
+import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 describe("formatBytes", () => {
   it("formats gigabytes with one decimal", () => {
@@ -71,5 +71,15 @@ describe("detectLanguage", () => {
 
   it("treats empty input as English", () => {
     expect(detectLanguage("")).toBe("en");
+  });
+});
+
+describe("formatEndedAt", () => {
+  // Exact wall-clock text is timezone-dependent (CI may run in any TZ), so
+  // this asserts the shape rather than a fixed string.
+  it("formats as a two-digit day, short month, and 24h time", () => {
+    expect(formatEndedAt(Date.UTC(2026, 7, 30, 18, 42))).toMatch(
+      /^\d{2} \w{3} · \d{2}:\d{2}$/,
+    );
   });
 });

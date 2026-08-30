@@ -25,6 +25,10 @@ export type RendererApi = {
   // nothing" — shown briefly in the voice-state element, never added to
   // the conversation as a hollow turn.
   onNotice(cb: (notice: VoiceNotice) => void): void;
+  // Session history is pulled on demand (when the history panel opens),
+  // not pushed like sessions:update — there is no live subscriber to keep
+  // in sync, only a snapshot to render once.
+  getHistory(): Promise<Session[]>;
 };
 
 export type WiringDeps = {

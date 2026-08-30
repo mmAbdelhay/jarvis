@@ -6,6 +6,7 @@ import {
   createBrain,
   createMetricsReader,
   createSpawner,
+  createSqliteSessionStore,
   runCommand,
   transcribe,
 } from "@jarvis/platform";
@@ -37,7 +38,12 @@ app.whenReady().then(async () => {
       console.error(`Startup health check failed: ${errorMessage(error)}`);
       return { healthy: [], broken: [], message: "" };
     });
-    const sessions = new SessionManager(createSpawner());
+    // Beside jarvis.yaml, created (directory included) on first use — see
+    // config.ts's defaultSessionsDbPath() note. SessionManager upserts a
+    // row into this store on every state transition it already emits a
+    // change event for, so history persistence needs no separate polling.
+    const sessionStore = createSqliteSessionStore(config.sessionsDbPath);
+    const sessions = new SessionManager(createSpawner(), sessionStore);
     const speech = new MacSpeech({ arabicVoice: "Majed" });
 
     const orchestrator = new Orchestrator({
@@ -98,6 +104,11 @@ app.whenReady().then(async () => {
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
       await orchestrator.handle(text, language);
     });
+
+    // Pulled on demand when the renderer's history panel opens, not
+    // pushed — there is no live subscriber to keep in sync for a past-
+    // sessions view, only a snapshot to render once per open.
+    ipcMain.handle("history:list", () => sessionStore.history());
 
     const recorder = new Recorder(defaultRecorderDeps);
 

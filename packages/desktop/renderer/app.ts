@@ -1,6 +1,6 @@
 import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
-import { detectLanguage, formatBytes, formatDiskUsage, formatUptime } from "./format.js";
+import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
   interface Window {
@@ -23,6 +23,7 @@ window.jarvis.onNotice((notice) => renderNotice(notice));
 startClock();
 wireComposer();
 wireMicButton();
+wireHistoryPanel();
 
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
@@ -54,6 +55,14 @@ function renderSessions(sessions: Session[]): void {
 }
 
 function renderSession(session: Session): HTMLElement {
+  return buildSessionRow(session);
+}
+
+// Shared by the live Sessions panel and the History panel so a past
+// session's row matches an active one's visual language exactly — same
+// palette, type scale, and dot/state/summary/meta structure — rather than
+// inventing separate markup for history rows.
+function buildSessionRow(session: Session): HTMLElement {
   const row = document.createElement("div");
   row.className = `session session--${session.state}`;
 
@@ -138,6 +147,79 @@ function wireMicButton(): void {
     if (isListening) void window.jarvis.stopVoice();
     else void window.jarvis.startVoice();
   });
+}
+
+// Sessions only (not the conversation transcript, not agent stdout) — see
+// task 17's scope. History is pulled once, on open, not kept live: there is
+// no sessions:update-style push channel for it, so reopening the panel is
+// what refreshes it.
+function wireHistoryPanel(): void {
+  const button = document.getElementById("history-button");
+  const closeButton = document.getElementById("history-close");
+  const overlay = document.getElementById("history-overlay");
+  if (!(overlay instanceof HTMLElement)) return;
+
+  const open = (): void => {
+    overlay.hidden = false;
+    window.jarvis
+      .getHistory()
+      .then(renderHistoryList)
+      .catch((error: unknown) => {
+        console.error(`Failed to load session history: ${errorMessage(error)}`);
+        renderHistoryList([]);
+      });
+  };
+  const close = (): void => {
+    overlay.hidden = true;
+  };
+
+  button?.addEventListener("click", open);
+  closeButton?.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+}
+
+function renderHistoryList(sessions: Session[]): void {
+  $("history-count").textContent = `${sessions.length} sessions`;
+  if (sessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "sessions-empty";
+    empty.textContent = "No past sessions yet.";
+    $("history-list").replaceChildren(empty);
+    return;
+  }
+  // Most recently active first: what the sqlite store's history() already
+  // returns, so no re-sort is needed here.
+  $("history-list").replaceChildren(...sessions.map(buildHistoryRow));
+}
+
+function buildHistoryRow(session: Session): HTMLElement {
+  const row = buildSessionRow(session);
+  if (session.endedAt === undefined) return row;
+
+  const ended = document.createElement("div");
+  ended.className = "session__meta mono";
+  const endedBadge = document.createElement("span");
+  endedBadge.className = "session__ended";
+  endedBadge.textContent = endedLabel(session);
+  ended.append(endedBadge, formatEndedAt(session.endedAt));
+  row.append(ended);
+  return row;
+}
+
+// Distinguishes the three ways a session's row ended, matching how
+// SessionManager records them: a real process exit (code 0 -> "done") vs.
+// a non-zero exit (exitCode set, "dead") vs. a manual kill() (no
+// process-reported exitCode at all, "dead").
+function endedLabel(session: Session): string {
+  if (session.state === "done") return "Exited cleanly";
+  if (session.exitCode === undefined) return "Stopped";
+  return `Exited (code ${session.exitCode})`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // A transient status distinct from the idle/listening state — e.g. "heard

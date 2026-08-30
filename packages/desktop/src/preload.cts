@@ -20,6 +20,7 @@ const api: RendererApi = {
   onNotice: (cb) => {
     ipcRenderer.on("voice:notice", (_e, notice) => cb(notice));
   },
+  getHistory: () => ipcRenderer.invoke("history:list"),
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

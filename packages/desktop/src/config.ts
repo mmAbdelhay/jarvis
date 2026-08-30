@@ -10,7 +10,19 @@ export type JarvisConfig = {
   projects: Record<string, string>;
   brain: BrainConfig;
   whisper: { binaryPath: string; modelPath: string };
+  // Beside jarvis.yaml itself, not user-configurable — see the note on
+  // defaultSessionsDbPath().
+  sessionsDbPath: string;
 };
+
+// `~/.config/jarvis/sessions.db`, beside the config file. Not exposed as a
+// yaml setting (unlike brain.cwd or whisper paths) because the history
+// store is Jarvis's own bookkeeping, not something a user has a reason to
+// relocate — same reasoning DEFAULT_BRAIN_CWD documents for the brain's
+// isolation directory below.
+export function defaultSessionsDbPath(): string {
+  return join(homedir(), ".config/jarvis/sessions.db");
+}
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
 
@@ -59,6 +71,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
       cwd: expandTilde(typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD),
     },
     whisper,
+    sessionsDbPath: defaultSessionsDbPath(),
   };
 }
 
