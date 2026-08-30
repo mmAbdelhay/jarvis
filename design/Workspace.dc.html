@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Space Grotesk", system-ui, sans-serif; }
+    a { color: #45c8dc; } a:hover { color: #7ddced; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .tab { display: flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 7px 7px 0 0; font-size: 12px; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; background: #060a0f; color: #e6f3f8; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="display: flex; align-items: center; gap: 12px; padding: 11px 20px 0; border-bottom: 1px solid #16232e;">
+    <div class="mono" style="font-size: 11px; color: #45c8dc; background: #0e2029; border: 1px solid #1c3f49; border-radius: 5px; padding: 3px 9px; margin-bottom: 9px;">acme</div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div class="tab" style="background: #0b1219; border: 1px solid #16232e; border-bottom-color: #0b1219; color: #e6f3f8;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.8" stroke-linecap="round"><path d="M4 4h16v14H4zM8 20h8"></path></svg>
+        <span>localhost:8000</span>
+      </div>
+      <div class="tab" style="color: #7f97a5;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5c7484" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"></path><path d="M9 13h6M9 17h4"></path></svg>
+        <span>CLAUDE.md</span>
+      </div>
+      <div class="tab" style="color: #7f97a5;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5c7484" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"></path><path d="M9 13h6M9 17h4"></path></svg>
+        <span>docs/retry.md</span>
+      </div>
+      <div class="tab" style="color: #5c7484;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5c7484" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+      </div>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div class="mono" style="display: flex; align-items: center; gap: 7px; font-size: 10px; color: #5c7484; margin-bottom: 9px; border: 1px solid #16232e; border-radius: 5px; padding: 3px 9px;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#5fb87a" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      <span>isolated session · acme</span>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1fr) 520px; flex-grow: 1; overflow: hidden;">
+
+    <div style="display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid #16232e;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid #16232e;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5c7484" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"></path></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38505d" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"></path></svg>
+        <div class="mono" style="flex-grow: 1; background: #0d1720; border: 1px solid #16232e; border-radius: 6px; padding: 5px 11px; font-size: 11px; color: #9fb7c4;">localhost:8000/checkout</div>
+      </div>
+      <div style="flex-grow: 1; background: #0a0f14; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;">
+        <div style="width: 300px; height: 168px; border-radius: 10px; border: 1px dashed #1d2f3a; display: flex; align-items: center; justify-content: center;">
+          <div style="font-size: 12px; color: #38505d;">rendered page</div>
+        </div>
+        <div style="font-size: 11px; color: #38505d; max-width: 320px; text-align: center; line-height: 1.6;">Each project gets its own cookie jar and storage. Logging in here never touches another project's session.</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid #16232e;">
+        <div class="mono" style="font-size: 11px; color: #cfe4ec;">CLAUDE.md</div>
+        <div style="flex-grow: 1;"></div>
+        <div class="mono" style="font-size: 10px; color: #5c7484;">1.2k tokens</div>
+        <div style="display: flex; border: 1px solid #16232e; border-radius: 6px; overflow: hidden;">
+          <div style="font-size: 11px; padding: 3px 10px; background: #0e2029; color: #45c8dc;">Read</div>
+          <div style="font-size: 11px; padding: 3px 10px; color: #5c7484;">Edit</div>
+        </div>
+      </div>
+
+      <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: hidden;">
+        <div style="font-size: 20px; font-weight: 600; color: #e6f3f8;">acme</div>
+        <div style="height: 1px; background: #16232e;"></div>
+        <div style="font-size: 13px; line-height: 1.75; color: #9fb7c4;">Laravel 11 storefront. Payments go through the gateway wrapper, never the SDK directly.</div>
+
+        <div style="font-size: 14px; font-weight: 600; color: #cfe4ec; margin-top: 4px;">Commands</div>
+        <div style="background: #0b1219; border: 1px solid #16232e; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
+          <div class="mono" style="font-size: 11px; color: #9fd9b4;">php artisan test</div>
+          <div class="mono" style="font-size: 11px; color: #9fd9b4;">npm run build</div>
+        </div>
+
+        <div style="font-size: 14px; font-weight: 600; color: #cfe4ec; margin-top: 4px;">Conventions</div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="display: flex; gap: 10px; font-size: 13px; line-height: 1.6; color: #9fb7c4;"><span style="color: #45c8dc;">•</span><span>Service classes stay under 200 lines.</span></div>
+          <div style="display: flex; gap: 10px; font-size: 13px; line-height: 1.6; color: #9fb7c4;"><span style="color: #45c8dc;">•</span><span>Every payment path needs a retry test.</span></div>
+        </div>
+
+        <div style="background: #0d1720; border-left: 2px solid #45c8dc; border-radius: 0 7px 7px 0; padding: 11px 14px; margin-top: 4px;">
+          <div style="font-size: 12px; line-height: 1.6; color: #9fb7c4;">Referenced by the running session in this project.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

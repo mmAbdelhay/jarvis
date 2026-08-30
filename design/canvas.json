@@ -1,0 +1,24 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Dashboard" },
+    { "file": "GitChanges.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 900, "title": "Changes" },
+    { "file": "Workspace.dc.html", "x": 3120, "y": 0, "w": 1440, "h": 900, "title": "Project workspace" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -190,
+      "w": 700,
+      "text": "Jarvis — full dashboard, reworked against your reference.\nVoice and text both drive it. Sessions, system metrics, git changes, per-project browser tabs and markdown."
+    },
+    {
+      "id": "scope",
+      "x": 1560,
+      "y": -190,
+      "w": 700,
+      "text": "Scope warning: this is five products in one (assistant, system monitor, git client, browser, markdown editor).\nThe phasing I recommend is in the reply — build the dashboard first, git second, workspace third."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

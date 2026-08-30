@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.log
+design/jarvis-voice-orchestrator.html

@@ -1,0 +1,211 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Space Grotesk", system-ui, sans-serif; }
+    a { color: #45c8dc; } a:hover { color: #7ddced; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .panel { background: #0b1219; border: 1px solid #16232e; border-radius: 10px; }
+    .ph { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid #16232e; }
+    .pt { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: #cfe4ec; }
+    .lbl { font-size: 10px; color: #5c7484; letter-spacing: 0.06em; }
+    .val { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 15px; color: #e6f3f8; }
+    .tile { background: #0d1720; border: 1px solid #16232e; border-radius: 7px; padding: 9px 10px; display: flex; flex-direction: column; gap: 3px; }
+    .bar { height: 4px; border-radius: 2px; background: #16232e; overflow: hidden; }
+    .fill { height: 100%; border-radius: 2px; background: #45c8dc; }
+    @keyframes pulse { 0%, 100% { opacity: 0.25; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.04); } }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; background: #060a0f; color: #e6f3f8; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #16232e;">
+    <div style="font-size: 17px; font-weight: 600; letter-spacing: 0.22em; color: #e6f3f8;">JARVIS</div>
+    <div style="display: flex; align-items: center; gap: 6px; background: #0b1219; border: 1px solid #16232e; border-radius: 20px; padding: 4px 11px;">
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #5fb87a;"></div>
+      <div style="font-size: 11px; color: #9fb7c4;">Online</div>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div class="mono" style="display: flex; align-items: center; gap: 10px; background: #0b1219; border: 1px solid #16232e; border-radius: 8px; padding: 6px 14px; font-size: 12px; color: #cfe4ec;">
+      <span>18:42:07</span><span style="color: #2b3d4a;">|</span><span style="color: #9fb7c4;">30 Aug 2026</span>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div class="mono" style="display: flex; align-items: center; gap: 8px; background: #0b1219; border: 1px solid #16232e; border-radius: 8px; padding: 6px 12px; font-size: 12px;">
+      <span style="color: #5fb87a;">↓ 84.2</span><span style="color: #5c7484;">/</span><span style="color: #45c8dc;">↑ 12.6</span><span style="color: #5c7484; font-size: 10px;">Mbps</span>
+    </div>
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5c7484" stroke-width="1.6" stroke-linecap="round">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8 2 2 0 1 1-2.8 2.8 1.6 1.6 0 0 0-2.8 1.1 2 2 0 1 1-4 0 1.6 1.6 0 0 0-2.8-1.1 2 2 0 1 1-2.8-2.8 1.6 1.6 0 0 0-1.1-2.8 2 2 0 1 1 0-4 1.6 1.6 0 0 0 1.1-2.8 2 2 0 1 1 2.8-2.8 1.6 1.6 0 0 0 2.8-1.1 2 2 0 1 1 4 0 1.6 1.6 0 0 0 2.8 1.1 2 2 0 1 1 2.8 2.8 1.6 1.6 0 0 0 1.1 2.8 2 2 0 1 1 0 4 1.6 1.6 0 0 0-1.1 1.1z"></path>
+    </svg>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 330px minmax(0, 1fr) 400px; gap: 16px; padding: 16px 20px; flex-grow: 1; overflow: hidden;">
+
+    <div style="display: flex; flex-direction: column; gap: 14px; overflow: hidden;">
+
+      <div class="panel">
+        <div class="ph">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"></path></svg>
+          <div class="pt">System</div>
+        </div>
+        <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 11px;">
+          <div style="display: flex; flex-direction: column; gap: 5px;">
+            <div style="display: flex; align-items: baseline;">
+              <div class="lbl" style="flex-grow: 1;">CPU</div>
+              <div class="mono" style="font-size: 11px; color: #cfe4ec;">23%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width: 23%;"></div></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 5px;">
+            <div style="display: flex; align-items: baseline;">
+              <div class="lbl" style="flex-grow: 1;">MEMORY</div>
+              <div class="mono" style="font-size: 11px; color: #cfe4ec;">21.4 / 36 GB</div>
+            </div>
+            <div class="bar"><div class="fill" style="width: 59%;"></div></div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px;">
+            <div class="tile"><div class="lbl">DISK</div><div class="val">312<span style="font-size: 10px; color: #5c7484;"> / 994 GB</span></div></div>
+            <div class="tile"><div class="lbl">UPTIME</div><div class="val">4<span style="font-size: 10px; color: #5c7484;">d</span> 06<span style="font-size: 10px; color: #5c7484;">h</span></div></div>
+            <div class="tile"><div class="lbl">TEMP</div><div class="val" style="color: #5c7484;">—</div></div>
+          </div>
+          <div style="font-size: 10px; color: #5c7484; line-height: 1.45;">Temperature needs a privileged helper on Apple Silicon — not wired up.</div>
+        </div>
+      </div>
+
+      <div class="panel" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;">
+        <div class="ph">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><path d="M4 17l6-6-6-6M12 19h8"></path></svg>
+          <div class="pt">Sessions</div>
+          <div style="flex-grow: 1;"></div>
+          <div class="mono" style="font-size: 10px; color: #5c7484;">3 live</div>
+        </div>
+        <div style="padding: 10px; display: flex; flex-direction: column; gap: 7px; overflow: hidden;">
+
+          <div style="background: #0d1720; border: 1px solid #16232e; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 7px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="width: 6px; height: 6px; border-radius: 50%; background: #5fb87a;"></div>
+              <div style="font-size: 12px; font-weight: 500;">acme</div>
+              <div style="flex-grow: 1;"></div>
+              <div class="mono" style="font-size: 9px; color: #5fb87a; border: 1px solid #1e3a2c; border-radius: 3px; padding: 1px 5px;">+128 −34</div>
+            </div>
+            <div style="font-size: 11px; color: #9fb7c4;">Running tests — 14 passed</div>
+            <div class="mono" style="display: flex; gap: 8px; font-size: 9px; color: #5c7484;"><span>claude-acme</span><span>sonnet</span></div>
+          </div>
+
+          <div style="background: #0e1a20; border: 1px solid #45c8dc; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 7px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="width: 6px; height: 6px; border-radius: 50%; background: #45c8dc;"></div>
+              <div style="font-size: 12px; font-weight: 500;">storefront</div>
+              <div style="flex-grow: 1;"></div>
+              <div class="mono" style="font-size: 9px; color: #45c8dc; border: 1px solid #1c3f49; border-radius: 3px; padding: 1px 5px;">+12 −3</div>
+            </div>
+            <div style="font-size: 11px; color: #45c8dc;">Waiting for your answer</div>
+            <div class="mono" style="display: flex; gap: 8px; font-size: 9px; color: #5c7484;"><span>claude-mm</span><span>opus</span></div>
+          </div>
+
+          <div style="background: #0a1117; border: 1px solid #16232e; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 7px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="width: 6px; height: 6px; border-radius: 50%; background: #33454f;"></div>
+              <div style="font-size: 12px; font-weight: 500; color: #9fb7c4;">atlas</div>
+              <div style="flex-grow: 1;"></div>
+              <div class="mono" style="font-size: 9px; color: #5c7484;">clean</div>
+            </div>
+            <div style="font-size: 11px; color: #5c7484;">Idle — 12m</div>
+            <div class="mono" style="display: flex; gap: 8px; font-size: 9px; color: #5c7484;"><span>copilot</span><span>gpt-5</span></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;">
+
+      <div style="position: relative; width: 300px; height: 300px; display: flex; align-items: center; justify-content: center;">
+        <div style="position: absolute; width: 300px; height: 300px; border-radius: 50%; border: 1px solid #12222c; animation: pulse 3600ms ease-in-out infinite;"></div>
+        <div style="position: absolute; width: 236px; height: 236px; border-radius: 50%; border: 1px solid #17303c; animation: pulse 3600ms ease-in-out infinite; animation-delay: 400ms;"></div>
+        <div style="position: absolute; width: 172px; height: 172px; border-radius: 50%; border: 1px solid #1d3f4d; background: #0a141b;"></div>
+        <div style="position: absolute; width: 108px; height: 108px; border-radius: 50%; background: #0e2029; border: 1px solid #2a5d6e;"></div>
+        <div style="display: flex; align-items: center; gap: 5px; z-index: 1;">
+          <div style="width: 4px; height: 13px; border-radius: 2px; background: #45c8dc; opacity: 0.5;"></div>
+          <div style="width: 4px; height: 21px; border-radius: 2px; background: #45c8dc;"></div>
+          <div style="width: 4px; height: 15px; border-radius: 2px; background: #45c8dc; opacity: 0.75;"></div>
+          <div style="width: 4px; height: 24px; border-radius: 2px; background: #45c8dc;"></div>
+          <div style="width: 4px; height: 11px; border-radius: 2px; background: #45c8dc; opacity: 0.5;"></div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+        <div style="font-size: 24px; font-weight: 600; letter-spacing: 0.26em; color: #e6f3f8;">JARVIS</div>
+        <div style="display: flex; align-items: center; gap: 8px; background: #0b1219; border: 1px solid #16232e; border-radius: 20px; padding: 7px 16px;">
+          <div style="width: 6px; height: 6px; border-radius: 50%; background: #45c8dc;"></div>
+          <div style="font-size: 12px; color: #9fb7c4;">Listening for “hey jarvis”</div>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="width: 46px; height: 46px; border-radius: 50%; background: #0b1219; border: 1px solid #16232e; display: flex; align-items: center; justify-content: center;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        </div>
+        <div style="width: 46px; height: 46px; border-radius: 50%; background: #0e2029; border: 1px solid #45c8dc; display: flex; align-items: center; justify-content: center;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg>
+        </div>
+        <div style="width: 46px; height: 46px; border-radius: 50%; background: #0b1219; border: 1px solid #16232e; display: flex; align-items: center; justify-content: center;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="panel" style="display: flex; flex-direction: column; overflow: hidden;">
+      <div class="ph">
+        <div class="pt">Conversation</div>
+        <div style="flex-grow: 1;"></div>
+        <div class="mono" style="font-size: 9px; color: #5c7484; border: 1px solid #16232e; border-radius: 3px; padding: 2px 6px;">AR · EN</div>
+      </div>
+
+      <div style="padding: 14px; display: flex; flex-direction: column; gap: 12px; flex-grow: 1; overflow: hidden;">
+
+        <div dir="rtl" style="align-self: flex-end; max-width: 88%; background: #0e2029; border: 1px solid #1c3f49; border-radius: 10px 10px 3px 10px; padding: 10px 12px;">
+          <div style="font-family: 'IBM Plex Sans Arabic', sans-serif; font-size: 13px; line-height: 1.7; color: #e6f3f8; text-align: right;">افتح مشروع سعودي سيل وشغّل الاختبارات</div>
+        </div>
+
+        <div style="align-self: flex-start; max-width: 90%; background: #0d1720; border: 1px solid #16232e; border-radius: 10px 10px 10px 3px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div dir="rtl" style="font-family: 'IBM Plex Sans Arabic', sans-serif; font-size: 13px; line-height: 1.7; color: #cfe4ec; text-align: right;">تمام. شغّلت الاختبارات على حساب سعودي سيل.</div>
+          <div class="mono" style="display: flex; align-items: center; gap: 7px; font-size: 10px; color: #5c7484; border-top: 1px solid #16232e; padding-top: 7px;">
+            <span style="color: #45c8dc;">acme</span><span>›</span><span>claude-acme</span><span>›</span><span>sonnet</span>
+          </div>
+        </div>
+
+        <div style="align-self: flex-start; max-width: 90%; background: #0d1720; border: 1px solid #16232e; border-radius: 10px 10px 10px 3px; padding: 10px 12px;">
+          <div style="font-size: 13px; line-height: 1.6; color: #cfe4ec;">14 passed, 2 pending. Two snapshot tests need updating — want me to update them?</div>
+        </div>
+
+        <div style="align-self: flex-start; display: flex; align-items: center; gap: 7px; padding: 3px 2px;">
+          <div style="width: 5px; height: 5px; border-radius: 50%; background: #45c8dc;"></div>
+          <div style="font-size: 11px; color: #5c7484;">speaking…</div>
+        </div>
+
+      </div>
+
+      <div style="padding: 12px 14px; border-top: 1px solid #16232e; display: flex; align-items: center; gap: 10px;">
+        <div style="flex-grow: 1; background: #0d1720; border: 1px solid #16232e; border-radius: 8px; padding: 9px 12px; font-size: 12px; color: #5c7484;">Type, or hold ⌥Space to talk…</div>
+        <div style="width: 34px; height: 34px; border-radius: 8px; background: #45c8dc; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
