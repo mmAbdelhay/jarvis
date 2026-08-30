@@ -1,12 +1,32 @@
 import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
-import type { Brain, BrainReply, ToolSpec, Turn } from "./types.js";
+import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js";
 
 const TOOLS: ToolSpec[] = [
-  { name: "session.start", description: "Start an agent session in a project" },
-  { name: "session.send", description: "Send text to a running session" },
-  { name: "session.kill", description: "Stop a running session" },
+  {
+    name: "session.start",
+    description: "Start an agent session in a project",
+    inputSchema: {
+      project: "Name of the project to open, from the list of known projects",
+      agent: "(optional) explicit agent id to use instead of routing",
+    },
+  },
+  {
+    name: "session.send",
+    description: "Send text to a running session",
+    inputSchema: {
+      sessionId: "id of a running session, from the list of running sessions",
+      text: "text to send to that session",
+    },
+  },
+  {
+    name: "session.kill",
+    description: "Stop a running session",
+    inputSchema: {
+      sessionId: "id of a running session, from the list of running sessions",
+    },
+  },
 ];
 
 type ToolContext = Partial<Pick<Turn, "sessionId" | "agentId" | "model">>;
@@ -77,7 +97,7 @@ export class Orchestrator {
 
     let reply: BrainReply;
     try {
-      reply = await this.#options.brain.ask({ text, tools: TOOLS });
+      reply = await this.#options.brain.ask({ text, tools: TOOLS, context: this.#context() });
     } catch (error) {
       const message = MESSAGES.brainFailed(errorMessage(error), language);
       return this.#answer(message, language, {});
@@ -104,6 +124,22 @@ export class Orchestrator {
   onTurn(listener: (turn: Turn) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  // Rebuilt on every turn (not cached): projects are static per config, but
+  // sessions change as they start, finish, and die, so a stale snapshot
+  // would let the brain reference a session id that's already gone.
+  #context(): BrainContext {
+    return {
+      projects: Object.keys(this.#options.projects),
+      sessions: this.#options.sessions.list().map((session) => ({
+        id: session.id,
+        project: session.project,
+        agentId: session.agentId,
+        state: session.state,
+        summary: session.summary,
+      })),
+    };
   }
 
   #runTool(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {

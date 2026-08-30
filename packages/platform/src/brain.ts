@@ -1,5 +1,5 @@
 import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
-import type { Brain, BrainReply, ToolSpec } from "@jarvis/core";
+import type { Brain, BrainContext, BrainReply, ToolSpec } from "@jarvis/core";
 
 const TOOL_BLOCK = /```jarvis-tool\s*\n([\s\S]*?)\n```/g;
 
@@ -63,7 +63,28 @@ function defaultQuery(params: { prompt: string; options?: Options }): AsyncItera
   return sdkQuery(params);
 }
 
-function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[]): string {
+function describeTool(tool: ToolSpec): string {
+  const fields = Object.entries(tool.inputSchema).map(([key, description]) => `${key} (${description})`);
+  const schema = fields.length === 0 ? "" : ` — input: ${fields.join(", ")}`;
+  return `- ${tool.name}: ${tool.description}${schema}`;
+}
+
+function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[], context: BrainContext): string {
+  const projectsLine =
+    context.projects.length === 0
+      ? "(no projects configured)"
+      : context.projects.join(", ");
+
+  const sessionsLine =
+    context.sessions.length === 0
+      ? "(no sessions running)"
+      : context.sessions
+          .map((session) => {
+            const summary = session.summary === "" ? "" : ` "${session.summary}"`;
+            return `${session.id} — project ${session.project}, agent ${session.agentId}, state ${session.state}${summary}`;
+          })
+          .join("; ");
+
   return [
     systemPrompt,
     "",
@@ -71,7 +92,13 @@ function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[]): str
     "```jarvis-tool",
     '{ "name": "<tool>", "input": { ... } }',
     "```",
-    ...tools.map((tool) => `- ${tool.name}: ${tool.description}`),
+    ...tools.map(describeTool),
+    "",
+    // These two lines are what let the model resolve "project" and
+    // "sessionId" inputs to real values instead of guessing them — see
+    // the Critical 1/2 seam this closes.
+    `Known projects: ${projectsLine}`,
+    `Running sessions: ${sessionsLine}`,
     "",
     `User: ${text}`,
   ].join("\n");
@@ -95,8 +122,16 @@ export function createBrain(config: BrainConfig): Brain {
   let sessionId: string | undefined;
 
   return {
-    async ask({ text, tools }: { text: string; tools: ToolSpec[] }): Promise<BrainReply> {
-      const prompt = buildPrompt(config.systemPrompt, text, tools);
+    async ask({
+      text,
+      tools,
+      context,
+    }: {
+      text: string;
+      tools: ToolSpec[];
+      context: BrainContext;
+    }): Promise<BrainReply> {
+      const prompt = buildPrompt(config.systemPrompt, text, tools, context);
 
       const options: Options = {
         cwd: config.cwd,

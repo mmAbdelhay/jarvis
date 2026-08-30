@@ -517,4 +517,77 @@ describe("Orchestrator", () => {
     await orchestrator.handle("two", "en");
     expect(orchestrator.transcript()).toHaveLength(4);
   });
+
+  // --- Critical 1/2: the brain must see project names, tool schemas, and
+  // running sessions, not just tool name/description strings.
+  describe("brain context", () => {
+    it("passes the known project names to the brain", async () => {
+      const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
+      const orchestrator = build({ ask });
+      await orchestrator.handle("افتح سعودي سيل", "ar");
+      expect(ask).toHaveBeenCalledWith(
+        expect.objectContaining({ context: expect.objectContaining({ projects: ["acme"] }) }),
+      );
+    });
+
+    it("passes every tool's input schema to the brain", async () => {
+      const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
+      const orchestrator = build({ ask });
+      await orchestrator.handle("hi", "en");
+      const call = ask.mock.calls[0]?.[0];
+      const startTool = call?.tools.find((tool) => tool.name === "session.start");
+      expect(startTool?.inputSchema).toMatchObject({ project: expect.any(String) });
+      const sendTool = call?.tools.find((tool) => tool.name === "session.send");
+      expect(sendTool?.inputSchema).toMatchObject({
+        sessionId: expect.any(String),
+        text: expect.any(String),
+      });
+      const killTool = call?.tools.find((tool) => tool.name === "session.kill");
+      expect(killTool?.inputSchema).toMatchObject({ sessionId: expect.any(String) });
+    });
+
+    it("passes no running sessions when none have started", async () => {
+      const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
+      const orchestrator = build({ ask });
+      await orchestrator.handle("hi", "en");
+      expect(ask.mock.calls[0]?.[0]?.context.sessions).toEqual([]);
+    });
+
+    it("passes a started session's id so a later 'kill it' can resolve it", async () => {
+      const agent = registry.resolve({ project: "acme" });
+      const started = sessions.start({ project: "acme", projectPath: "/x", agent });
+
+      const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
+      const orchestrator = build({ ask });
+      await orchestrator.handle("kill it", "en");
+
+      expect(ask.mock.calls[0]?.[0]?.context.sessions).toEqual([
+        {
+          id: started.id,
+          project: "acme",
+          agentId: "claude-acme",
+          state: started.state,
+          summary: started.summary,
+        },
+      ]);
+    });
+
+    it("reflects a session started earlier in the same turn's tool call in the next turn's context", async () => {
+      const first = build(
+        brainReturning({
+          text: "Starting.",
+          toolCalls: [{ name: "session.start", input: { project: "acme" } }],
+        }),
+      );
+      await first.handle("افتح سعودي سيل", "ar");
+      const sessionId = sessions.list()[0]?.id;
+
+      const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
+      const second = build({ ask });
+      await second.handle("اقفلها", "ar");
+
+      const sessionIds = ask.mock.calls[0]?.[0]?.context.sessions.map((session) => session.id);
+      expect(sessionIds).toContain(sessionId);
+    });
+  });
 });

@@ -8,7 +8,34 @@ export type Turn = {
   at: number;
 };
 
-export type ToolSpec = { name: string; description: string };
+// `inputSchema` maps each input field name to a one-line description the
+// brain can use to fill it in correctly (e.g. that `project` must come
+// from the known-projects list, or that `sessionId` must come from the
+// running-sessions list) — without it the model has no way to know a
+// tool's input shape beyond guessing from its name.
+export type ToolSpec = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, string>;
+};
+
+// A live snapshot of what the brain is allowed to reference by name: the
+// project names it may resolve "project" input to, and the sessions it may
+// resolve "sessionId" input to. Without this the model has never seen
+// these strings and must guess them, which is exactly how "افتح سعودي
+// سيل" fails to match a project keyed as "acme".
+export type BrainSessionSummary = {
+  id: string;
+  project: string;
+  agentId: string;
+  state: string;
+  summary: string;
+};
+
+export type BrainContext = {
+  projects: string[];
+  sessions: BrainSessionSummary[];
+};
 
 export type BrainReply = {
   text: string;
@@ -16,5 +43,5 @@ export type BrainReply = {
 };
 
 export type Brain = {
-  ask(input: { text: string; tools: ToolSpec[] }): Promise<BrainReply>;
+  ask(input: { text: string; tools: ToolSpec[]; context: BrainContext }): Promise<BrainReply>;
 };

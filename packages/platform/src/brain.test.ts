@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BrainContext, ToolSpec } from "@jarvis/core";
 import { createBrain, parseCliReply, type SdkQueryFn } from "./brain.js";
 
 describe("parseCliReply", () => {
@@ -85,17 +86,27 @@ function textMessage(text: string): FakeMessage {
   return { type: "assistant", message: { content: [{ type: "text", text }] } };
 }
 
-const tools = [
-  { name: "session.start", description: "Start a coding session." },
-  { name: "session.kill", description: "Kill a coding session." },
+const tools: ToolSpec[] = [
+  {
+    name: "session.start",
+    description: "Start a coding session.",
+    inputSchema: { project: "name of the project to open" },
+  },
+  {
+    name: "session.kill",
+    description: "Kill a coding session.",
+    inputSchema: { sessionId: "id of the session to stop" },
+  },
 ];
+
+const emptyContext: BrainContext = { projects: [], sessions: [] };
 
 describe("createBrain", () => {
   it("returns the SDK's text reply for the current utterance", async () => {
     const { query } = fakeSdkQuery([[textMessage("Started the tests.")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    const reply = await brain.ask({ text: "run the tests", tools });
+    const reply = await brain.ask({ text: "run the tests", tools, context: emptyContext });
 
     expect(reply).toEqual({ text: "Started the tests.", toolCalls: [] });
   });
@@ -104,7 +115,7 @@ describe("createBrain", () => {
     const { query } = fakeSdkQuery([[textMessage("Star"), textMessage("ted.")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    const reply = await brain.ask({ text: "run the tests", tools });
+    const reply = await brain.ask({ text: "run the tests", tools, context: emptyContext });
 
     expect(reply.text).toBe("Started.");
   });
@@ -119,7 +130,7 @@ describe("createBrain", () => {
     const { query } = fakeSdkQuery([[textMessage(stdout)]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    const reply = await brain.ask({ text: "open acme", tools });
+    const reply = await brain.ask({ text: "open acme", tools, context: emptyContext });
 
     expect(reply).toEqual({
       text: "Opening the project.",
@@ -131,7 +142,7 @@ describe("createBrain", () => {
     const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    await brain.ask({ text: "kill it", tools });
+    await brain.ask({ text: "kill it", tools, context: emptyContext });
 
     const call = calls[0];
     expect(call).toBeDefined();
@@ -140,12 +151,76 @@ describe("createBrain", () => {
     expect(call?.prompt).toContain("session.kill: Kill a coding session.");
   });
 
+  it("includes each tool's input schema in the prompt", async () => {
+    const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
+    const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
+
+    await brain.ask({ text: "kill it", tools, context: emptyContext });
+
+    const call = calls[0];
+    expect(call?.prompt).toContain("project (name of the project to open)");
+    expect(call?.prompt).toContain("sessionId (id of the session to stop)");
+  });
+
+  it("lists the known project names in the prompt", async () => {
+    const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
+    const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
+
+    await brain.ask({
+      text: "افتح سعودي سيل",
+      tools,
+      context: { projects: ["acme", "storefront"], sessions: [] },
+    });
+
+    const call = calls[0];
+    expect(call?.prompt).toContain("Known projects: acme, storefront");
+  });
+
+  it("lists running sessions with their ids so the model can address them", async () => {
+    const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
+    const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
+
+    await brain.ask({
+      text: "kill it",
+      tools,
+      context: {
+        projects: [],
+        sessions: [
+          {
+            id: "sess-abc",
+            project: "acme",
+            agentId: "claude-acme",
+            state: "running",
+            summary: "running tests",
+          },
+        ],
+      },
+    });
+
+    const call = calls[0];
+    expect(call?.prompt).toContain("sess-abc");
+    expect(call?.prompt).toContain("acme");
+    expect(call?.prompt).toContain("claude-acme");
+    expect(call?.prompt).toContain("running tests");
+  });
+
+  it("says no projects or sessions are known when both lists are empty", async () => {
+    const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
+    const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
+
+    await brain.ask({ text: "hello", tools, context: emptyContext });
+
+    const call = calls[0];
+    expect(call?.prompt).toContain("no projects configured");
+    expect(call?.prompt).toContain("no sessions running");
+  });
+
   it("does not send prior conversation turns as part of the prompt", async () => {
     const { query, calls } = fakeSdkQuery([[textMessage("first")], [textMessage("second")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    await brain.ask({ text: "first utterance", tools });
-    await brain.ask({ text: "second utterance", tools });
+    await brain.ask({ text: "first utterance", tools, context: emptyContext });
+    await brain.ask({ text: "second utterance", tools, context: emptyContext });
 
     const secondCall = calls[1];
     expect(secondCall).toBeDefined();
@@ -156,7 +231,7 @@ describe("createBrain", () => {
     const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    await brain.ask({ text: "hello", tools });
+    await brain.ask({ text: "hello", tools, context: emptyContext });
 
     expect(calls[0]?.options?.resume).toBeUndefined();
   });
@@ -168,8 +243,8 @@ describe("createBrain", () => {
     ]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    await brain.ask({ text: "hello", tools });
-    await brain.ask({ text: "ok kill it", tools });
+    await brain.ask({ text: "hello", tools, context: emptyContext });
+    await brain.ask({ text: "ok kill it", tools, context: emptyContext });
 
     expect(calls[1]?.options?.resume).toBe("sess-1");
   });
@@ -182,7 +257,7 @@ describe("createBrain", () => {
       query,
     });
 
-    await brain.ask({ text: "hello", tools });
+    await brain.ask({ text: "hello", tools, context: emptyContext });
 
     expect(calls[0]?.options?.cwd).toBe("/tmp/jarvis-brain-isolated");
     expect(calls[0]?.options?.settingSources).toEqual([]);
@@ -192,7 +267,7 @@ describe("createBrain", () => {
     const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
-    await brain.ask({ text: "hello", tools });
+    await brain.ask({ text: "hello", tools, context: emptyContext });
 
     expect(calls[0]?.options?.tools).toEqual([]);
   });
