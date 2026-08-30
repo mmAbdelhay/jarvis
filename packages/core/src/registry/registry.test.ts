@@ -61,4 +61,20 @@ describe("AgentRegistry.resolve", () => {
     expect(agent.command).toBe("copilot");
     expect(agent.args).toEqual(["-p"]);
   });
+
+  it("throws when a matching routing rule points at an unknown agent", () => {
+    const registry = new AgentRegistry({
+      agents: config.agents,
+      routing: [{ match: { project: "x" }, agent: "ghost" }],
+    });
+    expect(() => registry.resolve({ project: "x" })).toThrow(UnknownAgentError);
+  });
+
+  it("does not let a rule with an empty match swallow every request", () => {
+    const registry = new AgentRegistry({
+      agents: config.agents,
+      routing: [{ match: {}, agent: "copilot" }],
+    });
+    expect(registry.resolve({}).id).toBe("claude-mm");
+  });
 });
