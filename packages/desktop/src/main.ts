@@ -12,8 +12,15 @@ import {
 import { buildWiring } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
+import { errorMessage, MESSAGES } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
 import { startupReport } from "./startup.js";
+
+// The user's primary language, used for the handful of user-facing strings
+// that fire before any utterance has been heard (a hotkey collision at
+// startup) or after the language signal itself has been lost (a broken
+// recording or transcription pipeline never produces a detected language).
+const PRIMARY_LANGUAGE = "ar";
 
 app.whenReady().then(async () => {
   try {
@@ -27,8 +34,7 @@ app.whenReady().then(async () => {
     // for an unrelated startup failure, it cannot surface as an unhandled
     // rejection; checkAgent itself never rejects, so this is a safety net.
     const reportPromise = startupReport(registry, runCommand).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Startup health check failed: ${message}`);
+      console.error(`Startup health check failed: ${errorMessage(error)}`);
       return { healthy: [], broken: [], message: "" };
     });
     const sessions = new SessionManager(createSpawner());
@@ -46,7 +52,16 @@ app.whenReady().then(async () => {
       width: 1440,
       height: 900,
       backgroundColor: "#060a0f",
-      webPreferences: { preload: fileURLToPath(new URL("preload.cjs", import.meta.url)) },
+      webPreferences: {
+        preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
+        // This renderer displays untrusted agent output and holds
+        // `window.jarvis.send`. These already match Electron 44's implicit
+        // defaults; stated explicitly so a future edit that weakens them
+        // is visible in review.
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
     });
 
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -61,74 +76,126 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Important 4: wiring is built and started here — before ipcMain
+    // handlers are registered, before the recorder/hotkeys exist, and
+    // before the window ever loads a page a user could interact with — so
+    // no turn produced between now and the (slow, up-to-5s) startup health
+    // report can ever be dropped. Previously wiring.start() (where
+    // orchestrator.onTurn / sessions.onChange are first subscribed) ran
+    // only after `await reportPromise`, so a turn handled during that
+    // window was spoken by TTS but never reached "turn:new" — gone, with
+    // no replay.
+    const wiring = buildWiring({
+      send: (channel, payload) => window.webContents.send(channel, payload),
+      readMetrics: createMetricsReader(),
+      intervalMs: 2000,
+      onSessionsChange: (cb) => sessions.onChange(cb),
+      onTurn: (cb) => orchestrator.onTurn(cb),
+    });
+    wiring.start();
+    window.on("closed", () => wiring.stop());
+
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
       await orchestrator.handle(text, language);
     });
 
     const recorder = new Recorder(defaultRecorderDeps);
 
+    function startVoice(): void {
+      recorder.start();
+      window.webContents.send("voice:listening", true);
+    }
+
     // Alt+Space / Alt+Shift+Space is a press-to-start / press-to-stop-and-send
     // pair, not a genuine toggle on one key: macOS reserves plain toggling of
     // a single combo for other system uses, and a distinct stop key also
-    // means "stop without holding" is unambiguous to the user.
-    const spaceRegistered = globalShortcut.register("Alt+Space", () => {
-      recorder.start();
-      window.webContents.send("voice:listening", true);
-    });
-
-    const stopRegistered = globalShortcut.register("Alt+Shift+Space", () => {
+    // means "stop without holding" is unambiguous to the user. The mic
+    // button in the renderer drives the same pair through voice:start /
+    // voice:stop IPC calls below, so voice has exactly one implementation
+    // regardless of which control triggers it.
+    function stopVoice(): void {
       window.webContents.send("voice:listening", false);
-      void (async () => {
-        let wavPath: string;
+
+      // Important 6: the whole turn — recorder stop, transcription, and
+      // orchestrator dispatch — is wrapped in one promise chain with a
+      // top-level `.catch`. Previously this was `void (async () => {...})()`
+      // with a try/finally but no catch: if the `finally` block itself threw
+      // (or any awaited call inside it rejected past its own local catch),
+      // the rejection had no handler and Node's default
+      // `--unhandled-rejections=throw` would kill the whole main process
+      // mid-sentence.
+      processVoiceTurn().catch((error) => {
+        console.error(`Voice turn failed: ${errorMessage(error)}`);
+      });
+    }
+
+    async function processVoiceTurn(): Promise<void> {
+      let wavPath: string;
+      try {
+        wavPath = await recorder.stop();
+      } catch (error) {
+        const message = errorMessage(error);
+        console.error(`Recorder stop failed: ${message}`);
+        window.webContents.send("turn:new", {
+          role: "assistant",
+          text: MESSAGES.recordingFailed(message, PRIMARY_LANGUAGE),
+          language: PRIMARY_LANGUAGE,
+          at: Date.now(),
+        });
+        return;
+      }
+
+      try {
+        // transcribe() throws on a broken transcription pipeline (bad
+        // model path, corrupt wav, missing ffmpeg/whisper binary — a
+        // recording that never started leaves no readable wav behind,
+        // and transcription fails on that missing file) and returns an
+        // empty-text transcript for actual silence — two different
+        // outcomes that must not be collapsed into one another. A broken
+        // pipeline is reported as an assistant turn; silence gets a
+        // brief, non-turn notice so the user knows the hotkey worked and
+        // nothing was heard, rather than the UI just going quiet.
+        let transcript: Awaited<ReturnType<typeof transcribe>>;
         try {
-          wavPath = await recorder.stop();
+          transcript = await transcribe(wavPath, config.whisper, runCommand);
         } catch (error) {
-          console.error(`Recorder stop failed: ${error instanceof Error ? error.message : String(error)}`);
+          const message = errorMessage(error);
+          console.error(`Transcription failed: ${message}`);
+          window.webContents.send("turn:new", {
+            role: "assistant",
+            text: MESSAGES.transcriptionFailed(message, PRIMARY_LANGUAGE),
+            language: PRIMARY_LANGUAGE,
+            at: Date.now(),
+          });
           return;
         }
 
-        try {
-          // transcribe() throws on a broken transcription pipeline (bad
-          // model path, corrupt wav, missing ffmpeg/whisper binary — a
-          // recording that never started leaves no readable wav behind,
-          // and transcription fails on that missing file) and returns an
-          // empty-text transcript for actual silence — two different
-          // outcomes that must not be collapsed into one another. A broken
-          // pipeline is reported as an assistant turn; silence gets a
-          // brief, non-turn notice so the user knows the hotkey worked and
-          // nothing was heard, rather than the UI just going quiet.
-          let transcript: Awaited<ReturnType<typeof transcribe>>;
-          try {
-            transcript = await transcribe(wavPath, config.whisper, runCommand);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error(`Transcription failed: ${message}`);
-            window.webContents.send("turn:new", {
-              role: "assistant",
-              text: `Transcription failed: ${message}`,
-              language: "en",
-              at: Date.now(),
-            });
-            return;
-          }
-
-          if (transcript.text.trim() === "") {
-            const language = transcript.language === "ar" ? "ar" : "en";
-            window.webContents.send("voice:notice", {
-              text: language === "ar" ? "لم يُسمع شيء" : "Didn't catch that",
-              language,
-            });
-            return;
-          }
-          await orchestrator.handle(transcript.text, transcript.language === "ar" ? "ar" : "en");
-        } finally {
-          // Recorder owns the wav file it created; nothing else reads it
-          // past this point on any of the branches above, so it's always
-          // deleted here rather than left behind in tmpdir().
-          await recorder.cleanup(wavPath);
+        if (transcript.text.trim() === "") {
+          const language = transcript.language === "ar" ? "ar" : "en";
+          window.webContents.send("voice:notice", {
+            text: language === "ar" ? "لم يُسمع شيء" : "Didn't catch that",
+            language,
+          });
+          return;
         }
-      })();
-    });
+        await orchestrator.handle(transcript.text, transcript.language === "ar" ? "ar" : "en");
+      } finally {
+        // Recorder owns the wav file it created; nothing else reads it
+        // past this point on any of the branches above, so it's always
+        // deleted here rather than left behind in tmpdir().
+        await recorder.cleanup(wavPath);
+      }
+    }
+
+    const spaceRegistered = globalShortcut.register("Alt+Space", startVoice);
+    const stopRegistered = globalShortcut.register("Alt+Shift+Space", stopVoice);
+
+    // M-b: the renderer's mic button drives the exact same start/stop path
+    // as the global hotkey, so voice has one implementation no matter which
+    // control triggers it — never a second, unwired-looking "click to talk"
+    // affordance beside the real hotkey-driven one.
+    ipcMain.handle("voice:start", () => startVoice());
+    ipcMain.handle("voice:stop", () => stopVoice());
 
     app.on("will-quit", () => {
       globalShortcut.unregisterAll();
@@ -152,8 +219,8 @@ app.whenReady().then(async () => {
       if (registered) continue;
       window.webContents.send("turn:new", {
         role: "assistant",
-        text: `Could not register the ${combo} shortcut — another app is probably already using it.`,
-        language: "en",
+        text: MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
+        language: PRIMARY_LANGUAGE,
         at: Date.now(),
       });
     }
@@ -168,20 +235,8 @@ app.whenReady().then(async () => {
         at: Date.now(),
       });
     }
-
-    const wiring = buildWiring({
-      send: (channel, payload) => window.webContents.send(channel, payload),
-      readMetrics: createMetricsReader(),
-      intervalMs: 2000,
-      onSessionsChange: (cb) => sessions.onChange(cb),
-      onTurn: (cb) => orchestrator.onTurn(cb),
-    });
-
-    wiring.start();
-    window.on("closed", () => wiring.stop());
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    dialog.showErrorBox("Jarvis failed to start", message);
+    dialog.showErrorBox("Jarvis failed to start", errorMessage(error));
     app.quit();
   }
 });
