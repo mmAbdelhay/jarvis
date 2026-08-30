@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
     const indexUrl = pathToFileURL(
-      fileURLToPath(new URL("../renderer/index.html", import.meta.url)),
+      fileURLToPath(new URL("../../renderer/index.html", import.meta.url)),
     ).href;
 
     window.webContents.on("will-navigate", (event, url) => {
@@ -233,7 +233,7 @@ app.whenReady().then(async () => {
       }
     });
 
-    await window.loadFile(fileURLToPath(new URL("../renderer/index.html", import.meta.url)));
+    await window.loadFile(fileURLToPath(new URL("../../renderer/index.html", import.meta.url)));
 
     // globalShortcut.register() does not throw on collision — a combo
     // already claimed by another app (window managers, Alfred, Raycast and
