@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
-import type { RegistryConfig } from "@jarvis/core";
+import type { AgentConfig, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type { BrainConfig } from "@jarvis/platform";
 
 export type JarvisConfig = {
@@ -25,10 +25,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   }
   const root = raw as Record<string, unknown>;
 
-  const agents = root["agents"];
-  if (typeof agents !== "object" || agents === null) {
-    throw new Error("Config is missing an `agents` section");
-  }
+  const agents = parseAgents(root["agents"]);
 
   const brain = root["brain"];
   if (typeof brain !== "object" || brain === null) {
@@ -36,13 +33,11 @@ export function parseConfig(raw: unknown): JarvisConfig {
   }
   const brainConfig = brain as Partial<BrainConfig>;
 
-  const projects = (root["projects"] ?? {}) as Record<string, string>;
+  const routing = parseRouting(root["routing"]);
+  const projects = parseProjects(root["projects"]);
 
   return {
-    registry: {
-      agents: agents as RegistryConfig["agents"],
-      routing: (root["routing"] ?? []) as RegistryConfig["routing"],
-    },
+    registry: { agents, routing },
     projects: Object.fromEntries(
       Object.entries(projects).map(([name, path]) => [name, expandTilde(path)]),
     ),
@@ -65,4 +60,93 @@ export async function loadConfig(
 
 function expandTilde(path: string): string {
   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
+  if (typeof rawAgents !== "object" || rawAgents === null || Array.isArray(rawAgents)) {
+    throw new Error("Config is missing an `agents` section");
+  }
+
+  const agents: RegistryConfig["agents"] = {};
+  for (const [id, rawAgent] of Object.entries(rawAgents)) {
+    if (typeof rawAgent !== "object" || rawAgent === null || Array.isArray(rawAgent)) {
+      throw new Error(`Config \`agents.${id}\` must be an object`);
+    }
+    const agent = rawAgent as Partial<Omit<AgentConfig, "id">>;
+    if (typeof agent.command !== "string") {
+      throw new Error(`Config \`agents.${id}.command\` must be a string`);
+    }
+    if (agent.args !== undefined) {
+      if (!Array.isArray(agent.args) || !agent.args.every((arg) => typeof arg === "string")) {
+        throw new Error(`Config \`agents.${id}.args\` must be an array of strings`);
+      }
+    }
+    if (agent.model !== undefined && typeof agent.model !== "string") {
+      throw new Error(`Config \`agents.${id}.model\` must be a string`);
+    }
+    if (agent.default !== undefined && typeof agent.default !== "boolean") {
+      throw new Error(`Config \`agents.${id}.default\` must be a boolean`);
+    }
+    agents[id] = {
+      command: agent.command,
+      ...(agent.args === undefined ? {} : { args: agent.args }),
+      ...(agent.model === undefined ? {} : { model: agent.model }),
+      ...(agent.default === undefined ? {} : { default: agent.default }),
+    };
+  }
+  return agents;
+}
+
+function parseRouting(rawRouting: unknown): RoutingRule[] {
+  if (rawRouting === undefined) {
+    return [];
+  }
+  if (!Array.isArray(rawRouting)) {
+    throw new Error("Config `routing` must be a list");
+  }
+
+  return rawRouting.map((rawRule, index) => {
+    if (typeof rawRule !== "object" || rawRule === null || Array.isArray(rawRule)) {
+      throw new Error(`Config \`routing[${index}]\` must be an object`);
+    }
+    const rule = rawRule as Partial<RoutingRule>;
+    if (typeof rule.agent !== "string") {
+      throw new Error(`Config \`routing[${index}].agent\` must be a string`);
+    }
+    if (typeof rule.match !== "object" || rule.match === null || Array.isArray(rule.match)) {
+      throw new Error(`Config \`routing[${index}].match\` must be an object`);
+    }
+    const match = rule.match;
+    if (match.project !== undefined && typeof match.project !== "string") {
+      throw new Error(`Config \`routing[${index}].match.project\` must be a string`);
+    }
+    if (match.intent !== undefined && typeof match.intent !== "string") {
+      throw new Error(`Config \`routing[${index}].match.intent\` must be a string`);
+    }
+    return {
+      agent: rule.agent,
+      match: {
+        ...(match.project === undefined ? {} : { project: match.project }),
+        ...(match.intent === undefined ? {} : { intent: match.intent }),
+      },
+    };
+  });
+}
+
+function parseProjects(rawProjects: unknown): Record<string, string> {
+  if (rawProjects === undefined) {
+    return {};
+  }
+  if (typeof rawProjects !== "object" || rawProjects === null || Array.isArray(rawProjects)) {
+    throw new Error("Config `projects` must be an object");
+  }
+
+  const projects: Record<string, string> = {};
+  for (const [name, path] of Object.entries(rawProjects)) {
+    if (typeof path !== "string") {
+      throw new Error(`Config \`projects.${name}\` must be a string`);
+    }
+    projects[name] = path;
+  }
+  return projects;
 }

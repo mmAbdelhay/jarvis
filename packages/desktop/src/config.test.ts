@@ -39,4 +39,26 @@ describe("parseConfig", () => {
     const config = parseConfig({ ...valid, routing: undefined });
     expect(config.registry.routing).toEqual([]);
   });
+
+  it("throws when a routing entry is missing agent", () => {
+    expect(() =>
+      parseConfig({ ...valid, routing: [{ match: { project: "x" } }] }),
+    ).toThrow(/routing\[0\]\.agent/);
+  });
+
+  it("throws when an agent entry is not an object", () => {
+    expect(() => parseConfig({ ...valid, agents: { foo: "not-an-object" } })).toThrow(
+      /agents\.foo/,
+    );
+  });
+
+  it("throws when a projects value is not a string", () => {
+    expect(() => parseConfig({ ...valid, projects: { acme: 123 } })).toThrow(
+      /projects\.acme/,
+    );
+  });
+
+  it("throws when agents is an array", () => {
+    expect(() => parseConfig({ ...valid, agents: [] })).toThrow(/agents/);
+  });
 });
