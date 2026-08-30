@@ -31,12 +31,13 @@ export class SessionManager {
       lastActivityAt: now,
     };
 
+    this.#sessions.set(id, session);
+
     const handle = this.#spawn(input.agent, input.projectPath);
+    this.#processes.set(id, handle);
     handle.onOutput((chunk) => this.#onOutput(id, chunk));
     handle.onExit((code) => this.#onExit(id, code));
 
-    this.#sessions.set(id, session);
-    this.#processes.set(id, handle);
     this.#emit();
     return session;
   }
@@ -82,13 +83,14 @@ export class SessionManager {
   #update(id: string, patch: Partial<Session>): void {
     const existing = this.#sessions.get(id);
     if (existing === undefined) return;
+    if (existing.state === "dead" || existing.state === "done") return;
     this.#sessions.set(id, { ...existing, ...patch, lastActivityAt: Date.now() });
     this.#emit();
   }
 
   #emit(): void {
     const snapshot = this.list();
-    for (const listener of this.#listeners) listener(snapshot);
+    for (const listener of [...this.#listeners]) listener(snapshot);
   }
 }
 

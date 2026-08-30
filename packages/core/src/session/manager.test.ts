@@ -95,6 +95,25 @@ describe("SessionManager", () => {
     expect(manager.get(session.id)?.state).toBe("dead");
   });
 
+  it("stays dead when the killed process's own exit event arrives afterward", () => {
+    // A real child process (Task 6's spawner) reports `code: null` on a
+    // SIGTERM-killed process, which collapses to exit code 0 via `code ?? 0`.
+    // kill() must not be undone by that later "successful" exit.
+    const manager = new SessionManager(spawner);
+    const session = manager.start({ project: "p", projectPath: "/p", agent });
+    manager.kill(session.id);
+    fake.emitExit(0);
+    expect(manager.get(session.id)?.state).toBe("dead");
+  });
+
+  it("stays dead when late output arrives after death", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({ project: "p", projectPath: "/p", agent });
+    fake.emitExit(1);
+    fake.emitOutput("still writing after death\n");
+    expect(manager.get(session.id)?.state).toBe("dead");
+  });
+
   it("throws when killing an unknown session", () => {
     const manager = new SessionManager(spawner);
     expect(() => manager.kill("missing")).toThrow(/missing/);
@@ -107,6 +126,9 @@ describe("SessionManager", () => {
     manager.start({ project: "p", projectPath: "/p", agent });
     fake.emitOutput("working\n");
     expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenLastCalledWith([
+      expect.objectContaining({ state: "running", summary: "working" }),
+    ]);
   });
 
   it("stops notifying after unsubscribe", () => {
@@ -123,11 +145,36 @@ describe("SessionManager", () => {
     const second = new FakeProcess();
     const processes = [first, second];
     let index = 0;
-    const manager = new SessionManager(() => processes[index++]!);
+    const nextProcess = (): FakeProcess => {
+      const next = processes[index++];
+      if (next === undefined) throw new Error("spawner called more times than expected");
+      return next;
+    };
+    const manager = new SessionManager(nextProcess);
     const a = manager.start({ project: "a", projectPath: "/a", agent });
     const b = manager.start({ project: "b", projectPath: "/b", agent });
     first.emitExit(1);
     expect(manager.get(a.id)?.state).toBe("dead");
     expect(manager.get(b.id)?.state).toBe("starting");
+  });
+
+  it("does not let one session's output affect another", () => {
+    const first = new FakeProcess();
+    const second = new FakeProcess();
+    const processes = [first, second];
+    let index = 0;
+    const nextProcess = (): FakeProcess => {
+      const next = processes[index++];
+      if (next === undefined) throw new Error("spawner called more times than expected");
+      return next;
+    };
+    const manager = new SessionManager(nextProcess);
+    const a = manager.start({ project: "a", projectPath: "/a", agent });
+    const b = manager.start({ project: "b", projectPath: "/b", agent });
+    first.emitOutput("only a's output\n");
+    expect(manager.get(a.id)?.state).toBe("running");
+    expect(manager.get(a.id)?.summary).toBe("only a's output");
+    expect(manager.get(b.id)?.state).toBe("starting");
+    expect(manager.get(b.id)?.summary).toBe("");
   });
 });
