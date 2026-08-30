@@ -1,3 +1,4 @@
+import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
 import type { Brain, BrainReply, ToolSpec, Turn } from "./types.js";
@@ -7,6 +8,44 @@ const TOOLS: ToolSpec[] = [
   { name: "session.send", description: "Send text to a running session" },
   { name: "session.kill", description: "Stop a running session" },
 ];
+
+type ToolContext = Partial<Pick<Turn, "sessionId" | "agentId" | "model">>;
+
+type ToolCall = { name: string; input: Record<string, unknown> };
+
+const MESSAGES = {
+  unknownProject: (project: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `لا أعرف مشروعًا باسم "${project}".`
+      : `I don't know a project called "${project}".`,
+  agentResolveFailed: (message: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذر العثور على الوكيل: ${message}`
+      : `I couldn't find that agent: ${message}`,
+  sessionStartFailed: (message: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذر بدء الجلسة: ${message}`
+      : `I couldn't start that session: ${message}`,
+  unknownSession: (sessionId: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `لا أعرف جلسة باسم "${sessionId}".`
+      : `I don't know a session called "${sessionId}".`,
+  unknownTool: (name: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `لا أعرف كيف أفعل ذلك ("${name}").`
+      : `I don't know how to do that ("${name}").`,
+  brainFailed: (message: string, language: "ar" | "en"): string =>
+    language === "ar" ? `حدث خطأ: ${message}` : `Something went wrong: ${message}`,
+};
+
+function stringInput(input: Record<string, unknown>, key: string): string {
+  const value = input[key];
+  return typeof value === "string" ? value : "";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export type OrchestratorOptions = {
   brain: Brain;
@@ -32,19 +71,20 @@ export class Orchestrator {
     try {
       reply = await this.#options.brain.ask({ text, tools: TOOLS });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = MESSAGES.brainFailed(errorMessage(error), language);
       return this.#answer(message, language, {});
     }
 
-    let context: Partial<Turn> = {};
-    let note = "";
+    let context: ToolContext = {};
+    const notes: string[] = [];
 
-    for (const call of reply.toolCalls) {
-      const outcome = this.#runTool(call);
-      if (outcome.error !== undefined) note = outcome.error;
+    for (const call of reply.toolCalls ?? []) {
+      const outcome = this.#runTool(call, language);
+      if (outcome.error !== undefined) notes.push(outcome.error);
       context = { ...context, ...outcome.context };
     }
 
+    const note = notes.join(" ");
     const spoken = note === "" ? reply.text : `${reply.text} ${note}`.trim();
     return this.#answer(spoken, language, context);
   }
@@ -58,31 +98,38 @@ export class Orchestrator {
     return () => this.#listeners.delete(listener);
   }
 
-  #runTool(call: { name: string; input: Record<string, unknown> }): {
-    context: Partial<Turn>;
-    error?: string;
-  } {
-    if (call.name !== "session.start") return { context: {} };
+  #runTool(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
+    if (call.name === "session.start") return this.#startSession(call, language);
+    if (call.name === "session.send") return this.#sendToSession(call, language);
+    if (call.name === "session.kill") return this.#killSession(call, language);
+    return { context: {}, error: MESSAGES.unknownTool(call.name, language) };
+  }
 
-    const project = String(call.input["project"] ?? "");
+  #startSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
+    const project = stringInput(call.input, "project");
     const projectPath = this.#options.projects[project];
     if (projectPath === undefined) {
-      return { context: {}, error: `I don't know a project called "${project}".` };
+      return { context: {}, error: MESSAGES.unknownProject(project, language) };
     }
 
     const explicit = call.input["agent"];
-    let agent;
+    let agent: AgentConfig;
     try {
       agent = this.#options.registry.resolve({
         project,
         ...(typeof explicit === "string" ? { explicitAgent: explicit } : {}),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { context: {}, error: message };
+      return { context: {}, error: MESSAGES.agentResolveFailed(errorMessage(error), language) };
     }
 
-    const session = this.#options.sessions.start({ project, projectPath, agent });
+    let session: ReturnType<SessionManager["start"]>;
+    try {
+      session = this.#options.sessions.start({ project, projectPath, agent });
+    } catch (error) {
+      return { context: {}, error: MESSAGES.sessionStartFailed(errorMessage(error), language) };
+    }
+
     return {
       context: {
         sessionId: session.id,
@@ -92,15 +139,47 @@ export class Orchestrator {
     };
   }
 
-  async #answer(text: string, language: "ar" | "en", context: Partial<Turn>): Promise<Turn> {
+  #sendToSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
+    const sessionId = stringInput(call.input, "sessionId");
+    const text = stringInput(call.input, "text");
+    try {
+      this.#options.sessions.send(sessionId, text);
+    } catch {
+      return { context: {}, error: MESSAGES.unknownSession(sessionId, language) };
+    }
+    return { context: {} };
+  }
+
+  #killSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
+    const sessionId = stringInput(call.input, "sessionId");
+    try {
+      this.#options.sessions.kill(sessionId);
+    } catch {
+      return { context: {}, error: MESSAGES.unknownSession(sessionId, language) };
+    }
+    return { context: {} };
+  }
+
+  async #answer(text: string, language: "ar" | "en", context: ToolContext): Promise<Turn> {
     const turn: Turn = { role: "assistant", text, language, at: Date.now(), ...context };
     this.#record(turn);
-    await this.#options.speak(text, language);
+    try {
+      await this.#options.speak(text, language);
+    } catch {
+      // A TTS failure must not fail a turn the transcript already recorded as succeeded.
+    }
     return turn;
   }
 
   #record(turn: Turn): void {
     this.#turns.push(turn);
-    for (const listener of this.#listeners) listener(turn);
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(turn);
+      } catch {
+        // Isolate subscribers: one throwing listener must not starve the others
+        // or abort the turn, the way SessionManager already isolates its listeners.
+      }
+    }
   }
 }
