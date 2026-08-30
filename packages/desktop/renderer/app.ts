@@ -1,5 +1,6 @@
 import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
+import { MESSAGES } from "../src/messages.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
@@ -75,6 +76,9 @@ function buildSessionRow(session: Session): HTMLElement {
 
   const project = document.createElement("span");
   project.className = "session__project";
+  const projectLanguage = detectLanguage(session.project);
+  project.dir = projectLanguage === "ar" ? "rtl" : "ltr";
+  if (projectLanguage === "ar") project.classList.add("arabic");
   project.textContent = session.project;
   head.append(project);
 
@@ -181,7 +185,7 @@ function wireHistoryPanel(): void {
 }
 
 function renderHistoryList(sessions: Session[]): void {
-  $("history-count").textContent = `${sessions.length} sessions`;
+  $("history-count").textContent = MESSAGES.sessionsCount(sessions.length, "en");
   if (sessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "sessions-empty";

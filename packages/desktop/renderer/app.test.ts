@@ -10,14 +10,16 @@
 // #clock-date so startClock has somewhere to write, #voice-state itself),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Session } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
 
 type Callbacks = {
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
+  onSessions?: (sessions: Session[]) => void;
 };
 
-async function loadApp(): Promise<Callbacks> {
+async function loadApp(getHistory: () => Promise<Session[]> = async () => []): Promise<Callbacks> {
   vi.resetModules();
   document.body.innerHTML = `
     <span id="clock-time"></span>
@@ -26,6 +28,13 @@ async function loadApp(): Promise<Callbacks> {
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
     <button id="mic-button"></button>
+    <span id="session-count"></span>
+    <div id="sessions"></div>
+    <button id="history-button"></button>
+    <button id="history-close"></button>
+    <div id="history-overlay" hidden></div>
+    <span id="history-count"></span>
+    <div id="history-list"></div>
   `;
 
   const callbacks: Callbacks = {};
@@ -34,7 +43,9 @@ async function loadApp(): Promise<Callbacks> {
     startVoice: vi.fn(async () => {}),
     stopVoice: vi.fn(async () => {}),
     onMetrics: vi.fn(),
-    onSessions: vi.fn(),
+    onSessions: (cb: (sessions: Session[]) => void) => {
+      callbacks.onSessions = cb;
+    },
     onTurn: vi.fn(),
     onListening: (cb: (listening: boolean) => void) => {
       callbacks.onListening = cb;
@@ -42,6 +53,7 @@ async function loadApp(): Promise<Callbacks> {
     onNotice: (cb: (notice: VoiceNotice) => void) => {
       callbacks.onNotice = cb;
     },
+    getHistory: vi.fn(getHistory),
   };
 
   await import("./app.js");
@@ -166,5 +178,128 @@ describe("mic button", () => {
 
     onListening?.(false);
     expect(micButtonEl().classList.contains("voice-btn--active")).toBe(false);
+  });
+});
+
+function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: "s1",
+    project: "acme",
+    projectPath: "/p/acme",
+    agentId: "claude-mm",
+    state: "running",
+    summary: "",
+    startedAt: 1000,
+    lastActivityAt: 1000,
+    ...overrides,
+  };
+}
+
+// Critical: the overlay must actually hide/show — see
+// history-overlay-css.test.ts for the CSS-cascade half of this fix (an
+// author `display: flex` on
+// `.history-overlay` itself would out-cascade the UA `[hidden]{display:
+// none}` rule regardless of what the click handlers below do to the
+// attribute). This describe block proves the *other* half: that
+// wireHistoryPanel's click handlers actually flip `overlay.hidden`, the
+// one mechanism the CSS fix depends on. jsdom's own `getComputedStyle`
+// does not reproduce the cascade-origin bug the CSS fix addresses (it
+// special-cases `hidden` outside the normal cascade), so this test
+// intentionally does not assert computed `display` — only the `hidden`
+// property, which is the actual mechanism `wireHistoryPanel` controls.
+describe("history panel", () => {
+  function overlayEl(): HTMLElement & { hidden: boolean } {
+    const el = document.getElementById("history-overlay");
+    if (el === null) throw new Error("Missing #history-overlay");
+    return el as HTMLElement & { hidden: boolean };
+  }
+
+  it("is hidden before the history button is ever clicked", async () => {
+    await loadApp();
+    expect(overlayEl().hidden).toBe(true);
+  });
+
+  it("un-hides on click and loads history", async () => {
+    const getHistory = vi.fn(async () => [makeSession({ id: "past", project: "acme" })]);
+    await loadApp(getHistory);
+
+    document.getElementById("history-button")?.click();
+    expect(overlayEl().hidden).toBe(false);
+    expect(getHistory).toHaveBeenCalledTimes(1);
+
+    // Flush the getHistory() promise's .then().
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const list = document.getElementById("history-list");
+    expect(list?.querySelector(".session__project")?.textContent).toBe("acme");
+  });
+
+  it("re-hides on the close button", async () => {
+    await loadApp(async () => []);
+    document.getElementById("history-button")?.click();
+    expect(overlayEl().hidden).toBe(false);
+
+    document.getElementById("history-close")?.click();
+    expect(overlayEl().hidden).toBe(true);
+  });
+
+  it("stays open on a click inside the panel, and closes only on a click on the scrim itself", async () => {
+    await loadApp(async () => []);
+    document.getElementById("history-button")?.click();
+    expect(overlayEl().hidden).toBe(false);
+
+    const child = document.createElement("div");
+    overlayEl().append(child);
+    child.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    expect(overlayEl().hidden).toBe(false);
+
+    // A click whose target is the overlay element itself (the scrim, not
+    // a descendant) closes it.
+    overlayEl().dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    expect(overlayEl().hidden).toBe(true);
+  });
+
+  it("shows '1 session' not '1 sessions' for a single past session, and pluralises the badge through the bilingual MESSAGES table", async () => {
+    await loadApp(async () => [makeSession()]);
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("history-count")?.textContent).toBe("1 session");
+  });
+
+  it("shows the plural form for zero or more than one past session", async () => {
+    await loadApp(async () => []);
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.getElementById("history-count")?.textContent).toBe("0 sessions");
+  });
+});
+
+// Spec shortfall: buildSessionRow applied dir/`.arabic` to session__summary
+// but not session__project — closed for both the live Sessions panel
+// (exercised here via onSessions) and the History panel (which reuses the
+// same buildSessionRow).
+describe("Arabic project names", () => {
+  it("renders an Arabic project name right-to-left with the arabic class in the live Sessions panel", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ project: "سعودي سيل" })]);
+
+    const project = document.querySelector("#sessions .session__project");
+    expect(project).not.toBeNull();
+    expect(project?.textContent).toBe("سعودي سيل");
+    expect((project as HTMLElement).dir).toBe("rtl");
+    expect(project?.classList.contains("arabic")).toBe(true);
+  });
+
+  it("renders an English project name left-to-right with no arabic class", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ project: "acme" })]);
+
+    const project = document.querySelector("#sessions .session__project");
+    expect((project as HTMLElement).dir).toBe("ltr");
+    expect(project?.classList.contains("arabic")).toBe(false);
   });
 });
