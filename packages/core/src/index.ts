@@ -5,3 +5,4 @@ export * from "./registry/registry.js";
 export * from "./registry/health.js";
 export * from "./session/types.js";
 export * from "./session/manager.js";
+export * from "./platform/types.js";
