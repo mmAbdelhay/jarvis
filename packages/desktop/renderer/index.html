@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jarvis</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap"
+/>
+<style>
+  :root {
+    --ground: #060a0f;
+    --panel: #0b1219;
+    --border: #16232e;
+    --accent: #45c8dc;
+    --accent-soft: #7ddced;
+    --text: #e6f3f8;
+    --text-secondary: #9fb7c4;
+    --text-muted: #5c7484;
+    --text-dim: #cfe4ec;
+    --good: #5fb87a;
+    --bad: #b85f5f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--ground);
+    color: var(--text);
+    font-family: "Space Grotesk", system-ui, sans-serif;
+  }
+
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-soft); }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  .arabic {
+    font-family: "IBM Plex Sans Arabic", "Space Grotesk", sans-serif;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .ph {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pt {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+  }
+
+  .lbl {
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+  }
+
+  .val {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  .val small {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .tile {
+    background: #0d1720;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .bar {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    overflow: hidden;
+  }
+
+  .fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 400ms ease;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.25; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.04); }
+  }
+
+  #app {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+  }
+
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 11px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+    flex-shrink: 0;
+  }
+
+  .spacer { flex-grow: 1; }
+
+  .clock, .netinfo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .clock .sep { color: #2b3d4a; }
+  .clock .date { color: var(--text-secondary); }
+
+  .netinfo { padding: 6px 12px; gap: 8px; }
+  .netinfo .down { color: var(--good); }
+  .netinfo .sep { color: var(--text-muted); }
+  .netinfo .up { color: var(--accent); }
+  .netinfo .unit { color: var(--text-muted); font-size: 10px; }
+
+  .main {
+    display: grid;
+    grid-template-columns: 330px minmax(0, 1fr) 400px;
+    gap: 16px;
+    padding: 16px 20px;
+    flex-grow: 1;
+    overflow: hidden;
+  }
+
+  .col-left {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .system-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .metric-head {
+    display: flex;
+    align-items: baseline;
+  }
+
+  .metric-head .lbl { flex-grow: 1; }
+  .metric-head .mono { font-size: 11px; color: var(--text-dim); }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .temp-note {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+
+  .sessions-panel {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .sessions-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow-y: auto;
+  }
+
+  .sessions-empty {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 10px 4px;
+  }
+
+  .session {
+    background: #0a1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .session--running { background: #0d1720; }
+  .session--waiting { background: #0e1a20; border-color: var(--accent); }
+  .session--starting { background: #0d1720; }
+
+  .session__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .session__project {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .session--dead .session__project,
+  .session--done .session__project {
+    color: var(--text-secondary);
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .session--running .dot { background: var(--good); }
+  .session--waiting .dot { background: var(--accent); }
+  .session--starting .dot { background: #d8ad4c; }
+  .session--dead .dot { background: var(--bad); }
+
+  .session__state {
+    font-size: 9px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .session--running .session__state { color: var(--good); border-color: #1e3a2c; }
+  .session--waiting .session__state { color: var(--accent); border-color: #1c3f49; }
+
+  .session__summary {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .session--waiting .session__summary { color: var(--accent); }
+  .session--dead .session__summary,
+  .session--done .session__summary { color: var(--text-muted); }
+
+  .session__meta {
+    display: flex;
+    gap: 8px;
+    font-size: 9px;
+    color: var(--text-muted);
+  }
+
+  .col-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    min-width: 0;
+  }
+
+  .orb {
+    position: relative;
+    width: 300px;
+    height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .orb-ring {
+    position: absolute;
+    border-radius: 50%;
+    animation: pulse 3600ms ease-in-out infinite;
+  }
+
+  .orb-ring--outer { width: 300px; height: 300px; border: 1px solid #12222c; }
+  .orb-ring--inner { width: 236px; height: 236px; border: 1px solid #17303c; animation-delay: 400ms; }
+
+  .orb-core {
+    position: absolute;
+    width: 172px;
+    height: 172px;
+    border-radius: 50%;
+    border: 1px solid #1d3f4d;
+    background: #0a141b;
+  }
+
+  .orb-nucleus {
+    position: absolute;
+    width: 108px;
+    height: 108px;
+    border-radius: 50%;
+    background: #0e2029;
+    border: 1px solid #2a5d6e;
+  }
+
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    z-index: 1;
+  }
+
+  .waveform span {
+    width: 4px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  .brand-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand-title {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: 0.26em;
+  }
+
+  .voice-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 7px 16px;
+  }
+
+  .voice-state .pill-dot { background: var(--accent); }
+  .voice-state span:last-child { font-size: 12px; color: var(--text-secondary); }
+
+  .voice-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .voice-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .voice-btn--active {
+    background: #0e2029;
+    border-color: var(--accent);
+  }
+
+  .col-right {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .conversation-tag {
+    font-size: 9px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 6px;
+  }
+
+  #conversation {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex-grow: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .conversation-empty {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    margin: auto 0;
+  }
+
+  .turn {
+    max-width: 90%;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-radius: 10px 10px 10px 3px;
+  }
+
+  .turn--assistant {
+    align-self: flex-start;
+    background: #0d1720;
+    border: 1px solid var(--border);
+  }
+
+  .turn--user {
+    align-self: flex-end;
+    max-width: 88%;
+    background: #0e2029;
+    border: 1px solid #1c3f49;
+    border-radius: 10px 10px 3px 10px;
+  }
+
+  .turn__text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+
+  .turn--user .turn__text { color: var(--text); }
+
+  .turn__text--arabic {
+    font-family: "IBM Plex Sans Arabic", sans-serif;
+    line-height: 1.7;
+  }
+
+  .turn__meta {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 10px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    padding-top: 7px;
+  }
+
+  .composer {
+    padding: 12px 14px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #composer {
+    flex-grow: 1;
+    background: #0d1720;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 12px;
+    color: var(--text);
+    font-family: inherit;
+  }
+
+  #composer::placeholder { color: var(--text-muted); }
+
+  #composer-send {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--accent);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    padding: 0;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <div class="brand">JARVIS</div>
+    <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
+    <div class="spacer"></div>
+    <div class="clock mono">
+      <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="netinfo mono">
+      <span id="net-down" class="down">↓ 0.0</span><span class="sep">/</span><span id="net-up" class="up">↑ 0.0</span><span class="unit">Mbps</span>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="col-left">
+
+      <div class="panel">
+        <div class="ph">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"></path></svg>
+          <div class="pt">System</div>
+        </div>
+        <div class="system-body">
+          <div class="metric">
+            <div class="metric-head">
+              <div class="lbl">CPU</div>
+              <div id="cpu-value" class="mono">0%</div>
+            </div>
+            <div class="bar"><div id="cpu-bar" class="fill" style="width: 0%;"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-head">
+              <div class="lbl">MEMORY</div>
+              <div id="mem-value" class="mono">— / —</div>
+            </div>
+            <div class="bar"><div id="mem-bar" class="fill" style="width: 0%;"></div></div>
+          </div>
+          <div class="tiles">
+            <div class="tile">
+              <div class="lbl">DISK</div>
+              <div class="val"><span id="disk-value">—</span><small id="disk-total"></small></div>
+            </div>
+            <div class="tile">
+              <div class="lbl">UPTIME</div>
+              <div id="uptime-value" class="val">—</div>
+            </div>
+            <div class="tile">
+              <div class="lbl">TEMP</div>
+              <div class="val" style="color: var(--text-muted);">—</div>
+            </div>
+          </div>
+          <div class="temp-note">Temperature needs a privileged helper on Apple Silicon — not wired up.</div>
+        </div>
+      </div>
+
+      <div class="panel sessions-panel">
+        <div class="ph">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><path d="M4 17l6-6-6-6M12 19h8"></path></svg>
+          <div class="pt">Sessions</div>
+          <div class="spacer"></div>
+          <div id="session-count" class="mono" style="font-size: 10px; color: var(--text-muted);">0 live</div>
+        </div>
+        <div class="sessions-body" id="sessions">
+          <div class="sessions-empty">No active sessions.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="col-center">
+
+      <div class="orb">
+        <div class="orb-ring orb-ring--outer"></div>
+        <div class="orb-ring orb-ring--inner"></div>
+        <div class="orb-core"></div>
+        <div class="orb-nucleus"></div>
+        <div class="waveform">
+          <span style="height: 13px; opacity: 0.5;"></span>
+          <span style="height: 21px;"></span>
+          <span style="height: 15px; opacity: 0.75;"></span>
+          <span style="height: 24px;"></span>
+          <span style="height: 11px; opacity: 0.5;"></span>
+        </div>
+      </div>
+
+      <div class="brand-block">
+        <div class="brand-title">JARVIS</div>
+        <div class="voice-state">
+          <span class="pill-dot"></span>
+          <span>Hold ⌥Space to speak</span>
+        </div>
+      </div>
+
+      <div class="voice-controls">
+        <div class="voice-btn">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        </div>
+        <div class="voice-btn voice-btn--active">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg>
+        </div>
+        <div class="voice-btn">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="panel col-right">
+      <div class="ph">
+        <div class="pt">Conversation</div>
+        <div class="spacer"></div>
+        <div class="conversation-tag mono">AR · EN</div>
+      </div>
+
+      <div id="conversation">
+        <div class="conversation-empty">No conversation yet — type below or hold ⌥Space to speak.</div>
+      </div>
+
+      <div class="composer">
+        <input id="composer" type="text" placeholder="Type, or hold ⌥Space to talk…" autocomplete="off" />
+        <button id="composer-send" type="button" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+<script type="module" src="../dist/renderer/app.js"></script>
+</body>
+</html>

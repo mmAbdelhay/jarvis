@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/platform" },
-    { "path": "packages/desktop" }
+    { "path": "packages/desktop" },
+    { "path": "packages/desktop/renderer" }
   ]
 }
