@@ -17,8 +17,18 @@ app.whenReady().then(async () => {
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
-    const report = await startupReport(registry, runCommand);
-    console.log(report.message);
+    // Started, not awaited: the health probe (bounded per-agent in
+    // @jarvis/core, but still a network of spawned processes) must never
+    // hold up the window appearing. The `.catch` is attached immediately —
+    // not after some later `await` — so that if this promise settles after
+    // the outer try/catch has already run dialog.showErrorBox/app.quit()
+    // for an unrelated startup failure, it cannot surface as an unhandled
+    // rejection; checkAgent itself never rejects, so this is a safety net.
+    const reportPromise = startupReport(registry, runCommand).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Startup health check failed: ${message}`);
+      return { healthy: [], broken: [], message: "" };
+    });
     const sessions = new SessionManager(createSpawner());
     const speech = new MacSpeech({ arabicVoice: "Majed" });
 
@@ -55,12 +65,16 @@ app.whenReady().then(async () => {
 
     await window.loadFile(fileURLToPath(new URL("../renderer/index.html", import.meta.url)));
 
-    window.webContents.send("turn:new", {
-      role: "assistant",
-      text: report.message,
-      language: "en",
-      at: Date.now(),
-    });
+    const report = await reportPromise;
+    console.log(report.message);
+    if (report.message !== "") {
+      window.webContents.send("turn:new", {
+        role: "assistant",
+        text: report.message,
+        language: "en",
+        at: Date.now(),
+      });
+    }
 
     const wiring = buildWiring({
       send: (channel, payload) => window.webContents.send(channel, payload),

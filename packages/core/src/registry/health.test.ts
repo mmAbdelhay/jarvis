@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAgent, checkAll } from "./health.js";
 import type { CommandRunner } from "./health.js";
 import type { AgentConfig } from "./types.js";
@@ -56,6 +56,60 @@ describe("checkAgent", () => {
     const health = await checkAgent(agent, runner({ code: 0, stdout: "   ", stderr: "" }));
     expect(health.ok).toBe(false);
     expect(health.detail).toContain("no output");
+  });
+
+  describe("timeout", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("reports broken with a timeout detail when the probe never settles", async () => {
+      const never: CommandRunner = () => new Promise(() => {});
+      const pending = checkAgent(agent, never, 1000);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      const health = await pending;
+
+      expect(health.ok).toBe(false);
+      expect(health.detail.toLowerCase()).toContain("timed out");
+      expect(health.detail).toContain("claude-mm");
+    });
+
+    it("does not leak the timer once the probe answers before the deadline", async () => {
+      const slowButHealthy: CommandRunner = () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ code: 0, stdout: "1.2.3", stderr: "" }), 500);
+        });
+      const pending = checkAgent(agent, slowButHealthy, 5000);
+
+      await vi.advanceTimersByTimeAsync(500);
+      const health = await pending;
+
+      expect(health).toEqual({ id: "claude-mm", ok: true, detail: "1.2.3" });
+      // The probe's own 500ms setTimeout has fired and self-cleared; the
+      // only timer that could still be pending is checkAgent's 5000ms
+      // deadline timer. If it were not cleared on the success path, it
+      // would still be sitting in the fake-timer queue here.
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("reports a slow-but-answering agent under the limit as healthy, not broken", async () => {
+      const slowButHealthy: CommandRunner = () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ code: 0, stdout: "9.9.9", stderr: "" }), 4000);
+        });
+      const pending = checkAgent(agent, slowButHealthy, 5000);
+
+      await vi.advanceTimersByTimeAsync(4000);
+      const health = await pending;
+
+      expect(health.ok).toBe(true);
+      expect(health.detail).toBe("9.9.9");
+    });
   });
 });
 
@@ -126,5 +180,39 @@ describe("checkAll", () => {
   it("returns an empty array for no agents", async () => {
     const results = await checkAll([], runner({ code: 0, stdout: "1.0.0", stderr: "" }));
     expect(results).toEqual([]);
+  });
+
+  describe("timeout isolation", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("reports one agent broken by timeout without affecting the other's result", async () => {
+      const agents: AgentConfig[] = [
+        { id: "hangs", command: "hangs" },
+        { id: "fine", command: "fine" },
+      ];
+
+      const run: CommandRunner = (command) => {
+        if (command === "hangs") {
+          return new Promise(() => {});
+        }
+        return Promise.resolve({ code: 0, stdout: "1.0.0", stderr: "" });
+      };
+
+      const pending = checkAll(agents, run, 1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      const results = await pending;
+
+      expect(results.map((r) => r.id)).toEqual(["hangs", "fine"]);
+      expect(results[0]?.ok).toBe(false);
+      expect(results[0]?.detail.toLowerCase()).toContain("timed out");
+      expect(results[1]?.ok).toBe(true);
+      expect(results[1]?.detail).toBe("1.0.0");
+    });
   });
 });

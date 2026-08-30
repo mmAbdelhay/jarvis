@@ -13,17 +13,44 @@ const BROKEN_MARKERS = [
   "postinstall did not run",
 ];
 
+// A slow-but-healthy agent on a loaded machine should not be misreported as
+// broken, so the default is generous; callers (and tests) can override it.
+export const DEFAULT_HEALTH_TIMEOUT_MS = 5000;
+
 export async function checkAgent(
   agent: AgentConfig,
   run: CommandRunner,
+  timeoutMs: number = DEFAULT_HEALTH_TIMEOUT_MS,
 ): Promise<AgentHealth> {
   let result: { code: number; stdout: string; stderr: string };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // agent.args carries mode flags for real invocations (e.g. copilot's
     // ["-p"] selects prompt mode), not a launcher prefix — probing with
     // those flags appended would run the wrong mode (`copilot -p --version`
     // is not a health check). The probe always asks for --version alone.
-    result = await run(agent.command, ["--version"]);
+    //
+    // An agent whose --version probe never answers is, for the purposes of
+    // this report, broken — so the wait is bounded with a race against a
+    // timeout rather than left open-ended. This only bounds the *wait*: if
+    // the timeout wins, the child process spawned by `run` is left running
+    // in the background (reaping it is the spawn layer's responsibility,
+    // not this pure, Electron-free health check).
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(`Health probe for "${agent.id}" timed out after ${timeoutMs}ms.`),
+        );
+      }, timeoutMs);
+    });
+    try {
+      result = await Promise.race([run(agent.command, ["--version"]), timeout]);
+    } finally {
+      // Clear on every path (success or timeout-race loss) so a resolved
+      // probe never leaves a dangling timer keeping the event loop — and
+      // the test process — alive.
+      clearTimeout(timer);
+    }
   } catch (error) {
     return {
       id: agent.id,
@@ -57,8 +84,12 @@ export async function checkAgent(
 export async function checkAll(
   agents: AgentConfig[],
   run: CommandRunner,
+  timeoutMs: number = DEFAULT_HEALTH_TIMEOUT_MS,
 ): Promise<AgentHealth[]> {
-  return Promise.all(agents.map((agent) => checkAgent(agent, run)));
+  // checkAgent never rejects (all failure paths, including a timeout, are
+  // caught and folded into a `{ ok: false }` result), so one agent timing
+  // out cannot fail Promise.all or affect any other agent's result.
+  return Promise.all(agents.map((agent) => checkAgent(agent, run, timeoutMs)));
 }
 
 function firstLine(text: string): string {
