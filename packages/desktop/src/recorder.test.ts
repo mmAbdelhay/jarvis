@@ -57,6 +57,32 @@ describe("Recorder", () => {
     await expect(recorder.stop()).rejects.toThrow(/microphone recorder/i);
   });
 
+  describe("isRecording", () => {
+    it("is false before start and after stop", async () => {
+      const d = deps();
+      const recorder = new Recorder(d);
+      expect(recorder.isRecording()).toBe(false);
+      recorder.start();
+      await recorder.stop();
+      expect(recorder.isRecording()).toBe(false);
+    });
+
+    it("is true between start and stop", () => {
+      const d = deps();
+      const recorder = new Recorder(d);
+      recorder.start();
+      expect(recorder.isRecording()).toBe(true);
+    });
+
+    it("is false after abort", () => {
+      const d = deps();
+      const recorder = new Recorder(d);
+      recorder.start();
+      recorder.abort();
+      expect(recorder.isRecording()).toBe(false);
+    });
+  });
+
   it("ignores a second start while already recording", () => {
     const d = deps();
     const recorder = new Recorder(d);

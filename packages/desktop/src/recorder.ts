@@ -77,6 +77,14 @@ export class Recorder {
     this.#active = { path, process: this.#deps.spawnRecorder(path) };
   }
 
+  // Lets a caller (main.ts's stopVoice, driven by the stop hotkey) tell a
+  // real "nothing to stop" apart from an actual failure before calling
+  // stop() — stop() still throws "Not recording" for callers that need
+  // that distinction preserved.
+  isRecording(): boolean {
+    return this.#active !== undefined;
+  }
+
   async stop(): Promise<string> {
     const active = this.#active;
     if (active === undefined) throw new Error("Not recording");

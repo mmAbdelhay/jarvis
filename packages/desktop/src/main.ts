@@ -114,6 +114,14 @@ app.whenReady().then(async () => {
     // voice:stop IPC calls below, so voice has exactly one implementation
     // regardless of which control triggers it.
     function stopVoice(): void {
+      // The mic button already guards this on the renderer's own
+      // `isListening` flag; Alt+Shift+Space has no such guard, so a stop
+      // with nothing active (e.g. the hotkey fired twice) must be a
+      // silent no-op rather than falling through to recorder.stop()'s
+      // "Not recording" throw, which processVoiceTurn's catch renders to
+      // the user as a spurious "تعذر تسجيل الصوت: Not recording" turn.
+      if (!recorder.isRecording()) return;
+
       window.webContents.send("voice:listening", false);
 
       // Important 6: the whole turn — recorder stop, transcription, and
