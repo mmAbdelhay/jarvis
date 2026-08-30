@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Orchestrator } from "./orchestrator.js";
+import { Orchestrator, TOOL_NAMES } from "./orchestrator.js";
 import type { Brain, BrainReply } from "./types.js";
 import { AgentRegistry } from "../registry/registry.js";
 import { SessionManager } from "../session/manager.js";
@@ -588,6 +588,33 @@ describe("Orchestrator", () => {
 
       const sessionIds = ask.mock.calls[0]?.[0]?.context.sessions.map((session) => session.id);
       expect(sessionIds).toContain(sessionId);
+    });
+  });
+
+  describe("tool dispatch seam", () => {
+    it("dispatches every declared tool name to a handler, never to unknownTool", async () => {
+      const calls: string[] = [];
+      const brain: Brain = {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: TOOL_NAMES.map((name) => ({ name, input: {} })),
+        }),
+      };
+      const orchestrator = build(brain);
+
+      const turn = await orchestrator.handle("do everything", "en");
+      calls.push(turn.text);
+
+      expect(turn.text).not.toContain("I don't know how to do that");
+    });
+
+    it("still reports a tool name nobody declared", async () => {
+      const brain: Brain = {
+        ask: async () => ({ text: "ok", toolCalls: [{ name: "session.explode", input: {} }] }),
+      };
+      const orchestrator = build(brain);
+      const turn = await orchestrator.handle("explode", "en");
+      expect(turn.text).toContain('I don\'t know how to do that ("session.explode")');
     });
   });
 });

@@ -69,7 +69,12 @@ function describeTool(tool: ToolSpec): string {
   return `- ${tool.name}: ${tool.description}${schema}`;
 }
 
-function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[], context: BrainContext): string {
+function buildPrompt(
+  systemPrompt: string,
+  text: string,
+  tools: readonly ToolSpec[],
+  context: BrainContext,
+): string {
   const projectsLine =
     context.projects.length === 0
       ? "(no projects configured)"
@@ -128,7 +133,7 @@ export function createBrain(config: BrainConfig): Brain {
       context,
     }: {
       text: string;
-      tools: ToolSpec[];
+      tools: readonly ToolSpec[];
       context: BrainContext;
     }): Promise<BrainReply> {
       const prompt = buildPrompt(config.systemPrompt, text, tools, context);

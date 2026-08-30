@@ -43,5 +43,9 @@ export type BrainReply = {
 };
 
 export type Brain = {
-  ask(input: { text: string; tools: ToolSpec[]; context: BrainContext }): Promise<BrainReply>;
+  ask(input: {
+    text: string;
+    tools: readonly ToolSpec[];
+    context: BrainContext;
+  }): Promise<BrainReply>;
 };

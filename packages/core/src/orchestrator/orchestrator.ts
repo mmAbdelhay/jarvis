@@ -3,7 +3,7 @@ import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
 import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js";
 
-const TOOLS: ToolSpec[] = [
+const TOOLS = [
   {
     name: "session.start",
     description: "Start an agent session in a project",
@@ -27,9 +27,16 @@ const TOOLS: ToolSpec[] = [
       sessionId: "id of a running session, from the list of running sessions",
     },
   },
-];
+] as const satisfies readonly ToolSpec[];
+
+export type ToolName = (typeof TOOLS)[number]["name"];
+
+export const TOOL_NAMES: readonly ToolName[] = TOOLS.map((tool) => tool.name);
 
 type ToolContext = Partial<Pick<Turn, "sessionId" | "agentId" | "model">>;
+
+type ToolResult = { context: ToolContext; error?: string };
+type ToolHandler = (call: ToolCall, language: "ar" | "en") => Promise<ToolResult>;
 
 type ToolCall = { name: string; input: Record<string, unknown> };
 
@@ -107,7 +114,7 @@ export class Orchestrator {
     const notes: string[] = [];
 
     for (const call of reply.toolCalls ?? []) {
-      const outcome = this.#runTool(call, language);
+      const outcome = await this.#runTool(call, language);
       if (outcome.error !== undefined) notes.push(outcome.error);
       if (Object.keys(outcome.context).length > 0) context = outcome.context;
     }
@@ -142,11 +149,27 @@ export class Orchestrator {
     };
   }
 
-  #runTool(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
-    if (call.name === "session.start") return this.#startSession(call, language);
-    if (call.name === "session.send") return this.#sendToSession(call, language);
-    if (call.name === "session.kill") return this.#killSession(call, language);
-    return { context: {}, error: MESSAGES.unknownTool(call.name, language) };
+  // TOOLS and the dispatch table are tied together by `Record<ToolName, …>`:
+  // declaring a tool with no handler, or a handler for a tool nobody
+  // declared, is now a typecheck failure rather than a silent runtime
+  // fall-through to unknownTool.
+  #handlers(): Record<ToolName, ToolHandler> {
+    return {
+      "session.start": async (call, language) => this.#startSession(call, language),
+      "session.send": async (call, language) => this.#sendToSession(call, language),
+      "session.kill": async (call, language) => this.#killSession(call, language),
+    };
+  }
+
+  #isToolName(name: string): name is ToolName {
+    return TOOL_NAMES.some((known) => known === name);
+  }
+
+  async #runTool(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
+    if (!this.#isToolName(call.name)) {
+      return { context: {}, error: MESSAGES.unknownTool(call.name, language) };
+    }
+    return this.#handlers()[call.name](call, language);
   }
 
   #startSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
