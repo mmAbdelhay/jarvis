@@ -1,0 +1,27 @@
+agents:
+  claude-mm:
+    command: claude-mm
+    model: opus
+    default: true
+  claude-acme:
+    command: claude-acme
+    model: sonnet
+  copilot:
+    command: copilot
+    args: ["-p"]
+
+routing:
+  - match: { project: acme }
+    agent: claude-acme
+
+projects:
+  acme: ~/projects/acme
+  storefront: ~/projects/storefront
+  atlas: ~/projects/atlas
+
+brain:
+  cwd: ~/.config/jarvis/brain
+  systemPrompt: |
+    You are Jarvis, a voice assistant that runs coding sessions.
+    The user speaks Arabic and English. Always reply in the language they used.
+    Keep spoken replies to one or two sentences.

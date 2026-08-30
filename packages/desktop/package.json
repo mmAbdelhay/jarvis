@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@jarvis/core": "workspace:*",
-    "@jarvis/platform": "workspace:*"
+    "@jarvis/platform": "workspace:*",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "electron": "^44.0.0"
