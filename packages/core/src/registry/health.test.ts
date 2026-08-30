@@ -70,39 +70,58 @@ describe("checkAll", () => {
     expect(results.every((r) => r.ok)).toBe(true);
   });
 
-  it("preserves input order even when a later agent resolves first, and runs concurrently", async () => {
-    const agents: AgentConfig[] = [
-      { id: "a", command: "a" },
-      { id: "b", command: "b" },
-    ];
-    // "a" is slow and unhealthy, "b" is fast and healthy: b's runner settles
-    // well before a's, so this only passes if checkAll preserves the input
-    // order rather than the settle order — and it only demonstrates
-    // concurrency (as opposed to a sequential await-in-a-loop, which would
-    // still finish, just slower) if we bound the wall-clock time below the
-    // sum of both delays.
-    const delayed: CommandRunner = async (command) => {
-      if (command === "a") {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        return { code: 127, stdout: "", stderr: "command not found" };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return { code: 0, stdout: "1.0.0", stderr: "" };
-    };
+  it(
+    "preserves input order even when a later agent resolves first, and runs concurrently",
+    async () => {
+      const agents: AgentConfig[] = [
+        { id: "a", command: "a" },
+        { id: "b", command: "b" },
+      ];
 
-    const start = Date.now();
-    const results = await checkAll(agents, delayed);
-    const elapsed = Date.now() - start;
+      // Barrier instead of a wall-clock bound: each runner increments a
+      // shared counter, then awaits a promise that only resolves once the
+      // counter reaches the agent count. Under the real Promise.all-based
+      // checkAll, both runners are entered (both increment the counter)
+      // before either resolves, so the barrier releases and both complete.
+      // Under a sequential for-loop rewrite, the second runner is only
+      // invoked after the first resolves — so the first runner's barrier
+      // condition is never met and it awaits forever, which this test
+      // catches as a timeout rather than a flaky timing comparison.
+      let arrived = 0;
+      let release: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
 
-    expect(results.map((r) => r.id)).toEqual(["a", "b"]);
-    expect(results[0]?.ok).toBe(false);
-    expect(results[1]?.ok).toBe(true);
-    expect(results.every((r) => r.ok)).toBe(false);
-    // Sequential execution would take >= 40 + 5 = 45ms; concurrent execution
-    // is bounded by the slower of the two (~40ms). Leave headroom for
-    // scheduler jitter while still being well short of the sequential sum.
-    expect(elapsed).toBeLessThan(45);
-  });
+      const synced: CommandRunner = async (command) => {
+        arrived += 1;
+        if (arrived === agents.length) {
+          release();
+        }
+        await barrier;
+
+        if (command === "a") {
+          // One extra microtask tick so "b" still settles first even
+          // though both are released by the same barrier at the same time,
+          // preserving the "later agent resolves first" scenario.
+          await Promise.resolve();
+          return { code: 127, stdout: "", stderr: "command not found" };
+        }
+        return { code: 0, stdout: "1.0.0", stderr: "" };
+      };
+
+      const results = await checkAll(agents, synced);
+
+      expect(results.map((r) => r.id)).toEqual(["a", "b"]);
+      expect(results[0]?.ok).toBe(false);
+      expect(results[1]?.ok).toBe(true);
+      expect(results.every((r) => r.ok)).toBe(false);
+    },
+    // Comfortably above the barrier's expected (near-instant) resolution,
+    // so a genuine deadlock (sequential execution) reports as a failure
+    // instead of hanging the suite.
+    1000,
+  );
 
   it("returns an empty array for no agents", async () => {
     const results = await checkAll([], runner({ code: 0, stdout: "1.0.0", stderr: "" }));
