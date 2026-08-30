@@ -8,3 +8,5 @@ export * from "./session/manager.js";
 export * from "./platform/types.js";
 export * from "./orchestrator/types.js";
 export * from "./orchestrator/orchestrator.js";
+export * from "./git/types.js";
+export * from "./git/messages.js";
