@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "@jarvis/core";
 import { createSqliteSessionStore } from "./session-store.js";
@@ -68,6 +69,99 @@ describe("createSqliteSessionStore", () => {
     store.upsert(agentSession({ id: "a" }));
     store.upsert(agentSession({ id: "b" }));
     expect(store.history()).toHaveLength(2);
+  });
+
+  describe("row validation (Important 2 — no unchecked `as` cast on a db row)", () => {
+    // These simulate a drifted schema (a hand-edited file, an older build,
+    // a partially-applied future migration) by writing a malformed value
+    // through a second raw connection to the same file — sqlite's own
+    // flexible typing allows it even into a column declared NOT NULL/
+    // INTEGER, so `createSqliteSessionStore`'s own `upsert()` (which only
+    // ever writes well-typed `Session` fields) can't be used to produce
+    // the bad row.
+    let dir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-validate-"));
+      dbPath = join(dir, "sessions.db");
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("throws a specific error when a row has an unrecognised state", () => {
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession());
+
+      const raw = new DatabaseSync(dbPath);
+      raw.prepare("UPDATE sessions SET state = ? WHERE id = ?").run("orbiting", "s1");
+      raw.close();
+
+      expect(() => store.history()).toThrow(/unrecognised session state: orbiting/);
+    });
+
+    it("throws a specific error instead of silently producing NaN for a non-numeric startedAt", () => {
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession());
+
+      const raw = new DatabaseSync(dbPath);
+      raw.prepare("UPDATE sessions SET startedAt = ? WHERE id = ?").run("not-a-number", "s1");
+      raw.close();
+
+      expect(() => store.history()).toThrow(/numeric `startedAt` column/);
+    });
+
+    it("throws a specific error for a non-string project instead of rendering the literal string \"undefined\"", () => {
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession());
+
+      // A TEXT-affinity column converts a bound number to its text
+      // representation on the way in, so a number alone can't reproduce
+      // the drift — a blob is left as-is by TEXT affinity and comes back
+      // out as a Uint8Array, which is exactly the kind of wrong-shaped
+      // value a validated read must reject rather than accept as `unknown`.
+      const raw = new DatabaseSync(dbPath);
+      raw.prepare("UPDATE sessions SET project = ? WHERE id = ?").run(new Uint8Array([1, 2, 3]), "s1");
+      raw.close();
+
+      expect(() => store.history()).toThrow(/string `project` column/);
+    });
+  });
+
+  describe("startup reconciliation of stale non-terminal rows", () => {
+    it("sweeps a row still 'running' with no endedAt to 'dead' with endedAt on the next open", () => {
+      const dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-reconcile-"));
+      const dbPath = join(dir, "sessions.db");
+      try {
+        const first = createSqliteSessionStore(dbPath);
+        // A session that never reached a terminal state before the
+        // process ended (a hard kill, a crash) — no endedAt was ever set.
+        first.upsert(agentSession({ id: "stuck", state: "running", lastActivityAt: 4242 }));
+
+        const reopened = createSqliteSessionStore(dbPath);
+        const row = reopened.history().find((s) => s.id === "stuck");
+        expect(row).toMatchObject({ state: "dead", endedAt: 4242 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("does not touch rows already in a terminal state", () => {
+      const dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-reconcile-"));
+      const dbPath = join(dir, "sessions.db");
+      try {
+        const first = createSqliteSessionStore(dbPath);
+        first.upsert(agentSession({ id: "done-one", state: "done", exitCode: 0, endedAt: 9000 }));
+
+        const reopened = createSqliteSessionStore(dbPath);
+        const row = reopened.history().find((s) => s.id === "done-one");
+        expect(row).toMatchObject({ state: "done", exitCode: 0, endedAt: 9000 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("against a real file on disk", () => {

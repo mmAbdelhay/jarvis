@@ -222,6 +222,21 @@ app.whenReady().then(async () => {
       // Alt+Space still active) would otherwise leave ffmpeg running as an
       // orphaned process with the microphone held open indefinitely.
       recorder.abort();
+      // Sessions still "starting"/"running"/"waiting" at quit time never
+      // reach SessionManager#update's endedAt-setting branch on their own
+      // — nothing calls onExit/kill for them once the window is gone — so
+      // without this their history() rows stay wrong forever, sorted to
+      // the very top (most-recently-active first). kill() is the same
+      // path a user-initiated stop already takes, so it persists an
+      // endedAt-bearing row through the normal #persist choke point. This
+      // only fires on a clean quit, though — a hard kill or crash never
+      // reaches `will-quit` at all — so createSqliteSessionStore's own
+      // startup reconciliation (session-store.ts) is the backstop that's
+      // guaranteed to run regardless of how the previous run ended.
+      for (const session of sessions.list()) {
+        if (session.state === "done" || session.state === "dead") continue;
+        sessions.kill(session.id);
+      }
     });
 
     await window.loadFile(fileURLToPath(new URL("../renderer/index.html", import.meta.url)));

@@ -40,6 +40,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
 
   const db = new DatabaseSync(dbPath);
   migrate(db);
+  reconcileStaleSessions(db);
 
   const upsertStmt = db.prepare(`
     INSERT INTO sessions (
@@ -88,6 +89,16 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
   };
 }
 
+// FROZEN: the `version === 0` branch below creates the CURRENT table shape.
+// Once shipped, it is never edited again — not even to add a phase-2
+// column. A fresh db (version 0) must always end up at the *latest* schema
+// after `migrate()` runs, so every later change is instead a new,
+// append-only `if (version < N) { db.exec("ALTER TABLE ...") }` branch
+// below this one, each bumping `SCHEMA_VERSION` by one. Editing the v0
+// `CREATE TABLE` to add a column AND adding an `ALTER TABLE ADD COLUMN`
+// branch for that same column gives a fresh db the column twice and
+// throws "duplicate column name" — this is the mistake this comment exists
+// to head off.
 function migrate(db: DatabaseSync): void {
   const row = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   const version = row?.user_version ?? 0;
@@ -115,36 +126,103 @@ function migrate(db: DatabaseSync): void {
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-type SessionRow = {
-  id: string;
-  project: string;
-  projectPath: string;
-  agentId: string;
-  model: string | null;
-  state: string;
-  summary: string;
-  startedAt: number;
-  lastActivityAt: number;
-  endedAt: number | null;
-  exitCode: number | null;
-};
+// A row still in a non-terminal state ("starting" / "running" / "waiting")
+// the moment the store is *opened* cannot belong to a session from this
+// run — this function runs before `createSqliteSessionStore` returns,
+// before `SessionManager` has started any session — so it can only be a
+// row left behind by a previous run that never reached a terminal state on
+// disk. That happens whenever the previous process didn't exit cleanly
+// through `will-quit` (a hard kill, `SIGKILL`, a crash, a power loss), and
+// even on a clean quit as a backstop for anything the quit-time sweep
+// missed. A startup sweep is the one mechanism guaranteed to run on the
+// *next* launch regardless of how the previous one ended, so it — not a
+// will-quit-only sweep — is what keeps `endedAt IS NULL` rows from sorting
+// to the top of `history()` (which orders by `lastActivityAt DESC`)
+// forever.
+function reconcileStaleSessions(db: DatabaseSync): void {
+  db.exec(`
+    UPDATE sessions
+    SET state = 'dead', endedAt = lastActivityAt
+    WHERE endedAt IS NULL AND state NOT IN ('done', 'dead')
+  `);
+}
 
+// No `as` cast onto the row's shape: sqlite is flexibly typed and this
+// process's own `SCHEMA_VERSION`/migration guarantees are no proof against
+// a hand-edited file, a partially-applied future migration, or an older
+// build's row shape. Every column is validated on the way out, the same
+// per-field pattern config.ts's parseConfig() uses for its own
+// `as`-then-validate cast — a missing or wrong-typed column throws a
+// specific error naming the column, rather than silently producing
+// `project: undefined` (rendered as the literal string "undefined") or an
+// `undefined` `startedAt` that turns into `NaN` the first time it's used
+// in arithmetic.
 function rowToSession(raw: unknown): Session {
-  const row = raw as SessionRow;
-  if (!isSessionState(row.state)) {
-    throw new Error(`sessions.db has an unrecognised session state: ${row.state}`);
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("sessions.db returned a non-object row");
   }
+  const row = raw as Record<string, unknown>;
+
+  const id = requireString(row, "id");
+  const project = requireString(row, "project");
+  const projectPath = requireString(row, "projectPath");
+  const agentId = requireString(row, "agentId");
+  const model = requireNullableString(row, "model");
+  const state = requireString(row, "state");
+  if (!isSessionState(state)) {
+    throw new Error(`sessions.db has an unrecognised session state: ${state}`);
+  }
+  const summary = requireString(row, "summary");
+  const startedAt = requireNumber(row, "startedAt");
+  const lastActivityAt = requireNumber(row, "lastActivityAt");
+  const endedAt = requireNullableNumber(row, "endedAt");
+  const exitCode = requireNullableNumber(row, "exitCode");
+
   return {
-    id: row.id,
-    project: row.project,
-    projectPath: row.projectPath,
-    agentId: row.agentId,
-    ...(row.model === null ? {} : { model: row.model }),
-    state: row.state,
-    summary: row.summary,
-    startedAt: row.startedAt,
-    lastActivityAt: row.lastActivityAt,
-    ...(row.endedAt === null ? {} : { endedAt: row.endedAt }),
-    ...(row.exitCode === null ? {} : { exitCode: row.exitCode }),
+    id,
+    project,
+    projectPath,
+    agentId,
+    ...(model === null ? {} : { model }),
+    state,
+    summary,
+    startedAt,
+    lastActivityAt,
+    ...(endedAt === null ? {} : { endedAt }),
+    ...(exitCode === null ? {} : { exitCode }),
   };
+}
+
+function requireString(row: Record<string, unknown>, key: string): string {
+  const value = row[key];
+  if (typeof value !== "string") {
+    throw new Error(`sessions.db row is missing a string \`${key}\` column (got ${typeof value})`);
+  }
+  return value;
+}
+
+function requireNullableString(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key];
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error(`sessions.db row's \`${key}\` column must be a string or null (got ${typeof value})`);
+  }
+  return value;
+}
+
+function requireNumber(row: Record<string, unknown>, key: string): number {
+  const value = row[key];
+  if (typeof value !== "number") {
+    throw new Error(`sessions.db row is missing a numeric \`${key}\` column (got ${typeof value})`);
+  }
+  return value;
+}
+
+function requireNullableNumber(row: Record<string, unknown>, key: string): number | null {
+  const value = row[key];
+  if (value === null) return null;
+  if (typeof value !== "number") {
+    throw new Error(`sessions.db row's \`${key}\` column must be a number or null (got ${typeof value})`);
+  }
+  return value;
 }
