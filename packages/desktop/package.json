@@ -1,0 +1,19 @@
+{
+  "name": "@jarvis/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/main.js",
+  "scripts": {
+    "build": "tsc -b ../../tsconfig.json",
+    "start": "pnpm run build && electron ."
+  },
+  "dependencies": {
+    "@jarvis/core": "workspace:*",
+    "@jarvis/platform": "workspace:*",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  }
+}
