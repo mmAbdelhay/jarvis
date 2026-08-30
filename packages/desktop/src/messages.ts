@@ -9,6 +9,13 @@
 // collision is discovered at startup, before any utterance; a broken
 // recording or transcription pipeline means no language was ever
 // detected), so callers pass the user's configured primary language.
+// The user's primary language, shared by both the main process (which
+// picks it for strings fired before any utterance is heard, or after the
+// language signal itself is lost) and the renderer (which cannot import
+// main.ts — that would pull Electron into a browser-side bundle). This is
+// the one definition both sides read; do not duplicate it.
+export const PRIMARY_LANGUAGE = "ar";
+
 export const MESSAGES = {
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
     language === "ar"

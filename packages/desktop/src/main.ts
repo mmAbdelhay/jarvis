@@ -13,15 +13,9 @@ import {
 import { buildWiring } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
-import { errorMessage, MESSAGES } from "./messages.js";
+import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
 import { startupReport } from "./startup.js";
-
-// The user's primary language, used for the handful of user-facing strings
-// that fire before any utterance has been heard (a hotkey collision at
-// startup) or after the language signal itself has been lost (a broken
-// recording or transcription pipeline never produces a detected language).
-const PRIMARY_LANGUAGE = "ar";
 
 app.whenReady().then(async () => {
   try {

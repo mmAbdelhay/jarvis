@@ -260,21 +260,25 @@ describe("history panel", () => {
     expect(overlayEl().hidden).toBe(true);
   });
 
-  it("shows '1 session' not '1 sessions' for a single past session, and pluralises the badge through the bilingual MESSAGES table", async () => {
+  // The app's primary language is Arabic (MESSAGES.PRIMARY_LANGUAGE), so the
+  // history badge is expected in MSA's counted-noun forms, not English —
+  // this pins the call site's wiring, not just sessionsCount() itself
+  // (already covered by messages.test.ts).
+  it("shows the Arabic singular form 'جلسة واحدة' for a single past session, wired through PRIMARY_LANGUAGE", async () => {
     await loadApp(async () => [makeSession()]);
     document.getElementById("history-button")?.click();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("history-count")?.textContent).toBe("1 session");
+    expect(document.getElementById("history-count")?.textContent).toBe("جلسة واحدة");
   });
 
-  it("shows the plural form for zero or more than one past session", async () => {
+  it("shows the Arabic zero form 'لا جلسات' for no past sessions", async () => {
     await loadApp(async () => []);
     document.getElementById("history-button")?.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(document.getElementById("history-count")?.textContent).toBe("0 sessions");
+    expect(document.getElementById("history-count")?.textContent).toBe("لا جلسات");
   });
 });
 
