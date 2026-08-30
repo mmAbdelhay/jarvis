@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseWhisperOutput, transcribe } from "./stt.js";
 import type { WhisperConfig } from "./stt.js";
@@ -42,6 +43,11 @@ describe("parseWhisperOutput", () => {
     ].join("\n");
     expect(parseWhisperOutput("bonjour", stderr).language).toBe("fr");
   });
+
+  it("captures three-letter language codes in full instead of truncating them", () => {
+    const stderr = "auto-detected language: yue (p = 0.912345)";
+    expect(parseWhisperOutput("你好", stderr).language).toBe("yue");
+  });
 });
 
 describe("transcribe", () => {
@@ -69,19 +75,30 @@ describe("transcribe", () => {
     const fakeRun = async () => ({
       code: 0,
       stdout: " hello there\n",
-      stderr: "auto-detected language: en (p = 0.999)",
+      stderr: "auto-detected language: ar (p = 0.999)",
     });
     const config: WhisperConfig = { binaryPath: "/bin/whisper-cli", modelPath: "/models/ggml-base.bin" };
 
     const result = await transcribe("/tmp/audio.wav", config, fakeRun);
 
-    expect(result).toEqual({ text: "hello there", language: "en" });
+    expect(result).toEqual({ text: "hello there", language: "ar" });
+  });
+
+  it("throws when whisper exits with a non-zero code instead of returning a silent-looking transcript", async () => {
+    const fakeRun = async () => ({
+      code: 1,
+      stdout: "",
+      stderr: "error: failed to load model",
+    });
+    const config: WhisperConfig = { binaryPath: "/bin/whisper-cli", modelPath: "/models/ggml-base.bin" };
+
+    await expect(transcribe("/tmp/audio.wav", config, fakeRun)).rejects.toThrow();
   });
 });
 
 const whisper = join(homedir(), ".voicemode/services/whisper/build/bin/whisper-cli");
 const model = join(homedir(), ".voicemode/services/whisper/models/ggml-base.bin");
-const fixture = new URL("../test-fixtures/ar_test.wav", import.meta.url).pathname;
+const fixture = fileURLToPath(new URL("../test-fixtures/ar_test.wav", import.meta.url));
 const installed = existsSync(whisper) && existsSync(model);
 
 describe.skipIf(!installed)("transcribe (integration)", () => {
