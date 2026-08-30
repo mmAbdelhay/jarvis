@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { parseConfig } from "./config.js";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { loadConfig, parseConfig } from "./config.js";
 
 const valid = {
   agents: { "claude-mm": { command: "claude-mm", model: "opus", default: true } },
@@ -68,6 +71,15 @@ describe("parseConfig", () => {
     expect(config.whisper.binaryPath.startsWith("~")).toBe(false);
   });
 
+  // Important 7: base corrupts the Arabic project name itself in testing
+  // ("سعودي سيل" -> "سعودي ينسيل"), so the shipped default must be
+  // large-v3-turbo, not base.
+  it("defaults to the large-v3-turbo whisper model, expanded", () => {
+    const config = parseConfig(valid);
+    expect(config.whisper.modelPath).toContain("ggml-large-v3-turbo.bin");
+    expect(config.whisper.modelPath.startsWith("~")).toBe(false);
+  });
+
   it("uses explicit whisper paths and expands a leading tilde", () => {
     const config = parseConfig({
       ...valid,
@@ -86,5 +98,58 @@ describe("parseConfig", () => {
 
   it("throws when whisper is not an object", () => {
     expect(() => parseConfig({ ...valid, whisper: "nope" })).toThrow(/whisper/);
+  });
+
+  // Critical 3: the shipped example config sets `brain.cwd: ~/.config/jarvis/brain`,
+  // and `~/…` resolved against the SDK's own working-directory logic (not
+  // the shell) is not a real path — every turn would fail.
+  it("expands a leading tilde in brain.cwd", () => {
+    const config = parseConfig({ ...valid, brain: { ...valid.brain, cwd: "~/.config/jarvis/brain" } });
+    expect(config.brain.cwd.startsWith("~")).toBe(false);
+    expect(config.brain.cwd).toContain("/.config/jarvis/brain");
+  });
+
+  it("expands a leading tilde in the default brain.cwd", () => {
+    const config = parseConfig({ ...valid, brain: { systemPrompt: "You are Jarvis." } });
+    expect(config.brain.cwd.startsWith("~")).toBe(false);
+    expect(config.brain.cwd).toContain("/.config/jarvis/brain");
+  });
+
+  it("leaves an absolute brain.cwd untouched", () => {
+    const config = parseConfig(valid);
+    expect(config.brain.cwd).toBe("/tmp/jarvis-brain");
+  });
+});
+
+describe("loadConfig", () => {
+  let dir: string | undefined;
+
+  afterEach(async () => {
+    if (dir !== undefined) await rm(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it("creates the brain cwd directory if it does not already exist", async () => {
+    dir = await mkdtemp(join(tmpdir(), "jarvis-config-test-"));
+    const brainCwd = join(dir, "brain-does-not-exist-yet");
+    const configPath = join(dir, "jarvis.yaml");
+    await writeFile(
+      configPath,
+      [
+        "agents:",
+        "  claude-mm:",
+        "    command: claude-mm",
+        "    default: true",
+        "brain:",
+        "  systemPrompt: You are Jarvis.",
+        `  cwd: ${brainCwd}`,
+      ].join("\n"),
+    );
+
+    const config = await loadConfig(configPath);
+
+    expect(config.brain.cwd).toBe(brainCwd);
+    const stats = await stat(brainCwd);
+    expect(stats.isDirectory()).toBe(true);
   });
 });

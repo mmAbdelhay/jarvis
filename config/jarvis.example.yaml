@@ -25,3 +25,10 @@ brain:
     You are Jarvis, a voice assistant that runs coding sessions.
     The user speaks Arabic and English. Always reply in the language they used.
     Keep spoken replies to one or two sentences.
+
+whisper:
+  binaryPath: ~/.voicemode/services/whisper/build/bin/whisper-cli
+  # large-v3-turbo, not base: base corrupts Arabic project names in testing
+  # (e.g. "سعودي سيل" transcribed as "سعودي ينسيل"), which breaks project
+  # resolution since routing depends on that exact token.
+  modelPath: ~/.whisper-models/ggml-large-v3-turbo.bin

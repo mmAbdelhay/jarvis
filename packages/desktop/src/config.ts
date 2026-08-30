@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -21,7 +21,12 @@ const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
 const DEFAULT_BRAIN_CWD = join(homedir(), ".config/jarvis/brain");
 
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
-const DEFAULT_WHISPER_MODEL_PATH = "~/.voicemode/services/whisper/models/ggml-base.bin";
+// large-v3-turbo, not base: synthesised-speech testing of the spec's own
+// acceptance sentence showed base corrupting the Arabic project name
+// itself ("سعودي سيل" -> "سعودي ينسيل"), which breaks project resolution
+// since routing depends on that exact token. large-v3-turbo is already on
+// disk at this path.
+const DEFAULT_WHISPER_MODEL_PATH = "~/.whisper-models/ggml-large-v3-turbo.bin";
 
 export function parseConfig(raw: unknown): JarvisConfig {
   if (typeof raw !== "object" || raw === null) {
@@ -51,7 +56,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
         typeof brainConfig.systemPrompt === "string"
           ? brainConfig.systemPrompt
           : DEFAULT_SYSTEM_PROMPT,
-      cwd: typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD,
+      cwd: expandTilde(typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD),
     },
     whisper,
   };
@@ -61,7 +66,12 @@ export async function loadConfig(
   path: string = join(homedir(), ".config/jarvis/jarvis.yaml"),
 ): Promise<JarvisConfig> {
   const text = await readFile(path, "utf8");
-  return parseConfig(parse(text));
+  const config = parseConfig(parse(text));
+  // The brain's cwd is Jarvis's own isolation artifact (see the note on
+  // BrainConfig.cwd in @jarvis/platform), not something the user should
+  // have to create by hand before first launch.
+  await mkdir(config.brain.cwd, { recursive: true });
+  return config;
 }
 
 function expandTilde(path: string): string {
