@@ -3,10 +3,14 @@
   "compilerOptions": {
     "outDir": "../dist/renderer",
     "rootDir": ".",
-    "types": [],
+    // The renderer app code itself is browser-only and never references
+    // Node globals; "node" is included here only so id-contract.test.ts
+    // (which reads app.ts/index.html's source with node:fs at test time)
+    // typechecks now that *.test.ts is no longer excluded from this
+    // project (M-c).
+    "types": ["node"],
     "composite": true
   },
   "include": ["."],
-  "exclude": ["*.test.ts"],
   "references": [{ "path": ".." }, { "path": "../../core" }]
 }
