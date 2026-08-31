@@ -58,6 +58,22 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const projects = parseProjects(root["projects"]);
   const whisper = parseWhisper(root["whisper"]);
 
+  const accountId = brainConfig.accountId;
+  if (accountId !== undefined && typeof accountId !== "string") {
+    throw new Error("Config `brain.accountId` must be a string");
+  }
+  let brainAccount: { accountId: string; configDir: string } | undefined;
+  if (accountId !== undefined) {
+    const agent = agents[accountId];
+    if (agent === undefined) {
+      throw new Error(`Config \`brain.accountId\` names no configured agent: "${accountId}"`);
+    }
+    if (agent.configDir === undefined) {
+      throw new Error(`Config \`brain.accountId\` names "${accountId}", which declares no configDir`);
+    }
+    brainAccount = { accountId, configDir: agent.configDir };
+  }
+
   return {
     registry: { agents, routing },
     projects: Object.fromEntries(
@@ -69,6 +85,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
           ? brainConfig.systemPrompt
           : DEFAULT_SYSTEM_PROMPT,
       cwd: expandTilde(typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD),
+      ...(brainAccount === undefined ? {} : brainAccount),
     },
     whisper,
     sessionsDbPath: defaultSessionsDbPath(),

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BrainContext, ToolSpec } from "@jarvis/core";
-import { createBrain, parseCliReply, type SdkQueryFn } from "./brain.js";
+import { createBrain, parseCliReply, type BrainSdkMessage, type SdkQueryFn } from "./brain.js";
 
 describe("parseCliReply", () => {
   it("reads plain text with no tool calls", () => {
@@ -328,5 +328,119 @@ describe("createBrain", () => {
     await brain.ask({ text: "hi", tools: [], context: { projects: [], sessions: [], changes: [] } });
 
     expect(capturedPrompt).toContain("Uncommitted changes: (none)");
+  });
+});
+
+describe("capacity piggyback", () => {
+  const usage = {
+    rate_limits_available: true,
+    rate_limits: { five_hour: { utilization: 12, resets_at: "2026-08-31T14:30:00Z" } },
+  };
+
+  function usageQuery(messages: BrainSdkMessage[], response: unknown) {
+    let drained = false;
+    const query = {
+      async *[Symbol.asyncIterator]() {
+        for (const message of messages) yield message;
+        drained = true;
+      },
+      async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET() {
+        if (drained) throw new Error("Query closed before response received");
+        return response;
+      },
+    };
+    return () => query;
+  }
+
+  const messages: BrainSdkMessage[] = [
+    { type: "system", subtype: "init", session_id: "s1" },
+    { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } },
+    { type: "result" },
+  ];
+
+  it("reports the account's capacity for free when accountId is configured", async () => {
+    const onUsage = vi.fn();
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      accountId: "claude-mm",
+      configDir: "/c/mm",
+      onUsage,
+      query: usageQuery(messages, usage),
+    });
+
+    await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+
+    expect(onUsage).toHaveBeenCalledWith("claude-mm", {
+      ok: true,
+      fiveHour: { usedPercent: 12, resetsAt: "2026-08-31T14:30:00Z" },
+      sevenDay: undefined,
+    });
+  });
+
+  it("attributes nothing when no accountId is configured", async () => {
+    const onUsage = vi.fn();
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      onUsage,
+      query: usageQuery(messages, usage),
+    });
+
+    await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+    expect(onUsage).not.toHaveBeenCalled();
+  });
+
+  it("still answers normally when the experimental usage call throws", async () => {
+    const onUsage = vi.fn();
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      accountId: "claude-mm",
+      configDir: "/c/mm",
+      onUsage,
+      query: () => ({
+        async *[Symbol.asyncIterator]() {
+          for (const message of messages) yield message;
+        },
+        async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET() {
+          throw new Error("DO_NOT_RELY_ON_THIS_API_YET");
+        },
+      }),
+    });
+
+    const reply = await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
+
+    // The assistant's answer is the product; the free reading is a bonus and
+    // must never be able to break it.
+    expect(reply.text).toBe("hi");
+    expect(onUsage).toHaveBeenCalledWith("claude-mm", { ok: false, reason: "unavailable" });
+  });
+
+  it("works with a plain query function that exposes no usage method at all", async () => {
+    const onUsage = vi.fn();
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      accountId: "claude-mm",
+      configDir: "/c/mm",
+      onUsage,
+      query: () =>
+        (async function* () {
+          for (const message of messages) yield message;
+        })(),
+    });
+
+    const reply = await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
+    expect(reply.text).toBe("hi");
+    expect(onUsage).not.toHaveBeenCalled();
   });
 });

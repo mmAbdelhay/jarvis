@@ -1,5 +1,6 @@
 import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
-import type { Brain, BrainContext, BrainReply, ToolSpec } from "@jarvis/core";
+import type { Brain, BrainContext, BrainReply, CapacityReading, ToolSpec } from "@jarvis/core";
+import { parseUsage } from "./capacity.js";
 
 const TOOL_BLOCK = /```jarvis-tool\s*\n([\s\S]*?)\n```/g;
 
@@ -16,10 +17,11 @@ export type BrainSdkMessage =
   | { type: "assistant"; message: { content: readonly { type: string; text?: string }[] } }
   | { type: string };
 
-export type SdkQueryFn = (params: {
-  prompt: string;
-  options?: Options;
-}) => AsyncIterable<BrainSdkMessage>;
+export type SdkQueryResult = AsyncIterable<BrainSdkMessage> & {
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<unknown>;
+};
+
+export type SdkQueryFn = (params: { prompt: string; options?: Options }) => SdkQueryResult;
 
 export type BrainConfig = {
   systemPrompt: string;
@@ -34,6 +36,19 @@ export type BrainConfig = {
   cwd: string;
   /** Injected for tests; defaults to the real Agent SDK `query`. */
   query?: SdkQueryFn;
+  /**
+   * Which configured account the brain's own SDK session runs under. Set it
+   * and two things follow: the brain's spend is attributable, and its usage
+   * reading — taken mid-stream off a round trip already paid for — can be
+   * credited to that account for free. Leave it unset and the brain behaves
+   * exactly as before, with no capacity attribution at all: guessing which
+   * account paid would put a number on the wrong row.
+   */
+  accountId?: string;
+  /** That account's CLAUDE_CONFIG_DIR, resolved from the registry by config.ts. */
+  configDir?: string;
+  /** Called at most once per turn, only when accountId is set. Never throws. */
+  onUsage?: (agentId: string, reading: CapacityReading) => void;
 };
 
 export function parseCliReply(stdout: string): BrainReply {
@@ -59,7 +74,7 @@ export function parseCliReply(stdout: string): BrainReply {
   return { text, toolCalls };
 }
 
-function defaultQuery(params: { prompt: string; options?: Options }): AsyncIterable<BrainSdkMessage> {
+function defaultQuery(params: { prompt: string; options?: Options }): SdkQueryResult {
   return sdkQuery(params);
 }
 
@@ -159,10 +174,30 @@ export function createBrain(config: BrainConfig): Brain {
         // anything itself. The orchestrator dispatches the real calls.
         tools: [],
         ...(sessionId === undefined ? {} : { resume: sessionId }),
+        ...(config.configDir === undefined
+          ? {}
+          : { env: { ...process.env, CLAUDE_CONFIG_DIR: config.configDir } }),
       };
 
       let replyText = "";
-      for await (const message of query({ prompt, options })) {
+      let usageRead = false;
+      const stream = query({ prompt, options });
+      const readUsage = async (): Promise<void> => {
+        const { accountId, onUsage } = config;
+        if (accountId === undefined || onUsage === undefined) return;
+        const read = stream.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+        if (read === undefined) return;
+        try {
+          onUsage(accountId, parseUsage(await read.call(stream)));
+        } catch {
+          // The assistant's answer is the product. An experimental API that
+          // is explicitly named DO_NOT_RELY_ON_THIS_API_YET must never be
+          // able to break a turn.
+          onUsage(accountId, { ok: false, reason: "unavailable" });
+        }
+      };
+
+      for await (const message of stream) {
         if (message.type === "system" && "subtype" in message && message.subtype === "init") {
           sessionId = message.session_id;
         }
@@ -172,6 +207,13 @@ export function createBrain(config: BrainConfig): Brain {
               replyText += block.text;
             }
           }
+        }
+        if (message.type === "assistant" && !usageRead) {
+          usageRead = true;
+          // Free: this round trip is already paid for by the turn itself.
+          // Mid-stream is the only moment it works — after the result
+          // message the query is closed (controller verification, note 2).
+          await readUsage();
         }
       }
 

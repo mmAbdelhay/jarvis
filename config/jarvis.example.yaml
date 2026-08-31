@@ -32,6 +32,11 @@ projects:
 
 brain:
   cwd: ~/.config/jarvis/brain
+  # Which account Jarvis's own reasoning runs under. Setting it makes the
+  # brain's spend attributable, and lets its usage reading be credited to that
+  # account for free — no extra billed query. Omit it and no capacity is
+  # attributed to anyone (Jarvis will not guess which account paid).
+  accountId: claude-mm
   systemPrompt: |
     You are Jarvis, a voice assistant that runs coding sessions.
     The user speaks Arabic and English. Always reply in the language they used.

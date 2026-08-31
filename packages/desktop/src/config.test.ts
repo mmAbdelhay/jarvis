@@ -191,3 +191,32 @@ describe("agent provider fields", () => {
     ).toThrow(/configDir/);
   });
 });
+
+describe("brain.accountId", () => {
+  it("resolves the named account's config dir onto the brain config", () => {
+    const config = parseConfig({
+      agents: { "claude-mm": { command: "claude-mm", configDir: "/c/mm" } },
+      brain: { accountId: "claude-mm" },
+    });
+    expect(config.brain.accountId).toBe("claude-mm");
+    expect(config.brain.configDir).toBe("/c/mm");
+  });
+
+  it("rejects an accountId that names no agent, rather than silently ignoring it", () => {
+    expect(() =>
+      parseConfig({ agents: { "claude-mm": { command: "claude-mm" } }, brain: { accountId: "ghost" } }),
+    ).toThrow(/accountId/);
+  });
+
+  it("rejects an accountId whose agent declares no configDir", () => {
+    expect(() =>
+      parseConfig({ agents: { copilot: { command: "copilot" } }, brain: { accountId: "copilot" } }),
+    ).toThrow(/configDir/);
+  });
+
+  it("leaves the brain unchanged when accountId is absent", () => {
+    const config = parseConfig({ agents: { x: { command: "x" } }, brain: {} });
+    expect(config.brain).not.toHaveProperty("accountId");
+    expect(config.brain).not.toHaveProperty("configDir");
+  });
+});
