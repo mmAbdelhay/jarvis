@@ -7,5 +7,6 @@ export * from "./brain.js";
 export * from "./session-store.js";
 export * from "./paths.js";
 export * from "./git.js";
+export * from "./docs.js";
 export * from "./status-page.js";
 export * from "./capacity.js";
