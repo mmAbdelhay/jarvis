@@ -28,12 +28,23 @@ function setText(element: HTMLElement, text: string): void {
 
 let current: ChangesView | undefined;
 
-export function showView(name: "dashboard" | "changes"): void {
-  const dashboard = document.querySelector(".main:not(.main--changes)");
+export type ViewName = "dashboard" | "changes" | "session";
+
+// Each view is looked up optionally except the two the original layout
+// always had: app.test.ts's minimal DOM harness lays down the dashboard and
+// #view-changes but not necessarily #view-session, and a missing third view
+// there must not throw where switching to the other two still works.
+export function showView(name: ViewName): void {
+  const dashboard =
+    document.getElementById("view-dashboard") ??
+    document.querySelector(".main:not(.main--changes):not(.main--session)");
   if (dashboard instanceof HTMLElement) dashboard.hidden = name !== "dashboard";
   $("view-changes").hidden = name !== "changes";
+  const session = document.getElementById("view-session");
+  if (session instanceof HTMLElement) session.hidden = name !== "session";
   $("nav-dashboard").classList.toggle("nav-btn--on", name === "dashboard");
   $("nav-changes").classList.toggle("nav-btn--on", name === "changes");
+  document.getElementById("nav-session")?.classList.toggle("nav-btn--on", name === "session");
 }
 
 function showError(result: { text: string; language: "ar" | "en" }): void {
@@ -319,6 +330,11 @@ export function applyStaticChrome(): void {
   if (navDashboard !== null) navDashboard.textContent = MESSAGES.navDashboard(PRIMARY_LANGUAGE);
   const navChanges = document.getElementById("nav-changes");
   if (navChanges !== null) navChanges.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
+  const navSession = document.getElementById("nav-session");
+  if (navSession !== null) navSession.textContent = MESSAGES.navSession(PRIMARY_LANGUAGE);
+  const sessionTitle = document.getElementById("session-title");
+  if (sessionTitle !== null) sessionTitle.textContent = MESSAGES.navSession(PRIMARY_LANGUAGE);
+
   const title = document.getElementById("changes-title");
   if (title !== null) title.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
   // The artboard's path/branch separator ("~/projects/acme on

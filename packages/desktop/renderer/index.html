@@ -8,6 +8,7 @@
   content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:"
 />
 <title>Jarvis</title>
+<link rel="stylesheet" href="vendor/xterm.css" />
 <link
   rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap"
@@ -605,6 +606,79 @@
     border-color: var(--accent);
   }
 
+  /* Providers panel: the approved artboard (design/Main.dc.html) has three
+     panels and none is this one. It is a third panel in the LEFT column
+     rather than a History-style overlay because the user's question — "which
+     account can I use right now" — is asked before they have decided to ask
+     anything, and a surface you must open cannot answer that. Every value
+     below is the artboard's own: .panel chrome, .ph header, .lbl labels, and
+     the same .bar/.fill meter the System panel uses for CPU and MEMORY
+     (lines 105-116 above), which is exactly the right analogy for remaining
+     capacity. .sessions-panel already carries flex-grow: 1, so it absorbs
+     the height this takes with no change to the grid. */
+  .providers-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow-y: auto;
+  }
+
+  /* A plain class toggle, not the [hidden] attribute — there is no UA rule
+     to out-cascade here, so this doesn't need the :not([hidden]) guard the
+     History overlay below needs. */
+  .providers-panel--collapsed .providers-body { display: none; }
+
+  .providers-panel .ph { cursor: pointer; }
+
+  .provider {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .provider__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .provider__id {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .provider__value {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Known-zero and unknown must never look alike: zero is a real reading
+     shown in the "no headroom" red, unknown is a muted em dash and has no
+     meter beneath it at all (see providers.ts). */
+  .provider__value--empty { color: var(--del); }
+  .provider__value--unknown { color: var(--text-muted); }
+
+  .provider .fill { background: var(--accent); }
+  .provider .fill--low { background: var(--amber); }
+  .provider .fill--critical { background: var(--del); }
+
+  .provider__note {
+    font-size: 9px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .provider__note--stale { color: var(--text-muted); }
+
+  /* Source order matters: these four must follow the base `.dot` rule
+     above (line 302) to win — equal specificity (one class selector each),
+     last declared wins the cascade. */
+  .dot--ok { background: var(--good); }
+  .dot--degraded { background: var(--amber); }
+  .dot--outage { background: var(--del); }
+  .dot--unknown { background: #33454f; }
+
   /* History panel: the approved artboard has no history surface, so this
      reuses the same panel chrome, session-row treatment and type scale as
      the Sessions panel rather than inventing a new visual language — it is
@@ -696,6 +770,94 @@
      later, so a visible `#view-changes` gets flex, not the dashboard's
      grid. Both rules stay inert together while `hidden` is present. */
   .main--changes:not([hidden]) { display: flex; }
+
+  /* The Session view — the live transcript of one agent process. Same
+     flush-to-the-edge frame as .main--changes above, and the same
+     [hidden] cascade discipline: NO `display` in this base rule, because
+     an author rule here would out-cascade the UA's `[hidden]{display:none}`
+     and leave the view permanently on screen (see
+     view-display-css.test.ts, which pins this shape). */
+  .main--session {
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .main--session:not([hidden]) { display: flex; }
+
+  .session-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .session-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+
+  /* The terminal host. xterm.js paints into this and manages its own
+     scrolling, selection and scrollback, so nothing here may set overflow
+     or line-height — the emulator measures the box and lays out character
+     cells to fit. `dir=ltr` is pinned in the markup: this is a terminal
+     grid, and an Arabic word inside it must not flip the whole screen. */
+  .session-terminal {
+    flex-grow: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 10px 14px;
+    background: var(--ground);
+  }
+
+  /* xterm renders its own scrollbar inside .xterm-viewport; styled to match
+     the dashboard rather than left as the platform default. */
+  .session-terminal .xterm-viewport::-webkit-scrollbar { width: 9px; }
+  .session-terminal .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+  .session-terminal .xterm-viewport::-webkit-scrollbar-thumb {
+    background: #1c3f49;
+    border-radius: 5px;
+  }
+
+  .session__diff--clickable { cursor: pointer; }
+
+  /* Shown before any session has been opened, so the view is never an
+     unexplained black rectangle. */
+  .session-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  /* Says where a spoken utterance will land while this view is open. It is
+     the one thing about voice that is not obvious from the terminal
+     itself, and getting it wrong means talking to the wrong agent. */
+  .session-voice {
+    font-size: 10.5px;
+    color: var(--accent);
+    background: #0e2029;
+    border: 1px solid #1c3f49;
+    border-radius: 5px;
+    padding: 3px 9px;
+  }
+
+  .session-voice--listening {
+    color: var(--ground);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .session-log-wrap {
+    position: relative;
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+  }
 
   .changes-head {
     display: flex;
@@ -994,6 +1156,7 @@
     <div class="nav">
       <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button">Dashboard</button>
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
+      <button id="nav-session" class="nav-btn" type="button">Session</button>
     </div>
     <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
     <div class="spacer"></div>
@@ -1009,7 +1172,7 @@
     </button>
   </div>
 
-  <div class="main">
+  <div class="main" id="view-dashboard">
 
     <div class="col-left">
 
@@ -1049,6 +1212,18 @@
           </div>
           <div class="temp-note">Temperature needs a privileged helper on Apple Silicon — not wired up.</div>
         </div>
+      </div>
+
+      <div class="panel providers-panel" id="providers-panel">
+        <div class="ph" id="providers-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><path d="M12 20a8 8 0 1 0-8-8"></path><path d="M12 12l5-3"></path><path d="M4 12H2M12 4V2M20 12h2"></path></svg>
+          <div class="pt">Providers</div>
+          <div class="spacer"></div>
+          <button id="providers-refresh" class="icon-btn" type="button" aria-label="Refresh provider status">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
+          </button>
+        </div>
+        <div class="providers-body" id="providers"></div>
       </div>
 
       <div class="panel sessions-panel">
@@ -1161,6 +1336,26 @@
           <button id="commit-button" class="commit-btn" type="button">Commit</button>
         </div>
       </div>
+    </div>
+
+  </div>
+
+  <div class="main main--session" id="view-session" hidden>
+
+    <div class="session-head">
+      <div id="session-title" class="session-title">Session</div>
+      <div id="session-view-project" class="chip mono"></div>
+      <div id="session-view-path" class="mono changes-muted"></div>
+      <div class="spacer"></div>
+      <div id="session-voice" class="session-voice mono" hidden></div>
+      <div id="session-view-state" class="mono changes-dim"></div>
+      <div class="vrule"></div>
+      <div id="session-view-agent" class="mono changes-muted"></div>
+    </div>
+
+    <div class="session-log-wrap">
+      <div id="session-terminal" class="session-terminal" dir="ltr"></div>
+      <div id="session-empty" class="session-empty" hidden></div>
     </div>
 
   </div>

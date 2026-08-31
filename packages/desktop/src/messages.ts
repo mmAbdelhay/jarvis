@@ -14,7 +14,13 @@
 // language signal itself is lost) and the renderer (which cannot import
 // main.ts — that would pull Electron into a browser-side bundle). This is
 // the one definition both sides read; do not duplicate it.
-export const PRIMARY_LANGUAGE = "ar";
+//
+// English by the user's own instruction ("make all default at english
+// layout"). This is only the FALLBACK: it decides the chrome and any
+// string fired before a language signal exists. It never overrides a
+// detected utterance — an Arabic sentence still gets an Arabic reply, and
+// Arabic session/project text still renders RTL via detectLanguage().
+export const PRIMARY_LANGUAGE = "en";
 
 export const MESSAGES = {
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
@@ -114,6 +120,22 @@ export const MESSAGES = {
     language === "ar" ? `بواسطة ${agentId} · ${ago}` : `written by ${agentId} · ${ago}`,
   navDashboard: (language: "ar" | "en"): string => (language === "ar" ? "اللوحة" : "Dashboard"),
   navChanges: (language: "ar" | "en"): string => (language === "ar" ? "التغييرات" : "Changes"),
+  navSession: (language: "ar" | "en"): string => (language === "ar" ? "الجلسة" : "Session"),
+  // The Session view's empty state, before the agent has printed anything.
+  // Distinct from "this session produced no output at all": a just-started
+  // process routinely sits here for a second or two.
+  sessionNoOutput: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد إخراج بعد…" : "No output yet…",
+  // Shown when no session has been started, so there is nothing to open.
+  sessionNone: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد جلسة مفتوحة." : "No session open.",
+  // Where speech lands while a session's terminal is open. Named
+  // explicitly because it is the one thing about voice the terminal itself
+  // cannot show, and being wrong about it means talking to another agent.
+  voiceGoesHere: (language: "ar" | "en"): string =>
+    language === "ar" ? "⌥Space يتحدث إلى هذه الجلسة" : "⌥Space talks to this session",
+  voiceListeningHere: (language: "ar" | "en"): string =>
+    language === "ar" ? "يستمع… إلى هذه الجلسة" : "Listening… to this session",
   changedFilesLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "الملفات المعدّلة" : "CHANGED FILES",
   // The header's repo-path/branch separator ("~/projects/acme on
@@ -131,6 +153,44 @@ export const MESSAGES = {
   stageFileLabel: (language: "ar" | "en"): string => (language === "ar" ? "تجهيز الملف" : "Stage file"),
   unstageFileLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "إلغاء تجهيز الملف" : "Unstage file",
+  // Providers panel chrome (Task 9). The account-status *sentences*
+  // (providerStatusLine et al.) belong to @jarvis/core's own messages.ts —
+  // these are only the panel's own labels, same split as everywhere else
+  // in this file (I2: no English-only lane beside a bilingual table).
+  //
+  // The panel header itself stays the hardcoded literal "Providers" in
+  // index.html, consistent with the other four hardcoded English panel
+  // titles (System, Sessions, Conversation, History) — translating this
+  // one alone is a product decision about the whole dashboard, not this
+  // feature's to make (ruling S22).
+  providersEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد حسابات مُعرّفة." : "No providers are configured.",
+  // The row's own label. "LEFT", not "USED": the System panel above shows
+  // consumption, this shows headroom, and the label is what makes the
+  // meter's direction unambiguous.
+  capacityLeftLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المتبقي" : "LEFT",
+  // Three different facts, never collapsed into one "unknown".
+  capacityUnsupported: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوفّر قراءة للسعة" : "no capacity reading available",
+  capacityUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّرت قراءة السعة" : "capacity couldn't be read",
+  capacityNeverRead: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تُقرأ السعة بعد" : "capacity not checked yet",
+  // `clock` is an already-formatted HH:MM value, interpolated at the tail.
+  // Ruling P30: never "resets in 3 hours" — an absolute time needs no
+  // counted noun in Arabic and stays true as the reading ages.
+  capacityResetsAt: (clock: string, language: "ar" | "en"): string =>
+    language === "ar" ? `يتجدد ${clock}` : `resets ${clock}`,
+  capacityAsOf: (clock: string, language: "ar" | "en"): string =>
+    language === "ar" ? `حتى ${clock}` : `as of ${clock}`,
+  refreshProviders: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحديث حالة الحسابات" : "Refresh provider status",
+  providerHealth: (state: "degraded" | "outage" | "unknown", language: "ar" | "en"): string => {
+    if (state === "degraded") return language === "ar" ? "الخدمة متعثرة" : "service degraded";
+    if (state === "outage") return language === "ar" ? "الخدمة متوقفة" : "service down";
+    return language === "ar" ? "حالة الخدمة غير معروفة" : "service status unknown";
+  },
 };
 
 // NOT the same table as arabicSessionsCount below, even though the two

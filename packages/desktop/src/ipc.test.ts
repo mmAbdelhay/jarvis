@@ -1,6 +1,40 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildWiring, createGitHandlers } from "./ipc.js";
-import type { GitProvider } from "@jarvis/core";
+import { buildWiring, createGitHandlers, type WiringDeps } from "./ipc.js";
+import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
+
+// Shared fixture for buildWiring's provider-facing tests: everything a
+// WiringDeps needs, wired to a `sent` capture array instead of a bare
+// vi.fn(), plus no-op defaults for every subscription/timer so a test only
+// has to override what it actually exercises.
+function baseDeps(sent: { channel: string; payload: unknown }[]): WiringDeps {
+  return {
+    send: (channel, payload) => {
+      sent.push({ channel, payload });
+    },
+    readMetrics: async () => ({
+      cpuPercent: 10,
+      memoryUsedBytes: 1,
+      memoryTotalBytes: 2,
+      diskUsedBytes: 1,
+      diskTotalBytes: 2,
+      networkDownMbps: 0,
+      networkUpMbps: 0,
+      uptimeSeconds: 1,
+    }),
+    intervalMs: 100_000,
+    onSessionsChange: () => () => {},
+    onTurn: () => () => {},
+    onChangeCounts: () => () => {},
+    onSessionOutput: () => () => {},
+    refreshChanges: async () => {},
+    changesIntervalMs: 100_000,
+    onProvidersChange: () => () => {},
+    refreshHealth: async () => {},
+    healthIntervalMs: 100_000,
+  };
+}
 
 describe("buildWiring", () => {
   beforeEach(() => {
@@ -20,14 +54,10 @@ describe("buildWiring", () => {
     }));
 
     const wiring = buildWiring({
+      ...baseDeps([]),
       send,
       readMetrics: metrics,
       intervalMs: 10,
-      onSessionsChange: () => () => {},
-      onTurn: () => () => {},
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -43,14 +73,10 @@ describe("buildWiring", () => {
     let emit: ((sessions: unknown[]) => void) | undefined;
 
     const wiring = buildWiring({
+      ...baseDeps([]),
       send,
       readMetrics: async () => { throw new Error("unused"); },
-      intervalMs: 100_000,
       onSessionsChange: (cb) => { emit = cb as (s: unknown[]) => void; return () => {}; },
-      onTurn: () => () => {},
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -64,14 +90,10 @@ describe("buildWiring", () => {
     let emit: ((turn: unknown) => void) | undefined;
 
     const wiring = buildWiring({
+      ...baseDeps([]),
       send,
       readMetrics: async () => { throw new Error("unused"); },
-      intervalMs: 100_000,
-      onSessionsChange: () => () => {},
       onTurn: (cb) => { emit = cb as (t: unknown) => void; return () => {}; },
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -85,14 +107,11 @@ describe("buildWiring", () => {
     const unsubTurns = vi.fn();
 
     const wiring = buildWiring({
+      ...baseDeps([]),
       send: vi.fn(),
       readMetrics: async () => { throw new Error("unused"); },
-      intervalMs: 100_000,
       onSessionsChange: () => unsubSessions,
       onTurn: () => unsubTurns,
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -111,14 +130,10 @@ describe("buildWiring", () => {
     }));
 
     const wiring = buildWiring({
+      ...baseDeps([]),
       send,
       readMetrics: metrics,
       intervalMs: 10,
-      onSessionsChange: () => () => {},
-      onTurn: () => () => {},
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -133,14 +148,10 @@ describe("buildWiring", () => {
   it("survives a metrics read that rejects", async () => {
     const send = vi.fn();
     const wiring = buildWiring({
+      ...baseDeps([]),
       send,
       readMetrics: async () => { throw new Error("sensor gone"); },
       intervalMs: 10,
-      onSessionsChange: () => () => {},
-      onTurn: () => () => {},
-      onChangeCounts: () => () => {},
-      refreshChanges: async () => {},
-      changesIntervalMs: 100_000,
     });
 
     wiring.start();
@@ -461,5 +472,159 @@ describe("createGitHandlers", () => {
       await repo1Promise;
       expect(order).toEqual(["repo1:start", "repo2:start", "repo2:end", "repo1:end"]);
     });
+  });
+});
+
+describe("provider wiring", () => {
+  it("pushes a provider snapshot on every store change", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    let emit: ((statuses: ProviderStatus[]) => void) | undefined;
+    const wiring = buildWiring({
+      ...baseDeps(sent),
+      onProvidersChange: (cb) => {
+        emit = cb;
+        return () => {};
+      },
+      refreshHealth: async () => {},
+      healthIntervalMs: 300_000,
+    });
+    wiring.start();
+
+    const statuses: ProviderStatus[] = [
+      {
+        id: "claude-mm",
+        vendor: "anthropic",
+        capacity: { state: "unknown", reason: "never-read" },
+        health: { state: "ok", detail: "ok", readAt: 1 },
+      },
+    ];
+    emit?.(statuses);
+
+    expect(sent).toContainEqual({ channel: "providers:update", payload: statuses });
+    wiring.stop();
+  });
+
+  it("polls the free health endpoints on its own interval, and stops on teardown", async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshHealth = vi.fn(async () => {});
+      const wiring = buildWiring({
+        ...baseDeps([]),
+        onProvidersChange: () => () => {},
+        refreshHealth,
+        healthIntervalMs: 1_000,
+      });
+      wiring.start();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(refreshHealth).toHaveBeenCalledTimes(2);
+
+      wiring.stop();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(refreshHealth).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never puts capacity on a timer — no wiring dep asks for a paid read", () => {
+    // Pinned deliberately: a capacity interval is the one design mistake
+    // this feature exists to avoid (~$2/day, and it consumes what it reports).
+    const source = readFileSync(fileURLToPath(new URL("./ipc.ts", import.meta.url)), "utf8");
+    expect(source).not.toMatch(/refreshCapacity/);
+  });
+});
+
+// Acceptance test for "the renderer must not be able to spend without
+// limit". `refreshProviders()` reaches main.ts's `providers:refresh`
+// ipcMain.handle (wired in Task 11's composition, outside ipc.ts's scope —
+// see the pinned "never puts capacity on a timer" test above, which keeps
+// ipc.ts itself from ever calling ProviderMonitor#refreshCapacity
+// directly). That handler's only correct shape is a direct forward to
+// `monitor.refreshCapacity({ force: true })` — never a bypass of the
+// monitor, never its own throttle reimplemented alongside it. This test
+// proves what bounds a renderer loop once that forward exists: a REAL
+// ProviderMonitor (not a fake standing in for its own logic), hit with a
+// tight synchronous loop of forced calls — the shape a buggy or
+// compromised renderer's spam would take — spends exactly one billed read
+// per due account, because the monitor coalesces concurrent forced passes
+// (`#refreshing`/`#refreshingForce`) instead of starting one per call. The
+// bound is the monitor's own, not anything this IPC layer adds on top.
+describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not by renderer restraint", () => {
+  it("a tight loop of forced refresh calls buys one billed read per account, not one per call", async () => {
+    const agents = [
+      { id: "claude-mm", command: "claude", configDir: "/config/mm", vendor: "anthropic" as const },
+      { id: "claude-personal", command: "claude", configDir: "/config/247", vendor: "anthropic" as const },
+    ];
+    const store = new ProviderStatusStore(agents);
+    const readCapacity = vi.fn(
+      () =>
+        new Promise<{
+          ok: true;
+          fiveHour: { usedPercent: number; resetsAt: string };
+          sevenDay: undefined;
+        }>((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                fiveHour: { usedPercent: 10, resetsAt: "2026-01-01T00:00:00Z" },
+                sevenDay: undefined,
+              }),
+            10,
+          );
+        }),
+    );
+    const monitor = new ProviderMonitor({
+      agents,
+      store,
+      readCapacity,
+      readHealth: async () => ({ state: "unknown", detail: "" }),
+    });
+
+    // A tight synchronous loop — nothing here awaits between calls, exactly
+    // as a `providers:refresh` handler forwarding to
+    // `monitor.refreshCapacity({ force: true })` would see from a
+    // misbehaving renderer calling refreshProviders() in a loop.
+    const calls = Array.from({ length: 20 }, () => monitor.refreshCapacity({ force: true }));
+    await Promise.all(calls);
+
+    // One billed read per readable account, not one per call — 20 forced
+    // calls did not buy 20x (or even 2x) the reads.
+    expect(readCapacity).toHaveBeenCalledTimes(agents.length);
+  });
+});
+
+describe("buildWiring session output", () => {
+  it("forwards each output chunk to the renderer's session:output channel", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    let emit: ((output: { sessionId: string; chunk: string }) => void) | undefined;
+    const wiring = buildWiring({
+      ...baseDeps(sent),
+      onSessionOutput: (cb) => {
+        emit = cb;
+        return () => {};
+      },
+    });
+    wiring.start();
+
+    emit?.({ sessionId: "s1", chunk: "hello\n" });
+    wiring.stop();
+
+    expect(sent).toContainEqual({
+      channel: "session:output",
+      payload: { sessionId: "s1", chunk: "hello\n" },
+    });
+  });
+
+  it("unsubscribes from session output on stop", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    const unsubscribe = vi.fn();
+    const wiring = buildWiring({ ...baseDeps(sent), onSessionOutput: () => unsubscribe });
+
+    wiring.start();
+    wiring.stop();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

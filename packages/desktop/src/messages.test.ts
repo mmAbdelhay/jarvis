@@ -167,3 +167,27 @@ describe("errorMessage", () => {
     expect(errorMessage(42)).toBe("42");
   });
 });
+
+describe("provider panel strings", () => {
+  it("has an Arabic and an English form for every provider label", () => {
+    for (const key of [
+      "providersEmpty",
+      "capacityLeftLabel",
+      "capacityUnsupported",
+      "capacityUnavailable",
+      "capacityNeverRead",
+      "refreshProviders",
+    ] as const) {
+      expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
+      expect(MESSAGES[key]("ar")).not.toBe("");
+    }
+  });
+
+  it("states a reset time as a label and a clock value, never as a counted duration", () => {
+    const ar = MESSAGES.capacityResetsAt("14:30", "ar");
+    expect(ar).toContain("14:30");
+    // Ruling P30: no composed counted duration in either language.
+    expect(ar).not.toMatch(/ساعات|ساعتين|يومين/);
+    expect(MESSAGES.capacityResetsAt("14:30", "en")).toContain("14:30");
+  });
+});

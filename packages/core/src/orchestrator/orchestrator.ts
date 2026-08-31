@@ -9,6 +9,8 @@ import {
   gitDiffOpenedText,
   gitFailureText,
 } from "../git/messages.js";
+import type { ProviderStatus } from "../providers/types.js";
+import { providerReportText } from "../providers/messages.js";
 import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js";
 
 const TOOLS = [
@@ -57,6 +59,15 @@ const TOOLS = [
     inputSchema: {
       sessionId: "id of a session, from the list of running sessions",
       message: "the commit message, in the language the user used",
+    },
+  },
+  {
+    name: "providers.status",
+    description:
+      "Report each configured account's provider health and how much of its own capacity is left, so the user can pick which account to use",
+    inputSchema: {
+      refresh:
+        "(optional) \"yes\" to take a fresh reading first — this costs a real API query per account, so only pass it when the user explicitly asks for an up-to-date number",
     },
   },
 ] as const satisfies readonly ToolSpec[];
@@ -122,6 +133,15 @@ export type OrchestratorOptions = {
   changes: () => SessionChanges[];
   speak(text: string, language: "ar" | "en"): Promise<void>;
   projects: Record<string, string>;
+  /**
+   * Read-only view of the provider cache, plus the one call that spends
+   * money. `snapshot()` is free; `refresh()` bills one API query per
+   * readable account and is only ever called when the user explicitly asks.
+   */
+  providers: {
+    snapshot(): ProviderStatus[];
+    refresh(): Promise<void>;
+  };
 };
 
 export class Orchestrator {
@@ -199,6 +219,7 @@ export class Orchestrator {
       "git.status": (call, language) => this.#gitStatus(call, language),
       "git.diff": (call, language) => this.#gitDiff(call, language),
       "git.commit": (call, language) => this.#gitCommit(call, language),
+      "providers.status": (call, language) => this.#providerStatus(call, language),
     };
   }
 
@@ -374,6 +395,22 @@ export class Orchestrator {
     return {
       context: { sessionId: target.sessionId, view: "changes" },
       error: gitCommitText(outcome.value, target.project, language, excludedUntracked),
+    };
+  }
+
+  async #providerStatus(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
+    if (stringInput(call.input, "refresh").toLowerCase() === "yes") {
+      try {
+        await this.#options.providers.refresh();
+      } catch {
+        // A failed refresh is not a failed answer: the cached readings are
+        // still true statements about the windows they describe (resets_at
+        // is absolute), and each carries its own "as of" time.
+      }
+    }
+    return {
+      context: {},
+      error: providerReportText(this.#options.providers.snapshot(), language),
     };
   }
 

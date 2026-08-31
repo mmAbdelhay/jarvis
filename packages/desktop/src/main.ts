@@ -1,27 +1,56 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
-import { AgentRegistry, ChangeTracker, Orchestrator, SessionManager } from "@jarvis/core";
+import {
+  AgentRegistry,
+  ChangeTracker,
+  Orchestrator,
+  ProviderMonitor,
+  ProviderStatusStore,
+  SessionManager,
+} from "@jarvis/core";
 import {
   MacSpeech,
   createBrain,
+  createCapacityReader,
   createGitProvider,
   createMetricsReader,
-  createSpawner,
+  createPtySpawner,
   createSqliteSessionStore,
+  readStatusPage,
   runCommand,
   transcribe,
 } from "@jarvis/platform";
-import { buildWiring, createGitHandlers } from "./ipc.js";
+import { buildWiring, createGitHandlers, PROVIDER_HEALTH_INTERVAL_MS } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
-import { startupReport } from "./startup.js";
+import { capacityReport, startupReport } from "./startup.js";
 
 app.whenReady().then(async () => {
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
+
+    const providerStore = new ProviderStatusStore(registry.list());
+    const readCapacity = createCapacityReader({ cwd: config.brain.cwd });
+    const providers = new ProviderMonitor({
+      agents: registry.list(),
+      store: providerStore,
+      readCapacity,
+      readHealth: (vendor) => readStatusPage(vendor),
+    });
+
+    // Started, never awaited — ruling R35: nothing that touches the network
+    // may sit between app-ready and the window existing. The health poll is
+    // free; the capacity refresh is one billed query per readable account and
+    // happens exactly once here, at launch. There is no capacity interval
+    // anywhere in this file, deliberately.
+    void providers.refreshHealth();
+    const capacityPromise = providers.refreshCapacity().catch((error) => {
+      console.error(`Provider capacity refresh failed: ${errorMessage(error)}`);
+    });
+
     // Started, not awaited: the health probe (bounded per-agent in
     // @jarvis/core, but still a network of spawned processes) must never
     // hold up the window appearing. The `.catch` is attached immediately —
@@ -38,7 +67,10 @@ app.whenReady().then(async () => {
     // row into this store on every state transition it already emits a
     // change event for, so history persistence needs no separate polling.
     const sessionStore = createSqliteSessionStore(config.sessionsDbPath);
-    const sessions = new SessionManager(createSpawner(), sessionStore);
+    // A pty, not pipes: an interactive coding agent checks whether stdin is
+    // a TTY and, finding a pipe, exits after three seconds having decided it
+    // was handed a single non-interactive prompt. See createPtySpawner.
+    const sessions = new SessionManager(createPtySpawner(), sessionStore);
     const speech = new MacSpeech({ arabicVoice: "Majed" });
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
@@ -73,13 +105,20 @@ app.whenReady().then(async () => {
     });
 
     const orchestrator = new Orchestrator({
-      brain: createBrain(config.brain),
+      brain: createBrain({
+        ...config.brain,
+        onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
+      }),
       registry,
       sessions,
       git,
       changes: () => changeTracker.snapshot(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
+      providers: {
+        snapshot: () => providers.snapshot(),
+        refresh: () => providers.refreshCapacity({ force: true }),
+      },
     });
 
     const window = new BrowserWindow({
@@ -126,11 +165,15 @@ app.whenReady().then(async () => {
       onSessionsChange: (cb) => sessions.onChange(cb),
       onTurn: (cb) => orchestrator.onTurn(cb),
       onChangeCounts: (cb) => changeTracker.onChange(cb),
+      onSessionOutput: (cb) => sessions.onOutput(cb),
       refreshChanges: () => changeTracker.refresh(),
       // Slower than the 2s metrics tick: a git status on a large repository
       // is far more expensive than reading /proc-equivalent counters, and
       // change counts do not need second-level freshness.
       changesIntervalMs: 5000,
+      onProvidersChange: (cb) => providers.onChange(cb),
+      refreshHealth: () => providers.refreshHealth(),
+      healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
     });
     wiring.start();
     window.on("closed", () => wiring.stop());
@@ -143,6 +186,41 @@ app.whenReady().then(async () => {
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
     ipcMain.handle("history:list", () => sessionStore.history());
+
+    // The Session view's backlog. Like history:list this is pulled on
+    // demand rather than pushed: everything printed *after* the view opens
+    // arrives on the "session:output" channel instead. The renderer only
+    // ever names a session id — it can never ask for output from a process
+    // Jarvis did not itself start.
+    ipcMain.handle("session:log", (_event, sessionId: string) =>
+      typeof sessionId === "string" ? sessions.log(sessionId) : "",
+    );
+
+    // Keystrokes into a session's pty. Validated rather than trusted: the
+    // renderer names a session id, never a process — the main process owns
+    // that mapping, so a compromised renderer can only ever type into a
+    // session Jarvis itself started.
+    ipcMain.handle("session:input", (_event, sessionId: string, data: string) => {
+      if (typeof sessionId !== "string" || typeof data !== "string") return;
+      sessions.write(sessionId, data);
+    });
+
+    // Where a spoken utterance goes. Normally the brain, which decides what
+    // to do with it; but while a session's terminal is open, speaking is
+    // meant to talk to THAT agent — the same thing as typing into it — so
+    // the renderer names the session it is showing and the transcript is
+    // typed there instead. Cleared (undefined) whenever the view is left.
+    let voiceTargetSessionId: string | undefined;
+
+    ipcMain.handle("voice:target", (_event, sessionId: unknown) => {
+      voiceTargetSessionId = typeof sessionId === "string" ? sessionId : undefined;
+    });
+
+    ipcMain.handle("session:resize", (_event, sessionId: string, cols: number, rows: number) => {
+      if (typeof sessionId !== "string") return;
+      if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
+      sessions.resize(sessionId, cols, rows);
+    });
 
     // The main process owns the sessionId -> projectPath mapping, so a
     // compromised renderer can request git data only for a repo a real
@@ -168,6 +246,14 @@ app.whenReady().then(async () => {
     ipcMain.handle("git:commit", (_event, sessionId: string, message: string) =>
       gitHandlers.commit(sessionId, message),
     );
+
+    // The only user-triggered call in the app that spends money: one billed
+    // query per readable account, guarded by ProviderMonitor's own minimum
+    // interval so a held-down button cannot run up a bill. A direct forward
+    // — no wrapping try/catch, no re-implemented throttle or dedup — so
+    // ProviderMonitor's own coalescing (Task 8) is the only one in effect,
+    // and this handler never rejects on a normal per-account failure.
+    ipcMain.handle("providers:refresh", () => providers.refreshCapacity({ force: true }));
 
     const recorder = new Recorder(defaultRecorderDeps);
 
@@ -256,7 +342,28 @@ app.whenReady().then(async () => {
           });
           return;
         }
-        await orchestrator.handle(transcript.text, transcript.language === "ar" ? "ar" : "en");
+        const language = transcript.language === "ar" ? "ar" : "en";
+
+        // A session's terminal is open: type the utterance into it, exactly
+        // as if it had been typed at the keyboard, so the agent cannot tell
+        // speech from typing. The carriage return is what a terminal
+        // receives for Enter. Checked against the live session list rather
+        // than trusted: the renderer's target can name a session that has
+        // since exited, and the utterance must fall back to the brain
+        // rather than vanishing into a dead pty.
+        const target =
+          voiceTargetSessionId === undefined ? undefined : sessions.get(voiceTargetSessionId);
+        if (target !== undefined && target.endedAt === undefined) {
+          sessions.write(target.id, `${transcript.text}\r`);
+          // Echoed as a notice, not a turn: this was not a conversation
+          // with the brain, and the agent's own terminal is about to show
+          // the line. The notice is what confirms the speech was heard and
+          // where it went.
+          window.webContents.send("voice:notice", { text: transcript.text, language });
+          return;
+        }
+
+        await orchestrator.handle(transcript.text, language);
       } finally {
         // Recorder owns the wav file it created; nothing else reads it
         // past this point on any of the branches above, so it's always
@@ -298,6 +405,22 @@ app.whenReady().then(async () => {
       }
     });
 
+    // The renderer's own errors, surfaced in the terminal that launched the
+    // app. Without this a renderer that dies at module load — a bad import
+    // path, a CSP refusal, a missing element — takes the whole UI down in
+    // total silence, which is exactly how it went unnoticed three times
+    // during phase 1. Errors and warnings only: routine logs are the
+    // renderer's business.
+    window.webContents.on("console-message", (event) => {
+      if (event.level !== "error" && event.level !== "warning") return;
+      console.error(`[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+    });
+
+    // A page that fails to load at all never reaches the console at all.
+    window.webContents.on("did-fail-load", (_event, code, description, url) => {
+      console.error(`[renderer] failed to load ${url}: ${description} (${code})`);
+    });
+
     await window.loadFile(fileURLToPath(new URL("../../renderer/index.html", import.meta.url)));
 
     // globalShortcut.register() does not throw on collision — a combo
@@ -328,6 +451,26 @@ app.whenReady().then(async () => {
         at: Date.now(),
       });
     }
+
+    window.webContents.send("providers:update", providers.snapshot());
+
+    void capacityPromise.then(() => {
+      // The capacity refresh takes up to 20s per account, so this callback
+      // can land long after a user who launched, glanced and quit. Sending
+      // on a destroyed webContents throws, and this chain has no catch of
+      // its own — an unhandled rejection in the main process on every quick
+      // quit. There is nothing to report to a window that is gone.
+      if (window.isDestroyed()) return;
+      window.webContents.send("providers:update", providers.snapshot());
+      const capacity = capacityReport(providers.snapshot(), PRIMARY_LANGUAGE);
+      if (capacity === "") return;
+      window.webContents.send("turn:new", {
+        role: "assistant",
+        text: capacity,
+        language: PRIMARY_LANGUAGE,
+        at: Date.now(),
+      });
+    });
   } catch (error) {
     dialog.showErrorBox("Jarvis failed to start", errorMessage(error));
     app.quit();

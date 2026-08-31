@@ -29,6 +29,18 @@ const api: RendererApi = {
   onChangeCounts: (cb) => {
     ipcRenderer.on("git:counts", (_e, changes) => cb(changes));
   },
+  onSessionOutput: (cb) => {
+    ipcRenderer.on("session:output", (_e, output) => cb(output));
+  },
+  getSessionLog: (sessionId) => ipcRenderer.invoke("session:log", sessionId),
+  sendSessionInput: (sessionId, data) => ipcRenderer.invoke("session:input", sessionId, data),
+  resizeSession: (sessionId, cols, rows) =>
+    ipcRenderer.invoke("session:resize", sessionId, cols, rows),
+  setVoiceTarget: (sessionId) => ipcRenderer.invoke("voice:target", sessionId),
+  onProviders: (cb) => {
+    ipcRenderer.on("providers:update", (_e, statuses) => cb(statuses));
+  },
+  refreshProviders: () => ipcRenderer.invoke("providers:refresh"),
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

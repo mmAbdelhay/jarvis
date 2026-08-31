@@ -70,9 +70,28 @@ export interface ProcessHandle {
   kill(): void;
   onOutput(listener: (chunk: string) => void): void;
   onExit(listener: (code: number) => void): void;
+  /**
+   * Tell the process its terminal is now `cols` x `rows`. Optional because
+   * not every Spawner runs its child under a pty — a plain piped process
+   * has no window size to change. A terminal UI (Claude Code's included)
+   * lays itself out from this, so a missing or wrong size is the difference
+   * between a readable session and a mangled one.
+   */
+  resize?(cols: number, rows: number): void;
 }
 
 export type Spawner = (agent: AgentConfig, projectPath: string) => ProcessHandle;
+
+/**
+ * One chunk of a session's output as it is emitted. `chunk` is exactly what
+ * the process wrote (newline-terminated lines, or a trailing partial line
+ * flushed at close) — never re-wrapped or trimmed, so the transcript a user
+ * reads is byte-for-byte what the agent printed.
+ */
+export type SessionOutput = {
+  sessionId: string;
+  chunk: string;
+};
 
 export type StartInput = {
   project: string;

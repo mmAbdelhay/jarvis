@@ -160,3 +160,63 @@ describe("loadConfig", () => {
     expect(stats.isDirectory()).toBe(true);
   });
 });
+
+describe("agent provider fields", () => {
+  it("parses configDir and vendor, expanding a tilde in configDir", () => {
+    const config = parseConfig({
+      agents: {
+        "claude-mm": { command: "claude-mm", configDir: "~/.claude-main", vendor: "anthropic" },
+      },
+      brain: {},
+    });
+    expect(config.registry.agents["claude-mm"]?.configDir).toBe(join(homedir(), ".claude-main"));
+    expect(config.registry.agents["claude-mm"]?.vendor).toBe("anthropic");
+  });
+
+  it("leaves both fields absent when the config omits them", () => {
+    const config = parseConfig({ agents: { copilot: { command: "copilot" } }, brain: {} });
+    expect(config.registry.agents["copilot"]).not.toHaveProperty("configDir");
+    expect(config.registry.agents["copilot"]).not.toHaveProperty("vendor");
+  });
+
+  it("rejects a vendor it does not know rather than passing it through", () => {
+    expect(() =>
+      parseConfig({ agents: { x: { command: "x", vendor: "acme" } }, brain: {} }),
+    ).toThrow(/vendor/);
+  });
+
+  it("rejects a non-string configDir", () => {
+    expect(() =>
+      parseConfig({ agents: { x: { command: "x", configDir: 7 } }, brain: {} }),
+    ).toThrow(/configDir/);
+  });
+});
+
+describe("brain.accountId", () => {
+  it("resolves the named account's config dir onto the brain config", () => {
+    const config = parseConfig({
+      agents: { "claude-mm": { command: "claude-mm", configDir: "/c/mm" } },
+      brain: { accountId: "claude-mm" },
+    });
+    expect(config.brain.accountId).toBe("claude-mm");
+    expect(config.brain.configDir).toBe("/c/mm");
+  });
+
+  it("rejects an accountId that names no agent, rather than silently ignoring it", () => {
+    expect(() =>
+      parseConfig({ agents: { "claude-mm": { command: "claude-mm" } }, brain: { accountId: "ghost" } }),
+    ).toThrow(/accountId/);
+  });
+
+  it("rejects an accountId whose agent declares no configDir", () => {
+    expect(() =>
+      parseConfig({ agents: { copilot: { command: "copilot" } }, brain: { accountId: "copilot" } }),
+    ).toThrow(/configDir/);
+  });
+
+  it("leaves the brain unchanged when accountId is absent", () => {
+    const config = parseConfig({ agents: { x: { command: "x" } }, brain: {} });
+    expect(config.brain).not.toHaveProperty("accountId");
+    expect(config.brain).not.toHaveProperty("configDir");
+  });
+});

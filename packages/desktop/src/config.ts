@@ -2,7 +2,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
-import type { AgentConfig, RegistryConfig, RoutingRule } from "@jarvis/core";
+import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type { BrainConfig } from "@jarvis/platform";
 
 export type JarvisConfig = {
@@ -58,6 +58,22 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const projects = parseProjects(root["projects"]);
   const whisper = parseWhisper(root["whisper"]);
 
+  const accountId = brainConfig.accountId;
+  if (accountId !== undefined && typeof accountId !== "string") {
+    throw new Error("Config `brain.accountId` must be a string");
+  }
+  let brainAccount: { accountId: string; configDir: string } | undefined;
+  if (accountId !== undefined) {
+    const agent = agents[accountId];
+    if (agent === undefined) {
+      throw new Error(`Config \`brain.accountId\` names no configured agent: "${accountId}"`);
+    }
+    if (agent.configDir === undefined) {
+      throw new Error(`Config \`brain.accountId\` names "${accountId}", which declares no configDir`);
+    }
+    brainAccount = { accountId, configDir: agent.configDir };
+  }
+
   return {
     registry: { agents, routing },
     projects: Object.fromEntries(
@@ -69,6 +85,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
           ? brainConfig.systemPrompt
           : DEFAULT_SYSTEM_PROMPT,
       cwd: expandTilde(typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD),
+      ...(brainAccount === undefined ? {} : brainAccount),
     },
     whisper,
     sessionsDbPath: defaultSessionsDbPath(),
@@ -89,6 +106,12 @@ export async function loadConfig(
 
 function expandTilde(path: string): string {
   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+const VENDORS: readonly ProviderVendor[] = ["anthropic", "github", "openai"];
+
+function isVendor(value: unknown): value is ProviderVendor {
+  return VENDORS.some((vendor) => vendor === value);
 }
 
 function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
@@ -116,11 +139,21 @@ function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
     if (agent.default !== undefined && typeof agent.default !== "boolean") {
       throw new Error(`Config \`agents.${id}.default\` must be a boolean`);
     }
+    if (agent.configDir !== undefined && typeof agent.configDir !== "string") {
+      throw new Error(`Config \`agents.${id}.configDir\` must be a string`);
+    }
+    if (agent.vendor !== undefined && !isVendor(agent.vendor)) {
+      throw new Error(
+        `Config \`agents.${id}.vendor\` must be one of: ${VENDORS.join(", ")}`,
+      );
+    }
     agents[id] = {
       command: agent.command,
       ...(agent.args === undefined ? {} : { args: agent.args }),
       ...(agent.model === undefined ? {} : { model: agent.model }),
       ...(agent.default === undefined ? {} : { default: agent.default }),
+      ...(agent.configDir === undefined ? {} : { configDir: expandTilde(agent.configDir) }),
+      ...(agent.vendor === undefined ? {} : { vendor: agent.vendor }),
     };
   }
   return agents;

@@ -61,4 +61,17 @@ describe(".main / .main--changes [hidden] cascade", () => {
     const body = ruleBodyFor(".main--changes:not([hidden])", htmlSource);
     expect(body).toMatch(/display\s*:\s*flex/);
   });
+
+  // The Session view is the third `.main` and hits exactly the same
+  // footgun: an unconditional `display` here would leave the transcript
+  // permanently on screen, squeezing whichever view is meant to be showing.
+  it("the base .main--session rule does not set display", () => {
+    const body = ruleBodyFor(".main--session", htmlSource);
+    expect(body).not.toMatch(/display\s*:/);
+  });
+
+  it("the session flex layout applies only via .main--session:not([hidden])", () => {
+    const body = ruleBodyFor(".main--session:not([hidden])", htmlSource);
+    expect(body).toMatch(/display\s*:\s*flex/);
+  });
 });
