@@ -339,6 +339,10 @@ export type RendererApi = {
    *  its URL — call openTab(project, url) with the result to actually show
    *  it; this call alone does not open a tab. */
   openEditor(project: string): Promise<GitViewResult<string>>;
+  getSettings(): Promise<JarvisConfig>;
+  saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
+  testAgent(agent: AgentConfig): Promise<AgentHealth>;
+  restartApp(): Promise<void>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;

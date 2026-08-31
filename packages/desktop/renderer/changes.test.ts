@@ -60,6 +60,17 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     readDocRaw: vi.fn(async () => notStubbed),
     taskOffsets: vi.fn(async () => []),
     openEditor: vi.fn(async () => notStubbed),
+    getSettings: vi.fn(async () => {
+      throw new Error("not stubbed in this test");
+    }),
+    saveSettings: vi.fn(async () => ({
+      ok: false as const,
+      text: "not stubbed in this test",
+      detail: "not stubbed in this test",
+      language: "en" as const,
+    })),
+    testAgent: vi.fn(async () => ({ id: "unstubbed", ok: false, detail: "not stubbed in this test" })),
+    restartApp: vi.fn(async () => {}),
     hideAllTabs: vi.fn(async () => {}),
     getProjects: vi.fn(async () => []),
     refreshProviders: vi.fn(async () => {}),

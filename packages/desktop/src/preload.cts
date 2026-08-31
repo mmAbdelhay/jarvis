@@ -61,6 +61,10 @@ const api: RendererApi = {
   readDocRaw: (project, path) => ipcRenderer.invoke("docs:readRaw", project, path),
   taskOffsets: (text) => ipcRenderer.invoke("docs:taskOffsets", text),
   openEditor: (project) => ipcRenderer.invoke("editor:open", project),
+  getSettings: () => ipcRenderer.invoke("settings:read"),
+  saveSettings: (draft) => ipcRenderer.invoke("settings:save", draft),
+  testAgent: (agent) => ipcRenderer.invoke("settings:testAgent", agent),
+  restartApp: () => ipcRenderer.invoke("settings:restart"),
   getProjects: () => ipcRenderer.invoke("projects:list"),
 };
 
