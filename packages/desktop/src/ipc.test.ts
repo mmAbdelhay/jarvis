@@ -27,6 +27,7 @@ function baseDeps(sent: { channel: string; payload: unknown }[]): WiringDeps {
     onSessionsChange: () => () => {},
     onTurn: () => () => {},
     onChangeCounts: () => () => {},
+    onSessionOutput: () => () => {},
     refreshChanges: async () => {},
     changesIntervalMs: 100_000,
     onProvidersChange: () => () => {},
@@ -591,5 +592,39 @@ describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not b
     // One billed read per readable account, not one per call — 20 forced
     // calls did not buy 20x (or even 2x) the reads.
     expect(readCapacity).toHaveBeenCalledTimes(agents.length);
+  });
+});
+
+describe("buildWiring session output", () => {
+  it("forwards each output chunk to the renderer's session:output channel", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    let emit: ((output: { sessionId: string; chunk: string }) => void) | undefined;
+    const wiring = buildWiring({
+      ...baseDeps(sent),
+      onSessionOutput: (cb) => {
+        emit = cb;
+        return () => {};
+      },
+    });
+    wiring.start();
+
+    emit?.({ sessionId: "s1", chunk: "hello\n" });
+    wiring.stop();
+
+    expect(sent).toContainEqual({
+      channel: "session:output",
+      payload: { sessionId: "s1", chunk: "hello\n" },
+    });
+  });
+
+  it("unsubscribes from session output on stop", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    const unsubscribe = vi.fn();
+    const wiring = buildWiring({ ...baseDeps(sent), onSessionOutput: () => unsubscribe });
+
+    wiring.start();
+    wiring.stop();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

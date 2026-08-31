@@ -14,7 +14,13 @@
 // language signal itself is lost) and the renderer (which cannot import
 // main.ts — that would pull Electron into a browser-side bundle). This is
 // the one definition both sides read; do not duplicate it.
-export const PRIMARY_LANGUAGE = "ar";
+//
+// English by the user's own instruction ("make all default at english
+// layout"). This is only the FALLBACK: it decides the chrome and any
+// string fired before a language signal exists. It never overrides a
+// detected utterance — an Arabic sentence still gets an Arabic reply, and
+// Arabic session/project text still renders RTL via detectLanguage().
+export const PRIMARY_LANGUAGE = "en";
 
 export const MESSAGES = {
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
@@ -114,6 +120,22 @@ export const MESSAGES = {
     language === "ar" ? `بواسطة ${agentId} · ${ago}` : `written by ${agentId} · ${ago}`,
   navDashboard: (language: "ar" | "en"): string => (language === "ar" ? "اللوحة" : "Dashboard"),
   navChanges: (language: "ar" | "en"): string => (language === "ar" ? "التغييرات" : "Changes"),
+  navSession: (language: "ar" | "en"): string => (language === "ar" ? "الجلسة" : "Session"),
+  // The Session view's empty state, before the agent has printed anything.
+  // Distinct from "this session produced no output at all": a just-started
+  // process routinely sits here for a second or two.
+  sessionNoOutput: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد إخراج بعد…" : "No output yet…",
+  // Shown when no session has been started, so there is nothing to open.
+  sessionNone: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد جلسة مفتوحة." : "No session open.",
+  // Where speech lands while a session's terminal is open. Named
+  // explicitly because it is the one thing about voice the terminal itself
+  // cannot show, and being wrong about it means talking to another agent.
+  voiceGoesHere: (language: "ar" | "en"): string =>
+    language === "ar" ? "⌥Space يتحدث إلى هذه الجلسة" : "⌥Space talks to this session",
+  voiceListeningHere: (language: "ar" | "en"): string =>
+    language === "ar" ? "يستمع… إلى هذه الجلسة" : "Listening… to this session",
   changedFilesLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "الملفات المعدّلة" : "CHANGED FILES",
   // The header's repo-path/branch separator ("~/projects/acme on

@@ -1,9 +1,25 @@
-import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
+import type {
+  Session,
+  SessionChanges,
+  SessionState,
+  SystemMetrics,
+  Turn,
+} from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { applyStaticChrome, openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 import { renderProviders, wireProvidersPanel } from "./providers.js";
+import {
+  appendSessionOutput,
+  openSession,
+  openSessionId,
+  releaseVoice,
+  renderEmptyState,
+  renderVoiceTarget,
+  updateSessionHeader,
+  wireSessionView,
+} from "./session-view.js";
 
 declare global {
   interface Window {
@@ -26,8 +42,11 @@ let latestChanges = new Map<string, SessionChanges>();
 
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
+  const previous = latestSessions;
   latestSessions = sessions;
   renderSessions(latestSessions);
+  updateSessionHeader(latestSessions);
+  autoOpenNewSession(previous, sessions);
 });
 window.jarvis.onTurn((turn) => renderTurn(turn));
 window.jarvis.onListening((listening) => renderListening(listening));
@@ -37,6 +56,7 @@ window.jarvis.onChangeCounts((changes) => {
   renderSessions(latestSessions);
 });
 window.jarvis.onProviders((statuses) => renderProviders(statuses, Date.now()));
+window.jarvis.onSessionOutput((output) => appendSessionOutput(output));
 
 startClock();
 applyStaticChrome();
@@ -47,10 +67,36 @@ wireNav();
 wireDiffModes();
 wireCommitBar();
 wireProvidersPanel();
+wireSessionView();
+renderEmptyState();
+
+// The whole point of starting a session is to watch it work, so a newly
+// started one opens its transcript without being asked — the behaviour the
+// dashboard was missing ("when i start a session it's not opening it so i
+// can see it"). Only genuinely new ids qualify: a state change or a git
+// count landing on an existing session must never yank the view away from
+// whatever the user is reading. Sessions live in memory for one app run, so
+// the first update after launch is empty and nothing auto-opens at startup.
+function autoOpenNewSession(previous: Session[], next: Session[]): void {
+  const known = new Set(previous.map((session) => session.id));
+  const started = next.filter((session) => !known.has(session.id));
+  if (started.length === 0) return;
+  // Newest first, so starting several at once lands on the last one.
+  const newest = [...started].sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (newest === undefined) return;
+  void openSession(newest);
+}
 
 function wireNav(): void {
-  document.getElementById("nav-dashboard")?.addEventListener("click", () => showView("dashboard"));
+  // Leaving the Session view hands speech back to the brain: while a
+  // session's terminal is open, ⌥Space types into that agent, and once it
+  // is not, speaking is addressed to Jarvis again.
+  document.getElementById("nav-dashboard")?.addEventListener("click", () => {
+    showView("dashboard");
+    releaseVoice();
+  });
   document.getElementById("nav-changes")?.addEventListener("click", () => {
+    releaseVoice();
     // With no session chosen yet, the most recently active one is the one
     // the user just spoke about.
     const latest = [...latestSessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
@@ -120,7 +166,18 @@ function buildSessionRow(session: Session): HTMLElement {
   head.append(spacer);
 
   const diffBadge = buildDiffBadge(session, latestChanges.get(session.id));
-  if (diffBadge !== undefined) head.append(diffBadge);
+  if (diffBadge !== undefined) {
+    // The row itself opens the transcript, so the badge keeps the Changes
+    // view reachable. stopPropagation, or the row's own handler would fire
+    // straight afterwards and replace the diff with the transcript.
+    diffBadge.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeHistoryOverlay();
+      void openChanges(session.id);
+    });
+    diffBadge.classList.add("session__diff--clickable");
+    head.append(diffBadge);
+  }
 
   const state = document.createElement("span");
   state.className = "session__state mono";
@@ -140,15 +197,19 @@ function buildSessionRow(session: Session): HTMLElement {
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
 
   row.append(head, summary, meta);
-  // The dashboard is where a user picks which session's changes to read.
+  // A row click opens the session's own transcript — what the user came to
+  // the row for is "what is this agent doing". Its diff badge is the route
+  // to the Changes view instead (see buildDiffBadge), so both destinations
+  // stay one click away.
+  //
   // This row is shared with the History panel (buildHistoryRow below), whose
   // full-screen `.history-overlay` sits on top of everything else — without
-  // closing it first, openChanges() renders the Changes view underneath the
-  // scrim and the click appears to do nothing (I1). Closing it here is a
-  // no-op for the live Sessions panel, where the overlay is already hidden.
+  // closing it first, the view underneath renders behind the scrim and the
+  // click appears to do nothing (I1). Closing it here is a no-op for the
+  // live Sessions panel, where the overlay is already hidden.
   row.addEventListener("click", () => {
     closeHistoryOverlay();
-    void openChanges(session.id);
+    void openSession(session);
   });
   return row;
 }
@@ -216,6 +277,7 @@ let isListening = false;
 
 function renderListening(listening: boolean): void {
   isListening = listening;
+  renderVoiceTarget(openSessionId() !== undefined, listening);
   clearNotice();
   setVoiceState(listening ? VOICE_LISTENING : VOICE_IDLE);
   const micButton = document.getElementById("mic-button");

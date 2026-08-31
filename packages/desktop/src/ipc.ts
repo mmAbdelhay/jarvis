@@ -7,6 +7,7 @@ import {
   type ProviderStatus,
   type Session,
   type SessionChanges,
+  type SessionOutput,
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
@@ -22,6 +23,7 @@ export type IpcChannels = {
   "voice:notice": VoiceNotice;
   "git:counts": SessionChanges[];
   "providers:update": ProviderStatus[];
+  "session:output": SessionOutput;
 };
 
 /**
@@ -249,6 +251,39 @@ export type RendererApi = {
   gitSetStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   gitCommit(sessionId: string, message: string): Promise<GitViewResult<null>>;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): void;
+  // A session's live output, chunk by chunk, for every session at once —
+  // the Session view keeps only the one it is showing. Paired with
+  // getSessionLog below: the log is the backlog from before the view was
+  // opened, this is everything after.
+  onSessionOutput(cb: (output: SessionOutput) => void): void;
+  /**
+   * The retained transcript for one session. Pulled once when the Session
+   * view opens, so a session opened partway through a run shows what it
+   * already printed instead of starting blank. Returns "" for an unknown
+   * session rather than rejecting — a row can be clicked in the instant
+   * before its process has written anything.
+   */
+  getSessionLog(sessionId: string): Promise<string>;
+  /**
+   * Raw keystrokes for one session's terminal, written to its pty exactly
+   * as given — including control bytes (Ctrl-C, arrows, Escape). This is
+   * the only way the user talks to a session: there is no separate "send a
+   * message" path, because the agent's own terminal UI owns the input line.
+   */
+  sendSessionInput(sessionId: string, data: string): Promise<void>;
+  /**
+   * The terminal pane's new size in character cells. A terminal UI lays
+   * itself out from this, so it is sent whenever the pane is measured or
+   * the window changes shape.
+   */
+  resizeSession(sessionId: string, cols: number, rows: number): Promise<void>;
+  /**
+   * Names the session a spoken utterance should be typed into, or
+   * `undefined` to send speech back to the brain. Set when a session's
+   * terminal is opened and cleared when it is left, so "talking" always
+   * means whatever is on screen.
+   */
+  setVoiceTarget(sessionId: string | undefined): Promise<void>;
   // Provider status: pushed like sessions, plus one pull the user drives.
   onProviders(cb: (statuses: ProviderStatus[]) => void): void;
   /**
@@ -266,6 +301,7 @@ export type WiringDeps = {
   onSessionsChange(cb: (sessions: Session[]) => void): () => void;
   onTurn(cb: (turn: Turn) => void): () => void;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): () => void;
+  onSessionOutput(cb: (output: SessionOutput) => void): () => void;
   /** ChangeTracker.refresh; it guards its own re-entrancy. */
   refreshChanges(): Promise<void>;
   changesIntervalMs: number;
@@ -293,6 +329,7 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       );
       unsubscribes.push(deps.onTurn((t) => deps.send("turn:new", t)));
       unsubscribes.push(deps.onChangeCounts((c) => deps.send("git:counts", c)));
+      unsubscribes.push(deps.onSessionOutput((o) => deps.send("session:output", o)));
       unsubscribes.push(deps.onProvidersChange((s) => deps.send("providers:update", s)));
 
       healthTimer = setInterval(() => {

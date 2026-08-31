@@ -11,7 +11,7 @@ agents:
     vendor: anthropic
   claude-acme:
     command: claude-acme
-    model: sonnet
+    model: opus
     configDir: ~/.claude-acme
     vendor: anthropic
   copilot:
@@ -29,6 +29,7 @@ projects:
   acme: ~/projects/acme
   storefront: ~/projects/storefront
   atlas: ~/projects/atlas
+  globex: ~/projects/globex
 
 brain:
   cwd: ~/.config/jarvis/brain

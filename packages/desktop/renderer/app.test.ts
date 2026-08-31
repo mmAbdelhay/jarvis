@@ -10,14 +10,23 @@
 // #clock-date so startClock has somewhere to write, #voice-state itself),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session, SessionChanges } from "@jarvis/core";
+import type { Session, SessionChanges, SessionOutput } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
+
+// app.ts pulls in session-view.ts, which hosts a real terminal emulator.
+// jsdom has neither a canvas nor real character metrics, so the vendored
+// xterm modules are doubled here the same way session-view.test.ts does it.
+vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
+vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 
 type Callbacks = {
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
   onSessions?: (sessions: Session[]) => void;
   onChangeCounts?: (changes: SessionChanges[]) => void;
+  onSessionOutput?: (output: SessionOutput) => void;
 };
 
 async function loadApp(
@@ -27,8 +36,10 @@ async function loadApp(
     text: "not stubbed in this test",
     language: "en",
   }),
+  getSessionLog: (sessionId: string) => Promise<string> = async () => "",
 ): Promise<Callbacks> {
   vi.resetModules();
+  FakeTerminal.last = undefined;
   document.body.innerHTML = `
     <span id="clock-time"></span>
     <span id="clock-date"></span>
@@ -62,6 +73,16 @@ async function loadApp(
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
+    <button id="nav-session" class="nav-btn" type="button"></button>
+    <div class="main main--session" id="view-session" hidden>
+      <div id="session-view-project"></div>
+      <div id="session-view-path"></div>
+      <div id="session-view-state"></div>
+      <div id="session-view-agent"></div>
+      <div id="session-voice" hidden></div>
+      <div id="session-terminal"></div>
+      <div id="session-empty" hidden></div>
+    </div>
   `;
 
   const callbacks: Callbacks = {};
@@ -78,6 +99,13 @@ async function loadApp(
       callbacks.onChangeCounts = cb;
     },
     onTurn: vi.fn(),
+    onSessionOutput: (cb: (output: SessionOutput) => void) => {
+      callbacks.onSessionOutput = cb;
+    },
+    getSessionLog: vi.fn(getSessionLog),
+    sendSessionInput: vi.fn(async () => {}),
+    resizeSession: vi.fn(async () => {}),
+    setVoiceTarget: vi.fn(async () => {}),
     onListening: (cb: (listening: boolean) => void) => {
       callbacks.onListening = cb;
     },
@@ -299,12 +327,18 @@ describe("history panel", () => {
   // panel) calls openChanges(), which renders the Changes view — but
   // nothing closed this full-screen overlay first, so the view rendered
   // underneath the scrim and the click appeared to do nothing.
-  it("closes on clicking a history row, so the Changes view underneath is not hidden by the scrim", async () => {
-    const gitChanges = vi.fn(async () => ({ ok: true, value: {
-      session: { id: "past", project: "acme", projectPath: "/p", agentId: "claude-mm", lastActivityAt: 1000, endedAt: 5000 },
-      changes: { repoPath: "/p", branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
-    } }));
-    await loadApp(async () => [makeSession({ id: "past", endedAt: 5000 })], gitChanges);
+  // I1: whichever view a row opens, it renders *underneath* this
+  // full-screen overlay unless the overlay is closed first — the click
+  // then looks like it did nothing. A row now opens the Session
+  // transcript rather than the Changes view, so this checks the same
+  // scrim invariant against the new destination.
+  it("closes on clicking a history row, so the view underneath is not hidden by the scrim", async () => {
+    const getSessionLog = vi.fn(async () => "resumed output\n");
+    await loadApp(
+      async () => [makeSession({ id: "past", endedAt: 5000 })],
+      undefined,
+      getSessionLog,
+    );
 
     document.getElementById("history-button")?.click();
     await Promise.resolve();
@@ -318,29 +352,38 @@ describe("history panel", () => {
     expect(overlayEl().hidden).toBe(true);
     await Promise.resolve();
     await Promise.resolve();
-    expect(gitChanges).toHaveBeenCalledWith("past");
-    expect(document.getElementById("view-changes")?.hidden).toBe(false);
+    expect(getSessionLog).toHaveBeenCalledWith("past");
+    expect(document.getElementById("view-session")?.hidden).toBe(false);
+    expect(FakeTerminal.last?.text).toBe("resumed output\n");
   });
 
-  // The app's primary language is Arabic (MESSAGES.PRIMARY_LANGUAGE), so the
-  // history badge is expected in MSA's counted-noun forms, not English —
-  // this pins the call site's wiring, not just sessionsCount() itself
-  // (already covered by messages.test.ts).
-  it("shows the Arabic singular form 'جلسة واحدة' for a single past session, wired through PRIMARY_LANGUAGE", async () => {
+  // What this pins is the CALL SITE's wiring — that the badge is built by
+  // sessionsCount() at the app's configured primary language — not the
+  // strings themselves, which messages.test.ts already covers in both
+  // languages (including MSA's counted-noun forms). Asserting through
+  // MESSAGES rather than a hardcoded literal is what keeps it that way:
+  // PRIMARY_LANGUAGE flipped to English at the user's request, and a test
+  // that hardcoded the Arabic output would have failed for the wiring
+  // being right.
+  it("builds the singular badge through sessionsCount at PRIMARY_LANGUAGE", async () => {
     await loadApp(async () => [makeSession()]);
     document.getElementById("history-button")?.click();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("history-count")?.textContent).toBe("جلسة واحدة");
+    expect(document.getElementById("history-count")?.textContent).toBe(
+      MESSAGES.sessionsCount(1, PRIMARY_LANGUAGE),
+    );
   });
 
-  it("shows the Arabic zero form 'لا جلسات' for no past sessions", async () => {
+  it("builds the zero badge through sessionsCount at PRIMARY_LANGUAGE", async () => {
     await loadApp(async () => []);
     document.getElementById("history-button")?.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(document.getElementById("history-count")?.textContent).toBe("لا جلسات");
+    expect(document.getElementById("history-count")?.textContent).toBe(
+      MESSAGES.sessionsCount(0, PRIMARY_LANGUAGE),
+    );
   });
 });
 
@@ -568,5 +611,125 @@ describe("history row recorded change-count badge", () => {
 
     const row = document.querySelector("#history-list .session");
     expect(row?.querySelector(".session__diff")).toBeNull();
+  });
+});
+
+// The user's report that started this: "when i start a session it's not
+// opening it so i can see it". Starting a session is an explicit request to
+// watch it work, so its transcript opens by itself — but only for a
+// genuinely new session, never on a state change or a git-count update,
+// which would yank the view away mid-read.
+describe("opening a session", () => {
+  it("opens the transcript of a newly started session", async () => {
+    const getSessionLog = vi.fn(async () => "booting…\n");
+    const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([makeSession({ id: "fresh" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("view-session")?.hidden).toBe(false);
+    expect(getSessionLog).toHaveBeenCalledWith("fresh");
+    expect(FakeTerminal.last?.text).toBe("booting…\n");
+  });
+
+  it("does not reopen the view when an already-known session merely changes state", async () => {
+    const getSessionLog = vi.fn(async () => "");
+    const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([makeSession({ id: "s1", state: "starting" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getSessionLog).toHaveBeenCalledTimes(1);
+
+    onSessions?.([makeSession({ id: "s1", state: "running" })]);
+    await Promise.resolve();
+
+    expect(getSessionLog).toHaveBeenCalledTimes(1);
+    // The header still tracks the session it is showing.
+    expect(document.getElementById("session-view-state")?.textContent).toBe("running");
+  });
+
+  it("opens the most recently started one when several appear at once", async () => {
+    const getSessionLog = vi.fn(async () => "");
+    const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([
+      makeSession({ id: "older", startedAt: 1000 }),
+      makeSession({ id: "newer", startedAt: 2000 }),
+    ]);
+    await Promise.resolve();
+
+    expect(getSessionLog).toHaveBeenCalledTimes(1);
+    expect(getSessionLog).toHaveBeenCalledWith("newer");
+  });
+
+  it("opens a session's transcript when its row is clicked", async () => {
+    const getSessionLog = vi.fn(async () => "row click\n");
+    const { onSessions, onChangeCounts } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+    getSessionLog.mockClear();
+    onChangeCounts?.([]);
+
+    document.querySelector<HTMLElement>("#sessions .session")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getSessionLog).toHaveBeenCalledWith("s1");
+    expect(document.getElementById("view-session")?.hidden).toBe(false);
+  });
+
+  // The row opens the transcript, so the diff badge is what keeps the
+  // Changes view one click away. Without stopPropagation the row's own
+  // handler fires straight after and replaces the diff with the transcript.
+  it("opens the Changes view from the diff badge, not the transcript", async () => {
+    const gitChanges = vi.fn(async () => ({
+      ok: true,
+      value: {
+        session: { id: "s1", project: "acme", projectPath: "/p", agentId: "claude-mm", lastActivityAt: 1000, endedAt: undefined },
+        changes: { repoPath: "/p", branch: "main", detached: false, files: [], insertions: 3, deletions: 1 },
+      },
+    }));
+    const { onSessions, onChangeCounts } = await loadApp(undefined, gitChanges);
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([
+      {
+        sessionId: "s1",
+        project: "acme",
+        repoPath: "/p",
+        branch: "main",
+        detached: false,
+        files: 1,
+        insertions: 3,
+        deletions: 1,
+      },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const badge = document.querySelector<HTMLElement>("#sessions .session__diff");
+    expect(badge).not.toBeNull();
+    badge?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(gitChanges).toHaveBeenCalledWith("s1");
+    expect(document.getElementById("view-changes")?.hidden).toBe(false);
+    expect(document.getElementById("view-session")?.hidden).toBe(true);
+  });
+
+  it("streams later output into the open transcript", async () => {
+    const { onSessions, onSessionOutput } = await loadApp(undefined, undefined, async () => "");
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+    onSessionOutput?.({ sessionId: "s1", chunk: "live line\n" });
+
+    expect(FakeTerminal.last?.text).toBe("live line\n");
   });
 });

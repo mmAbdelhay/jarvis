@@ -8,6 +8,7 @@
   content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:"
 />
 <title>Jarvis</title>
+<link rel="stylesheet" href="vendor/xterm.css" />
 <link
   rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap"
@@ -770,6 +771,94 @@
      grid. Both rules stay inert together while `hidden` is present. */
   .main--changes:not([hidden]) { display: flex; }
 
+  /* The Session view — the live transcript of one agent process. Same
+     flush-to-the-edge frame as .main--changes above, and the same
+     [hidden] cascade discipline: NO `display` in this base rule, because
+     an author rule here would out-cascade the UA's `[hidden]{display:none}`
+     and leave the view permanently on screen (see
+     view-display-css.test.ts, which pins this shape). */
+  .main--session {
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .main--session:not([hidden]) { display: flex; }
+
+  .session-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .session-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+
+  /* The terminal host. xterm.js paints into this and manages its own
+     scrolling, selection and scrollback, so nothing here may set overflow
+     or line-height — the emulator measures the box and lays out character
+     cells to fit. `dir=ltr` is pinned in the markup: this is a terminal
+     grid, and an Arabic word inside it must not flip the whole screen. */
+  .session-terminal {
+    flex-grow: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 10px 14px;
+    background: var(--ground);
+  }
+
+  /* xterm renders its own scrollbar inside .xterm-viewport; styled to match
+     the dashboard rather than left as the platform default. */
+  .session-terminal .xterm-viewport::-webkit-scrollbar { width: 9px; }
+  .session-terminal .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+  .session-terminal .xterm-viewport::-webkit-scrollbar-thumb {
+    background: #1c3f49;
+    border-radius: 5px;
+  }
+
+  .session__diff--clickable { cursor: pointer; }
+
+  /* Shown before any session has been opened, so the view is never an
+     unexplained black rectangle. */
+  .session-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  /* Says where a spoken utterance will land while this view is open. It is
+     the one thing about voice that is not obvious from the terminal
+     itself, and getting it wrong means talking to the wrong agent. */
+  .session-voice {
+    font-size: 10.5px;
+    color: var(--accent);
+    background: #0e2029;
+    border: 1px solid #1c3f49;
+    border-radius: 5px;
+    padding: 3px 9px;
+  }
+
+  .session-voice--listening {
+    color: var(--ground);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .session-log-wrap {
+    position: relative;
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+  }
+
   .changes-head {
     display: flex;
     align-items: center;
@@ -1067,6 +1156,7 @@
     <div class="nav">
       <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button">Dashboard</button>
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
+      <button id="nav-session" class="nav-btn" type="button">Session</button>
     </div>
     <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
     <div class="spacer"></div>
@@ -1082,7 +1172,7 @@
     </button>
   </div>
 
-  <div class="main">
+  <div class="main" id="view-dashboard">
 
     <div class="col-left">
 
@@ -1246,6 +1336,26 @@
           <button id="commit-button" class="commit-btn" type="button">Commit</button>
         </div>
       </div>
+    </div>
+
+  </div>
+
+  <div class="main main--session" id="view-session" hidden>
+
+    <div class="session-head">
+      <div id="session-title" class="session-title">Session</div>
+      <div id="session-view-project" class="chip mono"></div>
+      <div id="session-view-path" class="mono changes-muted"></div>
+      <div class="spacer"></div>
+      <div id="session-voice" class="session-voice mono" hidden></div>
+      <div id="session-view-state" class="mono changes-dim"></div>
+      <div class="vrule"></div>
+      <div id="session-view-agent" class="mono changes-muted"></div>
+    </div>
+
+    <div class="session-log-wrap">
+      <div id="session-terminal" class="session-terminal" dir="ltr"></div>
+      <div id="session-empty" class="session-empty" hidden></div>
     </div>
 
   </div>

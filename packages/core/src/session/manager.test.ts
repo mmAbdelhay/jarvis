@@ -26,11 +26,13 @@ const agent: AgentConfig = { id: "claude-mm", command: "claude-mm", model: "opus
 class FakeProcess implements ProcessHandle {
   written: string[] = [];
   killed = false;
+  resizes: { cols: number; rows: number }[] = [];
   #output: ((chunk: string) => void)[] = [];
   #exit: ((code: number) => void)[] = [];
 
   write(data: string): void { this.written.push(data); }
   kill(): void { this.killed = true; }
+  resize(cols: number, rows: number): void { this.resizes.push({ cols, rows }); }
   onOutput(listener: (chunk: string) => void): void { this.#output.push(listener); }
   onExit(listener: (code: number) => void): void { this.#exit.push(listener); }
 
@@ -97,7 +99,9 @@ describe("SessionManager", () => {
     const manager = new SessionManager(spawner);
     const session = manager.start({ project: "p", projectPath: "/p", agent });
     manager.send(session.id, "run the tests");
-    expect(fake.written).toEqual(["run the tests\n"]);
+    // CR, not LF: sessions run under a pty, where the Enter key sends a
+    // carriage return and an LF leaves the line unsubmitted.
+    expect(fake.written).toEqual(["run the tests\r"]);
   });
 
   it("throws when sending to an unknown session", () => {
@@ -260,5 +264,258 @@ describe("SessionManager", () => {
       expect(row?.exitCode).toBe(0);
       expect(row?.endedAt).toEqual(expect.any(Number));
     });
+  });
+
+  describe("output transcript", () => {
+    it("retains output so a session opened mid-run shows what came before", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput("first line\n");
+      fake.emitOutput("second line\n");
+
+      expect(manager.log(session.id)).toBe("first line\nsecond line\n");
+    });
+
+    it("keeps the transcript after the session has exited", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput("crashed: missing file\n");
+      fake.emitExit(1);
+
+      expect(manager.log(session.id)).toBe("crashed: missing file\n");
+    });
+
+    it("returns an empty transcript for an unknown session instead of throwing", () => {
+      const manager = new SessionManager(spawner);
+      expect(manager.log("no-such-session")).toBe("");
+    });
+
+    it("streams each chunk to output subscribers tagged with its session", () => {
+      const manager = new SessionManager(spawner);
+      const seen: { sessionId: string; chunk: string }[] = [];
+      manager.onOutput((output) => seen.push(output));
+
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+      fake.emitOutput("hello\n");
+
+      expect(seen).toEqual([{ sessionId: session.id, chunk: "hello\n" }]);
+    });
+
+    it("stops delivering to a subscriber after it unsubscribes", () => {
+      const manager = new SessionManager(spawner);
+      const seen: string[] = [];
+      const off = manager.onOutput((output) => seen.push(output.chunk));
+
+      manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+      fake.emitOutput("before\n");
+      off();
+      fake.emitOutput("after\n");
+
+      expect(seen).toEqual(["before\n"]);
+    });
+
+    // The cap must bound memory without ever costing the newest output —
+    // which is the part a user opening a running session is looking at.
+    it("drops the oldest output once the retained transcript passes its cap", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      const chunk = `${"x".repeat(64 * 1024)}\n`;
+      for (let i = 0; i < 8; i += 1) fake.emitOutput(chunk);
+      fake.emitOutput("newest\n");
+
+      const log = manager.log(session.id);
+      expect(log.length).toBeLessThanOrEqual(256 * 1024);
+      expect(log.endsWith("newest\n")).toBe(true);
+    });
+
+    // A single chunk bigger than the whole cap must not be discarded
+    // wholesale — its tail is the newest thing the agent printed.
+    it("truncates a single oversized chunk from its front rather than dropping it", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput(`${"y".repeat(300 * 1024)}TAIL`);
+
+      const log = manager.log(session.id);
+      expect(log.length).toBe(256 * 1024);
+      expect(log.endsWith("TAIL")).toBe(true);
+    });
+  });
+});
+
+describe("terminal input and size", () => {
+  // These blocks sit outside the main `describe`, so they carry their own
+  // fixture rather than borrowing its `beforeEach`.
+  let fake: FakeProcess;
+  let spawner: Spawner;
+
+  beforeEach(() => {
+    fake = new FakeProcess();
+    spawner = () => fake;
+  });
+
+  it("writes raw input through without adding a newline", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    manager.write(session.id, "ls -la");
+
+    expect(fake.written).toEqual(["ls -la"]);
+  });
+
+  // Control bytes are the difference between a terminal and a text box.
+  it("passes control bytes through unchanged", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    const ctrlC = String.fromCharCode(3);
+    manager.write(session.id, ctrlC);
+
+    expect(fake.written).toEqual([ctrlC]);
+  });
+
+  // Keystrokes can be in flight from the UI at the instant a session ends,
+  // and losing that race is not an error worth surfacing.
+  it("ignores input for an unknown session instead of throwing", () => {
+    const manager = new SessionManager(spawner);
+    expect(() => manager.write("no-such-session", "x")).not.toThrow();
+  });
+
+  it("passes a resize to the session's terminal", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    manager.resize(session.id, 120, 40);
+
+    expect(fake.resizes).toEqual([{ cols: 120, rows: 40 }]);
+  });
+
+  it("ignores a resize for an unknown session", () => {
+    const manager = new SessionManager(spawner);
+    expect(() => manager.resize("no-such-session", 80, 24)).not.toThrow();
+  });
+
+  // Not every Spawner runs its child under a pty — a piped process has no
+  // window size to change, and `resize` is optional for exactly that case.
+  it("ignores a resize for a process with no terminal", () => {
+    const piped: ProcessHandle = {
+      write: () => {},
+      kill: () => {},
+      onOutput: () => {},
+      onExit: () => {},
+    };
+    const manager = new SessionManager(() => piped);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    expect(() => manager.resize(session.id, 80, 24)).not.toThrow();
+  });
+});
+
+describe("summary from terminal output", () => {
+  // These blocks sit outside the main `describe`, so they carry their own
+  // fixture rather than borrowing its `beforeEach`.
+  let fake: FakeProcess;
+  let spawner: Spawner;
+
+  beforeEach(() => {
+    fake = new FakeProcess();
+    spawner = () => fake;
+  });
+
+  const ESC = String.fromCharCode(27);
+
+  // An agent under a pty draws its whole UI out of escape sequences. A
+  // summary taken from the raw stream would be cursor-positioning noise.
+  it("strips escape sequences out of the row summary", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    fake.emitOutput(`${ESC}[2K${ESC}[1;36mReading Checkout.php${ESC}[0m\r\n`);
+
+    expect(manager.get(session.id)?.summary).toBe("Reading Checkout.php");
+  });
+
+  it("splits on a bare carriage return, as a redrawing UI emits", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    fake.emitOutput("first pass\rsecond pass\r\n");
+
+    expect(manager.get(session.id)?.summary).toBe("second pass");
+  });
+
+  // A terminal UI redraws its frame constantly; "│" summarises nothing.
+  it("skips lines that are only box-drawing chrome", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    fake.emitOutput("Running tests\r\n");
+    fake.emitOutput("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\r\n");
+
+    expect(manager.get(session.id)?.summary).toBe("Running tests");
+  });
+
+  it("keeps a line that merely contains a box-drawing character", () => {
+    const manager = new SessionManager(spawner);
+    const session = manager.start({
+      project: "acme",
+      projectPath: "/tmp/acme",
+      agent,
+    });
+
+    fake.emitOutput("\u2502 Welcome to Claude Code \u2502\r\n");
+
+    expect(manager.get(session.id)?.summary).toBe("\u2502 Welcome to Claude Code \u2502");
   });
 });

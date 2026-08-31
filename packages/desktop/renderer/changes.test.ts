@@ -9,6 +9,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitFileChange, GitFileDiff } from "@jarvis/core";
 import type { ChangesView, GitViewResult, RendererApi } from "../src/ipc.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { detectLanguage, formatAgo } from "./format.js";
 
 // Full RendererApi stub: every member defaults to a vi.fn() so a test that
 // only cares about one or two bridge calls never has to enumerate the rest,
@@ -35,6 +37,11 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitSetStaged: vi.fn(async () => notStubbed),
     gitCommit: vi.fn(async () => notStubbed),
     onChangeCounts: vi.fn(),
+    onSessionOutput: vi.fn(),
+    getSessionLog: vi.fn(async () => ""),
+    sendSessionInput: vi.fn(async () => {}),
+    resizeSession: vi.fn(async () => {}),
+    setVoiceTarget: vi.fn(async () => {}),
     onProviders: vi.fn(),
     refreshProviders: vi.fn(async () => {}),
   };
@@ -155,6 +162,12 @@ beforeEach(() => {
 });
 
 describe("openChanges", () => {
+  // Pinned rather than read back from Date.now() at assertion time: the
+  // header's "written by X · 6m ago" is built from a clock reading taken
+  // inside openChanges, and re-reading the clock here can land in the next
+  // whole minute and flake.
+  const ACTIVE_AT = Date.now() - 6 * 60_000;
+
   it("names the session, project path, branch and totals in the header", async () => {
     const jarvis = stubJarvis({
       gitChanges: vi.fn(async () => ({
@@ -165,7 +178,7 @@ describe("openChanges", () => {
             project: "acme",
             projectPath: "~/projects/acme",
             agentId: "claude-acme",
-            lastActivityAt: Date.now() - 6 * 60_000,
+            lastActivityAt: ACTIVE_AT,
             endedAt: undefined,
           },
           changes: {
@@ -189,7 +202,11 @@ describe("openChanges", () => {
     expect(document.getElementById("changes-add")?.textContent).toBe("+128");
     expect(document.getElementById("changes-del")?.textContent).toBe("−34");
     expect(document.getElementById("changes-by")?.textContent).toBe(
-      "بواسطة claude-acme · قبل 6 دقائق",
+      MESSAGES.writtenBy(
+        "claude-acme",
+        formatAgo(ACTIVE_AT, Date.now(), PRIMARY_LANGUAGE),
+        PRIMARY_LANGUAGE,
+      ),
     );
     expect(jarvis.gitChanges).toHaveBeenCalledWith("s1");
   });
@@ -427,12 +444,18 @@ describe("the P22 current-state notice", () => {
     const notice = document.getElementById("changes-stale-notice");
     expect(notice?.hidden).toBe(false);
     expect(notice?.textContent).toContain("claude-acme");
-    // The app's primary language is Arabic (PRIMARY_LANGUAGE): the notice
-    // is renderer-generated, not echoed from a main-process failure, so it
-    // follows PRIMARY_LANGUAGE the same way app.ts's history-count badge
-    // does, not English.
-    expect(notice?.dir).toBe("rtl");
-    expect(notice?.textContent).toContain("انتهت هذه الجلسة");
+    // The notice is renderer-generated, not echoed from a main-process
+    // failure, so it follows PRIMARY_LANGUAGE the same way app.ts's
+    // history-count badge does. Asserted through MESSAGES rather than a
+    // literal so this keeps testing the wiring when the default flips.
+    // Asserted against the notice's own text rather than against
+    // PRIMARY_LANGUAGE directly: PRIMARY_LANGUAGE is a literal type, so
+    // `=== "ar"` is a compile-time-false comparison, and "the direction
+    // matches the language of the words shown" is the real invariant.
+    expect(notice?.dir).toBe(detectLanguage(notice?.textContent ?? "") === "ar" ? "rtl" : "ltr");
+    expect(notice?.textContent).toBe(
+      MESSAGES.changesShowCurrentState("claude-acme", PRIMARY_LANGUAGE),
+    );
   });
 
   it("stays hidden for a session that is still live", async () => {
@@ -504,18 +527,32 @@ describe("the P22 current-state notice", () => {
 // the commit-button-label and TESTS-group-label coverage already updated
 // above to expect Arabic (this app's PRIMARY_LANGUAGE).
 describe("applyStaticChrome", () => {
-  it("replaces the placeholder English nav labels, title, section label, diff-mode toggle and commit placeholder with Arabic", async () => {
+  it("fills every placeholder label from MESSAGES at the primary language", async () => {
     const { applyStaticChrome } = await import("./changes.js");
     applyStaticChrome();
 
-    expect(document.getElementById("nav-dashboard")?.textContent).toBe("اللوحة");
-    expect(document.getElementById("nav-changes")?.textContent).toBe("التغييرات");
-    expect(document.getElementById("changes-files-label")?.textContent).toBe("الملفات المعدّلة");
-    expect(document.getElementById("changes-path-branch-sep")?.textContent).toBe("على");
-    expect(document.getElementById("diff-mode-side")?.textContent).toBe("جنبًا إلى جنب");
-    expect(document.getElementById("diff-mode-unified")?.textContent).toBe("موحّد");
+    expect(document.getElementById("nav-dashboard")?.textContent).toBe(
+      MESSAGES.navDashboard(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("nav-changes")?.textContent).toBe(
+      MESSAGES.navChanges(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("changes-files-label")?.textContent).toBe(
+      MESSAGES.changedFilesLabel(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("changes-path-branch-sep")?.textContent).toBe(
+      MESSAGES.pathBranchSeparator(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("diff-mode-side")?.textContent).toBe(
+      MESSAGES.sideBySideLabel(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("diff-mode-unified")?.textContent).toBe(
+      MESSAGES.unifiedLabel(PRIMARY_LANGUAGE),
+    );
     const message = document.getElementById("commit-message");
-    expect(message instanceof HTMLInputElement && message.placeholder).toBe("رسالة الحفظ…");
+    expect(message instanceof HTMLInputElement && message.placeholder).toBe(
+      MESSAGES.commitMessagePlaceholder(PRIMARY_LANGUAGE),
+    );
   });
 
   it("does not throw against app.test.ts's minimal DOM, which lacks this markup", async () => {
@@ -539,20 +576,25 @@ describe("BEFORE/AFTER pane headers", () => {
     });
 
     const headers = [...document.querySelectorAll(".pane-head")].map((el) => el.textContent);
-    expect(headers).toEqual(["قبل", "بعد"]);
+    expect(headers).toEqual([
+      MESSAGES.beforeColumnLabel(PRIMARY_LANGUAGE),
+      MESSAGES.afterColumnLabel(PRIMARY_LANGUAGE),
+    ]);
   });
 });
 
 describe("stage/unstage aria-labels", () => {
-  it("names the action in Arabic, matching the app's primary language", async () => {
+  it("names the action at the app's primary language", async () => {
     await openChangesWith([
       { path: "a.php", status: "M", insertions: 1, deletions: 0, staged: false },
       { path: "b.php", status: "M", insertions: 1, deletions: 0, staged: true },
     ]);
 
     const buttons = [...document.querySelectorAll<HTMLButtonElement>(".file-stage")];
-    expect(buttons[0]?.getAttribute("aria-label")).toBe("تجهيز الملف");
-    expect(buttons[1]?.getAttribute("aria-label")).toBe("إلغاء تجهيز الملف");
+    expect(buttons[0]?.getAttribute("aria-label")).toBe(MESSAGES.stageFileLabel(PRIMARY_LANGUAGE));
+    expect(buttons[1]?.getAttribute("aria-label")).toBe(
+      MESSAGES.unstageFileLabel(PRIMARY_LANGUAGE),
+    );
   });
 });
 
@@ -605,7 +647,7 @@ describe("the changed-files panel", () => {
   it("groups test files under a TESTS label, as the artboard does", async () => {
     await openChangesWith(FILES);
     const labels = [...document.querySelectorAll(".file-group")].map((el) => el.textContent);
-    expect(labels).toEqual(["الاختبارات"]);
+    expect(labels).toEqual([MESSAGES.testsGroupLabel(PRIMARY_LANGUAGE)]);
     const rows = [...document.querySelectorAll(".file-row .file-name")].map((el) => el.textContent);
     expect(rows[3]).toBe("tests/RetryPolicyTest.php");
   });
@@ -622,7 +664,7 @@ describe("the changed-files panel", () => {
       { path: "spec/checkout_spec.rb", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
     const labels = [...document.querySelectorAll(".file-group")].map((el) => el.textContent);
-    expect(labels).toEqual(["الاختبارات"]);
+    expect(labels).toEqual([MESSAGES.testsGroupLabel(PRIMARY_LANGUAGE)]);
   });
 
   it("selects the first file by default and marks the row selected", async () => {
@@ -826,10 +868,12 @@ describe("the diff panes", () => {
 
   // These three notices are renderer-generated (never echoed from a main-
   // process failure), so — like ruling P22's changesShowCurrentState —
-  // they follow PRIMARY_LANGUAGE (Arabic), not English.
+  // they follow PRIMARY_LANGUAGE, whatever it is set to.
   it("says so plainly for a binary file instead of rendering nothing", async () => {
     await openChangesWithDiff({ path: "logo.png", binary: true, hunks: [] });
-    expect(document.getElementById("diff-body")?.textContent).toContain("ملف ثنائي");
+    expect(document.getElementById("diff-body")?.textContent).toContain(
+      MESSAGES.diffBinaryFile(PRIMARY_LANGUAGE),
+    );
   });
 
   // Ruling P8: `tooLarge` means the content was never read at all, which is
@@ -838,13 +882,15 @@ describe("the diff panes", () => {
   it("says the file is too large, distinctly from binary, when tooLarge is set", async () => {
     await openChangesWithDiff({ path: "generated.sql", binary: false, tooLarge: true, hunks: [] });
     const text = document.getElementById("diff-body")?.textContent ?? "";
-    expect(text).toContain("كبير جدًا");
-    expect(text).not.toContain("ملف ثنائي");
+    expect(text).toContain(MESSAGES.diffTooLarge(PRIMARY_LANGUAGE));
+    expect(text).not.toContain(MESSAGES.diffBinaryFile(PRIMARY_LANGUAGE));
   });
 
   it("says there are no changes for a file with an empty diff", async () => {
     await openChangesWithDiff({ path: "a.php", binary: false, hunks: [] });
-    expect(document.getElementById("diff-body")?.textContent).toContain("لا توجد تغييرات");
+    expect(document.getElementById("diff-body")?.textContent).toContain(
+      MESSAGES.diffNoChanges(PRIMARY_LANGUAGE),
+    );
   });
 
   it("renders diff content as text, never as markup", async () => {
@@ -1149,14 +1195,14 @@ describe("the commit bar", () => {
       { path: "b.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
       { path: "c.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملفين");
+    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(2, PRIMARY_LANGUAGE));
   });
 
   it("uses the singular for one staged file", async () => {
     await openChangesWith([
       { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملف واحد");
+    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE));
   });
 
   it("is disabled with nothing staged", async () => {
@@ -1195,7 +1241,7 @@ describe("the commit bar", () => {
         gitSetStaged: vi.fn(async () => ({ ok: true as const, value: null })),
       },
     );
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ");
+    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE));
 
     // gitChanges() is re-read after the toggle resolves; simulate the file
     // now being staged, the same way openChanges's real refetch would.
@@ -1227,7 +1273,7 @@ describe("the commit bar", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملف واحد");
+    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE));
   });
 
   it("commits the typed message and clears the field on success", async () => {
@@ -1310,7 +1356,7 @@ describe("the commit bar", () => {
     // commit resolves) to redraw the file list, counts and commit button
     // from whatever the repository actually looks like now.
     expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ");
+    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE));
   });
 
   it("shows a commit failure and keeps the message so it is not lost", async () => {

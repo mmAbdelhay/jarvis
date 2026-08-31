@@ -13,6 +13,14 @@ import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(fileURLToPath(new URL("./app.ts", import.meta.url)), "utf8");
 const changesSource = readFileSync(fileURLToPath(new URL("./changes.ts", import.meta.url)), "utf8");
+// session-view.ts's own `$` returns null instead of throwing, so a typo
+// there fails *silently* — a pane that simply never fills in — which is
+// harder to notice than the thrown "Missing element #x", not easier. Same
+// contract, same check.
+const sessionViewSource = readFileSync(
+  fileURLToPath(new URL("./session-view.ts", import.meta.url)),
+  "utf8",
+);
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -26,9 +34,13 @@ function idsPassedTo$(source: string): string[] {
 }
 
 describe("$() id contract", () => {
-  const ids = [...idsPassedTo$(appSource), ...idsPassedTo$(changesSource)];
+  const ids = [
+    ...idsPassedTo$(appSource),
+    ...idsPassedTo$(changesSource),
+    ...idsPassedTo$(sessionViewSource),
+  ];
 
-  it("finds at least one $() call in app.ts and changes.ts (sanity check the extraction itself works)", () => {
+  it("finds at least one $() call across the renderer modules (sanity check the extraction itself works)", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 

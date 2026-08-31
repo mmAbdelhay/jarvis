@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderStatus, RateWindow } from "@jarvis/core";
 import { remainingPercent as coreRemainingPercent } from "@jarvis/core";
 import { remainingPercent as rendererRemainingPercent, renderProviders, wireProvidersPanel } from "./providers.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { formatAgo } from "./format.js";
 
 const NOW = Date.parse("2026-08-31T12:20:00.000Z");
 
@@ -87,9 +89,9 @@ describe("renderProviders", () => {
   // three distinctly worded notes), matching what the panel actually shows.
   it("says which kind of unknown it is", () => {
     for (const [reason, needle] of [
-      ["unsupported", "لا يوفّر قراءة"],
-      ["unavailable", "تعذّرت قراءة"],
-      ["never-read", "لم تُقرأ السعة"],
+      ["unsupported", MESSAGES.capacityUnsupported(PRIMARY_LANGUAGE)],
+      ["unavailable", MESSAGES.capacityUnavailable(PRIMARY_LANGUAGE)],
+      ["never-read", MESSAGES.capacityNeverRead(PRIMARY_LANGUAGE)],
     ] as const) {
       layoutDom();
       renderProviders([status({ capacity: { state: "unknown", reason } })], NOW);
@@ -114,8 +116,9 @@ describe("renderProviders", () => {
     renderProviders([old], NOW);
     const note = document.querySelector(".provider__note");
     expect(note?.classList.contains("provider__note--stale")).toBe(true);
-    // Reuses formatAgo, which is already bilingual and P30-correct.
-    expect(note?.textContent).toContain("قبل ساعة");
+    // Reuses formatAgo, which is already bilingual and P30-correct — so
+    // this asserts through it rather than against one language's literal.
+    expect(note?.textContent).toContain(formatAgo(NOW - 90 * 60_000, NOW, PRIMARY_LANGUAGE));
   });
 
   it("colours the health dot by state and never drops the row when health is unknown", () => {
@@ -140,7 +143,9 @@ describe("renderProviders", () => {
 
   it("says so plainly when no accounts are configured", () => {
     renderProviders([], NOW);
-    expect(document.querySelector("#providers")?.textContent).toContain("لا توجد");
+    expect(document.querySelector("#providers")?.textContent).toContain(
+      MESSAGES.providersEmpty(PRIMARY_LANGUAGE),
+    );
   });
 });
 
