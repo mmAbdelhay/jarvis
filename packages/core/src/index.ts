@@ -16,6 +16,8 @@ export * from "./providers/types.js";
 export * from "./providers/store.js";
 export * from "./providers/messages.js";
 export * from "./providers/monitor.js";
+export * from "./workspace/types.js";
 export * from "./workspace/url.js";
+export * from "./workspace/tabs.js";
 export * from "./greeting/greeting.js";
 export * from "./greeting/scan.js";
