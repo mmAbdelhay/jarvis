@@ -1,4 +1,4 @@
-import type { TabId, TabPatch, WorkspaceState, WorkspaceTab } from "./types.js";
+import type { TabId, TabKind, TabPatch, WorkspaceState, WorkspaceTab } from "./types.js";
 
 /**
  * The tab model, pure. Which tabs exist, which is active, and what each one
@@ -35,11 +35,12 @@ export class TabStore {
     return tab === undefined ? undefined : { ...tab };
   }
 
-  open(project: string, url: string): WorkspaceTab {
+  open(project: string, url: string, kind: TabKind = "web"): WorkspaceTab {
     const tab: WorkspaceTab = {
       id: this.#nextId(),
       project,
       url,
+      kind,
       title: "",
       loading: true,
       canGoBack: false,

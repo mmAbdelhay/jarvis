@@ -87,6 +87,7 @@ function tab(overrides: Partial<WorkspaceState["tabs"][number]> = {}) {
     id: "tab-1",
     project: "acme",
     url: "https://github.com",
+    kind: "web" as const,
     title: "GitHub",
     loading: false,
     canGoBack: false,

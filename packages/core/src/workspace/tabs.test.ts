@@ -22,6 +22,7 @@ describe("TabStore", () => {
           id: "tab-1",
           project: "acme",
           url: "https://example.com",
+          kind: "web",
           title: "",
           loading: true,
           canGoBack: false,
@@ -31,6 +32,20 @@ describe("TabStore", () => {
       ],
       activeTabId: "tab-1",
     });
+  });
+
+  it("defaults a tab's kind to web", () => {
+    const tabs = store();
+    const tab = tabs.open("acme", "https://example.com");
+
+    expect(tab.kind).toBe("web");
+  });
+
+  it("opens a tab with an explicit kind", () => {
+    const tabs = store();
+    const tab = tabs.open("acme", "http://127.0.0.1:9001", "editor");
+
+    expect(tab.kind).toBe("editor");
   });
 
   it("keeps tabs in the order they were opened", () => {
