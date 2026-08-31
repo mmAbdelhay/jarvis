@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
 import {
@@ -14,18 +16,23 @@ import {
   MacSpeech,
   createBrain,
   createCapacityReader,
+  createCodeServerManager,
   createDocReader,
   createGitProvider,
   createMetricsReader,
   createPtySpawner,
+  createRealCodeServerSpawner,
   createSqliteSessionStore,
+  findFreePort,
   readStatusPage,
   runCommand,
   transcribe,
+  waitUntilReady,
 } from "@jarvis/platform";
 import {
   buildWiring,
   createDocsHandlers,
+  createEditorHandlers,
   createGitHandlers,
   PROVIDER_HEALTH_INTERVAL_MS,
 } from "./ipc.js";
@@ -175,6 +182,23 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // One code-server process per project, started lazily the first time
+    // its editor is opened. Jarvis-managed profile directories, separate
+    // from anywhere the user's own VS Code (if any) keeps its own settings.
+    const codeServerRoot = join(homedir(), ".config/jarvis/code-server");
+    const codeServer = createCodeServerManager({
+      spawn: createRealCodeServerSpawner(),
+      findFreePort,
+      waitUntilReady,
+      userDataDir: join(codeServerRoot, "user-data"),
+      extensionsDir: join(codeServerRoot, "extensions"),
+    });
+    const editor = createEditorHandlers({
+      codeServer,
+      projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
     const indexUrl = pathToFileURL(
       fileURLToPath(new URL("../../renderer/index.html", import.meta.url)),
     ).href;
@@ -218,6 +242,8 @@ app.whenReady().then(async () => {
       // Each hosted view is a live Chromium process; they do not go away
       // with the window on their own.
       workspace.destroy();
+      // Each open editor is a live code-server child process, same reasoning.
+      codeServer.stopAll();
     });
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
@@ -334,6 +360,9 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("docs:taskOffsets", (_event, text: unknown) =>
       docs.taskOffsets(typeof text === "string" ? text : ""),
+    );
+    ipcMain.handle("editor:open", (_event, project: unknown) =>
+      editor.open(typeof project === "string" ? project : ""),
     );
     ipcMain.handle("projects:list", () => Object.keys(config.projects));
 

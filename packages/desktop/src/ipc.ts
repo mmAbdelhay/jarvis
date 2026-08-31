@@ -18,7 +18,7 @@ import {
   type DocEntry,
   type WorkspaceState,
 } from "@jarvis/core";
-import type { DocFailureCode, DocReader } from "@jarvis/platform";
+import type { CodeServerManager, DocFailureCode, DocReader } from "@jarvis/platform";
 import { MESSAGES } from "./messages.js";
 
 export type VoiceNotice = { text: string; language: "ar" | "en" };
@@ -327,6 +327,10 @@ export type RendererApi = {
   parseDoc(text: string): Promise<DocBlock[]>;
   readDocRaw(project: string, path: string): Promise<GitViewResult<string>>;
   taskOffsets(text: string): Promise<number[]>;
+  /** Ensures a code-server instance is running for `project` and returns
+   *  its URL — call openTab(project, url) with the result to actually show
+   *  it; this call alone does not open a tab. */
+  openEditor(project: string): Promise<GitViewResult<string>>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;
@@ -517,6 +521,42 @@ export function createDocsHandlers(deps: DocsHandlerDeps): DocsHandlers {
 
     taskOffsets(text) {
       return findTaskMarkerOffsets(text);
+    },
+  };
+}
+
+export type EditorHandlers = {
+  /** Ensures a code-server instance is running for `project` and returns
+   *  its URL — the renderer then opens that URL as an ordinary Workspace
+   *  browser tab (openTab), same as any other page. */
+  open(project: string): Promise<GitViewResult<string>>;
+};
+
+export type EditorHandlerDeps = {
+  codeServer: CodeServerManager;
+  /** Name to absolute path, from config. The renderer never sees a path. */
+  projects: Readonly<Record<string, string>>;
+  language: "ar" | "en";
+};
+
+export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  return {
+    async open(project) {
+      const root = isString(project) ? deps.projects[project] : undefined;
+      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+      try {
+        const result = await deps.codeServer.open(root);
+        // The manager's own failure detail is developer-facing (e.g. "did
+        // not become ready in time") — same discipline as docFailureText:
+        // wrap it behind one bilingual headline rather than surface it raw.
+        return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.docUnavailable(deps.language));
+      } catch {
+        return fail(MESSAGES.docUnavailable(deps.language));
+      }
     },
   };
 }

@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildWiring, createDocsHandlers, createGitHandlers, type WiringDeps } from "./ipc.js";
-import type { DocOutcome, DocReader } from "@jarvis/platform";
+import {
+  buildWiring,
+  createDocsHandlers,
+  createEditorHandlers,
+  createGitHandlers,
+  type WiringDeps,
+} from "./ipc.js";
+import type { CodeServerManager, DocOutcome, DocReader } from "@jarvis/platform";
 import type { DocEntry, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 
@@ -902,5 +908,106 @@ describe("buildWiring workspace", () => {
       payload: { tabs: [], activeTabId: undefined },
     });
     wiring.stop();
+  });
+});
+
+describe("editor handlers", () => {
+  function codeServer(overrides: Partial<CodeServerManager> = {}): CodeServerManager {
+    return {
+      open: () => Promise.resolve({ ok: true, url: "http://127.0.0.1:9001/?folder=%2Fp" }),
+      stopAll: () => {},
+      ...overrides,
+    };
+  }
+
+  it("opens the project's editor and returns its URL", async () => {
+    const handlers = createEditorHandlers({
+      codeServer: codeServer({
+        open: (path) => Promise.resolve({ ok: true, url: `http://127.0.0.1:9001/?folder=${path}` }),
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    expect(await handlers.open("acme")).toEqual({
+      ok: true,
+      value: "http://127.0.0.1:9001/?folder=/p/acme",
+    });
+  });
+
+  it("passes the configured root, not anything the caller supplied", async () => {
+    const opened: string[] = [];
+    const handlers = createEditorHandlers({
+      codeServer: codeServer({
+        open: (path) => {
+          opened.push(path);
+          return Promise.resolve({ ok: true, url: "http://127.0.0.1:9001" });
+        },
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    await handlers.open("acme");
+
+    expect(opened).toEqual(["/p/acme"]);
+  });
+
+  it("refuses an unknown project without starting a code-server instance", async () => {
+    let called = false;
+    const handlers = createEditorHandlers({
+      codeServer: codeServer({
+        open: () => {
+          called = true;
+          return Promise.resolve({ ok: true, url: "http://127.0.0.1:9001" });
+        },
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open("/etc");
+
+    expect(called).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a non-string project", async () => {
+    const handlers = createEditorHandlers({
+      codeServer: codeServer(),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open(undefined as unknown as string);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports a code-server failure as localised text", async () => {
+    const handlers = createEditorHandlers({
+      codeServer: codeServer({
+        open: () => Promise.resolve({ ok: false, detail: "did not become ready in time" }),
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open("acme");
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.text.length).toBeGreaterThan(0);
+  });
+
+  it("survives a code-server manager that throws", async () => {
+    const handlers = createEditorHandlers({
+      codeServer: codeServer({ open: () => Promise.reject(new Error("boom")) }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open("acme");
+
+    expect(result.ok).toBe(false);
   });
 });
