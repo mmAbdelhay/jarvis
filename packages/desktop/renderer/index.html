@@ -834,6 +834,7 @@
      below it, the classic "attached tab" look — a uniform bottom padding
      here would put a visible gap under every open tab, not just a lone +. */
   .workspace-tabs { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 6px 10px 0; }
+  .workspace-tabs[hidden] { display: none; }
 
   @keyframes workspace-tab-in {
     from { opacity: 0; transform: translateY(-3px); }

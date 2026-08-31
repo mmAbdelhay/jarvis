@@ -505,11 +505,19 @@ export function renderWorkspace(state: WorkspaceState): void {
     }
   }
 
+  // With no tabs open anywhere — not even a collapsed pill for another
+  // project — the strip has nothing in it at all. A dedicated row holding
+  // only "+" reads as an orphaned button floating above the address bar,
+  // so it folds into that row instead (at the far right, after the
+  // grown address input), and the empty strip itself is hidden rather
+  // than left showing as a bare padded band with nothing in it.
   // append() relocates a node already in the DOM rather than cloning it,
   // so "+"'s click listener (wired once in initWorkspace) comes along
-  // unchanged. Always reachable here, regardless of the active tab's
-  // kind — unlike #workspace-bar, this row never hides.
-  strip.append(newTabButton);
+  // unchanged, wherever it lands.
+  const noTabsOpenAtAll = state.tabs.length === 0;
+  strip.hidden = noTabsOpenAtAll;
+  if (noTabsOpenAtAll) $("workspace-bar").append(newTabButton);
+  else strip.append(newTabButton);
 
   const tab = activeTab();
 

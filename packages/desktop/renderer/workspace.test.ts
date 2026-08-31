@@ -277,6 +277,44 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
+  // With no tabs open anywhere (not even a collapsed pill for another
+  // project), a whole dedicated row holding nothing but + looked orphaned
+  // — floating alone above the address bar. Folded into the same row as
+  // back/forward/reload/address instead, at the far right, so there is
+  // exactly one row when there is nothing to show a real tab strip for.
+  it("moves + into the address bar, and hides the empty tab strip, when no tabs are open at all", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(true);
+    const barChildren = [...document.getElementById("workspace-bar")!.children];
+    expect(barChildren.at(-1)?.id).toBe("workspace-new-tab");
+    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("moves + back into the tab strip once a tab exists, and shows the strip again", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
+    const stripChildren = [...document.getElementById("workspace-tabs")!.children];
+    expect(stripChildren.at(-1)?.id).toBe("workspace-new-tab");
+  });
+
+  // A collapsed pill for another project is real content — the strip is
+  // not empty just because the *selected* project has nothing open, so +
+  // stays in the tab row, not folded into the address bar.
+  it("keeps + in the tab strip when another project has a collapsed pill, even with none selected", () => {
+    renderWorkspace({
+      tabs: [tab({ project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+
+    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
+    const stripChildren = [...document.getElementById("workspace-tabs")!.children];
+    expect(stripChildren.at(-1)?.id).toBe("workspace-new-tab");
+  });
+
   it("puts the active tab's URL in the address bar", () => {
     renderWorkspace({ tabs: [tab({ url: "https://example.com/a" })], activeTabId: "tab-1" });
 
