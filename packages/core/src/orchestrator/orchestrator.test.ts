@@ -713,7 +713,7 @@ describe("git tools", () => {
 
     const turn = await orchestrator.handle("وريني التغييرات", "ar");
 
-    expect(turn.text).toContain("الفرع feat/checkout-retry");
+    expect(turn.text).toContain("الفرع: feat/checkout-retry");
     expect(turn.text).toContain("الملفات المعدّلة: 1");
     expect(turn.view).toBe("changes");
   });
@@ -820,6 +820,180 @@ describe("git tools", () => {
     const turn = await orchestrator.handle("commit", "en");
 
     expect(turn.text).toContain("Write a commit message first.");
+  });
+
+  it("names the project and the file count in a commit confirmation", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [
+            { name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } },
+          ],
+        }),
+      },
+      git: fakeGitProvider({
+        commit: async () => ({ ok: true, value: { sha: "a1b2c3d", filesChanged: 4 } }),
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("احفظ التغييرات", "ar");
+
+    expect(turn.text).toContain("acme");
+    expect(turn.text).toContain("4");
+    expect(turn.text).toContain("a1b2c3d");
+  });
+
+  it("reports a git.diff failure, such as insideRepo rejecting a path escaping the repository", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [
+            { name: "git.diff", input: { sessionId: "s1", path: "../../etc/passwd" } },
+          ],
+        }),
+      },
+      git: fakeGitProvider({
+        diff: async () => ({ ok: false, error: { code: "failed", detail: "path escapes repository" } }),
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("show me ../../etc/passwd", "en");
+
+    expect(turn.text).toContain("The git command failed: path escapes repository");
+    expect(turn.view).toBeUndefined();
+    expect(turn.path).toBeUndefined();
+  });
+
+  it("still calls git.diff with an empty path rather than throwing when the model omits it", async () => {
+    const seenPaths: string[] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.diff", input: { sessionId: "s1" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        diff: async (_repoPath, path) => {
+          seenPaths.push(path);
+          return { ok: false, error: { code: "failed", detail: "no path given" } };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("show me the diff", "en");
+
+    expect(seenPaths).toEqual([""]);
+    expect(turn.text).toContain("The git command failed: no path given");
+  });
+
+  it("announces a binary diff instead of an opened diff", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.diff", input: { sessionId: "s1", path: "logo.png" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        diff: async (_repoPath, path) => ({
+          ok: true,
+          value: { path, binary: true, hunks: [] },
+        }),
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("show me logo.png", "en");
+
+    expect(turn.text).not.toContain("Opened the diff");
+    expect(turn.text).toContain("Binary");
+    expect(turn.view).toBe("changes");
+    expect(turn.path).toBe("logo.png");
+  });
+
+  it("announces a too-large diff instead of an opened diff", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.diff", input: { sessionId: "s1", path: "dump.sql" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        diff: async (_repoPath, path) => ({
+          ok: true,
+          value: { path, binary: false, tooLarge: true, hunks: [] },
+        }),
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("show me dump.sql", "en");
+
+    expect(turn.text).not.toContain("Opened the diff");
+    expect(turn.text).toContain("Too large");
+  });
+
+  it("reports a stage failure inside git.commit instead of committing anyway", async () => {
+    const committed: string[] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "fix" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        stage: async () => ({ ok: false, error: { code: "failed", detail: "permission denied" } }),
+        commit: async (_repoPath, message) => {
+          committed.push(message);
+          return { ok: true, value: { sha: "shouldnotrun", filesChanged: 1 } };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("commit", "en");
+
+    expect(turn.text).toContain("The git command failed: permission denied");
+    expect(committed).toEqual([]);
+  });
+
+  it("reports the changes lookup failure inside git.commit before staging or committing", async () => {
+    const staged: string[][] = [];
+    const committed: string[] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "fix" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        changes: async () => ({ ok: false, error: { code: "not-a-repo", detail: "/p" } }),
+        stage: async (_repoPath, paths) => {
+          staged.push(paths);
+          return { ok: true, value: null };
+        },
+        commit: async (_repoPath, message) => {
+          committed.push(message);
+          return { ok: true, value: { sha: "shouldnotrun", filesChanged: 1 } };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("commit", "en");
+
+    expect(turn.text).toContain("That folder isn't a git repository.");
+    expect(staged).toEqual([]);
+    expect(committed).toEqual([]);
   });
 
   it("rebuilds the change context on every turn instead of caching it", async () => {

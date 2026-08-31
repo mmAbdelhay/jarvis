@@ -282,13 +282,13 @@ export class Orchestrator {
   #repoFor(
     call: ToolCall,
     language: "ar" | "en",
-  ): { sessionId: string; repoPath: string } | { error: string } {
+  ): { sessionId: string; repoPath: string; project: string } | { error: string } {
     const sessionId = stringInput(call.input, "sessionId");
     const session = this.#options.sessions.get(sessionId);
     if (session === undefined) {
       return { error: MESSAGES.unknownSession(sessionId, language) };
     }
-    return { sessionId, repoPath: session.projectPath };
+    return { sessionId, repoPath: session.projectPath, project: session.project };
   }
 
   async #gitStatus(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
@@ -314,9 +314,12 @@ export class Orchestrator {
     if (!outcome.ok) {
       return { context: {}, error: gitFailureText(outcome.error, language) };
     }
+    // Pass the whole diff, not just the path: a binary or too-large diff is
+    // `ok: true` with `hunks: []`, so the text must branch on those flags
+    // rather than always claiming a diff was opened (ruling P12).
     return {
       context: { sessionId: target.sessionId, view: "changes", path },
-      error: gitDiffOpenedText(path, language),
+      error: gitDiffOpenedText(outcome.value, language),
     };
   }
 
@@ -347,7 +350,7 @@ export class Orchestrator {
     }
     return {
       context: { sessionId: target.sessionId, view: "changes" },
-      error: gitCommitText(outcome.value, language),
+      error: gitCommitText(outcome.value, target.project, language),
     };
   }
 
