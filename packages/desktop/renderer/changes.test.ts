@@ -78,11 +78,13 @@ async function openChangesWith(
     gitCommit: vi.fn(async () => ({ ok: true as const, value: null })),
     ...overrides,
   });
-  const { openChanges, wireDiffModes } = await import("./changes.js");
-  // wireDiffModes is normally called once from app.ts; this harness has no
-  // app.ts, so each test's own module instance (vi.resetModules() in
-  // beforeEach) wires its own Side-by-side/Unified toggle here instead.
+  const { openChanges, wireCommitBar, wireDiffModes } = await import("./changes.js");
+  // wireDiffModes/wireCommitBar are normally called once from app.ts; this
+  // harness has no app.ts, so each test's own module instance
+  // (vi.resetModules() in beforeEach) wires its own Side-by-side/Unified
+  // toggle and commit bar here instead.
   wireDiffModes();
+  wireCommitBar();
   await openChanges("s1", select);
   return jarvis;
 }
@@ -138,6 +140,10 @@ beforeEach(() => {
           </div>
         </div>
         <div id="diff-body" class="diff-body"></div>
+        <div class="commit-bar">
+          <input id="commit-message" class="commit-input" type="text" dir="auto" autocomplete="off" placeholder="Commit message…" />
+          <button id="commit-button" class="commit-btn" type="button">Commit</button>
+        </div>
       </div>
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
@@ -881,5 +887,280 @@ describe("the diff panes", () => {
     await openChangesWithDiffFailure({ text: "The git command failed: boom", language: "en" });
     expect(document.getElementById("changes-error")?.hidden).toBe(false);
     expect(document.querySelectorAll(".file-row").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the commit bar", () => {
+  it("counts only the staged files in the button label", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+      { path: "b.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+      { path: "c.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
+    ]);
+    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 2 files");
+  });
+
+  it("uses the singular for one staged file", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+    ]);
+    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 1 file");
+  });
+
+  it("is disabled with nothing staged", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
+    ]);
+    const button = document.getElementById("commit-button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("missing button");
+    expect(button.disabled).toBe(true);
+  });
+
+  it("is disabled while the message is empty and enabled once it is typed", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+    ]);
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("missing button");
+
+    expect(button.disabled).toBe(true);
+    input.value = "  ";
+    input.dispatchEvent(new Event("input"));
+    expect(button.disabled).toBe(true);
+
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+    expect(button.disabled).toBe(false);
+  });
+
+  it("updates the button label as soon as a file is staged or unstaged", async () => {
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: false }],
+      undefined,
+      {
+        gitSetStaged: vi.fn(async () => ({ ok: true as const, value: null })),
+      },
+    );
+    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 0 files");
+
+    // gitChanges() is re-read after the toggle resolves; simulate the file
+    // now being staged, the same way openChanges's real refetch would.
+    jarvis.gitChanges = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        session: {
+          id: "s1",
+          project: "acme",
+          projectPath: "~/projects/acme",
+          agentId: "claude-acme",
+          lastActivityAt: Date.now(),
+          endedAt: undefined,
+        },
+        changes: {
+          repoPath: "~/projects/acme",
+          branch: "feat/checkout-retry",
+          detached: false,
+          files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+          insertions: 1,
+          deletions: 0,
+        },
+      },
+    }));
+
+    const stageButton = document.querySelector(".file-stage");
+    if (!(stageButton instanceof HTMLElement)) throw new Error("missing stage toggle");
+    stageButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 1 file");
+  });
+
+  it("commits the typed message and clears the field on success", async () => {
+    const jarvis = await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+    ]);
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLElement)) throw new Error("missing button");
+
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(jarvis.gitCommit).toHaveBeenCalledWith("s1", "إصلاح الدفع");
+    expect(input.value).toBe("");
+  });
+
+  it("re-reads the repository after a successful commit so a now-committed file drops off the list", async () => {
+    const emptyView = {
+      ok: true as const,
+      value: {
+        session: {
+          id: "s1",
+          project: "acme",
+          projectPath: "~/projects/acme",
+          agentId: "claude-acme",
+          lastActivityAt: Date.now(),
+          endedAt: undefined,
+        },
+        changes: {
+          repoPath: "~/projects/acme",
+          branch: "feat/checkout-retry",
+          detached: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        },
+      },
+    };
+    let call = 0;
+    const gitChanges = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          ok: true as const,
+          value: {
+            session: emptyView.value.session,
+            changes: {
+              ...emptyView.value.changes,
+              files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+              insertions: 1,
+            },
+          },
+        };
+      }
+      return emptyView;
+    });
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+      undefined,
+      { gitChanges, gitCommit: vi.fn(async () => ({ ok: true as const, value: null })) },
+    );
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLElement)) throw new Error("missing button");
+
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // openChanges() was called a second time (once at open, once after the
+    // commit resolves) to redraw the file list, counts and commit button
+    // from whatever the repository actually looks like now.
+    expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
+    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 0 files");
+  });
+
+  it("shows a commit failure and keeps the message so it is not lost", async () => {
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+      undefined,
+      {
+        gitCommit: vi.fn(async () => ({
+          ok: false as const,
+          text: "لا توجد تغييرات مجهّزة للحفظ.",
+          language: "ar" as const,
+        })),
+      },
+    );
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLElement)) throw new Error("missing button");
+
+    input.value = "محاولة";
+    input.dispatchEvent(new Event("input"));
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("changes-error")?.textContent).toBe(
+      "لا توجد تغييرات مجهّزة للحفظ.",
+    );
+    expect(input.value).toBe("محاولة");
+    expect(jarvis.gitCommit).toHaveBeenCalled();
+  });
+
+  it("surfaces an empty-message refusal from the provider and leaves the assistant usable", async () => {
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+      undefined,
+      {
+        gitCommit: vi.fn(async () => ({
+          ok: false as const,
+          text: "اكتب رسالة للحفظ أولًا.",
+          language: "ar" as const,
+        })),
+      },
+    );
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("missing button");
+
+    input.value = "x";
+    input.dispatchEvent(new Event("input"));
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("changes-error")?.textContent).toBe("اكتب رسالة للحفظ أولًا.");
+    // The assistant stays usable: the button is not stuck disabled forever.
+    expect(button.disabled).toBe(false);
+    expect(jarvis.gitCommit).toHaveBeenCalled();
+  });
+
+  it("keeps the message field's direction following what was typed, not the app chrome", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+    ]);
+    const input = document.getElementById("commit-message");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    expect(input.getAttribute("dir")).toBe("auto");
+
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+    // The message survives intact — no reordering, no stripped characters.
+    expect(input.value).toBe("إصلاح الدفع");
+  });
+
+  it("does not double-commit on a second click before the first resolves", async () => {
+    let resolveCommit: ((result: { ok: true; value: null }) => void) | undefined;
+    const commitPromise = new Promise<{ ok: true; value: null }>((resolve) => {
+      resolveCommit = resolve;
+    });
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+      undefined,
+      { gitCommit: vi.fn(() => commitPromise) },
+    );
+    const input = document.getElementById("commit-message");
+    const button = document.getElementById("commit-button");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    if (!(button instanceof HTMLElement)) throw new Error("missing button");
+
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+    button.click();
+    button.click();
+    button.click();
+
+    if (resolveCommit === undefined) throw new Error("commit never called");
+    resolveCommit({ ok: true, value: null });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(jarvis.gitCommit).toHaveBeenCalledTimes(1);
   });
 });

@@ -368,6 +368,90 @@ function renderFiles(view: ChangesView): void {
   }
 
   list.replaceChildren(...nodes);
+  refreshCommitBar();
+}
+
+function commitInput(): HTMLInputElement {
+  const element = document.getElementById("commit-message");
+  if (!(element instanceof HTMLInputElement)) throw new Error("Missing #commit-message");
+  return element;
+}
+
+function commitButton(): HTMLButtonElement {
+  const element = document.getElementById("commit-button");
+  if (!(element instanceof HTMLButtonElement)) throw new Error("Missing #commit-button");
+  return element;
+}
+
+// A commit in flight guards the button against a second click landing
+// before the first one's promise resolves — without it, a fast double
+// click produces two real commits against the user's repository.
+let committing = false;
+
+/** Recomputes the button's label and disabled state from the current
+ *  view's staged files and the message field. Called after every render
+ *  of the file list (staging changes the staged count) and after typing. */
+function refreshCommitBar(): void {
+  const staged = current?.changes.files.filter((file) => file.staged) ?? [];
+  const button = commitButton();
+  // The artboard's label is "Commit 7 files"; one file reads as "1 file".
+  button.textContent = staged.length === 1 ? "Commit 1 file" : `Commit ${staged.length} files`;
+  button.disabled = committing || staged.length === 0 || commitInput().value.trim() === "";
+}
+
+/** Wires the commit bar's message field and Commit button. Called once
+ *  from app.ts, alongside wireNav()/wireDiffModes().
+ *  Uses optional lookups (not the throwing commitInput()/commitButton())
+ *  because app.test.ts's DOM harness — like wireDiffModes() above — does
+ *  not lay down the Changes view's markup at all. */
+export function wireCommitBar(): void {
+  const input = document.getElementById("commit-message");
+  const button = document.getElementById("commit-button");
+  if (!(input instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement)) return;
+
+  input.addEventListener("input", () => refreshCommitBar());
+  button.addEventListener("click", () => {
+    const view = current;
+    if (view === undefined || committing) return;
+    const message = commitInput().value.trim();
+    if (message === "") return;
+
+    committing = true;
+    refreshCommitBar();
+
+    void window.jarvis
+      .gitCommit(view.session.id, message)
+      .then((result) => {
+        committing = false;
+        if (!result.ok) {
+          // Task 10's handlers never reject — a commit failure (nothing
+          // staged, an empty message, a rejecting pre-commit hook) arrives
+          // as a value, rendered here. The message stays in the field:
+          // retyping a commit message you already wrote because the
+          // commit failed is pure loss.
+          showError(result);
+          refreshCommitBar();
+          return undefined;
+        }
+        clearError();
+        commitInput().value = "";
+        // The committed files are gone from the working tree's diff — the
+        // file list, counts, staged count and button label all describe
+        // state that no longer exists. Re-reading via openChanges() (the
+        // same fresh-read-not-local-mutation approach the staging toggle
+        // above already uses) redraws every one of them from what the
+        // repository now actually contains, rather than guessing which
+        // files the commit took.
+        return openChanges(view.session.id);
+      })
+      .catch(() => {
+        // Belt-and-braces: Task 10's handlers are documented to never
+        // reject, but if window.jarvis.gitCommit ever did throw, the
+        // in-flight guard must not get stuck forever.
+        committing = false;
+        refreshCommitBar();
+      });
+  });
 }
 
 export async function openChanges(sessionId: string, path?: string): Promise<void> {
