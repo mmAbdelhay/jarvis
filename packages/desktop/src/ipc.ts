@@ -304,7 +304,7 @@ export type RendererApi = {
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.
-  openTab(project: string, input: string): Promise<void>;
+  openTab(project: string, input: string, kind?: "web" | "editor"): Promise<void>;
   closeTab(id: string): Promise<void>;
   activateTab(id: string): Promise<void>;
   navigateTab(id: string, input: string): Promise<void>;

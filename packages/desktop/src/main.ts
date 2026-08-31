@@ -319,8 +319,9 @@ app.whenReady().then(async () => {
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one; docs.list/.read validate
     // internally (createDocsHandlers).
-    ipcMain.handle("workspace:open", (_event, project: unknown, input: unknown) => {
-      if (typeof project === "string" && typeof input === "string") workspace.open(project, input);
+    ipcMain.handle("workspace:open", (_event, project: unknown, input: unknown, kind: unknown) => {
+      if (typeof project !== "string" || typeof input !== "string") return;
+      workspace.open(project, input, kind === "editor" ? "editor" : "web");
     });
     ipcMain.handle("workspace:close", (_event, id: unknown) => {
       if (typeof id === "string") workspace.close(id);

@@ -41,7 +41,7 @@ const api: RendererApi = {
     ipcRenderer.on("providers:update", (_e, statuses) => cb(statuses));
   },
   refreshProviders: () => ipcRenderer.invoke("providers:refresh"),
-  openTab: (project, input) => ipcRenderer.invoke("workspace:open", project, input),
+  openTab: (project, input, kind) => ipcRenderer.invoke("workspace:open", project, input, kind),
   closeTab: (id) => ipcRenderer.invoke("workspace:close", id),
   activateTab: (id) => ipcRenderer.invoke("workspace:activate", id),
   navigateTab: (id, input) => ipcRenderer.invoke("workspace:navigate", id, input),

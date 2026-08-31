@@ -14,11 +14,13 @@ function harness(): Recorded[] {
       <button id="workspace-mode-docs"></button>
       <div id="workspace-browser">
         <div id="workspace-tabs"></div>
-        <button id="workspace-back"></button>
-        <button id="workspace-forward"></button>
-        <button id="workspace-reload"></button>
-        <input id="workspace-address" />
-        <button id="workspace-new-tab"></button>
+        <div id="workspace-bar">
+          <button id="workspace-back"></button>
+          <button id="workspace-forward"></button>
+          <button id="workspace-reload"></button>
+          <input id="workspace-address" />
+          <button id="workspace-new-tab"></button>
+        </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
       </div>
@@ -141,6 +143,24 @@ describe("workspace chrome", () => {
       element.classList.contains("workspace-tab--on"),
     );
     expect(marked).toEqual([false, true]);
+  });
+
+  it("hides the address bar when the active tab is an editor", () => {
+    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("shows the address bar when the active tab is an ordinary page", () => {
+    renderWorkspace({ tabs: [tab({ kind: "web" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("shows the address bar when there is no active tab at all", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
   });
 
   it("puts the active tab's URL in the address bar", () => {
@@ -551,14 +571,79 @@ describe("open in editor", () => {
 
     expect(calls).toContainEqual({
       call: "openTab",
-      args: ["acme", "http://127.0.0.1:9001/?folder=acme"],
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme", "editor"],
     });
     expect(
       document.getElementById("workspace-browser")?.hasAttribute("hidden"),
     ).toBe(false);
   });
 
+  // Reopening a project that already has an editor tab must not spin up a
+  // second one — code-server is already running and the tab is already
+  // there, so this is a plain tab switch, not a new-tab-plus-IPC round trip.
+  it("activates the existing editor tab instead of opening a duplicate", async () => {
+    renderWorkspace({
+      tabs: [
+        {
+          id: "tab-9",
+          project: "acme",
+          url: "http://127.0.0.1:9001/?folder=acme",
+          kind: "editor",
+          title: "acme — Editor",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          error: undefined,
+        },
+      ],
+      activeTabId: "tab-9",
+    });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-9"] });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("opens a new editor tab when the existing one belongs to a different project", async () => {
+    initWorkspace(["acme", "storefront"]);
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+    select.value = "storefront";
+    renderWorkspace({
+      tabs: [
+        {
+          id: "tab-9",
+          project: "acme",
+          url: "http://127.0.0.1:9001/?folder=acme",
+          kind: "editor",
+          title: "acme — Editor",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          error: undefined,
+        },
+      ],
+      activeTabId: "tab-9",
+    });
+    jarvis["openEditor"] = (project: string) =>
+      Promise.resolve({ ok: true, value: `http://127.0.0.1:9002/?folder=${project}` });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["storefront", "http://127.0.0.1:9002/?folder=storefront", "editor"],
+    });
+  });
+
   it("shows a localised error and does not open a tab when the editor cannot start", async () => {
+    // No editor tab open yet — renderWorkspace's own module state does not
+    // reset between tests, so this is stated explicitly rather than
+    // assumed, the same as every other test in this suite that depends on
+    // the current tab list.
+    renderWorkspace({ tabs: [], activeTabId: undefined });
     jarvis["openEditor"] = () =>
       Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
 

@@ -125,6 +125,17 @@ export function initWorkspace(projects: string[]): void {
  *  address bar or a "+" click would. */
 async function openEditor(): Promise<void> {
   const project = selectedProject();
+
+  // code-server is already running and the tab already exists for this
+  // project — this is a tab switch, not a reason to spin up a second
+  // instance or open a duplicate tab.
+  const existing = latest.tabs.find((tab) => tab.kind === "editor" && tab.project === project);
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    showMode("browser");
+    return;
+  }
+
   const status = $("workspace-editor-status");
   status.textContent = "";
   status.classList.remove("workspace-editor-status--error");
@@ -135,7 +146,7 @@ async function openEditor(): Promise<void> {
     status.classList.add("workspace-editor-status--error");
     return;
   }
-  void window.jarvis.openTab(project, result.value);
+  void window.jarvis.openTab(project, result.value, "editor");
   showMode("browser");
 }
 
@@ -407,6 +418,11 @@ export function renderWorkspace(state: WorkspaceState): void {
   }
 
   const tab = activeTab();
+
+  // Nothing in this row means anything for a code editor — nobody
+  // navigates it like a webpage.
+  ($("workspace-bar") as HTMLElement).hidden = tab?.kind === "editor";
+
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.
   if (document.activeElement !== address) address.value = tab?.url ?? "";
