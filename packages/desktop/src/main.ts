@@ -1,13 +1,22 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
-import { AgentRegistry, ChangeTracker, Orchestrator, SessionManager } from "@jarvis/core";
+import {
+  AgentRegistry,
+  ChangeTracker,
+  Orchestrator,
+  ProviderMonitor,
+  ProviderStatusStore,
+  SessionManager,
+} from "@jarvis/core";
 import {
   MacSpeech,
   createBrain,
+  createCapacityReader,
   createGitProvider,
   createMetricsReader,
   createSpawner,
   createSqliteSessionStore,
+  readStatusPage,
   runCommand,
   transcribe,
 } from "@jarvis/platform";
@@ -16,12 +25,32 @@ import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
-import { startupReport } from "./startup.js";
+import { capacityReport, startupReport } from "./startup.js";
 
 app.whenReady().then(async () => {
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
+
+    const providerStore = new ProviderStatusStore(registry.list());
+    const readCapacity = createCapacityReader({ cwd: config.brain.cwd });
+    const providers = new ProviderMonitor({
+      agents: registry.list(),
+      store: providerStore,
+      readCapacity,
+      readHealth: (vendor) => readStatusPage(vendor),
+    });
+
+    // Started, never awaited — ruling R35: nothing that touches the network
+    // may sit between app-ready and the window existing. The health poll is
+    // free; the capacity refresh is one billed query per readable account and
+    // happens exactly once here, at launch. There is no capacity interval
+    // anywhere in this file, deliberately.
+    void providers.refreshHealth();
+    const capacityPromise = providers.refreshCapacity().catch((error) => {
+      console.error(`Provider capacity refresh failed: ${errorMessage(error)}`);
+    });
+
     // Started, not awaited: the health probe (bounded per-agent in
     // @jarvis/core, but still a network of spawned processes) must never
     // hold up the window appearing. The `.catch` is attached immediately —
@@ -73,15 +102,20 @@ app.whenReady().then(async () => {
     });
 
     const orchestrator = new Orchestrator({
-      brain: createBrain(config.brain),
+      brain: createBrain({
+        ...config.brain,
+        onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
+      }),
       registry,
       sessions,
       git,
       changes: () => changeTracker.snapshot(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
-      // Task 11 wires the real ProviderMonitor here.
-      providers: { snapshot: () => [], refresh: async () => {} },
+      providers: {
+        snapshot: () => providers.snapshot(),
+        refresh: () => providers.refreshCapacity({ force: true }),
+      },
     });
 
     const window = new BrowserWindow({
@@ -133,14 +167,8 @@ app.whenReady().then(async () => {
       // is far more expensive than reading /proc-equivalent counters, and
       // change counts do not need second-level freshness.
       changesIntervalMs: 5000,
-      // No ProviderMonitor is composed into main.ts yet — that is Task 11's
-      // job (it owns instantiating ProviderStatusStore/ProviderMonitor
-      // against the real registry and platform readers). Until then this
-      // stays a genuine no-op: no store to change, so no push ever fires;
-      // no network call, so "free health polling" costs nothing while it
-      // has nothing to poll. Never a stand-in for the monitor's own policy.
-      onProvidersChange: () => () => {},
-      refreshHealth: async () => {},
+      onProvidersChange: (cb) => providers.onChange(cb),
+      refreshHealth: () => providers.refreshHealth(),
       healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
     });
     wiring.start();
@@ -179,6 +207,14 @@ app.whenReady().then(async () => {
     ipcMain.handle("git:commit", (_event, sessionId: string, message: string) =>
       gitHandlers.commit(sessionId, message),
     );
+
+    // The only user-triggered call in the app that spends money: one billed
+    // query per readable account, guarded by ProviderMonitor's own minimum
+    // interval so a held-down button cannot run up a bill. A direct forward
+    // — no wrapping try/catch, no re-implemented throttle or dedup — so
+    // ProviderMonitor's own coalescing (Task 8) is the only one in effect,
+    // and this handler never rejects on a normal per-account failure.
+    ipcMain.handle("providers:refresh", () => providers.refreshCapacity({ force: true }));
 
     const recorder = new Recorder(defaultRecorderDeps);
 
@@ -339,6 +375,20 @@ app.whenReady().then(async () => {
         at: Date.now(),
       });
     }
+
+    window.webContents.send("providers:update", providers.snapshot());
+
+    void capacityPromise.then(() => {
+      window.webContents.send("providers:update", providers.snapshot());
+      const capacity = capacityReport(providers.snapshot(), PRIMARY_LANGUAGE);
+      if (capacity === "") return;
+      window.webContents.send("turn:new", {
+        role: "assistant",
+        text: capacity,
+        language: PRIMARY_LANGUAGE,
+        at: Date.now(),
+      });
+    });
   } catch (error) {
     dialog.showErrorBox("Jarvis failed to start", errorMessage(error));
     app.quit();

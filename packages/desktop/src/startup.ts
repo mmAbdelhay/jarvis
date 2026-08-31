@@ -1,5 +1,5 @@
-import { checkAll } from "@jarvis/core";
-import type { AgentHealth, AgentRegistry, CommandRunner } from "@jarvis/core";
+import { capacityReportText, checkAll } from "@jarvis/core";
+import type { AgentHealth, AgentRegistry, CommandRunner, ProviderStatus } from "@jarvis/core";
 
 const REPAIR_HINT =
   "Repair with: node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/install.cjs";
@@ -25,4 +25,24 @@ export async function startupReport(
   }
 
   return { healthy, broken, message: `${healthy.length} agents ready. Broken: ${names}.${hint}` };
+}
+
+/**
+ * The startup report's second half. Deliberately a SEPARATE message from
+ * startupReport's health line rather than an extension of it: the health
+ * probe runs `--version` (bounded at 5s, opens no session, learns nothing
+ * about capacity), while a capacity reading is a real ~3.3s billed API query
+ * per account. Folding them into one message would hold the health report —
+ * the one the user relies on today — behind three paid round trips for a
+ * number that is not urgent at launch. So health speaks first, and this
+ * follows when the startup refresh settles.
+ *
+ * Returns "" when no account produced a reading, and the caller then sends
+ * no turn at all rather than announcing that it knows nothing.
+ */
+export function capacityReport(
+  statuses: readonly ProviderStatus[],
+  language: "ar" | "en",
+): string {
+  return capacityReportText(statuses, language);
 }
