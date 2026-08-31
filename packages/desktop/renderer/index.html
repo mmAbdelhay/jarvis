@@ -619,7 +619,7 @@
     padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 7px;
     overflow-y: auto;
   }
 
@@ -638,7 +638,7 @@
 
   .provider__head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
   }
 
@@ -668,7 +668,7 @@
     line-height: 1.4;
   }
 
-  .provider__note--stale { color: #46606f; }
+  .provider__note--stale { color: var(--text-muted); }
 
   /* Source order matters: these four must follow the base `.dot` rule
      above (line 302) to win — equal specificity (one class selector each),

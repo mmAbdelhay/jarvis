@@ -135,8 +135,12 @@ export const MESSAGES = {
   // (providerStatusLine et al.) belong to @jarvis/core's own messages.ts —
   // these are only the panel's own labels, same split as everywhere else
   // in this file (I2: no English-only lane beside a bilingual table).
-  providersTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "الحسابات" : "Providers",
+  //
+  // The panel header itself stays the hardcoded literal "Providers" in
+  // index.html, consistent with the other four hardcoded English panel
+  // titles (System, Sessions, Conversation, History) — translating this
+  // one alone is a product decision about the whole dashboard, not this
+  // feature's to make (ruling S22).
   providersEmpty: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد حسابات مُعرّفة." : "No providers are configured.",
   // The row's own label. "LEFT", not "USED": the System panel above shows

@@ -171,7 +171,6 @@ describe("errorMessage", () => {
 describe("provider panel strings", () => {
   it("has an Arabic and an English form for every provider label", () => {
     for (const key of [
-      "providersTitle",
       "providersEmpty",
       "capacityLeftLabel",
       "capacityUnsupported",
