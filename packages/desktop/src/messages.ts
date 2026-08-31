@@ -72,6 +72,14 @@ export const MESSAGES = {
   docSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
+  // Settings' save flow. The headline is bilingual per the Global
+  // Constraint every other view follows; parseConfig's own thrown message
+  // (English, developer-facing — e.g. "Config `agents.x.command` must be a
+  // string") is shown underneath it verbatim, the same headline-plus-
+  // technical-detail split the Changes view and Providers panel already use.
+  settingsSaveFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر حفظ الإعدادات — التفاصيل أدناه." : "Couldn't save settings — see below.",
+  settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie
