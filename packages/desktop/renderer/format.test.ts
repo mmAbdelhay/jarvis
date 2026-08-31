@@ -87,6 +87,16 @@ describe("formatAgo", () => {
     expect(formatAgo(now - 5_000, now)).toBe("just now");
     expect(formatAgo(now + 60_000, now)).toBe("just now");
   });
+
+  // I2: this string is user-facing (the Changes view header), so it must
+  // not be an English-only lane — same rule as every other piece of chrome
+  // the review names.
+  it("is bilingual: Arabic when asked for it", () => {
+    expect(formatAgo(now - 6 * 60_000, now, "ar")).toBe("قبل 6 د");
+    expect(formatAgo(now - 90 * 60_000, now, "ar")).toBe("قبل 1 س");
+    expect(formatAgo(now - 50 * 60 * 60_000, now, "ar")).toBe("قبل 2 يوم");
+    expect(formatAgo(now - 5_000, now, "ar")).toBe("الآن");
+  });
 });
 
 describe("formatEndedAt", () => {

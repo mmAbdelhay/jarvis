@@ -28,12 +28,6 @@ function setText(element: HTMLElement, text: string): void {
 
 let current: ChangesView | undefined;
 
-/** Exposed for Tasks 13-15, which need the currently-open view's data
- *  (its file list, its repo path) without re-fetching it. */
-export function currentView(): ChangesView | undefined {
-  return current;
-}
-
 export function showView(name: "dashboard" | "changes"): void {
   const dashboard = document.querySelector(".main:not(.main--changes)");
   if (dashboard instanceof HTMLElement) dashboard.hidden = name !== "dashboard";
@@ -79,22 +73,41 @@ function renderHeader(view: ChangesView): void {
   setText($("changes-branch"), view.changes.branch);
   $("changes-add").textContent = `+${view.changes.insertions}`;
   $("changes-del").textContent = `−${view.changes.deletions}`;
-  // One template, one interpolation each: nothing here is assembled from
-  // ordered fragments, so it survives an RTL agent id unchanged.
-  $("changes-by").textContent =
-    `written by ${view.session.agentId} · ${formatAgo(view.session.lastActivityAt, Date.now())}`;
+  // I2: routed through messages.ts's writtenBy(), not an inline
+  // English-only template literal — this is user-facing chrome in an
+  // Arabic-primary app. formatAgo's own output is localised the same way.
+  setText(
+    $("changes-by"),
+    MESSAGES.writtenBy(
+      view.session.agentId,
+      formatAgo(view.session.lastActivityAt, Date.now(), PRIMARY_LANGUAGE),
+      PRIMARY_LANGUAGE,
+    ),
+  );
   renderStaleNotice(view);
 }
 
-// Matches the artboard's TESTS group. A path segment (or a filename stem)
-// that is literally "test", "tests", "spec" or "specs" — bounded by a path
-// separator, a dot, an underscore or a hyphen (or the start/end of the
-// string) on both sides. A plain substring match would also sweep in
-// "contest.php"; this boundary rule is what the brief's own fixture
-// ("tests/RetryPolicyTest.php" — a *directory* named tests/, not a bare
-// "…Test.php" suffix) actually exercises, so that is the rule implemented:
-// a real "tests"/"specs" path segment, not any filename ending in "Test".
-const TEST_PATH = /(^|[/._-])(tests?|specs?)([/._-]|$)/i;
+// Matches the artboard's TESTS group. Two independent shapes, both bounded
+// so a plain substring match never sweeps in "contest.php":
+//  1. a path segment (or filename stem) that is literally "test", "tests",
+//     "spec" or "specs" — bounded by a path separator, a dot, an underscore
+//     or a hyphen (or the start/end of the string) on both sides. Covers
+//     "tests/RetryPolicyTest.php"'s *directory*.
+//  2. a filename ending in "Test" or "Spec" right before the extension,
+//     case-SENSITIVELY (unlike the segment rule above) — covers that same
+//     fixture's actual filename, "RetryPolicyTest.php", and
+//     "CheckoutTest.php": Task 13's first-draft regex matched neither of
+//     the brief's own fixtures, since both are a camelCase suffix, not a
+//     bounded segment. Case-sensitive is what keeps "contest.php" out:
+//     case-insensitively, "conTEST.php" would match this suffix rule too
+//     (it literally contains "test.php"), which is exactly the false
+//     positive the segment rule above was already built to avoid.
+const TEST_PATH_SEGMENT = /(^|[/._-])(tests?|specs?)([/._-]|$)/i;
+const TEST_FILENAME_SUFFIX = /(Test|Spec)\.[^/.]+$/;
+
+function isTestPath(path: string): boolean {
+  return TEST_PATH_SEGMENT.test(path) || TEST_FILENAME_SUFFIX.test(path);
+}
 
 const STATUS_COLOUR: Record<GitFileChange["status"], string> = {
   M: "status-m",
@@ -155,12 +168,11 @@ function hunkHead(hunk: GitDiffHunk): HTMLElement {
   return head;
 }
 
-// BEFORE/AFTER kept as the artboard's own literal English (GitChanges.dc.html
-// lines 97/113) rather than routed through messages.ts: they are column
-// chrome labels, not sentences, and Task 13 already established the same
-// precedent for this same header row — the Side-by-side/Unified toggle
-// buttons in index.html are static English text, not MESSAGES entries.
-// The header gets its own `pane-head--${side}` class rather than reusing
+// I2: BEFORE/AFTER now route through messages.ts like every other piece of
+// user-facing chrome in this file — Task 13's "column chrome, not a
+// sentence, so it can stay English-only" precedent was exactly the defect
+// the Global Constraints name (a second English-only lane). The header gets
+// its own `pane-head--${side}` class rather than reusing
 // `pane--${side}` (the column class from hunkRow below): sharing the class
 // made `.pane--before` match the header too, so `querySelector(".pane--before")`
 // found a row even when every hunk row had been removed — a test could pass
@@ -201,7 +213,10 @@ function renderSideBySide(diff: GitFileDiff): HTMLElement {
 
   const head = document.createElement("div");
   head.className = "diff-cols";
-  head.append(paneHead("before", "BEFORE"), paneHead("after", "AFTER"));
+  head.append(
+    paneHead("before", MESSAGES.beforeColumnLabel(PRIMARY_LANGUAGE)),
+    paneHead("after", MESSAGES.afterColumnLabel(PRIMARY_LANGUAGE)),
+  );
   wrapper.append(head);
 
   for (const hunk of diff.hunks) {
@@ -293,6 +308,31 @@ async function renderDiff(view: ChangesView): Promise<void> {
   body.replaceChildren(mode === "side" ? renderSideBySide(diff) : renderUnified(diff));
 }
 
+// I2: the Changes view's static English chrome — index.html has no language
+// signal of its own, so this fills in the real (Arabic-primary) text at
+// startup rather than shipping the placeholder English markup as the
+// permanent UI. Every lookup is optional, same reasoning as wireDiffModes/
+// wireCommitBar below: app.test.ts's minimal DOM harness doesn't lay down
+// all of this markup, and a missing decorative label there must not throw.
+export function applyStaticChrome(): void {
+  const navDashboard = document.getElementById("nav-dashboard");
+  if (navDashboard !== null) navDashboard.textContent = MESSAGES.navDashboard(PRIMARY_LANGUAGE);
+  const navChanges = document.getElementById("nav-changes");
+  if (navChanges !== null) navChanges.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
+  const title = document.getElementById("changes-title");
+  if (title !== null) title.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
+  const filesLabel = document.getElementById("changes-files-label");
+  if (filesLabel !== null) filesLabel.textContent = MESSAGES.changedFilesLabel(PRIMARY_LANGUAGE);
+  const sideButtonLabel = document.getElementById("diff-mode-side");
+  if (sideButtonLabel !== null) sideButtonLabel.textContent = MESSAGES.sideBySideLabel(PRIMARY_LANGUAGE);
+  const unifiedButtonLabel = document.getElementById("diff-mode-unified");
+  if (unifiedButtonLabel !== null) unifiedButtonLabel.textContent = MESSAGES.unifiedLabel(PRIMARY_LANGUAGE);
+  const message = document.getElementById("commit-message");
+  if (message instanceof HTMLInputElement) {
+    message.placeholder = MESSAGES.commitMessagePlaceholder(PRIMARY_LANGUAGE);
+  }
+}
+
 /** Wires the Side-by-side / Unified toggle. Called once from app.ts.
  *  Uses optional lookups (not the throwing `$()`) because app.test.ts's DOM
  *  harness — which predates this task — does not lay down the Changes
@@ -329,7 +369,10 @@ function fileRow(view: ChangesView, file: GitFileChange): HTMLElement {
   const stage = document.createElement("button");
   stage.type = "button";
   stage.className = file.staged ? "file-stage file-stage--on" : "file-stage";
-  stage.setAttribute("aria-label", file.staged ? "Unstage file" : "Stage file");
+  stage.setAttribute(
+    "aria-label",
+    file.staged ? MESSAGES.unstageFileLabel(PRIMARY_LANGUAGE) : MESSAGES.stageFileLabel(PRIMARY_LANGUAGE),
+  );
   stage.addEventListener("click", (event) => {
     // Without this the row's own click handler would also fire and the
     // selection would jump every time someone staged a file.
@@ -393,8 +436,8 @@ function renderFiles(view: ChangesView): void {
   const list = $("changes-file-list");
   $("changes-count").textContent = `${view.changes.files.length}`;
 
-  const main = view.changes.files.filter((file) => !TEST_PATH.test(file.path));
-  const tests = view.changes.files.filter((file) => TEST_PATH.test(file.path));
+  const main = view.changes.files.filter((file) => !isTestPath(file.path));
+  const tests = view.changes.files.filter((file) => isTestPath(file.path));
 
   const nodes: HTMLElement[] = main.map((file) => fileRow(view, file));
 
@@ -403,7 +446,7 @@ function renderFiles(view: ChangesView): void {
     spacer.className = "file-gap";
     const label = document.createElement("div");
     label.className = "file-group";
-    label.textContent = "TESTS";
+    label.textContent = MESSAGES.testsGroupLabel(PRIMARY_LANGUAGE);
     nodes.push(spacer, label, ...tests.map((file) => fileRow(view, file)));
   }
 
@@ -442,8 +485,11 @@ let stagingInFlight = 0;
 function refreshCommitBar(): void {
   const staged = current?.changes.files.filter((file) => file.staged) ?? [];
   const button = commitButton();
-  // The artboard's label is "Commit 7 files"; one file reads as "1 file".
-  button.textContent = staged.length === 1 ? "Commit 1 file" : `Commit ${staged.length} files`;
+  // I2: routed through messages.ts's commitButtonLabel(), the sharpest case
+  // of this file's English-only-lane defect — a counted noun ("N files")
+  // needs Arabic's singular/dual/plural agreement, not a number spliced
+  // into a fixed English phrase.
+  button.textContent = MESSAGES.commitButtonLabel(staged.length, PRIMARY_LANGUAGE);
   button.disabled =
     committing || stagingInFlight > 0 || staged.length === 0 || commitInput().value.trim() === "";
 }
@@ -503,12 +549,37 @@ export function wireCommitBar(): void {
   });
 }
 
+// I3: a failed gitChanges() (e.g. session B's project isn't a repo) must not
+// leave session A's file list, diff pane, filename or header on screen under
+// the error banner — that reads as B's data, and a click on one of A's still
+// -rendered rows would fire gitDiff() against A (its row closure captured
+// A's `view`, never re-read from `current`). Clearing the file list removes
+// those stale rows/closures entirely, not just the header text.
+function clearView(): void {
+  setText($("changes-project"), "");
+  setText($("changes-path"), "");
+  setText($("changes-branch"), "");
+  $("changes-add").textContent = "";
+  $("changes-del").textContent = "";
+  setText($("changes-by"), "");
+  const staleNotice = $("changes-stale-notice");
+  staleNotice.hidden = true;
+  staleNotice.textContent = "";
+  $("changes-count").textContent = "";
+  $("changes-file-list").replaceChildren();
+  $("diff-filename").textContent = "";
+  $("diff-body").replaceChildren();
+  selected = undefined;
+  refreshCommitBar();
+}
+
 export async function openChanges(sessionId: string, path?: string): Promise<void> {
   showView("changes");
   const result: GitViewResult<ChangesView> = await window.jarvis.gitChanges(sessionId);
 
   if (!result.ok) {
     current = undefined;
+    clearView();
     showError(result);
     return;
   }

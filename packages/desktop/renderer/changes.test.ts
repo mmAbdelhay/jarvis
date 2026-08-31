@@ -116,7 +116,7 @@ beforeEach(() => {
     <div class="main"></div>
     <div class="main main--changes" id="view-changes" hidden>
       <div class="changes-head">
-        <div class="changes-title">Changes</div>
+        <div id="changes-title" class="changes-title">Changes</div>
         <div id="changes-project" class="chip mono"></div>
         <div id="changes-path" class="mono changes-muted"></div>
         <div class="mono changes-muted">on</div>
@@ -128,6 +128,7 @@ beforeEach(() => {
       <div id="changes-stale-notice" class="changes-notice" hidden></div>
       <div id="changes-error" class="changes-error" hidden></div>
       <div class="changes-files-head">
+        <div id="changes-files-label" class="lbl">CHANGED FILES</div>
         <div id="changes-count" class="mono changes-count"></div>
       </div>
       <div id="changes-file-list" class="changes-file-list"></div>
@@ -186,7 +187,7 @@ describe("openChanges", () => {
     expect(document.getElementById("changes-add")?.textContent).toBe("+128");
     expect(document.getElementById("changes-del")?.textContent).toBe("−34");
     expect(document.getElementById("changes-by")?.textContent).toBe(
-      "written by claude-acme · 6m ago",
+      "بواسطة claude-acme · قبل 6 د",
     );
     expect(jarvis.gitChanges).toHaveBeenCalledWith("s1");
   });
@@ -314,6 +315,73 @@ describe("openChanges", () => {
     expect(document.getElementById("changes-del")?.textContent).toBe("−0");
     expect(document.getElementById("changes-error")?.hidden).toBe(true);
   });
+
+  // I3: a failed gitChanges() for session B must not leave session A's file
+  // list, diff pane, filename or header on screen — that reads as B's data
+  // under the error banner, and a click on one of A's still-rendered rows
+  // would fire gitDiff() against A (the row's closure captured A's view).
+  it("clears the previous session's file list, diff pane and header on a failed re-open", async () => {
+    let call = 0;
+    const gitDiff = vi.fn(async (_id: string, path: string) => ({
+      ok: true as const,
+      value: { path, binary: false, hunks: [] },
+    }));
+    stubJarvis({
+      gitChanges: vi.fn(async () => {
+        call += 1;
+        if (call === 1) {
+          return {
+            ok: true as const,
+            value: {
+              session: {
+                id: "a",
+                project: "acme",
+                projectPath: "~/projects/acme",
+                agentId: "claude-acme",
+                lastActivityAt: Date.now(),
+                endedAt: undefined,
+              },
+              changes: {
+                repoPath: "~/projects/acme",
+                branch: "feat/checkout-retry",
+                detached: false,
+                files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 1, staged: false }],
+                insertions: 1,
+                deletions: 1,
+              },
+            },
+          };
+        }
+        return { ok: false as const, text: "That folder isn't a git repository.", language: "en" as const };
+      }),
+      gitDiff,
+    });
+
+    const { openChanges } = await import("./changes.js");
+    await openChanges("a");
+
+    expect(document.getElementById("changes-file-list")?.children.length).toBeGreaterThan(0);
+    expect(document.getElementById("diff-filename")?.textContent).toBe("a.php");
+    expect(gitDiff).toHaveBeenCalledTimes(1);
+
+    const staleRow = document.querySelector<HTMLElement>(".file-row");
+    expect(staleRow).not.toBeNull();
+
+    await openChanges("b");
+
+    expect(document.getElementById("changes-error")?.hidden).toBe(false);
+    expect(document.getElementById("changes-file-list")?.children.length).toBe(0);
+    expect(document.getElementById("diff-body")?.children.length).toBe(0);
+    expect(document.getElementById("diff-filename")?.textContent).toBe("");
+    expect(document.getElementById("changes-project")?.textContent).toBe("");
+    expect(document.getElementById("changes-path")?.textContent).toBe("");
+    expect(document.getElementById("changes-branch")?.textContent).toBe("");
+
+    // The row from session A no longer exists in the DOM at all (its parent
+    // was replaced), so it cannot be clicked to fire gitDiff() against A.
+    expect(document.body.contains(staleRow)).toBe(false);
+    expect(gitDiff).toHaveBeenCalledTimes(1);
+  });
 });
 
 // Ruling P22: gitChanges() always reads the repository's *current* working
@@ -428,6 +496,63 @@ describe("the P22 current-state notice", () => {
   });
 });
 
+// I2: the Changes view shipped as an English-only lane in an
+// Arabic-primary app (Global Constraints names this exact defect). These
+// pin the static-chrome initializer and the per-row aria-labels, alongside
+// the commit-button-label and TESTS-group-label coverage already updated
+// above to expect Arabic (this app's PRIMARY_LANGUAGE).
+describe("applyStaticChrome", () => {
+  it("replaces the placeholder English nav labels, title, section label, diff-mode toggle and commit placeholder with Arabic", async () => {
+    const { applyStaticChrome } = await import("./changes.js");
+    applyStaticChrome();
+
+    expect(document.getElementById("nav-dashboard")?.textContent).toBe("اللوحة");
+    expect(document.getElementById("nav-changes")?.textContent).toBe("التغييرات");
+    expect(document.getElementById("changes-files-label")?.textContent).toBe("الملفات المعدّلة");
+    expect(document.getElementById("diff-mode-side")?.textContent).toBe("جنبًا إلى جنب");
+    expect(document.getElementById("diff-mode-unified")?.textContent).toBe("موحّد");
+    const message = document.getElementById("commit-message");
+    expect(message instanceof HTMLInputElement && message.placeholder).toBe("رسالة الحفظ…");
+  });
+
+  it("does not throw against app.test.ts's minimal DOM, which lacks this markup", async () => {
+    document.body.innerHTML = "";
+    const { applyStaticChrome } = await import("./changes.js");
+    expect(() => applyStaticChrome()).not.toThrow();
+  });
+});
+
+describe("BEFORE/AFTER pane headers", () => {
+  it("renders the Arabic column labels, not the artboard's literal English", async () => {
+    await openChangesWithDiff({
+      path: "a.php",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -1,1 +1,1 @@",
+          lines: [{ kind: "context", text: "x", beforeLine: 1, afterLine: 1 }],
+        },
+      ],
+    });
+
+    const headers = [...document.querySelectorAll(".pane-head")].map((el) => el.textContent);
+    expect(headers).toEqual(["قبل", "بعد"]);
+  });
+});
+
+describe("stage/unstage aria-labels", () => {
+  it("names the action in Arabic, matching the app's primary language", async () => {
+    await openChangesWith([
+      { path: "a.php", status: "M", insertions: 1, deletions: 0, staged: false },
+      { path: "b.php", status: "M", insertions: 1, deletions: 0, staged: true },
+    ]);
+
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>(".file-stage")];
+    expect(buttons[0]?.getAttribute("aria-label")).toBe("تجهيز الملف");
+    expect(buttons[1]?.getAttribute("aria-label")).toBe("إلغاء تجهيز الملف");
+  });
+});
+
 describe("showView", () => {
   it("swaps which view is hidden and which nav button is lit", async () => {
     const { showView } = await import("./changes.js");
@@ -477,7 +602,7 @@ describe("the changed-files panel", () => {
   it("groups test files under a TESTS label, as the artboard does", async () => {
     await openChangesWith(FILES);
     const labels = [...document.querySelectorAll(".file-group")].map((el) => el.textContent);
-    expect(labels).toEqual(["TESTS"]);
+    expect(labels).toEqual(["الاختبارات"]);
     const rows = [...document.querySelectorAll(".file-row .file-name")].map((el) => el.textContent);
     expect(rows[3]).toBe("tests/RetryPolicyTest.php");
   });
@@ -494,7 +619,7 @@ describe("the changed-files panel", () => {
       { path: "spec/checkout_spec.rb", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
     const labels = [...document.querySelectorAll(".file-group")].map((el) => el.textContent);
-    expect(labels).toEqual(["TESTS"]);
+    expect(labels).toEqual(["الاختبارات"]);
   });
 
   it("selects the first file by default and marks the row selected", async () => {
@@ -1021,14 +1146,14 @@ describe("the commit bar", () => {
       { path: "b.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
       { path: "c.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 2 files");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملفان");
   });
 
   it("uses the singular for one staged file", async () => {
     await openChangesWith([
       { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 1 file");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملف واحد");
   });
 
   it("is disabled with nothing staged", async () => {
@@ -1067,7 +1192,7 @@ describe("the commit bar", () => {
         gitSetStaged: vi.fn(async () => ({ ok: true as const, value: null })),
       },
     );
-    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 0 files");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ لا ملفات");
 
     // gitChanges() is re-read after the toggle resolves; simulate the file
     // now being staged, the same way openChanges's real refetch would.
@@ -1099,7 +1224,7 @@ describe("the commit bar", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 1 file");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملف واحد");
   });
 
   it("commits the typed message and clears the field on success", async () => {
@@ -1182,7 +1307,7 @@ describe("the commit bar", () => {
     // commit resolves) to redraw the file list, counts and commit button
     // from whatever the repository actually looks like now.
     expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
-    expect(document.getElementById("commit-button")?.textContent).toBe("Commit 0 files");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ لا ملفات");
   });
 
   it("shows a commit failure and keeps the message so it is not lost", async () => {

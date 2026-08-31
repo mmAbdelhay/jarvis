@@ -39,15 +39,21 @@ export function formatUptime(seconds: number): string {
   return `${minutes}m`;
 }
 
-/** Relative age, as the artboard shows it ("6m ago"). */
-export function formatAgo(at: number, now: number): string {
+/** Relative age, as the artboard shows it ("6m ago"). Bilingual (I2): this
+ *  string is user-facing (the Changes view header), so it must not be an
+ *  English-only lane beside @jarvis/core's and messages.ts's bilingual
+ *  tables — same rule, applied here. Kept compact in Arabic (قبل 6د) rather
+ *  than fully agreement-correct, matching the artboard's own compact
+ *  English form ("6m ago", not "6 minutes ago"). */
+export function formatAgo(at: number, now: number, language: "ar" | "en" = "en"): string {
   const seconds = Math.floor((now - at) / 1000);
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return language === "ar" ? "الآن" : "just now";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return language === "ar" ? `قبل ${minutes} د` : `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return language === "ar" ? `قبل ${hours} س` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return language === "ar" ? `قبل ${days} يوم` : `${days}d ago`;
 }
 
 export function detectLanguage(text: string): "ar" | "en" {

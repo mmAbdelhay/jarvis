@@ -85,7 +85,49 @@ export const MESSAGES = {
   // the file picked from the list has since gone back to matching HEAD).
   diffNoChanges: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد تغييرات لعرضها." : "No changes to show.",
+  // I2: the Changes view shipped as an English-only lane in an
+  // Arabic-primary app (Global Constraints names this exact defect — it was
+  // a real phase-1 regression). Every string below routes through here
+  // instead of a literal in changes.ts/index.html.
+  //
+  // "Commit N files" is the sharpest case: a counted noun, not a sentence
+  // with a number dropped in — exactly what arabicSessionsCount above
+  // exists for. This mirrors its same label-shape approach (a small
+  // dual/plural table, sidestepping mid-string agreement) rather than
+  // interpolating a raw number into a noun phrase.
+  commitButtonLabel: (count: number, language: "ar" | "en"): string =>
+    language === "ar" ? `حفظ ${arabicFilesCount(count)}` : `Commit ${count} ${count === 1 ? "file" : "files"}`,
+  // `ago` is formatAgo()'s own already-localised output; this just joins it
+  // to the agent id as one label/value pair, same shape as the rest of this
+  // table.
+  writtenBy: (agentId: string, ago: string, language: "ar" | "en"): string =>
+    language === "ar" ? `بواسطة ${agentId} · ${ago}` : `written by ${agentId} · ${ago}`,
+  navDashboard: (language: "ar" | "en"): string => (language === "ar" ? "اللوحة" : "Dashboard"),
+  navChanges: (language: "ar" | "en"): string => (language === "ar" ? "التغييرات" : "Changes"),
+  changedFilesLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "الملفات المعدّلة" : "CHANGED FILES",
+  sideBySideLabel: (language: "ar" | "en"): string => (language === "ar" ? "جنبًا إلى جنب" : "Side by side"),
+  unifiedLabel: (language: "ar" | "en"): string => (language === "ar" ? "موحّد" : "Unified"),
+  beforeColumnLabel: (language: "ar" | "en"): string => (language === "ar" ? "قبل" : "BEFORE"),
+  afterColumnLabel: (language: "ar" | "en"): string => (language === "ar" ? "بعد" : "AFTER"),
+  testsGroupLabel: (language: "ar" | "en"): string => (language === "ar" ? "الاختبارات" : "TESTS"),
+  commitMessagePlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "رسالة الحفظ…" : "Commit message…",
+  stageFileLabel: (language: "ar" | "en"): string => (language === "ar" ? "تجهيز الملف" : "Stage file"),
+  unstageFileLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء تجهيز الملف" : "Unstage file",
 };
+
+// Same shape as arabicSessionsCount below (singular/dual/3-10-plural/11+
+// reverting to singular indefinite accusative), for the counted noun "ملف"
+// (file) instead of "جلسة" (session).
+function arabicFilesCount(count: number): string {
+  if (count === 0) return "لا ملفات";
+  if (count === 1) return "ملف واحد";
+  if (count === 2) return "ملفان";
+  if (count <= 10) return `${count} ملفات`;
+  return `${count} ملفًا`;
+}
 
 function arabicSessionsCount(count: number): string {
   if (count === 0) return "لا جلسات";
