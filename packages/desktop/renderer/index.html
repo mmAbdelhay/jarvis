@@ -25,10 +25,6 @@
     --text-dim: #cfe4ec;
     --good: #5fb87a;
     --bad: #b85f5f;
-    /* The "−34" deletions color from design/GitChanges.dc.html. Insertions
-       reuse --good (already #5fb87a, the same value the artboard uses for
-       "+128") rather than a duplicate token. */
-    --del: #d9645a;
   }
 
   * { box-sizing: border-box; }
@@ -329,18 +325,28 @@
     color: var(--text-muted);
   }
 
+  /* design/Main.dc.html lines 96 and 107: one bordered mono pill carrying
+     both numbers, in the head row, right-aligned after the project name.
+     Base treatment (neutral, on --border) also covers the "done" state,
+     matching .session__ended's own neutral treatment of a past session. */
   .session__diff {
-    display: flex;
-    gap: 7px;
-    margin-inline-start: auto;
     font-size: 9px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
   }
 
-  /* margin-inline-start rather than margin-left: the row flips under an
-     RTL ancestor and the counts must stay on the row's trailing edge
-     either way. */
-  .diff-add { color: var(--good); }
-  .diff-del { color: var(--del); }
+  /* Confirmed against the artboard: running pairs --good with border
+     #1e3a2c, waiting pairs --accent with border #1c3f49 (Main.dc.html
+     lines 96 and 107). Starting/dead aren't illustrated there, so their
+     borders are derived at the same ~1/3-brightness ratio as those two
+     confirmed pairs, off the dot colors already defined below (#d8ad4c,
+     --bad) per ruling P19. */
+  .session--running .session__diff { color: var(--good); border-color: #1e3a2c; }
+  .session--waiting .session__diff { color: var(--accent); border-color: #1c3f49; }
+  .session--starting .session__diff { color: #d8ad4c; border-color: #493b1a; }
+  .session--dead .session__diff { color: var(--bad); border-color: #3f2020; }
 
   .col-center {
     display: flex;

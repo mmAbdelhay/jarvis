@@ -100,6 +100,24 @@ function buildSessionRow(session: Session): HTMLElement {
   spacer.style.flexGrow = "1";
   head.append(spacer);
 
+  // A past session (endedAt set) must not show a live change count: the
+  // counts map is fed only by the live "git:counts" stream, so a stale id
+  // lingering in that snapshot would otherwise put a live-looking badge on
+  // a finished session. Task 16 will persist each session's own recorded
+  // counts; until then, showing nothing is honest.
+  const changes = session.endedAt === undefined ? latestChanges.get(session.id) : undefined;
+  if (changes !== undefined && (changes.insertions > 0 || changes.deletions > 0)) {
+    const diff = document.createElement("div");
+    diff.className = "session__diff mono";
+    // dir is pinned LTR: this is a numeric counter with +/− signs, and an
+    // RTL ancestor would otherwise reorder the sign and the digits.
+    diff.dir = "ltr";
+    // One space, matching design/Main.dc.html lines 96 and 107 verbatim
+    // (a single bordered pill carrying both numbers, not two spans).
+    diff.textContent = `+${changes.insertions} −${changes.deletions}`;
+    head.append(diff);
+  }
+
   const state = document.createElement("span");
   state.className = "session__state mono";
   state.textContent = session.state;
@@ -116,26 +134,6 @@ function buildSessionRow(session: Session): HTMLElement {
   const meta = document.createElement("div");
   meta.className = "session__meta mono";
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
-
-  const changes = latestChanges.get(session.id);
-  if (changes !== undefined && (changes.insertions > 0 || changes.deletions > 0)) {
-    const diff = document.createElement("div");
-    diff.className = "session__diff mono";
-    // dir is pinned LTR: these are numeric counters with +/− signs, and an
-    // RTL ancestor would otherwise reorder the sign and the digits.
-    diff.dir = "ltr";
-
-    const added = document.createElement("span");
-    added.className = "diff-add";
-    added.textContent = `+${changes.insertions}`;
-
-    const removed = document.createElement("span");
-    removed.className = "diff-del";
-    removed.textContent = `−${changes.deletions}`;
-
-    diff.append(added, removed);
-    meta.append(diff);
-  }
 
   row.append(head, summary, meta);
   return row;

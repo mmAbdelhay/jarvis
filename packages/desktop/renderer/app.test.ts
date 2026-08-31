@@ -428,11 +428,13 @@ describe("session change-count badges", () => {
   // buildSessionRow is shared by the live panel and the History panel
   // (Arabic project names test above pins the same sharing for dir/.arabic).
   // A past session keeps the same id it had while live, so if the counts
-  // snapshot has not yet dropped that id, the History panel — like the live
-  // panel — will still paint it; there is no separate suppression for
-  // history rows. This test documents that actual, current behavior rather
-  // than asserting an untested guess about it.
-  it("history rows share the same badge rendering as live rows, including a stale entry that has not been dropped from the snapshot yet", async () => {
+  // snapshot has not yet dropped that id, `latestChanges` can still hold a
+  // live-looking entry for it. Ruling P21: a finished session must never
+  // show a live change count — that would be a lie about it, since counts
+  // are only ever fed by the live "git:counts" stream. Gated on
+  // `endedAt === undefined`, so a history row renders no badge at all,
+  // regardless of what the stale snapshot still holds.
+  it("never shows a live change count on a past session, even with a stale entry still in the snapshot", async () => {
     const past = makeSession({ id: "s1", project: "acme", endedAt: 5000 });
     const { onChangeCounts } = await loadApp(async () => [past]);
     onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
@@ -442,7 +444,7 @@ describe("session change-count badges", () => {
     await Promise.resolve();
 
     const row = document.querySelector("#history-list .session");
-    expect(row?.querySelector(".session__diff")).not.toBeNull();
-    expect(row?.textContent).toContain("+128");
+    expect(row?.querySelector(".session__diff")).toBeNull();
+    expect(row?.textContent).not.toContain("+128");
   });
 });
