@@ -1,4 +1,11 @@
-import { TabStore, isSafeHref, normalizeInput, type TabId, type WorkspaceState } from "@jarvis/core";
+import {
+  TabStore,
+  isSafeHref,
+  normalizeInput,
+  type TabId,
+  type TabKind,
+  type WorkspaceState,
+} from "@jarvis/core";
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
@@ -57,13 +64,20 @@ export class BrowserHost {
     return this.#store.onChange(listener);
   }
 
-  open(project: string, input: string): void {
+  open(project: string, input: string, kind: TabKind = "web"): void {
     const target = normalizeInput(input);
     if (target.kind === "rejected") return;
 
     this.#evictIfFull();
 
-    const tab = this.#store.open(project, target.url);
+    const tab = this.#store.open(project, target.url, kind);
+    if (kind === "editor") {
+      // code-server's own document.title tracks whatever file or panel has
+      // focus inside it; the tab strip would be unreadable if that leaked
+      // through, so this label is fixed once, here, and #onViewEvent's
+      // "title" case never overwrites it for a tab of this kind.
+      this.#store.update(tab.id, { title: `${project} — Editor` });
+    }
     // The partition is what makes a project's logins its own.
     // encodeURIComponent because a project name is user-supplied config and
     // a partition name with a slash or a space in it is not addressable.
@@ -141,7 +155,9 @@ export class BrowserHost {
         });
         break;
       case "title":
-        this.#store.update(id, { title: event.title });
+        // An editor tab's title is fixed at open() and never follows the
+        // page's own document.title — see the comment there.
+        if (this.#store.get(id)?.kind !== "editor") this.#store.update(id, { title: event.title });
         break;
       case "loading":
         this.#store.update(id, { loading: event.loading });

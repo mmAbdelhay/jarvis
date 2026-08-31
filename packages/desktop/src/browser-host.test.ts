@@ -307,6 +307,44 @@ describe("BrowserHost", () => {
 
     expect(seen).toEqual([1, 1]);
   });
+
+  it("defaults an opened tab's kind to web", () => {
+    host.open("acme", "one.example");
+
+    expect(host.state().tabs[0]?.kind).toBe("web");
+  });
+
+  it("opens a tab with an explicit kind", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor");
+
+    expect(host.state().tabs[0]?.kind).toBe("editor");
+  });
+
+  // code-server's own document.title changes with whatever file or panel
+  // has focus inside it; the tab strip would be unreadable if that leaked
+  // through, so an editor tab gets a stable label the project name alone
+  // decides, set once at open and never touched again.
+  it("gives an editor tab a stable title naming its project", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor");
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Editor");
+  });
+
+  it("ignores page-title-updated for an editor tab", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor");
+
+    views[0]?.emit({ kind: "title", title: "Welcome - code-server" });
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Editor");
+  });
+
+  it("still applies page-title-updated for an ordinary web tab", () => {
+    host.open("acme", "one.example");
+
+    views[0]?.emit({ kind: "title", title: "One" });
+
+    expect(host.state().tabs[0]?.title).toBe("One");
+  });
 });
 
 class FakeContents implements WebContentsLike {
