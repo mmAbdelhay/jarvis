@@ -7,6 +7,15 @@ const AGENTS: AgentConfig[] = [
   { id: "copilot", command: "copilot", vendor: "github" },
 ];
 
+// The user's real configuration: three accounts share the anthropic vendor.
+// A fixture with only one account per vendor can prove cross-vendor
+// isolation but structurally cannot prove fan-out to siblings — this one can.
+const MULTI_ANTHROPIC_AGENTS: AgentConfig[] = [
+  { id: "claude-mm", command: "claude-mm", configDir: "/c/mm", vendor: "anthropic" },
+  { id: "claude-acme", command: "claude-acme", configDir: "/c/acme", vendor: "anthropic" },
+  { id: "copilot", command: "copilot", vendor: "github" },
+];
+
 describe("ProviderStatusStore", () => {
   it("starts every account unknown, distinguishing never-read from unsupported", () => {
     const store = new ProviderStatusStore(AGENTS);
@@ -79,12 +88,103 @@ describe("ProviderStatusStore", () => {
     expect(store.snapshot()[1]?.health.state).toBe("unknown");
   });
 
+  it("fans one vendor's health out to every account of that vendor, without touching a sibling's capacity", () => {
+    const store = new ProviderStatusStore(MULTI_ANTHROPIC_AGENTS);
+    // Give both anthropic accounts a known capacity reading first, so a bug
+    // that let recordHealth touch capacity would be visible as a change.
+    store.recordCapacity(
+      "claude-mm",
+      { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+      1_000,
+    );
+    store.recordCapacity(
+      "claude-acme",
+      { ok: true, fiveHour: { usedPercent: 42, resetsAt: "2026-08-31T15:00:00Z" }, sevenDay: undefined },
+      1_500,
+    );
+    const capacityBeforeMm = store.snapshot()[0]?.capacity;
+    const capacityBeforeAcme = store.snapshot()[1]?.capacity;
+
+    store.recordHealth("anthropic", { state: "degraded", detail: "Partially Degraded Service" }, 5_000);
+
+    const [mm, acme, copilot] = store.snapshot();
+
+    // Both anthropic accounts got the health update — this is the fan-out.
+    expect(mm?.health).toEqual({ state: "degraded", detail: "Partially Degraded Service", readAt: 5_000 });
+    expect(acme?.health).toEqual({ state: "degraded", detail: "Partially Degraded Service", readAt: 5_000 });
+
+    // The github account is untouched.
+    expect(copilot?.health.state).toBe("unknown");
+
+    // Health is a vendor fact; capacity is an account fact. Neither
+    // anthropic account's capacity moved.
+    expect(mm?.capacity).toEqual(capacityBeforeMm);
+    expect(acme?.capacity).toEqual(capacityBeforeAcme);
+  });
+
   it("ignores a reading for an id it does not know", () => {
     const store = new ProviderStatusStore(AGENTS);
     expect(() =>
       store.recordCapacity("ghost", { ok: false, reason: "unavailable" }, 1),
     ).not.toThrow();
     expect(store.snapshot()).toHaveLength(2);
+  });
+
+  // Ruling S7: lastCapacityReadAt reports the last *attempt*, success or
+  // failure, not just the last success. A failed reading still opened and
+  // billed the SDK query before the usage call failed, so Task 6's throttle
+  // must see the attempt time or it will retry a failing account every
+  // cycle. These tests are written to fail under success-only semantics.
+  describe("lastCapacityReadAt (ruling S7: last attempt, not last success)", () => {
+    it("reports the failure's own time, not undefined and not an earlier success", () => {
+      const store = new ProviderStatusStore(AGENTS);
+      store.recordCapacity(
+        "claude-mm",
+        { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+        1_000,
+      );
+      store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 2_000);
+
+      expect(store.lastCapacityReadAt("claude-mm")).toBe(2_000);
+    });
+
+    it("advances to the later failed attempt even though the reading itself reverts to unknown", () => {
+      const store = new ProviderStatusStore(AGENTS);
+      store.recordCapacity(
+        "claude-mm",
+        { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+        1_000,
+      );
+      store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 2_000);
+
+      expect(store.lastCapacityReadAt("claude-mm")).toBe(2_000);
+      expect(store.snapshot()[0]?.capacity).toEqual({ state: "unknown", reason: "unavailable" });
+    });
+
+    it("returns undefined for an account that has never been read", () => {
+      const store = new ProviderStatusStore(AGENTS);
+      expect(store.lastCapacityReadAt("claude-mm")).toBeUndefined();
+    });
+  });
+
+  it("does not emit for recordHealth on a vendor no configured account uses", () => {
+    const store = new ProviderStatusStore(AGENTS);
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    store.recordHealth("openai", { state: "ok", detail: "All Systems Operational" }, 1);
+
+    expect(listener).toHaveBeenCalledTimes(0);
+  });
+
+  it("does not emit for recordCapacity on an unknown account id", () => {
+    const store = new ProviderStatusStore(AGENTS);
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    store.recordCapacity("ghost", { ok: false, reason: "unavailable" }, 1);
+
+    expect(listener).toHaveBeenCalledTimes(0);
   });
 
   it("notifies listeners on every record, and stops after unsubscribe", () => {
