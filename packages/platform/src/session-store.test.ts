@@ -290,6 +290,64 @@ describe("createSqliteSessionStore", () => {
       expect(version).toMatchObject({ user_version: 2 });
     });
 
+    it("recovers a half-migrated database — some git columns already present but user_version still 1", () => {
+      // This is the realistic crash state, not a hypothetical: an earlier
+      // (unwrapped) build of migrate() ran the four ALTER TABLE statements
+      // and the PRAGMA user_version write as five separate, unguarded
+      // statements. A process killed after some ALTERs landed but before
+      // the PRAGMA write leaves exactly this shape on disk — some but not
+      // all v2 columns present, user_version still 1 — and the *next*
+      // launch must not throw "duplicate column name" trying to re-add a
+      // column that is already there.
+      const seed = new DatabaseSync(dbPath);
+      seed.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          project TEXT NOT NULL,
+          projectPath TEXT NOT NULL,
+          agentId TEXT NOT NULL,
+          model TEXT,
+          state TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          startedAt INTEGER NOT NULL,
+          lastActivityAt INTEGER NOT NULL,
+          endedAt INTEGER,
+          exitCode INTEGER
+        )
+      `);
+      // Only the first two of the four v2 columns made it — the state a
+      // crash between the 2nd and 3rd ALTER would leave behind.
+      seed.exec("ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''");
+      seed.exec("ALTER TABLE sessions ADD COLUMN insertions INTEGER NOT NULL DEFAULT 0");
+      seed.exec("PRAGMA user_version = 1");
+      seed
+        .prepare(
+          `INSERT INTO sessions (id, project, projectPath, agentId, state, summary, startedAt, lastActivityAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run("half-1", "acme", "/projects/acme", "claude-acme", "done", "", 1, 1);
+      seed.close();
+
+      expect(() => createSqliteSessionStore(dbPath)).not.toThrow();
+
+      const store = createSqliteSessionStore(dbPath);
+      expect(store.history().map((session) => session.id)).toContain("half-1");
+
+      store.updateGit("half-1", {
+        branch: "feat/checkout-retry",
+        insertions: 5,
+        deletions: 2,
+        changedFiles: 1,
+      });
+      const row = store.history().find((session) => session.id === "half-1");
+      expect(row).toMatchObject({ branch: "feat/checkout-retry", deletions: 2, changedFiles: 1 });
+
+      const db = new DatabaseSync(dbPath);
+      const version = db.prepare("PRAGMA user_version").get();
+      db.close();
+      expect(version).toMatchObject({ user_version: 2 });
+    });
+
     it("gives a fresh (never-migrated) database the git columns exactly once", () => {
       // Regression guard for the trap this file's migrate() comment warns
       // about: a fresh db must not define the git columns both in the v0

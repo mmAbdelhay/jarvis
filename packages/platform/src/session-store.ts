@@ -133,6 +133,27 @@ function createSchemaV1(db: DatabaseSync): void {
   `);
 }
 
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return rows.some((row) => row.name === column);
+}
+
+// Adds a column only if it is not already there. `migrate` below also
+// wraps the whole version-2 step in one transaction so a crash mid-way
+// can no longer leave `user_version` behind what the table shape actually
+// is — but this guard stays regardless, because it is what recovers a
+// database that already reached that half-migrated state under the
+// *previous*, unwrapped version of this function (some `ALTER TABLE`
+// statements applied, `PRAGMA user_version` write never reached): without
+// it, re-entering `if (version < 2)` on the next launch re-runs
+// `ALTER TABLE … ADD COLUMN branch …` against a table that already has it
+// and sqlite throws "duplicate column name", bricking every subsequent
+// launch.
+function addColumnIfMissing(db: DatabaseSync, table: string, ddl: string, column: string): void {
+  if (hasColumn(db, table, column)) return;
+  db.exec(ddl);
+}
+
 /**
  * Steps a database up to SCHEMA_VERSION one version at a time. Never drops
  * or recreates a table: this file holds the user's real session history
@@ -144,21 +165,59 @@ function migrate(db: DatabaseSync): void {
 
   if (version >= SCHEMA_VERSION) return;
 
-  if (version < 1) {
-    createSchemaV1(db);
-  }
+  // The whole step — every ALTER plus the PRAGMA user_version write that
+  // marks it done — runs as one transaction. Without this, a process that
+  // dies partway through (a crash, a force-quit) can leave some columns
+  // added but `user_version` still at the old value; the next launch would
+  // then re-enter this branch and re-run an ALTER against a column that
+  // already exists. Wrapped, a crash mid-migration rolls every statement
+  // back (verified: PRAGMA user_version participates in the rollback same
+  // as the ALTERs), so the db is left exactly as it was and the next
+  // launch retries the whole step cleanly. addColumnIfMissing above is the
+  // separate guard that recovers a database already left half-migrated by
+  // an earlier, unwrapped build of this function.
+  db.exec("BEGIN");
+  try {
+    if (version < 1) {
+      createSchemaV1(db);
+    }
 
-  if (version < 2) {
-    // Phase 2: what each session changed on disk, so the history panel can
-    // show it after the session and its worktree are long gone. Defaults
-    // make every pre-existing row valid without a backfill.
-    db.exec("ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''");
-    db.exec("ALTER TABLE sessions ADD COLUMN insertions INTEGER NOT NULL DEFAULT 0");
-    db.exec("ALTER TABLE sessions ADD COLUMN deletions INTEGER NOT NULL DEFAULT 0");
-    db.exec("ALTER TABLE sessions ADD COLUMN changed_files INTEGER NOT NULL DEFAULT 0");
-  }
+    if (version < 2) {
+      // Phase 2: what each session changed on disk, so the history panel
+      // can show it after the session and its worktree are long gone.
+      // Defaults make every pre-existing row valid without a backfill.
+      addColumnIfMissing(
+        db,
+        "sessions",
+        "ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
+        "branch",
+      );
+      addColumnIfMissing(
+        db,
+        "sessions",
+        "ALTER TABLE sessions ADD COLUMN insertions INTEGER NOT NULL DEFAULT 0",
+        "insertions",
+      );
+      addColumnIfMissing(
+        db,
+        "sessions",
+        "ALTER TABLE sessions ADD COLUMN deletions INTEGER NOT NULL DEFAULT 0",
+        "deletions",
+      );
+      addColumnIfMissing(
+        db,
+        "sessions",
+        "ALTER TABLE sessions ADD COLUMN changed_files INTEGER NOT NULL DEFAULT 0",
+        "changed_files",
+      );
+    }
 
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 // A row still in a non-terminal state ("starting" / "running" / "waiting")
