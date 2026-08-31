@@ -1,5 +1,9 @@
 import {
+  checkAgent,
   gitFailureText,
+  type AgentConfig,
+  type AgentHealth,
+  type CommandRunner,
   type GitChanges,
   type GitFileDiff,
   type GitOutcome,
@@ -19,6 +23,7 @@ import {
   type WorkspaceState,
 } from "@jarvis/core";
 import type { CodeServerManager, DocFailureCode, DocReader } from "@jarvis/platform";
+import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
 export type VoiceNotice = { text: string; language: "ar" | "en" };
@@ -561,5 +566,50 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
         return fail(MESSAGES.docUnavailable(deps.language));
       }
     },
+  };
+}
+
+export type SettingsSaveResult =
+  | { ok: true }
+  | { ok: false; text: string; detail: string; language: "ar" | "en" };
+
+export type SettingsHandlers = {
+  read(): Promise<JarvisConfig>;
+  save(draft: unknown): Promise<SettingsSaveResult>;
+  testAgent(agent: unknown): Promise<AgentHealth>;
+  restart(): void;
+};
+
+export type SettingsHandlerDeps = {
+  readConfig(): Promise<JarvisConfig>;
+  /** settings-io.ts's writeSettingsFile, injected so this file's own tests
+   *  never touch a real filesystem. */
+  writeConfig(draft: JarvisConfig): Promise<{ ok: true } | { ok: false; detail: string }>;
+  run: CommandRunner;
+  restart(): void;
+  language: "ar" | "en";
+};
+
+export function createSettingsHandlers(deps: SettingsHandlerDeps): SettingsHandlers {
+  return {
+    read: () => deps.readConfig(),
+
+    async save(draft) {
+      const result = await deps.writeConfig(draft as JarvisConfig);
+      if (result.ok) return { ok: true };
+      return {
+        ok: false,
+        text: MESSAGES.settingsSaveFailed(deps.language),
+        detail: result.detail,
+        language: deps.language,
+      };
+    },
+
+    // checkAgent never rejects — a malformed draft agent (missing command,
+    // wrong types) degrades to an unhealthy AgentHealth, same as a real
+    // broken agent would, rather than needing its own guard here.
+    testAgent: (agent) => checkAgent(agent as AgentConfig, deps.run),
+
+    restart: () => deps.restart(),
   };
 }

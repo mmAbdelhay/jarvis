@@ -6,11 +6,13 @@ import {
   createDocsHandlers,
   createEditorHandlers,
   createGitHandlers,
+  createSettingsHandlers,
   type WiringDeps,
 } from "./ipc.js";
 import type { CodeServerManager, DocOutcome, DocReader } from "@jarvis/platform";
-import type { DocEntry, WorkspaceState } from "@jarvis/core";
+import type { AgentHealth, DocEntry, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
+import type { JarvisConfig } from "./config.js";
 
 // Shared fixture for buildWiring's provider-facing tests: everything a
 // WiringDeps needs, wired to a `sent` capture array instead of a bare
@@ -1009,5 +1011,120 @@ describe("editor handlers", () => {
     const result = await handlers.open("acme");
 
     expect(result.ok).toBe(false);
+  });
+});
+
+const sampleConfig: JarvisConfig = {
+  registry: { agents: { "claude-mm": { command: "claude-mm" } }, routing: [] },
+  projects: { acme: "/p/acme" },
+  brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
+  whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
+  sessionsDbPath: "/tmp/sessions.db",
+};
+
+function settingsDeps(overrides: Partial<{
+  readConfig: () => Promise<JarvisConfig>;
+  writeConfig: (draft: JarvisConfig) => Promise<{ ok: true } | { ok: false; detail: string }>;
+  run: (command: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+  restart: () => void;
+}> = {}) {
+  return {
+    readConfig: overrides.readConfig ?? (() => Promise.resolve(sampleConfig)),
+    writeConfig: overrides.writeConfig ?? (() => Promise.resolve({ ok: true } as const)),
+    run: overrides.run ?? (() => Promise.resolve({ code: 0, stdout: "1.0.0", stderr: "" })),
+    restart: overrides.restart ?? (() => {}),
+    language: "en" as const,
+  };
+}
+
+describe("createSettingsHandlers", () => {
+  it("reads the current config through readConfig", async () => {
+    const handlers = createSettingsHandlers(settingsDeps());
+
+    expect(await handlers.read()).toEqual(sampleConfig);
+  });
+
+  it("saves a draft through writeConfig and reports success", async () => {
+    const written: JarvisConfig[] = [];
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        writeConfig: (draft) => {
+          written.push(draft);
+          return Promise.resolve({ ok: true });
+        },
+      }),
+    );
+
+    const result = await handlers.save(sampleConfig);
+
+    expect(result).toEqual({ ok: true });
+    expect(written).toEqual([sampleConfig]);
+  });
+
+  it("wraps a write failure in the bilingual headline plus the raw detail", async () => {
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        writeConfig: () =>
+          Promise.resolve({ ok: false, detail: "Config `agents.x.command` must be a string" }),
+      }),
+    );
+
+    const result = await handlers.save(sampleConfig);
+
+    expect(result).toEqual({
+      ok: false,
+      text: "Couldn't save settings — see below.",
+      detail: "Config `agents.x.command` must be a string",
+      language: "en",
+    });
+  });
+
+  it("localises the headline into Arabic when that is the configured language", async () => {
+    const handlers = createSettingsHandlers({
+      ...settingsDeps({ writeConfig: () => Promise.resolve({ ok: false, detail: "x" }) }),
+      language: "ar",
+    });
+
+    const result = await handlers.save(sampleConfig);
+
+    expect(!result.ok && result.text).toBe("تعذّر حفظ الإعدادات — التفاصيل أدناه.");
+  });
+
+  it("runs the health probe against the draft agent via run", async () => {
+    const calls: [string, string[]][] = [];
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        run: (command, args) => {
+          calls.push([command, args]);
+          return Promise.resolve({ code: 0, stdout: "1.2.3", stderr: "" });
+        },
+      }),
+    );
+
+    const health: AgentHealth = await handlers.testAgent({ id: "claude-mm", command: "claude-mm" });
+
+    expect(health).toEqual({ id: "claude-mm", ok: true, detail: "1.2.3" });
+    expect(calls).toEqual([["claude-mm", ["--version"]]]);
+  });
+
+  it("reports a broken agent as unhealthy rather than throwing", async () => {
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        run: () => Promise.resolve({ code: 0, stdout: "Error: command not found", stderr: "" }),
+      }),
+    );
+
+    const health = await handlers.testAgent({ id: "claude-mm", command: "claude-mm" });
+
+    expect(health.ok).toBe(false);
+  });
+
+  it("calls the injected restart function", () => {
+    let called = false;
+    const handlers = createSettingsHandlers(settingsDeps({ restart: () => { called = true; } }));
+
+    handlers.restart();
+
+    expect(called).toBe(true);
   });
 });
