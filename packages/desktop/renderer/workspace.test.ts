@@ -232,4 +232,28 @@ describe("workspace chrome", () => {
       args: [{ x: 12, y: 141, width: 901, height: 600 }],
     });
   });
+
+  it("lists a project's documents when docs mode opens", async () => {
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.listDocs = () =>
+      Promise.resolve({ ok: true, value: [{ path: "docs/plan.md", name: "plan.md" }] });
+
+    document.getElementById("workspace-mode-docs")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector(".workspace-doc-item")?.textContent).toBe("docs/plan.md");
+  });
+
+  it("shows a localised error when the project's docs cannot be listed", async () => {
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.listDocs = () =>
+      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
+
+    document.getElementById("workspace-mode-docs")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("workspace-doc-body")?.textContent).toContain(
+      "Could not open that document.",
+    );
+  });
 });

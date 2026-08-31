@@ -1,5 +1,7 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { setWorkspaceMode } from "./views.js";
+import { renderDocument } from "./doc-view.js";
+import type { DocEntry } from "@jarvis/core";
 
 // The Workspace's chrome. Everything a page can influence — its title, its
 // URL, a load error — is attacker-controlled text arriving in the process
@@ -31,6 +33,12 @@ export function initWorkspace(projects: string[]): void {
     option.textContent = project;
     select.append(option);
   }
+  select.addEventListener("change", () => {
+    // Only refetch if Docs is the mode actually on screen — switching
+    // projects while browsing has nothing to do with the doc tree.
+    const docs = document.getElementById("workspace-docs");
+    if (docs instanceof HTMLElement && !docs.hidden) void openDocs(select.value);
+  });
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -80,6 +88,59 @@ function showMode(mode: "browser" | "docs"): void {
   // above are only paint.
   setWorkspaceMode(mode);
   if (mode === "browser") reportWorkspaceBounds();
+  else void openDocs(selectedProject());
+}
+
+
+let openDocPath: string | undefined;
+
+/** Lists a project's documents and shows the first one, or an error line if
+ *  the project cannot be read. Called when Docs mode is entered and when the
+ *  project selector changes. */
+export async function openDocs(project: string): Promise<void> {
+  const list = $("workspace-doc-list");
+  list.replaceChildren();
+  const result = await window.jarvis.listDocs(project);
+  if (!result.ok) {
+    showDocError(result);
+    return;
+  }
+  for (const entry of result.value) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "workspace-doc-item";
+    button.classList.toggle("workspace-doc-item--on", entry.path === openDocPath);
+    // A filename comes from the filesystem; it is text.
+    button.textContent = entry.path;
+    button.addEventListener("click", () => void openDoc(project, entry));
+    list.append(button);
+  }
+}
+
+async function openDoc(project: string, entry: DocEntry): Promise<void> {
+  const result = await window.jarvis.readDoc(project, entry.path);
+  const body = $("workspace-doc-body");
+  const title = $("workspace-doc-title");
+  if (!result.ok) {
+    showDocError(result);
+    return;
+  }
+  openDocPath = entry.path;
+  title.textContent = entry.path;
+  body.replaceChildren(renderDocument(result.value));
+  for (const item of document.querySelectorAll(".workspace-doc-item")) {
+    item.classList.toggle("workspace-doc-item--on", item.textContent === entry.path);
+  }
+}
+
+function showDocError(result: { text: string; language: "ar" | "en" }): void {
+  const body = $("workspace-doc-body");
+  body.replaceChildren();
+  const line = document.createElement("p");
+  line.dir = result.language === "ar" ? "rtl" : "ltr";
+  line.classList.toggle("arabic", result.language === "ar");
+  line.textContent = result.text;
+  body.append(line);
 }
 
 export function renderWorkspace(state: WorkspaceState): void {
