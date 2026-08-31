@@ -115,6 +115,28 @@ export function initWorkspace(projects: string[]): void {
   $("workspace-doc-quote").addEventListener("click", () => applyToEditor(prefixLines("> ")));
   $("workspace-doc-link").addEventListener("click", () => applyToEditor(wrapSelection("[", "](url)")));
   $("workspace-doc-hr").addEventListener("click", () => applyToEditor(insertAtCursor("\n---\n")));
+
+  $("workspace-open-editor").addEventListener("click", () => void openEditor());
+}
+
+/** Ensures a code-server instance is running for the selected project and
+ *  opens it as an ordinary browser tab — the editor is not a separate
+ *  surface, just a page like any other, reusing openTab exactly as the
+ *  address bar or a "+" click would. */
+async function openEditor(): Promise<void> {
+  const project = selectedProject();
+  const status = $("workspace-editor-status");
+  status.textContent = "";
+  status.classList.remove("workspace-editor-status--error");
+
+  const result = await window.jarvis.openEditor(project);
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-editor-status--error");
+    return;
+  }
+  void window.jarvis.openTab(project, result.value);
+  showMode("browser");
 }
 
 function showMode(mode: "browser" | "docs"): void {

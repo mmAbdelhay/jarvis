@@ -22,6 +22,8 @@ function harness(): Recorded[] {
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
       </div>
+      <button id="workspace-open-editor"></button>
+      <span id="workspace-editor-status"></span>
       <div id="workspace-docs" hidden>
         <div id="workspace-doc-list"></div>
         <div id="workspace-doc-title"></div>
@@ -75,6 +77,7 @@ function harness(): Recorded[] {
     },
     parseDoc: () => Promise.resolve([]),
     taskOffsets: () => Promise.resolve([]),
+    openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
   };
   return calls;
 }
@@ -524,5 +527,46 @@ describe("workspace doc editing", () => {
     document.getElementById("workspace-doc-hr")?.click();
 
     expect(editor.value).toBe("a\n---\nb");
+  });
+});
+
+describe("open in editor", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme"]);
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  });
+
+  it("opens the editor URL as a tab for the selected project and switches to Browser", async () => {
+    jarvis["openEditor"] = (project: string) =>
+      Promise.resolve({ ok: true, value: `http://127.0.0.1:9001/?folder=${project}` });
+    document.getElementById("workspace-mode-docs")?.click();
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme"],
+    });
+    expect(
+      document.getElementById("workspace-browser")?.hasAttribute("hidden"),
+    ).toBe(false);
+  });
+
+  it("shows a localised error and does not open a tab when the editor cannot start", async () => {
+    jarvis["openEditor"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+    expect(document.getElementById("workspace-editor-status")?.textContent).toBe(
+      "Could not open that document.",
+    );
   });
 });

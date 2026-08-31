@@ -47,6 +47,8 @@ describe("workspace markup", () => {
     "workspace-doc-quote",
     "workspace-doc-link",
     "workspace-doc-hr",
+    "workspace-open-editor",
+    "workspace-editor-status",
   ])("has #%s", (id) => {
     expect(html).toContain(`id="${id}"`);
   });

@@ -948,6 +948,9 @@
   #workspace-doc-save-status { font-size: 11px; color: var(--good); }
   #workspace-doc-save-status.workspace-doc-save-status--error { color: var(--del); }
 
+  #workspace-editor-status { font-size: 11px; color: var(--text-muted); }
+  #workspace-editor-status.workspace-editor-status--error { color: var(--del); }
+
   .workspace-doc-body {
     flex-grow: 1;
     min-height: 0;
@@ -1571,6 +1574,9 @@
 
     <div class="workspace-head">
       <select id="workspace-project" class="workspace-project mono"></select>
+      <button id="workspace-open-editor" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 12px;" title="Open the project's files in a full code editor">Editor</button>
+      <span id="workspace-editor-status" class="mono"></span>
       <div class="workspace-modes">
         <button id="workspace-mode-browser" class="diff-mode diff-mode--on" type="button">Browser</button>
         <button id="workspace-mode-docs" class="diff-mode" type="button">Docs</button>
