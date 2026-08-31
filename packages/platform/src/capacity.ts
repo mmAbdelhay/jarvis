@@ -1,0 +1,162 @@
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { CapacityReading, RateWindow } from "@jarvis/core";
+
+/**
+ * EVERY CALL INTO THIS MODULE COSTS REAL MONEY.
+ *
+ * The remaining-capacity figure is not readable for free: it arrives as a
+ * side effect of an actual API round trip, so asking how much is left
+ * consumes some of what is left. The controller's live run measured
+ * `total_cost_usd: 0.0077` and ~3.3s for a one-word prompt. Three
+ * accounts on a 30-second dashboard tick would be about $2/day spent asking
+ * the question.
+ *
+ * Consequently: nothing in this file polls, retries, or fans out, and no
+ * caller may put it on a timer. The refresh policy lives in core's
+ * ProviderMonitor, where it is one reviewable object: startup once,
+ * on explicit user demand, and free piggybacks off queries already paid for.
+ *
+ * The SDK method is literally named
+ * `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`. Absence, a
+ * throw, or a changed shape must degrade to "unavailable" — never to a
+ * guess, and never to a stale number presented as current.
+ */
+
+/** Generous next to a ~3.3s measured round trip, but bounded (R35 / P6). */
+export const CAPACITY_TIMEOUT_MS = 20_000;
+
+/**
+ * The slice of the SDK's `Query` this module uses. Narrower than the real
+ * type (which carries dozens of control methods) so tests can build a
+ * fixture; the real `Query` satisfies it structurally, so no cast is needed.
+ */
+export type UsageQuery = {
+  [Symbol.asyncIterator](): AsyncIterator<{ type: string }>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<unknown>;
+};
+
+export type OpenUsageQuery = (configDir: string) => UsageQuery;
+
+const UNAVAILABLE: CapacityReading = { ok: false, reason: "unavailable" };
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  return Object.fromEntries(Object.entries(value));
+}
+
+function parseWindow(value: unknown): RateWindow | undefined {
+  const window = asRecord(value);
+  if (window === undefined) return undefined;
+
+  const utilization = window["utilization"];
+  const resetsAt = window["resets_at"];
+  // Both fields are typed `| null` by the SDK and both are optional in
+  // practice; a partial window is no window at all.
+  if (typeof utilization !== "number" || !Number.isFinite(utilization)) return undefined;
+  if (typeof resetsAt !== "string" || Number.isNaN(Date.parse(resetsAt))) return undefined;
+
+  return {
+    usedPercent: Math.max(0, Math.min(100, Math.round(utilization))),
+    resetsAt,
+  };
+}
+
+/**
+ * The choke point. The raw response — session cost, per-model usage,
+ * behaviour flags, internal codenames — dies here; only the two windows
+ * continue. Nothing downstream, in a log, an error message or an IPC
+ * payload, ever sees the rest.
+ *
+ * CORRECTION 1 from the controller's verification, pinned by test: the
+ * fields live under `rate_limits`, NOT at the top level. Reading
+ * `usage.five_hour` returns undefined and would ship a permanently blank
+ * panel.
+ */
+export function parseUsage(raw: unknown): CapacityReading {
+  const usage = asRecord(raw);
+  if (usage === undefined) return UNAVAILABLE;
+
+  // False for API-key / Bedrock / Vertex auth, where plan limits do not
+  // apply at all and `rate_limits` is null.
+  if (usage["rate_limits_available"] === false) return UNAVAILABLE;
+
+  const limits = asRecord(usage["rate_limits"]);
+  if (limits === undefined) return UNAVAILABLE;
+
+  const fiveHour = parseWindow(limits["five_hour"]);
+  if (fiveHour === undefined) return UNAVAILABLE;
+
+  return { ok: true, fiveHour, sevenDay: parseWindow(limits["seven_day"]) };
+}
+
+/**
+ * CORRECTION 2 from the controller's verification, pinned by test: the usage
+ * method must be called MID-STREAM, at the first `assistant` message.
+ * Calling it at the `result` message throws "Query closed before response
+ * received"; calling it after the loop throws "ProcessTransport is not ready
+ * for writing". After reading, the stream is drained to the end rather than
+ * broken out of, so the child process finishes and exits on its own.
+ */
+async function runRead(open: OpenUsageQuery, configDir: string): Promise<CapacityReading> {
+  let raw: unknown;
+  let read = false;
+
+  const query = open(configDir);
+  for await (const message of query) {
+    if (read || message.type !== "assistant") continue;
+    read = true;
+    raw = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+  }
+
+  if (!read) return UNAVAILABLE;
+  return parseUsage(raw);
+}
+
+export function createCapacityReader(config: {
+  /**
+   * A directory with no `.claude` project config of its own — the same
+   * isolation requirement as BrainConfig.cwd, for the same reason: a
+   * headless SDK session inherits hooks and skills from its cwd. Pass the
+   * brain's cwd.
+   */
+  cwd: string;
+  open?: OpenUsageQuery;
+  timeoutMs?: number;
+}): (configDir: string) => Promise<CapacityReading> {
+  const timeoutMs = config.timeoutMs ?? CAPACITY_TIMEOUT_MS;
+  const open: OpenUsageQuery =
+    config.open ??
+    ((configDir) =>
+      sdkQuery({
+        // One word. The reading is a side effect of the round trip, so the
+        // prompt exists only to make the trip as small as it can be.
+        prompt: "ok",
+        options: {
+          maxTurns: 1,
+          cwd: config.cwd,
+          settingSources: [],
+          tools: [],
+          // This is what makes the reading belong to THIS account: the SDK
+          // subprocess is pointed at that account's config directory, the
+          // same mechanism the user's own wrapper scripts use.
+          env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        },
+      }));
+
+  return async (configDir: string): Promise<CapacityReading> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<CapacityReading>((resolve) => {
+        timer = setTimeout(() => resolve(UNAVAILABLE), timeoutMs);
+      });
+      return await Promise.race([runRead(open, configDir), timeout]);
+    } catch {
+      // A throw from the experimental API, a spawn failure, a shape change
+      // mid-iteration: all of them are "we don't know", never a rejection
+      // into a caller that has a panel to paint.
+      return UNAVAILABLE;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}

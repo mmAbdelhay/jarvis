@@ -6,3 +6,4 @@ export * from "./brain.js";
 export * from "./session-store.js";
 export * from "./git.js";
 export * from "./status-page.js";
+export * from "./capacity.js";
