@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,6 +131,76 @@ describe("createGitProvider().changes", () => {
     });
   });
 
+  it("reports real insertions/deletions for a rename with content changes, not 0/0", async () => {
+    // Regression test: simple-git's diffSummary reports a renamed file as
+    // "kept.txt => renamed.txt", not as the new path alone. A counts lookup
+    // keyed by the raw diffSummary string never matches status.files[].path
+    // (always the new path) and silently falls back to zero.
+    const dir = await makeRepo();
+    const git = simpleGit(dir);
+    await git.mv("kept.txt", "renamed.txt");
+    await writeFile(join(dir, "renamed.txt"), "one\nTWO\nthree\nfour\n", "utf8");
+    await git.add(["renamed.txt"]);
+
+    const outcome = await createGitProvider().changes(dir);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    expect(outcome.value.files).toHaveLength(1);
+    expect(outcome.value.files[0]).toMatchObject({
+      path: "renamed.txt",
+      status: "R",
+      staged: true,
+      insertions: 2,
+      deletions: 1,
+    });
+    expect(outcome.value.insertions).toBe(2);
+    expect(outcome.value.deletions).toBe(1);
+  });
+
+  it("reports real insertions/deletions for a rename in a subdirectory (brace notation)", async () => {
+    // Same bug, brace form: a common directory collapses the diffSummary
+    // key to "sub/{kept.txt => renamed.txt}", which must resolve to
+    // "sub/renamed.txt" to match status.files[].path.
+    const dir = await makeRepo();
+    const git = simpleGit(dir);
+    await mkdir(join(dir, "sub"));
+    await writeFile(join(dir, "sub", "kept2.txt"), "one\ntwo\nthree\n", "utf8");
+    await git.add(["sub/kept2.txt"]);
+    await git.commit("add sub file");
+
+    await git.mv("sub/kept2.txt", "sub/renamed2.txt");
+    await writeFile(join(dir, "sub", "renamed2.txt"), "one\nTWO\nthree\nfour\n", "utf8");
+    await git.add(["sub/renamed2.txt"]);
+
+    const outcome = await createGitProvider().changes(dir);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    const renamed = outcome.value.files.find((file) => file.path === "sub/renamed2.txt");
+    expect(renamed).toMatchObject({
+      status: "R",
+      staged: true,
+      insertions: 2,
+      deletions: 1,
+    });
+  });
+
+  it("rolls a rename's real counts up into the totals alongside an ordinary edit", async () => {
+    const dir = await makeRepo();
+    const git = simpleGit(dir);
+    await git.mv("kept.txt", "renamed.txt");
+    await writeFile(join(dir, "renamed.txt"), "one\nTWO\nthree\nfour\n", "utf8");
+    await git.add(["renamed.txt"]);
+    await writeFile(join(dir, "loose.txt"), "x\ny\n", "utf8");
+
+    const outcome = await createGitProvider().changes(dir);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    expect(outcome.value.files).toHaveLength(2);
+    // renamed.txt: +2/-1 (staged), loose.txt: untracked, +0/-0.
+    expect(outcome.value.insertions).toBe(2);
+    expect(outcome.value.deletions).toBe(1);
+  });
+
   it("reports a detached HEAD as detached with the short SHA as the branch", async () => {
     const dir = await makeRepo();
     const git = simpleGit(dir);
@@ -169,6 +239,7 @@ describe("createGitProvider().changes", () => {
     const outcome = await createGitProvider().changes("/definitely/not/here");
     expect(outcome.ok).toBe(false);
   });
+
 });
 
 describe("createGitProvider().diff", () => {

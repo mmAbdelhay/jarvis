@@ -37,18 +37,41 @@ function toLetter(raw: string): GitStatusLetter {
 
 type Counts = { insertions: number; deletions: number };
 
+// simple-git's diffSummary (git diff --stat) writes a rename or copy not as
+// the new path alone but as "old => new", or — when old and new share a
+// directory or a prefix/suffix — as "prefix{old => new}suffix". status.files
+// always keys a file by its *new* path (that's what git status --porcelain
+// prints), so a counts lookup keyed by the raw diffSummary string never
+// matches a renamed or copied file and silently falls back to 0/0. Resolving
+// every diffSummary key to the real new path here — once, for every entry,
+// regardless of the file's status letter — fixes rename (R) and copy (C)
+// alike without special-casing either.
+function resolveDiffPath(file: string): string {
+  const braced = /^(.*)\{.* => (.*)\}(.*)$/.exec(file);
+  if (braced) {
+    const [, prefix = "", newMid = "", suffix = ""] = braced;
+    return `${prefix}${newMid}${suffix}`;
+  }
+  const arrow = file.indexOf(" => ");
+  if (arrow !== -1) {
+    return file.slice(arrow + " => ".length).trim();
+  }
+  return file;
+}
+
 function countsByFile(files: readonly { file: string; binary: boolean }[]): Map<string, Counts> {
   const counts = new Map<string, Counts>();
   for (const entry of files) {
+    const path = resolveDiffPath(entry.file);
     if (entry.binary) {
-      counts.set(entry.file, { insertions: 0, deletions: 0 });
+      counts.set(path, { insertions: 0, deletions: 0 });
       continue;
     }
     if ("insertions" in entry && "deletions" in entry) {
       const insertions = typeof entry.insertions === "number" ? entry.insertions : 0;
       const deletions = typeof entry.deletions === "number" ? entry.deletions : 0;
-      const existing = counts.get(entry.file) ?? { insertions: 0, deletions: 0 };
-      counts.set(entry.file, {
+      const existing = counts.get(path) ?? { insertions: 0, deletions: 0 };
+      counts.set(path, {
         insertions: existing.insertions + insertions,
         deletions: existing.deletions + deletions,
       });
