@@ -1,5 +1,5 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, normalize, relative, sep } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, join, normalize } from "node:path";
 import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
 import type {
   GitChanges,
@@ -12,6 +12,7 @@ import type {
   GitStatusLetter,
 } from "@jarvis/core";
 import { GitPluginError, simpleGit, type SimpleGit } from "simple-git";
+import { resolvesInside } from "./paths.js";
 
 // This module is the only place in the repository that imports simple-git.
 // `core` declares GitProvider; everything OS-facing lives here. simple-git
@@ -142,28 +143,12 @@ function insideRepo(filePath: string): boolean {
  * symlink whose target resolves *outside* it (ruling P17: an agent, which
  * routinely creates files as part of the product, can plant a symlink to
  * e.g. ~/.ssh/id_rsa; the untracked-file branch below would then read the
- * link's target and hand its contents to the Changes view). realpath()
- * resolves symlinks (and any intermediate ones in the path); both sides are
- * resolved before comparing because the repo root itself can be reached
- * through a symlink too (/tmp is one on macOS) — resolving only filePath
- * would make every legitimate repo created under a symlinked root fail this
- * check.
+ * link's target and hand its contents to the Changes view).
+ *
+ * The filesystem half of that check lives in paths.ts, shared with the
+ * workspace's document reader: two copies of a security check are how the
+ * two drift apart.
  */
-async function resolvesInsideRepo(repoPath: string, filePath: string): Promise<boolean> {
-  try {
-    const [realRepo, realTarget] = await Promise.all([
-      realpath(repoPath),
-      realpath(join(repoPath, filePath)),
-    ]);
-    const rel = relative(realRepo, realTarget);
-    return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-  } catch {
-    // A dangling symlink (target doesn't exist) or a repo path that
-    // vanished mid-check can't be proven safe, so it's refused rather than
-    // read.
-    return false;
-  }
-}
 
 // A huge repo, a stalled index lock, or a network-mounted .git can make the
 // real git binary never return. GitOutcome has no way to express "still
@@ -225,7 +210,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         const untracked = status.not_added.some((path) => path === filePath);
 
         if (untracked) {
-          if (!(await resolvesInsideRepo(repoPath, filePath))) {
+          if (!(await resolvesInside(repoPath, filePath))) {
             return failure("failed", `path outside the repository: ${filePath}`);
           }
           const info = await stat(join(repoPath, filePath));
