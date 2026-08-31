@@ -15,10 +15,12 @@ function harness(): Recorded[] {
       <div id="workspace-browser">
         <div id="workspace-tabs"></div>
         <div id="workspace-bar">
-          <button id="workspace-back"></button>
-          <button id="workspace-forward"></button>
-          <button id="workspace-reload"></button>
-          <input id="workspace-address" />
+          <div id="workspace-nav-controls">
+            <button id="workspace-back"></button>
+            <button id="workspace-forward"></button>
+            <button id="workspace-reload"></button>
+            <input id="workspace-address" />
+          </div>
           <button id="workspace-new-tab"></button>
         </div>
         <div id="workspace-error" hidden></div>
@@ -238,22 +240,28 @@ describe("workspace chrome", () => {
     expect(marked).toEqual([false, true]);
   });
 
-  it("hides the address bar when the active tab is an editor", () => {
+  // Only the back/forward/reload/address-input group is meaningless for a
+  // code editor — "+" (open a new tab) is not tied to what the current tab
+  // happens to be, and must stay reachable even while an editor tab is
+  // active, or there would be no way to open a browser tab from there.
+  it("hides only the nav controls, not the whole bar, when the active tab is an editor", () => {
     renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
 
-    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("shows the address bar when the active tab is an ordinary page", () => {
+  it("shows the nav controls when the active tab is an ordinary page", () => {
     renderWorkspace({ tabs: [tab({ kind: "web" })], activeTabId: "tab-1" });
 
-    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("shows the address bar when there is no active tab at all", () => {
+  it("shows the nav controls when there is no active tab at all", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
-    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(false);
   });
 
   it("puts the active tab's URL in the address bar", () => {

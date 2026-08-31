@@ -501,9 +501,11 @@ export function renderWorkspace(state: WorkspaceState): void {
 
   const tab = activeTab();
 
-  // Nothing in this row means anything for a code editor — nobody
-  // navigates it like a webpage.
-  ($("workspace-bar") as HTMLElement).hidden = tab?.kind === "editor";
+  // Back/forward/reload/address mean nothing for a code editor — nobody
+  // navigates it like a webpage. "+" (open a new tab) is not tied to what
+  // the current tab happens to be, so only the nav-controls group hides;
+  // #workspace-bar itself, and "+" inside it, stay visible regardless.
+  ($("workspace-nav-controls") as HTMLElement).hidden = tab?.kind === "editor";
 
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.

@@ -892,7 +892,14 @@
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .workspace-bar[hidden] { display: none; }
+
+  /* Back/forward/reload/address — hidden for an editor tab, since none of
+     it means anything for a code editor. Never applied to #workspace-bar
+     itself: "+" (open a new tab) is not tied to the current tab's kind and
+     must always stay reachable, or there would be no way to open a browser
+     tab while an editor tab is active. */
+  .workspace-nav-controls { display: flex; align-items: center; gap: 6px; flex-grow: 1; }
+  .workspace-nav-controls[hidden] { display: none; }
 
   .workspace-nav {
     font: inherit;
@@ -1767,11 +1774,13 @@
     <div id="workspace-browser" class="workspace-browser">
       <div id="workspace-tabs" class="workspace-tabs"></div>
       <div id="workspace-bar" class="workspace-bar">
-        <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
-        <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
-        <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
-        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
-               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+        <div id="workspace-nav-controls" class="workspace-nav-controls">
+          <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
+          <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
+          <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
+          <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+                 autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+        </div>
         <button id="workspace-new-tab" class="workspace-nav" type="button" title="New tab">+</button>
       </div>
       <div id="workspace-error" class="changes-error" hidden></div>
