@@ -334,11 +334,20 @@ function fileRow(view: ChangesView, file: GitFileChange): HTMLElement {
     // Without this the row's own click handler would also fire and the
     // selection would jump every time someone staged a file.
     event.stopPropagation();
+    // Task 15 review: a stage toggle in flight must also block Commit —
+    // without this, clicking Commit before this gitSetStaged() resolves
+    // (and openChanges() re-renders) could commit a file's stage state the
+    // button's label never described. Released on both branches below, the
+    // same way `committing` is.
+    stagingInFlight += 1;
+    refreshCommitBar();
     void window.jarvis
       .gitSetStaged(view.session.id, file.path, !file.staged)
       .then((result) => {
+        stagingInFlight -= 1;
         if (!result.ok) {
           showError(result);
+          refreshCommitBar();
           return;
         }
         // Re-fetching and re-rendering from a fresh gitChanges() read
@@ -349,6 +358,13 @@ function fileRow(view: ChangesView, file: GitFileChange): HTMLElement {
         // last response to land always wins over a stale one, instead of
         // two racing in-place mutations disagreeing with each other.
         return openChanges(view.session.id, selected);
+      })
+      .catch(() => {
+        // Belt-and-braces, same reasoning as the commit guard's own catch:
+        // window.jarvis.gitSetStaged is documented to never reject, but if
+        // it ever did, the guard must not get stuck disabled forever.
+        stagingInFlight -= 1;
+        refreshCommitBar();
       });
   });
 
@@ -412,6 +428,14 @@ function commitButton(): HTMLButtonElement {
 // click produces two real commits against the user's repository.
 let committing = false;
 
+// A counter, not a boolean: more than one file's stage toggle can be in
+// flight at once (rapid clicks across different rows), and the button must
+// stay disabled until every one of them has settled, not just the first.
+// See the stage button's click handler in fileRow() for why this exists —
+// this is the renderer-side half only; per-repo serialization of
+// git:setStaged against git:commit in the main process is Task 17's.
+let stagingInFlight = 0;
+
 /** Recomputes the button's label and disabled state from the current
  *  view's staged files and the message field. Called after every render
  *  of the file list (staging changes the staged count) and after typing. */
@@ -420,7 +444,8 @@ function refreshCommitBar(): void {
   const button = commitButton();
   // The artboard's label is "Commit 7 files"; one file reads as "1 file".
   button.textContent = staged.length === 1 ? "Commit 1 file" : `Commit ${staged.length} files`;
-  button.disabled = committing || staged.length === 0 || commitInput().value.trim() === "";
+  button.disabled =
+    committing || stagingInFlight > 0 || staged.length === 0 || commitInput().value.trim() === "";
 }
 
 /** Wires the commit bar's message field and Commit button. Called once
@@ -436,7 +461,7 @@ export function wireCommitBar(): void {
   input.addEventListener("input", () => refreshCommitBar());
   button.addEventListener("click", () => {
     const view = current;
-    if (view === undefined || committing) return;
+    if (view === undefined || committing || stagingInFlight > 0) return;
     const message = commitInput().value.trim();
     if (message === "") return;
 

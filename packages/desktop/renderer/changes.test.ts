@@ -1287,4 +1287,51 @@ describe("the commit bar", () => {
 
     expect(jarvis.gitCommit).toHaveBeenCalledTimes(1);
   });
+
+  // Task 15 review: a stage/unstage toggle in flight must also block
+  // Commit, not just an in-flight commit itself — otherwise a commit fired
+  // while gitSetStaged() is still outstanding can include or exclude a
+  // file the button's label never described.
+  it("disables Commit while a stage toggle is outstanding, and re-enables it once the toggle settles", async () => {
+    let resolveStage: ((result: { ok: true; value: null }) => void) | undefined;
+    const stagePromise = new Promise<{ ok: true; value: null }>((resolve) => {
+      resolveStage = resolve;
+    });
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+      undefined,
+      { gitSetStaged: vi.fn(() => stagePromise) },
+    );
+    const input = document.getElementById("commit-message");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing input");
+    input.value = "إصلاح الدفع";
+    input.dispatchEvent(new Event("input"));
+
+    const stageButton = document.querySelector(".file-stage");
+    if (!(stageButton instanceof HTMLElement)) throw new Error("missing stage toggle");
+    stageButton.click();
+    await Promise.resolve();
+
+    const button = document.getElementById("commit-button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("missing button");
+    expect(button.disabled).toBe(true);
+
+    button.click();
+    await Promise.resolve();
+    expect(jarvis.gitCommit).not.toHaveBeenCalled();
+
+    if (resolveStage === undefined) throw new Error("stage toggle never called");
+    resolveStage({ ok: true, value: null });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const settledButton = document.getElementById("commit-button");
+    if (!(settledButton instanceof HTMLButtonElement)) throw new Error("missing button");
+    expect(settledButton.disabled).toBe(false);
+
+    settledButton.click();
+    await Promise.resolve();
+    expect(jarvis.gitCommit).toHaveBeenCalledTimes(1);
+  });
 });
