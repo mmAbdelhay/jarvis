@@ -605,6 +605,79 @@
     border-color: var(--accent);
   }
 
+  /* Providers panel: the approved artboard (design/Main.dc.html) has three
+     panels and none is this one. It is a third panel in the LEFT column
+     rather than a History-style overlay because the user's question — "which
+     account can I use right now" — is asked before they have decided to ask
+     anything, and a surface you must open cannot answer that. Every value
+     below is the artboard's own: .panel chrome, .ph header, .lbl labels, and
+     the same .bar/.fill meter the System panel uses for CPU and MEMORY
+     (lines 105-116 above), which is exactly the right analogy for remaining
+     capacity. .sessions-panel already carries flex-grow: 1, so it absorbs
+     the height this takes with no change to the grid. */
+  .providers-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    overflow-y: auto;
+  }
+
+  /* A plain class toggle, not the [hidden] attribute — there is no UA rule
+     to out-cascade here, so this doesn't need the :not([hidden]) guard the
+     History overlay below needs. */
+  .providers-panel--collapsed .providers-body { display: none; }
+
+  .providers-panel .ph { cursor: pointer; }
+
+  .provider {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .provider__head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .provider__id {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .provider__value {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Known-zero and unknown must never look alike: zero is a real reading
+     shown in the "no headroom" red, unknown is a muted em dash and has no
+     meter beneath it at all (see providers.ts). */
+  .provider__value--empty { color: var(--del); }
+  .provider__value--unknown { color: var(--text-muted); }
+
+  .provider .fill { background: var(--accent); }
+  .provider .fill--low { background: var(--amber); }
+  .provider .fill--critical { background: var(--del); }
+
+  .provider__note {
+    font-size: 9px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .provider__note--stale { color: #46606f; }
+
+  /* Source order matters: these four must follow the base `.dot` rule
+     above (line 302) to win — equal specificity (one class selector each),
+     last declared wins the cascade. */
+  .dot--ok { background: var(--good); }
+  .dot--degraded { background: var(--amber); }
+  .dot--outage { background: var(--del); }
+  .dot--unknown { background: #33454f; }
+
   /* History panel: the approved artboard has no history surface, so this
      reuses the same panel chrome, session-row treatment and type scale as
      the Sessions panel rather than inventing a new visual language — it is
@@ -1049,6 +1122,18 @@
           </div>
           <div class="temp-note">Temperature needs a privileged helper on Apple Silicon — not wired up.</div>
         </div>
+      </div>
+
+      <div class="panel providers-panel" id="providers-panel">
+        <div class="ph" id="providers-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><path d="M12 20a8 8 0 1 0-8-8"></path><path d="M12 12l5-3"></path><path d="M4 12H2M12 4V2M20 12h2"></path></svg>
+          <div class="pt">Providers</div>
+          <div class="spacer"></div>
+          <button id="providers-refresh" class="icon-btn" type="button" aria-label="Refresh provider status">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
+          </button>
+        </div>
+        <div class="providers-body" id="providers"></div>
       </div>
 
       <div class="panel sessions-panel">

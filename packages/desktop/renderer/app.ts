@@ -3,6 +3,7 @@ import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { applyStaticChrome, openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
+import { renderProviders, wireProvidersPanel } from "./providers.js";
 
 declare global {
   interface Window {
@@ -35,6 +36,7 @@ window.jarvis.onChangeCounts((changes) => {
   latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
   renderSessions(latestSessions);
 });
+window.jarvis.onProviders((statuses) => renderProviders(statuses, Date.now()));
 
 startClock();
 applyStaticChrome();
@@ -44,6 +46,7 @@ wireHistoryPanel();
 wireNav();
 wireDiffModes();
 wireCommitBar();
+wireProvidersPanel();
 
 function wireNav(): void {
   document.getElementById("nav-dashboard")?.addEventListener("click", () => showView("dashboard"));

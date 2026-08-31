@@ -70,6 +70,7 @@ async function loadApp(
     startVoice: vi.fn(async () => {}),
     stopVoice: vi.fn(async () => {}),
     onMetrics: vi.fn(),
+    onProviders: vi.fn(),
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
     },

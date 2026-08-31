@@ -131,6 +131,40 @@ export const MESSAGES = {
   stageFileLabel: (language: "ar" | "en"): string => (language === "ar" ? "تجهيز الملف" : "Stage file"),
   unstageFileLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "إلغاء تجهيز الملف" : "Unstage file",
+  // Providers panel chrome (Task 9). The account-status *sentences*
+  // (providerStatusLine et al.) belong to @jarvis/core's own messages.ts —
+  // these are only the panel's own labels, same split as everywhere else
+  // in this file (I2: no English-only lane beside a bilingual table).
+  providersTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحسابات" : "Providers",
+  providersEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد حسابات مُعرّفة." : "No providers are configured.",
+  // The row's own label. "LEFT", not "USED": the System panel above shows
+  // consumption, this shows headroom, and the label is what makes the
+  // meter's direction unambiguous.
+  capacityLeftLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المتبقي" : "LEFT",
+  // Three different facts, never collapsed into one "unknown".
+  capacityUnsupported: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوفّر قراءة للسعة" : "no capacity reading available",
+  capacityUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّرت قراءة السعة" : "capacity couldn't be read",
+  capacityNeverRead: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تُقرأ السعة بعد" : "capacity not checked yet",
+  // `clock` is an already-formatted HH:MM value, interpolated at the tail.
+  // Ruling P30: never "resets in 3 hours" — an absolute time needs no
+  // counted noun in Arabic and stays true as the reading ages.
+  capacityResetsAt: (clock: string, language: "ar" | "en"): string =>
+    language === "ar" ? `يتجدد ${clock}` : `resets ${clock}`,
+  capacityAsOf: (clock: string, language: "ar" | "en"): string =>
+    language === "ar" ? `حتى ${clock}` : `as of ${clock}`,
+  refreshProviders: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحديث حالة الحسابات" : "Refresh provider status",
+  providerHealth: (state: "degraded" | "outage" | "unknown", language: "ar" | "en"): string => {
+    if (state === "degraded") return language === "ar" ? "الخدمة متعثرة" : "service degraded";
+    if (state === "outage") return language === "ar" ? "الخدمة متوقفة" : "service down";
+    return language === "ar" ? "حالة الخدمة غير معروفة" : "service status unknown";
+  },
 };
 
 // NOT the same table as arabicSessionsCount below, even though the two

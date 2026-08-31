@@ -64,10 +64,9 @@ const knownFullRemaining: ProviderStatus = {
 };
 
 /**
- * A fractional `usedPercent` (62.5), which `remainingPercent` does not
- * round — see the "rounding" note in the fix-round-1 report. Exercises
- * whatever a 0.5-boundary value actually renders as, rather than assuming
- * it gets rounded to a whole number.
+ * A fractional `usedPercent` (62.5). Ruling S11: `remainingPercent` floors
+ * rather than rounds, so 100 - 62.5 = 37.5 renders as "37%", never "38%" —
+ * flooring never overstates what's left.
  */
 const knownFractional: ProviderStatus = {
   id: "claude-half",
@@ -154,12 +153,12 @@ describe("providerStatusLine — capacity known", () => {
     );
   });
 
-  it("renders a fractional remaining percentage exactly (no rounding), in both languages", () => {
+  it("renders a fractional remaining percentage floored, in both languages", () => {
     expect(providerStatusLine(knownFractional, "en")).toBe(
-      `claude-half — 37.5% left · resets ${clock("2026-08-31T18:45:00.000Z")} · as of ${clock("2026-08-31T17:30:00.000Z")}`,
+      `claude-half — 37% left · resets ${clock("2026-08-31T18:45:00.000Z")} · as of ${clock("2026-08-31T17:30:00.000Z")}`,
     );
     expect(providerStatusLine(knownFractional, "ar")).toBe(
-      `claude-half — المتبقي 37.5% · يتجدد ${clock("2026-08-31T18:45:00.000Z")} · حتى ${clock("2026-08-31T17:30:00.000Z")}`,
+      `claude-half — المتبقي 37% · يتجدد ${clock("2026-08-31T18:45:00.000Z")} · حتى ${clock("2026-08-31T17:30:00.000Z")}`,
     );
   });
 

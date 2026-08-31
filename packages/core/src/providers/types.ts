@@ -52,6 +52,12 @@ export type ProviderStatus = {
   health: ProviderHealth;
 };
 
+// Ruling S11: floors rather than rounds. This is REMAINING capacity, so
+// flooring never tells the user they have more left than they actually do
+// — usedPercent 99.6 floors to "0%" ("none left" when a sliver remains),
+// which is the safe direction to be wrong in. Clamped to 0-100 first so a
+// provider-reported usedPercent outside 0-100 can't produce a negative or
+// over-100 remaining value.
 export function remainingPercent(window: RateWindow): number {
-  return Math.max(0, Math.min(100, 100 - window.usedPercent));
+  return Math.floor(Math.max(0, Math.min(100, 100 - window.usedPercent)));
 }
