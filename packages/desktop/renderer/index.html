@@ -909,12 +909,69 @@
   .workspace-doc-pane {
     display: flex;
     flex-direction: column;
+    flex-grow: 1;
     min-height: 0;
-    padding: 14px 20px;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
-  .workspace-doc-body { font-size: 13px; line-height: 1.65; color: var(--text); max-width: 78ch; }
+  .workspace-doc-pane-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace-doc-modes { display: flex; gap: 6px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+
+  .workspace-doc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .workspace-doc-toolbar[hidden] { display: none; }
+
+  .workspace-doc-tool {
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+  .workspace-doc-tool:hover { color: var(--text); }
+
+  #workspace-doc-save-status { font-size: 11px; color: var(--good); }
+  #workspace-doc-save-status.workspace-doc-save-status--error { color: var(--del); }
+
+  .workspace-doc-body {
+    flex-grow: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 20px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--text);
+    max-width: 78ch;
+  }
+  .workspace-doc-body[hidden] { display: none; }
+
+  .workspace-doc-editor {
+    flex-grow: 1;
+    min-height: 0;
+    padding: 14px 20px;
+    background: var(--ground);
+    color: var(--text);
+    border: none;
+    resize: none;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .workspace-doc-editor[hidden] { display: none; }
   .workspace-doc-body pre {
     background: var(--panel);
     padding: 10px 12px;
@@ -1540,8 +1597,37 @@
         <div id="workspace-doc-list" class="workspace-doc-list"></div>
       </div>
       <div class="workspace-doc-pane">
-        <div id="workspace-doc-title" class="mono changes-dim"></div>
+        <div class="workspace-doc-pane-head">
+          <div id="workspace-doc-title" class="mono changes-dim"></div>
+          <div class="spacer"></div>
+          <div class="workspace-doc-modes">
+            <button id="workspace-doc-mode-writing" class="diff-mode diff-mode--on" type="button">Writing</button>
+            <button id="workspace-doc-mode-dev" class="diff-mode" type="button">Dev</button>
+          </div>
+        </div>
+
+        <div id="workspace-doc-toolbar" class="workspace-doc-toolbar" hidden>
+          <button id="workspace-doc-h1" class="workspace-doc-tool" type="button" title="Heading 1">H1</button>
+          <button id="workspace-doc-h2" class="workspace-doc-tool" type="button" title="Heading 2">H2</button>
+          <button id="workspace-doc-h3" class="workspace-doc-tool" type="button" title="Heading 3">H3</button>
+          <button id="workspace-doc-bold" class="workspace-doc-tool" type="button" title="Bold">B</button>
+          <button id="workspace-doc-italic" class="workspace-doc-tool" type="button" title="Italic">I</button>
+          <button id="workspace-doc-strike" class="workspace-doc-tool" type="button" title="Strikethrough">S</button>
+          <button id="workspace-doc-code" class="workspace-doc-tool" type="button" title="Inline code">Code</button>
+          <button id="workspace-doc-codeblock" class="workspace-doc-tool" type="button" title="Code block">Block</button>
+          <button id="workspace-doc-ul" class="workspace-doc-tool" type="button" title="Bullet list">List</button>
+          <button id="workspace-doc-ol" class="workspace-doc-tool" type="button" title="Numbered list">1.</button>
+          <button id="workspace-doc-quote" class="workspace-doc-tool" type="button" title="Quote">Quote</button>
+          <button id="workspace-doc-link" class="workspace-doc-tool" type="button" title="Link">Link</button>
+          <button id="workspace-doc-hr" class="workspace-doc-tool" type="button" title="Horizontal rule">—</button>
+          <div class="spacer"></div>
+          <span id="workspace-doc-save-status" class="mono"></span>
+          <button id="workspace-doc-save" class="workspace-nav" type="button" title="Save" style="width: auto; padding: 0 12px;">Save</button>
+        </div>
+
         <div id="workspace-doc-body" class="workspace-doc-body"></div>
+        <textarea id="workspace-doc-editor" class="workspace-doc-editor mono" hidden dir="ltr"
+                  autocomplete="off" spellcheck="false"></textarea>
       </div>
     </div>
 

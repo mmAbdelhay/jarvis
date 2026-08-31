@@ -65,6 +65,11 @@ export const MESSAGES = {
     language === "ar" ? "المستند أكبر من أن يُعرض." : "That document is too large to display.",
   docNotFound: (language: "ar" | "en"): string =>
     language === "ar" ? "لا يوجد مستند بهذا الاسم." : "There is no document by that name.",
+  // The Dev-mode editor's save status line. A failure reuses the text a
+  // write already returns (docUnavailable, docTooLarge, docNotFound) —
+  // this is the one new string, for the quiet success case those have no
+  // equivalent of.
+  docSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // Ruling P22: gitChanges() always reads the repository's current working

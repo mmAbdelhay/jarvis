@@ -25,7 +25,27 @@ function harness(): Recorded[] {
       <div id="workspace-docs" hidden>
         <div id="workspace-doc-list"></div>
         <div id="workspace-doc-title"></div>
+        <button id="workspace-doc-mode-writing"></button>
+        <button id="workspace-doc-mode-dev"></button>
+        <div id="workspace-doc-toolbar" hidden>
+          <button id="workspace-doc-h1"></button>
+          <button id="workspace-doc-h2"></button>
+          <button id="workspace-doc-h3"></button>
+          <button id="workspace-doc-bold"></button>
+          <button id="workspace-doc-italic"></button>
+          <button id="workspace-doc-strike"></button>
+          <button id="workspace-doc-code"></button>
+          <button id="workspace-doc-codeblock"></button>
+          <button id="workspace-doc-ul"></button>
+          <button id="workspace-doc-ol"></button>
+          <button id="workspace-doc-quote"></button>
+          <button id="workspace-doc-link"></button>
+          <button id="workspace-doc-hr"></button>
+          <span id="workspace-doc-save-status"></span>
+          <button id="workspace-doc-save"></button>
+        </div>
         <div id="workspace-doc-body"></div>
+        <textarea id="workspace-doc-editor" hidden></textarea>
       </div>
     </div>`;
 
@@ -48,6 +68,13 @@ function harness(): Recorded[] {
     setWorkspaceVisible: record("setWorkspaceVisible"),
     listDocs: () => Promise.resolve({ ok: true, value: [] }),
     readDoc: () => Promise.resolve({ ok: true, value: [] }),
+    readDocRaw: () => Promise.resolve({ ok: true, value: "" }),
+    writeDoc: (...args: unknown[]) => {
+      calls.push({ call: "writeDoc", args });
+      return Promise.resolve({ ok: true, value: null });
+    },
+    parseDoc: () => Promise.resolve([]),
+    taskOffsets: () => Promise.resolve([]),
   };
   return calls;
 }
@@ -280,5 +307,222 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-doc-body")?.textContent).toContain(
       "Could not open that document.",
     );
+  });
+});
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function openADoc(
+  jarvis: Record<string, unknown>,
+  overrides: { readDoc?: unknown; readDocRaw?: unknown; taskOffsets?: unknown } = {},
+): Promise<void> {
+  jarvis["listDocs"] = () =>
+    Promise.resolve({ ok: true, value: [{ path: "notes.md", name: "notes.md" }] });
+  jarvis["readDoc"] =
+    overrides.readDoc ??
+    (() =>
+      Promise.resolve({
+        ok: true,
+        value: [{ kind: "paragraph", children: [{ kind: "text", text: "hello" }] }],
+      }));
+  jarvis["readDocRaw"] = overrides.readDocRaw ?? (() => Promise.resolve({ ok: true, value: "hello" }));
+  // openDoc() itself calls taskOffsets while opening, so this override has
+  // to be in place before the click below — setting it afterwards is too
+  // late to affect the value openDoc() already cached.
+  if (overrides.taskOffsets !== undefined) jarvis["taskOffsets"] = overrides.taskOffsets;
+
+  document.getElementById("workspace-mode-docs")?.click();
+  await flush();
+  document.querySelector<HTMLElement>(".workspace-doc-item")?.click();
+  await flush();
+}
+
+describe("workspace doc editing", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme"]);
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  });
+
+  it("populates the raw-text editor when a document opens", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }) });
+
+    expect((document.getElementById("workspace-doc-editor") as HTMLTextAreaElement).value).toBe(
+      "- [ ] a",
+    );
+  });
+
+  it("shows the editor and toolbar, and hides the rendered body, in Dev mode", async () => {
+    await openADoc(jarvis);
+
+    document.getElementById("workspace-doc-mode-dev")?.click();
+
+    expect((document.getElementById("workspace-doc-editor") as HTMLElement).hidden).toBe(false);
+    expect((document.getElementById("workspace-doc-toolbar") as HTMLElement).hidden).toBe(false);
+    expect((document.getElementById("workspace-doc-body") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("re-renders the body from the editor's current text when switching back to Writing", async () => {
+    await openADoc(jarvis);
+    jarvis["parseDoc"] = (text: string) =>
+      Promise.resolve([{ kind: "paragraph", children: [{ kind: "text", text: `parsed:${text}` }] }]);
+    document.getElementById("workspace-doc-mode-dev")?.click();
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.value = "edited text";
+
+    document.getElementById("workspace-doc-mode-writing")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-doc-body")?.textContent).toBe("parsed:edited text");
+    expect((document.getElementById("workspace-doc-editor") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("flips the matching raw-text offset and saves when a checkbox is clicked", async () => {
+    await openADoc(jarvis, {
+      readDoc: () =>
+        Promise.resolve({
+          ok: true,
+          value: [
+            {
+              kind: "list",
+              ordered: false,
+              items: [[{ kind: "paragraph", children: [{ kind: "text", text: "a" }] }]],
+              checked: [false],
+            },
+          ],
+        }),
+      readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }),
+      taskOffsets: () => Promise.resolve([3]),
+    });
+
+    const box = document.querySelector<HTMLInputElement>("input[type=checkbox]");
+    expect(box).not.toBeNull();
+    box!.checked = true;
+    box!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(calls).toContainEqual({ call: "writeDoc", args: ["acme", "notes.md", "- [x] a"] });
+  });
+
+  it("reverts the checkbox if the write fails", async () => {
+    await openADoc(jarvis, {
+      readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }),
+      taskOffsets: () => Promise.resolve([3]),
+    });
+    jarvis["writeDoc"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset["taskIndex"] = "0";
+    document.getElementById("workspace-doc-body")?.append(box);
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(box.checked).toBe(false);
+  });
+
+  it("clears the save status when the editor is typed into", async () => {
+    await openADoc(jarvis);
+    const status = document.getElementById("workspace-doc-save-status") as HTMLElement;
+    status.textContent = "Saved.";
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(status.textContent).toBe("");
+  });
+
+  it("saves the editor's current text and shows a success status", async () => {
+    await openADoc(jarvis);
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.value = "new content";
+
+    document.getElementById("workspace-doc-save")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "writeDoc", args: ["acme", "notes.md", "new content"] });
+    expect(document.getElementById("workspace-doc-save-status")?.textContent).not.toBe("");
+  });
+
+  it("shows the localised error text when a save fails", async () => {
+    await openADoc(jarvis);
+    jarvis["writeDoc"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
+
+    document.getElementById("workspace-doc-save")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-doc-save-status")?.textContent).toBe(
+      "Could not open that document.",
+    );
+  });
+
+  it("wraps the selection in ** ** when Bold is clicked", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "hello world" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 5);
+
+    document.getElementById("workspace-doc-bold")?.click();
+
+    expect(editor.value).toBe("**hello** world");
+  });
+
+  it("places the cursor between empty markers when nothing is selected", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 0);
+
+    document.getElementById("workspace-doc-bold")?.click();
+
+    expect(editor.value).toBe("****");
+    expect(editor.selectionStart).toBe(2);
+    expect(editor.selectionEnd).toBe(2);
+  });
+
+  it("prefixes the current line with # # when H1 is clicked", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "a line" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(2, 2);
+
+    document.getElementById("workspace-doc-h1")?.click();
+
+    expect(editor.value).toBe("# a line");
+  });
+
+  it("prefixes every selected line with - when the bullet-list button is clicked", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "a\nb" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 3);
+
+    document.getElementById("workspace-doc-ul")?.click();
+
+    expect(editor.value).toBe("- a\n- b");
+  });
+
+  it("wraps the selection as a link when Link is clicked", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "docs" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 4);
+
+    document.getElementById("workspace-doc-link")?.click();
+
+    expect(editor.value).toBe("[docs](url)");
+  });
+
+  it("inserts a rule at the cursor when HR is clicked", async () => {
+    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "ab" }) });
+    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(1, 1);
+
+    document.getElementById("workspace-doc-hr")?.click();
+
+    expect(editor.value).toBe("a\n---\nb");
   });
 });

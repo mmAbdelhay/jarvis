@@ -2,6 +2,7 @@ import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { setWorkspaceMode } from "./views.js";
 import { renderDocument } from "./doc-view.js";
 import type { DocEntry } from "@jarvis/core";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
 // The Workspace's chrome. Everything a page can influence — its title, its
 // URL, a load error — is attacker-controlled text arriving in the process
@@ -84,6 +85,36 @@ export function initWorkspace(projects: string[]): void {
   // The overlay does not move with the layout, so every reflow has to be
   // pushed. A resize is the only one the renderer can observe cheaply.
   window.addEventListener("resize", reportWorkspaceBounds);
+
+  $("workspace-doc-mode-writing").addEventListener("click", () => void switchDocMode("writing"));
+  $("workspace-doc-mode-dev").addEventListener("click", () => void switchDocMode("dev"));
+
+  // Event delegation: the body is replaced wholesale on every doc open and
+  // every mode switch, so a listener on each checkbox would need rewiring
+  // every time. One listener on the container survives all of that.
+  $("workspace-doc-body").addEventListener("change", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "checkbox") void toggleTask(target);
+  });
+
+  $("workspace-doc-editor").addEventListener("input", () => setSaveStatus(""));
+  $("workspace-doc-save").addEventListener("click", () => void saveDoc());
+
+  $("workspace-doc-h1").addEventListener("click", () => applyToEditor(prefixLines("# ")));
+  $("workspace-doc-h2").addEventListener("click", () => applyToEditor(prefixLines("## ")));
+  $("workspace-doc-h3").addEventListener("click", () => applyToEditor(prefixLines("### ")));
+  $("workspace-doc-bold").addEventListener("click", () => applyToEditor(wrapSelection("**", "**")));
+  $("workspace-doc-italic").addEventListener("click", () => applyToEditor(wrapSelection("*", "*")));
+  $("workspace-doc-strike").addEventListener("click", () => applyToEditor(wrapSelection("~~", "~~")));
+  $("workspace-doc-code").addEventListener("click", () => applyToEditor(wrapSelection("`", "`")));
+  $("workspace-doc-codeblock").addEventListener("click", () =>
+    applyToEditor(wrapSelection("```\n", "\n```")),
+  );
+  $("workspace-doc-ul").addEventListener("click", () => applyToEditor(prefixLines("- ")));
+  $("workspace-doc-ol").addEventListener("click", () => applyToEditor(prefixLines("1. ")));
+  $("workspace-doc-quote").addEventListener("click", () => applyToEditor(prefixLines("> ")));
+  $("workspace-doc-link").addEventListener("click", () => applyToEditor(wrapSelection("[", "](url)")));
+  $("workspace-doc-hr").addEventListener("click", () => applyToEditor(insertAtCursor("\n---\n")));
 }
 
 function showMode(mode: "browser" | "docs"): void {
@@ -102,6 +133,21 @@ function showMode(mode: "browser" | "docs"): void {
 
 
 let openDocPath: string | undefined;
+let openDocProject: string | undefined;
+/** The document's raw markdown source — Dev-mode's textarea starts here,
+ *  and it is what a checkbox click and Save actually write back. Distinct
+ *  from the parsed model shown in Writing mode, which cannot losslessly
+ *  round-trip back to source text. */
+let openDocRawText: string | undefined;
+/** Character offsets of each task marker's state character in
+ *  openDocRawText, in the same document order renderDocument assigns
+ *  checkbox data-task-index — see findTaskMarkerOffsets in core. Same
+ *  length after a checkbox flip (space<->x is a same-length swap), so it is
+ *  only ever recomputed when the text itself changes for another reason
+ *  (opening a doc, switching back from Dev, a successful Save). */
+let openDocTaskOffsets: number[] = [];
+type DocMode = "writing" | "dev";
+let docMode: DocMode = "writing";
 
 /** Lists a project's documents and shows the first one, or an error line if
  *  the project cannot be read. Called when Docs mode is entered and when the
@@ -135,11 +181,167 @@ async function openDoc(project: string, entry: DocEntry): Promise<void> {
     return;
   }
   openDocPath = entry.path;
+  openDocProject = project;
   title.textContent = entry.path;
   body.replaceChildren(renderDocument(result.value));
   for (const item of document.querySelectorAll(".workspace-doc-item")) {
     item.classList.toggle("workspace-doc-item--on", item.textContent === entry.path);
   }
+
+  // The parsed model above is enough for Writing mode; Dev mode needs the
+  // actual source text, which the model cannot losslessly reconstruct.
+  const raw = await window.jarvis.readDocRaw(project, entry.path);
+  const editor = $("workspace-doc-editor") as HTMLTextAreaElement;
+  if (raw.ok) {
+    openDocRawText = raw.value;
+    editor.value = raw.value;
+    openDocTaskOffsets = await window.jarvis.taskOffsets(raw.value);
+  } else {
+    openDocRawText = undefined;
+    openDocTaskOffsets = [];
+    editor.value = "";
+  }
+  setSaveStatus("");
+  setDocMode("writing");
+}
+
+/** Swaps which of the rendered body / raw-text editor is on screen. Purely
+ *  visual — switchDocMode (below) is what also decides whether the other
+ *  side needs to be resynced first. */
+function setDocMode(mode: DocMode): void {
+  docMode = mode;
+  ($("workspace-doc-body") as HTMLElement).hidden = mode !== "writing";
+  ($("workspace-doc-editor") as HTMLElement).hidden = mode !== "dev";
+  ($("workspace-doc-toolbar") as HTMLElement).hidden = mode !== "dev";
+  $("workspace-doc-mode-writing").classList.toggle("diff-mode--on", mode === "writing");
+  $("workspace-doc-mode-dev").classList.toggle("diff-mode--on", mode === "dev");
+}
+
+/** Entering Writing from Dev re-parses whatever is currently in the
+ *  editor — including an edit that has not been saved yet — so switching
+ *  back and forth always shows the true current state, and recomputes the
+ *  task offsets against that same text so a checkbox click afterwards
+ *  flips the right character. Entering Dev needs none of that: the editor
+ *  already holds the current text (openDoc populated it, or Writing mode
+ *  never had a way to change it in the first place). */
+async function switchDocMode(mode: DocMode): Promise<void> {
+  if (mode === "writing" && docMode === "dev") {
+    const editor = $("workspace-doc-editor") as HTMLTextAreaElement;
+    const text = editor.value;
+    const blocks = await window.jarvis.parseDoc(text);
+    $("workspace-doc-body").replaceChildren(renderDocument(blocks));
+    openDocRawText = text;
+    openDocTaskOffsets = await window.jarvis.taskOffsets(text);
+  }
+  setDocMode(mode);
+}
+
+async function toggleTask(box: HTMLInputElement): Promise<void> {
+  const indexRaw = box.dataset["taskIndex"];
+  if (
+    indexRaw === undefined ||
+    openDocRawText === undefined ||
+    openDocProject === undefined ||
+    openDocPath === undefined
+  ) {
+    return;
+  }
+  const offset = openDocTaskOffsets[Number(indexRaw)];
+  if (offset === undefined) return;
+
+  const nextChar = box.checked ? "x" : " ";
+  const newText = openDocRawText.slice(0, offset) + nextChar + openDocRawText.slice(offset + 1);
+
+  const result = await window.jarvis.writeDoc(openDocProject, openDocPath, newText);
+  if (!result.ok) {
+    // The write failed; the checkbox must not silently claim a state the
+    // file does not actually have.
+    box.checked = !box.checked;
+    return;
+  }
+  openDocRawText = newText;
+  const editor = $("workspace-doc-editor") as HTMLTextAreaElement;
+  if (docMode === "dev") editor.value = newText;
+}
+
+function setSaveStatus(text: string, isError = false): void {
+  const status = $("workspace-doc-save-status");
+  status.textContent = text;
+  status.classList.toggle("workspace-doc-save-status--error", isError);
+}
+
+async function saveDoc(): Promise<void> {
+  if (openDocProject === undefined || openDocPath === undefined) return;
+  const editor = $("workspace-doc-editor") as HTMLTextAreaElement;
+  const result = await window.jarvis.writeDoc(openDocProject, openDocPath, editor.value);
+  if (!result.ok) {
+    setSaveStatus(result.text, true);
+    return;
+  }
+  openDocRawText = editor.value;
+  openDocTaskOffsets = await window.jarvis.taskOffsets(editor.value);
+  setSaveStatus(MESSAGES.docSaved(PRIMARY_LANGUAGE));
+}
+
+type TextSelection = { start: number; end: number };
+type EditorMutation = (text: string, selection: TextSelection) => { text: string; selection: TextSelection };
+
+/** Wraps the selection in `before`/`after` — or, with nothing selected,
+ *  inserts an empty pair and leaves the cursor between them, ready to type
+ *  into. Not true WYSIWYG: this is text surgery on the raw markdown, the
+ *  same as every toolbar button here. */
+function wrapSelection(before: string, after: string): EditorMutation {
+  return (text, selection) => {
+    const selected = text.slice(selection.start, selection.end);
+    const replacement = before + selected + after;
+    const newText = text.slice(0, selection.start) + replacement + text.slice(selection.end);
+    const newSelection: TextSelection =
+      selected === ""
+        ? { start: selection.start + before.length, end: selection.start + before.length }
+        : { start: selection.start, end: selection.start + replacement.length };
+    return { text: newText, selection: newSelection };
+  };
+}
+
+/** Prefixes every line the selection touches (or just the current line, if
+ *  the selection is collapsed) with `marker`. */
+function prefixLines(marker: string): EditorMutation {
+  return (text, selection) => {
+    const lineStart = text.lastIndexOf("\n", selection.start - 1) + 1;
+    const nextBreak = text.indexOf("\n", selection.end);
+    const lineEnd = nextBreak === -1 ? text.length : nextBreak;
+    const block = text.slice(lineStart, lineEnd);
+    const prefixed = block
+      .split("\n")
+      .map((line) => marker + line)
+      .join("\n");
+    const newText = text.slice(0, lineStart) + prefixed + text.slice(lineEnd);
+    const delta = prefixed.length - block.length;
+    return {
+      text: newText,
+      selection: { start: selection.start + marker.length, end: selection.end + delta },
+    };
+  };
+}
+
+/** Inserts `snippet` at the cursor, replacing any selection, cursor left at
+ *  the end of what was inserted. */
+function insertAtCursor(snippet: string): EditorMutation {
+  return (text, selection) => {
+    const newText = text.slice(0, selection.start) + snippet + text.slice(selection.end);
+    const at = selection.start + snippet.length;
+    return { text: newText, selection: { start: at, end: at } };
+  };
+}
+
+function applyToEditor(mutate: EditorMutation): void {
+  const editor = $("workspace-doc-editor") as HTMLTextAreaElement;
+  const selection = { start: editor.selectionStart, end: editor.selectionEnd };
+  const result = mutate(editor.value, selection);
+  editor.value = result.text;
+  editor.focus();
+  editor.setSelectionRange(result.selection.start, result.selection.end);
+  setSaveStatus("");
 }
 
 function showDocError(result: { text: string; language: "ar" | "en" }): void {
