@@ -134,8 +134,11 @@ function createSchemaV1(db: DatabaseSync): void {
 }
 
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  return rows.some((row) => row.name === column);
+  // No `as` cast onto the row shape: node:sqlite types `all()` as
+  // `Record<string, SQLOutputValue>[]`, so `row.name` narrows to `string`
+  // via `typeof` alone, same as the row validation in `rowToSession` below.
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+  return rows.some((row) => typeof row.name === "string" && row.name === column);
 }
 
 // Adds a column only if it is not already there. `migrate` below also

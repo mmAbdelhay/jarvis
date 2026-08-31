@@ -415,6 +415,71 @@ describe("createSqliteSessionStore", () => {
       expect(store.history()[0]).toMatchObject({ branch: "" });
     });
 
+    it("rolls back every statement — including the PRAGMA user_version write — when a mid-migration ALTER TABLE genuinely fails", () => {
+      // Forces a *real* sqlite failure partway through the v1->v2 step,
+      // rather than asserting the rollback comment's claim on faith: pad
+      // the v1 table with dummy columns so it sits one column short of
+      // sqlite's SQLITE_MAX_COLUMN limit (2000, this build's default).
+      // The migration's first three ALTERs (branch, insertions, deletions)
+      // then land for real, and the fourth (changed_files) genuinely
+      // collides with the limit and throws — no mocking of the driver,
+      // every statement here runs against a real on-disk sqlite file, the
+      // same as the rest of this suite. This is what proves or disproves
+      // the comment at the top of `migrate()`: if `PRAGMA user_version`
+      // did not actually participate in the transaction, this test would
+      // find it bumped to 2 below despite the throw.
+      const seed = new DatabaseSync(dbPath);
+      const padding = Array.from({ length: 1986 }, (_, i) => `extra${i} INTEGER`).join(", ");
+      seed.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          project TEXT NOT NULL,
+          projectPath TEXT NOT NULL,
+          agentId TEXT NOT NULL,
+          model TEXT,
+          state TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          startedAt INTEGER NOT NULL,
+          lastActivityAt INTEGER NOT NULL,
+          endedAt INTEGER,
+          exitCode INTEGER,
+          ${padding}
+        )
+      `);
+      seed.exec("PRAGMA user_version = 1");
+      seed
+        .prepare(
+          `INSERT INTO sessions (id, project, projectPath, agentId, state, summary, startedAt, lastActivityAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run("pre-crash", "acme", "/projects/acme", "claude-acme", "done", "", 1, 1);
+      seed.close();
+
+      expect(() => createSqliteSessionStore(dbPath)).toThrow(/too many columns/);
+
+      const check = new DatabaseSync(dbPath);
+      const version = check.prepare("PRAGMA user_version").get();
+      const columns = check
+        .prepare("PRAGMA table_info(sessions)")
+        .all()
+        .map((row) => row.name);
+      const rowStillThere = check.prepare("SELECT id FROM sessions WHERE id = ?").get("pre-crash");
+      check.close();
+
+      // The PRAGMA write is left exactly where it started, not bumped —
+      // the single most important property of the atomic migration: it is
+      // what stands between a force-quit mid-migration and a db that
+      // throws "duplicate column name" on every subsequent launch.
+      expect(version).toMatchObject({ user_version: 1 });
+      expect(columns).not.toContain("branch");
+      expect(columns).not.toContain("insertions");
+      expect(columns).not.toContain("deletions");
+      expect(columns).not.toContain("changed_files");
+      // And the row that was already there survives untouched — a clean,
+      // exact rollback of the whole transaction, not a partial one.
+      expect(rowStillThere).toMatchObject({ id: "pre-crash" });
+    });
+
     it("never drops the sessions table", () => {
       // A mutation guard: if someone "fixes" a migration by recreating the
       // table, this fails. Read the store source and assert on it directly.
