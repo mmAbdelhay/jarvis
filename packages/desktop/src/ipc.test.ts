@@ -348,4 +348,118 @@ describe("createGitHandlers", () => {
       );
     });
   });
+
+  // Ruling P26: the renderer's own guard against a double Commit click is
+  // one window's JavaScript, not real serialization. The main process must
+  // itself refuse to let setStaged and commit for the *same* repository
+  // interleave, or a commit can capture a staging set that was mid-change.
+  describe("per-repo serialization (P26)", () => {
+    it("runs a slow setStaged and a commit for the SAME repo strictly in order", async () => {
+      const order: string[] = [];
+      let releaseStage: (() => void) | undefined;
+      const stageGate = new Promise<void>((resolve) => {
+        releaseStage = resolve;
+      });
+
+      const { handlers } = handlerFakes({
+        stage: async () => {
+          order.push("stage:start");
+          await stageGate;
+          order.push("stage:end");
+          return { ok: true, value: null };
+        },
+        commit: async () => {
+          order.push("commit:start");
+          order.push("commit:end");
+          return { ok: true, value: { sha: "a1b2c3d", filesChanged: 1 } };
+        },
+      });
+
+      const setStagedPromise = handlers.setStaged("s1", "a.php", true);
+      // Fired before setStaged's git call has resolved — proving the
+      // ordering below comes from real serialization, not from these two
+      // calls merely being awaited one after another by the test.
+      const commitPromise = handlers.commit("s1", "fix payment");
+
+      // Give both microtask queues a turn so, absent serialization, the
+      // commit's `stage` — sorry, `commit` — call would already have
+      // started interleaved with the still-pending stage.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(order).toEqual(["stage:start"]);
+
+      releaseStage?.();
+      await Promise.all([setStagedPromise, commitPromise]);
+
+      expect(order).toEqual(["stage:start", "stage:end", "commit:start", "commit:end"]);
+    });
+
+    it("still runs two DIFFERENT repos concurrently — no global lock", async () => {
+      const session1 = {
+        id: "s1",
+        project: "acme",
+        projectPath: "/projects/acme",
+        agentId: "claude-acme",
+        state: "running" as const,
+        summary: "",
+        startedAt: 0,
+        lastActivityAt: 0,
+      };
+      const session2 = {
+        id: "s2",
+        project: "other",
+        projectPath: "/projects/other",
+        agentId: "claude-other",
+        state: "running" as const,
+        summary: "",
+        startedAt: 0,
+        lastActivityAt: 0,
+      };
+
+      const order: string[] = [];
+      let releaseRepo1: (() => void) | undefined;
+      const repo1Gate = new Promise<void>((resolve) => {
+        releaseRepo1 = resolve;
+      });
+
+      const git: GitProvider = {
+        changes: async (repoPath) => ({
+          ok: true,
+          value: { repoPath, branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
+        }),
+        diff: async (_repoPath, path) => ({ ok: true, value: { path, binary: false, hunks: [] } }),
+        stage: async () => ({ ok: true, value: null }),
+        unstage: async () => ({ ok: true, value: null }),
+        commit: async (repoPath) => {
+          if (repoPath === "/projects/acme") {
+            order.push("repo1:start");
+            await repo1Gate;
+            order.push("repo1:end");
+          } else {
+            order.push("repo2:start");
+            order.push("repo2:end");
+          }
+          return { ok: true, value: { sha: "a1b2c3d", filesChanged: 1 } };
+        },
+      };
+
+      const handlers = createGitHandlers({
+        git,
+        sessions: { get: (id) => (id === "s1" ? session1 : id === "s2" ? session2 : undefined) },
+        language: "en",
+        refresh: async () => {},
+      });
+
+      const repo1Promise = handlers.commit("s1", "repo1 message");
+      const repo2Promise = handlers.commit("s2", "repo2 message");
+
+      // repo2's commit is not blocked behind repo1's still-open gate.
+      await repo2Promise;
+      expect(order).toEqual(["repo1:start", "repo2:start", "repo2:end"]);
+
+      releaseRepo1?.();
+      await repo1Promise;
+      expect(order).toEqual(["repo1:start", "repo2:start", "repo2:end", "repo1:end"]);
+    });
+  });
 });

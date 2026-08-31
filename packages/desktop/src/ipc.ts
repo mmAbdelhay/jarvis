@@ -97,6 +97,36 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
     return deps.sessions.get(sessionId);
   }
 
+  // Ruling P26: the renderer already blocks a Commit click while a
+  // gitSetStaged is outstanding, but that guard is one window's JavaScript,
+  // not real serialization — nothing stops setStaged and commit for the
+  // *same* repo from interleaving across two IPC calls in flight together
+  // (e.g. a fast double-click, or two renderer code paths racing), and an
+  // interleaved commit can capture a staging set that was mid-change. A
+  // plain per-repo promise chain is enough: each repo's tail promise is
+  // replaced with the new task chained onto the previous one, so
+  // setStaged/commit for one repository always run one at a time, in the
+  // order they were called, while two different repositories (two open
+  // sessions) still run fully concurrently — a global lock would make the
+  // app feel broken with several sessions open.
+  const repoQueues = new Map<string, Promise<unknown>>();
+
+  function enqueue<T>(repoPath: string, task: () => Promise<T>): Promise<T> {
+    const previous = repoQueues.get(repoPath) ?? Promise.resolve();
+    // `task` runs only after `previous` settles, whichever way it settled —
+    // one repo's failed commit must not wedge that repo's queue forever.
+    const run = previous.then(task, task);
+    // The stored tail must never itself reject (a rejection stored here
+    // would otherwise propagate into the *next* caller's `.then`, not this
+    // caller's), so the chain keeps moving regardless of outcome; the
+    // caller still gets the real result/rejection via `run` below.
+    repoQueues.set(
+      repoPath,
+      run.catch(() => undefined),
+    );
+    return run;
+  }
+
   // GitProvider's contract says it never throws (its own guard clauses —
   // e.g. rejecting a path outside the repo — return a GitOutcome failure,
   // not an exception), but ChangeTracker.refresh already sets the house
@@ -154,13 +184,15 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
-      const outcome = staged
-        ? await callGit(() => deps.git.stage(session.projectPath, [path]))
-        : await callGit(() => deps.git.unstage(session.projectPath, [path]));
-      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      return enqueue(session.projectPath, async () => {
+        const outcome = staged
+          ? await callGit(() => deps.git.stage(session.projectPath, [path]))
+          : await callGit(() => deps.git.unstage(session.projectPath, [path]));
+        if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
 
-      await deps.refresh();
-      return { ok: true, value: null };
+        await deps.refresh();
+        return { ok: true, value: null };
+      });
     },
 
     async commit(sessionId, message) {
@@ -168,11 +200,13 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
-      const outcome = await callGit(() => deps.git.commit(session.projectPath, message));
-      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      return enqueue(session.projectPath, async () => {
+        const outcome = await callGit(() => deps.git.commit(session.projectPath, message));
+        if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
 
-      await deps.refresh();
-      return { ok: true, value: null };
+        await deps.refresh();
+        return { ok: true, value: null };
+      });
     },
   };
 }
