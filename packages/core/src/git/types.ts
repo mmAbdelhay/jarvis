@@ -45,8 +45,24 @@ export type GitDiffHunk = {
 
 export type GitFileDiff = {
   path: string;
-  /** True for binary files and for text past the provider's size cap. */
+  /**
+   * True when the file's content is genuinely binary — confirmed by git
+   * itself (`Binary files … differ`) or by reading the file and finding a
+   * NUL byte. `false` here does not mean the diff is safe to render in
+   * full: check `tooLarge` too.
+   */
   binary: boolean;
+  /**
+   * True when the file (untracked) or its diff (tracked) exceeded the
+   * provider's size cap and was never read or parsed, so `hunks` is empty
+   * and whether the content is really binary is unknown — `binary` stays
+   * `false` in this case rather than guessing. Optional so existing
+   * consumers that only checked `binary` are unaffected; a consumer that
+   * wants to tell a real binary file apart from "too large to show" (e.g.
+   * to offer "open externally" instead of "not displayable") must check
+   * this field explicitly.
+   */
+  tooLarge?: boolean;
   hunks: GitDiffHunk[];
 };
 
