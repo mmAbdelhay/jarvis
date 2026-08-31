@@ -82,3 +82,31 @@ describe(".main / .main--changes [hidden] cascade", () => {
       if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
     }
   });
+
+  it("never sets display on .main--settings outside a :not([hidden]) rule", () => {
+    const rules = [...htmlSource.matchAll(/\.main--settings[^{]*\{[^}]*\}/g)].map((m) => m[0]);
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
+    }
+  });
+
+  // Found live: renderWorkspace() sets #workspace-bar's `hidden` property
+  // correctly for an editor-kind tab (views.test.ts/workspace.test.ts prove
+  // the JS side), but the base .workspace-bar rule set `display: flex`
+  // unconditionally with no [hidden] override — an author rule, which
+  // always beats the UA's [hidden]{display:none} regardless of specificity,
+  // so the address bar stayed visible over a code-server tab no matter what
+  // the JS did. Every sibling toggled the same way (.workspace-browser,
+  // .workspace-docs, .workspace-doc-body, .workspace-doc-editor,
+  // .workspace-doc-toolbar) already had this override; .workspace-bar was
+  // the one built without it.
+  it("overrides display for .workspace-bar when hidden is present", () => {
+    const rules = [...htmlSource.matchAll(/\.workspace-bar(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
+      (m) => m[0],
+    );
+    const hasOverride = rules.some(
+      (rule) => rule.startsWith(".workspace-bar[hidden]") && /display\s*:\s*none/.test(rule),
+    );
+    expect(hasOverride).toBe(true);
+  });
