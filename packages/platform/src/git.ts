@@ -11,7 +11,7 @@ import type {
   GitProvider,
   GitStatusLetter,
 } from "@jarvis/core";
-import { simpleGit, type SimpleGit } from "simple-git";
+import { GitPluginError, simpleGit, type SimpleGit } from "simple-git";
 
 // This module is the only place in the repository that imports simple-git.
 // `core` declares GitProvider; everything OS-facing lives here. simple-git
@@ -136,14 +136,36 @@ function insideRepo(filePath: string): boolean {
   return !normalized.startsWith("..") && normalized !== ".";
 }
 
-export function createGitProvider(): GitProvider {
+// A huge repo, a stalled index lock, or a network-mounted .git can make the
+// real git binary never return. GitOutcome has no way to express "still
+// running" — a hang here is the one gap the discriminated union can't
+// cover — so every spawned git process is bounded by simple-git's own
+// timeout plugin. The default is generous (a slow-but-healthy repo on a
+// loaded machine should not be misreported as broken); callers can override
+// it, same as core/registry/health.ts's DEFAULT_HEALTH_TIMEOUT_MS.
+export const DEFAULT_GIT_TIMEOUT_MS = 30_000;
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof GitPluginError && error.plugin === "timeout";
+}
+
+export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): GitProvider {
   async function open(repoPath: string): Promise<GitOutcome<SimpleGit>> {
     try {
-      const git = simpleGit(repoPath);
+      const git = simpleGit(repoPath, { timeout: { block: timeoutMs } });
       const isRepo = await git.checkIsRepo();
       if (!isRepo) return failure("not-a-repo", repoPath);
       return { ok: true, value: git };
     } catch (error) {
+      if (isTimeout(error)) {
+        // A timeout here says nothing about whether repoPath is a repo —
+        // the check simply never got an answer — so it must not be folded
+        // into "not-a-repo", which would tell the user the wrong thing.
+        // "failed" is the closest existing GitFailureCode; there is no
+        // dedicated timeout code (GitFailureCode is consumed by fifteen
+        // downstream tasks, so this task does not add one).
+        return failure("failed", `git timed out after ${timeoutMs}ms opening ${repoPath}`);
+      }
       // A missing directory, a permissions problem, or no git binary at all.
       // The spec requires this to be shown, never to blow up the caller.
       return failure("not-a-repo", `${repoPath}: ${errorMessage(error)}`);

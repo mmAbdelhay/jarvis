@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseUnifiedDiff } from "@jarvis/core";
 import { simpleGit } from "simple-git";
 import { afterEach, describe, expect, it } from "vitest";
-import { createGitProvider } from "./git.js";
+import { createGitProvider, DEFAULT_GIT_TIMEOUT_MS } from "./git.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 
@@ -240,6 +240,27 @@ describe("createGitProvider().changes", () => {
     expect(outcome.ok).toBe(false);
   });
 
+  it("returns a failure instead of hanging when the git process exceeds the timeout", async () => {
+    // A stalled index lock or a huge repo must not hang the caller forever —
+    // GitOutcome cannot express "still running". Rather than waiting out a
+    // real multi-second hang (the suite must stay fast), the provider's
+    // timeout is injected as an unreasonably small bound: any real spawn of
+    // the git binary takes far longer than 1ms of wall time, so the
+    // timeout plugin reliably fires almost immediately, without a sleep in
+    // this test.
+    const dir = await makeRepo();
+
+    const outcome = await createGitProvider(1).changes(dir);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("unreachable");
+    expect(outcome.error.code).toBe("failed");
+    expect(outcome.error.detail).toContain("timed out");
+  });
+
+  it("uses a generous default timeout so a normal repo is unaffected", async () => {
+    expect(DEFAULT_GIT_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000);
+  });
 });
 
 describe("createGitProvider().diff", () => {
