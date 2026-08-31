@@ -37,10 +37,20 @@ export const MESSAGES = {
   // plural (3-10), and a reversion to singular for 11+.
   sessionsCount: (count: number, language: "ar" | "en"): string =>
     language === "ar" ? arabicSessionsCount(count) : `${count} ${count === 1 ? "session" : "sessions"}`,
-  unknownSession: (sessionId: string, language: "ar" | "en"): string =>
-    language === "ar"
-      ? `لا أعرف جلسة بهذا المعرّف: ${sessionId}`
-      : `I don't know a session with that id: ${sessionId}`,
+  // sessionId is renderer-supplied and echoed straight into the sentence;
+  // capped so a caller passing something unbounded (accidentally or not)
+  // cannot blow up the size of a string that ends up rendered in the UI.
+  unknownSession: (sessionId: string, language: "ar" | "en"): string => {
+    const id = sessionId.length > 100 ? `${sessionId.slice(0, 100)}…` : sessionId;
+    return language === "ar"
+      ? `لا أعرف جلسة بهذا المعرّف: ${id}`
+      : `I don't know a session with that id: ${id}`;
+  },
+  // Shown when an IPC call arrives with an argument of the wrong type (a
+  // buggy renderer caller, not necessarily a malicious one) — never echoes
+  // the bad value back, since its shape/type is exactly what's untrusted.
+  invalidArgument: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب غير صالح." : "Invalid request.",
 };
 
 function arabicSessionsCount(count: number): string {

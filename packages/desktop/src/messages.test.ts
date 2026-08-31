@@ -61,6 +61,22 @@ describe("unknownSession", () => {
     expect(MESSAGES.unknownSession("s1", "ar").endsWith("s1")).toBe(true);
     expect(MESSAGES.unknownSession("s1", "en").endsWith("s1")).toBe(true);
   });
+
+  // MINOR finding on Task 10's review: sessionId is renderer-supplied and
+  // was echoed back unbounded.
+  it("caps an unbounded sessionId instead of echoing it in full", () => {
+    const huge = "x".repeat(10_000);
+    const text = MESSAGES.unknownSession(huge, "en");
+    expect(text.length).toBeLessThan(200);
+    expect(text).not.toContain(huge);
+  });
+});
+
+describe("invalidArgument", () => {
+  it("renders in both languages without echoing anything back", () => {
+    expect(MESSAGES.invalidArgument("en").length).toBeGreaterThan(0);
+    expect(MESSAGES.invalidArgument("ar").length).toBeGreaterThan(0);
+  });
 });
 
 describe("errorMessage", () => {

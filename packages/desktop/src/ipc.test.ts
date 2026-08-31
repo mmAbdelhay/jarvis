@@ -264,4 +264,88 @@ describe("createGitHandlers", () => {
     await handlers.fileDiff("s1", "a.php");
     expect(refreshes).toEqual([]);
   });
+
+  // Ruling P15: a buggy Task 12-15 caller can pass a value of the wrong
+  // type over IPC — TypeScript's compile-time signature is no guard at
+  // runtime. Each of these previously reached deps.git.* directly and, for
+  // the real provider, threw a raw TypeError that crossed IPC as an
+  // unhandled rejection (leaking internals, no localised text). Now they
+  // must resolve to a normal GitViewResult failure without ever touching
+  // git.
+  describe("argument validation (P15)", () => {
+    it("rejects a non-string path to fileDiff without calling git", async () => {
+      const calls: unknown[] = [];
+      const { handlers } = handlerFakes({
+        diff: async (_repoPath, path) => {
+          calls.push(path);
+          return { ok: true, value: { path, binary: false, hunks: [] } };
+        },
+      });
+      const badFileDiff = handlers.fileDiff as unknown as (
+        sessionId: string,
+        path: unknown,
+      ) => ReturnType<typeof handlers.fileDiff>;
+      const result = await badFileDiff("s1", {});
+      expect(result.ok).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a null commit message without calling git", async () => {
+      const calls: unknown[] = [];
+      const { handlers } = handlerFakes({
+        commit: async (_repoPath, message) => {
+          calls.push(message);
+          return { ok: true, value: { sha: "x", filesChanged: 0 } };
+        },
+      });
+      const badCommit = handlers.commit as unknown as (
+        sessionId: string,
+        message: unknown,
+      ) => ReturnType<typeof handlers.commit>;
+      const result = await badCommit("s1", null);
+      expect(result.ok).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a non-boolean `staged` rather than coercing it", async () => {
+      const staged: string[][] = [];
+      const unstaged: string[][] = [];
+      const { handlers } = handlerFakes({
+        stage: async (_repoPath, paths) => {
+          staged.push(paths);
+          return { ok: true, value: null };
+        },
+        unstage: async (_repoPath, paths) => {
+          unstaged.push(paths);
+          return { ok: true, value: null };
+        },
+      });
+      const badSetStaged = handlers.setStaged as unknown as (
+        sessionId: string,
+        path: string,
+        staged: unknown,
+      ) => ReturnType<typeof handlers.setStaged>;
+
+      // "false" and 0 are both truthy-adjacent footguns for `staged ? … :
+      // …` — the coercion the ruling calls out — and both must be refused,
+      // not silently treated as unstage.
+      const resultString = await badSetStaged("s1", "a.php", "false");
+      const resultNumber = await badSetStaged("s1", "a.php", 0);
+      expect(resultString.ok).toBe(false);
+      expect(resultNumber.ok).toBe(false);
+      expect(staged).toEqual([]);
+      expect(unstaged).toEqual([]);
+    });
+
+    it("returns a renderable failure, never a rejection, when the provider throws unexpectedly", async () => {
+      const { handlers } = handlerFakes({
+        diff: async () => {
+          throw new TypeError('The "path" argument must be of type string. Received an instance of Object');
+        },
+      });
+      await expect(handlers.fileDiff("s1", "a.php")).resolves.toEqual(
+        expect.objectContaining({ ok: false, language: "ar" }),
+      );
+    });
+  });
 });

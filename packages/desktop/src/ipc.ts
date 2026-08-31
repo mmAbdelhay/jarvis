@@ -2,6 +2,7 @@ import {
   gitFailureText,
   type GitChanges,
   type GitFileDiff,
+  type GitOutcome,
   type GitProvider,
   type Session,
   type SessionChanges,
@@ -59,6 +60,18 @@ export type GitHandlerDeps = {
   refresh(): Promise<void>;
 };
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
 // Sessions, not renderer-supplied paths, are the only route into GitProvider
 // here: the main process owns the sessionId -> projectPath mapping, so a
 // compromised renderer can request git data only for a repo a real session
@@ -68,16 +81,38 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
     return { ok: false, text, language: deps.language };
   }
 
+  function invalid(): { ok: false; text: string; language: "ar" | "en" } {
+    return fail(MESSAGES.invalidArgument(deps.language));
+  }
+
   function repoFor(sessionId: string): Session | undefined {
     return deps.sessions.get(sessionId);
   }
 
+  // GitProvider's contract says it never throws (its own guard clauses —
+  // e.g. rejecting a path outside the repo — return a GitOutcome failure,
+  // not an exception), but ChangeTracker.refresh already sets the house
+  // rule of not trusting that contract at the call site: it wraps every
+  // provider call so a real-world throw degrades to a failure instead of
+  // taking down the caller (ruling P15). This is the IPC-boundary
+  // equivalent — an uncaught throw here would cross into the renderer as a
+  // raw, English-only, internals-leaking IPC rejection, never a
+  // GitViewResult the Changes view can render.
+  async function callGit<T>(run: () => Promise<GitOutcome<T>>): Promise<GitOutcome<T>> {
+    try {
+      return await run();
+    } catch (error) {
+      return { ok: false, error: { code: "failed", detail: errorMessage(error) } };
+    }
+  }
+
   return {
     async changes(sessionId) {
+      if (!isString(sessionId)) return invalid();
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
-      const outcome = await deps.git.changes(session.projectPath);
+      const outcome = await callGit(() => deps.git.changes(session.projectPath));
       if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
 
       return {
@@ -96,21 +131,23 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
     },
 
     async fileDiff(sessionId, path) {
+      if (!isString(sessionId) || !isString(path)) return invalid();
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
-      const outcome = await deps.git.diff(session.projectPath, path);
+      const outcome = await callGit(() => deps.git.diff(session.projectPath, path));
       if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
       return { ok: true, value: outcome.value };
     },
 
     async setStaged(sessionId, path, staged) {
+      if (!isString(sessionId) || !isString(path) || !isBoolean(staged)) return invalid();
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
       const outcome = staged
-        ? await deps.git.stage(session.projectPath, [path])
-        : await deps.git.unstage(session.projectPath, [path]);
+        ? await callGit(() => deps.git.stage(session.projectPath, [path]))
+        : await callGit(() => deps.git.unstage(session.projectPath, [path]));
       if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
 
       await deps.refresh();
@@ -118,10 +155,11 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
     },
 
     async commit(sessionId, message) {
+      if (!isString(sessionId) || !isString(message)) return invalid();
       const session = repoFor(sessionId);
       if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
 
-      const outcome = await deps.git.commit(session.projectPath, message);
+      const outcome = await callGit(() => deps.git.commit(session.projectPath, message));
       if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
 
       await deps.refresh();
