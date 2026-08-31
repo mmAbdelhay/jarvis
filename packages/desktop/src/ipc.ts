@@ -4,6 +4,7 @@ import {
   type GitFileDiff,
   type GitOutcome,
   type GitProvider,
+  type ProviderStatus,
   type Session,
   type SessionChanges,
   type SystemMetrics,
@@ -20,7 +21,17 @@ export type IpcChannels = {
   "voice:listening": boolean;
   "voice:notice": VoiceNotice;
   "git:counts": SessionChanges[];
+  "providers:update": ProviderStatus[];
 };
+
+/**
+ * Public status pages are free and unauthenticated, so they can be polled.
+ * Five minutes: a provider incident is minutes-scale news, and the endpoint
+ * is a small JSON GET. CAPACITY IS NEVER POLLED — see the plan's refresh
+ * policy; every capacity read is a billed round trip that consumes the
+ * capacity it reports.
+ */
+export const PROVIDER_HEALTH_INTERVAL_MS = 300_000;
 
 // Every git call the renderer can make returns this. Failures arrive as text
 // already localised in the main process, because the renderer has no access
@@ -238,6 +249,14 @@ export type RendererApi = {
   gitSetStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   gitCommit(sessionId: string, message: string): Promise<GitViewResult<null>>;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): void;
+  // Provider status: pushed like sessions, plus one pull the user drives.
+  onProviders(cb: (statuses: ProviderStatus[]) => void): void;
+  /**
+   * Explicit user demand only (the panel's refresh control, or asking by
+   * voice). Each call spends one billed API query per readable account, so
+   * it is never wired to a timer, a focus event, or a route change.
+   */
+  refreshProviders(): Promise<void>;
 };
 
 export type WiringDeps = {
@@ -250,11 +269,16 @@ export type WiringDeps = {
   /** ChangeTracker.refresh; it guards its own re-entrancy. */
   refreshChanges(): Promise<void>;
   changesIntervalMs: number;
+  onProvidersChange(cb: (statuses: ProviderStatus[]) => void): () => void;
+  /** Free public status pages only. Never a capacity read. */
+  refreshHealth(): Promise<void>;
+  healthIntervalMs: number;
 };
 
 export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
   let timer: ReturnType<typeof setInterval> | undefined;
   let changesTimer: ReturnType<typeof setInterval> | undefined;
+  let healthTimer: ReturnType<typeof setInterval> | undefined;
   const unsubscribes: (() => void)[] = [];
 
   return {
@@ -269,6 +293,11 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       );
       unsubscribes.push(deps.onTurn((t) => deps.send("turn:new", t)));
       unsubscribes.push(deps.onChangeCounts((c) => deps.send("git:counts", c)));
+      unsubscribes.push(deps.onProvidersChange((s) => deps.send("providers:update", s)));
+
+      healthTimer = setInterval(() => {
+        void deps.refreshHealth();
+      }, deps.healthIntervalMs);
 
       timer = setInterval(() => {
         deps.readMetrics()
@@ -287,6 +316,8 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       timer = undefined;
       if (changesTimer !== undefined) clearInterval(changesTimer);
       changesTimer = undefined;
+      if (healthTimer !== undefined) clearInterval(healthTimer);
+      healthTimer = undefined;
       while (unsubscribes.length > 0) unsubscribes.pop()?.();
     },
   };

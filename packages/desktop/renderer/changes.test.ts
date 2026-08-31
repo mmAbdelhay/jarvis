@@ -35,6 +35,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitSetStaged: vi.fn(async () => notStubbed),
     gitCommit: vi.fn(async () => notStubbed),
     onChangeCounts: vi.fn(),
+    onProviders: vi.fn(),
+    refreshProviders: vi.fn(async () => {}),
   };
   const jarvis: RendererApi = { ...defaults, ...overrides };
   window.jarvis = jarvis;

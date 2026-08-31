@@ -11,7 +11,7 @@ import {
   runCommand,
   transcribe,
 } from "@jarvis/platform";
-import { buildWiring, createGitHandlers } from "./ipc.js";
+import { buildWiring, createGitHandlers, PROVIDER_HEALTH_INTERVAL_MS } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -131,6 +131,15 @@ app.whenReady().then(async () => {
       // is far more expensive than reading /proc-equivalent counters, and
       // change counts do not need second-level freshness.
       changesIntervalMs: 5000,
+      // No ProviderMonitor is composed into main.ts yet — that is Task 11's
+      // job (it owns instantiating ProviderStatusStore/ProviderMonitor
+      // against the real registry and platform readers). Until then this
+      // stays a genuine no-op: no store to change, so no push ever fires;
+      // no network call, so "free health polling" costs nothing while it
+      // has nothing to poll. Never a stand-in for the monitor's own policy.
+      onProvidersChange: () => () => {},
+      refreshHealth: async () => {},
+      healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
     });
     wiring.start();
     window.on("closed", () => wiring.stop());

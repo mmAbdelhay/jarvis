@@ -29,6 +29,10 @@ const api: RendererApi = {
   onChangeCounts: (cb) => {
     ipcRenderer.on("git:counts", (_e, changes) => cb(changes));
   },
+  onProviders: (cb) => {
+    ipcRenderer.on("providers:update", (_e, statuses) => cb(statuses));
+  },
+  refreshProviders: () => ipcRenderer.invoke("providers:refresh"),
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);
