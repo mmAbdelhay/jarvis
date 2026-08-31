@@ -56,6 +56,13 @@ describe("MESSAGES", () => {
   });
 });
 
+describe("unknownSession", () => {
+  it("names the session id at the tail in both languages", () => {
+    expect(MESSAGES.unknownSession("s1", "ar").endsWith("s1")).toBe(true);
+    expect(MESSAGES.unknownSession("s1", "en").endsWith("s1")).toBe(true);
+  });
+});
+
 describe("errorMessage", () => {
   it("extracts the message from an Error", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");

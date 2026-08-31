@@ -37,6 +37,10 @@ export const MESSAGES = {
   // plural (3-10), and a reversion to singular for 11+.
   sessionsCount: (count: number, language: "ar" | "en"): string =>
     language === "ar" ? arabicSessionsCount(count) : `${count} ${count === 1 ? "session" : "sessions"}`,
+  unknownSession: (sessionId: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `لا أعرف جلسة بهذا المعرّف: ${sessionId}`
+      : `I don't know a session with that id: ${sessionId}`,
 };
 
 function arabicSessionsCount(count: number): string {

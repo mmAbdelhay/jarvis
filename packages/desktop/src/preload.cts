@@ -21,6 +21,14 @@ const api: RendererApi = {
     ipcRenderer.on("voice:notice", (_e, notice) => cb(notice));
   },
   getHistory: () => ipcRenderer.invoke("history:list"),
+  gitChanges: (sessionId) => ipcRenderer.invoke("git:changes", sessionId),
+  gitDiff: (sessionId, path) => ipcRenderer.invoke("git:diff", sessionId, path),
+  gitSetStaged: (sessionId, path, staged) =>
+    ipcRenderer.invoke("git:setStaged", sessionId, path, staged),
+  gitCommit: (sessionId, message) => ipcRenderer.invoke("git:commit", sessionId, message),
+  onChangeCounts: (cb) => {
+    ipcRenderer.on("git:counts", (_e, changes) => cb(changes));
+  },
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

@@ -105,6 +105,9 @@ app.whenReady().then(async () => {
       intervalMs: 2000,
       onSessionsChange: (cb) => sessions.onChange(cb),
       onTurn: (cb) => orchestrator.onTurn(cb),
+      onChangeCounts: (cb) => changeTracker.onChange(cb),
+      refreshChanges: () => changeTracker.refresh(),
+      changesIntervalMs: 15_000,
     });
     wiring.start();
     window.on("closed", () => wiring.stop());
