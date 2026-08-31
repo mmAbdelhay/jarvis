@@ -57,6 +57,16 @@ export const MESSAGES = {
   // the bad value back, since its shape/type is exactly what's untrusted.
   invalidArgument: (language: "ar" | "en"): string =>
     language === "ar" ? "طلب غير صالح." : "Invalid request.",
+  // The doc viewer's failures. Each names what went wrong without echoing
+  // the path back — a path is exactly the part that is caller-supplied.
+  docUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر فتح المستند." : "Could not open that document.",
+  docTooLarge: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستند أكبر من أن يُعرض." : "That document is too large to display.",
+  docNotFound: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد مستند بهذا الاسم." : "There is no document by that name.",
+  unknownProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie

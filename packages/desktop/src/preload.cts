@@ -41,6 +41,21 @@ const api: RendererApi = {
     ipcRenderer.on("providers:update", (_e, statuses) => cb(statuses));
   },
   refreshProviders: () => ipcRenderer.invoke("providers:refresh"),
+  openTab: (project, input) => ipcRenderer.invoke("workspace:open", project, input),
+  closeTab: (id) => ipcRenderer.invoke("workspace:close", id),
+  activateTab: (id) => ipcRenderer.invoke("workspace:activate", id),
+  navigateTab: (id, input) => ipcRenderer.invoke("workspace:navigate", id, input),
+  tabBack: (id) => ipcRenderer.invoke("workspace:back", id),
+  tabForward: (id) => ipcRenderer.invoke("workspace:forward", id),
+  tabReload: (id) => ipcRenderer.invoke("workspace:reload", id),
+  setWorkspaceBounds: (bounds) => ipcRenderer.invoke("workspace:bounds", bounds),
+  setWorkspaceVisible: (visible) => ipcRenderer.invoke("workspace:visible", visible),
+  onWorkspace: (cb) => {
+    ipcRenderer.on("workspace:update", (_e, state) => cb(state));
+  },
+  listDocs: (project) => ipcRenderer.invoke("docs:list", project),
+  readDoc: (project, path) => ipcRenderer.invoke("docs:read", project, path),
+  getProjects: () => ipcRenderer.invoke("projects:list"),
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);

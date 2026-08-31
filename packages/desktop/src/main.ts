@@ -14,6 +14,7 @@ import {
   MacSpeech,
   createBrain,
   createCapacityReader,
+  createDocReader,
   createGitProvider,
   createMetricsReader,
   createPtySpawner,
@@ -22,7 +23,14 @@ import {
   runCommand,
   transcribe,
 } from "@jarvis/platform";
-import { buildWiring, createGitHandlers, PROVIDER_HEALTH_INTERVAL_MS } from "./ipc.js";
+import {
+  buildWiring,
+  createDocsHandlers,
+  createGitHandlers,
+  PROVIDER_HEALTH_INTERVAL_MS,
+} from "./ipc.js";
+import { BrowserHost, type Rect } from "./browser-host.js";
+import { createElectronViewFactory } from "./electron-view.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -157,6 +165,16 @@ app.whenReady().then(async () => {
 
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
+    // The Workspace's hosted browser tabs. Each is a native WebContentsView
+    // over this window, so the host — not CSS — decides where they sit and
+    // whether they are visible at all.
+    const workspace = new BrowserHost(createElectronViewFactory(window));
+    const docs = createDocsHandlers({
+      reader: createDocReader(),
+      projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
     const indexUrl = pathToFileURL(
       fileURLToPath(new URL("../../renderer/index.html", import.meta.url)),
     ).href;
@@ -190,11 +208,17 @@ app.whenReady().then(async () => {
       // change counts do not need second-level freshness.
       changesIntervalMs: 5000,
       onProvidersChange: (cb) => providers.onChange(cb),
+      onWorkspaceChange: (cb) => workspace.onChange(cb),
       refreshHealth: () => providers.refreshHealth(),
       healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
     });
     wiring.start();
-    window.on("closed", () => wiring.stop());
+    window.on("closed", () => {
+      wiring.stop();
+      // Each hosted view is a live Chromium process; they do not go away
+      // with the window on their own.
+      workspace.destroy();
+    });
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
       await orchestrator.handle(text, language);
@@ -264,6 +288,39 @@ app.whenReady().then(async () => {
     ipcMain.handle("git:commit", (_event, sessionId: string, message: string) =>
       gitHandlers.commit(sessionId, message),
     );
+
+    // Every argument here crosses an untyped IPC boundary. workspace.open
+    // and .navigate go into normalizeInput either way, but a non-string
+    // still must not reach it as if it were one; docs.list/.read validate
+    // internally (createDocsHandlers).
+    ipcMain.handle("workspace:open", (_event, project: unknown, input: unknown) => {
+      if (typeof project === "string" && typeof input === "string") workspace.open(project, input);
+    });
+    ipcMain.handle("workspace:close", (_event, id: unknown) => {
+      if (typeof id === "string") workspace.close(id);
+    });
+    ipcMain.handle("workspace:activate", (_event, id: unknown) => {
+      if (typeof id === "string") workspace.activate(id);
+    });
+    ipcMain.handle("workspace:navigate", (_event, id: unknown, input: unknown) => {
+      if (typeof id === "string" && typeof input === "string") workspace.navigate(id, input);
+    });
+    ipcMain.handle("workspace:back", (_event, id: unknown) => {
+      if (typeof id === "string") workspace.back(id);
+    });
+    ipcMain.handle("workspace:forward", (_event, id: unknown) => {
+      if (typeof id === "string") workspace.forward(id);
+    });
+    ipcMain.handle("workspace:reload", (_event, id: unknown) => {
+      if (typeof id === "string") workspace.reload(id);
+    });
+    ipcMain.handle("workspace:bounds", (_event, bounds: Rect) => workspace.setBounds(bounds));
+    ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
+      workspace.setVisible(visible === true),
+    );
+    ipcMain.handle("docs:list", (_event, project: string) => docs.list(project));
+    ipcMain.handle("docs:read", (_event, project: string, path: string) => docs.read(project, path));
+    ipcMain.handle("projects:list", () => Object.keys(config.projects));
 
     // The only user-triggered call in the app that spends money: one billed
     // query per readable account, guarded by ProviderMonitor's own minimum

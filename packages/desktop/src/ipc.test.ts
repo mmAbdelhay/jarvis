@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildWiring, createGitHandlers, type WiringDeps } from "./ipc.js";
+import { buildWiring, createDocsHandlers, createGitHandlers, type WiringDeps } from "./ipc.js";
+import type { DocOutcome, DocReader } from "@jarvis/platform";
+import type { DocEntry, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 
 // Shared fixture for buildWiring's provider-facing tests: everything a
@@ -31,6 +33,7 @@ function baseDeps(sent: { channel: string; payload: unknown }[]): WiringDeps {
     refreshChanges: async () => {},
     changesIntervalMs: 100_000,
     onProvidersChange: () => () => {},
+    onWorkspaceChange: () => () => {},
     refreshHealth: async () => {},
     healthIntervalMs: 100_000,
   };
@@ -626,5 +629,160 @@ describe("buildWiring session output", () => {
     wiring.stop();
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+function reader(overrides: Partial<DocReader> = {}): DocReader {
+  return {
+    list: () => Promise.resolve({ ok: true, value: [] } as DocOutcome<DocEntry[]>),
+    read: () => Promise.resolve({ ok: true, value: "" } as DocOutcome<string>),
+    ...overrides,
+  };
+}
+
+const projects = { acme: "/p/acme" };
+
+describe("docs handlers", () => {
+  it("lists a known project's docs", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({
+        list: () => Promise.resolve({ ok: true, value: [{ path: "a.md", name: "a.md" }] }),
+      }),
+      projects,
+      language: "en",
+    });
+
+    expect(await handlers.list("acme")).toEqual({
+      ok: true,
+      value: [{ path: "a.md", name: "a.md" }],
+    });
+  });
+
+  // The renderer names a project; main owns the path. A compromised
+  // renderer must not be able to point the reader anywhere it likes.
+  it("passes the configured root, not anything the caller supplied", async () => {
+    const roots: string[] = [];
+    const handlers = createDocsHandlers({
+      reader: reader({
+        list: (root) => {
+          roots.push(root);
+          return Promise.resolve({ ok: true, value: [] });
+        },
+      }),
+      projects,
+      language: "en",
+    });
+
+    await handlers.list("acme");
+
+    expect(roots).toEqual(["/p/acme"]);
+  });
+
+  it("refuses an unknown project without touching the reader", async () => {
+    let called = false;
+    const handlers = createDocsHandlers({
+      reader: reader({
+        list: () => {
+          called = true;
+          return Promise.resolve({ ok: true, value: [] });
+        },
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.list("/etc");
+
+    expect(called).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a non-string project id", async () => {
+    const handlers = createDocsHandlers({ reader: reader(), projects, language: "en" });
+
+    // The IPC boundary is untyped at runtime; a buggy or hostile caller can
+    // send anything.
+    const result = await handlers.list(undefined as unknown as string);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("returns a parsed document model, not markdown source", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({ read: () => Promise.resolve({ ok: true, value: "# Title" }) }),
+      projects,
+      language: "en",
+    });
+
+    expect(await handlers.read("acme", "a.md")).toEqual({
+      ok: true,
+      value: [{ kind: "heading", level: 1, children: [{ kind: "text", text: "Title" }] }],
+    });
+  });
+
+  it("reports a read failure as localised text, never as a rejection", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({
+        read: () => Promise.resolve({ ok: false, error: { code: "outside-root", detail: "x" } }),
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.read("acme", "x");
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.text.length).toBeGreaterThan(0);
+    expect(!result.ok && result.language).toBe("en");
+  });
+
+  it("localises a failure into Arabic when that is the configured language", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({
+        read: () => Promise.resolve({ ok: false, error: { code: "too-large", detail: "x" } }),
+      }),
+      projects,
+      language: "ar",
+    });
+
+    const result = await handlers.read("acme", "x");
+
+    expect(!result.ok && result.language).toBe("ar");
+    expect(!result.ok && /[؀-ۿ]/.test(result.text)).toBe(true);
+  });
+
+  it("survives a reader that throws instead of returning a failure", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({ read: () => Promise.reject(new Error("boom")) }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.read("acme", "a.md");
+
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("buildWiring workspace", () => {
+  it("pushes workspace state to the renderer", () => {
+    const sent: { channel: string; payload: unknown }[] = [];
+    let emit: ((state: WorkspaceState) => void) | undefined;
+    const wiring = buildWiring({
+      ...baseDeps(sent),
+      onWorkspaceChange: (cb) => {
+        emit = cb;
+        return () => {};
+      },
+    });
+    wiring.start();
+
+    emit?.({ tabs: [], activeTabId: undefined });
+
+    expect(sent).toContainEqual({
+      channel: "workspace:update",
+      payload: { tabs: [], activeTabId: undefined },
+    });
+    wiring.stop();
   });
 });

@@ -11,6 +11,8 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
+import { parseMarkdown, type DocBlock, type DocEntry, type WorkspaceState } from "@jarvis/core";
+import type { DocFailureCode, DocReader } from "@jarvis/platform";
 import { MESSAGES } from "./messages.js";
 
 export type VoiceNotice = { text: string; language: "ar" | "en" };
@@ -24,6 +26,7 @@ export type IpcChannels = {
   "git:counts": SessionChanges[];
   "providers:update": ProviderStatus[];
   "session:output": SessionOutput;
+  "workspace:update": WorkspaceState;
 };
 
 /**
@@ -292,6 +295,29 @@ export type RendererApi = {
    * it is never wired to a timer, a focus event, or a route change.
    */
   refreshProviders(): Promise<void>;
+  // Workspace. Every call is fire-and-forget: the authoritative state comes
+  // back on workspace:update, so the renderer never keeps a second copy it
+  // would have to reconcile.
+  openTab(project: string, input: string): Promise<void>;
+  closeTab(id: string): Promise<void>;
+  activateTab(id: string): Promise<void>;
+  navigateTab(id: string, input: string): Promise<void>;
+  tabBack(id: string): Promise<void>;
+  tabForward(id: string): Promise<void>;
+  tabReload(id: string): Promise<void>;
+  /** The rectangle the renderer has reserved for the page, in CSS pixels
+   *  relative to the window's content area. A hosted view is a native
+   *  overlay, so it has to be told; nothing about CSS layout reaches it. */
+  setWorkspaceBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
+  /** Called by showView on EVERY route change, not only when entering the
+   *  Workspace — a view left visible floats over whatever route follows. */
+  setWorkspaceVisible(visible: boolean): Promise<void>;
+  onWorkspace(cb: (state: WorkspaceState) => void): void;
+  listDocs(project: string): Promise<GitViewResult<DocEntry[]>>;
+  readDoc(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
+  /** The configured project names, for the Workspace's project selector.
+   *  Names only — the renderer never receives a filesystem path. */
+  getProjects(): Promise<string[]>;
 };
 
 export type WiringDeps = {
@@ -306,6 +332,7 @@ export type WiringDeps = {
   refreshChanges(): Promise<void>;
   changesIntervalMs: number;
   onProvidersChange(cb: (statuses: ProviderStatus[]) => void): () => void;
+  onWorkspaceChange(cb: (state: WorkspaceState) => void): () => void;
   /** Free public status pages only. Never a capacity read. */
   refreshHealth(): Promise<void>;
   healthIntervalMs: number;
@@ -331,6 +358,7 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       unsubscribes.push(deps.onChangeCounts((c) => deps.send("git:counts", c)));
       unsubscribes.push(deps.onSessionOutput((o) => deps.send("session:output", o)));
       unsubscribes.push(deps.onProvidersChange((s) => deps.send("providers:update", s)));
+unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update", state)));
 
       healthTimer = setInterval(() => {
         void deps.refreshHealth();
@@ -356,6 +384,80 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       if (healthTimer !== undefined) clearInterval(healthTimer);
       healthTimer = undefined;
       while (unsubscribes.length > 0) unsubscribes.pop()?.();
+    },
+  };
+}
+
+export type DocsHandlers = {
+  list(project: string): Promise<GitViewResult<DocEntry[]>>;
+  read(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
+};
+
+export type DocsHandlerDeps = {
+  reader: DocReader;
+  /** Name to absolute path, from config. The renderer never sees a path. */
+  projects: Readonly<Record<string, string>>;
+  language: "ar" | "en";
+};
+
+function docFailureText(code: DocFailureCode, language: "ar" | "en"): string {
+  switch (code) {
+    case "too-large":
+      return MESSAGES.docTooLarge(language);
+    case "not-found":
+      return MESSAGES.docNotFound(language);
+    // "outside-root" and "unreadable" are both refusals. Neither says which
+    // one it was: a caller probing for a file it is not allowed to read
+    // learns nothing from the difference, and the user cannot act on it.
+    default:
+      return MESSAGES.docUnavailable(language);
+  }
+}
+
+/**
+ * Documents cross this boundary as a parsed model, never as markdown source
+ * and never as HTML — the renderer builds nodes from data it cannot execute
+ * (see markdown.ts). Projects are named, not pathed, for the same reason
+ * the git handlers take a sessionId: main owns the mapping, so a compromised
+ * renderer can only ever reach a directory the user configured.
+ */
+export function createDocsHandlers(deps: DocsHandlerDeps): DocsHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  function rootFor(project: unknown): string | undefined {
+    if (!isString(project)) return undefined;
+    return deps.projects[project];
+  }
+
+  return {
+    async list(project) {
+      const root = rootFor(project);
+      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+      try {
+        const outcome = await deps.reader.list(root);
+        return outcome.ok
+          ? { ok: true, value: outcome.value }
+          : fail(docFailureText(outcome.error.code, deps.language));
+      } catch {
+        // P15: the contract says it resolves; the cost of trusting that at
+        // the call site is an unhandled rejection in the main process.
+        return fail(MESSAGES.docUnavailable(deps.language));
+      }
+    },
+
+    async read(project, path) {
+      const root = rootFor(project);
+      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+      if (!isString(path)) return fail(MESSAGES.invalidArgument(deps.language));
+      try {
+        const outcome = await deps.reader.read(root, path);
+        if (!outcome.ok) return fail(docFailureText(outcome.error.code, deps.language));
+        return { ok: true, value: parseMarkdown(outcome.value) };
+      } catch {
+        return fail(MESSAGES.docUnavailable(deps.language));
+      }
     },
   };
 }
