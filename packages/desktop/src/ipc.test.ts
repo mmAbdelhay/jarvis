@@ -850,6 +850,36 @@ describe("docs handlers", () => {
       { kind: "heading", level: 1, children: [{ kind: "text", text: "Title" }] },
     ]);
   });
+
+  it("returns raw markdown source, not the parsed model", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({ read: () => Promise.resolve({ ok: true, value: "# Title\n" }) }),
+      projects,
+      language: "en",
+    });
+
+    expect(await handlers.readRaw("acme", "a.md")).toEqual({ ok: true, value: "# Title\n" });
+  });
+
+  it("reports a readRaw failure the same way read does", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({
+        read: () => Promise.resolve({ ok: false, error: { code: "not-found", detail: "x" } }),
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.readRaw("acme", "x");
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("finds task-marker offsets with no filesystem access at all", () => {
+    const handlers = createDocsHandlers({ reader: reader(), projects, language: "en" });
+
+    expect(handlers.taskOffsets("- [x] a\n- [ ] b")).toHaveLength(2);
+  });
 });
 
 describe("buildWiring workspace", () => {

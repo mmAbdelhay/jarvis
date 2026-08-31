@@ -57,6 +57,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     readDoc: vi.fn(async () => notStubbed),
     writeDoc: vi.fn(async () => notStubbed),
     parseDoc: vi.fn(async () => []),
+    readDocRaw: vi.fn(async () => notStubbed),
+    taskOffsets: vi.fn(async () => []),
     getProjects: vi.fn(async () => []),
     refreshProviders: vi.fn(async () => {}),
   };

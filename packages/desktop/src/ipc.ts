@@ -11,7 +11,13 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { parseMarkdown, type DocBlock, type DocEntry, type WorkspaceState } from "@jarvis/core";
+import {
+  findTaskMarkerOffsets,
+  parseMarkdown,
+  type DocBlock,
+  type DocEntry,
+  type WorkspaceState,
+} from "@jarvis/core";
 import type { DocFailureCode, DocReader } from "@jarvis/platform";
 import { MESSAGES } from "./messages.js";
 
@@ -319,6 +325,8 @@ export type RendererApi = {
   /** Parses arbitrary text with no filesystem access — used to preview a
    *  Dev-mode edit that has not been saved yet. */
   parseDoc(text: string): Promise<DocBlock[]>;
+  readDocRaw(project: string, path: string): Promise<GitViewResult<string>>;
+  taskOffsets(text: string): Promise<number[]>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;
@@ -400,6 +408,14 @@ export type DocsHandlers = {
    *  preview an unsaved Dev-mode edit through the same parser read() uses,
    *  without writing the draft to disk just to look at it. */
   parse(text: string): DocBlock[];
+  /** The raw markdown source, not the parsed model — Dev-mode editing needs
+   *  the actual text a save would write back, which the model cannot
+   *  losslessly reconstruct (reference links, exact list markers, and so
+   *  on are not represented in it). Plain text is safe to expose: it only
+   *  ever lands in a textarea's value, never in innerHTML. */
+  readRaw(project: string, path: string): Promise<GitViewResult<string>>;
+  /** Pure — no project, no filesystem, never fails. */
+  taskOffsets(text: string): number[];
 };
 
 export type DocsHandlerDeps = {
@@ -483,6 +499,24 @@ export function createDocsHandlers(deps: DocsHandlerDeps): DocsHandlers {
 
     parse(text) {
       return parseMarkdown(text);
+    },
+
+    async readRaw(project, path) {
+      const root = rootFor(project);
+      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+      if (!isString(path)) return fail(MESSAGES.invalidArgument(deps.language));
+      try {
+        const outcome = await deps.reader.read(root, path);
+        return outcome.ok
+          ? { ok: true, value: outcome.value }
+          : fail(docFailureText(outcome.error.code, deps.language));
+      } catch {
+        return fail(MESSAGES.docUnavailable(deps.language));
+      }
+    },
+
+    taskOffsets(text) {
+      return findTaskMarkerOffsets(text);
     },
   };
 }

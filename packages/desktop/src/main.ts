@@ -329,6 +329,12 @@ app.whenReady().then(async () => {
     ipcMain.handle("docs:parse", (_event, text: unknown) =>
       docs.parse(typeof text === "string" ? text : ""),
     );
+    ipcMain.handle("docs:readRaw", (_event, project: string, path: string) =>
+      docs.readRaw(project, path),
+    );
+    ipcMain.handle("docs:taskOffsets", (_event, text: unknown) =>
+      docs.taskOffsets(typeof text === "string" ? text : ""),
+    );
     ipcMain.handle("projects:list", () => Object.keys(config.projects));
 
     // The only user-triggered call in the app that spends money: one billed

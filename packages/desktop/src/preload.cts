@@ -57,6 +57,8 @@ const api: RendererApi = {
   readDoc: (project, path) => ipcRenderer.invoke("docs:read", project, path),
   writeDoc: (project, path, content) => ipcRenderer.invoke("docs:write", project, path, content),
   parseDoc: (text) => ipcRenderer.invoke("docs:parse", text),
+  readDocRaw: (project, path) => ipcRenderer.invoke("docs:readRaw", project, path),
+  taskOffsets: (text) => ipcRenderer.invoke("docs:taskOffsets", text),
   getProjects: () => ipcRenderer.invoke("projects:list"),
 };
 
