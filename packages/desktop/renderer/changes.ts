@@ -160,9 +160,14 @@ function hunkHead(hunk: GitDiffHunk): HTMLElement {
 // chrome labels, not sentences, and Task 13 already established the same
 // precedent for this same header row — the Side-by-side/Unified toggle
 // buttons in index.html are static English text, not MESSAGES entries.
+// The header gets its own `pane-head--${side}` class rather than reusing
+// `pane--${side}` (the column class from hunkRow below): sharing the class
+// made `.pane--before` match the header too, so `querySelector(".pane--before")`
+// found a row even when every hunk row had been removed — a test could pass
+// while rendering zero lines. The two are unambiguous now.
 function paneHead(side: "before" | "after", label: string): HTMLElement {
   const heading = document.createElement("div");
-  heading.className = `pane-head pane--${side}`;
+  heading.className = `pane-head pane-head--${side}`;
   heading.textContent = label;
   return heading;
 }
@@ -237,7 +242,19 @@ async function renderDiff(view: ChangesView): Promise<void> {
 
   setText($("diff-filename"), path);
 
-  const result = await window.jarvis.gitDiff(view.session.id, path);
+  // Captured before the await, the same defense the staging toggle above
+  // relies on against its own race: two clicks in quick succession (A then
+  // B) can have their gitDiff() responses land in either order. Without
+  // this check, A's response resolving after B's would overwrite B's
+  // already-rendered diff with A's — leaving B highlighted in the file
+  // list while A's diff (and A's filename) sit in the pane. Comparing the
+  // requested path against `selected` once the await returns means only
+  // the response for whichever file is still selected is ever rendered;
+  // a stale one is silently dropped.
+  const requested = path;
+  const result = await window.jarvis.gitDiff(view.session.id, requested);
+  if (selected !== requested) return;
+
   if (!result.ok) {
     // Task 10's handlers never reject — a git failure arrives as a value,
     // so it is rendered here rather than caught. The file list stays as it
@@ -247,18 +264,25 @@ async function renderDiff(view: ChangesView): Promise<void> {
     return;
   }
 
+  // A successful diff — of any of the four shapes handled below — means
+  // whatever failure banner might still be showing (from a previous file's
+  // failed gitDiff() call) no longer describes the file now on screen.
+  clearError();
+
   const diff = result.value;
 
   // Three distinct states per ruling P8's GitFileDiff.tooLarge, checked in
-  // this order: a real binary confirmation, then "too large to have ever
-  // been read" (which must not be reported as binary — it might not be),
-  // then a genuinely empty diff.
-  if (diff.binary) {
-    body.replaceChildren(diffNote(MESSAGES.diffBinaryFile(PRIMARY_LANGUAGE)));
-    return;
-  }
+  // core's own order (packages/core/src/git/messages.ts): tooLarge first,
+  // since a file whose diff was never read (too large to have been read at
+  // all) must not be reported as binary — it might not be. Only once
+  // tooLarge is ruled out does a true `binary` confirmation apply, then a
+  // genuinely empty diff.
   if (diff.tooLarge === true) {
     body.replaceChildren(diffNote(MESSAGES.diffTooLarge(PRIMARY_LANGUAGE)));
+    return;
+  }
+  if (diff.binary) {
+    body.replaceChildren(diffNote(MESSAGES.diffBinaryFile(PRIMARY_LANGUAGE)));
     return;
   }
   if (diff.hunks.length === 0) {

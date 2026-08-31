@@ -63,17 +63,23 @@ export const MESSAGES = {
       : `This session has ended — what's shown below is the repository's current state, not necessarily ${agentId}'s work.`,
   // GitFileDiff.binary: git itself (or a NUL-byte read) confirmed the file
   // is not text, so there is no line-by-line diff to draw at all.
+  //
+  // Ruling P25: the pane and the voice lane (core's gitDiffOpenedText,
+  // packages/core/src/git/messages.ts) describe the same condition in the
+  // same moment for the same file, so they use the same wording — this is
+  // that sentence minus its trailing `: ${path}` clause, since the pane
+  // already shows the filename in its own header and does not need it
+  // repeated inside the note.
   diffBinaryFile: (language: "ar" | "en"): string =>
-    language === "ar" ? "ملف ثنائي — لا يوجد فرق نصي لعرضه." : "Binary file — no text diff to show.",
+    language === "ar" ? "هذا ملف ثنائي ولا يمكن عرض فروقه." : "Binary file — no diff to show.",
   // GitFileDiff.tooLarge (ruling P8): the file or its diff exceeded the
   // provider's size cap and was never read, so this is deliberately a
   // different sentence from diffBinaryFile — "too big to show" is not the
   // same fact as "not text", and conflating them was Task 14's first-draft
-  // mistake this message exists to avoid repeating.
+  // mistake this message exists to avoid repeating. Wording reused from
+  // core's gitDiffOpenedText per ruling P25, same as diffBinaryFile above.
   diffTooLarge: (language: "ar" | "en"): string =>
-    language === "ar"
-      ? "الملف كبير جدًا لعرض الفرق."
-      : "This file is too large to display a diff for.",
+    language === "ar" ? "الملف كبير جدًا لعرض الفروق." : "Too large to show a diff for.",
   // hunks.length === 0 with binary and tooLarge both false: a real diff
   // read that simply found nothing to show (e.g. a mode-only change, or
   // the file picked from the list has since gone back to matching HEAD).

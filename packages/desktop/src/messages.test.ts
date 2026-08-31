@@ -90,6 +90,39 @@ describe("changesShowCurrentState", () => {
   });
 });
 
+// Ruling P25: these three notices and core's gitDiffOpenedText
+// (packages/core/src/git/messages.ts) describe the same GitFileDiff
+// conditions for the same file at the same moment, so diffBinaryFile and
+// diffTooLarge reuse gitDiffOpenedText's own wording rather than a second
+// vocabulary — asserted here by pinning the exact strings.
+describe("diffBinaryFile", () => {
+  it("renders in both languages, matching core's gitDiffOpenedText wording", () => {
+    expect(MESSAGES.diffBinaryFile("en")).toBe("Binary file — no diff to show.");
+    expect(MESSAGES.diffBinaryFile("ar")).toBe("هذا ملف ثنائي ولا يمكن عرض فروقه.");
+  });
+});
+
+describe("diffTooLarge", () => {
+  it("renders in both languages, matching core's gitDiffOpenedText wording", () => {
+    expect(MESSAGES.diffTooLarge("en")).toBe("Too large to show a diff for.");
+    expect(MESSAGES.diffTooLarge("ar")).toBe("الملف كبير جدًا لعرض الفروق.");
+  });
+
+  // Ruling P8: tooLarge and binary describe different facts (never read at
+  // all, vs. confirmed not text) and must not share wording.
+  it("is worded distinctly from diffBinaryFile in both languages", () => {
+    expect(MESSAGES.diffTooLarge("en")).not.toBe(MESSAGES.diffBinaryFile("en"));
+    expect(MESSAGES.diffTooLarge("ar")).not.toBe(MESSAGES.diffBinaryFile("ar"));
+  });
+});
+
+describe("diffNoChanges", () => {
+  it("renders in both languages", () => {
+    expect(MESSAGES.diffNoChanges("en")).toBe("No changes to show.");
+    expect(MESSAGES.diffNoChanges("ar")).toBe("لا توجد تغييرات لعرضها.");
+  });
+});
+
 describe("errorMessage", () => {
   it("extracts the message from an Error", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");

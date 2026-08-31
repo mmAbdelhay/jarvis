@@ -891,7 +891,7 @@
   .diff-split { display: flex; flex-direction: column; }
   .diff-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-  .pane { display: flex; flex-direction: column; min-width: 0; }
+  .pane { display: flex; flex-direction: column; min-width: 0; padding: 10px 0; }
   .pane--before { border-inline-end: 1px solid var(--border); }
 
   .pane-head {
@@ -901,6 +901,8 @@
     letter-spacing: 0.06em;
     color: var(--text-muted);
   }
+
+  .pane-head--before { border-inline-end: 1px solid var(--border); }
 
   .ln {
     font-family: "IBM Plex Mono", ui-monospace, monospace;

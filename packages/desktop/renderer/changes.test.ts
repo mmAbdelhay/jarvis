@@ -888,6 +888,130 @@ describe("the diff panes", () => {
     expect(document.getElementById("changes-error")?.hidden).toBe(false);
     expect(document.querySelectorAll(".file-row").length).toBeGreaterThan(0);
   });
+
+  // A previous file's failed gitDiff() call leaves the banner showing; a
+  // later file's successful diff must not leave it standing underneath a
+  // now-correct pane, accusing the repository of a failure that isn't
+  // happening any more.
+  it("clears a standing error banner once a later diff succeeds", async () => {
+    let first = true;
+    await openChangesWith(
+      [
+        { path: "a.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+        { path: "b.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+      ],
+      undefined,
+      {
+        gitDiff: vi.fn(async (_id: string, path: string) => {
+          if (first) {
+            first = false;
+            return { ok: false as const, text: "The git command failed: boom", language: "en" as const };
+          }
+          return { ok: true as const, value: { path, binary: false, hunks: [] } };
+        }),
+      },
+    );
+    expect(document.getElementById("changes-error")?.hidden).toBe(false);
+
+    const rows = [...document.querySelectorAll(".file-row")];
+    const second = rows[1];
+    if (!(second instanceof HTMLElement)) throw new Error("missing second row");
+    second.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("changes-error")?.hidden).toBe(true);
+  });
+
+  // Two clicks in quick succession — A then B — whose gitDiff() responses
+  // land out of order (B first, A second) must not leave A's diff showing
+  // under B's highlighted file row. The staging toggle above already
+  // defends against this shape of race by re-rendering from a fresh read;
+  // here the defense is capturing the requested path before the await and
+  // discarding a response that arrives after the selection has moved on.
+  // Verified against the pre-fix code (renderDiff with no guard): this
+  // test fails there, resolving B first and A second still leaves A's
+  // "a file line" in the pane instead of B's "b file line".
+  it("keeps the diff pane in sync when two diff responses resolve out of order", async () => {
+    const files = [
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+      { path: "b.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+    ];
+    const diffs: Record<string, GitFileDiff> = {
+      "a.php": {
+        path: "a.php",
+        binary: false,
+        hunks: [
+          {
+            header: "@@ -1,1 +1,1 @@",
+            lines: [{ kind: "added" as const, text: "a file line", beforeLine: undefined, afterLine: 1 }],
+          },
+        ],
+      },
+      "b.php": {
+        path: "b.php",
+        binary: false,
+        hunks: [
+          {
+            header: "@@ -1,1 +1,1 @@",
+            lines: [{ kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 }],
+          },
+        ],
+      },
+    };
+
+    let calls = 0;
+    const pending: Record<number, () => void> = {};
+    await openChangesWith(files, undefined, {
+      gitDiff: vi.fn((_id: string, path: string): Promise<GitViewResult<GitFileDiff>> => {
+        const index = calls++;
+        const diff = diffs[path];
+        if (diff === undefined) throw new Error(`no stub diff for ${path}`);
+        // Call 0 is openChangesWith's own initial selection of a.php —
+        // resolved immediately so setup itself doesn't hang. Later calls
+        // (the two rapid clicks below) stay pending until resolved by hand,
+        // in whichever order the test chooses.
+        if (index === 0) {
+          return Promise.resolve({ ok: true as const, value: diff });
+        }
+        return new Promise((resolve) => {
+          pending[index] = () => resolve({ ok: true as const, value: diff });
+        });
+      }),
+    });
+
+    const rows = [...document.querySelectorAll(".file-row")];
+    const rowA = rows[0];
+    const rowB = rows[1];
+    if (!(rowA instanceof HTMLElement) || !(rowB instanceof HTMLElement)) {
+      throw new Error("missing file rows");
+    }
+
+    // Click A, then B, before either response has arrived.
+    rowA.click();
+    rowB.click();
+
+    // Resolve out of order: B (the later click, call index 2) first, A
+    // (call index 1) second.
+    pending[2]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    pending[1]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Each click re-renders the whole file list (fresh nodes), so the
+    // final highlighted row must be re-queried rather than read off the
+    // `rowA`/`rowB` references captured before either click.
+    const finalRows = [...document.querySelectorAll(".file-row")];
+    const finalA = finalRows.find((row) => row.querySelector(".file-name")?.textContent === "a.php");
+    const finalB = finalRows.find((row) => row.querySelector(".file-name")?.textContent === "b.php");
+
+    expect(document.querySelector(".pane--after .code")?.textContent).toBe("b file line");
+    expect(document.getElementById("diff-filename")?.textContent).toBe("b.php");
+    expect(finalB?.className).toContain("file-row--on");
+    expect(finalA?.className).not.toContain("file-row--on");
+  });
 });
 
 describe("the commit bar", () => {
