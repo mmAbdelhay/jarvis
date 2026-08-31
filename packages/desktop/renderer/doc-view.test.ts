@@ -112,3 +112,103 @@ describe("renderDocument", () => {
     expect(html([])).toBe("");
   });
 });
+
+describe("renderDocument — task lists", () => {
+  it("renders a task item as a real, unchecked checkbox", () => {
+    const host = document.createElement("div");
+    host.append(
+      renderDocument([
+        {
+          kind: "list",
+          ordered: false,
+          items: [[{ kind: "paragraph", children: [text("todo")] }]],
+          checked: [false],
+        },
+      ]),
+    );
+
+    const box = host.querySelector("input[type=checkbox]");
+    expect(box).not.toBeNull();
+    expect((box as HTMLInputElement).checked).toBe(false);
+    expect((box as HTMLInputElement).disabled).toBe(false);
+    expect(host.querySelector("li")?.textContent).toContain("todo");
+  });
+
+  it("renders a checked task item's box as checked", () => {
+    const host = document.createElement("div");
+    host.append(
+      renderDocument([
+        {
+          kind: "list",
+          ordered: false,
+          items: [[{ kind: "paragraph", children: [text("done")] }]],
+          checked: [true],
+        },
+      ]),
+    );
+
+    expect((host.querySelector("input[type=checkbox]") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("renders no checkbox for a plain item in a mixed list", () => {
+    const host = document.createElement("div");
+    host.append(
+      renderDocument([
+        {
+          kind: "list",
+          ordered: false,
+          items: [
+            [{ kind: "paragraph", children: [text("a")] }],
+            [{ kind: "paragraph", children: [text("plain")] }],
+          ],
+          checked: [true, undefined],
+        },
+      ]),
+    );
+
+    const items = host.querySelectorAll("li");
+    expect(items[0]?.querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(items[1]?.querySelector("input[type=checkbox]")).toBeNull();
+  });
+
+  it("renders no checkboxes at all for a list with no checked array", () => {
+    const host = document.createElement("div");
+    host.append(
+      renderDocument([
+        { kind: "list", ordered: false, items: [[{ kind: "paragraph", children: [text("a")] }]] },
+      ]),
+    );
+
+    expect(host.querySelector("input[type=checkbox]")).toBeNull();
+  });
+
+  // workspace.ts locates a clicked checkbox by this index to flip the right
+  // character in the raw markdown text — it must be stable, unique, and
+  // assigned in document order, the same order a left-to-right regex scan
+  // of the raw source would find the same markers in.
+  it("assigns each checkbox a distinct, document-order task index", () => {
+    const host = document.createElement("div");
+    host.append(
+      renderDocument([
+        {
+          kind: "list",
+          ordered: false,
+          items: [
+            [{ kind: "paragraph", children: [text("a")] }],
+            [{ kind: "paragraph", children: [text("b")] }],
+          ],
+          checked: [false, true],
+        },
+        {
+          kind: "list",
+          ordered: false,
+          items: [[{ kind: "paragraph", children: [text("c")] }]],
+          checked: [false],
+        },
+      ]),
+    );
+
+    const boxes = [...host.querySelectorAll("input[type=checkbox]")] as HTMLInputElement[];
+    expect(boxes.map((box) => box.dataset["taskIndex"])).toEqual(["0", "1", "2"]);
+  });
+});

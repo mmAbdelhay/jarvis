@@ -9,7 +9,15 @@ import { detectLanguage } from "./format.js";
  * construction (markdown.ts, html: false), which is what makes that
  * possible rather than merely careful.
  */
+// A running count of task-list checkboxes across one renderDocument() call,
+// in document order — a checkbox's index is how workspace.ts locates the
+// matching "[ ]"/"[x]" marker in the raw source text to flip when it's
+// clicked. Reset at the start of every call; safe as module state because
+// rendering is synchronous and this renderer never overlaps two calls.
+let taskIndexCounter = 0;
+
 export function renderDocument(blocks: DocBlock[]): DocumentFragment {
+  taskIndexCounter = 0;
   const fragment = document.createDocumentFragment();
   for (const block of blocks) fragment.append(renderBlock(block));
   return fragment;
@@ -41,11 +49,19 @@ function renderBlock(block: DocBlock): Node {
       return document.createElement("hr");
     case "list": {
       const list = document.createElement(block.ordered ? "ol" : "ul");
-      for (const item of block.items) {
+      block.items.forEach((item, index) => {
         const li = document.createElement("li");
+        const isTask = block.checked?.[index] !== undefined;
+        if (isTask) {
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.checked = block.checked?.[index] === true;
+          box.dataset["taskIndex"] = String(taskIndexCounter++);
+          li.append(box);
+        }
         for (const child of item) li.append(renderBlock(child));
         list.append(li);
-      }
+      });
       return list;
     }
     case "quote": {
