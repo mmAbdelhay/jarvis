@@ -254,6 +254,33 @@ describe("ChangeTracker", () => {
   // Pins: a listener that unsubscribes (itself or another listener) while
   // #emit is iterating must not corrupt that iteration or skip a remaining
   // listener — #emit iterates a copy of the set, same as SessionManager.
+  // Controller ruling P28: SessionManager never removes an ended session
+  // from its list (only its state changes), so without this the snapshot
+  // would keep rejoining a finished session against its repo's *current*
+  // git state on every refresh — main.ts's persistence writer would then
+  // rewrite that session's history row forever, including work from
+  // sessions that started after it ended.
+  it("freezes a session's entry once it reaches a terminal state, even though it stays in the session list", async () => {
+    const git = fakeGit((repoPath) => ({ ok: true, value: changesFor(repoPath, 3) }));
+    const ended: Session = { ...session("a", "p", "/p"), state: "done", endedAt: 100 };
+    const tracker = new ChangeTracker({ git, sessions: { list: () => [ended] } });
+
+    await tracker.refresh();
+
+    expect(tracker.snapshot()).toEqual([]);
+  });
+
+  it("keeps a live session's entry while a different, ended session sharing its repo is dropped", async () => {
+    const git = fakeGit((repoPath) => ({ ok: true, value: changesFor(repoPath, 3) }));
+    const ended: Session = { ...session("a", "p", "/p"), state: "done", endedAt: 100 };
+    const live = session("b", "p", "/p");
+    const tracker = new ChangeTracker({ git, sessions: { list: () => [ended, live] } });
+
+    await tracker.refresh();
+
+    expect(tracker.snapshot().map((entry) => entry.sessionId)).toEqual(["b"]);
+  });
+
   it("delivers to every listener even when one unsubscribes another during the emit", async () => {
     const git = fakeGit((repoPath) => ({ ok: true, value: changesFor(repoPath, 1) }));
     const tracker = new ChangeTracker({ git, sessions: { list: () => [session("a", "p", "/p")] } });

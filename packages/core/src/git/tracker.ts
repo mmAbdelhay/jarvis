@@ -42,6 +42,20 @@ export class ChangeTracker {
   snapshot(): SessionChanges[] {
     const result: SessionChanges[] = [];
     for (const session of this.#options.sessions.list()) {
+      // Controller ruling P28: once a session reaches a terminal state
+      // (`done`/`dead`, signalled by `endedAt`), its entry here freezes —
+      // it stops appearing in this snapshot at all, forever, even though
+      // SessionManager keeps the session in its list. Without this, a
+      // session that ended is still joined against its `projectPath`'s
+      // *current* git state on every refresh (`#byRepo` is keyed by repo,
+      // not by session), and main.ts's persistence writer — the only
+      // consumer of this snapshot's non-live path — rewrites that session's
+      // history row with the repository's live state every ~5s forever,
+      // including work from sessions that started long after this one
+      // ended. A frozen session's last honest counts are whatever
+      // SessionStore already recorded for it before it ended; nothing here
+      // may overwrite that again.
+      if (session.endedAt !== undefined) continue;
       const changes = this.#byRepo.get(session.projectPath);
       if (changes === undefined) continue;
       result.push({
