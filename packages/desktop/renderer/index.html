@@ -28,6 +28,10 @@
     /* The Changes view's own delete/error red (GitChanges.dc.html — see
        the .diff-del comment below); distinct from --bad. */
     --del: #d9645a;
+    /* GitChanges.dc.html's "M" status letter color (lines 45/58/68/85) —
+       distinct from every other token above, so it gets its own name
+       rather than overloading one of them. */
+    --amber: #d9a03b;
   }
 
   * { box-sizing: border-box; }
@@ -732,6 +736,19 @@
     border-bottom: 1px solid var(--border);
   }
 
+  /* Ruling P22 (not in the artboard — GitChanges.dc.html has no notion of
+     a past session, since it draws only a live one): a neutral info
+     banner, not the error banner's red, since nothing has failed — it
+     tells the truth about what gitChanges() can and cannot show for a
+     session that has already ended. */
+  .changes-notice {
+    padding: 8px 20px;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: #0d1720;
+    border-bottom: 1px solid var(--border);
+  }
+
   .changes-body {
     display: grid;
     grid-template-columns: 300px minmax(0, 1fr);
@@ -764,6 +781,71 @@
     gap: 2px;
     overflow-y: auto;
     min-height: 0;
+  }
+
+  /* GitChanges.dc.html's file-row treatment (lines 41-89): the artboard
+     draws no staging control of its own, so the 12px toggle at the row's
+     leading edge is this plan's one sanctioned addition — in the
+     artboard's own palette (border #1c3f49, filled --accent #45c8dc when
+     staged) so it reads as native to the row, not bolted on. */
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    /* Transparent rather than absent so selecting a row does not shift the
+       other rows by the border's 1px. */
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+
+  .file-row--on { background: #0e2029; border-color: #1c3f49; }
+
+  .file-stage {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    padding: 0;
+    border: 1px solid #1c3f49;
+    border-radius: 3px;
+    background: none;
+    cursor: pointer;
+  }
+
+  .file-stage--on { background: var(--accent); border-color: var(--accent); }
+
+  .file-status { font-size: 10px; width: 10px; flex-shrink: 0; }
+  /* --good/--del below are the same tokens `.diff-add`/`.diff-del` above
+     already use for the artboard's A/D colors (#5fb87a / #d9645a) — the
+     brief's draft CSS named these `--add`/`--del`, but `--add` was never
+     defined anywhere in this file; reusing `--good` keeps one token per
+     color instead of introducing a second name for the same hex. */
+  .status-m { color: var(--amber); }
+  .status-a { color: var(--good); }
+  .status-d { color: var(--del); }
+  .status-r { color: var(--accent); }
+  .status-q { color: var(--text-muted); }
+
+  .file-name {
+    font-size: 12px;
+    flex-grow: 1;
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .file-row--on .file-name { color: var(--text); }
+
+  .file-row .diff-add, .file-row .diff-del { font-size: 9px; }
+
+  .file-gap { height: 9px; }
+
+  .file-group {
+    padding: 0 10px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: #38505d;
   }
 
   .changes-diff { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -980,6 +1062,7 @@
       <div id="changes-by" class="mono changes-muted"></div>
     </div>
 
+    <div id="changes-stale-notice" class="changes-notice" hidden></div>
     <div id="changes-error" class="changes-error" hidden></div>
 
     <div class="changes-body">

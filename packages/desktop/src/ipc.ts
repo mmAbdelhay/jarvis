@@ -40,6 +40,14 @@ export type ChangesView = {
     projectPath: string;
     agentId: string;
     lastActivityAt: number;
+    // Set once a session reaches a terminal state (Session.endedAt).
+    // gitChanges() always reads the repository's *current* working tree,
+    // never a per-session snapshot, so a defined endedAt is the renderer's
+    // only signal that what it is about to show is not necessarily this
+    // session's own work (ruling P22) — Task 16 replaces this with real
+    // per-session recorded counts, at which point the notice this drives
+    // goes away for good.
+    endedAt: number | undefined;
   };
   changes: GitChanges;
 };
@@ -124,6 +132,7 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
             projectPath: session.projectPath,
             agentId: session.agentId,
             lastActivityAt: session.lastActivityAt,
+            endedAt: session.endedAt,
           },
           changes: outcome.value,
         },

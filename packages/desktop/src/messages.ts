@@ -51,6 +51,16 @@ export const MESSAGES = {
   // the bad value back, since its shape/type is exactly what's untrusted.
   invalidArgument: (language: "ar" | "en"): string =>
     language === "ar" ? "طلب غير صالح." : "Invalid request.",
+  // Ruling P22: gitChanges() always reads the repository's current working
+  // tree, never a per-session snapshot. For a session that has already
+  // ended, showing that data under its name would repeat exactly the lie
+  // ruling P21 removed from the session badge — so the Changes view says
+  // so plainly instead of pretending the file list is that session's own
+  // work. Task 16's per-session recorded git metadata retires this notice.
+  changesShowCurrentState: (agentId: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `انتهت هذه الجلسة — ما يظهر أدناه هو الحالة الحالية للمستودع، وليس بالضرورة ما كتبه ${agentId}.`
+      : `This session has ended — what's shown below is the repository's current state, not necessarily ${agentId}'s work.`,
 };
 
 function arabicSessionsCount(count: number): string {

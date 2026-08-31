@@ -79,6 +79,17 @@ describe("invalidArgument", () => {
   });
 });
 
+describe("changesShowCurrentState", () => {
+  it("names the agent and states the caveat in both languages", () => {
+    expect(MESSAGES.changesShowCurrentState("claude-acme", "en")).toBe(
+      "This session has ended — what's shown below is the repository's current state, not necessarily claude-acme's work.",
+    );
+    expect(MESSAGES.changesShowCurrentState("claude-acme", "ar")).toBe(
+      "انتهت هذه الجلسة — ما يظهر أدناه هو الحالة الحالية للمستودع، وليس بالضرورة ما كتبه claude-acme.",
+    );
+  });
+});
+
 describe("errorMessage", () => {
   it("extracts the message from an Error", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");
