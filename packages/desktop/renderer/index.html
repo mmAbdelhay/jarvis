@@ -166,7 +166,7 @@
 
   .spacer { flex-grow: 1; }
 
-  .clock, .netinfo {
+  .clock, .netinfo, .sysinfo {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -186,6 +186,12 @@
   .netinfo .sep { color: var(--text-muted); }
   .netinfo .up { color: var(--accent); }
   .netinfo .unit { color: var(--text-muted); font-size: 10px; }
+
+  /* Always visible regardless of route — the Dashboard's own System panel
+     still has the full byte-level detail; this is a glanceable summary. */
+  .sysinfo { padding: 6px 12px; gap: 6px; }
+  .sysinfo .sep { color: var(--text-muted); }
+  .sysinfo .unit { color: var(--text-muted); font-size: 10px; }
 
   /* No `display` here: an author rule on `.main` itself would out-cascade
      the UA stylesheet's `[hidden] { display: none }` regardless of
@@ -1372,6 +1378,12 @@
     <div class="spacer"></div>
     <div class="clock mono">
       <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="sysinfo mono">
+      <span class="unit">CPU</span><span id="header-cpu">--%</span><span class="sep">|</span>
+      <span class="unit">RAM</span><span id="header-mem">--%</span><span class="sep">|</span>
+      <span class="unit">DISK</span><span id="header-disk">--%</span>
     </div>
     <div class="spacer"></div>
     <div class="netinfo mono">

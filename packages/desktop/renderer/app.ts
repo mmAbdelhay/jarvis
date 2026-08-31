@@ -139,6 +139,18 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("uptime-value").textContent = formatUptime(metrics.uptimeSeconds);
   $("net-down").textContent = `↓ ${metrics.networkDownMbps.toFixed(1)}`;
   $("net-up").textContent = `↑ ${metrics.networkUpMbps.toFixed(1)}`;
+
+  // Always-visible header summary, alongside network speed — the
+  // Dashboard's own System panel still has the full byte-level detail.
+  $("header-cpu").textContent = `${Math.round(metrics.cpuPercent)}%`;
+  $("header-mem").textContent =
+    metrics.memoryTotalBytes > 0
+      ? `${Math.round((metrics.memoryUsedBytes / metrics.memoryTotalBytes) * 100)}%`
+      : "--%";
+  $("header-disk").textContent =
+    metrics.diskTotalBytes > 0
+      ? `${Math.round((metrics.diskUsedBytes / metrics.diskTotalBytes) * 100)}%`
+      : "--%";
 }
 
 function renderSessions(sessions: Session[]): void {
