@@ -160,3 +160,34 @@ describe("loadConfig", () => {
     expect(stats.isDirectory()).toBe(true);
   });
 });
+
+describe("agent provider fields", () => {
+  it("parses configDir and vendor, expanding a tilde in configDir", () => {
+    const config = parseConfig({
+      agents: {
+        "claude-mm": { command: "claude-mm", configDir: "~/.claude-main", vendor: "anthropic" },
+      },
+      brain: {},
+    });
+    expect(config.registry.agents["claude-mm"]?.configDir).toBe(join(homedir(), ".claude-main"));
+    expect(config.registry.agents["claude-mm"]?.vendor).toBe("anthropic");
+  });
+
+  it("leaves both fields absent when the config omits them", () => {
+    const config = parseConfig({ agents: { copilot: { command: "copilot" } }, brain: {} });
+    expect(config.registry.agents["copilot"]).not.toHaveProperty("configDir");
+    expect(config.registry.agents["copilot"]).not.toHaveProperty("vendor");
+  });
+
+  it("rejects a vendor it does not know rather than passing it through", () => {
+    expect(() =>
+      parseConfig({ agents: { x: { command: "x", vendor: "acme" } }, brain: {} }),
+    ).toThrow(/vendor/);
+  });
+
+  it("rejects a non-string configDir", () => {
+    expect(() =>
+      parseConfig({ agents: { x: { command: "x", configDir: 7 } }, brain: {} }),
+    ).toThrow(/configDir/);
+  });
+});

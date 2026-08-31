@@ -2,7 +2,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
-import type { AgentConfig, RegistryConfig, RoutingRule } from "@jarvis/core";
+import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type { BrainConfig } from "@jarvis/platform";
 
 export type JarvisConfig = {
@@ -91,6 +91,12 @@ function expandTilde(path: string): string {
   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 }
 
+const VENDORS: readonly ProviderVendor[] = ["anthropic", "github", "openai"];
+
+function isVendor(value: unknown): value is ProviderVendor {
+  return VENDORS.some((vendor) => vendor === value);
+}
+
 function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
   if (typeof rawAgents !== "object" || rawAgents === null || Array.isArray(rawAgents)) {
     throw new Error("Config is missing an `agents` section");
@@ -116,11 +122,21 @@ function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
     if (agent.default !== undefined && typeof agent.default !== "boolean") {
       throw new Error(`Config \`agents.${id}.default\` must be a boolean`);
     }
+    if (agent.configDir !== undefined && typeof agent.configDir !== "string") {
+      throw new Error(`Config \`agents.${id}.configDir\` must be a string`);
+    }
+    if (agent.vendor !== undefined && !isVendor(agent.vendor)) {
+      throw new Error(
+        `Config \`agents.${id}.vendor\` must be one of: ${VENDORS.join(", ")}`,
+      );
+    }
     agents[id] = {
       command: agent.command,
       ...(agent.args === undefined ? {} : { args: agent.args }),
       ...(agent.model === undefined ? {} : { model: agent.model }),
       ...(agent.default === undefined ? {} : { default: agent.default }),
+      ...(agent.configDir === undefined ? {} : { configDir: expandTilde(agent.configDir) }),
+      ...(agent.vendor === undefined ? {} : { vendor: agent.vendor }),
     };
   }
   return agents;

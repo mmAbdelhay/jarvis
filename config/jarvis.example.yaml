@@ -3,12 +3,23 @@ agents:
     command: claude-mm
     model: opus
     default: true
+    # The CLAUDE_CONFIG_DIR this account's wrapper sets. Its presence is what
+    # lets Jarvis read this account's remaining capacity; omit it and capacity
+    # is honestly shown as unknown rather than guessed.
+    configDir: ~/.claude-main
+    # Which public status page speaks for this provider.
+    vendor: anthropic
   claude-acme:
     command: claude-acme
     model: sonnet
+    configDir: ~/.claude-acme
+    vendor: anthropic
   copilot:
     command: copilot
     args: ["-p"]
+    # No configDir: GitHub Copilot has no standalone quota query, so its
+    # capacity is reported as "not available", never invented.
+    vendor: github
 
 routing:
   - match: { project: acme }
