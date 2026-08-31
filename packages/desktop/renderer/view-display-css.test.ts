@@ -91,33 +91,24 @@ describe(".main / .main--changes [hidden] cascade", () => {
     }
   });
 
-  // Found live: renderWorkspace() originally set #workspace-bar's `hidden`
+  // Found live, twice: (1) renderWorkspace() set #workspace-bar's `hidden`
   // property for an editor-kind tab, but the base .workspace-bar rule set
   // `display: flex` unconditionally with no [hidden] override — an author
   // rule, which always beats the UA's [hidden]{display:none} regardless of
-  // specificity, so the address bar stayed visible over a code-server tab
-  // no matter what the JS did. Fixed, then immediately superseded by a
-  // second live finding: hiding the *whole* bar also hid "+" (open a new
-  // tab), leaving no way to open a browser tab while an editor tab was
-  // active. The toggle now targets #workspace-nav-controls (back/forward/
-  // reload/address only) instead, and #workspace-bar itself is never
-  // hidden again — this test moves with it, pinning the same override
-  // discipline on the new target.
-  it("overrides display for .workspace-nav-controls when hidden is present", () => {
-    const rules = [
-      ...htmlSource.matchAll(/\.workspace-nav-controls(?:\[hidden\])?[^{]*\{[^}]*\}/g),
-    ].map((m) => m[0]);
+  // specificity, so the address bar stayed visible no matter what the JS
+  // did. (2) Fixed by splitting the row so only back/forward/reload/
+  // address hid, keeping "+" (open a new tab) reachable — but the user
+  // then asked for "+" to sit at the end of the tab strip instead, which
+  // makes the split unnecessary: "+" moved out of this row entirely
+  // (workspace.ts relocates the existing button into #workspace-tabs on
+  // every render), so hiding the *whole* .workspace-bar row is safe again.
+  // This test pins the final shape's override.
+  it("overrides display for .workspace-bar when hidden is present", () => {
+    const rules = [...htmlSource.matchAll(/\.workspace-bar(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
+      (m) => m[0],
+    );
     const hasOverride = rules.some(
-      (rule) => rule.startsWith(".workspace-nav-controls[hidden]") && /display\s*:\s*none/.test(rule),
+      (rule) => rule.startsWith(".workspace-bar[hidden]") && /display\s*:\s*none/.test(rule),
     );
     expect(hasOverride).toBe(true);
-  });
-
-  it("never sets display on .workspace-bar itself outside a [hidden] guard", () => {
-    // #workspace-bar is never given the hidden attribute at all (only its
-    // #workspace-nav-controls child is), so this is a weaker check than the
-    // others: it exists to catch a future regression that reintroduces
-    // toggling .workspace-bar directly without redoing this analysis.
-    const rules = [...htmlSource.matchAll(/\.workspace-bar\b[^{]*\{[^}]*\}/g)].map((m) => m[0]);
-    expect(rules.length).toBeGreaterThan(0);
   });

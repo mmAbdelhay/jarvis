@@ -885,6 +885,10 @@
     flex-shrink: 0;
   }
 
+  /* None of this means anything for a code editor, so the whole row hides
+     for an editor tab. Safe to hide as a whole: "+" lives at the end of
+     #workspace-tabs's own row (below), not in here, so hiding this row
+     never hides the way to open a new tab. */
   .workspace-bar {
     display: flex;
     align-items: center;
@@ -892,14 +896,11 @@
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
   }
+  .workspace-bar[hidden] { display: none; }
 
-  /* Back/forward/reload/address — hidden for an editor tab, since none of
-     it means anything for a code editor. Never applied to #workspace-bar
-     itself: "+" (open a new tab) is not tied to the current tab's kind and
-     must always stay reachable, or there would be no way to open a browser
-     tab while an editor tab is active. */
-  .workspace-nav-controls { display: flex; align-items: center; gap: 6px; flex-grow: 1; }
-  .workspace-nav-controls[hidden] { display: none; }
+  /* Moved into #workspace-tabs's own row by renderWorkspace on every
+     render — shrink: 0 keeps it from being squeezed by many scrolled tabs. */
+  .workspace-new-tab { flex-shrink: 0; }
 
   .workspace-nav {
     font: inherit;
@@ -1773,15 +1774,16 @@
 
     <div id="workspace-browser" class="workspace-browser">
       <div id="workspace-tabs" class="workspace-tabs"></div>
+      <!-- Moved to the end of #workspace-tabs's own row by renderWorkspace
+           on every render — right side of the tabs, always reachable. This
+           is only its starting position in the markup. -->
+      <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
       <div id="workspace-bar" class="workspace-bar">
-        <div id="workspace-nav-controls" class="workspace-nav-controls">
-          <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
-          <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
-          <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
-          <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
-                 autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
-        </div>
-        <button id="workspace-new-tab" class="workspace-nav" type="button" title="New tab">+</button>
+        <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
+        <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
+        <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
+        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
       </div>
       <div id="workspace-error" class="changes-error" hidden></div>
       <div id="workspace-page" class="workspace-page"></div>

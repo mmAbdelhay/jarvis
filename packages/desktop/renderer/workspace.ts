@@ -478,6 +478,12 @@ export function renderWorkspace(state: WorkspaceState): void {
 
   const selected = selectedProject();
   const strip = $("workspace-tabs");
+  // Found wherever it currently lives — including inside `strip` itself,
+  // moved there by a previous render — before replaceChildren() below
+  // detaches it. Grabbing the reference after clearing would fail: once
+  // "+" is a child of `strip`, clearing `strip` removes it from the
+  // document entirely, and a later $("workspace-new-tab") finds nothing.
+  const newTabButton = $("workspace-new-tab");
   strip.replaceChildren();
 
   // Every project with at least one open tab gets a slot: the selected
@@ -499,13 +505,19 @@ export function renderWorkspace(state: WorkspaceState): void {
     }
   }
 
+  // append() relocates a node already in the DOM rather than cloning it,
+  // so "+"'s click listener (wired once in initWorkspace) comes along
+  // unchanged. Always reachable here, regardless of the active tab's
+  // kind — unlike #workspace-bar, this row never hides.
+  strip.append(newTabButton);
+
   const tab = activeTab();
 
   // Back/forward/reload/address mean nothing for a code editor — nobody
-  // navigates it like a webpage. "+" (open a new tab) is not tied to what
-  // the current tab happens to be, so only the nav-controls group hides;
-  // #workspace-bar itself, and "+" inside it, stay visible regardless.
-  ($("workspace-nav-controls") as HTMLElement).hidden = tab?.kind === "editor";
+  // navigates it like a webpage. "+" is not in this row at all (it lives
+  // at the end of the tab strip itself, appended below), so hiding the
+  // whole bar here no longer hides the way to open a new tab.
+  ($("workspace-bar") as HTMLElement).hidden = tab?.kind === "editor";
 
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.

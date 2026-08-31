@@ -14,14 +14,12 @@ function harness(): Recorded[] {
       <button id="workspace-mode-docs"></button>
       <div id="workspace-browser">
         <div id="workspace-tabs"></div>
+        <button id="workspace-new-tab"></button>
         <div id="workspace-bar">
-          <div id="workspace-nav-controls">
-            <button id="workspace-back"></button>
-            <button id="workspace-forward"></button>
-            <button id="workspace-reload"></button>
-            <input id="workspace-address" />
-          </div>
-          <button id="workspace-new-tab"></button>
+          <button id="workspace-back"></button>
+          <button id="workspace-forward"></button>
+          <button id="workspace-reload"></button>
+          <input id="workspace-address" />
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
@@ -240,28 +238,43 @@ describe("workspace chrome", () => {
     expect(marked).toEqual([false, true]);
   });
 
-  // Only the back/forward/reload/address-input group is meaningless for a
-  // code editor — "+" (open a new tab) is not tied to what the current tab
-  // happens to be, and must stay reachable even while an editor tab is
-  // active, or there would be no way to open a browser tab from there.
-  it("hides only the nav controls, not the whole bar, when the active tab is an editor", () => {
+  // "+" lives in the tab strip now, not the address-bar row — none of
+  // back/forward/reload/address means anything for a code editor, but the
+  // whole row can hide safely, since "+" is no longer inside it.
+  it("hides the address bar when the active tab is an editor", () => {
     renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
 
-    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(true);
-    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
-    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
   });
 
-  it("shows the nav controls when the active tab is an ordinary page", () => {
+  it("shows the address bar when the active tab is an ordinary page", () => {
     renderWorkspace({ tabs: [tab({ kind: "web" })], activeTabId: "tab-1" });
 
-    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("shows the nav controls when there is no active tab at all", () => {
+  it("shows the address bar when there is no active tab at all", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
-    expect(document.getElementById("workspace-nav-controls")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  // "+" moves to the end of the tab strip's own row on every render — the
+  // right side of the tabs, always reachable regardless of the active
+  // tab's kind, never inside the row that hides for an editor tab.
+  it("keeps + at the end of the tab strip, after every tab", () => {
+    renderWorkspace({ tabs: [tab(), tab({ id: "tab-2" })], activeTabId: "tab-1" });
+
+    const children = [...document.getElementById("workspace-tabs")!.children];
+    expect(children.at(-1)?.id).toBe("workspace-new-tab");
+  });
+
+  it("keeps + reachable at the end of the strip even while an editor tab is active", () => {
+    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
+
+    const children = [...document.getElementById("workspace-tabs")!.children];
+    expect(children.at(-1)?.id).toBe("workspace-new-tab");
+    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
   it("puts the active tab's URL in the address bar", () => {
