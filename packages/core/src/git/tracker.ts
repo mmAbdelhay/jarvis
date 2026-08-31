@@ -1,6 +1,10 @@
 import type { Session } from "../session/types.js";
 import type { GitChanges, GitProvider } from "./types.js";
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export type SessionChanges = {
   sessionId: string;
   project: string;
@@ -67,11 +71,28 @@ export class ChangeTracker {
         ...new Set(this.#options.sessions.list().map((session) => session.projectPath)),
       ];
 
+      // Each repo's read is caught individually rather than trusting
+      // GitProvider's contract never to throw. The real provider
+      // (platform/git.ts) never does today, but Promise.all rejects the
+      // whole aggregation the instant any one of its promises rejects —
+      // Phase 1 already paid for exactly this: a non-Error rejection from
+      // one agent's health check took down every agent's health status.
+      // Catching here makes one repo's unexpected throw degrade only that
+      // repo's entry, never the whole snapshot.
       const results = await Promise.all(
-        repoPaths.map(async (repoPath) => ({
-          repoPath,
-          outcome: await this.#options.git.changes(repoPath),
-        })),
+        repoPaths.map(async (repoPath) => {
+          try {
+            return { repoPath, outcome: await this.#options.git.changes(repoPath) };
+          } catch (error) {
+            return {
+              repoPath,
+              outcome: {
+                ok: false as const,
+                error: { code: "failed" as const, detail: errorMessage(error) },
+              },
+            };
+          }
+        }),
       );
 
       this.#byRepo.clear();

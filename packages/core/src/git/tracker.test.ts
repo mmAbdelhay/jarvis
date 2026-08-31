@@ -113,6 +113,43 @@ describe("ChangeTracker", () => {
     expect(tracker.snapshot().map((entry) => entry.sessionId)).toEqual(["a"]);
   });
 
+  // Pins: a provider that *throws* instead of returning a GitOutcome (never
+  // observed from the real provider, but not something Promise.all can be
+  // trusted to tolerate) must degrade only that repo's entry, not reject
+  // the whole refresh and lose every other session's counts (Phase 1's
+  // Promise.all bug, again — this time at a package boundary).
+  it("survives a repository whose provider throws instead of returning an outcome", async () => {
+    const git: GitProvider = {
+      changes: async (repoPath) => {
+        if (repoPath === "/bad") throw new Error("boom");
+        return { ok: true, value: changesFor(repoPath, 1) };
+      },
+      diff: async () => ({ ok: false, error: { code: "failed", detail: "unused" } }),
+      stage: async () => ({ ok: true, value: null }),
+      unstage: async () => ({ ok: true, value: null }),
+      commit: async () => ({ ok: false, error: { code: "failed", detail: "unused" } }),
+    };
+    const tracker = new ChangeTracker({
+      git,
+      sessions: { list: () => [session("a", "good", "/good"), session("b", "bad", "/bad")] },
+    });
+
+    await tracker.refresh();
+
+    expect(tracker.snapshot()).toEqual([
+      {
+        sessionId: "a",
+        project: "good",
+        repoPath: "/good",
+        branch: "main",
+        detached: false,
+        files: 1,
+        insertions: 2,
+        deletions: 1,
+      },
+    ]);
+  });
+
   it("notifies subscribers with the new snapshot", async () => {
     const git = fakeGit((repoPath) => ({ ok: true, value: changesFor(repoPath, 2) }));
     const tracker = new ChangeTracker({ git, sessions: { list: () => [session("a", "p", "/p")] } });
