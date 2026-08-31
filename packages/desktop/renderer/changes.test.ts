@@ -611,20 +611,6 @@ describe("stage/unstage aria-labels", () => {
   });
 });
 
-describe("showView", () => {
-  it("swaps which view is hidden and which nav button is lit", async () => {
-    const { showView } = await import("./changes.js");
-
-    showView("changes");
-    expect(document.getElementById("view-changes")?.hidden).toBe(false);
-    expect(document.getElementById("nav-changes")?.className).toContain("nav-btn--on");
-
-    showView("dashboard");
-    expect(document.getElementById("view-changes")?.hidden).toBe(true);
-    expect(document.getElementById("nav-dashboard")?.className).toContain("nav-btn--on");
-  });
-});
-
 const FILES = [
   { path: "CheckoutService.php", status: "M" as const, insertions: 42, deletions: 9, staged: true },
   { path: "RetryPolicy.php", status: "A" as const, insertions: 61, deletions: 0, staged: false },

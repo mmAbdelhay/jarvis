@@ -1,6 +1,6 @@
 import type { Session, SessionOutput } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { showView } from "./changes.js";
+import { showView } from "./views.js";
 import { detectLanguage } from "./format.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";

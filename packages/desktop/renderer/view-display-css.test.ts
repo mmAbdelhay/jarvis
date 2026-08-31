@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // AUTHOR-origin rules, and the UA stylesheet's `[hidden] { display: none }`
 // is UA-origin — an author rule always wins the cascade over a UA rule
 // regardless of specificity, so `showView()` toggling the `hidden` attribute
-// (app.test.ts and changes.test.ts's "showView" tests prove the JS side does
+// (app.test.ts and views.test.ts's "showView" tests prove the JS side does
 // this correctly) never actually hid either view. Confirmed live:
 //
 //   VIEWPROBE: {"changesHiddenAttr":true, "changesDisplay":"flex",

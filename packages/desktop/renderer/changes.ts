@@ -3,6 +3,7 @@ import type { ChangesView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
 import { toSideBySide } from "./sidebyside.js";
+import { showView } from "./views.js";
 
 // The Changes view's own module. It owns the whole right-hand route: the
 // header (this task), the file list (Task 13), the diff panes (Task 14) and
@@ -27,25 +28,6 @@ function setText(element: HTMLElement, text: string): void {
 }
 
 let current: ChangesView | undefined;
-
-export type ViewName = "dashboard" | "changes" | "session";
-
-// Each view is looked up optionally except the two the original layout
-// always had: app.test.ts's minimal DOM harness lays down the dashboard and
-// #view-changes but not necessarily #view-session, and a missing third view
-// there must not throw where switching to the other two still works.
-export function showView(name: ViewName): void {
-  const dashboard =
-    document.getElementById("view-dashboard") ??
-    document.querySelector(".main:not(.main--changes):not(.main--session)");
-  if (dashboard instanceof HTMLElement) dashboard.hidden = name !== "dashboard";
-  $("view-changes").hidden = name !== "changes";
-  const session = document.getElementById("view-session");
-  if (session instanceof HTMLElement) session.hidden = name !== "session";
-  $("nav-dashboard").classList.toggle("nav-btn--on", name === "dashboard");
-  $("nav-changes").classList.toggle("nav-btn--on", name === "changes");
-  document.getElementById("nav-session")?.classList.toggle("nav-btn--on", name === "session");
-}
 
 function showError(result: { text: string; language: "ar" | "en" }): void {
   const banner = $("changes-error");

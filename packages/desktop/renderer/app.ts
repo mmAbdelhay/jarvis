@@ -7,7 +7,8 @@ import type {
 } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { applyStaticChrome, openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
+import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
+import { showView } from "./views.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 import { renderProviders, wireProvidersPanel } from "./providers.js";
 import {
