@@ -61,8 +61,15 @@ function parseWindow(value: unknown): RateWindow | undefined {
   if (typeof utilization !== "number" || !Number.isFinite(utilization)) return undefined;
   if (typeof resetsAt !== "string" || Number.isNaN(Date.parse(resetsAt))) return undefined;
 
+  // Out of [0, 100] means the shape has changed underneath us — a fraction
+  // (0.42), a raw token count (4200), something else. Clamping would turn
+  // that shape change into a confident, wrong percentage; abstaining is the
+  // only honest response, same as every other unrecognised shape in this
+  // module.
+  if (utilization < 0 || utilization > 100) return undefined;
+
   return {
-    usedPercent: Math.max(0, Math.min(100, Math.round(utilization))),
+    usedPercent: Math.round(utilization),
     resetsAt,
   };
 }

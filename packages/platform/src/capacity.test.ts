@@ -61,12 +61,18 @@ describe("parseUsage", () => {
     }
   });
 
-  it("clamps a utilization outside 0-100 rather than propagating it", () => {
-    const reading = parseUsage({
+  it("rejects a utilization outside 0-100 rather than clamping it", () => {
+    const tooHigh = parseUsage({
       rate_limits_available: true,
       rate_limits: { five_hour: { utilization: 140, resets_at: "2026-08-31T14:30:00Z" } },
     });
-    expect(reading.ok && reading.fiveHour.usedPercent).toBe(100);
+    expect(tooHigh).toEqual({ ok: false, reason: "unavailable" });
+
+    const negative = parseUsage({
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: -1, resets_at: "2026-08-31T14:30:00Z" } },
+    });
+    expect(negative).toEqual({ ok: false, reason: "unavailable" });
   });
 });
 
