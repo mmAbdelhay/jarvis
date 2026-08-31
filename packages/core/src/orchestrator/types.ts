@@ -5,6 +5,12 @@ export type Turn = {
   sessionId?: string;
   agentId?: string;
   model?: string;
+  // Set when a turn's tool call means "and show me this": the renderer
+  // switches to the Changes view for `sessionId`, selecting `path` when
+  // present. This is what makes the git view reachable by voice — without
+  // it, a spoken "وريني التغييرات" would answer in words only.
+  view?: "changes";
+  path?: string;
   at: number;
 };
 

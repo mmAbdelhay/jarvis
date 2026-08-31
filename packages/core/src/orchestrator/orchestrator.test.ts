@@ -3,7 +3,34 @@ import { Orchestrator, TOOL_NAMES } from "./orchestrator.js";
 import type { Brain, BrainReply } from "./types.js";
 import { AgentRegistry } from "../registry/registry.js";
 import { SessionManager } from "../session/manager.js";
-import type { ProcessHandle } from "../session/types.js";
+import type { ProcessHandle, Session } from "../session/types.js";
+import type { GitProvider } from "../git/types.js";
+
+function fakeGitProvider(overrides: Partial<GitProvider> = {}): GitProvider {
+  return {
+    changes: async (repoPath) => ({
+      ok: true,
+      value: {
+        repoPath,
+        branch: "feat/checkout-retry",
+        detached: false,
+        files: [
+          { path: "a.php", status: "M", insertions: 3, deletions: 1, staged: false },
+        ],
+        insertions: 3,
+        deletions: 1,
+      },
+    }),
+    diff: async (_repoPath, filePath) => ({
+      ok: true,
+      value: { path: filePath, binary: false, hunks: [] },
+    }),
+    stage: async () => ({ ok: true, value: null }),
+    unstage: async () => ({ ok: true, value: null }),
+    commit: async () => ({ ok: true, value: { sha: "a1b2c3d", filesChanged: 1 } }),
+    ...overrides,
+  };
+}
 
 const registry = new AgentRegistry({
   agents: {
@@ -40,6 +67,7 @@ describe("Orchestrator", () => {
       brain,
       registry,
       sessions,
+      git: fakeGitProvider(),
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -195,6 +223,7 @@ describe("Orchestrator", () => {
       }),
       registry,
       sessions: throwingSessions,
+      git: fakeGitProvider(),
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -364,6 +393,7 @@ describe("Orchestrator", () => {
       }),
       registry,
       sessions: throwingSessions,
+      git: fakeGitProvider(),
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -487,6 +517,7 @@ describe("Orchestrator", () => {
       }),
       registry: localRegistry,
       sessions,
+      git: fakeGitProvider(),
       speak,
       projects: { a: "/Users/x/projects/a" },
     });
@@ -616,5 +647,168 @@ describe("Orchestrator", () => {
       const turn = await orchestrator.handle("explode", "en");
       expect(turn.text).toContain('I don\'t know how to do that ("session.explode")');
     });
+  });
+});
+
+describe("git tools", () => {
+  let sessions: SessionManager;
+  let speak: ReturnType<typeof vi.fn<(text: string, language: "ar" | "en") => Promise<void>>>;
+
+  beforeEach(() => {
+    sessions = new SessionManager(() => fakeProcess());
+    speak = vi.fn(async () => {});
+  });
+
+  function buildOrchestrator(options: { brain: Brain; git: GitProvider }): Orchestrator {
+    return new Orchestrator({
+      brain: options.brain,
+      registry,
+      sessions,
+      git: options.git,
+      speak,
+      projects: { acme: "/Users/x/projects/acme" },
+    });
+  }
+
+  // Stubs SessionManager#get so a fixed, known session id resolves without
+  // needing a real spawned process — the git tools only ever read the
+  // session's projectPath, never its process handle.
+  async function startTestSession(_orchestrator: Orchestrator, id: string): Promise<void> {
+    const session: Session = {
+      id,
+      project: "acme",
+      projectPath: "/Users/x/projects/acme",
+      agentId: "claude-acme",
+      state: "running",
+      summary: "",
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    vi.spyOn(sessions, "get").mockImplementation((sessionId) =>
+      sessionId === id ? session : undefined,
+    );
+  }
+
+  it("answers git.status with the branch and counts, in Arabic", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "شوف كده.",
+          toolCalls: [{ name: "git.status", input: { sessionId: "s1" } }],
+        }),
+      },
+      git: fakeGitProvider(),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("وريني التغييرات", "ar");
+
+    expect(turn.text).toContain("الفرع feat/checkout-retry");
+    expect(turn.text).toContain("الملفات المعدّلة: 1");
+    expect(turn.view).toBe("changes");
+  });
+
+  it("carries the file path on a git.diff turn so the view can open it", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.diff", input: { sessionId: "s1", path: "a.php" } }],
+        }),
+      },
+      git: fakeGitProvider(),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("show me a.php", "en");
+
+    expect(turn.view).toBe("changes");
+    expect(turn.path).toBe("a.php");
+    expect(turn.text).toContain("Opened the diff for a.php");
+  });
+
+  it("stages every changed file before committing", async () => {
+    const staged: string[][] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [
+            { name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } },
+          ],
+        }),
+      },
+      git: fakeGitProvider({
+        stage: async (_repoPath, paths) => {
+          staged.push(paths);
+          return { ok: true, value: null };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("احفظ التغييرات", "ar");
+
+    expect(staged).toEqual([["a.php"]]);
+    expect(turn.text).toContain("a1b2c3d");
+  });
+
+  it("reports a git failure in the user's language and still answers", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "تمام.",
+          toolCalls: [{ name: "git.status", input: { sessionId: "s1" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        changes: async () => ({ ok: false, error: { code: "not-a-repo", detail: "/p" } }),
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("وريني التغييرات", "ar");
+
+    expect(turn.text).toContain("هذا المجلد ليس مستودع git.");
+    expect(turn.role).toBe("assistant");
+  });
+
+  it("reports an unknown session id rather than reading some other repository", async () => {
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.status", input: { sessionId: "ghost" } }],
+        }),
+      },
+      git: fakeGitProvider(),
+    });
+
+    const turn = await orchestrator.handle("status", "en");
+
+    expect(turn.text).toContain('I don\'t know a session called "ghost"');
+  });
+
+  it("refuses to commit without a message instead of committing an empty one", async () => {
+    const commits: string[] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        commit: async (_repoPath, message) => {
+          commits.push(message);
+          return { ok: false, error: { code: "empty-message", detail: "" } };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("commit", "en");
+
+    expect(turn.text).toContain("Write a commit message first.");
   });
 });

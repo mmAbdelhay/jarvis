@@ -4,6 +4,7 @@ import { AgentRegistry, Orchestrator, SessionManager } from "@jarvis/core";
 import {
   MacSpeech,
   createBrain,
+  createGitProvider,
   createMetricsReader,
   createSpawner,
   createSqliteSessionStore,
@@ -44,6 +45,7 @@ app.whenReady().then(async () => {
       brain: createBrain(config.brain),
       registry,
       sessions,
+      git: createGitProvider(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
     });

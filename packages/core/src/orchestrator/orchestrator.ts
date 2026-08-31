@@ -1,6 +1,13 @@
 import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
+import type { GitProvider } from "../git/types.js";
+import {
+  gitChangesText,
+  gitCommitText,
+  gitDiffOpenedText,
+  gitFailureText,
+} from "../git/messages.js";
 import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js";
 
 const TOOLS = [
@@ -27,13 +34,36 @@ const TOOLS = [
       sessionId: "id of a running session, from the list of running sessions",
     },
   },
+  {
+    name: "git.status",
+    description: "Show what files a session has changed in its project, and on which branch",
+    inputSchema: {
+      sessionId: "id of a session, from the list of running sessions",
+    },
+  },
+  {
+    name: "git.diff",
+    description: "Open the diff of one changed file in a session's project",
+    inputSchema: {
+      sessionId: "id of a session, from the list of running sessions",
+      path: "path of the file relative to the project root, as shown in the changed-file list",
+    },
+  },
+  {
+    name: "git.commit",
+    description: "Stage every changed file in a session's project and commit them",
+    inputSchema: {
+      sessionId: "id of a session, from the list of running sessions",
+      message: "the commit message, in the language the user used",
+    },
+  },
 ] as const satisfies readonly ToolSpec[];
 
 export type ToolName = (typeof TOOLS)[number]["name"];
 
 export const TOOL_NAMES: readonly ToolName[] = TOOLS.map((tool) => tool.name);
 
-type ToolContext = Partial<Pick<Turn, "sessionId" | "agentId" | "model">>;
+type ToolContext = Partial<Pick<Turn, "sessionId" | "agentId" | "model" | "view" | "path">>;
 
 type ToolResult = { context: ToolContext; error?: string };
 type ToolHandler = (call: ToolCall, language: "ar" | "en") => Promise<ToolResult>;
@@ -86,6 +116,7 @@ export type OrchestratorOptions = {
   brain: Brain;
   registry: AgentRegistry;
   sessions: SessionManager;
+  git: GitProvider;
   speak(text: string, language: "ar" | "en"): Promise<void>;
   projects: Record<string, string>;
 };
@@ -158,6 +189,9 @@ export class Orchestrator {
       "session.start": async (call, language) => this.#startSession(call, language),
       "session.send": async (call, language) => this.#sendToSession(call, language),
       "session.kill": async (call, language) => this.#killSession(call, language),
+      "git.status": (call, language) => this.#gitStatus(call, language),
+      "git.diff": (call, language) => this.#gitDiff(call, language),
+      "git.commit": (call, language) => this.#gitCommit(call, language),
     };
   }
 
@@ -235,6 +269,80 @@ export class Orchestrator {
 
   #isUnknownSession(error: unknown, sessionId: string): boolean {
     return error instanceof Error && error.message === `No session ${sessionId}`;
+  }
+
+  // Resolving the repository from the session id (never from model-supplied
+  // free text) is what stops a hallucinated path from reaching git.
+  #repoFor(
+    call: ToolCall,
+    language: "ar" | "en",
+  ): { sessionId: string; repoPath: string } | { error: string } {
+    const sessionId = stringInput(call.input, "sessionId");
+    const session = this.#options.sessions.get(sessionId);
+    if (session === undefined) {
+      return { error: MESSAGES.unknownSession(sessionId, language) };
+    }
+    return { sessionId, repoPath: session.projectPath };
+  }
+
+  async #gitStatus(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
+    const target = this.#repoFor(call, language);
+    if ("error" in target) return { context: {}, error: target.error };
+
+    const outcome = await this.#options.git.changes(target.repoPath);
+    if (!outcome.ok) {
+      return { context: {}, error: gitFailureText(outcome.error, language) };
+    }
+    return {
+      context: { sessionId: target.sessionId, view: "changes" },
+      error: gitChangesText(outcome.value, outcome.value.files.length, language),
+    };
+  }
+
+  async #gitDiff(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
+    const target = this.#repoFor(call, language);
+    if ("error" in target) return { context: {}, error: target.error };
+
+    const path = stringInput(call.input, "path");
+    const outcome = await this.#options.git.diff(target.repoPath, path);
+    if (!outcome.ok) {
+      return { context: {}, error: gitFailureText(outcome.error, language) };
+    }
+    return {
+      context: { sessionId: target.sessionId, view: "changes", path },
+      error: gitDiffOpenedText(path, language),
+    };
+  }
+
+  async #gitCommit(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
+    const target = this.#repoFor(call, language);
+    if ("error" in target) return { context: {}, error: target.error };
+
+    const changes = await this.#options.git.changes(target.repoPath);
+    if (!changes.ok) {
+      return { context: {}, error: gitFailureText(changes.error, language) };
+    }
+
+    // The tool's contract is "stage every changed file and commit them", so
+    // staging happens here rather than being a second thing the model has to
+    // remember to ask for.
+    const staged = await this.#options.git.stage(
+      target.repoPath,
+      changes.value.files.map((file) => file.path),
+    );
+    if (!staged.ok) {
+      return { context: {}, error: gitFailureText(staged.error, language) };
+    }
+
+    const message = stringInput(call.input, "message");
+    const outcome = await this.#options.git.commit(target.repoPath, message);
+    if (!outcome.ok) {
+      return { context: {}, error: gitFailureText(outcome.error, language) };
+    }
+    return {
+      context: { sessionId: target.sessionId, view: "changes" },
+      error: gitCommitText(outcome.value, language),
+    };
   }
 
   async #answer(text: string, language: "ar" | "en", context: ToolContext): Promise<Turn> {
