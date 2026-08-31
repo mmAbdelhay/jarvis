@@ -831,6 +831,11 @@
 
   .workspace-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 8px 10px 0; }
 
+  @keyframes workspace-tab-in {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
   .workspace-tab {
     display: flex;
     align-items: center;
@@ -841,14 +846,44 @@
     color: var(--text-muted);
     border: 1px solid var(--border);
     border-bottom: none;
+    border-top: 2px solid var(--tab-color, var(--border));
     border-radius: 6px 6px 0 0;
     cursor: pointer;
+    animation: workspace-tab-in 140ms ease-out;
   }
 
   .workspace-tab--on { background: var(--panel); color: var(--text); }
   .workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workspace-tab-close { opacity: 0.6; }
   .workspace-tab-close:hover { opacity: 1; color: var(--del); }
+
+  /* A non-selected project's tabs, stacked into one pill rather than left
+     flat in the same row as the selected project's own tabs. Clicking it
+     switches to that project (workspace.ts's switchToProject). */
+  .workspace-tab-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    animation: workspace-tab-in 140ms ease-out;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .workspace-tab-group:hover { color: var(--text); }
+
+  .workspace-tab-group-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tab-color, var(--accent));
+    flex-shrink: 0;
+  }
 
   .workspace-bar {
     display: flex;

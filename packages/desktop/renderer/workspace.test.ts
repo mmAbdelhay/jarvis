@@ -70,6 +70,7 @@ function harness(): Recorded[] {
     tabReload: record("tabReload"),
     setWorkspaceBounds: record("setWorkspaceBounds"),
     setWorkspaceVisible: record("setWorkspaceVisible"),
+    hideAllTabs: record("hideAllTabs"),
     listDocs: () => Promise.resolve({ ok: true, value: [] }),
     readDoc: () => Promise.resolve({ ok: true, value: [] }),
     readDocRaw: () => Promise.resolve({ ok: true, value: "" }),
@@ -118,6 +119,98 @@ describe("workspace chrome", () => {
     renderWorkspace({ tabs: [tab(), tab({ id: "tab-2", title: "Docs" })], activeTabId: "tab-1" });
 
     expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(2);
+  });
+
+  // The selected project ("acme", the first <option>, per beforeEach)
+  // shows its tabs individually; every other project with an open tab
+  // collapses into one pill instead of stacking every tab from every
+  // project into the same flat row.
+  it("shows only the selected project's tabs individually", () => {
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+
+    expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(1);
+  });
+
+  it("collapses a non-selected project's tabs into one labeled, counted pill", () => {
+    renderWorkspace({
+      tabs: [
+        tab({ project: "acme" }),
+        tab({ id: "tab-2", project: "storefront" }),
+        tab({ id: "tab-3", project: "storefront" }),
+      ],
+      activeTabId: "tab-1",
+    });
+
+    const pill = document.querySelector(".workspace-tab-group");
+    expect(pill?.textContent).toContain("storefront");
+    expect(pill?.textContent).toContain("2");
+  });
+
+  it("gives each project a distinct color", () => {
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+
+    const active = document.querySelector(".workspace-tab") as HTMLElement;
+    const collapsed = document.querySelector(".workspace-tab-group") as HTMLElement;
+    expect(active.style.getPropertyValue("--tab-color")).not.toBe("");
+    expect(active.style.getPropertyValue("--tab-color")).not.toBe(
+      collapsed.style.getPropertyValue("--tab-color"),
+    );
+  });
+
+  it("gives the same project the same color across renders", () => {
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+    const first = (document.querySelector(".workspace-tab-group") as HTMLElement).style.getPropertyValue(
+      "--tab-color",
+    );
+
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+    const second = (document.querySelector(".workspace-tab-group") as HTMLElement).style.getPropertyValue(
+      "--tab-color",
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it("switches the selected project and activates its remembered tab when a collapsed pill is clicked", async () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-2",
+    });
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-1",
+    });
+
+    document.querySelector<HTMLElement>(".workspace-tab-group")?.click();
+    await flush();
+
+    expect((document.getElementById("workspace-project") as HTMLSelectElement).value).toBe("storefront");
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-2"] });
+  });
+
+  it("hides every view when switching to a project with no open tabs", async () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+
+    select.value = "storefront";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "hideAllTabs")).toBe(true);
+    expect(calls.some((entry) => entry.call === "activateTab")).toBe(false);
   });
 
   it("shows the page title, falling back to the URL before one arrives", () => {

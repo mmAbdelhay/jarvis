@@ -32,21 +32,58 @@ function selectedProject(): string {
   return ($("workspace-project") as HTMLSelectElement).value;
 }
 
+// A small fixed palette, none of it reused from the app's semantic colors
+// (--good/--bad/--accent/etc). Assigned to a project the first time it is
+// seen and never reassigned — the same project keeps the same color for as
+// long as the window is open, in initWorkspace's own order (config order),
+// not tab-open order.
+const TAB_COLOR_PALETTE = ["#7dd3c8", "#c792ea", "#f2b880", "#f28fad", "#82b1ff", "#a3e07a"];
+const projectColors = new Map<string, string>();
+
+function colorFor(project: string): string {
+  const existing = projectColors.get(project);
+  if (existing !== undefined) return existing;
+  const color = TAB_COLOR_PALETTE[projectColors.size % TAB_COLOR_PALETTE.length] ?? "#7dd3c8";
+  projectColors.set(project, color);
+  return color;
+}
+
+/** Remembers, per project, the tab that was active the last time it was
+ *  selected — so switching back to a project restores what you were on
+ *  instead of picking arbitrarily. */
+const lastActiveTabByProject = new Map<string, string>();
+
+/** Selects `project` and shows whatever it was last on: its remembered
+ *  tab if that tab still exists, any other of its open tabs otherwise, or
+ *  nothing (hideAll) if it has none open at all. Shared by the project
+ *  <select> and by clicking a collapsed project pill in the tab strip. */
+async function switchToProject(project: string): Promise<void> {
+  ($("workspace-project") as HTMLSelectElement).value = project;
+
+  const remembered = lastActiveTabByProject.get(project);
+  const target =
+    latest.tabs.find((tab) => tab.id === remembered && tab.project === project) ??
+    latest.tabs.find((tab) => tab.project === project);
+  if (target !== undefined) void window.jarvis.activateTab(target.id);
+  else void window.jarvis.hideAllTabs();
+
+  // Only refetch if Docs is the mode actually on screen — switching
+  // projects while browsing has nothing to do with the doc tree.
+  const docs = document.getElementById("workspace-docs");
+  if (docs instanceof HTMLElement && !docs.hidden) await openDocs(project);
+}
+
 export function initWorkspace(projects: string[]): void {
   const select = $("workspace-project") as HTMLSelectElement;
   select.replaceChildren();
   for (const project of projects) {
+    colorFor(project);
     const option = document.createElement("option");
     option.value = project;
     option.textContent = project;
     select.append(option);
   }
-  select.addEventListener("change", () => {
-    // Only refetch if Docs is the mode actually on screen — switching
-    // projects while browsing has nothing to do with the doc tree.
-    const docs = document.getElementById("workspace-docs");
-    if (docs instanceof HTMLElement && !docs.hidden) void openDocs(select.value);
-  });
+  select.addEventListener("change", () => void switchToProject(select.value));
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -387,34 +424,79 @@ function showDocError(result: { text: string; language: "ar" | "en" }): void {
   body.append(line);
 }
 
+function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "workspace-tab";
+  element.style.setProperty("--tab-color", colorFor(tab.project));
+  element.classList.toggle("workspace-tab--on", tab.id === activeTabId);
+  element.addEventListener("click", () => void window.jarvis.activateTab(tab.id));
+
+  const title = document.createElement("span");
+  title.className = "workspace-tab-title";
+  // A page picks its own title; it is text here and nothing else.
+  title.textContent = tab.title === "" ? tab.url : tab.title;
+
+  const close = document.createElement("span");
+  close.className = "workspace-tab-close";
+  close.textContent = "×";
+  close.addEventListener("click", (event) => {
+    // Without this the tab underneath also receives the click and gets
+    // activated on its way out.
+    event.stopPropagation();
+    void window.jarvis.closeTab(tab.id);
+  });
+
+  element.append(title, close);
+  return element;
+}
+
+function renderCollapsedGroup(project: string, count: number): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "workspace-tab-group";
+  element.style.setProperty("--tab-color", colorFor(project));
+  element.addEventListener("click", () => void switchToProject(project));
+
+  const dot = document.createElement("span");
+  dot.className = "workspace-tab-group-dot";
+
+  const label = document.createElement("span");
+  // A project name comes from config, but it is still text, same
+  // discipline as everything else this file builds.
+  label.textContent = `${project} (${count})`;
+
+  element.append(dot, label);
+  return element;
+}
+
 export function renderWorkspace(state: WorkspaceState): void {
   latest = state;
 
+  const activeTabForState = state.tabs.find((tab) => tab.id === state.activeTabId);
+  if (activeTabForState !== undefined) {
+    lastActiveTabByProject.set(activeTabForState.project, activeTabForState.id);
+  }
+
+  const selected = selectedProject();
   const strip = $("workspace-tabs");
   strip.replaceChildren();
+
+  // Every project with at least one open tab gets a slot: the selected
+  // one expands into its individual tabs, every other one collapses into a
+  // single colored, counted pill rather than stacking every project's tabs
+  // into one flat, unreadable row.
+  const byProject = new Map<string, WorkspaceTab[]>();
   for (const tab of state.tabs) {
-    const element = document.createElement("div");
-    element.className = "workspace-tab";
-    element.classList.toggle("workspace-tab--on", tab.id === state.activeTabId);
-    element.addEventListener("click", () => void window.jarvis.activateTab(tab.id));
+    const group = byProject.get(tab.project) ?? [];
+    group.push(tab);
+    byProject.set(tab.project, group);
+  }
 
-    const title = document.createElement("span");
-    title.className = "workspace-tab-title";
-    // A page picks its own title; it is text here and nothing else.
-    title.textContent = tab.title === "" ? tab.url : tab.title;
-
-    const close = document.createElement("span");
-    close.className = "workspace-tab-close";
-    close.textContent = "×";
-    close.addEventListener("click", (event) => {
-      // Without this the tab underneath also receives the click and gets
-      // activated on its way out.
-      event.stopPropagation();
-      void window.jarvis.closeTab(tab.id);
-    });
-
-    element.append(title, close);
-    strip.append(element);
+  for (const [project, tabs] of byProject) {
+    if (project === selected) {
+      for (const tab of tabs) strip.append(renderTabChip(tab, state.activeTabId));
+    } else {
+      strip.append(renderCollapsedGroup(project, tabs.length));
+    }
   }
 
   const tab = activeTab();
