@@ -14,6 +14,7 @@ import {
 } from "@jarvis/core";
 import {
   MacSpeech,
+  createBookmarkStore,
   createBrain,
   createCapacityReader,
   createCodeServerManager,
@@ -30,6 +31,7 @@ import {
 } from "@jarvis/platform";
 import {
   buildWiring,
+  createBookmarksHandlers,
   createEditorHandlers,
   createGitHandlers,
   createSettingsHandlers,
@@ -191,6 +193,11 @@ app.whenReady().then(async () => {
     const editor = createEditorHandlers({
       codeServer,
       projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
+    const bookmarks = createBookmarksHandlers({
+      store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
       language: PRIMARY_LANGUAGE,
     });
 
@@ -356,6 +363,15 @@ app.whenReady().then(async () => {
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
     ipcMain.handle("editor:open", (_event, project: unknown) =>
       editor.open(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
+      bookmarks.list(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("bookmarks:add", (_event, project: unknown, bookmark: unknown) =>
+      bookmarks.add(typeof project === "string" ? project : "", bookmark as never),
+    );
+    ipcMain.handle("bookmarks:remove", (_event, project: unknown, url: unknown) =>
+      bookmarks.remove(typeof project === "string" ? project : "", typeof url === "string" ? url : ""),
     );
     ipcMain.handle("settings:read", () => settings.read());
     ipcMain.handle("settings:save", (_event, draft: unknown) => settings.save(draft));

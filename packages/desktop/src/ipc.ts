@@ -16,7 +16,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import type { WorkspaceState } from "@jarvis/core";
-import type { CodeServerManager } from "@jarvis/platform";
+import type { Bookmark, BookmarkStore, CodeServerManager } from "@jarvis/platform";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -325,6 +325,9 @@ export type RendererApi = {
    *  its URL — call openTab(project, url) with the result to actually show
    *  it; this call alone does not open a tab. */
   openEditor(project: string): Promise<GitViewResult<string>>;
+  listBookmarks(project: string): Promise<GitViewResult<Bookmark[]>>;
+  addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
+  removeBookmark(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
   getSettings(): Promise<JarvisConfig>;
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
   testAgent(agent: AgentConfig): Promise<AgentHealth>;
@@ -434,6 +437,59 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
       } catch {
         return fail(MESSAGES.editorUnavailable(deps.language));
       }
+    },
+  };
+}
+
+export type BookmarksHandlers = {
+  list(project: string): Promise<GitViewResult<Bookmark[]>>;
+  /** Returns the project's full list after the change, so the renderer
+   *  never needs a second list() call just to redraw. */
+  add(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
+  remove(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
+};
+
+export type BookmarksHandlerDeps = {
+  store: BookmarkStore;
+  language: "ar" | "en";
+};
+
+function isBookmark(value: unknown): value is Bookmark {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return isString(candidate["url"]) && isString(candidate["title"]);
+}
+
+/**
+ * Bookmarks are keyed by project *name*, not path — unlike the editor and
+ * git handlers, there is no filesystem to reach through this boundary, so
+ * (unlike those) any string project name is accepted rather than checked
+ * against configured projects.
+ */
+export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  return {
+    async list(project) {
+      if (!isString(project)) return fail(MESSAGES.invalidArgument(deps.language));
+      const result = await deps.store.list(project);
+      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
+    },
+
+    async add(project, bookmark) {
+      if (!isString(project) || !isBookmark(bookmark)) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      const result = await deps.store.add(project, bookmark);
+      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
+    },
+
+    async remove(project, url) {
+      if (!isString(project) || !isString(url)) return fail(MESSAGES.invalidArgument(deps.language));
+      const result = await deps.store.remove(project, url);
+      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
     },
   };
 }

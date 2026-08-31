@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiring,
+  createBookmarksHandlers,
   createEditorHandlers,
   createGitHandlers,
   createSettingsHandlers,
   type WiringDeps,
 } from "./ipc.js";
-import type { CodeServerManager } from "@jarvis/platform";
+import type { Bookmark, BookmarkStore, CodeServerManager } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig } from "./config.js";
@@ -760,6 +761,88 @@ describe("editor handlers", () => {
     const result = await handlers.open("acme");
 
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("bookmarks handlers", () => {
+  function store(overrides: Partial<BookmarkStore> = {}): BookmarkStore {
+    return {
+      list: () => Promise.resolve({ ok: true, value: [] }),
+      add: (_project, bookmark) => Promise.resolve({ ok: true, value: [bookmark] }),
+      remove: () => Promise.resolve({ ok: true, value: [] }),
+      ...overrides,
+    };
+  }
+
+  it("lists a project's bookmarks", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({
+        list: (project) =>
+          Promise.resolve({
+            ok: true,
+            value: project === "acme" ? [{ url: "https://github.com", title: "GitHub" }] : [],
+          }),
+      }),
+      language: "en",
+    });
+
+    expect(await handlers.list("acme")).toEqual({
+      ok: true,
+      value: [{ url: "https://github.com", title: "GitHub" }],
+    });
+  });
+
+  it("adds a bookmark and returns the updated list", async () => {
+    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+
+    const result = await handlers.add("acme", { url: "https://github.com", title: "GitHub" });
+
+    expect(result).toEqual({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+  });
+
+  it("removes a bookmark", async () => {
+    const removed: { project: string; url: string }[] = [];
+    const handlers = createBookmarksHandlers({
+      store: store({
+        remove: (project, url) => {
+          removed.push({ project, url });
+          return Promise.resolve({ ok: true, value: [] });
+        },
+      }),
+      language: "en",
+    });
+
+    await handlers.remove("acme", "https://github.com");
+
+    expect(removed).toEqual([{ project: "acme", url: "https://github.com" }]);
+  });
+
+  it("refuses a non-string project", async () => {
+    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+
+    const result = await handlers.list(undefined as unknown as string);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a malformed bookmark", async () => {
+    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+
+    const result = await handlers.add("acme", { url: "https://github.com" } as unknown as Bookmark);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports a store failure as localised text", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({ add: () => Promise.resolve({ ok: false, detail: "disk full" }) }),
+      language: "en",
+    });
+
+    const result = await handlers.add("acme", { url: "https://github.com", title: "GitHub" });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.text.length).toBeGreaterThan(0);
   });
 });
 

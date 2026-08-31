@@ -824,8 +824,53 @@
     padding: 4px 8px;
   }
 
-  .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+  /* Row: the bookmarks sidebar beside the tabs/address/page column. */
+  .workspace-browser { display: flex; flex-direction: row; flex-grow: 1; min-height: 0; }
   .workspace-browser[hidden] { display: none; }
+
+  .workspace-browser-main { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
+
+  .workspace-bookmarks {
+    width: 200px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px;
+  }
+
+  .workspace-bookmark-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+
+  .workspace-bookmark {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .workspace-bookmark:hover { background: var(--panel); }
+
+  .workspace-bookmark-text { flex-grow: 1; min-width: 0; }
+  .workspace-bookmark-title {
+    font-size: 11px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .workspace-bookmark-domain {
+    font-size: 10px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-bookmark-remove { opacity: 0; flex-shrink: 0; color: var(--text-muted); }
+  .workspace-bookmark:hover .workspace-bookmark-remove { opacity: 0.6; }
+  .workspace-bookmark-remove:hover { opacity: 1; color: var(--del); }
+
+  .workspace-bookmark-toggle--on { color: var(--accent); border-color: var(--accent); }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar
@@ -1661,16 +1706,24 @@
     </div>
 
     <div id="workspace-browser" class="workspace-browser">
-      <div id="workspace-tabs" class="workspace-tabs"></div>
-      <div id="workspace-bar" class="workspace-bar">
-        <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
-        <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
-        <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
-        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
-               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+      <div id="workspace-bookmarks" class="workspace-bookmarks">
+        <div class="lbl">BOOKMARKS</div>
+        <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
       </div>
-      <div id="workspace-error" class="changes-error" hidden></div>
-      <div id="workspace-page" class="workspace-page"></div>
+      <div class="workspace-browser-main">
+        <div id="workspace-tabs" class="workspace-tabs"></div>
+        <div id="workspace-bar" class="workspace-bar">
+          <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
+          <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
+          <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
+          <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+                 autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+          <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
+                  title="Bookmark this page">☆</button>
+        </div>
+        <div id="workspace-error" class="changes-error" hidden></div>
+        <div id="workspace-page" class="workspace-page"></div>
+      </div>
     </div>
 
   </div>

@@ -55,6 +55,9 @@ const api: RendererApi = {
     ipcRenderer.on("workspace:update", (_e, state) => cb(state));
   },
   openEditor: (project) => ipcRenderer.invoke("editor:open", project),
+  listBookmarks: (project) => ipcRenderer.invoke("bookmarks:list", project),
+  addBookmark: (project, bookmark) => ipcRenderer.invoke("bookmarks:add", project, bookmark),
+  removeBookmark: (project, url) => ipcRenderer.invoke("bookmarks:remove", project, url),
   getSettings: () => ipcRenderer.invoke("settings:read"),
   saveSettings: (draft) => ipcRenderer.invoke("settings:save", draft),
   testAgent: (agent) => ipcRenderer.invoke("settings:testAgent", agent),

@@ -1,5 +1,12 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 
+// Structurally the same shape the preload bridge and main process pass
+// across IPC (packages/desktop/src/ipc.ts's Bookmark, from @jarvis/platform)
+// — duplicated here rather than imported, since the renderer may only
+// import *types* from @jarvis/core (a bare-specifier value import from any
+// other workspace package is runtime-fatal once bundled).
+type Bookmark = { url: string; title: string };
+
 // The Workspace's chrome. Everything a page can influence — its title, its
 // URL, a load error — is attacker-controlled text arriving in the process
 // that holds window.jarvis, so this file builds nodes and sets textContent.
@@ -62,6 +69,98 @@ async function switchToProject(project: string): Promise<void> {
     latest.tabs.find((tab) => tab.project === project);
   if (target !== undefined) void window.jarvis.activateTab(target.id);
   else void window.jarvis.hideAllTabs();
+
+  await refreshBookmarks();
+}
+
+let bookmarks: Bookmark[] = [];
+
+/** Refetches the *selected* project's bookmarks and redraws the sidebar —
+ *  called on init and every project switch, never kept in sync with tabs
+ *  (a different project's tabs collapsing into a pill does not touch it). */
+async function refreshBookmarks(): Promise<void> {
+  const project = selectedProject();
+  const result = project === "" ? { ok: true as const, value: [] } : await window.jarvis.listBookmarks(project);
+  bookmarks = result.ok ? result.value : [];
+  renderBookmarks();
+}
+
+function domainFor(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+function renderBookmarkRow(bookmark: Bookmark): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "workspace-bookmark";
+  row.addEventListener("click", () => void window.jarvis.openTab(selectedProject(), bookmark.url));
+
+  const text = document.createElement("div");
+  text.className = "workspace-bookmark-text";
+  const title = document.createElement("div");
+  title.className = "workspace-bookmark-title";
+  // A saved page title is text here, same discipline as a tab's title.
+  title.textContent = bookmark.title === "" ? bookmark.url : bookmark.title;
+  const domain = document.createElement("div");
+  domain.className = "workspace-bookmark-domain";
+  domain.textContent = domainFor(bookmark.url);
+  text.append(title, domain);
+
+  const remove = document.createElement("span");
+  remove.className = "workspace-bookmark-remove";
+  remove.textContent = "×";
+  remove.addEventListener("click", (event) => {
+    // Without this the row underneath also receives the click and opens
+    // the bookmark it was just removed from.
+    event.stopPropagation();
+    void removeBookmark(bookmark.url);
+  });
+
+  row.append(text, remove);
+  return row;
+}
+
+function renderBookmarks(): void {
+  const list = $("workspace-bookmark-list");
+  list.replaceChildren();
+  for (const bookmark of bookmarks) list.append(renderBookmarkRow(bookmark));
+  updateBookmarkToggle();
+}
+
+async function removeBookmark(url: string): Promise<void> {
+  const result = await window.jarvis.removeBookmark(selectedProject(), url);
+  if (result.ok) bookmarks = result.value;
+  renderBookmarks();
+}
+
+/** Star button next to the address bar: bookmarks/unbookmarks the active
+ *  tab's current URL for the selected project. */
+async function toggleBookmark(): Promise<void> {
+  const tab = activeTab();
+  if (tab === undefined) return;
+  const project = selectedProject();
+  const alreadyBookmarked = bookmarks.some((b) => b.url === tab.url);
+  const result = alreadyBookmarked
+    ? await window.jarvis.removeBookmark(project, tab.url)
+    : await window.jarvis.addBookmark(project, {
+        url: tab.url,
+        title: tab.title === "" ? tab.url : tab.title,
+      });
+  if (result.ok) bookmarks = result.value;
+  renderBookmarks();
+}
+
+function updateBookmarkToggle(): void {
+  const toggle = $("workspace-bookmark-toggle") as HTMLButtonElement;
+  const tab = activeTab();
+  toggle.disabled = tab === undefined;
+  toggle.classList.toggle(
+    "workspace-bookmark-toggle--on",
+    tab !== undefined && bookmarks.some((b) => b.url === tab.url),
+  );
 }
 
 export function initWorkspace(projects: string[]): void {
@@ -112,6 +211,9 @@ export function initWorkspace(projects: string[]): void {
   window.addEventListener("resize", reportWorkspaceBounds);
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
+
+  $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
+  void refreshBookmarks();
 }
 
 /** Ensures a code-server instance is running for the selected project and
@@ -244,6 +346,8 @@ export function renderWorkspace(state: WorkspaceState): void {
     error.hidden = false;
     error.textContent = tab.error;
   }
+
+  updateBookmarkToggle();
 }
 
 /**

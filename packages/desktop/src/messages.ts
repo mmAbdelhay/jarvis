@@ -62,6 +62,10 @@ export const MESSAGES = {
   // viewer's shared failure text.
   editorUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر فتح المحرر." : "Could not open the editor.",
+  // The bookmark store's failures (a disk write that failed, mainly) —
+  // never echoes the store's own developer-facing detail.
+  bookmarksUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر حفظ العلامات المرجعية." : "Could not save bookmarks.",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // Settings' save flow. The headline is bilingual per the Global

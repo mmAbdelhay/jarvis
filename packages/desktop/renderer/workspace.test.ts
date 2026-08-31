@@ -14,12 +14,16 @@ function harness(): Recorded[] {
       <span id="workspace-editor-status"></span>
       <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
+        <div id="workspace-bookmarks">
+          <div id="workspace-bookmark-list"></div>
+        </div>
         <div id="workspace-tabs"></div>
         <div id="workspace-bar">
           <button id="workspace-back"></button>
           <button id="workspace-forward"></button>
           <button id="workspace-reload"></button>
           <input id="workspace-address" />
+          <button id="workspace-bookmark-toggle"></button>
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
@@ -45,6 +49,15 @@ function harness(): Recorded[] {
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
+    listBookmarks: () => Promise.resolve({ ok: true, value: [] }),
+    addBookmark: (...args: unknown[]) => {
+      calls.push({ call: "addBookmark", args });
+      return Promise.resolve({ ok: true, value: [args[1] as { url: string; title: string }] });
+    },
+    removeBookmark: (...args: unknown[]) => {
+      calls.push({ call: "removeBookmark", args });
+      return Promise.resolve({ ok: true, value: [] });
+    },
   };
   return calls;
 }
@@ -400,6 +413,158 @@ describe("workspace chrome", () => {
       call: "setWorkspaceBounds",
       args: [{ x: 12, y: 141, width: 901, height: 600 }],
     });
+  });
+});
+
+describe("workspace bookmarks", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  });
+
+  it("renders the selected project's bookmarks after init", async () => {
+    jarvis["listBookmarks"] = (project: string) =>
+      Promise.resolve({
+        ok: true,
+        value: project === "acme" ? [{ url: "https://github.com", title: "GitHub" }] : [],
+      });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector(".workspace-bookmark")?.textContent).toContain("GitHub");
+  });
+
+  it("shows the bookmark's bare domain under its title", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com/a/b", title: "GitHub" }] });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector(".workspace-bookmark-domain")?.textContent).toBe("github.com");
+  });
+
+  it("opens a bookmark as a tab in the current project when clicked", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark")?.click();
+
+    expect(calls).toContainEqual({ call: "openTab", args: ["acme", "https://github.com"] });
+  });
+
+  it("removes a bookmark from its own remove control without opening it", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-remove")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "removeBookmark", args: ["acme", "https://github.com"] });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("refetches bookmarks when the project changes", async () => {
+    const listed: string[] = [];
+    jarvis["listBookmarks"] = (project: string) => {
+      listed.push(project);
+      return Promise.resolve({ ok: true, value: [] });
+    };
+    initWorkspace(["acme", "storefront"]);
+    await flush();
+    listed.length = 0;
+
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+    select.value = "storefront";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(listed).toEqual(["storefront"]);
+  });
+
+  it("marks the star toggle on when the active tab's URL is already bookmarked", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    initWorkspace(["acme"]);
+    await flush();
+
+    renderWorkspace({ tabs: [tab({ url: "https://github.com" })], activeTabId: "tab-1" });
+
+    expect(
+      document
+        .getElementById("workspace-bookmark-toggle")
+        ?.classList.contains("workspace-bookmark-toggle--on"),
+    ).toBe(true);
+  });
+
+  it("leaves the star toggle off when the active tab's URL is not bookmarked", async () => {
+    jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
+    initWorkspace(["acme"]);
+    await flush();
+
+    renderWorkspace({ tabs: [tab({ url: "https://example.com" })], activeTabId: "tab-1" });
+
+    expect(
+      document
+        .getElementById("workspace-bookmark-toggle")
+        ?.classList.contains("workspace-bookmark-toggle--on"),
+    ).toBe(false);
+  });
+
+  it("adds the active tab's URL as a bookmark when the star is clicked", async () => {
+    jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ url: "https://example.com", title: "Example" })],
+      activeTabId: "tab-1",
+    });
+
+    document.getElementById("workspace-bookmark-toggle")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "addBookmark",
+      args: ["acme", { url: "https://example.com", title: "Example" }],
+    });
+  });
+
+  it("removes the active tab's bookmark when the star is clicked again", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://example.com", title: "Example" }] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ url: "https://example.com", title: "Example" })],
+      activeTabId: "tab-1",
+    });
+
+    document.getElementById("workspace-bookmark-toggle")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "removeBookmark", args: ["acme", "https://example.com"] });
+  });
+
+  it("does nothing when the star is clicked with no active tab", async () => {
+    jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-bookmark-toggle")?.click();
+    await flush();
+
+    expect(
+      calls.some((entry) => entry.call === "addBookmark" || entry.call === "removeBookmark"),
+    ).toBe(false);
   });
 });
 
