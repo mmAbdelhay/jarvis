@@ -55,10 +55,42 @@ describe("parseUsage", () => {
       { rate_limits_available: true, rate_limits: { five_hour: { utilization: "9", resets_at: "x" } } },
       { rate_limits_available: true, rate_limits: { five_hour: { utilization: 9, resets_at: "not a date" } } },
       { rate_limits_available: true, rate_limits: { five_hour: { utilization: null, resets_at: null } } },
+      // Payload is a string, not an object.
+      "not an object",
+      // Payload is an array, not a record.
+      [{ rate_limits_available: true }],
     ];
     for (const raw of changed) {
       expect(parseUsage(raw)).toEqual({ ok: false, reason: "unavailable" });
     }
+  });
+
+  it("rejects a non-finite utilization (NaN, Infinity)", () => {
+    expect(
+      parseUsage({
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: NaN, resets_at: "2026-08-31T14:30:00Z" } },
+      }),
+    ).toEqual({ ok: false, reason: "unavailable" });
+
+    expect(
+      parseUsage({
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: Infinity, resets_at: "2026-08-31T14:30:00Z" } },
+      }),
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("still reports ok:true with sevenDay absent when seven_day is malformed but five_hour is good", () => {
+    const reading = parseUsage({
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 9, resets_at: "2026-08-31T14:30:00Z" },
+        seven_day: { utilization: "not a number", resets_at: "2026-09-02T11:00:00Z" },
+      },
+    });
+    expect(reading.ok).toBe(true);
+    expect(reading.ok && reading.sevenDay).toBeUndefined();
   });
 
   it("rejects a utilization outside 0-100 rather than clamping it", () => {
