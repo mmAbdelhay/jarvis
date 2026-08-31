@@ -1,6 +1,7 @@
 import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { openChanges, showView } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
@@ -39,6 +40,18 @@ startClock();
 wireComposer();
 wireMicButton();
 wireHistoryPanel();
+wireNav();
+
+function wireNav(): void {
+  document.getElementById("nav-dashboard")?.addEventListener("click", () => showView("dashboard"));
+  document.getElementById("nav-changes")?.addEventListener("click", () => {
+    // With no session chosen yet, the most recently active one is the one
+    // the user just spoke about.
+    const latest = [...latestSessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
+    if (latest === undefined) return;
+    void openChanges(latest.id);
+  });
+}
 
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
@@ -136,6 +149,8 @@ function buildSessionRow(session: Session): HTMLElement {
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
 
   row.append(head, summary, meta);
+  // The dashboard is where a user picks which session's changes to read.
+  row.addEventListener("click", () => void openChanges(session.id));
   return row;
 }
 
@@ -308,6 +323,13 @@ function renderTurn(turn: Turn): void {
   empty?.remove();
   conversation.append(bubble);
   conversation.scrollTop = conversation.scrollHeight;
+
+  // Voice and text are one input path: a turn whose tool call asked to show
+  // the changes opens the view here, so "وريني التغييرات" does the same
+  // thing as clicking Changes.
+  if (turn.view === "changes" && turn.sessionId !== undefined) {
+    void openChanges(turn.sessionId, turn.path);
+  }
 }
 
 function wireComposer(): void {

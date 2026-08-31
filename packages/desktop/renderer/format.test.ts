@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
+import { detectLanguage, formatAgo, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 describe("formatBytes", () => {
   it("formats gigabytes with one decimal", () => {
@@ -71,6 +71,21 @@ describe("detectLanguage", () => {
 
   it("treats empty input as English", () => {
     expect(detectLanguage("")).toBe("en");
+  });
+});
+
+describe("formatAgo", () => {
+  const now = 1_700_000_000_000;
+
+  it("counts minutes and hours the way the artboard does", () => {
+    expect(formatAgo(now - 6 * 60_000, now)).toBe("6m ago");
+    expect(formatAgo(now - 90 * 60_000, now)).toBe("1h ago");
+    expect(formatAgo(now - 50 * 60 * 60_000, now)).toBe("2d ago");
+  });
+
+  it("says just now under a minute, and never shows a negative age", () => {
+    expect(formatAgo(now - 5_000, now)).toBe("just now");
+    expect(formatAgo(now + 60_000, now)).toBe("just now");
   });
 });
 

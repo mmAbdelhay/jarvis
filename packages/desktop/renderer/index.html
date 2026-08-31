@@ -25,6 +25,9 @@
     --text-dim: #cfe4ec;
     --good: #5fb87a;
     --bad: #b85f5f;
+    /* The Changes view's own delete/error red (GitChanges.dc.html — see
+       the .diff-del comment below); distinct from --bad. */
+    --del: #d9645a;
   }
 
   * { box-sizing: border-box; }
@@ -636,6 +639,183 @@
     border-radius: 3px;
     padding: 1px 5px;
   }
+
+  /* Changes view — values copied from design/GitChanges.dc.html. Do not
+     round them or substitute the dashboard's spacing scale. */
+
+  .nav { display: flex; gap: 4px; margin-inline-start: 14px; }
+
+  .nav-btn {
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 11px;
+    cursor: pointer;
+  }
+
+  .nav-btn--on {
+    background: #0e2029;
+    border-color: #1c3f49;
+    color: var(--accent);
+  }
+
+  /* The dashboard's .main sets a 16px/20px padding and a 16px column gap
+     for its own 3-column grid (design/Main.dc.html); GitChanges.dc.html's
+     outer frame has neither — the header bar and file/diff panes run flush
+     to the window edge and to each other, separated only by their own
+     borders. .main--changes must zero both out, not just replace the
+     grid with a column flex, or the changes header would sit 16-20px
+     inset from where the artboard draws it. */
+  .main--changes {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .changes-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .changes-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+
+  .chip {
+    font-size: 11px;
+    color: var(--accent);
+    background: #0e2029;
+    border: 1px solid #1c3f49;
+    border-radius: 5px;
+    padding: 3px 9px;
+  }
+
+  .changes-muted { font-size: 11px; color: var(--text-muted); }
+  .changes-dim { font-size: 11px; color: var(--text-dim); }
+
+  /* Artboard's diff-count red (#d9645a, GitChanges.dc.html lines 31/51/64/
+     71/77/92) is not the dashboard's --bad (#b85f5f, used for a dead
+     session's dot/state) — it is this view's own red, so it gets its own
+     token rather than reusing --bad for a visually different color. */
+  .diff-add { color: var(--good); }
+  .diff-del { color: var(--del); }
+  .changes-head .diff-add, .changes-head .diff-del { font-size: 11px; }
+
+  .vrule { width: 1px; height: 14px; background: var(--border); }
+
+  .changes-error {
+    padding: 10px 20px;
+    font-size: 12px;
+    color: var(--del);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .changes-body {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    flex-grow: 1;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .changes-files {
+    border-inline-end: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .changes-files-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .changes-count { font-size: 10px; color: var(--text-muted); }
+
+  .changes-file-list {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .changes-diff { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+  .diff-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .diff-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .diff-mode {
+    font: inherit;
+    font-size: 11px;
+    padding: 4px 11px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .diff-mode--on { background: #0e2029; color: var(--accent); }
+
+  .diff-body { flex-grow: 1; overflow: auto; min-height: 0; }
+
+  .commit-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .commit-input {
+    flex-grow: 1;
+    background: #0d1720;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text);
+  }
+
+  .commit-input::placeholder { color: var(--text-muted); }
+
+  .commit-btn {
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ground);
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+  }
+
+  .commit-btn:disabled { opacity: 0.45; cursor: default; }
 </style>
 </head>
 <body>
@@ -643,6 +823,10 @@
 
   <div class="topbar">
     <div class="brand">JARVIS</div>
+    <div class="nav">
+      <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button">Dashboard</button>
+      <button id="nav-changes" class="nav-btn" type="button">Changes</button>
+    </div>
     <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
     <div class="spacer"></div>
     <div class="clock mono">
@@ -761,6 +945,52 @@
         <button id="composer-send" type="button" aria-label="Send">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
         </button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="main main--changes" id="view-changes" hidden>
+
+    <div class="changes-head">
+      <div class="changes-title">Changes</div>
+      <div id="changes-project" class="chip mono"></div>
+      <div id="changes-path" class="mono changes-muted"></div>
+      <div class="mono changes-muted">on</div>
+      <div id="changes-branch" class="mono changes-dim"></div>
+      <div class="spacer"></div>
+      <div id="changes-add" class="mono diff-add" dir="ltr"></div>
+      <div id="changes-del" class="mono diff-del" dir="ltr"></div>
+      <div class="vrule"></div>
+      <div id="changes-by" class="mono changes-muted"></div>
+    </div>
+
+    <div id="changes-error" class="changes-error" hidden></div>
+
+    <div class="changes-body">
+      <div class="changes-files">
+        <div class="changes-files-head">
+          <div class="lbl">CHANGED FILES</div>
+          <div class="spacer"></div>
+          <div id="changes-count" class="mono changes-count"></div>
+        </div>
+        <div id="changes-file-list" class="changes-file-list"></div>
+      </div>
+
+      <div class="changes-diff">
+        <div class="diff-head">
+          <div id="diff-filename" class="mono changes-dim"></div>
+          <div class="spacer"></div>
+          <div class="diff-toggle">
+            <button id="diff-mode-side" class="diff-mode diff-mode--on" type="button">Side by side</button>
+            <button id="diff-mode-unified" class="diff-mode" type="button">Unified</button>
+          </div>
+        </div>
+        <div id="diff-body" class="diff-body"></div>
+        <div class="commit-bar">
+          <input id="commit-message" class="commit-input" type="text" dir="auto" autocomplete="off" placeholder="Commit message…" />
+          <button id="commit-button" class="commit-btn" type="button">Commit</button>
+        </div>
       </div>
     </div>
 
