@@ -829,7 +829,11 @@
   .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
   .workspace-browser[hidden] { display: none; }
 
-  .workspace-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 8px 10px 0; }
+  /* padding-bottom stays 0 deliberately: an open tab chip has
+     border-bottom: none specifically so it sits flush against .workspace-bar
+     below it, the classic "attached tab" look — a uniform bottom padding
+     here would put a visible gap under every open tab, not just a lone +. */
+  .workspace-tabs { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 6px 10px 0; }
 
   @keyframes workspace-tab-in {
     from { opacity: 0; transform: translateY(-3px); }
@@ -900,7 +904,16 @@
 
   /* Moved into #workspace-tabs's own row by renderWorkspace on every
      render — shrink: 0 keeps it from being squeezed by many scrolled tabs. */
-  .workspace-new-tab { flex-shrink: 0; }
+  /* Matches an open tab chip's own "attached" look (border-bottom: none,
+     rounded only on top) rather than .workspace-nav's full box border on
+     every side — otherwise + reads as a separate floating button instead
+     of a natural part of the tab row, most noticeably when it is the row's
+     only content and has no real tab beside it to blend in with. */
+  .workspace-new-tab {
+    flex-shrink: 0;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
 
   .workspace-nav {
     font: inherit;
