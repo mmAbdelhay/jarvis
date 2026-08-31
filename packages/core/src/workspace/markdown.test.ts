@@ -267,3 +267,92 @@ describe("parseMarkdown — nested blocks", () => {
     expect(kinds).toEqual(["heading", "list", "quote", "paragraph"]);
   });
 });
+
+describe("parseMarkdown — task lists", () => {
+  it("parses an unchecked task item", () => {
+    expect(parseMarkdown("- [ ] todo")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [[{ kind: "paragraph", children: [text("todo")] }]],
+        checked: [false],
+      },
+    ]);
+  });
+
+  it("parses a checked task item", () => {
+    expect(parseMarkdown("- [x] done")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [[{ kind: "paragraph", children: [text("done")] }]],
+        checked: [true],
+      },
+    ]);
+  });
+
+  it("accepts an uppercase X", () => {
+    expect(parseMarkdown("- [X] done")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [[{ kind: "paragraph", children: [text("done")] }]],
+        checked: [true],
+      },
+    ]);
+  });
+
+  it("mixes task and non-task items in one list, aligned by index", () => {
+    const blocks = parseMarkdown("- [ ] a\n- plain\n- [x] b");
+    expect(blocks).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [
+          [{ kind: "paragraph", children: [text("a")] }],
+          [{ kind: "paragraph", children: [text("plain")] }],
+          [{ kind: "paragraph", children: [text("b")] }],
+        ],
+        checked: [false, undefined, true],
+      },
+    ]);
+  });
+
+  // No task items at all — checked is omitted entirely, not sent as an
+  // all-undefined array, so every list fixture written before task lists
+  // existed keeps matching exactly.
+  it("omits checked entirely for a plain list", () => {
+    const blocks = parseMarkdown("- a\n- b");
+    expect(blocks[0]).not.toHaveProperty("checked");
+  });
+
+  it("does not treat an ordered list's numbering as a task marker", () => {
+    const blocks = parseMarkdown("1. [ ]  looks odd but is not a task\n2. second");
+    expect(blocks[0]).not.toHaveProperty("checked");
+  });
+
+  // The bracket text is stripped from the rendered content — a real
+  // checkbox glyph replaces it, so the raw "[ ]"/"[x]" must not also
+  // appear as visible words.
+  it("strips the bracket marker from the item's own text", () => {
+    const blocks = parseMarkdown("- [x] Modules/Listing/app/Enums/ListingAddonType.php — done");
+    expect(blocks[0]).toMatchObject({
+      items: [
+        [
+          {
+            kind: "paragraph",
+            children: [text("Modules/Listing/app/Enums/ListingAddonType.php — done")],
+          },
+        ],
+      ],
+    });
+  });
+
+  it("keeps a nested list beside a task list correctly, without cross-contaminating checked arrays", () => {
+    const blocks = parseMarkdown("- [x] outer\n  - inner");
+    const outer = blocks[0];
+    expect(outer).toMatchObject({ kind: "list", checked: [true] });
+    const nested = (outer as { items: unknown[][] }).items[0]?.[1];
+    expect(nested).not.toHaveProperty("checked");
+  });
+});

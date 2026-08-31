@@ -80,16 +80,33 @@ function blocks(tokens: Token[], cursor: Cursor, closer: string | null): DocBloc
         const listCloser = ordered ? "ordered_list_close" : "bullet_list_close";
         cursor.index += 1;
         const items: DocBlock[][] = [];
+        const checked: (boolean | undefined)[] = [];
         while (cursor.index < tokens.length && tokens[cursor.index]?.type !== listCloser) {
           if (tokens[cursor.index]?.type !== "list_item_open") {
             cursor.index += 1;
             continue;
           }
           cursor.index += 1;
-          items.push(blocks(tokens, cursor, "list_item_close"));
+          const item = blocks(tokens, cursor, "list_item_close");
+          // GFM task lists, unordered only (GitHub's own checklist rendering
+          // applies the same restriction — a numbered list's own "1." is
+          // never a checkbox). Detected by pattern, not a markdown-it
+          // plugin: the marker is plain leading text on the item's first
+          // paragraph, and stripping it there is simpler than adding a
+          // second dependency for one prefix pattern.
+          items.push(item);
+          checked.push(ordered ? undefined : stripTaskMarker(item));
         }
         cursor.index += 1; // the list close
-        out.push({ kind: "list", ordered, items });
+        out.push({
+          kind: "list",
+          ordered,
+          items,
+          // Omitted entirely — not sent as an all-undefined array — unless
+          // at least one item is actually a task, so every list fixture
+          // written before task lists existed keeps matching exactly.
+          ...(checked.some((value) => value !== undefined) ? { checked } : {}),
+        });
         break;
       }
       case "blockquote_open": {
@@ -167,6 +184,35 @@ function table(tokens: Token[], cursor: Cursor): DocBlock {
   }
 
   return { kind: "table", head, rows };
+}
+
+// "- [ ] " / "- [x] " / "- [X] " — the GFM task-list marker, as it survives
+// into the item's first paragraph's first text node once markdown-it has
+// already consumed the list bullet itself.
+const TASK_MARKER = /^\[([ xX])\]\s+/;
+
+/**
+ * Strips a leading task marker from `item`'s first paragraph in place and
+ * returns its checked state, or undefined if the item is not a task at all.
+ * Mutates `item` (the freshly-built, not-yet-shared block array) so the
+ * marker text never appears twice — once as raw "[x]" and once as a real
+ * checkbox glyph the renderer draws from the returned boolean.
+ */
+function stripTaskMarker(item: DocBlock[]): boolean | undefined {
+  const first = item[0];
+  if (first === undefined || first.kind !== "paragraph") return undefined;
+  const firstChild = first.children[0];
+  if (firstChild === undefined || firstChild.kind !== "text") return undefined;
+
+  const match = TASK_MARKER.exec(firstChild.text);
+  if (match === null) return undefined;
+
+  const mark = match[1];
+  const rest = firstChild.text.slice(match[0].length);
+  if (rest === "") first.children.shift();
+  else first.children[0] = { kind: "text", text: rest };
+
+  return mark !== undefined && mark.toLowerCase() === "x";
 }
 
 function headingLevel(tag: string): 1 | 2 | 3 | 4 | 5 | 6 {

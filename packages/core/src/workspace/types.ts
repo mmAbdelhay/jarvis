@@ -45,6 +45,17 @@ export type DocBlock =
   | { kind: "paragraph"; children: DocInline[] }
   | { kind: "code"; language: string; text: string }
   | { kind: "rule" }
-  | { kind: "list"; ordered: boolean; items: DocBlock[][] }
+  | {
+      kind: "list";
+      ordered: boolean;
+      items: DocBlock[][];
+      /** GFM task-list state, aligned by index with `items`. `checked[i]`
+       *  is `undefined` for an ordinary item and `true`/`false` for a
+       *  `- [x]`/`- [ ]` one. Omitted entirely (not even as an all-undefined
+       *  array) unless the list contains at least one task item, so a plain
+       *  list's `toEqual` fixtures written before task lists existed still
+       *  match exactly. */
+      checked?: (boolean | undefined)[];
+    }
   | { kind: "quote"; children: DocBlock[] }
   | { kind: "table"; head: DocInline[][]; rows: DocInline[][][] };
