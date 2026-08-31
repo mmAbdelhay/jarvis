@@ -7,7 +7,7 @@ import { defaultSessionsDbPath, loadConfig, parseConfig } from "./config.js";
 
 const valid = {
   agents: { "claude-mm": { command: "claude-mm", model: "opus", default: true } },
-  routing: [{ match: { project: "acme" }, agent: "claude-acme" }],
+  routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
   projects: { acme: "~/projects/acme" },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain" },
 };
@@ -16,7 +16,29 @@ describe("parseConfig", () => {
   it("maps agents and routing into a registry config", () => {
     const config = parseConfig(valid);
     expect(config.registry.agents["claude-mm"]?.command).toBe("claude-mm");
-    expect(config.registry.routing?.[0]?.agent).toBe("claude-acme");
+    expect(config.registry.routing?.[0]?.agent).toBe("claude-mm");
+  });
+
+  it("rejects a routing rule whose agent names no configured agent", () => {
+    const raw = {
+      agents: { "claude-mm": { command: "claude-mm" } },
+      brain: { cwd: "/tmp/brain" },
+      routing: [{ match: { project: "acme" }, agent: "claude-typo" }],
+    };
+
+    expect(() => parseConfig(raw)).toThrow(
+      'Config `routing[0].agent` names no configured agent: "claude-typo"',
+    );
+  });
+
+  it("accepts a routing rule whose agent matches a configured one", () => {
+    const raw = {
+      agents: { "claude-mm": { command: "claude-mm" } },
+      brain: { cwd: "/tmp/brain" },
+      routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
+    };
+
+    expect(() => parseConfig(raw)).not.toThrow();
   });
 
   it("expands a leading tilde in project paths", () => {

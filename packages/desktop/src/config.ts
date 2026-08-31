@@ -55,6 +55,11 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const brainConfig = brain as Partial<BrainConfig>;
 
   const routing = parseRouting(root["routing"]);
+  routing.forEach((rule, index) => {
+    if (agents[rule.agent] === undefined) {
+      throw new Error(`Config \`routing[${index}].agent\` names no configured agent: "${rule.agent}"`);
+    }
+  });
   const projects = parseProjects(root["projects"]);
   const whisper = parseWhisper(root["whisper"]);
 
