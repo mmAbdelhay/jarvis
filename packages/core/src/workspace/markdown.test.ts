@@ -160,3 +160,110 @@ describe("parseMarkdown — inlines", () => {
     ]);
   });
 });
+
+describe("parseMarkdown — nested blocks", () => {
+  it("parses a bullet list", () => {
+    expect(parseMarkdown("- one\n- two")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [
+          [{ kind: "paragraph", children: [text("one")] }],
+          [{ kind: "paragraph", children: [text("two")] }],
+        ],
+      },
+    ]);
+  });
+
+  it("parses an ordered list", () => {
+    expect(parseMarkdown("1. first\n2. second")).toEqual([
+      {
+        kind: "list",
+        ordered: true,
+        items: [
+          [{ kind: "paragraph", children: [text("first")] }],
+          [{ kind: "paragraph", children: [text("second")] }],
+        ],
+      },
+    ]);
+  });
+
+  it("parses a list item holding more than one block", () => {
+    expect(parseMarkdown("- one\n\n  ```\n  code\n  ```")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [
+          [
+            { kind: "paragraph", children: [text("one")] },
+            { kind: "code", language: "", text: "code\n" },
+          ],
+        ],
+      },
+    ]);
+  });
+
+  it("parses a nested list inside an item", () => {
+    expect(parseMarkdown("- outer\n  - inner")).toEqual([
+      {
+        kind: "list",
+        ordered: false,
+        items: [
+          [
+            { kind: "paragraph", children: [text("outer")] },
+            {
+              kind: "list",
+              ordered: false,
+              items: [[{ kind: "paragraph", children: [text("inner")] }]],
+            },
+          ],
+        ],
+      },
+    ]);
+  });
+
+  it("parses a blockquote", () => {
+    expect(parseMarkdown("> quoted")).toEqual([
+      { kind: "quote", children: [{ kind: "paragraph", children: [text("quoted")] }] },
+    ]);
+  });
+
+  it("parses a nested blockquote", () => {
+    expect(parseMarkdown("> outer\n>\n> > inner")).toEqual([
+      {
+        kind: "quote",
+        children: [
+          { kind: "paragraph", children: [text("outer")] },
+          { kind: "quote", children: [{ kind: "paragraph", children: [text("inner")] }] },
+        ],
+      },
+    ]);
+  });
+
+  it("parses a table's header and rows", () => {
+    expect(parseMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |")).toEqual([
+      {
+        kind: "table",
+        head: [[text("a")], [text("b")]],
+        rows: [[[text("1")], [text("2")]]],
+      },
+    ]);
+  });
+
+  it("parses a table with several rows", () => {
+    expect(parseMarkdown("| h |\n| --- |\n| one |\n| two |")).toEqual([
+      { kind: "table", head: [[text("h")]], rows: [[[text("one")]], [[text("two")]]] },
+    ]);
+  });
+
+  it("keeps inline formatting inside a table cell", () => {
+    expect(parseMarkdown("| a |\n| --- |\n| `x` |")).toEqual([
+      { kind: "table", head: [[text("a")]], rows: [[[{ kind: "code", text: "x" }]]] },
+    ]);
+  });
+
+  it("keeps a list beside its neighbours in document order", () => {
+    const kinds = parseMarkdown("# t\n\n- a\n\n> q\n\npara").map((block) => block.kind);
+    expect(kinds).toEqual(["heading", "list", "quote", "paragraph"]);
+  });
+});

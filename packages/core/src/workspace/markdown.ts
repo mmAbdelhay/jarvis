@@ -74,9 +74,37 @@ function blocks(tokens: Token[], cursor: Cursor, closer: string | null): DocBloc
         out.push({ kind: "rule" });
         break;
       }
+      case "bullet_list_open":
+      case "ordered_list_open": {
+        const ordered = token.type === "ordered_list_open";
+        const listCloser = ordered ? "ordered_list_close" : "bullet_list_close";
+        cursor.index += 1;
+        const items: DocBlock[][] = [];
+        while (cursor.index < tokens.length && tokens[cursor.index]?.type !== listCloser) {
+          if (tokens[cursor.index]?.type !== "list_item_open") {
+            cursor.index += 1;
+            continue;
+          }
+          cursor.index += 1;
+          items.push(blocks(tokens, cursor, "list_item_close"));
+        }
+        cursor.index += 1; // the list close
+        out.push({ kind: "list", ordered, items });
+        break;
+      }
+      case "blockquote_open": {
+        cursor.index += 1;
+        out.push({ kind: "quote", children: blocks(tokens, cursor, "blockquote_close") });
+        break;
+      }
+      case "table_open": {
+        cursor.index += 1;
+        out.push(table(tokens, cursor));
+        break;
+      }
       default: {
-        // Task 4 replaces this with the list, quote and table cases. Until
-        // then an unknown block is skipped rather than guessed at.
+        // A block markdown-it emits that has no place in the model (and
+        // anything a future version adds) is skipped rather than guessed at.
         cursor.index += 1;
         break;
       }
@@ -84,6 +112,61 @@ function blocks(tokens: Token[], cursor: Cursor, closer: string | null): DocBloc
   }
 
   return out;
+}
+
+/**
+ * markdown-it emits a table as thead/tbody/tr/th/td open-close pairs around
+ * inline tokens. Header and body are read into the same cell shape; the only
+ * difference the model keeps is which array a row lands in, because that is
+ * the only difference the renderer needs to draw th versus td.
+ */
+function table(tokens: Token[], cursor: Cursor): DocBlock {
+  const head: DocInline[][] = [];
+  const rows: DocInline[][][] = [];
+  let inHead = false;
+
+  while (cursor.index < tokens.length) {
+    const token = tokens[cursor.index];
+    if (token === undefined) break;
+    if (token.type === "table_close") {
+      cursor.index += 1;
+      break;
+    }
+
+    switch (token.type) {
+      case "thead_open":
+        inHead = true;
+        cursor.index += 1;
+        break;
+      case "thead_close":
+        inHead = false;
+        cursor.index += 1;
+        break;
+      case "tr_open": {
+        cursor.index += 1;
+        const cells: DocInline[][] = [];
+        while (cursor.index < tokens.length && tokens[cursor.index]?.type !== "tr_close") {
+          const cell = tokens[cursor.index];
+          if (cell?.type === "th_open" || cell?.type === "td_open") {
+            cursor.index += 1;
+            cells.push(takeInline(tokens, cursor));
+            cursor.index += 1; // th_close / td_close
+            continue;
+          }
+          cursor.index += 1;
+        }
+        cursor.index += 1; // tr_close
+        if (inHead) head.push(...cells);
+        else rows.push(cells);
+        break;
+      }
+      default:
+        cursor.index += 1;
+        break;
+    }
+  }
+
+  return { kind: "table", head, rows };
 }
 
 function headingLevel(tag: string): 1 | 2 | 3 | 4 | 5 | 6 {
