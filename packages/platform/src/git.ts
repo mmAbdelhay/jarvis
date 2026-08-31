@@ -222,16 +222,86 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
       }
     },
 
-    async stage(_repoPath, _paths): Promise<GitOutcome<null>> {
-      return failure("failed", "not implemented");
+    async stage(repoPath, paths): Promise<GitOutcome<null>> {
+      // An empty list must never become a bare `git add`, which would stage
+      // the whole worktree — the opposite of what the caller asked for.
+      if (paths.length === 0) return { ok: true, value: null };
+      const outsidePath = paths.find((path) => !insideRepo(path));
+      if (outsidePath !== undefined) {
+        return failure("failed", `path outside the repository: ${outsidePath}`);
+      }
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      try {
+        await opened.value.add(paths);
+        return { ok: true, value: null };
+      } catch (error) {
+        return failure("failed", errorMessage(error));
+      }
     },
 
-    async unstage(_repoPath, _paths): Promise<GitOutcome<null>> {
-      return failure("failed", "not implemented");
+    async unstage(repoPath, paths): Promise<GitOutcome<null>> {
+      if (paths.length === 0) return { ok: true, value: null };
+      const outsidePath = paths.find((path) => !insideRepo(path));
+      if (outsidePath !== undefined) {
+        return failure("failed", `path outside the repository: ${outsidePath}`);
+      }
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      try {
+        // `--` separates paths from revisions, so a file literally named
+        // like a branch cannot be misread as one. On an unborn HEAD (no
+        // commits yet) `git reset -- <paths>` still works: git resets the
+        // index entries against the empty tree instead of failing.
+        await opened.value.reset(["--", ...paths]);
+        return { ok: true, value: null };
+      } catch (error) {
+        return failure("failed", errorMessage(error));
+      }
     },
 
-    async commit(_repoPath, _message): Promise<GitOutcome<GitCommitResult>> {
-      return failure("failed", "not implemented");
+    async commit(repoPath, message): Promise<GitOutcome<GitCommitResult>> {
+      if (message.trim() === "") return failure("empty-message", "");
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      const git = opened.value;
+
+      try {
+        const status = await git.status();
+        if (status.conflicted.length > 0) {
+          return failure("conflict", status.conflicted.join(", "));
+        }
+
+        const staged = await git.diffSummary(["--cached"]);
+        if (staged.files.length === 0) return failure("nothing-staged", repoPath);
+
+        // simple-git's commit() passes the message as a `-m` argument to the
+        // spawned git binary, never through a shell, so newlines, quotes and
+        // a leading `-` all survive intact without any escaping here.
+        const result = await git.commit(message);
+        // A rejected pre-commit hook makes the git binary exit non-zero, but
+        // simple-git's commit() does not throw for that — it resolves with
+        // an empty CommitResult (`commit: ""`) parsed from git's stderr
+        // instead of the usual "[branch sha] message" stdout line. That
+        // empty sha is the one reliable signal that nothing actually landed;
+        // treating it as success would report a commit that never happened.
+        if (result.commit === "") {
+          return failure("failed", "git rejected the commit (a hook may have failed)");
+        }
+        // Both the sha and the files-changed count are read from git's own
+        // report of the commit it just made — `result.summary.changes` is
+        // parsed from the real "N files changed" line git prints, not
+        // assembled from what we intended to commit before calling commit().
+        // That holds for the first commit on an unborn HEAD too, where there
+        // is no parent to diff against.
+        const sha = (await git.revparse(["--short", "HEAD"])).trim();
+        return {
+          ok: true,
+          value: { sha, filesChanged: result.summary.changes },
+        };
+      } catch (error) {
+        return failure("failed", errorMessage(error));
+      }
     },
   };
 }

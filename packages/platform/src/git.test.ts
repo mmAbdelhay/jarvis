@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -451,5 +451,343 @@ describe("createGitProvider().diff", () => {
     const outcome = await createGitProvider().diff(dir, "new.txt");
     if (!outcome.ok) throw new Error("expected ok");
     expect(outcome.value.hunks[0]?.lines.map((line) => line.text)).toEqual(["alpha", "beta"]);
+  });
+});
+
+describe("createGitProvider() staging and commit", () => {
+  it("stages a file and reports it as staged", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+
+    expect(await provider.stage(dir, ["kept.txt"])).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]?.staged).toBe(true);
+  });
+
+  it("unstages a file again", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    expect(await provider.unstage(dir, ["kept.txt"])).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]?.staged).toBe(false);
+  });
+
+  it("commits what is staged and returns the short sha", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const outcome = await provider.commit(dir, "تعديل الاختبارات");
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+    expect(outcome.value.sha.length).toBeGreaterThan(0);
+    expect(outcome.value.filesChanged).toBe(1);
+
+    const log = await simpleGit(dir).log();
+    expect(log.latest?.message).toBe("تعديل الاختبارات");
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files).toEqual([]);
+  });
+
+  it("commits an Arabic message and the real sha appears at HEAD via git log", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const outcome = await provider.commit(dir, "إصلاح خطأ في الاختبارات");
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    const head = (await simpleGit(dir).revparse(["--short", "HEAD"])).trim();
+    expect(outcome.value.sha).toBe(head);
+  });
+
+  it("refuses to commit with nothing staged", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().commit(dir, "nothing here");
+    expect(outcome).toMatchObject({ ok: false, error: { code: "nothing-staged" } });
+  });
+
+  it("refuses an empty or whitespace-only commit message", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const outcome = await provider.commit(dir, "   ");
+    expect(outcome).toMatchObject({ ok: false, error: { code: "empty-message" } });
+  });
+
+  it("refuses an empty message even though something is staged, without committing it", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+    const before = (await simpleGit(dir).revparse(["HEAD"])).trim();
+
+    await provider.commit(dir, "");
+
+    const after = (await simpleGit(dir).revparse(["HEAD"])).trim();
+    expect(after).toBe(before);
+  });
+
+  it("commits a multi-line message (subject + body) intact", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const message = "subject line\n\nbody line one\nbody line two";
+    const outcome = await provider.commit(dir, message);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    const raw = (await simpleGit(dir).raw(["log", "-1", "--format=%B"])).trimEnd();
+    expect(raw).toBe(message);
+  });
+
+  it("commits a message containing quotes intact", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const message = `fix: handle "quoted" and 'single' text`;
+    const outcome = await provider.commit(dir, message);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    const subject = (await simpleGit(dir).raw(["log", "-1", "--format=%s"])).trim();
+    expect(subject).toBe(message);
+  });
+
+  it("commits a message starting with a leading dash intact, not as a flag", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const message = "-force cleanup of stale entries";
+    const outcome = await provider.commit(dir, message);
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    const subject = (await simpleGit(dir).raw(["log", "-1", "--format=%s"])).trim();
+    expect(subject).toBe(message);
+  });
+
+  it("reports a conflict instead of committing over an unresolved merge", async () => {
+    const dir = await makeRepo();
+    const git = simpleGit(dir);
+
+    await git.checkoutLocalBranch("feature");
+    await writeFile(join(dir, "kept.txt"), "one\ntwo\nFEATURE\n", "utf8");
+    await git.add(["kept.txt"]);
+    await git.commit("feature change");
+
+    await git.checkout("main");
+    await writeFile(join(dir, "kept.txt"), "one\ntwo\nMAIN\n", "utf8");
+    await git.add(["kept.txt"]);
+    await git.commit("main change");
+
+    await git.merge(["feature"]).catch(() => undefined);
+
+    const outcome = await createGitProvider().commit(dir, "resolve merge");
+    expect(outcome).toMatchObject({ ok: false, error: { code: "conflict" } });
+  });
+
+  it("reports a failure, not a false success, when a pre-commit hook rejects the commit", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    const hooksDir = join(dir, ".git", "hooks");
+    await mkdir(hooksDir, { recursive: true });
+    await writeFile(join(hooksDir, "pre-commit"), "#!/bin/sh\nexit 1\n", "utf8");
+    await chmod(join(hooksDir, "pre-commit"), 0o755);
+
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+    const before = (await simpleGit(dir).revparse(["HEAD"])).trim();
+
+    const outcome = await provider.commit(dir, "should not land");
+
+    expect(outcome.ok).toBe(false);
+    const after = (await simpleGit(dir).revparse(["HEAD"])).trim();
+    expect(after).toBe(before);
+  });
+
+  it("reports the real sha and files-changed count from git, not counted optimistically", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed one\n", "utf8");
+    await writeFile(join(dir, "second.txt"), "second\n", "utf8");
+    await provider.stage(dir, ["kept.txt", "second.txt"]);
+
+    const outcome = await provider.commit(dir, "two files");
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    expect(outcome.value.filesChanged).toBe(2);
+    const realSha = (await simpleGit(dir).revparse(["--short", "HEAD"])).trim();
+    expect(outcome.value.sha).toBe(realSha);
+  });
+
+  it("commits successfully on an unborn HEAD (a repository with no commits yet)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jarvis-git-unborn-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const git = simpleGit(dir);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.name", "Jarvis Test");
+    await git.addConfig("user.email", "test@example.invalid");
+    await git.addConfig("commit.gpgsign", "false");
+
+    const provider = createGitProvider();
+    await writeFile(join(dir, "first.txt"), "hello\n", "utf8");
+
+    const staged = await provider.stage(dir, ["first.txt"]);
+    expect(staged).toEqual({ ok: true, value: null });
+
+    const outcome = await provider.commit(dir, "first commit");
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+    expect(outcome.value.filesChanged).toBe(1);
+
+    const log = await git.log();
+    expect(log.latest?.message).toBe("first commit");
+  });
+
+  it("refuses to commit on an unborn HEAD with nothing staged", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jarvis-git-unborn-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const git = simpleGit(dir);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.name", "Jarvis Test");
+    await git.addConfig("user.email", "test@example.invalid");
+    await git.addConfig("commit.gpgsign", "false");
+
+    const outcome = await createGitProvider().commit(dir, "nothing staged yet");
+    expect(outcome).toMatchObject({ ok: false, error: { code: "nothing-staged" } });
+  });
+
+  it("unstages on an unborn HEAD (git reset against a nonexistent HEAD) without throwing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jarvis-git-unborn-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const git = simpleGit(dir);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.name", "Jarvis Test");
+    await git.addConfig("user.email", "test@example.invalid");
+    await git.addConfig("commit.gpgsign", "false");
+
+    const provider = createGitProvider();
+    await writeFile(join(dir, "first.txt"), "hello\n", "utf8");
+    await provider.stage(dir, ["first.txt"]);
+
+    const outcome = await provider.unstage(dir, ["first.txt"]);
+    expect(outcome.ok).toBe(true);
+
+    const status = await git.status();
+    expect(status.staged).toEqual([]);
+    expect(status.not_added).toEqual(["first.txt"]);
+  });
+
+  it("refuses to stage a path outside the repository", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().stage(dir, ["../escape.txt"]);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses to unstage a path outside the repository", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().unstage(dir, ["../escape.txt"]);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("returns a failure, not a throw, staging a path that does not exist", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().stage(dir, ["does-not-exist.txt"]);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("is a no-op staging an already-staged file", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    const outcome = await provider.stage(dir, ["kept.txt"]);
+    expect(outcome).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]?.staged).toBe(true);
+  });
+
+  it("stages an untracked file", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "brand-new.txt"), "content\n", "utf8");
+
+    const outcome = await provider.stage(dir, ["brand-new.txt"]);
+    expect(outcome).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]).toMatchObject({ path: "brand-new.txt", staged: true });
+  });
+
+  it("stages a deleted file", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await rm(join(dir, "kept.txt"));
+
+    const outcome = await provider.stage(dir, ["kept.txt"]);
+    expect(outcome).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]).toMatchObject({ path: "kept.txt", status: "D", staged: true });
+  });
+
+  it("stages a renamed file", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    const git = simpleGit(dir);
+    await git.raw(["mv", "kept.txt", "renamed.txt"]);
+
+    const outcome = await provider.stage(dir, ["renamed.txt"]);
+    expect(outcome).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]).toMatchObject({ status: "R", staged: true });
+  });
+
+  it("treats an empty path list as a no-op rather than staging everything", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+
+    expect(await provider.stage(dir, [])).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]?.staged).toBe(false);
+  });
+
+  it("treats an empty path list on unstage as a no-op", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "kept.txt"), "changed\n", "utf8");
+    await provider.stage(dir, ["kept.txt"]);
+
+    expect(await provider.unstage(dir, [])).toEqual({ ok: true, value: null });
+
+    const after = await provider.changes(dir);
+    if (!after.ok) throw new Error("expected ok");
+    expect(after.value.files[0]?.staged).toBe(true);
   });
 });
