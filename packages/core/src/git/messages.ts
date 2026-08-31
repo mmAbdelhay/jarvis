@@ -1,4 +1,4 @@
-import type { GitChanges, GitCommitResult, GitFailure } from "./types.js";
+import type { GitChanges, GitCommitResult, GitFailure, GitFileDiff } from "./types.js";
 
 type Language = "ar" | "en";
 
@@ -36,18 +36,43 @@ export function gitFailureText(failure: GitFailure, language: Language): string 
 // Arabic number agreement (ملف / ملفان / ملفات / ملفًا) changes with the
 // count, and a template that inlines a number into a noun phrase is wrong for
 // most counts. Labels sidestep it and stay readable in both languages.
+//
+// The branch name is interpolated as its own tail-anchored sentence, not
+// spliced mid-string ahead of an em dash: an ASCII/Latin branch name sitting
+// inside an RTL run before a "—" is a bidi reordering risk in a transcript
+// (ruling P14). Every interpolated value here ends its own clause.
 export function gitChangesText(changes: GitChanges, fileCount: number, language: Language): string {
   return language === "ar"
-    ? `الفرع ${changes.branch} — الملفات المعدّلة: ${fileCount}، الإضافات: ${changes.insertions}، الحذوفات: ${changes.deletions}.`
-    : `Branch ${changes.branch} — changed files: ${fileCount}, insertions: ${changes.insertions}, deletions: ${changes.deletions}.`;
+    ? `الملفات المعدّلة: ${fileCount}، الإضافات: ${changes.insertions}، المحذوفات: ${changes.deletions}. الفرع: ${changes.branch}.`
+    : `Changed files: ${fileCount}, insertions: ${changes.insertions}, deletions: ${changes.deletions}. Branch: ${changes.branch}.`;
 }
 
-export function gitCommitText(result: GitCommitResult, language: Language): string {
+// Names the project and the file count so a wrong-repo or unexpectedly-wide
+// commit is audible (ruling P13): a model that resolves the wrong sessionId
+// still commits the right-looking sha, but the project name and file count
+// make that mistake catchable by ear. Label/value form again, for the same
+// Arabic-agreement reason as gitChangesText, and every value sits at the
+// tail of its own clause for the same bidi reason.
+export function gitCommitText(result: GitCommitResult, project: string, language: Language): string {
   return language === "ar"
-    ? `حفظت التغييرات في الالتزام ${result.sha}.`
-    : `Committed as ${result.sha}.`;
+    ? `تم الكوميت: ${result.sha}. المشروع: ${project}. عدد الملفات: ${result.filesChanged}.`
+    : `Committed: ${result.sha}. Project: ${project}. Files: ${result.filesChanged}.`;
 }
 
-export function gitDiffOpenedText(path: string, language: Language): string {
-  return language === "ar" ? `فتحت الفروق لملف ${path}.` : `Opened the diff for ${path}.`;
+// Branches on both `binary` and `tooLarge` (ruling P8's flag) so a file the
+// pane cannot actually show is never announced as an opened diff — a
+// "$ok:true" outcome with `hunks: []` looks identical to a real empty diff
+// unless the caller checks these two flags explicitly (ruling P12).
+export function gitDiffOpenedText(diff: GitFileDiff, language: Language): string {
+  if (diff.tooLarge) {
+    return language === "ar"
+      ? `الملف كبير جدًا لعرض الفروق: ${diff.path}.`
+      : `Too large to show a diff for: ${diff.path}.`;
+  }
+  if (diff.binary) {
+    return language === "ar"
+      ? `هذا ملف ثنائي ولا يمكن عرض فروقه: ${diff.path}.`
+      : `Binary file — no diff to show: ${diff.path}.`;
+  }
+  return language === "ar" ? `فتحت الفروق لملف ${diff.path}.` : `Opened the diff for ${diff.path}.`;
 }
