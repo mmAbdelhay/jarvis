@@ -119,7 +119,7 @@ beforeEach(() => {
         <div id="changes-title" class="changes-title">Changes</div>
         <div id="changes-project" class="chip mono"></div>
         <div id="changes-path" class="mono changes-muted"></div>
-        <div class="mono changes-muted">on</div>
+        <div id="changes-path-branch-sep" class="mono changes-muted">on</div>
         <div id="changes-branch" class="mono changes-dim"></div>
         <div id="changes-add" class="mono diff-add" dir="ltr"></div>
         <div id="changes-del" class="mono diff-del" dir="ltr"></div>
@@ -187,7 +187,7 @@ describe("openChanges", () => {
     expect(document.getElementById("changes-add")?.textContent).toBe("+128");
     expect(document.getElementById("changes-del")?.textContent).toBe("−34");
     expect(document.getElementById("changes-by")?.textContent).toBe(
-      "بواسطة claude-acme · قبل 6 د",
+      "بواسطة claude-acme · قبل 6 دقائق",
     );
     expect(jarvis.gitChanges).toHaveBeenCalledWith("s1");
   });
@@ -509,6 +509,7 @@ describe("applyStaticChrome", () => {
     expect(document.getElementById("nav-dashboard")?.textContent).toBe("اللوحة");
     expect(document.getElementById("nav-changes")?.textContent).toBe("التغييرات");
     expect(document.getElementById("changes-files-label")?.textContent).toBe("الملفات المعدّلة");
+    expect(document.getElementById("changes-path-branch-sep")?.textContent).toBe("على");
     expect(document.getElementById("diff-mode-side")?.textContent).toBe("جنبًا إلى جنب");
     expect(document.getElementById("diff-mode-unified")?.textContent).toBe("موحّد");
     const message = document.getElementById("commit-message");
@@ -1146,7 +1147,7 @@ describe("the commit bar", () => {
       { path: "b.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
       { path: "c.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملفان");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ ملفين");
   });
 
   it("uses the singular for one staged file", async () => {
@@ -1192,7 +1193,7 @@ describe("the commit bar", () => {
         gitSetStaged: vi.fn(async () => ({ ok: true as const, value: null })),
       },
     );
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ لا ملفات");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ");
 
     // gitChanges() is re-read after the toggle resolves; simulate the file
     // now being staged, the same way openChanges's real refetch would.
@@ -1307,7 +1308,7 @@ describe("the commit bar", () => {
     // commit resolves) to redraw the file list, counts and commit button
     // from whatever the repository actually looks like now.
     expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
-    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ لا ملفات");
+    expect(document.getElementById("commit-button")?.textContent).toBe("حفظ");
   });
 
   it("shows a commit failure and keeps the message so it is not lost", async () => {

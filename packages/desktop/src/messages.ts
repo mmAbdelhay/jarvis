@@ -92,11 +92,21 @@ export const MESSAGES = {
   //
   // "Commit N files" is the sharpest case: a counted noun, not a sentence
   // with a number dropped in — exactly what arabicSessionsCount above
-  // exists for. This mirrors its same label-shape approach (a small
-  // dual/plural table, sidestepping mid-string agreement) rather than
-  // interpolating a raw number into a noun phrase.
+  // exists for. It uses a table of its own (arabicFilesCount below), *not*
+  // arabicSessionsCount's: see the comment on arabicFilesCount for why the
+  // two must stay separate despite looking identical in shape.
+  //
+  // count === 0 is a case of its own rather than arabicFilesCount("لا ملفات"
+  // etc.): "حفظ" (Save/Commit) is a transitive verbal noun, and "Save no
+  // files" is not a grammatical verb-object phrase in Arabic any more than
+  // it reads naturally in English — there is no noun for it to govern. The
+  // button is disabled at zero anyway, so the bare verb is what's shown.
   commitButtonLabel: (count: number, language: "ar" | "en"): string =>
-    language === "ar" ? `حفظ ${arabicFilesCount(count)}` : `Commit ${count} ${count === 1 ? "file" : "files"}`,
+    language === "ar"
+      ? count === 0
+        ? "حفظ"
+        : `حفظ ${arabicFilesCount(count)}`
+      : `Commit ${count} ${count === 1 ? "file" : "files"}`,
   // `ago` is formatAgo()'s own already-localised output; this just joins it
   // to the agent id as one label/value pair, same shape as the rest of this
   // table.
@@ -106,6 +116,11 @@ export const MESSAGES = {
   navChanges: (language: "ar" | "en"): string => (language === "ar" ? "التغييرات" : "Changes"),
   changedFilesLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "الملفات المعدّلة" : "CHANGED FILES",
+  // The header's repo-path/branch separator ("~/projects/acme on
+  // feat/checkout-retry"). Both neighbouring values are technical tokens
+  // (a filesystem path, a git ref) that stay LTR regardless of language, so
+  // this is the same preposition English uses, not a sentence to reorder.
+  pathBranchSeparator: (language: "ar" | "en"): string => (language === "ar" ? "على" : "on"),
   sideBySideLabel: (language: "ar" | "en"): string => (language === "ar" ? "جنبًا إلى جنب" : "Side by side"),
   unifiedLabel: (language: "ar" | "en"): string => (language === "ar" ? "موحّد" : "Unified"),
   beforeColumnLabel: (language: "ar" | "en"): string => (language === "ar" ? "قبل" : "BEFORE"),
@@ -118,13 +133,27 @@ export const MESSAGES = {
     language === "ar" ? "إلغاء تجهيز الملف" : "Unstage file",
 };
 
-// Same shape as arabicSessionsCount below (singular/dual/3-10-plural/11+
-// reverting to singular indefinite accusative), for the counted noun "ملف"
-// (file) instead of "جلسة" (session).
+// NOT the same table as arabicSessionsCount below, even though the two
+// started out identical (that copy-paste is exactly the bug this comment
+// exists to prevent someone re-introducing). The two counted nouns sit in
+// grammatically different positions:
+//   - arabicSessionsCount's output is a standalone label value ("عدد
+//     الجلسات: جلستان") — a bare counted noun, nominative, same as it would
+//     be as the subject of a sentence.
+//   - arabicFilesCount's output is always the mudaf ilayhi of "حفظ" (an
+//     iḍāfa: "حفظ ملفين" = "the committing of two files"), which the masdar
+//     "حفظ" governs into the *genitive* — not nominative.
+// That only actually shows up at count === 2, where the genitive dual
+// (ملفين) differs in spelling from the nominative dual (ملفان) that
+// arabicSessionsCount's shape would produce. Every other count (1, 3-10,
+// 11+) is spelled the same in both cases once diacritics are dropped, which
+// is exactly how the wrong table went unnoticed here. If this file's
+// counted noun ever needs to appear standalone too, give it its own
+// function rather than reusing this one — don't merge the two tables back
+// together.
 function arabicFilesCount(count: number): string {
-  if (count === 0) return "لا ملفات";
   if (count === 1) return "ملف واحد";
-  if (count === 2) return "ملفان";
+  if (count === 2) return "ملفين"; // genitive dual (not ملفان — see comment above)
   if (count <= 10) return `${count} ملفات`;
   return `${count} ملفًا`;
 }

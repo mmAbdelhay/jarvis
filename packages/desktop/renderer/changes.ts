@@ -321,6 +321,12 @@ export function applyStaticChrome(): void {
   if (navChanges !== null) navChanges.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
   const title = document.getElementById("changes-title");
   if (title !== null) title.textContent = MESSAGES.navChanges(PRIMARY_LANGUAGE);
+  // The artboard's path/branch separator ("~/projects/acme on
+  // feat/checkout-retry") was still a bare English literal in the markup —
+  // the one spot I2's audit missed. Routed through the same bilingual table
+  // as everything else here rather than left untranslated.
+  const pathBranchSep = document.getElementById("changes-path-branch-sep");
+  if (pathBranchSep !== null) pathBranchSep.textContent = MESSAGES.pathBranchSeparator(PRIMARY_LANGUAGE);
   const filesLabel = document.getElementById("changes-files-label");
   if (filesLabel !== null) filesLabel.textContent = MESSAGES.changedFilesLabel(PRIMARY_LANGUAGE);
   const sideButtonLabel = document.getElementById("diff-mode-side");

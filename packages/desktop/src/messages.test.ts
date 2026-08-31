@@ -56,6 +56,40 @@ describe("MESSAGES", () => {
   });
 });
 
+// arabicFilesCount sits in a *governed* position (mudaf ilayhi of the verbal
+// noun "حفظ", an iḍāfa) rather than arabicSessionsCount's standalone-label
+// position, so it must not share arabicSessionsCount's table: the dual is
+// genitive (ملفين), not nominative (ملفان). Every count is asserted here so
+// a future re-merge of the two tables gets caught.
+describe("commitButtonLabel", () => {
+  it("uses the singular/plural English noun, including at zero", () => {
+    expect(MESSAGES.commitButtonLabel(0, "en")).toBe("Commit 0 files");
+    expect(MESSAGES.commitButtonLabel(1, "en")).toBe("Commit 1 file");
+    expect(MESSAGES.commitButtonLabel(2, "en")).toBe("Commit 2 files");
+  });
+
+  it("says just the bare verb at zero, since there is no noun for it to govern", () => {
+    expect(MESSAGES.commitButtonLabel(0, "ar")).toBe("حفظ");
+  });
+
+  it("uses the genitive dual (ملفين), not the nominative dual (ملفان)", () => {
+    expect(MESSAGES.commitButtonLabel(2, "ar")).toBe("حفظ ملفين");
+  });
+
+  it("follows Arabic's singular/3-10-plural/11+ counted-noun forms for the rest", () => {
+    expect(MESSAGES.commitButtonLabel(1, "ar")).toBe("حفظ ملف واحد");
+    expect(MESSAGES.commitButtonLabel(3, "ar")).toBe("حفظ 3 ملفات");
+    expect(MESSAGES.commitButtonLabel(11, "ar")).toBe("حفظ 11 ملفًا");
+  });
+});
+
+describe("pathBranchSeparator", () => {
+  it("renders in both languages", () => {
+    expect(MESSAGES.pathBranchSeparator("en")).toBe("on");
+    expect(MESSAGES.pathBranchSeparator("ar")).toBe("على");
+  });
+});
+
 describe("unknownSession", () => {
   it("names the session id at the tail in both languages", () => {
     expect(MESSAGES.unknownSession("s1", "ar").endsWith("s1")).toBe(true);
