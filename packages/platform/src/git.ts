@@ -198,7 +198,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         if (untracked) {
           const info = await stat(join(repoPath, filePath));
           if (info.size > MAX_DIFF_BYTES) {
-            return { ok: true, value: { path: filePath, binary: true, hunks: [] } };
+            return { ok: true, value: { path: filePath, binary: false, tooLarge: true, hunks: [] } };
           }
           const buffer = await readFile(join(repoPath, filePath));
           if (buffer.includes(0)) {
@@ -207,14 +207,37 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
           return { ok: true, value: addedFileDiff(filePath, buffer.toString("utf8")) };
         }
 
+        // A renamed file is keyed by its *new* path in status.files, but
+        // carries the pre-rename path in `.from` (present only for a rename
+        // or copy). Diffing by the new path alone (`git diff HEAD -- <new>`)
+        // cannot see the rename — the new path never existed at HEAD — so
+        // it reports the whole file as freshly added, contradicting
+        // changes()'s correct 0/0 for a pure rename. Passing *both* paths as
+        // pathspecs, with `-M` to force rename detection regardless of the
+        // repository's `diff.renames` setting, makes git match the rename
+        // and diff only its real content delta (verified against real git:
+        // nothing for a pure rename, only the edited lines for a rename
+        // with edits).
+        const entry = status.files.find((file) => file.path === filePath);
+        const fromPath = entry?.from;
+        const renamed = fromPath !== undefined && fromPath !== filePath;
+
         // Diffed against HEAD rather than the index, so one call shows a
         // change whether it is staged, unstaged, or both — matching
         // `changes()` above, which sums the unstaged and staged summaries
         // for the same file into one row. Showing only one of the two would
         // make the file list and the diff pane disagree about the same file.
-        const raw = await git.diff(["HEAD", "--", filePath]);
-        if (raw.length > MAX_DIFF_BYTES) {
-          return { ok: true, value: { path: filePath, binary: true, hunks: [] } };
+        const raw = renamed
+          ? await git.diff(["-M", "HEAD", "--", fromPath, filePath])
+          : await git.diff(["HEAD", "--", filePath]);
+
+        // Measured in real bytes (not UTF-16 code units) so the cap means
+        // the same thing here as it does on the untracked branch above,
+        // where it is compared against stat()'s byte size — otherwise
+        // non-ASCII content (e.g. Arabic) gets up to double the effective
+        // cap on this branch.
+        if (Buffer.byteLength(raw, "utf8") > MAX_DIFF_BYTES) {
+          return { ok: true, value: { path: filePath, binary: false, tooLarge: true, hunks: [] } };
         }
         return { ok: true, value: parseUnifiedDiff(filePath, raw) };
       } catch (error) {

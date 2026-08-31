@@ -362,18 +362,48 @@ describe("createGitProvider().diff", () => {
     expect(kinds.length).toBeGreaterThan(0);
   });
 
-  it("diffs a renamed file by its new path, against HEAD, as newly added content", async () => {
+  it("shows a pure rename as no content delta, agreeing with changes()'s 0/0", async () => {
     const dir = await makeRepo();
     await simpleGit(dir).mv("kept.txt", "renamed.txt");
 
+    const provider = createGitProvider();
+    const changesOutcome = await provider.changes(dir);
+    if (!changesOutcome.ok) throw new Error("expected ok");
+    const row = changesOutcome.value.files.find((file) => file.path === "renamed.txt");
+    expect(row).toMatchObject({ insertions: 0, deletions: 0 });
+
+    const outcome = await provider.diff(dir, "renamed.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    // A pure rename has no content delta at all — no `git diff` hunks — so
+    // the diff pane must agree with the file list's 0/0, not report the
+    // whole file as newly added just because the new path never existed at
+    // HEAD under its own name alone.
+    expect(outcome.value.hunks).toEqual([]);
+    expect(outcome.value.binary).toBe(false);
+  });
+
+  it("shows a rename with edits as only the edited lines, not the whole file", async () => {
+    const dir = await makeRepo();
+    const git = simpleGit(dir);
+    await git.mv("kept.txt", "renamed.txt");
+    await writeFile(join(dir, "renamed.txt"), "one\nTWO\nthree\n", "utf8");
+
     const outcome = await createGitProvider().diff(dir, "renamed.txt");
     if (!outcome.ok) throw new Error("expected ok");
-    // renamed.txt does not exist at HEAD under this path, so a HEAD-relative
-    // diff shows its whole content as added — consistent with diffing
-    // against HEAD everywhere else, and it must not fail or come back empty.
+    expect(outcome.value.path).toBe("renamed.txt");
+    expect(outcome.value.binary).toBe(false);
     expect(outcome.value.hunks).toHaveLength(1);
-    const kinds = outcome.value.hunks[0]?.lines.map((line) => line.kind);
-    expect(kinds?.every((kind) => kind === "added")).toBe(true);
+    const lines = outcome.value.hunks[0]?.lines ?? [];
+    // Only the one edited line changes; "one" and "three" survive as
+    // context, not as removed+added noise for the whole file.
+    expect(lines.filter((line) => line.kind === "removed").map((line) => line.text)).toEqual([
+      "two",
+    ]);
+    expect(lines.filter((line) => line.kind === "added").map((line) => line.text)).toEqual([
+      "TWO",
+    ]);
+    expect(lines.some((line) => line.kind === "context" && line.text === "one")).toBe(true);
+    expect(lines.some((line) => line.kind === "context" && line.text === "three")).toBe(true);
   });
 
   it("detects a binary file instead of returning empty hunks", async () => {
@@ -396,13 +426,28 @@ describe("createGitProvider().diff", () => {
     expect(outcome.value.hunks).toEqual([]);
   });
 
-  it("caps a large untracked file as binary instead of reading it whole", async () => {
+  it("caps a large untracked file as too-large rather than reading it whole or calling it binary", async () => {
     const dir = await makeRepo();
     await writeFile(join(dir, "huge.txt"), "x".repeat(2_000_001), "utf8");
 
     const outcome = await createGitProvider().diff(dir, "huge.txt");
     if (!outcome.ok) throw new Error("expected ok");
-    expect(outcome.value.binary).toBe(true);
+    // A large text file is not binary — reporting it as such would be a lie
+    // the UI has no way to catch. `tooLarge` says "not shown", `binary`
+    // stays false because the content was never read to know either way.
+    expect(outcome.value.binary).toBe(false);
+    expect(outcome.value.tooLarge).toBe(true);
+    expect(outcome.value.hunks).toEqual([]);
+  });
+
+  it("caps a large tracked diff as too-large rather than parsing it whole or calling it binary", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "x\n".repeat(1_500_000), "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.binary).toBe(false);
+    expect(outcome.value.tooLarge).toBe(true);
     expect(outcome.value.hunks).toEqual([]);
   });
 
