@@ -94,6 +94,17 @@ export class ProviderStatusStore {
 
   #emit(): void {
     const snapshot = this.snapshot();
-    for (const listener of [...this.#listeners]) listener(snapshot);
+    // Iterate a copy, same as ChangeTracker#emit: a listener added or
+    // removed (by itself or another listener) during this emit must not
+    // corrupt or extend the iteration in progress.
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(snapshot);
+      } catch {
+        // Same isolation rule ChangeTracker applies: the panel, the startup
+        // report and the voice tool all subscribe here, and one throwing
+        // subscriber must not starve the others.
+      }
+    }
   }
 }

@@ -200,6 +200,22 @@ describe("ProviderStatusStore", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it("does not let a throwing listener starve a later one (ruling S18)", () => {
+    const store = new ProviderStatusStore(AGENTS);
+    const bad = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const good = vi.fn();
+    store.onChange(bad);
+    store.onChange(good);
+
+    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 1);
+
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledWith(store.snapshot());
+  });
+
   it("hands listeners and callers copies, so a mutation cannot reach the store", () => {
     const store = new ProviderStatusStore(AGENTS);
     const first = store.snapshot();
