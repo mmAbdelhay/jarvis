@@ -7,6 +7,8 @@ import {
   ProviderMonitor,
   ProviderStatusStore,
   SessionManager,
+  greetingText,
+  scanDirtyProjects,
 } from "@jarvis/core";
 import {
   MacSpeech,
@@ -74,6 +76,22 @@ app.whenReady().then(async () => {
     const speech = new MacSpeech({ arabicVoice: "Majed" });
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
+
+    // Started here, awaited only once the window has loaded: the greeting
+    // wants it, and nothing else does, so it runs alongside window creation
+    // instead of in front of it.
+    //
+    // Its own provider, with a 3s timeout rather than the default 30s. A
+    // project that cannot be read that fast is simply left out of the
+    // greeting — the alternative is a greeting held back half a minute by
+    // one unresponsive repository, which is a worse answer than an
+    // incomplete one.
+    const dirtyProjects = scanDirtyProjects(config.projects, createGitProvider(3_000)).catch(
+      (error) => {
+        console.error(`Launch scan failed: ${errorMessage(error)}`);
+        return [];
+      },
+    );
     // A session starting/finishing/dying re-triggers a refresh too, but
     // that subscription lives in buildWiring's onSessionsChange handler
     // below (ruling P16: this used to be subscribed here *and* there —
@@ -440,6 +458,22 @@ app.whenReady().then(async () => {
         at: Date.now(),
       });
     }
+
+    // The greeting comes first, before the health line: it is instant, it is
+    // the thing a person opening the app is owed, and the health probe takes
+    // up to 5s. Spoken as well as shown — the same string, so the two can
+    // never drift — and this is the only place the app speaks unprompted.
+    const greeting = greetingText(
+      { now: Date.now(), history: sessionStore.history(), dirtyProjects: await dirtyProjects },
+      PRIMARY_LANGUAGE,
+    );
+    window.webContents.send("turn:new", {
+      role: "assistant",
+      text: greeting,
+      language: PRIMARY_LANGUAGE,
+      at: Date.now(),
+    });
+    speech.speak(greeting, PRIMARY_LANGUAGE);
 
     const report = await reportPromise;
     console.log(report.message);
