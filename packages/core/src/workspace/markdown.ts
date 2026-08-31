@@ -191,6 +191,40 @@ function table(tokens: Token[], cursor: Cursor): DocBlock {
 // already consumed the list bullet itself.
 const TASK_MARKER = /^\[([ xX])\]\s+/;
 
+// The same marker, but against raw source lines rather than an already-
+// tokenized first text node: the bullet is still there ("- ", "* " or
+// "+ "), and this runs with the multiline + global flags to walk every
+// line of the document in one pass. Ordered markers ("1.") are never
+// matched, same restriction as the parser's own ordered ? undefined : ...
+// — GFM task lists are unordered-only.
+const RAW_TASK_MARKER = /^\s*[-*+]\s+\[([ xX])\]/gm;
+
+/**
+ * The character offset of the state character (the space or x/X between
+ * the brackets) for every task-list marker in `text`, in document order —
+ * the same order renderDocument (doc-view.ts) assigns its checkboxes'
+ * data-task-index. A caller flips one marker by replacing the single
+ * character at offsets[i] and nothing else.
+ *
+ * Known limitation: this is a line scan, not fence-aware — a line that
+ * merely *looks* like "- [ ] text" inside a fenced code block (e.g. a
+ * document explaining task-list syntax) would be miscounted. Accepted for
+ * now: real documents with checklists essentially never also show literal
+ * task-marker syntax inside a code fence, and fence-tracking would meaningfully
+ * complicate what is otherwise a single-purpose, easily-verified scan.
+ */
+export function findTaskMarkerOffsets(text: string): number[] {
+  const offsets: number[] = [];
+  for (const match of text.matchAll(RAW_TASK_MARKER)) {
+    const stateChar = match[1];
+    if (stateChar === undefined) continue;
+    // match[0] ends in "[<stateChar>]"; the state character is the second
+    // to last character of the whole match.
+    offsets.push(match.index + match[0].length - 2);
+  }
+  return offsets;
+}
+
 /**
  * Strips a leading task marker from `item`'s first paragraph in place and
  * returns its checked state, or undefined if the item is not a task at all.

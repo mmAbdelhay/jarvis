@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMarkdown } from "./markdown.js";
+import { findTaskMarkerOffsets, parseMarkdown } from "./markdown.js";
 
 const text = (value: string) => ({ kind: "text", text: value });
 
@@ -354,5 +354,59 @@ describe("parseMarkdown — task lists", () => {
     expect(outer).toMatchObject({ kind: "list", checked: [true] });
     const nested = (outer as { items: unknown[][] }).items[0]?.[1];
     expect(nested).not.toHaveProperty("checked");
+  });
+});
+
+describe("findTaskMarkerOffsets", () => {
+  it("finds no offsets in a document with no task markers", () => {
+    expect(findTaskMarkerOffsets("just a line\n- a plain item")).toEqual([]);
+  });
+
+  it("finds the state-character offset of one unchecked marker", () => {
+    const text = "- [ ] todo";
+    const offsets = findTaskMarkerOffsets(text);
+    expect(offsets).toHaveLength(1);
+    expect(text[offsets[0] as number]).toBe(" ");
+  });
+
+  it("finds the state-character offset of one checked marker", () => {
+    const text = "- [x] done";
+    const offsets = findTaskMarkerOffsets(text);
+    expect(text[offsets[0] as number]).toBe("x");
+  });
+
+  it("finds every marker in document order", () => {
+    const text = "- [ ] a\n- [x] b\n- [X] c";
+    const offsets = findTaskMarkerOffsets(text);
+    expect(offsets.map((index) => text[index])).toEqual([" ", "x", "X"]);
+  });
+
+  it("finds markers indented under a parent item", () => {
+    const text = "- outer\n  - [x] inner";
+    const offsets = findTaskMarkerOffsets(text);
+    expect(offsets).toHaveLength(1);
+    expect(text[offsets[0] as number]).toBe("x");
+  });
+
+  it("accepts *, - and + bullets alike", () => {
+    const text = "* [ ] a\n- [ ] b\n+ [ ] c";
+    expect(findTaskMarkerOffsets(text)).toHaveLength(3);
+  });
+
+  // GFM task lists are unordered-only, matching the parser's own
+  // ordered ? undefined : ... restriction — a numbered list's "1." must
+  // never be scanned as a task marker.
+  it("ignores an ordered list's numbering", () => {
+    const text = "1. [ ] looks odd but is not a task";
+    expect(findTaskMarkerOffsets(text)).toEqual([]);
+  });
+
+  it("flipping the character at an offset toggles just that marker", () => {
+    const text = "- [ ] a\n- [x] b";
+    const [first, second] = findTaskMarkerOffsets(text);
+    const flipped =
+      text.slice(0, first as number) + "x" + text.slice((first as number) + 1);
+    expect(flipped).toBe("- [x] a\n- [x] b");
+    expect(flipped[second as number]).toBe("x");
   });
 });
