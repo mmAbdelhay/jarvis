@@ -34,12 +34,14 @@ import {
   createDocsHandlers,
   createEditorHandlers,
   createGitHandlers,
+  createSettingsHandlers,
   PROVIDER_HEALTH_INTERVAL_MS,
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { isAllowedNavigation } from "./navigation.js";
-import { loadConfig } from "./config.js";
+import { DEFAULT_CONFIG_PATH, loadConfig } from "./config.js";
+import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
@@ -196,6 +198,20 @@ app.whenReady().then(async () => {
     const editor = createEditorHandlers({
       codeServer,
       projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
+    const settings = createSettingsHandlers({
+      readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
+      writeConfig: (draft) => writeSettingsFile(DEFAULT_CONFIG_PATH, draft),
+      run: runCommand,
+      // A restart the user did not ask for is the wrong kind of "helpful"
+      // — this only ever fires from the renderer's own Restart button
+      // click, after a save has already succeeded.
+      restart: () => {
+        app.relaunch();
+        app.exit(0);
+      },
       language: PRIMARY_LANGUAGE,
     });
 
@@ -366,6 +382,10 @@ app.whenReady().then(async () => {
     ipcMain.handle("editor:open", (_event, project: unknown) =>
       editor.open(typeof project === "string" ? project : ""),
     );
+    ipcMain.handle("settings:read", () => settings.read());
+    ipcMain.handle("settings:save", (_event, draft: unknown) => settings.save(draft));
+    ipcMain.handle("settings:testAgent", (_event, agent: unknown) => settings.testAgent(agent));
+    ipcMain.handle("settings:restart", () => settings.restart());
     ipcMain.handle("projects:list", () => Object.keys(config.projects));
 
     // The only user-triggered call in the app that spends money: one billed

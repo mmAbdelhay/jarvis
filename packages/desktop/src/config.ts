@@ -97,9 +97,12 @@ export function parseConfig(raw: unknown): JarvisConfig {
   };
 }
 
-export async function loadConfig(
-  path: string = join(homedir(), ".config/jarvis/jarvis.yaml"),
-): Promise<JarvisConfig> {
+/** Extracted so Settings (settings-io.ts, via main.ts) reads and writes the
+ *  exact same file `loadConfig` reads at startup, rather than duplicating
+ *  this path as a second literal that could drift from this one. */
+export const DEFAULT_CONFIG_PATH = join(homedir(), ".config/jarvis/jarvis.yaml");
+
+export async function loadConfig(path: string = DEFAULT_CONFIG_PATH): Promise<JarvisConfig> {
   const text = await readFile(path, "utf8");
   const config = parseConfig(parse(text));
   // The brain's cwd is Jarvis's own isolation artifact (see the note on
