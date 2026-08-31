@@ -92,6 +92,8 @@ async function loadApp(
     stopVoice: vi.fn(async () => {}),
     onMetrics: vi.fn(),
     onProviders: vi.fn(),
+    onWorkspace: vi.fn(),
+    getProjects: vi.fn(async () => []),
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
     },

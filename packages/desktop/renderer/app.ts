@@ -9,6 +9,7 @@ import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
 import { showView } from "./views.js";
+import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 import { renderProviders, wireProvidersPanel } from "./providers.js";
 import {
@@ -104,6 +105,23 @@ function wireNav(): void {
     if (latest === undefined) return;
     void openChanges(latest.id);
   });
+  document.getElementById("nav-workspace")?.addEventListener("click", () => {
+    releaseVoice();
+    showView("workspace");
+    // The page slot has no measurable size until its route is on screen,
+    // so the bounds are reported after showView, not before.
+    reportWorkspaceBounds();
+  });
+
+  window.jarvis.onWorkspace((state) => renderWorkspace(state));
+  // No catch here would be an unhandled rejection in the renderer on any
+  // failure downstream of the IPC call — including, as app.test.ts's
+  // minimal harness proved, a DOM that has not laid down the workspace
+  // route's markup.
+  void window.jarvis
+    .getProjects()
+    .then((projects) => initWorkspace(projects))
+    .catch(() => undefined);
 }
 
 function renderMetrics(metrics: SystemMetrics): void {
