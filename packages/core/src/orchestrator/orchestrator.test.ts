@@ -6,6 +6,7 @@ import { SessionManager } from "../session/manager.js";
 import type { ProcessHandle, Session } from "../session/types.js";
 import type { GitProvider } from "../git/types.js";
 import type { SessionChanges } from "../git/tracker.js";
+import type { ProviderStatus } from "../providers/types.js";
 
 function fakeGitProvider(overrides: Partial<GitProvider> = {}): GitProvider {
   return {
@@ -72,6 +73,7 @@ describe("Orchestrator", () => {
       changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
+      providers: { snapshot: () => [], refresh: async () => {} },
     });
 
   it("records the user turn before answering", async () => {
@@ -229,6 +231,7 @@ describe("Orchestrator", () => {
       changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
+      providers: { snapshot: () => [], refresh: async () => {} },
     });
     const turn = await orchestrator.handle("open acme", "en");
     expect(turn.role).toBe("assistant");
@@ -400,6 +403,7 @@ describe("Orchestrator", () => {
       changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
+      providers: { snapshot: () => [], refresh: async () => {} },
     });
     const turn = await orchestrator.handle("افتح سعودي سيل", "ar");
     expect(turn.text).toContain("تعذر بدء الجلسة");
@@ -525,6 +529,7 @@ describe("Orchestrator", () => {
       changes: () => [],
       speak,
       projects: { a: "/Users/x/projects/a" },
+      providers: { snapshot: () => [], refresh: async () => {} },
     });
     const turn = await orchestrator.handle("open both", "en");
     const second = sessions.list()[1];
@@ -668,6 +673,7 @@ describe("git tools", () => {
     brain: Brain;
     git?: GitProvider;
     changes?: () => SessionChanges[];
+    providers?: { snapshot(): ProviderStatus[]; refresh(): Promise<void> };
   }): Orchestrator {
     return new Orchestrator({
       brain: options.brain,
@@ -677,6 +683,7 @@ describe("git tools", () => {
       changes: options.changes ?? (() => []),
       speak,
       projects: { acme: "/Users/x/projects/acme" },
+      providers: options.providers ?? { snapshot: () => [], refresh: async () => {} },
     });
   }
 
@@ -1108,5 +1115,97 @@ describe("git tools", () => {
     await orchestrator.handle("two", "en");
 
     expect(seen).toEqual([1, 5]);
+  });
+
+  describe("providers.status", () => {
+    const statuses: ProviderStatus[] = [
+      {
+        id: "claude-mm",
+        vendor: "anthropic",
+        capacity: {
+          state: "known",
+          fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00Z" },
+          sevenDay: undefined,
+          readAt: Date.parse("2026-08-31T12:12:00Z"),
+        },
+        health: { state: "ok", detail: "ok", readAt: 1 },
+      },
+      {
+        id: "copilot",
+        vendor: "github",
+        capacity: { state: "unknown", reason: "unsupported" },
+        health: { state: "degraded", detail: "Partially Degraded Service", readAt: 1 },
+      },
+    ];
+
+    it("answers with one line per provider, without spending a query", async () => {
+      const refresh = vi.fn(async () => {});
+      const brain: Brain = {
+        ask: async () => ({ text: "", toolCalls: [{ name: "providers.status", input: {} }] }),
+      };
+      const orchestrator = buildOrchestrator({
+        brain,
+        providers: { snapshot: () => statuses, refresh },
+      });
+
+      const turn = await orchestrator.handle("which account can I use", "en");
+
+      expect(turn.text).toContain("claude-mm");
+      expect(turn.text).toContain("38%");
+      expect(turn.text).toContain("copilot");
+      // Reading the cache is free; a spoken question must not silently bill.
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("refreshes first when the user explicitly asks for a fresh reading", async () => {
+      const refresh = vi.fn(async () => {});
+      const brain: Brain = {
+        ask: async () => ({
+          text: "",
+          toolCalls: [{ name: "providers.status", input: { refresh: "yes" } }],
+        }),
+      };
+      const orchestrator = buildOrchestrator({
+        brain,
+        providers: { snapshot: () => statuses, refresh },
+      });
+
+      await orchestrator.handle("check the accounts now", "en");
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("still answers from the cache when a refresh fails", async () => {
+      const brain: Brain = {
+        ask: async () => ({
+          text: "",
+          toolCalls: [{ name: "providers.status", input: { refresh: "yes" } }],
+        }),
+      };
+      const orchestrator = buildOrchestrator({
+        brain,
+        providers: {
+          snapshot: () => statuses,
+          refresh: async () => {
+            throw new Error("offline");
+          },
+        },
+      });
+
+      const turn = await orchestrator.handle("check now", "en");
+      expect(turn.text).toContain("claude-mm");
+    });
+
+    it("answers in Arabic when the user spoke Arabic", async () => {
+      const brain: Brain = {
+        ask: async () => ({ text: "", toolCalls: [{ name: "providers.status", input: {} }] }),
+      };
+      const orchestrator = buildOrchestrator({
+        brain,
+        providers: { snapshot: () => statuses, refresh: async () => {} },
+      });
+
+      const turn = await orchestrator.handle("أي حساب أقدر أستخدم؟", "ar");
+      expect(turn.text).toContain("المتبقي 38%");
+    });
   });
 });

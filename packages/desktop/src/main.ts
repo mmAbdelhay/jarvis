@@ -80,6 +80,8 @@ app.whenReady().then(async () => {
       changes: () => changeTracker.snapshot(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
+      // Task 11 wires the real ProviderMonitor here.
+      providers: { snapshot: () => [], refresh: async () => {} },
     });
 
     const window = new BrowserWindow({
