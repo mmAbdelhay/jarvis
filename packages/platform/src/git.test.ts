@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -334,6 +334,38 @@ describe("createGitProvider().diff", () => {
     const dir = await makeRepo();
     const outcome = await createGitProvider().diff(dir, "/etc/passwd");
     expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses an untracked symlink whose target resolves outside the repository (P17)", async () => {
+    const dir = await makeRepo();
+    const secretDir = await mkdtemp(join(tmpdir(), "jarvis-secret-"));
+    cleanups.push(() => rm(secretDir, { recursive: true, force: true }));
+    const secretPath = join(secretDir, "id_rsa");
+    await writeFile(secretPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n", "utf8");
+
+    // insideRepo() is a lexical-only check on the *link's own* path
+    // ("link.txt" — no "../", not absolute) and would pass it; the escape
+    // is entirely in what the link resolves to.
+    await symlink(secretPath, join(dir, "link.txt"));
+
+    const outcome = await createGitProvider().diff(dir, "link.txt");
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    // Must be a normal GitOutcome failure, never leak the secret content.
+    expect(JSON.stringify(outcome)).not.toContain("secret");
+  });
+
+  it("still reads a legitimate untracked file when the repo itself sits under a symlinked root", async () => {
+    // makeRepo() already creates its repo under os.tmpdir(), which is
+    // itself a symlink on macOS (/tmp -> /private/tmp) — this is the
+    // regression the P17 fix (comparing resolved repo root vs resolved
+    // file) most easily causes if only one side were resolved.
+    const dir = await makeRepo();
+    await writeFile(join(dir, "new.txt"), "alpha\nbeta\n", "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "new.txt");
+    if (!outcome.ok) throw new Error("expected ok, got failure");
+    expect(outcome.value.hunks[0]?.lines.map((line) => line.text)).toEqual(["alpha", "beta"]);
   });
 
   it("returns an empty diff, not a failure, for an unchanged file", async () => {

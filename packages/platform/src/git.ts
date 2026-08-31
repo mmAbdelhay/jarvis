@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, normalize } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
 import type {
   GitChanges,
@@ -136,6 +136,35 @@ function insideRepo(filePath: string): boolean {
   return !normalized.startsWith("..") && normalized !== ".";
 }
 
+/**
+ * insideRepo() above is a lexical check only — it never touches the
+ * filesystem, so it cannot see that an untracked path inside the repo is a
+ * symlink whose target resolves *outside* it (ruling P17: an agent, which
+ * routinely creates files as part of the product, can plant a symlink to
+ * e.g. ~/.ssh/id_rsa; the untracked-file branch below would then read the
+ * link's target and hand its contents to the Changes view). realpath()
+ * resolves symlinks (and any intermediate ones in the path); both sides are
+ * resolved before comparing because the repo root itself can be reached
+ * through a symlink too (/tmp is one on macOS) — resolving only filePath
+ * would make every legitimate repo created under a symlinked root fail this
+ * check.
+ */
+async function resolvesInsideRepo(repoPath: string, filePath: string): Promise<boolean> {
+  try {
+    const [realRepo, realTarget] = await Promise.all([
+      realpath(repoPath),
+      realpath(join(repoPath, filePath)),
+    ]);
+    const rel = relative(realRepo, realTarget);
+    return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  } catch {
+    // A dangling symlink (target doesn't exist) or a repo path that
+    // vanished mid-check can't be proven safe, so it's refused rather than
+    // read.
+    return false;
+  }
+}
+
 // A huge repo, a stalled index lock, or a network-mounted .git can make the
 // real git binary never return. GitOutcome has no way to express "still
 // running" — a hang here is the one gap the discriminated union can't
@@ -196,6 +225,9 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         const untracked = status.not_added.some((path) => path === filePath);
 
         if (untracked) {
+          if (!(await resolvesInsideRepo(repoPath, filePath))) {
+            return failure("failed", `path outside the repository: ${filePath}`);
+          }
           const info = await stat(join(repoPath, filePath));
           if (info.size > MAX_DIFF_BYTES) {
             return { ok: true, value: { path: filePath, binary: false, tooLarge: true, hunks: [] } };
