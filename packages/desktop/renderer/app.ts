@@ -1,7 +1,7 @@
 import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
+import { applyStaticChrome, openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
@@ -37,6 +37,7 @@ window.jarvis.onChangeCounts((changes) => {
 });
 
 startClock();
+applyStaticChrome();
 wireComposer();
 wireMicButton();
 wireHistoryPanel();
@@ -115,23 +116,8 @@ function buildSessionRow(session: Session): HTMLElement {
   spacer.style.flexGrow = "1";
   head.append(spacer);
 
-  // A past session (endedAt set) must not show a live change count: the
-  // counts map is fed only by the live "git:counts" stream, so a stale id
-  // lingering in that snapshot would otherwise put a live-looking badge on
-  // a finished session. Task 16 will persist each session's own recorded
-  // counts; until then, showing nothing is honest.
-  const changes = session.endedAt === undefined ? latestChanges.get(session.id) : undefined;
-  if (changes !== undefined && (changes.insertions > 0 || changes.deletions > 0)) {
-    const diff = document.createElement("div");
-    diff.className = "session__diff mono";
-    // dir is pinned LTR: this is a numeric counter with +/− signs, and an
-    // RTL ancestor would otherwise reorder the sign and the digits.
-    diff.dir = "ltr";
-    // One space, matching design/Main.dc.html lines 96 and 107 verbatim
-    // (a single bordered pill carrying both numbers, not two spans).
-    diff.textContent = `+${changes.insertions} −${changes.deletions}`;
-    head.append(diff);
-  }
+  const diffBadge = buildDiffBadge(session, latestChanges.get(session.id));
+  if (diffBadge !== undefined) head.append(diffBadge);
 
   const state = document.createElement("span");
   state.className = "session__state mono";
@@ -152,8 +138,51 @@ function buildSessionRow(session: Session): HTMLElement {
 
   row.append(head, summary, meta);
   // The dashboard is where a user picks which session's changes to read.
-  row.addEventListener("click", () => void openChanges(session.id));
+  // This row is shared with the History panel (buildHistoryRow below), whose
+  // full-screen `.history-overlay` sits on top of everything else — without
+  // closing it first, openChanges() renders the Changes view underneath the
+  // scrim and the click appears to do nothing (I1). Closing it here is a
+  // no-op for the live Sessions panel, where the overlay is already hidden.
+  row.addEventListener("click", () => {
+    closeHistoryOverlay();
+    void openChanges(session.id);
+  });
   return row;
+}
+
+// A live session's badge comes only from the live tracker stream, and only
+// when there is something to show. A past session's badge comes only from
+// its own *recorded* counts (SessionStore.updateGit, frozen at end by
+// ruling P28's ChangeTracker fix) — never the live tracker, whose entry for
+// a finished session's repoPath could by now belong to whatever different
+// session (or the user's own edits) is currently touching that same
+// project (ruling P21). `branch === ""` is the honest "never recorded
+// anything for this session" signal: SessionStore's upsert() never writes
+// the git columns at all, so a session that ended before any refresh cycle
+// (or before Task 16 existed) is left at that column's schema default,
+// which no real git read ever produces. That case renders no badge — kept
+// visibly different from a genuine "recorded zero changes" session, which
+// still renders "+0 −0" rather than being silently indistinguishable from
+// "we have no idea" (the exact conflation ruling P21 exists to avoid).
+function buildDiffBadge(session: Session, live: SessionChanges | undefined): HTMLElement | undefined {
+  if (session.endedAt === undefined) {
+    if (live === undefined || (live.insertions === 0 && live.deletions === 0)) return undefined;
+    return diffPill(live.insertions, live.deletions);
+  }
+  if (session.branch === undefined || session.branch === "") return undefined;
+  return diffPill(session.insertions ?? 0, session.deletions ?? 0);
+}
+
+function diffPill(insertions: number, deletions: number): HTMLElement {
+  const diff = document.createElement("div");
+  diff.className = "session__diff mono";
+  // dir is pinned LTR: this is a numeric counter with +/− signs, and an
+  // RTL ancestor would otherwise reorder the sign and the digits.
+  diff.dir = "ltr";
+  // One space, matching design/Main.dc.html lines 96 and 107 verbatim
+  // (a single bordered pill carrying both numbers, not two spans).
+  diff.textContent = `+${insertions} −${deletions}`;
+  return diff;
 }
 
 function summaryFallback(state: SessionState): string {
@@ -222,15 +251,20 @@ function wireHistoryPanel(): void {
         renderHistoryList([]);
       });
   };
-  const close = (): void => {
-    overlay.hidden = true;
-  };
-
   button?.addEventListener("click", open);
-  closeButton?.addEventListener("click", close);
+  closeButton?.addEventListener("click", closeHistoryOverlay);
   overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
+    if (event.target === overlay) closeHistoryOverlay();
   });
+}
+
+// Shared with buildSessionRow's row click handler (I1): a History row opens
+// the Changes view behind this same full-screen overlay unless it is closed
+// first. A no-op when the overlay doesn't exist yet (app.test.ts's minimal
+// DOM harness) or is already hidden.
+function closeHistoryOverlay(): void {
+  const overlay = document.getElementById("history-overlay");
+  if (overlay instanceof HTMLElement) overlay.hidden = true;
 }
 
 function renderHistoryList(sessions: Session[]): void {
