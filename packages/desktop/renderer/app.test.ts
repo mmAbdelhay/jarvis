@@ -10,13 +10,14 @@
 // #clock-date so startClock has somewhere to write, #voice-state itself),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session } from "@jarvis/core";
+import type { Session, SessionChanges } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
 
 type Callbacks = {
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
   onSessions?: (sessions: Session[]) => void;
+  onChangeCounts?: (changes: SessionChanges[]) => void;
 };
 
 async function loadApp(getHistory: () => Promise<Session[]> = async () => []): Promise<Callbacks> {
@@ -45,6 +46,9 @@ async function loadApp(getHistory: () => Promise<Session[]> = async () => []): P
     onMetrics: vi.fn(),
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
+    },
+    onChangeCounts: (cb: (changes: SessionChanges[]) => void) => {
+      callbacks.onChangeCounts = cb;
     },
     onTurn: vi.fn(),
     onListening: (cb: (listening: boolean) => void) => {
@@ -305,5 +309,140 @@ describe("Arabic project names", () => {
     const project = document.querySelector("#sessions .session__project");
     expect((project as HTMLElement).dir).toBe("ltr");
     expect(project?.classList.contains("arabic")).toBe(false);
+  });
+});
+
+function makeChanges(overrides: Partial<SessionChanges> = {}): SessionChanges {
+  return {
+    sessionId: "s1",
+    project: "acme",
+    repoPath: "/p/acme",
+    branch: "main",
+    detached: false,
+    files: 7,
+    insertions: 128,
+    deletions: 34,
+    ...overrides,
+  };
+}
+
+describe("session change-count badges", () => {
+  it("puts insertion and deletion counts on the session row that owns them", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1", project: "acme" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128");
+    // U+2212 minus sign, matching the artboard's "−34" — not an ASCII hyphen.
+    expect(row?.textContent).toContain("−34");
+  });
+
+  it("shows no counts for a session with no known changes", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s2", project: "storefront" })]);
+    onChangeCounts?.([]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders no badge for a session that has no entry in the counts snapshot at all", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ id: "s3" })]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("does not render a +0 −0 badge for a session whose changes are all zero", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", files: 0, insertions: 0, deletions: 0 })]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders a badge when only one side is non-zero (insertions only)", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", insertions: 8, deletions: 0 })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+8");
+    expect(row?.textContent).toContain("−0");
+  });
+
+  // The tracker refreshes on its own interval, independent of session
+  // updates, so counts can land on either channel first. Both must
+  // eventually paint the same row.
+  it("renders the badge once the session row appears, even if counts arrived first", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).toBeNull();
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+  });
+
+  it("keeps showing a session's counts across a re-render triggered by the other channel", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1", state: "running" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+
+    // A session state change re-renders the row from `latestSessions` alone;
+    // the counts map must not be forgotten.
+    onSessions?.([makeSession({ id: "s1", state: "waiting" })]);
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128");
+  });
+
+  it("drops the badge once a session that ended is no longer in either snapshot", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+
+    // The session ends: SessionManager drops it from the live list, and the
+    // tracker's next refresh (it only walks live sessions) stops including
+    // it in the snapshot it broadcasts.
+    onSessions?.([]);
+    onChangeCounts?.([]);
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders very large counts without breaking the row's layout classes", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", insertions: 128_734, deletions: 40_921 })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128734");
+    expect(row?.textContent).toContain("−40921");
+    expect(document.querySelectorAll(".session__diff").length).toBe(1);
+  });
+
+  // buildSessionRow is shared by the live panel and the History panel
+  // (Arabic project names test above pins the same sharing for dir/.arabic).
+  // A past session keeps the same id it had while live, so if the counts
+  // snapshot has not yet dropped that id, the History panel — like the live
+  // panel — will still paint it; there is no separate suppression for
+  // history rows. This test documents that actual, current behavior rather
+  // than asserting an untested guess about it.
+  it("history rows share the same badge rendering as live rows, including a stale entry that has not been dropped from the snapshot yet", async () => {
+    const past = makeSession({ id: "s1", project: "acme", endedAt: 5000 });
+    const { onChangeCounts } = await loadApp(async () => [past]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = document.querySelector("#history-list .session");
+    expect(row?.querySelector(".session__diff")).not.toBeNull();
+    expect(row?.textContent).toContain("+128");
   });
 });

@@ -1,4 +1,4 @@
-import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
+import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
@@ -15,11 +15,25 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
+// The two inputs arrive on independent channels: sessions on "sessions:update"
+// and counts on "git:counts". Both are kept so whichever lands second can
+// re-render with the other's latest value, instead of the row losing its
+// counts every time a session's state changes.
+let latestSessions: Session[] = [];
+let latestChanges = new Map<string, SessionChanges>();
+
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
-window.jarvis.onSessions((sessions) => renderSessions(sessions));
+window.jarvis.onSessions((sessions) => {
+  latestSessions = sessions;
+  renderSessions(latestSessions);
+});
 window.jarvis.onTurn((turn) => renderTurn(turn));
 window.jarvis.onListening((listening) => renderListening(listening));
 window.jarvis.onNotice((notice) => renderNotice(notice));
+window.jarvis.onChangeCounts((changes) => {
+  latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
+  renderSessions(latestSessions);
+});
 
 startClock();
 wireComposer();
@@ -102,6 +116,26 @@ function buildSessionRow(session: Session): HTMLElement {
   const meta = document.createElement("div");
   meta.className = "session__meta mono";
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
+
+  const changes = latestChanges.get(session.id);
+  if (changes !== undefined && (changes.insertions > 0 || changes.deletions > 0)) {
+    const diff = document.createElement("div");
+    diff.className = "session__diff mono";
+    // dir is pinned LTR: these are numeric counters with +/− signs, and an
+    // RTL ancestor would otherwise reorder the sign and the digits.
+    diff.dir = "ltr";
+
+    const added = document.createElement("span");
+    added.className = "diff-add";
+    added.textContent = `+${changes.insertions}`;
+
+    const removed = document.createElement("span");
+    removed.className = "diff-del";
+    removed.textContent = `−${changes.deletions}`;
+
+    diff.append(added, removed);
+    meta.append(diff);
+  }
 
   row.append(head, summary, meta);
   return row;

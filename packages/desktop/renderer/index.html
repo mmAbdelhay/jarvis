@@ -25,6 +25,10 @@
     --text-dim: #cfe4ec;
     --good: #5fb87a;
     --bad: #b85f5f;
+    /* The "−34" deletions color from design/GitChanges.dc.html. Insertions
+       reuse --good (already #5fb87a, the same value the artboard uses for
+       "+128") rather than a duplicate token. */
+    --del: #d9645a;
   }
 
   * { box-sizing: border-box; }
@@ -324,6 +328,19 @@
     font-size: 9px;
     color: var(--text-muted);
   }
+
+  .session__diff {
+    display: flex;
+    gap: 7px;
+    margin-inline-start: auto;
+    font-size: 9px;
+  }
+
+  /* margin-inline-start rather than margin-left: the row flips under an
+     RTL ancestor and the counts must stay on the row's trailing edge
+     either way. */
+  .diff-add { color: var(--good); }
+  .diff-del { color: var(--del); }
 
   .col-center {
     display: flex;
