@@ -1,4 +1,4 @@
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
 import type { CapacityReading, RateWindow } from "@jarvis/core";
 
 /**
@@ -35,7 +35,13 @@ export type UsageQuery = {
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<unknown>;
 };
 
-export type OpenUsageQuery = (configDir: string) => UsageQuery;
+/**
+ * The seam this module is opened through. Deliberately the *query function*
+ * itself, not a wrapper that already baked in `cwd`/`settingSources`/`tools`
+ * (the way `brain.ts`'s `SdkQueryFn` works) — so that a test can inspect the
+ * exact `options` object this module builds, instead of trusting it blindly.
+ */
+export type CapacityQueryFn = (params: { prompt: string; options: Options }) => UsageQuery;
 
 const UNAVAILABLE: CapacityReading = { ok: false, reason: "unavailable" };
 
@@ -97,11 +103,10 @@ export function parseUsage(raw: unknown): CapacityReading {
  * for writing". After reading, the stream is drained to the end rather than
  * broken out of, so the child process finishes and exits on its own.
  */
-async function runRead(open: OpenUsageQuery, configDir: string): Promise<CapacityReading> {
+async function runRead(query: UsageQuery): Promise<CapacityReading> {
   let raw: unknown;
   let read = false;
 
-  const query = open(configDir);
   for await (const message of query) {
     if (read || message.type !== "assistant") continue;
     read = true;
@@ -112,6 +117,10 @@ async function runRead(open: OpenUsageQuery, configDir: string): Promise<Capacit
   return parseUsage(raw);
 }
 
+function defaultQuery(params: { prompt: string; options: Options }): UsageQuery {
+  return sdkQuery(params);
+}
+
 export function createCapacityReader(config: {
   /**
    * A directory with no `.claude` project config of its own — the same
@@ -120,36 +129,40 @@ export function createCapacityReader(config: {
    * brain's cwd.
    */
   cwd: string;
-  open?: OpenUsageQuery;
+  query?: CapacityQueryFn;
   timeoutMs?: number;
 }): (configDir: string) => Promise<CapacityReading> {
   const timeoutMs = config.timeoutMs ?? CAPACITY_TIMEOUT_MS;
-  const open: OpenUsageQuery =
-    config.open ??
-    ((configDir) =>
-      sdkQuery({
-        // One word. The reading is a side effect of the round trip, so the
-        // prompt exists only to make the trip as small as it can be.
-        prompt: "ok",
-        options: {
-          maxTurns: 1,
-          cwd: config.cwd,
-          settingSources: [],
-          tools: [],
-          // This is what makes the reading belong to THIS account: the SDK
-          // subprocess is pointed at that account's config directory, the
-          // same mechanism the user's own wrapper scripts use.
-          env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
-        },
-      }));
+  const query = config.query ?? defaultQuery;
 
   return async (configDir: string): Promise<CapacityReading> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Owned so the child process can be torn down, not just abandoned, on
+    // the timeout path — a hung read must not become a billed subprocess
+    // that keeps running (and keeps spending) after this call has already
+    // resolved.
+    const abortController = new AbortController();
     try {
+      const options: Options = {
+        maxTurns: 1,
+        cwd: config.cwd,
+        settingSources: [],
+        tools: [],
+        abortController,
+        // This is what makes the reading belong to THIS account: the SDK
+        // subprocess is pointed at that account's config directory, the
+        // same mechanism the user's own wrapper scripts use.
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      };
+
+      // One word. The reading is a side effect of the round trip, so the
+      // prompt exists only to make the trip as small as it can be.
+      const opened = query({ prompt: "ok", options });
+
       const timeout = new Promise<CapacityReading>((resolve) => {
         timer = setTimeout(() => resolve(UNAVAILABLE), timeoutMs);
       });
-      return await Promise.race([runRead(open, configDir), timeout]);
+      return await Promise.race([runRead(opened), timeout]);
     } catch {
       // A throw from the experimental API, a spawn failure, a shape change
       // mid-iteration: all of them are "we don't know", never a rejection
@@ -157,6 +170,10 @@ export function createCapacityReader(config: {
       return UNAVAILABLE;
     } finally {
       clearTimeout(timer);
+      // Whether this resolved by finishing the drain, by timing out, or by
+      // throwing: the subprocess is never left to run (and bill) unwatched
+      // past this call's own lifetime.
+      abortController.abort();
     }
   };
 }
