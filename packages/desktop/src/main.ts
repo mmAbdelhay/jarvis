@@ -42,14 +42,12 @@ app.whenReady().then(async () => {
     const speech = new MacSpeech({ arabicVoice: "Majed" });
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
-    // Refreshed whenever a session starts/finishes/dies (the same event
-    // SessionManager already emits for the sessions list) so the counts
-    // the brain reads on the next turn are never more than one session
-    // transition stale. A git problem never blocks this — refresh() itself
-    // treats a broken repo as "no counts" rather than throwing.
-    sessions.onChange(() => {
-      void changeTracker.refresh();
-    });
+    // A session starting/finishing/dying re-triggers a refresh too, but
+    // that subscription lives in buildWiring's onSessionsChange handler
+    // below (ruling P16: this used to be subscribed here *and* there —
+    // every session transition fired two refreshes, and this copy was
+    // never unsubscribed, unlike wiring's own teardown in `stop()`). Only
+    // the initial refresh, before wiring exists, stays here.
     void changeTracker.refresh();
 
     const orchestrator = new Orchestrator({
