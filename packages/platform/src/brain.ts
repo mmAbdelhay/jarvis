@@ -168,6 +168,17 @@ export function createBrain(config: BrainConfig): Brain {
     }): Promise<BrainReply> {
       const prompt = buildPrompt(config.systemPrompt, text, tools, context);
 
+      // Deleting rather than leaving it set-or-unset keeps the child's env
+      // identical regardless of whether this process happens to have the
+      // key set: an inherited ANTHROPIC_API_KEY would make the SDK
+      // subprocess authenticate by key instead of the target account's
+      // subscription, so every account would silently report
+      // rate_limits_available: false forever, with nothing to explain why
+      // (mirrors capacity.ts's identical guard, for the same reason, for the
+      // whole turn rather than just a capacity read).
+      const env = { ...process.env };
+      delete env["ANTHROPIC_API_KEY"];
+
       const options: Options = {
         cwd: config.cwd,
         // SDK isolation mode: no project/user/local settings, hooks, or
@@ -180,7 +191,7 @@ export function createBrain(config: BrainConfig): Brain {
         ...(sessionId === undefined ? {} : { resume: sessionId }),
         ...(config.configDir === undefined
           ? {}
-          : { env: { ...process.env, CLAUDE_CONFIG_DIR: config.configDir } }),
+          : { env: { ...env, CLAUDE_CONFIG_DIR: config.configDir } }),
       };
 
       let replyText = "";

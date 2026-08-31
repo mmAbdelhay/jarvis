@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { BrainContext, ToolSpec } from "@jarvis/core";
 import { createBrain, parseCliReply, type BrainSdkMessage, type SdkQueryFn } from "./brain.js";
 
@@ -501,6 +502,37 @@ describe("capacity piggyback", () => {
     });
     expect(reply.text).toBe("hi");
     expect(onUsage).not.toHaveBeenCalled();
+  });
+
+  it("strips a set ANTHROPIC_API_KEY from the child env, matching capacity.ts", async () => {
+    const original = process.env["ANTHROPIC_API_KEY"];
+    process.env["ANTHROPIC_API_KEY"] = "sk-ant-should-not-reach-the-child";
+    try {
+      let capturedOptions: Options | undefined;
+      const brain = createBrain({
+        systemPrompt: "p",
+        cwd: "/tmp/brain",
+        accountId: "claude-mm",
+        configDir: "/c/mm",
+        onUsage: vi.fn(),
+        query: ({ options }) => {
+          capturedOptions = options;
+          return usageQuery(messages, usage)();
+        },
+      });
+
+      await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+
+      const env = capturedOptions?.env as Record<string, string> | undefined;
+      expect(env).toBeDefined();
+      expect(env?.["ANTHROPIC_API_KEY"]).toBeUndefined();
+      // The account override still wins — stripping the key must not
+      // disturb the config-dir attribution the whole feature depends on.
+      expect(env?.["CLAUDE_CONFIG_DIR"]).toBe("/c/mm");
+    } finally {
+      if (original === undefined) delete process.env["ANTHROPIC_API_KEY"];
+      else process.env["ANTHROPIC_API_KEY"] = original;
+    }
   });
 });
 
