@@ -53,10 +53,29 @@ export function gitChangesText(changes: GitChanges, fileCount: number, language:
 // make that mistake catchable by ear. Label/value form again, for the same
 // Arabic-agreement reason as gitChangesText, and every value sits at the
 // tail of its own clause for the same bidi reason.
-export function gitCommitText(result: GitCommitResult, project: string, language: Language): string {
-  return language === "ar"
-    ? `تم الكوميت: ${result.sha}. المشروع: ${project}. عدد الملفات: ${result.filesChanged}.`
-    : `Committed: ${result.sha}. Project: ${project}. Files: ${result.filesChanged}.`;
+// `excludedUntracked` (ruling P27): voice commit stages only what the user
+// already staged by hand, falling back to tracked-modified files when
+// nothing was staged — it never auto-stages untracked files. When that
+// leaves untracked files out of the commit, this says so as one more
+// label/value clause (same Arabic-agreement-sidestepping shape as the rest
+// of this function) rather than letting the user assume "commit" swept up
+// everything git status showed.
+export function gitCommitText(
+  result: GitCommitResult,
+  project: string,
+  language: Language,
+  excludedUntracked = 0,
+): string {
+  const base =
+    language === "ar"
+      ? `تم الكوميت: ${result.sha}. المشروع: ${project}. عدد الملفات: ${result.filesChanged}.`
+      : `Committed: ${result.sha}. Project: ${project}. Files: ${result.filesChanged}.`;
+  if (excludedUntracked <= 0) return base;
+  const excluded =
+    language === "ar"
+      ? ` ملفات غير متتبعة استُبعدت: ${excludedUntracked}.`
+      : ` Untracked files left out: ${excludedUntracked}.`;
+  return base + excluded;
 }
 
 // Branches on both `binary` and `tooLarge` (ruling P8's flag) so a file the

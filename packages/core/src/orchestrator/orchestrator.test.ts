@@ -737,7 +737,7 @@ describe("git tools", () => {
     expect(turn.text).toContain("Opened the diff for a.php");
   });
 
-  it("stages every changed file before committing", async () => {
+  it("falls back to staging tracked-modified files when nothing is staged", async () => {
     const staged: string[][] = [];
     const orchestrator = buildOrchestrator({
       brain: {
@@ -761,6 +761,89 @@ describe("git tools", () => {
 
     expect(staged).toEqual([["a.php"]]);
     expect(turn.text).toContain("a1b2c3d");
+  });
+
+  // Controller ruling P27: voice commit must agree with what the user
+  // already staged by hand, never override it with "everything git status
+  // shows".
+  it("commits only files the user already staged, without staging anything new", async () => {
+    const staged: string[][] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "fix" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        changes: async (repoPath) => ({
+          ok: true,
+          value: {
+            repoPath,
+            branch: "feat/checkout-retry",
+            detached: false,
+            files: [
+              { path: "a.php", status: "M", insertions: 3, deletions: 1, staged: true },
+              { path: "b.php", status: "M", insertions: 1, deletions: 0, staged: false },
+              { path: "scratch.txt", status: "?", insertions: 0, deletions: 0, staged: false },
+            ],
+            insertions: 4,
+            deletions: 1,
+          },
+        }),
+        stage: async (_repoPath, paths) => {
+          staged.push(paths);
+          return { ok: true, value: null };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("commit", "en");
+
+    // Nothing is staged again: a.php was already staged, b.php and the
+    // untracked scratch.txt are deliberately left alone.
+    expect(staged).toEqual([]);
+    expect(turn.text).toContain("a1b2c3d");
+  });
+
+  it("never auto-stages an untracked file, even in the fallback path, and names the count left out", async () => {
+    const staged: string[][] = [];
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async () => ({
+          text: "ok",
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "احفظ" } }],
+        }),
+      },
+      git: fakeGitProvider({
+        changes: async (repoPath) => ({
+          ok: true,
+          value: {
+            repoPath,
+            branch: "feat/checkout-retry",
+            detached: false,
+            files: [
+              { path: "a.php", status: "M", insertions: 3, deletions: 1, staged: false },
+              { path: ".env.local", status: "?", insertions: 0, deletions: 0, staged: false },
+              { path: "scratch.txt", status: "?", insertions: 0, deletions: 0, staged: false },
+            ],
+            insertions: 3,
+            deletions: 1,
+          },
+        }),
+        stage: async (_repoPath, paths) => {
+          staged.push(paths);
+          return { ok: true, value: null };
+        },
+      }),
+    });
+    await startTestSession(orchestrator, "s1");
+
+    const turn = await orchestrator.handle("احفظ التغييرات", "ar");
+
+    expect(staged).toEqual([["a.php"]]);
+    expect(turn.text).toContain("ملفات غير متتبعة استُبعدت: 2.");
   });
 
   it("reports a git failure in the user's language and still answers", async () => {

@@ -52,7 +52,8 @@ const TOOLS = [
   },
   {
     name: "git.commit",
-    description: "Stage every changed file in a session's project and commit them",
+    description:
+      "Commit the files already staged in a session's project; if none are staged, stage and commit its tracked modified files (never untracked ones)",
     inputSchema: {
       sessionId: "id of a session, from the list of running sessions",
       message: "the commit message, in the language the user used",
@@ -332,15 +333,29 @@ export class Orchestrator {
       return { context: {}, error: gitFailureText(changes.error, language) };
     }
 
-    // The tool's contract is "stage every changed file and commit them", so
-    // staging happens here rather than being a second thing the model has to
-    // remember to ask for.
-    const staged = await this.#options.git.stage(
-      target.repoPath,
-      changes.value.files.map((file) => file.path),
-    );
-    if (!staged.ok) {
-      return { context: {}, error: gitFailureText(staged.error, language) };
+    // Controller ruling P27 (reversing the earlier "stage every changed
+    // file" reading): the click lane and the voice lane must agree on what
+    // "commit" means. If the user already staged files by hand in the
+    // Changes view, voice commits exactly those — never a wider set the
+    // model happened to see in `git status`. Only when nothing is staged
+    // does this fall back to tracked-modified files, so a plain "save my
+    // work" with no manual staging still does something. Either way,
+    // untracked files (`status === "?"`) are never auto-staged: a scratch
+    // file or `.env.local` sitting untracked in the tree must never ride
+    // along on a voice commit neither lane asked for.
+    const alreadyStaged = changes.value.files.filter((file) => file.staged);
+    const toStage = alreadyStaged.length > 0
+      ? []
+      : changes.value.files.filter((file) => file.status !== "?");
+
+    if (toStage.length > 0) {
+      const staged = await this.#options.git.stage(
+        target.repoPath,
+        toStage.map((file) => file.path),
+      );
+      if (!staged.ok) {
+        return { context: {}, error: gitFailureText(staged.error, language) };
+      }
     }
 
     const message = stringInput(call.input, "message");
@@ -348,9 +363,17 @@ export class Orchestrator {
     if (!outcome.ok) {
       return { context: {}, error: gitFailureText(outcome.error, language) };
     }
+
+    const included = new Set(
+      (alreadyStaged.length > 0 ? alreadyStaged : toStage).map((file) => file.path),
+    );
+    const excludedUntracked = changes.value.files.filter(
+      (file) => file.status === "?" && !included.has(file.path),
+    ).length;
+
     return {
       context: { sessionId: target.sessionId, view: "changes" },
-      error: gitCommitText(outcome.value, target.project, language),
+      error: gitCommitText(outcome.value, target.project, language, excludedUntracked),
     };
   }
 

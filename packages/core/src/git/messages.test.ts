@@ -80,6 +80,20 @@ describe("gitCommitText", () => {
     expect(arabic).toContain("الكوميت");
     expect(arabic).not.toContain("الالتزام");
   });
+
+  it("says nothing about untracked files when none were excluded", () => {
+    const en = gitCommitText({ sha: "a1b2c3d", filesChanged: 1 }, "p", "en");
+    const ar = gitCommitText({ sha: "a1b2c3d", filesChanged: 1 }, "p", "ar");
+    expect(en).not.toContain("Untracked");
+    expect(ar).not.toContain("غير متتبعة");
+  });
+
+  it("names the excluded-untracked count as a label/value clause, in both languages", () => {
+    const en = gitCommitText({ sha: "a1b2c3d", filesChanged: 1 }, "p", "en", 2);
+    const ar = gitCommitText({ sha: "a1b2c3d", filesChanged: 1 }, "p", "ar", 2);
+    expect(en).toContain("Untracked files left out: 2.");
+    expect(ar).toContain("ملفات غير متتبعة استُبعدت: 2.");
+  });
 });
 
 describe("gitDiffOpenedText", () => {
