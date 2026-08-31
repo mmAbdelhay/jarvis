@@ -61,6 +61,24 @@ export const MESSAGES = {
     language === "ar"
       ? `انتهت هذه الجلسة — ما يظهر أدناه هو الحالة الحالية للمستودع، وليس بالضرورة ما كتبه ${agentId}.`
       : `This session has ended — what's shown below is the repository's current state, not necessarily ${agentId}'s work.`,
+  // GitFileDiff.binary: git itself (or a NUL-byte read) confirmed the file
+  // is not text, so there is no line-by-line diff to draw at all.
+  diffBinaryFile: (language: "ar" | "en"): string =>
+    language === "ar" ? "ملف ثنائي — لا يوجد فرق نصي لعرضه." : "Binary file — no text diff to show.",
+  // GitFileDiff.tooLarge (ruling P8): the file or its diff exceeded the
+  // provider's size cap and was never read, so this is deliberately a
+  // different sentence from diffBinaryFile — "too big to show" is not the
+  // same fact as "not text", and conflating them was Task 14's first-draft
+  // mistake this message exists to avoid repeating.
+  diffTooLarge: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الملف كبير جدًا لعرض الفرق."
+      : "This file is too large to display a diff for.",
+  // hunks.length === 0 with binary and tooLarge both false: a real diff
+  // read that simply found nothing to show (e.g. a mode-only change, or
+  // the file picked from the list has since gone back to matching HEAD).
+  diffNoChanges: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد تغييرات لعرضها." : "No changes to show.",
 };
 
 function arabicSessionsCount(count: number): string {

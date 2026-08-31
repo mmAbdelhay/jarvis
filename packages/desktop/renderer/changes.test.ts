@@ -78,7 +78,11 @@ async function openChangesWith(
     gitCommit: vi.fn(async () => ({ ok: true as const, value: null })),
     ...overrides,
   });
-  const { openChanges } = await import("./changes.js");
+  const { openChanges, wireDiffModes } = await import("./changes.js");
+  // wireDiffModes is normally called once from app.ts; this harness has no
+  // app.ts, so each test's own module instance (vi.resetModules() in
+  // beforeEach) wires its own Side-by-side/Unified toggle here instead.
+  wireDiffModes();
   await openChanges("s1", select);
   return jarvis;
 }
@@ -104,12 +108,6 @@ async function openChangesWithDiffFailure(failure: {
   );
 }
 
-// Referenced only to keep the two diff-oriented helpers above from being
-// flagged as unused ahead of Task 14, which is the first task that calls
-// them for real.
-void openChangesWithDiff;
-void openChangesWithDiffFailure;
-
 beforeEach(() => {
   vi.resetModules();
   document.body.innerHTML = `
@@ -131,6 +129,16 @@ beforeEach(() => {
         <div id="changes-count" class="mono changes-count"></div>
       </div>
       <div id="changes-file-list" class="changes-file-list"></div>
+      <div class="changes-diff">
+        <div class="diff-head">
+          <div id="diff-filename" class="mono changes-dim"></div>
+          <div class="diff-toggle">
+            <button id="diff-mode-side" class="diff-mode diff-mode--on" type="button">Side by side</button>
+            <button id="diff-mode-unified" class="diff-mode" type="button">Unified</button>
+          </div>
+        </div>
+        <div id="diff-body" class="diff-body"></div>
+      </div>
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
@@ -611,5 +619,267 @@ describe("the changed-files panel", () => {
     ]);
     expect(document.querySelector(".file-name")?.textContent).toBe("README.md");
     expect(document.querySelectorAll(".file-row")).toHaveLength(1);
+  });
+});
+
+const HUNK = {
+  header: "@@ -41,9 +41,9 @@",
+  lines: [
+    { kind: "context" as const, text: "public function charge()", beforeLine: 41, afterLine: 41 },
+    { kind: "removed" as const, text: "  $res = $this->pay();", beforeLine: 42, afterLine: undefined },
+    { kind: "added" as const, text: "  $res = $policy->run();", beforeLine: undefined, afterLine: 42 },
+  ],
+};
+
+describe("the diff panes", () => {
+  it("renders BEFORE and AFTER columns with line numbers from the hunk", async () => {
+    await openChangesWithDiff({ path: "a.php", binary: false, hunks: [HUNK] });
+
+    const before = [...document.querySelectorAll(".pane--before .ln")];
+    const after = [...document.querySelectorAll(".pane--after .ln")];
+    expect(before).toHaveLength(2);
+    expect(after).toHaveLength(2);
+    expect(before[0]?.querySelector(".num")?.textContent).toBe("41");
+    expect(before[1]?.querySelector(".code")?.textContent).toBe("  $res = $this->pay();");
+    expect(after[1]?.querySelector(".code")?.textContent).toBe("  $res = $policy->run();");
+  });
+
+  it("marks removed and added rows with their own classes", async () => {
+    await openChangesWithDiff({ path: "a.php", binary: false, hunks: [HUNK] });
+    expect(document.querySelector(".pane--before .ln--del")).not.toBeNull();
+    expect(document.querySelector(".pane--after .ln--add")).not.toBeNull();
+  });
+
+  it("switches to a single unified column when Unified is clicked", async () => {
+    await openChangesWithDiff({ path: "a.php", binary: false, hunks: [HUNK] });
+    const unified = document.getElementById("diff-mode-unified");
+    if (!(unified instanceof HTMLElement)) throw new Error("missing toggle");
+    unified.click();
+    await Promise.resolve();
+
+    expect(document.querySelector(".pane--before")).toBeNull();
+    expect([...document.querySelectorAll(".diff-unified .ln")]).toHaveLength(3);
+    expect(unified.className).toContain("diff-mode--on");
+  });
+
+  it("switches back to side-by-side when Side by side is clicked again", async () => {
+    await openChangesWithDiff({ path: "a.php", binary: false, hunks: [HUNK] });
+    const side = document.getElementById("diff-mode-side");
+    const unified = document.getElementById("diff-mode-unified");
+    if (!(side instanceof HTMLElement) || !(unified instanceof HTMLElement)) {
+      throw new Error("missing toggle");
+    }
+    unified.click();
+    await Promise.resolve();
+    side.click();
+    await Promise.resolve();
+
+    expect(document.querySelector(".pane--before")).not.toBeNull();
+    expect(document.querySelector(".diff-unified")).toBeNull();
+    expect(side.className).toContain("diff-mode--on");
+    expect(unified.className).not.toContain("diff-mode--on");
+  });
+
+  it("shows the hunk header between hunks", async () => {
+    await openChangesWithDiff({
+      path: "a.php",
+      binary: false,
+      hunks: [HUNK, { header: "@@ -90,2 +90,3 @@", lines: HUNK.lines }],
+    });
+    const headers = [...document.querySelectorAll(".hunk-head")].map((el) => el.textContent);
+    expect(headers).toEqual(["@@ -41,9 +41,9 @@", "@@ -90,2 +90,3 @@"]);
+  });
+
+  // These three notices are renderer-generated (never echoed from a main-
+  // process failure), so — like ruling P22's changesShowCurrentState —
+  // they follow PRIMARY_LANGUAGE (Arabic), not English.
+  it("says so plainly for a binary file instead of rendering nothing", async () => {
+    await openChangesWithDiff({ path: "logo.png", binary: true, hunks: [] });
+    expect(document.getElementById("diff-body")?.textContent).toContain("ملف ثنائي");
+  });
+
+  // Ruling P8: `tooLarge` means the content was never read at all, which is
+  // a different fact from `binary` — a consumer that conflates the two
+  // would tell the user their text file is binary, which is simply false.
+  it("says the file is too large, distinctly from binary, when tooLarge is set", async () => {
+    await openChangesWithDiff({ path: "generated.sql", binary: false, tooLarge: true, hunks: [] });
+    const text = document.getElementById("diff-body")?.textContent ?? "";
+    expect(text).toContain("كبير جدًا");
+    expect(text).not.toContain("ملف ثنائي");
+  });
+
+  it("says there are no changes for a file with an empty diff", async () => {
+    await openChangesWithDiff({ path: "a.php", binary: false, hunks: [] });
+    expect(document.getElementById("diff-body")?.textContent).toContain("لا توجد تغييرات");
+  });
+
+  it("renders diff content as text, never as markup", async () => {
+    await openChangesWithDiff({
+      path: "a.php",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -1,1 +1,1 @@",
+          lines: [
+            {
+              kind: "added" as const,
+              text: '<img src=x onerror="globalThis.diffPwned = true">',
+              beforeLine: undefined,
+              afterLine: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(document.querySelector(".diff-body img")).toBeNull();
+    expect("diffPwned" in globalThis).toBe(false);
+    expect(document.querySelector(".pane--after .code")?.textContent).toContain("onerror");
+  });
+
+  it("keeps the code panes left-to-right even for Arabic content", async () => {
+    await openChangesWithDiff({
+      path: "a.php",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -1,1 +1,1 @@",
+          lines: [
+            { kind: "added" as const, text: "// تعليق عربي", beforeLine: undefined, afterLine: 1 },
+          ],
+        },
+      ],
+    });
+    expect(document.querySelector(".pane--after .code")?.getAttribute("dir")).toBe("ltr");
+  });
+
+  it("renders a 50,000-character line without throwing", async () => {
+    const longLine = "x".repeat(50_000);
+    await openChangesWithDiff({
+      path: "generated.js",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -1,1 +1,1 @@",
+          lines: [
+            { kind: "added" as const, text: longLine, beforeLine: undefined, afterLine: 1 },
+          ],
+        },
+      ],
+    });
+    expect(document.querySelector(".pane--after .code")?.textContent).toHaveLength(50_000);
+  });
+
+  it("tolerates a hunk header whose counts disagree with the lines that follow", async () => {
+    await openChangesWithDiff({
+      path: "a.php",
+      binary: false,
+      hunks: [
+        {
+          // Header claims 1 line changed on each side; five actually follow.
+          header: "@@ -1,1 +1,1 @@",
+          lines: [
+            { kind: "context" as const, text: "a", beforeLine: 1, afterLine: 1 },
+            { kind: "removed" as const, text: "b", beforeLine: 2, afterLine: undefined },
+            { kind: "removed" as const, text: "c", beforeLine: 3, afterLine: undefined },
+            { kind: "added" as const, text: "d", beforeLine: undefined, afterLine: 2 },
+            { kind: "context" as const, text: "e", beforeLine: 4, afterLine: 3 },
+          ],
+        },
+      ],
+    });
+    expect([...document.querySelectorAll(".pane--after .ln")]).toHaveLength(4);
+  });
+
+  it("shows the added lines with nothing on the before side for a wholly-added file", async () => {
+    await openChangesWithDiff({
+      path: "new.php",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -0,0 +1,2 @@",
+          lines: [
+            { kind: "added" as const, text: "line one", beforeLine: undefined, afterLine: 1 },
+            { kind: "added" as const, text: "line two", beforeLine: undefined, afterLine: 2 },
+          ],
+        },
+      ],
+    });
+    const before = [...document.querySelectorAll(".pane--before .ln")];
+    const after = [...document.querySelectorAll(".pane--after .ln")];
+    expect(after).toHaveLength(2);
+    expect(before).toHaveLength(2);
+    expect(before.every((row) => row.querySelector(".code")?.textContent === "")).toBe(true);
+  });
+
+  it("shows the removed lines with nothing on the after side for a wholly-deleted file", async () => {
+    await openChangesWithDiff({
+      path: "gone.php",
+      binary: false,
+      hunks: [
+        {
+          header: "@@ -1,2 +0,0 @@",
+          lines: [
+            { kind: "removed" as const, text: "line one", beforeLine: 1, afterLine: undefined },
+            { kind: "removed" as const, text: "line two", beforeLine: 2, afterLine: undefined },
+          ],
+        },
+      ],
+    });
+    const before = [...document.querySelectorAll(".pane--before .ln")];
+    const after = [...document.querySelectorAll(".pane--after .ln")];
+    expect(before).toHaveLength(2);
+    expect(after).toHaveLength(2);
+    expect(after.every((row) => row.querySelector(".code")?.textContent === "")).toBe(true);
+  });
+
+  it("re-renders the diff for the newly selected file when the selection changes while Unified is active", async () => {
+    const files = [
+      { path: "a.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+      { path: "b.php", status: "M" as const, insertions: 1, deletions: 1, staged: false },
+    ];
+    const diffs: Record<string, GitFileDiff> = {
+      "a.php": { path: "a.php", binary: false, hunks: [HUNK] },
+      "b.php": {
+        path: "b.php",
+        binary: false,
+        hunks: [
+          {
+            header: "@@ -1,1 +1,1 @@",
+            lines: [{ kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 }],
+          },
+        ],
+      },
+    };
+    await openChangesWith(files, undefined, {
+      gitDiff: vi.fn(async (_id: string, path: string) => {
+        const diff = diffs[path];
+        if (diff === undefined) throw new Error(`no stub diff for ${path}`);
+        return { ok: true as const, value: diff };
+      }),
+    });
+
+    const unified = document.getElementById("diff-mode-unified");
+    if (!(unified instanceof HTMLElement)) throw new Error("missing toggle");
+    unified.click();
+    await Promise.resolve();
+    expect([...document.querySelectorAll(".diff-unified .ln")]).toHaveLength(3);
+
+    const rows = [...document.querySelectorAll(".file-row")];
+    const second = rows[1];
+    if (!(second instanceof HTMLElement)) throw new Error("missing second row");
+    second.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const unifiedLines = [...document.querySelectorAll(".diff-unified .ln")];
+    expect(unifiedLines).toHaveLength(1);
+    expect(unifiedLines[0]?.querySelector(".code")?.textContent).toBe("b file line");
+  });
+
+  it("shows a git failure for the file without clearing the file list", async () => {
+    await openChangesWithDiffFailure({ text: "The git command failed: boom", language: "en" });
+    expect(document.getElementById("changes-error")?.hidden).toBe(false);
+    expect(document.querySelectorAll(".file-row").length).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,8 @@
-import type { GitFileChange } from "@jarvis/core";
+import type { GitDiffHunk, GitDiffLine, GitFileChange, GitFileDiff } from "@jarvis/core";
 import type { ChangesView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
+import { toSideBySide } from "./sidebyside.js";
 
 // The Changes view's own module. It owns the whole right-hand route: the
 // header (this task), the file list (Task 13), the diff panes (Task 14) and
@@ -111,8 +112,182 @@ export function selectedPath(): string | undefined {
   return selected;
 }
 
-// Filled in by Task 14.
-async function renderDiff(_view: ChangesView): Promise<void> {}
+let mode: "side" | "unified" = "side";
+
+// This function's whole reason to exist: `line.text` is a repository's file
+// content, which an attacker fully controls. Every node here is built with
+// document.createElement and every string lands via textContent — no
+// innerHTML, no template-literal markup, anywhere in this module.
+function lineRow(line: GitDiffLine | undefined, side: "before" | "after"): HTMLElement {
+  const row = document.createElement("div");
+  const kindClass =
+    line === undefined
+      ? "ln--blank"
+      : line.kind === "added"
+        ? "ln--add"
+        : line.kind === "removed"
+          ? "ln--del"
+          : "ln--ctx";
+  row.className = `ln ${kindClass}`;
+
+  const num = document.createElement("div");
+  num.className = "num";
+  const number = side === "before" ? line?.beforeLine : line?.afterLine;
+  num.textContent = number === undefined ? "" : `${number}`;
+
+  const code = document.createElement("div");
+  code.className = "code";
+  // Code is the one sanctioned dir="ltr" exception in this app (everything
+  // else is direction-per-element): a diff pane is fixed-width monospace
+  // regardless of what script the line's own content happens to be in.
+  code.dir = "ltr";
+  code.textContent = line?.text ?? "";
+
+  row.append(num, code);
+  return row;
+}
+
+function hunkHead(hunk: GitDiffHunk): HTMLElement {
+  const head = document.createElement("div");
+  head.className = "hunk-head mono";
+  head.dir = "ltr";
+  head.textContent = hunk.header;
+  return head;
+}
+
+// BEFORE/AFTER kept as the artboard's own literal English (GitChanges.dc.html
+// lines 97/113) rather than routed through messages.ts: they are column
+// chrome labels, not sentences, and Task 13 already established the same
+// precedent for this same header row — the Side-by-side/Unified toggle
+// buttons in index.html are static English text, not MESSAGES entries.
+function paneHead(side: "before" | "after", label: string): HTMLElement {
+  const heading = document.createElement("div");
+  heading.className = `pane-head pane--${side}`;
+  heading.textContent = label;
+  return heading;
+}
+
+// One hunk's paired lines as a two-column row. The hunk header itself is
+// rendered once by the caller, above this row, rather than inside each
+// column — nesting it in both `.pane--before` and `.pane--after` would
+// render it twice for every hunk, doubling every count a test (or a real
+// reader) takes off the pane.
+function hunkRow(hunk: GitDiffHunk): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "diff-cols";
+
+  const before = document.createElement("div");
+  before.className = "pane pane--before";
+  const after = document.createElement("div");
+  after.className = "pane pane--after";
+
+  for (const pair of toSideBySide(hunk.lines)) {
+    before.append(lineRow(pair.before, "before"));
+    after.append(lineRow(pair.after, "after"));
+  }
+
+  row.append(before, after);
+  return row;
+}
+
+function renderSideBySide(diff: GitFileDiff): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "diff-split";
+
+  const head = document.createElement("div");
+  head.className = "diff-cols";
+  head.append(paneHead("before", "BEFORE"), paneHead("after", "AFTER"));
+  wrapper.append(head);
+
+  for (const hunk of diff.hunks) {
+    wrapper.append(hunkHead(hunk), hunkRow(hunk));
+  }
+  return wrapper;
+}
+
+function renderUnified(diff: GitFileDiff): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "diff-unified";
+  for (const hunk of diff.hunks) {
+    wrapper.append(hunkHead(hunk));
+    for (const line of hunk.lines) {
+      // A removed line is numbered by where it used to live; everything
+      // else (context, added) by where it lives now.
+      wrapper.append(lineRow(line, line.kind === "removed" ? "before" : "after"));
+    }
+  }
+  return wrapper;
+}
+
+function diffNote(text: string): HTMLElement {
+  const note = document.createElement("div");
+  note.className = "diff-note";
+  setText(note, text);
+  return note;
+}
+
+async function renderDiff(view: ChangesView): Promise<void> {
+  const body = $("diff-body");
+  const path = selected;
+  if (path === undefined) {
+    body.replaceChildren();
+    $("diff-filename").textContent = "";
+    return;
+  }
+
+  setText($("diff-filename"), path);
+
+  const result = await window.jarvis.gitDiff(view.session.id, path);
+  if (!result.ok) {
+    // Task 10's handlers never reject — a git failure arrives as a value,
+    // so it is rendered here rather than caught. The file list stays as it
+    // was: only the diff pane reflects the failure.
+    showError(result);
+    body.replaceChildren();
+    return;
+  }
+
+  const diff = result.value;
+
+  // Three distinct states per ruling P8's GitFileDiff.tooLarge, checked in
+  // this order: a real binary confirmation, then "too large to have ever
+  // been read" (which must not be reported as binary — it might not be),
+  // then a genuinely empty diff.
+  if (diff.binary) {
+    body.replaceChildren(diffNote(MESSAGES.diffBinaryFile(PRIMARY_LANGUAGE)));
+    return;
+  }
+  if (diff.tooLarge === true) {
+    body.replaceChildren(diffNote(MESSAGES.diffTooLarge(PRIMARY_LANGUAGE)));
+    return;
+  }
+  if (diff.hunks.length === 0) {
+    body.replaceChildren(diffNote(MESSAGES.diffNoChanges(PRIMARY_LANGUAGE)));
+    return;
+  }
+
+  body.replaceChildren(mode === "side" ? renderSideBySide(diff) : renderUnified(diff));
+}
+
+/** Wires the Side-by-side / Unified toggle. Called once from app.ts.
+ *  Uses optional lookups (not the throwing `$()`) because app.test.ts's DOM
+ *  harness — which predates this task — does not lay down the Changes
+ *  view's markup at all; only changes.test.ts's harness does. */
+export function wireDiffModes(): void {
+  const sideButton = document.getElementById("diff-mode-side");
+  const unifiedButton = document.getElementById("diff-mode-unified");
+  if (sideButton === null || unifiedButton === null) return;
+
+  const set = (next: "side" | "unified"): void => {
+    mode = next;
+    sideButton.classList.toggle("diff-mode--on", next === "side");
+    unifiedButton.classList.toggle("diff-mode--on", next === "unified");
+    const view = current;
+    if (view !== undefined) void renderDiff(view);
+  };
+  sideButton.addEventListener("click", () => set("side"));
+  unifiedButton.addEventListener("click", () => set("unified"));
+}
 
 function countEl(className: string, text: string): HTMLElement {
   const element = document.createElement("span");

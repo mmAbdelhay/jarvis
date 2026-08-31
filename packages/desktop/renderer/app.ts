@@ -1,7 +1,7 @@
 import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { openChanges, showView } from "./changes.js";
+import { openChanges, showView, wireDiffModes } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
@@ -41,6 +41,7 @@ wireComposer();
 wireMicButton();
 wireHistoryPanel();
 wireNav();
+wireDiffModes();
 
 function wireNav(): void {
   document.getElementById("nav-dashboard")?.addEventListener("click", () => showView("dashboard"));

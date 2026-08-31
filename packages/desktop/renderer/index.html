@@ -879,6 +879,75 @@
 
   .diff-body { flex-grow: 1; overflow: auto; min-height: 0; }
 
+  /* The diff panes themselves — GitChanges.dc.html's BEFORE/AFTER columns
+     (lines 96-123) and its .ln/.num/.code classes (its own <style> block),
+     copied verbatim: 40px right-aligned gutter, 11px mono at 1.75 line
+     height, the added/removed backgrounds and text colors. */
+  /* Side-by-side is a column of rows, each row itself split in two: one
+     header row (BEFORE/AFTER) plus one row per hunk (its header, full
+     width, then its paired lines in the two columns beneath). A hunk's
+     header is rendered once per hunk, not once per column — otherwise it
+     would be printed twice, once inside each `.pane`. */
+  .diff-split { display: flex; flex-direction: column; }
+  .diff-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .pane { display: flex; flex-direction: column; min-width: 0; }
+  .pane--before { border-inline-end: 1px solid var(--border); }
+
+  .pane-head {
+    padding: 7px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+
+  .ln {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.75;
+    display: flex;
+  }
+
+  .num {
+    width: 40px;
+    flex-shrink: 0;
+    text-align: right;
+    padding-inline-end: 12px;
+    color: #38505d;
+  }
+
+  .code {
+    flex-grow: 1;
+    padding-inline-start: 10px;
+    /* `pre` and not `pre-wrap`: leading whitespace is meaningful in a diff,
+       and the pane scrolls horizontally rather than reflowing code (also
+       what keeps a 50,000-character line from blowing out page layout). */
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .ln--ctx .code { color: #7f97a5; }
+  .pane--after .ln--ctx .code, .diff-unified .ln--ctx .code { color: var(--text-dim); }
+
+  .ln--del { background: #241214; }
+  .ln--del .num { color: #7a3c40; }
+  .ln--del .code { color: #d9948f; }
+
+  .ln--add { background: #10231a; }
+  .ln--add .num { color: #3d6b52; }
+  .ln--add .code { color: #9fd9b4; }
+
+  .hunk-head {
+    font-size: 10px;
+    color: #38505d;
+    background: var(--panel);
+    padding: 4px 16px;
+    border-block: 1px solid var(--border);
+  }
+
+  .diff-note { padding: 16px; font-size: 12px; color: var(--text-muted); }
+
   .commit-bar {
     display: flex;
     align-items: center;
