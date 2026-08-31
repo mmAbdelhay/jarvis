@@ -47,7 +47,11 @@ export type BrainConfig = {
   accountId?: string;
   /** That account's CLAUDE_CONFIG_DIR, resolved from the registry by config.ts. */
   configDir?: string;
-  /** Called at most once per turn, only when accountId is set. Never throws. */
+  /**
+   * Called exactly once per turn, only when accountId is set. If this
+   * throws, the throw is swallowed here — it can never escape into the
+   * turn, and is never retried (a retry would double-attribute).
+   */
   onUsage?: (agentId: string, reading: CapacityReading) => void;
 };
 
@@ -187,13 +191,25 @@ export function createBrain(config: BrainConfig): Brain {
         if (accountId === undefined || onUsage === undefined) return;
         const read = stream.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
         if (read === undefined) return;
+        let reading: CapacityReading;
         try {
-          onUsage(accountId, parseUsage(await read.call(stream)));
+          reading = parseUsage(await read.call(stream));
         } catch {
           // The assistant's answer is the product. An experimental API that
           // is explicitly named DO_NOT_RELY_ON_THIS_API_YET must never be
           // able to break a turn.
-          onUsage(accountId, { ok: false, reason: "unavailable" });
+          reading = { ok: false, reason: "unavailable" };
+        }
+        try {
+          // onUsage is called exactly once, here, whatever the reading
+          // turned out to be. A second attempt on a throwing callback would
+          // double-attribute the same turn to the same account; letting the
+          // throw propagate would take the whole turn down for a side
+          // effect. Neither is acceptable, so it is swallowed instead.
+          onUsage(accountId, reading);
+        } catch {
+          // No error binding: nothing here can stringify a caller-supplied
+          // payload into a message.
         }
       };
 

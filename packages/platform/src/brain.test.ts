@@ -376,6 +376,7 @@ describe("capacity piggyback", () => {
       fiveHour: { usedPercent: 12, resetsAt: "2026-08-31T14:30:00Z" },
       sevenDay: undefined,
     });
+    expect(onUsage).toHaveBeenCalledTimes(1);
   });
 
   it("attributes nothing when no accountId is configured", async () => {
@@ -419,6 +420,64 @@ describe("capacity piggyback", () => {
     // must never be able to break it.
     expect(reply.text).toBe("hi");
     expect(onUsage).toHaveBeenCalledWith("claude-mm", { ok: false, reason: "unavailable" });
+    expect(onUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("still answers normally when the caller-supplied onUsage throws", async () => {
+    const onUsage = vi.fn(() => {
+      throw new Error("listener exploded");
+    });
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      accountId: "claude-mm",
+      configDir: "/c/mm",
+      onUsage,
+      query: usageQuery(messages, usage),
+    });
+
+    // A throwing onUsage must not fall into the catch and be invoked a
+    // second time (double-attribution for one turn), and must not escape
+    // ask() either.
+    const reply = await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
+
+    expect(reply.text).toBe("hi");
+    expect(onUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("still answers normally when onUsage throws on the failure path too", async () => {
+    const onUsage = vi.fn(() => {
+      throw new Error("listener exploded");
+    });
+    const brain = createBrain({
+      systemPrompt: "p",
+      cwd: "/tmp/brain",
+      accountId: "claude-mm",
+      configDir: "/c/mm",
+      onUsage,
+      query: () => ({
+        async *[Symbol.asyncIterator]() {
+          for (const message of messages) yield message;
+        },
+        async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET() {
+          throw new Error("DO_NOT_RELY_ON_THIS_API_YET");
+        },
+      }),
+    });
+
+    const reply = await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
+
+    expect(reply.text).toBe("hi");
+    expect(onUsage).toHaveBeenCalledWith("claude-mm", { ok: false, reason: "unavailable" });
+    expect(onUsage).toHaveBeenCalledTimes(1);
   });
 
   it("works with a plain query function that exposes no usage method at all", async () => {
@@ -444,3 +503,4 @@ describe("capacity piggyback", () => {
     expect(onUsage).not.toHaveBeenCalled();
   });
 });
+
