@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 // catch this class of bug — it requires parsing the real markup.
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
-const ROUTE_IDS = ["view-dashboard", "view-changes", "view-session", "view-workspace"];
+const ROUTE_IDS = ["view-dashboard", "view-changes", "view-session", "view-workspace", "view-settings"];
 
 describe("routed view nesting", () => {
   const dom = new JSDOM(htmlSource);

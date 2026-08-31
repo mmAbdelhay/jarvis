@@ -1037,6 +1037,138 @@
     color: var(--text-dim);
   }
 
+  /* Settings route: same flush frame and [hidden] cascade discipline as
+     every other route in this file — NO display in the base rule. */
+  .main--settings {
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+  .main--settings:not([hidden]) { display: flex; }
+
+  .settings-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #settings-status { font-size: 11px; color: var(--good); }
+  #settings-status.settings-status--error { color: var(--del); }
+
+  .settings-body { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 40px; }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-section:last-child { border-bottom: none; }
+
+  .settings-section-head { display: flex; align-items: center; gap: 10px; }
+
+  .settings-add {
+    font: inherit;
+    font-size: 11px;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  .settings-add:hover { border-color: var(--accent); }
+
+  .settings-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .settings-row input[type="text"],
+  .settings-row select {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--ground);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 8px;
+    min-width: 90px;
+  }
+
+  .settings-row label {
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .settings-row-spacer { flex-grow: 1; }
+
+  .settings-test-status { font-size: 11px; min-width: 14px; text-align: center; }
+  .settings-test-status--ok { color: var(--good); }
+  .settings-test-status--fail { color: var(--del); }
+
+  .settings-row-remove {
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 13px;
+  }
+  .settings-row-remove:hover { color: var(--del); }
+
+  .settings-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+  }
+  .settings-field label {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 100px;
+    flex-shrink: 0;
+  }
+  .settings-field input[type="text"],
+  .settings-field select {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    flex-grow: 1;
+    max-width: 480px;
+  }
+  .settings-field--wide { align-items: flex-start; }
+  .settings-field--wide textarea {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    flex-grow: 1;
+    max-width: 480px;
+    min-height: 70px;
+    resize: vertical;
+  }
+
   .session-head {
     display: flex;
     align-items: center;
@@ -1408,6 +1540,7 @@
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
       <button id="nav-session" class="nav-btn" type="button">Session</button>
       <button id="nav-workspace" class="nav-btn" type="button">Workspace</button>
+      <button id="nav-settings" class="nav-btn" type="button">Settings</button>
     </div>
     <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
     <div class="spacer"></div>
@@ -1684,6 +1817,75 @@
       </div>
     </div>
 
+  </div>
+
+  <div class="main main--settings" id="view-settings" hidden>
+
+    <div class="settings-head">
+      <div class="pt">Settings</div>
+      <div class="spacer"></div>
+      <span id="settings-status" class="mono"></span>
+      <button id="settings-restart" class="workspace-nav" type="button" hidden
+              style="width: auto; padding: 0 14px;">Restart Jarvis</button>
+      <button id="settings-save" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 14px;">Save</button>
+    </div>
+
+    <div class="settings-body">
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <div class="lbl">AGENTS</div>
+          <button id="settings-agent-add" class="settings-add" type="button">+ Add agent</button>
+        </div>
+        <div id="settings-agents" class="settings-rows"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <div class="lbl">ROUTING</div>
+          <button id="settings-routing-add" class="settings-add" type="button">+ Add rule</button>
+        </div>
+        <div id="settings-routing" class="settings-rows"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <div class="lbl">PROJECTS</div>
+          <button id="settings-project-add" class="settings-add" type="button">+ Add project</button>
+        </div>
+        <div id="settings-projects" class="settings-rows"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="lbl">BRAIN</div>
+        <div class="settings-field">
+          <label for="settings-brain-cwd">cwd</label>
+          <input id="settings-brain-cwd" type="text" class="mono" autocomplete="off" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-brain-account">account</label>
+          <select id="settings-brain-account"></select>
+        </div>
+        <div class="settings-field settings-field--wide">
+          <label for="settings-brain-prompt">system prompt</label>
+          <textarea id="settings-brain-prompt" class="mono"></textarea>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="lbl">WHISPER</div>
+        <div class="settings-field">
+          <label for="settings-whisper-binary">binary path</label>
+          <input id="settings-whisper-binary" type="text" class="mono" autocomplete="off" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-whisper-model">model path</label>
+          <input id="settings-whisper-model" type="text" class="mono" autocomplete="off" />
+        </div>
+      </section>
+
+    </div>
   </div>
 
   <div id="history-overlay" class="history-overlay" hidden>

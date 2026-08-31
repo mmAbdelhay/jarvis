@@ -10,10 +10,12 @@ function layout(): void {
     <button id="nav-changes"></button>
     <button id="nav-session"></button>
     <button id="nav-workspace"></button>
+    <button id="nav-settings"></button>
     <div id="view-dashboard"></div>
     <div id="view-changes" hidden></div>
     <div id="view-session" hidden></div>
-    <div id="view-workspace" hidden></div>`;
+    <div id="view-workspace" hidden></div>
+    <div id="view-settings" hidden></div>`;
 }
 
 type Call = boolean;
@@ -44,6 +46,21 @@ describe("showView", () => {
     expect(document.getElementById("view-dashboard")?.hasAttribute("hidden")).toBe(true);
     expect(document.getElementById("view-changes")?.hasAttribute("hidden")).toBe(true);
     expect(document.getElementById("view-session")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("view-settings")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("shows Settings and hides every other route, including Workspace's hosted view", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    showView("settings");
+
+    expect(document.getElementById("view-settings")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("view-workspace")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("nav-settings")?.classList.contains("nav-btn--on")).toBe(true);
+    // Leaving Workspace must still hide the hosted browser view — the same
+    // choke point every other route change already goes through.
+    expect(calls.at(-1)).toBe(false);
   });
 
   it("marks the matching nav button as current", () => {

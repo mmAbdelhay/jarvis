@@ -11,7 +11,7 @@
  * showView rather than beside its call sites, where the next route added
  * would forget it.
  */
-export type ViewName = "dashboard" | "changes" | "session" | "workspace";
+export type ViewName = "dashboard" | "changes" | "session" | "workspace" | "settings";
 export type WorkspaceMode = "browser" | "docs";
 
 const VIEWS: Record<ViewName, string> = {
@@ -19,6 +19,7 @@ const VIEWS: Record<ViewName, string> = {
   changes: "view-changes",
   session: "view-session",
   workspace: "view-workspace",
+  settings: "view-settings",
 };
 
 const NAV: Record<ViewName, string> = {
@@ -26,6 +27,7 @@ const NAV: Record<ViewName, string> = {
   changes: "nav-changes",
   session: "nav-session",
   workspace: "nav-workspace",
+  settings: "nav-settings",
 };
 
 let view: ViewName = "dashboard";
@@ -44,7 +46,9 @@ export function showView(name: ViewName): void {
     const element =
       document.getElementById(id) ??
       (candidate === "dashboard"
-        ? document.querySelector(".main:not(.main--changes):not(.main--session):not(.main--workspace)")
+        ? document.querySelector(
+            ".main:not(.main--changes):not(.main--session):not(.main--workspace):not(.main--settings)",
+          )
         : null);
     if (element instanceof HTMLElement) element.hidden = candidate !== name;
   }
