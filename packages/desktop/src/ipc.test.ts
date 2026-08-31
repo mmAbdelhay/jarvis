@@ -636,6 +636,7 @@ function reader(overrides: Partial<DocReader> = {}): DocReader {
   return {
     list: () => Promise.resolve({ ok: true, value: [] } as DocOutcome<DocEntry[]>),
     read: () => Promise.resolve({ ok: true, value: "" } as DocOutcome<string>),
+    write: () => Promise.resolve({ ok: true, value: null } as DocOutcome<null>),
     ...overrides,
   };
 }

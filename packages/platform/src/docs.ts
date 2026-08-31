@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join, posix, sep } from "node:path";
 import type { DocEntry } from "@jarvis/core";
 import { resolvesInside } from "./paths.js";
@@ -12,6 +12,16 @@ export type DocOutcome<T> =
 export type DocReader = {
   list(root: string): Promise<DocOutcome<DocEntry[]>>;
   read(root: string, relativePath: string): Promise<DocOutcome<string>>;
+  /**
+   * Overwrites an existing document's contents. Only ever targets a file
+   * `list()`/`read()` already surfaced to the caller — there is no "create
+   * a new doc" here, deliberately: that was never asked for, and skipping
+   * it means write() reuses read()'s exact containment discipline (the
+   * target must already exist, be markdown, and resolve inside the root)
+   * without a second "does the parent directory exist / may I create it"
+   * question a create path would need answered.
+   */
+  write(root: string, relativePath: string, content: string): Promise<DocOutcome<null>>;
 };
 
 /** Two megabytes of markdown is roughly a 600-page book. Past that the
@@ -144,6 +154,42 @@ export function createDocReader(options?: { maxBytes?: number; maxDepth?: number
 
       try {
         return { ok: true, value: await readFile(full, "utf8") };
+      } catch {
+        return failure("unreadable", relativePath);
+      }
+    },
+
+    // Same checks as read(), in the same order, for the same reasons — a
+    // write is a read that also happens to overwrite, and the target must
+    // clear every gate a read would before anything on disk changes.
+    async write(root, relativePath, content) {
+      if (
+        relativePath.startsWith("/") ||
+        relativePath.includes(`..${sep}`) ||
+        relativePath.includes("../")
+      ) {
+        return failure("outside-root", relativePath);
+      }
+      if (!isMarkdown(relativePath)) return failure("unreadable", relativePath);
+
+      const full = join(root, relativePath);
+      try {
+        const fileStat = await stat(full);
+        if (!fileStat.isFile()) return failure("unreadable", relativePath);
+      } catch {
+        // No file there to overwrite — write() never creates one; see the
+        // type's own doc comment for why.
+        return failure("not-found", relativePath);
+      }
+
+      const bytes = Buffer.byteLength(content, "utf8");
+      if (bytes > maxBytes) return failure("too-large", relativePath);
+
+      if (!(await resolvesInside(root, relativePath))) return failure("outside-root", relativePath);
+
+      try {
+        await writeFile(full, content, "utf8");
+        return { ok: true, value: null };
       } catch {
         return failure("unreadable", relativePath);
       }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -185,5 +185,97 @@ describe("DocReader.read", () => {
 
     expect(outcome.ok).toBe(false);
     expect(!outcome.ok && outcome.error.code).toBe("unreadable");
+  });
+});
+
+describe("DocReader.write", () => {
+  it("overwrites an existing file's contents", async () => {
+    const root = await tempRoot();
+    await writeFile(join(root, "a.md"), "old");
+
+    const outcome = await createDocReader().write(root, "a.md", "new content");
+
+    expect(outcome).toEqual({ ok: true, value: null });
+    expect(await readFile(join(root, "a.md"), "utf8")).toBe("new content");
+  });
+
+  it("writes into a subdirectory", async () => {
+    const root = await tempRoot();
+    await mkdir(join(root, "docs"), { recursive: true });
+    await writeFile(join(root, "docs", "a.md"), "old");
+
+    await createDocReader().write(root, "docs/a.md", "new");
+
+    expect(await readFile(join(root, "docs", "a.md"), "utf8")).toBe("new");
+  });
+
+  // write() only ever overwrites a doc that list()/read() already surfaced
+  // to the caller — creating a brand-new file was never asked for and is
+  // out of scope, so a path with nothing there yet is refused, not created.
+  it("refuses to create a file that does not already exist", async () => {
+    const root = await tempRoot();
+
+    const outcome = await createDocReader().write(root, "new.md", "content");
+
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.error.code).toBe("not-found");
+  });
+
+  it("refuses a path that climbs out of the root", async () => {
+    const root = await tempRoot();
+
+    const outcome = await createDocReader().write(root, "../../../etc/passwd", "pwned");
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: { code: "outside-root", detail: "../../../etc/passwd" },
+    });
+  });
+
+  it("refuses an absolute path", async () => {
+    const root = await tempRoot();
+
+    const outcome = await createDocReader().write(root, "/etc/passwd", "pwned");
+
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.error.code).toBe("outside-root");
+  });
+
+  // Ruling P17: an existing symlink pointing outside the root must still be
+  // refused for a write, exactly as it is for a read — writing through it
+  // would corrupt a file this project has no business touching.
+  it("refuses a symlink pointing outside the root", async () => {
+    const root = await tempRoot();
+    const outside = await tempRoot();
+    await writeFile(join(outside, "id_rsa"), "PRIVATE KEY");
+    await symlink(join(outside, "id_rsa"), join(root, "notes.md"));
+
+    const outcome = await createDocReader().write(root, "notes.md", "pwned");
+
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.error.code).toBe("outside-root");
+    expect(await readFile(join(outside, "id_rsa"), "utf8")).toBe("PRIVATE KEY");
+  });
+
+  it("refuses a file that is not markdown", async () => {
+    const root = await tempRoot();
+    await writeFile(join(root, "secrets.env"), "TOKEN=1");
+
+    const outcome = await createDocReader().write(root, "secrets.env", "pwned");
+
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.error.code).toBe("unreadable");
+  });
+
+  it("refuses content larger than the limit", async () => {
+    const root = await tempRoot();
+    await writeFile(join(root, "a.md"), "old");
+
+    const outcome = await createDocReader({ maxBytes: 10 }).write(root, "a.md", "x".repeat(200));
+
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.error.code).toBe("too-large");
+    // Refused before anything was written — the original content survives.
+    expect(await readFile(join(root, "a.md"), "utf8")).toBe("old");
   });
 });
