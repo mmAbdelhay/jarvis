@@ -24,6 +24,7 @@ const sessionViewSource = readFileSync(
 // workspace.ts's and doc-view.ts's $() throw, same contract as app.ts/changes.ts.
 const workspaceSource = readFileSync(fileURLToPath(new URL("./workspace.ts", import.meta.url)), "utf8");
 const docViewSource = readFileSync(fileURLToPath(new URL("./doc-view.ts", import.meta.url)), "utf8");
+const settingsSource = readFileSync(fileURLToPath(new URL("./settings.ts", import.meta.url)), "utf8");
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -43,6 +44,7 @@ describe("$() id contract", () => {
     ...idsPassedTo$(sessionViewSource),
     ...idsPassedTo$(workspaceSource),
     ...idsPassedTo$(docViewSource),
+    ...idsPassedTo$(settingsSource),
   ];
 
   it("finds at least one $() call across the renderer modules (sanity check the extraction itself works)", () => {

@@ -10,6 +10,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
 import { showView } from "./views.js";
 import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
+import { initSettings, openSettings } from "./settings.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 import { renderProviders, wireProvidersPanel } from "./providers.js";
 import {
@@ -112,6 +113,21 @@ function wireNav(): void {
     // so the bounds are reported after showView, not before.
     reportWorkspaceBounds();
   });
+  document.getElementById("nav-settings")?.addEventListener("click", () => {
+    releaseVoice();
+    showView("settings");
+    void openSettings();
+  });
+  try {
+    // A minimal test harness (app.test.ts) is allowed to lay down only the
+    // routes it actually exercises — initSettings throwing on the Settings
+    // route's absent markup must not take wireNav() down before it finishes
+    // wiring every route after this line, the same reason
+    // getProjects().then(initWorkspace) below is guarded with its own catch.
+    initSettings();
+  } catch {
+    // Settings' own markup is absent in this harness; nothing to wire.
+  }
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any
