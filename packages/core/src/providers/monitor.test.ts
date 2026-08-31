@@ -86,6 +86,47 @@ describe("ProviderMonitor.refreshCapacity", () => {
     expect(readCapacity).toHaveBeenCalledTimes(2);
   });
 
+  it("lets an explicit force outrun an unforced pass and refresh what it left stale", async () => {
+    let gate: Promise<void> = Promise.resolve();
+    const readCapacity = vi.fn(async (configDir: string) => {
+      await gate;
+      return OK;
+    });
+    const { monitor, advance } = build({ readCapacity });
+
+    // Baseline: both accounts read and become fresh.
+    await monitor.refreshCapacity();
+    expect(readCapacity).toHaveBeenCalledTimes(2);
+
+    // Push past the throttle window, then re-freshen just "sd" via a
+    // piggyback (a real reading, so it resets that account's clock without
+    // billing) — leaving only "mm" due for a routine, unforced refresh.
+    advance(MIN_CAPACITY_REFRESH_MS);
+    monitor.recordPiggyback("claude-acme", OK);
+
+    // Gate the next reads so the unforced pass stays in flight while the
+    // forced call races in.
+    let release: () => void = () => {};
+    gate = new Promise((resolve) => (release = resolve));
+
+    const unforced = monitor.refreshCapacity(); // due: mm only
+    const forced = monitor.refreshCapacity({ force: true }); // must await, then force both
+    release();
+    await Promise.all([unforced, forced]);
+
+    // The unforced pass bills mm once; the forced pass, after awaiting it,
+    // bills its own pass over both accounts — "sd", which the unforced pass
+    // judged not due, is not silently left stale for the caller who
+    // explicitly asked for fresh data.
+    expect(readCapacity).toHaveBeenCalledTimes(2 + 1 + 2);
+    expect(
+      readCapacity.mock.calls
+        .slice(3)
+        .map((call) => call[0])
+        .sort(),
+    ).toEqual(["/c/mm", "/c/sd"]);
+  });
+
   it("records one account's failure without losing the other's reading", async () => {
     const readCapacity = vi.fn(async (configDir: string) =>
       configDir === "/c/mm" ? { ok: false as const, reason: "unavailable" as const } : OK,
@@ -105,6 +146,22 @@ describe("ProviderMonitor.refreshCapacity", () => {
 
     await expect(monitor.refreshCapacity()).resolves.toBeUndefined();
     expect(store.snapshot()[0]?.capacity).toEqual({ state: "unknown", reason: "unavailable" });
+  });
+});
+
+describe("ProviderMonitor.onChange", () => {
+  it("passes subscriptions through to the store", () => {
+    const { monitor, store } = build();
+    const listener = vi.fn();
+    const off = monitor.onChange(listener);
+
+    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(store.snapshot());
+
+    off();
+    store.recordCapacity("claude-acme", { ok: false, reason: "unavailable" }, 2);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

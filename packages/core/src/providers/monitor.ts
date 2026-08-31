@@ -36,8 +36,12 @@ export type ProviderMonitorDeps = {
  */
 export class ProviderMonitor {
   readonly #deps: ProviderMonitorDeps;
-  readonly #lastAttempt = new Map<string, number>();
   #refreshing: Promise<void> | undefined;
+  // Whether the in-flight #refreshing pass (if any) was itself a forced
+  // pass. Only relevant while #refreshing is defined; read alongside it to
+  // decide whether a new forced caller has the same intent as the pass
+  // already running, or needs one of its own — see refreshCapacity below.
+  #refreshingForce = false;
 
   constructor(deps: ProviderMonitorDeps) {
     this.#deps = deps;
@@ -82,19 +86,40 @@ export class ProviderMonitor {
   }
 
   /**
-   * Spends one billed query per readable, due account. Concurrent calls
-   * share one in-flight refresh rather than doubling the bill: a second
-   * caller rides the first's result instead of starting its own round of
-   * paid reads. Rejecting the second call instead would only push the
-   * problem onto every caller (a startup refresh racing a user's explicit
-   * refresh, or two piggyback-adjacent triggers) to serialize themselves by
-   * hand, and still leaves them wanting the same answer moments apart — so
-   * coalescing, not rejecting, is the correct choice here, same as
-   * ChangeTracker.
+   * Spends one billed query per readable, due account. Concurrent calls of
+   * the *same* intent share one in-flight refresh rather than doubling the
+   * bill: a second unforced caller rides the first unforced result, and a
+   * second forced caller rides the first forced one, instead of starting
+   * its own round of paid reads. Rejecting the second call instead would
+   * only push the problem onto every caller (a startup refresh racing a
+   * user's explicit refresh, or two piggyback-adjacent triggers) to
+   * serialize themselves by hand, and still leaves them wanting the same
+   * answer moments apart — so coalescing, not rejecting, is the correct
+   * choice here, same as ChangeTracker.
+   *
+   * A forced call arriving while an *unforced* pass is in flight is the one
+   * case that does not coalesce: riding the unforced pass would hand the
+   * caller who explicitly asked for fresh data whatever the unforced pass's
+   * due-list happened to include, silently dropping the force for every
+   * account that pass judged not yet due. Instead the forced call awaits
+   * the unforced pass, then runs its own — bypassing the throttle for every
+   * readable account, same as any other forced call. This can pay twice for
+   * an account the unforced pass was already fetching; that is the accepted
+   * trade, favouring truth over spend for an explicit request.
    */
   async refreshCapacity(options: { force?: boolean } = {}): Promise<void> {
-    if (this.#refreshing !== undefined) return this.#refreshing;
-    const run = this.#refreshCapacity(options.force === true).finally(() => {
+    const force = options.force === true;
+    const inFlight = this.#refreshing;
+    if (inFlight !== undefined) {
+      if (!force || this.#refreshingForce) return inFlight;
+      // Mixed intent: let the unforced pass finish, then re-check state —
+      // another forced call may have started its own pass while we waited.
+      await inFlight;
+      return this.refreshCapacity(options);
+    }
+
+    this.#refreshingForce = force;
+    const run = this.#refreshCapacity(force).finally(() => {
       this.#refreshing = undefined;
     });
     this.#refreshing = run;
@@ -103,14 +128,16 @@ export class ProviderMonitor {
 
   async #refreshCapacity(force: boolean): Promise<void> {
     const now = this.#now();
-    // `force: true` bypasses only the MIN_CAPACITY_REFRESH_MS throttle. It
-    // does not bypass the re-entrancy guard above (a forced call still
-    // coalesces with one already in flight) and it does not read an account
-    // that has no configDir — there is nothing honest to force there.
+    // `force: true` bypasses the MIN_CAPACITY_REFRESH_MS throttle and (per
+    // refreshCapacity above) coalescing with an in-flight *unforced* pass.
+    // It does not bypass coalescing with another in-flight *forced* pass
+    // (same intent, so riding it is correct) and it does not read an
+    // account that has no configDir — there is nothing honest to force
+    // there.
     const due = this.#deps.agents.filter((agent) => {
       if (agent.configDir === undefined) return false;
       if (force) return true;
-      const last = this.#lastAttempt.get(agent.id);
+      const last = this.#deps.store.lastCapacityReadAt(agent.id);
       return last === undefined || now - last >= MIN_CAPACITY_REFRESH_MS;
     });
 
@@ -118,11 +145,6 @@ export class ProviderMonitor {
       due.map(async (agent) => {
         const configDir = agent.configDir;
         if (configDir === undefined) return;
-        // Recorded before the call resolves: a failing account must not be
-        // retried (and rebilled) every cycle just because it never earns a
-        // "last success" timestamp (store.lastCapacityReadAt tracks
-        // attempts, not successes, for the same reason).
-        this.#lastAttempt.set(agent.id, this.#now());
 
         let reading: CapacityReading;
         try {
@@ -149,7 +171,9 @@ export class ProviderMonitor {
   recordPiggyback(agentId: string, reading: CapacityReading): void {
     const agent = this.#deps.agents.find((candidate) => candidate.id === agentId);
     if (agent === undefined || agent.configDir === undefined) return;
-    this.#lastAttempt.set(agentId, this.#now());
+    // recordCapacity itself resets the store's lastCapacityAttemptAt, which
+    // is the single source of truth refreshCapacity's due-filter reads —
+    // there is no separate clock here to keep in sync with it.
     this.#deps.store.recordCapacity(agentId, reading, this.#now());
   }
 }
