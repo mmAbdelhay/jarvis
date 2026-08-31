@@ -238,6 +238,27 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
   });
 
+  // Bookmarks are part of the browser, not of the editor.
+  it("hides the bookmarks sidebar when the active tab is an editor", () => {
+    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("shows the bookmarks sidebar when the active tab is an ordinary page", () => {
+    renderWorkspace({ tabs: [tab({ kind: "web" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  // With nothing open the sidebar is the quickest way to open something,
+  // so an empty workspace keeps it.
+  it("shows the bookmarks sidebar when there is no active tab at all", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(false);
+  });
+
   // "+" has a fixed spot in the workspace head — it is never relocated by
   // renderWorkspace, regardless of how many tabs are open or what kind the
   // active one is.
@@ -453,6 +474,38 @@ describe("workspace bookmarks", () => {
       Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
     initWorkspace(["acme"]);
     await flush();
+    // Nothing open on that URL yet — module state does not reset between
+    // tests, and a leftover tab would make this a tab switch instead.
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.querySelector<HTMLElement>(".workspace-bookmark")?.click();
+
+    expect(calls).toContainEqual({ call: "openTab", args: ["acme", "https://github.com"] });
+  });
+
+  it("activates the existing tab instead of opening the bookmark twice", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({ tabs: [tab({ id: "tab-7", url: "https://github.com" })], activeTabId: "tab-7" });
+
+    document.querySelector<HTMLElement>(".workspace-bookmark")?.click();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-7"] });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  // Same URL, different project: that is not the tab this bookmark opens.
+  it("opens the bookmark when the only tab on that URL belongs to another project", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ id: "tab-7", project: "storefront", url: "https://github.com" })],
+      activeTabId: "tab-7",
+    });
 
     document.querySelector<HTMLElement>(".workspace-bookmark")?.click();
 

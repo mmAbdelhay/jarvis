@@ -93,10 +93,20 @@ function domainFor(url: string): string {
   }
 }
 
+/** Clicking a bookmark the selected project already has open is a tab
+ *  switch, not a second copy of the same page — the same rule openEditor
+ *  applies to its own tab. */
+function openBookmark(url: string): void {
+  const project = selectedProject();
+  const existing = latest.tabs.find((tab) => tab.project === project && tab.url === url);
+  if (existing !== undefined) void window.jarvis.activateTab(existing.id);
+  else void window.jarvis.openTab(project, url);
+}
+
 function renderBookmarkRow(bookmark: Bookmark): HTMLElement {
   const row = document.createElement("div");
   row.className = "workspace-bookmark";
-  row.addEventListener("click", () => void window.jarvis.openTab(selectedProject(), bookmark.url));
+  row.addEventListener("click", () => openBookmark(bookmark.url));
 
   const text = document.createElement("div");
   text.className = "workspace-bookmark-text";
@@ -328,8 +338,12 @@ export function renderWorkspace(state: WorkspaceState): void {
   const tab = activeTab();
 
   // Back/forward/reload/address mean nothing for a code editor — nobody
-  // navigates it like a webpage.
-  ($("workspace-bar") as HTMLElement).hidden = tab?.kind === "editor";
+  // navigates it like a webpage, and neither do bookmarks: the sidebar
+  // belongs to the browser, so it goes away with the rest of the browser
+  // chrome while the editor is the active tab.
+  const editing = tab?.kind === "editor";
+  ($("workspace-bar") as HTMLElement).hidden = editing;
+  ($("workspace-bookmarks") as HTMLElement).hidden = editing;
 
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.
@@ -348,6 +362,11 @@ export function renderWorkspace(state: WorkspaceState): void {
   }
 
   updateBookmarkToggle();
+
+  // Hiding the bar and the sidebar resizes the page slot the hosted view
+  // is pinned to, and nothing else re-measures it — a resize is the only
+  // reflow the window itself reports.
+  reportWorkspaceBounds();
 }
 
 /**
@@ -361,6 +380,10 @@ export function reportWorkspaceBounds(): void {
   const slot = document.getElementById("workspace-page");
   if (slot === null) return;
   const rect = slot.getBoundingClientRect();
+  // renderWorkspace runs whether or not the Workspace route is on screen,
+  // and an off-screen slot measures zero. Moving the view to nowhere is
+  // never what that means.
+  if (rect.width === 0 || rect.height === 0) return;
   void window.jarvis.setWorkspaceBounds({
     x: Math.round(rect.x),
     y: Math.round(rect.y),
