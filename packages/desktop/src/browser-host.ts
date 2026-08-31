@@ -1,4 +1,4 @@
-import { TabStore, normalizeInput, type TabId, type WorkspaceState } from "@jarvis/core";
+import { TabStore, isSafeHref, normalizeInput, type TabId, type WorkspaceState } from "@jarvis/core";
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
@@ -174,4 +174,90 @@ export class BrowserHost {
       view.setVisible(this.#visible && id === activeId);
     }
   }
+}
+
+export type NavigationFacts = { canGoBack(): boolean; canGoForward(): boolean };
+
+/** The slice of Electron's WebContents this module uses. Narrow on purpose:
+ *  it is what makes the event mapping testable without a window. */
+export type WebContentsLike = {
+  on(event: string, listener: (...args: never[]) => void): unknown;
+  setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+};
+
+/** Chromium's ERR_ABORTED — emitted for an ordinary superseded or cancelled
+ *  load, not a failure the user should see. */
+const ERR_ABORTED = -3;
+
+/**
+ * Chromium events to HostedViewEvent. All the judgement lives here — which
+ * failures are real, which frames count, when the history flags are read —
+ * so it is a pure function over an emitter rather than something only a
+ * running window could exercise. electron-view.ts wires it to the real
+ * WebContents.
+ */
+export function bridgeEvents(
+  contents: WebContentsLike,
+  navigation: NavigationFacts,
+  emit: (event: HostedViewEvent) => void,
+): void {
+  const navigated = (url: string): void => {
+    emit({
+      kind: "navigated",
+      url,
+      canGoBack: navigation.canGoBack(),
+      canGoForward: navigation.canGoForward(),
+    });
+  };
+
+  const on = (event: string, listener: (...args: never[]) => void): void => {
+    contents.on(event, listener);
+  };
+
+  on("page-title-updated", ((_event: unknown, title: string) => {
+    emit({ kind: "title", title });
+  }) as (...args: never[]) => void);
+
+  on("did-start-loading", (() => {
+    emit({ kind: "loading", loading: true });
+  }) as (...args: never[]) => void);
+
+  on("did-stop-loading", (() => {
+    emit({ kind: "loading", loading: false });
+  }) as (...args: never[]) => void);
+
+  on("did-navigate", ((_event: unknown, url: string) => {
+    navigated(url);
+  }) as (...args: never[]) => void);
+
+  on("did-navigate-in-page", ((_event: unknown, url: string, isMainFrame: boolean) => {
+    if (isMainFrame) navigated(url);
+  }) as (...args: never[]) => void);
+
+  on("did-fail-load", ((
+    _event: unknown,
+    errorCode: number,
+    errorDescription: string,
+    _validatedURL: string,
+    isMainFrame: boolean,
+  ) => {
+    if (!isMainFrame || errorCode === ERR_ABORTED) return;
+    emit({ kind: "failed", detail: errorDescription });
+  }) as (...args: never[]) => void);
+
+  // The third way a non-web scheme could be reached: not the address bar,
+  // not BrowserHost.open, but the page navigating itself. isSafeHref is the
+  // shared vocabulary; the explicit https? test is the decision, because
+  // isSafeHref deliberately accepts relative and in-page links, which are
+  // legitimate in a document but are not what arrives here.
+  on("will-navigate", ((event: { preventDefault(): void }, url: string) => {
+    const target = url.trim();
+    if (isSafeHref(target) && /^https?:/i.test(target)) return;
+    event.preventDefault();
+  }) as (...args: never[]) => void);
+
+  contents.setWindowOpenHandler(({ url }) => {
+    emit({ kind: "popup", url });
+    return { action: "deny" };
+  });
 }

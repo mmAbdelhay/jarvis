@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BrowserHost, type HostedView, type HostedViewEvent, type Rect } from "./browser-host.js";
+import {
+  BrowserHost,
+  bridgeEvents,
+  type HostedView,
+  type HostedViewEvent,
+  type Rect,
+  type WebContentsLike,
+} from "./browser-host.js";
 
 class FakeView implements HostedView {
   loaded: string[] = [];
@@ -299,5 +306,151 @@ describe("BrowserHost", () => {
     views[0]?.emit({ kind: "title", title: "One" });
 
     expect(seen).toEqual([1, 1]);
+  });
+});
+
+class FakeContents implements WebContentsLike {
+  #handlers = new Map<string, ((...args: never[]) => void)[]>();
+  popupHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
+
+  on(event: string, listener: (...args: never[]) => void): this {
+    const list = this.#handlers.get(event) ?? [];
+    list.push(listener);
+    this.#handlers.set(event, list);
+    return this;
+  }
+  setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void {
+    this.popupHandler = handler;
+  }
+  fire(event: string, ...args: unknown[]): void {
+    for (const listener of this.#handlers.get(event) ?? []) {
+      (listener as (...a: unknown[]) => void)(...args);
+    }
+  }
+}
+
+describe("bridgeEvents", () => {
+  let contents: FakeContents;
+  let events: HostedViewEvent[];
+  let back: boolean;
+  let forward: boolean;
+
+  beforeEach(() => {
+    contents = new FakeContents();
+    events = [];
+    back = false;
+    forward = false;
+    bridgeEvents(
+      contents,
+      { canGoBack: () => back, canGoForward: () => forward },
+      (event) => events.push(event),
+    );
+  });
+
+  it("reports a title change", () => {
+    contents.fire("page-title-updated", {}, "GitHub");
+
+    expect(events).toEqual([{ kind: "title", title: "GitHub" }]);
+  });
+
+  it("reports loading start and stop", () => {
+    contents.fire("did-start-loading");
+    contents.fire("did-stop-loading");
+
+    expect(events).toEqual([
+      { kind: "loading", loading: true },
+      { kind: "loading", loading: false },
+    ]);
+  });
+
+  it("reports a navigation with the history flags read at that moment", () => {
+    back = true;
+    contents.fire("did-navigate", {}, "https://github.com/login");
+
+    expect(events).toEqual([
+      { kind: "navigated", url: "https://github.com/login", canGoBack: true, canGoForward: false },
+    ]);
+  });
+
+  // A single-page app changes URL without a document load; the address bar
+  // has to follow, or it shows a stale page.
+  it("reports an in-page navigation too", () => {
+    contents.fire("did-navigate-in-page", {}, "https://github.com/issues#new", true);
+
+    expect(events).toEqual([
+      {
+        kind: "navigated",
+        url: "https://github.com/issues#new",
+        canGoBack: false,
+        canGoForward: false,
+      },
+    ]);
+  });
+
+  it("ignores an in-page navigation in a subframe", () => {
+    contents.fire("did-navigate-in-page", {}, "https://ads.example/x", false);
+
+    expect(events).toEqual([]);
+  });
+
+  it("reports a failed main-frame load with the description", () => {
+    contents.fire("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://nope.example", true);
+
+    expect(events).toEqual([{ kind: "failed", detail: "ERR_NAME_NOT_RESOLVED" }]);
+  });
+
+  it("ignores a failed subframe load", () => {
+    contents.fire("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://ads.example", false);
+
+    expect(events).toEqual([]);
+  });
+
+  // -3 is ERR_ABORTED, which Chromium emits for an ordinary user-cancelled
+  // or superseded load. Surfacing it would put an error banner on a page
+  // that is loading perfectly well.
+  it("ignores an aborted load", () => {
+    contents.fire("did-fail-load", {}, -3, "ERR_ABORTED", "https://github.com", true);
+
+    expect(events).toEqual([]);
+  });
+
+  it("turns a window.open into a popup event and denies the native window", () => {
+    const result = contents.popupHandler?.({ url: "https://example.com/help" });
+
+    expect(result).toEqual({ action: "deny" });
+    expect(events).toEqual([{ kind: "popup", url: "https://example.com/help" }]);
+  });
+
+  // Defence in depth: the address bar already gates schemes, and so does
+  // BrowserHost.open. This covers the third route — a page navigating
+  // itself — which neither of those sees.
+  it("blocks a page navigating itself to a non-web scheme", () => {
+    let prevented = false;
+    contents.fire(
+      "will-navigate",
+      {
+        preventDefault: () => {
+          prevented = true;
+        },
+      },
+      "file:///etc/passwd",
+    );
+
+    expect(prevented).toBe(true);
+  });
+
+  it("allows a page to navigate itself to an https URL", () => {
+    let prevented = false;
+    contents.fire(
+      "will-navigate",
+      {
+        preventDefault: () => {
+          prevented = true;
+        },
+      },
+      "https://example.com",
+    );
+
+    expect(prevented).toBe(false);
   });
 });
