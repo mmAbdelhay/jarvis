@@ -455,6 +455,12 @@ app.whenReady().then(async () => {
     window.webContents.send("providers:update", providers.snapshot());
 
     void capacityPromise.then(() => {
+      // The capacity refresh takes up to 20s per account, so this callback
+      // can land long after a user who launched, glanced and quit. Sending
+      // on a destroyed webContents throws, and this chain has no catch of
+      // its own — an unhandled rejection in the main process on every quick
+      // quit. There is nothing to report to a window that is gone.
+      if (window.isDestroyed()) return;
       window.webContents.send("providers:update", providers.snapshot());
       const capacity = capacityReport(providers.snapshot(), PRIMARY_LANGUAGE);
       if (capacity === "") return;

@@ -84,6 +84,22 @@ describe("createPtySpawner", () => {
     expect(output).toContain("[][]");
   });
 
+  // An ambient API key outranks the OAuth credentials the wrapper's
+  // CLAUDE_CONFIG_DIR points at, so a session labelled `claude-acme`
+  // in the dashboard would silently bill API credits instead of that
+  // subscription. brain.ts and capacity.ts already strip it; a session
+  // spends far more than either.
+  it("strips ANTHROPIC_API_KEY so the account's own credentials decide who pays", async () => {
+    const spawn = createPtySpawner({ ...process.env, ANTHROPIC_API_KEY: "sk-should-not-reach-a-session" });
+    const handle = spawn(
+      agent({ command: "/bin/sh", args: ["-c", 'printf "[%s]" "$ANTHROPIC_API_KEY"'] }),
+      process.cwd(),
+    );
+    const { output } = await collect(handle);
+
+    expect(output).toContain("[]");
+  });
+
   it("passes the configured model through as --model", async () => {
     const spawn = createPtySpawner();
     const handle = spawn(

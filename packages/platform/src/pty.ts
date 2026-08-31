@@ -91,6 +91,16 @@ const INHERITED_AGENT_MARKERS = [
 ];
 
 /**
+ * Removed for the same reason capacity.ts and brain.ts remove it: an
+ * ambient ANTHROPIC_API_KEY silently outranks the OAuth credentials the
+ * account wrapper's CLAUDE_CONFIG_DIR points at, so a session the dashboard
+ * labels `claude-acme` would quietly bill API credits instead of that
+ * subscription. Jarvis exists to make which account is paying legible, and
+ * every other path that spends money already strips it.
+ */
+const BILLING_OVERRIDE = "ANTHROPIC_API_KEY";
+
+/**
  * The args an agent is launched with: whatever the config specifies, plus
  * `--model` when the config names one. Without this, `model:` in
  * jarvis.yaml is decorative — it is recorded on the session row and shown
@@ -151,6 +161,7 @@ export function createPtySpawner(env: NodeJS.ProcessEnv = process.env): Spawner 
   return (agent: AgentConfig, projectPath: string): ProcessHandle => {
     const childEnv: NodeJS.ProcessEnv = { ...env, TERM };
     for (const marker of INHERITED_AGENT_MARKERS) delete childEnv[marker];
+    delete childEnv[BILLING_OVERRIDE];
 
     const child = pty.spawn(agent.command, argsFor(agent), {
       name: TERM,
