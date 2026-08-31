@@ -12,7 +12,6 @@
  * would forget it.
  */
 export type ViewName = "dashboard" | "changes" | "session" | "workspace" | "settings";
-export type WorkspaceMode = "browser" | "docs";
 
 const VIEWS: Record<ViewName, string> = {
   dashboard: "view-dashboard",
@@ -31,7 +30,6 @@ const NAV: Record<ViewName, string> = {
 };
 
 let view: ViewName = "dashboard";
-let mode: WorkspaceMode = "browser";
 
 export function currentView(): ViewName {
   return view;
@@ -60,13 +58,8 @@ export function showView(name: ViewName): void {
   syncHostedView();
 }
 
-export function setWorkspaceMode(next: WorkspaceMode): void {
-  mode = next;
-  syncHostedView();
-}
-
 function syncHostedView(): void {
   // Optional-chained: several renderer test harnesses run with no bridge at
   // all, and a route change must not throw there.
-  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && mode === "browser");
+  void window.jarvis?.setWorkspaceVisible?.(view === "workspace");
 }

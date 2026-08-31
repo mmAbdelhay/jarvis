@@ -10,11 +10,11 @@ function harness(): Recorded[] {
     <button id="nav-workspace"></button>
     <div id="view-workspace">
       <select id="workspace-project"></select>
-      <button id="workspace-mode-browser"></button>
-      <button id="workspace-mode-docs"></button>
+      <button id="workspace-open-editor"></button>
+      <span id="workspace-editor-status"></span>
+      <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
         <div id="workspace-tabs"></div>
-        <button id="workspace-new-tab"></button>
         <div id="workspace-bar">
           <button id="workspace-back"></button>
           <button id="workspace-forward"></button>
@@ -23,33 +23,6 @@ function harness(): Recorded[] {
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
-      </div>
-      <button id="workspace-open-editor"></button>
-      <span id="workspace-editor-status"></span>
-      <div id="workspace-docs" hidden>
-        <div id="workspace-doc-list"></div>
-        <div id="workspace-doc-title"></div>
-        <button id="workspace-doc-mode-writing"></button>
-        <button id="workspace-doc-mode-dev"></button>
-        <div id="workspace-doc-toolbar" hidden>
-          <button id="workspace-doc-h1"></button>
-          <button id="workspace-doc-h2"></button>
-          <button id="workspace-doc-h3"></button>
-          <button id="workspace-doc-bold"></button>
-          <button id="workspace-doc-italic"></button>
-          <button id="workspace-doc-strike"></button>
-          <button id="workspace-doc-code"></button>
-          <button id="workspace-doc-codeblock"></button>
-          <button id="workspace-doc-ul"></button>
-          <button id="workspace-doc-ol"></button>
-          <button id="workspace-doc-quote"></button>
-          <button id="workspace-doc-link"></button>
-          <button id="workspace-doc-hr"></button>
-          <span id="workspace-doc-save-status"></span>
-          <button id="workspace-doc-save"></button>
-        </div>
-        <div id="workspace-doc-body"></div>
-        <textarea id="workspace-doc-editor" hidden></textarea>
       </div>
     </div>`;
 
@@ -71,15 +44,6 @@ function harness(): Recorded[] {
     setWorkspaceBounds: record("setWorkspaceBounds"),
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
-    listDocs: () => Promise.resolve({ ok: true, value: [] }),
-    readDoc: () => Promise.resolve({ ok: true, value: [] }),
-    readDocRaw: () => Promise.resolve({ ok: true, value: "" }),
-    writeDoc: (...args: unknown[]) => {
-      calls.push({ call: "writeDoc", args });
-      return Promise.resolve({ ok: true, value: null });
-    },
-    parseDoc: () => Promise.resolve([]),
-    taskOffsets: () => Promise.resolve([]),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
   };
   return calls;
@@ -98,6 +62,10 @@ function tab(overrides: Partial<WorkspaceState["tabs"][number]> = {}) {
     error: undefined,
     ...overrides,
   };
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("workspace chrome", () => {
@@ -238,9 +206,7 @@ describe("workspace chrome", () => {
     expect(marked).toEqual([false, true]);
   });
 
-  // "+" lives in the tab strip now, not the address-bar row — none of
-  // back/forward/reload/address means anything for a code editor, but the
-  // whole row can hide safely, since "+" is no longer inside it.
+  // None of back/forward/reload/address means anything for a code editor.
   it("hides the address bar when the active tab is an editor", () => {
     renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
 
@@ -259,60 +225,35 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(false);
   });
 
-  // "+" moves to the end of the tab strip's own row on every render — the
-  // right side of the tabs, always reachable regardless of the active
-  // tab's kind, never inside the row that hides for an editor tab.
-  it("keeps + at the end of the tab strip, after every tab", () => {
-    renderWorkspace({ tabs: [tab(), tab({ id: "tab-2" })], activeTabId: "tab-1" });
+  // "+" has a fixed spot in the workspace head — it is never relocated by
+  // renderWorkspace, regardless of how many tabs are open or what kind the
+  // active one is.
+  it("keeps + visible in its fixed spot with no tabs open", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
 
-    const children = [...document.getElementById("workspace-tabs")!.children];
-    expect(children.at(-1)?.id).toBe("workspace-new-tab");
-  });
-
-  it("keeps + reachable at the end of the strip even while an editor tab is active", () => {
-    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
-
-    const children = [...document.getElementById("workspace-tabs")!.children];
-    expect(children.at(-1)?.id).toBe("workspace-new-tab");
+    expect(document.getElementById("workspace-new-tab")).not.toBeNull();
     expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
-  // With no tabs open anywhere (not even a collapsed pill for another
-  // project), a whole dedicated row holding nothing but + looked orphaned
-  // — floating alone above the address bar. Folded into the same row as
-  // back/forward/reload/address instead, at the far right, so there is
-  // exactly one row when there is nothing to show a real tab strip for.
-  it("moves + into the address bar, and hides the empty tab strip, when no tabs are open at all", () => {
+  it("keeps + visible in its fixed spot while an editor tab is active", () => {
+    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-new-tab")).not.toBeNull();
+    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("hides the tab strip when no tabs are open anywhere", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(true);
-    const barChildren = [...document.getElementById("workspace-bar")!.children];
-    expect(barChildren.at(-1)?.id).toBe("workspace-new-tab");
-    expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("moves + back into the tab strip once a tab exists, and shows the strip again", () => {
+  it("shows the tab strip once a tab exists", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
 
     expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
-    const stripChildren = [...document.getElementById("workspace-tabs")!.children];
-    expect(stripChildren.at(-1)?.id).toBe("workspace-new-tab");
-  });
-
-  // A collapsed pill for another project is real content — the strip is
-  // not empty just because the *selected* project has nothing open, so +
-  // stays in the tab row, not folded into the address bar.
-  it("keeps + in the tab strip when another project has a collapsed pill, even with none selected", () => {
-    renderWorkspace({
-      tabs: [tab({ project: "storefront" })],
-      activeTabId: "tab-1",
-    });
-
-    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
-    const stripChildren = [...document.getElementById("workspace-tabs")!.children];
-    expect(stripChildren.at(-1)?.id).toBe("workspace-new-tab");
   });
 
   it("puts the active tab's URL in the address bar", () => {
@@ -460,247 +401,6 @@ describe("workspace chrome", () => {
       args: [{ x: 12, y: 141, width: 901, height: 600 }],
     });
   });
-
-  it("lists a project's documents when docs mode opens", async () => {
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.listDocs = () =>
-      Promise.resolve({ ok: true, value: [{ path: "docs/plan.md", name: "plan.md" }] });
-
-    document.getElementById("workspace-mode-docs")?.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(document.querySelector(".workspace-doc-item")?.textContent).toBe("docs/plan.md");
-  });
-
-  it("shows a localised error when the project's docs cannot be listed", async () => {
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.listDocs = () =>
-      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
-
-    document.getElementById("workspace-mode-docs")?.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(document.getElementById("workspace-doc-body")?.textContent).toContain(
-      "Could not open that document.",
-    );
-  });
-});
-
-function flush(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function openADoc(
-  jarvis: Record<string, unknown>,
-  overrides: { readDoc?: unknown; readDocRaw?: unknown; taskOffsets?: unknown } = {},
-): Promise<void> {
-  jarvis["listDocs"] = () =>
-    Promise.resolve({ ok: true, value: [{ path: "notes.md", name: "notes.md" }] });
-  jarvis["readDoc"] =
-    overrides.readDoc ??
-    (() =>
-      Promise.resolve({
-        ok: true,
-        value: [{ kind: "paragraph", children: [{ kind: "text", text: "hello" }] }],
-      }));
-  jarvis["readDocRaw"] = overrides.readDocRaw ?? (() => Promise.resolve({ ok: true, value: "hello" }));
-  // openDoc() itself calls taskOffsets while opening, so this override has
-  // to be in place before the click below — setting it afterwards is too
-  // late to affect the value openDoc() already cached.
-  if (overrides.taskOffsets !== undefined) jarvis["taskOffsets"] = overrides.taskOffsets;
-
-  document.getElementById("workspace-mode-docs")?.click();
-  await flush();
-  document.querySelector<HTMLElement>(".workspace-doc-item")?.click();
-  await flush();
-}
-
-describe("workspace doc editing", () => {
-  let calls: Recorded[];
-  let jarvis: Record<string, unknown>;
-
-  beforeEach(() => {
-    calls = harness();
-    initWorkspace(["acme"]);
-    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
-  });
-
-  it("populates the raw-text editor when a document opens", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }) });
-
-    expect((document.getElementById("workspace-doc-editor") as HTMLTextAreaElement).value).toBe(
-      "- [ ] a",
-    );
-  });
-
-  it("shows the editor and toolbar, and hides the rendered body, in Dev mode", async () => {
-    await openADoc(jarvis);
-
-    document.getElementById("workspace-doc-mode-dev")?.click();
-
-    expect((document.getElementById("workspace-doc-editor") as HTMLElement).hidden).toBe(false);
-    expect((document.getElementById("workspace-doc-toolbar") as HTMLElement).hidden).toBe(false);
-    expect((document.getElementById("workspace-doc-body") as HTMLElement).hidden).toBe(true);
-  });
-
-  it("re-renders the body from the editor's current text when switching back to Writing", async () => {
-    await openADoc(jarvis);
-    jarvis["parseDoc"] = (text: string) =>
-      Promise.resolve([{ kind: "paragraph", children: [{ kind: "text", text: `parsed:${text}` }] }]);
-    document.getElementById("workspace-doc-mode-dev")?.click();
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.value = "edited text";
-
-    document.getElementById("workspace-doc-mode-writing")?.click();
-    await flush();
-
-    expect(document.getElementById("workspace-doc-body")?.textContent).toBe("parsed:edited text");
-    expect((document.getElementById("workspace-doc-editor") as HTMLElement).hidden).toBe(true);
-  });
-
-  it("flips the matching raw-text offset and saves when a checkbox is clicked", async () => {
-    await openADoc(jarvis, {
-      readDoc: () =>
-        Promise.resolve({
-          ok: true,
-          value: [
-            {
-              kind: "list",
-              ordered: false,
-              items: [[{ kind: "paragraph", children: [{ kind: "text", text: "a" }] }]],
-              checked: [false],
-            },
-          ],
-        }),
-      readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }),
-      taskOffsets: () => Promise.resolve([3]),
-    });
-
-    const box = document.querySelector<HTMLInputElement>("input[type=checkbox]");
-    expect(box).not.toBeNull();
-    box!.checked = true;
-    box!.dispatchEvent(new Event("change", { bubbles: true }));
-    await flush();
-
-    expect(calls).toContainEqual({ call: "writeDoc", args: ["acme", "notes.md", "- [x] a"] });
-  });
-
-  it("reverts the checkbox if the write fails", async () => {
-    await openADoc(jarvis, {
-      readDocRaw: () => Promise.resolve({ ok: true, value: "- [ ] a" }),
-      taskOffsets: () => Promise.resolve([3]),
-    });
-    jarvis["writeDoc"] = () =>
-      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
-
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.dataset["taskIndex"] = "0";
-    document.getElementById("workspace-doc-body")?.append(box);
-    box.checked = true;
-    box.dispatchEvent(new Event("change", { bubbles: true }));
-    await flush();
-
-    expect(box.checked).toBe(false);
-  });
-
-  it("clears the save status when the editor is typed into", async () => {
-    await openADoc(jarvis);
-    const status = document.getElementById("workspace-doc-save-status") as HTMLElement;
-    status.textContent = "Saved.";
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
-
-    expect(status.textContent).toBe("");
-  });
-
-  it("saves the editor's current text and shows a success status", async () => {
-    await openADoc(jarvis);
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.value = "new content";
-
-    document.getElementById("workspace-doc-save")?.click();
-    await flush();
-
-    expect(calls).toContainEqual({ call: "writeDoc", args: ["acme", "notes.md", "new content"] });
-    expect(document.getElementById("workspace-doc-save-status")?.textContent).not.toBe("");
-  });
-
-  it("shows the localised error text when a save fails", async () => {
-    await openADoc(jarvis);
-    jarvis["writeDoc"] = () =>
-      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
-
-    document.getElementById("workspace-doc-save")?.click();
-    await flush();
-
-    expect(document.getElementById("workspace-doc-save-status")?.textContent).toBe(
-      "Could not open that document.",
-    );
-  });
-
-  it("wraps the selection in ** ** when Bold is clicked", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "hello world" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(0, 5);
-
-    document.getElementById("workspace-doc-bold")?.click();
-
-    expect(editor.value).toBe("**hello** world");
-  });
-
-  it("places the cursor between empty markers when nothing is selected", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(0, 0);
-
-    document.getElementById("workspace-doc-bold")?.click();
-
-    expect(editor.value).toBe("****");
-    expect(editor.selectionStart).toBe(2);
-    expect(editor.selectionEnd).toBe(2);
-  });
-
-  it("prefixes the current line with # # when H1 is clicked", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "a line" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(2, 2);
-
-    document.getElementById("workspace-doc-h1")?.click();
-
-    expect(editor.value).toBe("# a line");
-  });
-
-  it("prefixes every selected line with - when the bullet-list button is clicked", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "a\nb" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(0, 3);
-
-    document.getElementById("workspace-doc-ul")?.click();
-
-    expect(editor.value).toBe("- a\n- b");
-  });
-
-  it("wraps the selection as a link when Link is clicked", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "docs" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(0, 4);
-
-    document.getElementById("workspace-doc-link")?.click();
-
-    expect(editor.value).toBe("[docs](url)");
-  });
-
-  it("inserts a rule at the cursor when HR is clicked", async () => {
-    await openADoc(jarvis, { readDocRaw: () => Promise.resolve({ ok: true, value: "ab" }) });
-    const editor = document.getElementById("workspace-doc-editor") as HTMLTextAreaElement;
-    editor.setSelectionRange(1, 1);
-
-    document.getElementById("workspace-doc-hr")?.click();
-
-    expect(editor.value).toBe("a\n---\nb");
-  });
 });
 
 describe("open in editor", () => {
@@ -713,10 +413,9 @@ describe("open in editor", () => {
     jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
   });
 
-  it("opens the editor URL as a tab for the selected project and switches to Browser", async () => {
+  it("opens the editor URL as a tab for the selected project", async () => {
     jarvis["openEditor"] = (project: string) =>
       Promise.resolve({ ok: true, value: `http://127.0.0.1:9001/?folder=${project}` });
-    document.getElementById("workspace-mode-docs")?.click();
 
     document.getElementById("workspace-open-editor")?.click();
     await flush();
@@ -725,9 +424,6 @@ describe("open in editor", () => {
       call: "openTab",
       args: ["acme", "http://127.0.0.1:9001/?folder=acme", "editor"],
     });
-    expect(
-      document.getElementById("workspace-browser")?.hasAttribute("hidden"),
-    ).toBe(false);
   });
 
   // Reopening a project that already has an editor tab must not spin up a
@@ -797,14 +493,14 @@ describe("open in editor", () => {
     // the current tab list.
     renderWorkspace({ tabs: [], activeTabId: undefined });
     jarvis["openEditor"] = () =>
-      Promise.resolve({ ok: false, text: "Could not open that document.", language: "en" });
+      Promise.resolve({ ok: false, text: "Could not open the editor.", language: "en" });
 
     document.getElementById("workspace-open-editor")?.click();
     await flush();
 
     expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
     expect(document.getElementById("workspace-editor-status")?.textContent).toBe(
-      "Could not open that document.",
+      "Could not open the editor.",
     );
   });
 });

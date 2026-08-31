@@ -17,7 +17,6 @@ import {
   createBrain,
   createCapacityReader,
   createCodeServerManager,
-  createDocReader,
   createGitProvider,
   createMetricsReader,
   createPtySpawner,
@@ -31,7 +30,6 @@ import {
 } from "@jarvis/platform";
 import {
   buildWiring,
-  createDocsHandlers,
   createEditorHandlers,
   createGitHandlers,
   createSettingsHandlers,
@@ -178,11 +176,6 @@ app.whenReady().then(async () => {
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
     const workspace = new BrowserHost(createElectronViewFactory(window));
-    const docs = createDocsHandlers({
-      reader: createDocReader(),
-      projects: config.projects,
-      language: PRIMARY_LANGUAGE,
-    });
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
@@ -333,8 +326,7 @@ app.whenReady().then(async () => {
 
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
-    // still must not reach it as if it were one; docs.list/.read validate
-    // internally (createDocsHandlers).
+    // still must not reach it as if it were one.
     ipcMain.handle("workspace:open", (_event, project: unknown, input: unknown, kind: unknown) => {
       if (typeof project !== "string" || typeof input !== "string") return;
       workspace.open(project, input, kind === "editor" ? "editor" : "web");
@@ -362,23 +354,6 @@ app.whenReady().then(async () => {
       workspace.setVisible(visible === true),
     );
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
-    ipcMain.handle("docs:list", (_event, project: string) => docs.list(project));
-    ipcMain.handle("docs:read", (_event, project: string, path: string) => docs.read(project, path));
-    ipcMain.handle("docs:write", (_event, project: unknown, path: unknown, content: unknown) => {
-      if (typeof project !== "string" || typeof path !== "string" || typeof content !== "string") {
-        return { ok: false, text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
-      }
-      return docs.write(project, path, content);
-    });
-    ipcMain.handle("docs:parse", (_event, text: unknown) =>
-      docs.parse(typeof text === "string" ? text : ""),
-    );
-    ipcMain.handle("docs:readRaw", (_event, project: string, path: string) =>
-      docs.readRaw(project, path),
-    );
-    ipcMain.handle("docs:taskOffsets", (_event, text: unknown) =>
-      docs.taskOffsets(typeof text === "string" ? text : ""),
-    );
     ipcMain.handle("editor:open", (_event, project: unknown) =>
       editor.open(typeof project === "string" ? project : ""),
     );

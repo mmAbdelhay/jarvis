@@ -54,12 +54,6 @@ const api: RendererApi = {
   onWorkspace: (cb) => {
     ipcRenderer.on("workspace:update", (_e, state) => cb(state));
   },
-  listDocs: (project) => ipcRenderer.invoke("docs:list", project),
-  readDoc: (project, path) => ipcRenderer.invoke("docs:read", project, path),
-  writeDoc: (project, path, content) => ipcRenderer.invoke("docs:write", project, path, content),
-  parseDoc: (text) => ipcRenderer.invoke("docs:parse", text),
-  readDocRaw: (project, path) => ipcRenderer.invoke("docs:readRaw", project, path),
-  taskOffsets: (text) => ipcRenderer.invoke("docs:taskOffsets", text),
   openEditor: (project) => ipcRenderer.invoke("editor:open", project),
   getSettings: () => ipcRenderer.invoke("settings:read"),
   saveSettings: (draft) => ipcRenderer.invoke("settings:save", draft),

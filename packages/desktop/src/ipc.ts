@@ -15,14 +15,8 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import {
-  findTaskMarkerOffsets,
-  parseMarkdown,
-  type DocBlock,
-  type DocEntry,
-  type WorkspaceState,
-} from "@jarvis/core";
-import type { CodeServerManager, DocFailureCode, DocReader } from "@jarvis/platform";
+import type { WorkspaceState } from "@jarvis/core";
+import type { CodeServerManager } from "@jarvis/platform";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -327,14 +321,6 @@ export type RendererApi = {
    *  switching to a project with no open tab. */
   hideAllTabs(): Promise<void>;
   onWorkspace(cb: (state: WorkspaceState) => void): void;
-  listDocs(project: string): Promise<GitViewResult<DocEntry[]>>;
-  readDoc(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
-  writeDoc(project: string, path: string, content: string): Promise<GitViewResult<null>>;
-  /** Parses arbitrary text with no filesystem access — used to preview a
-   *  Dev-mode edit that has not been saved yet. */
-  parseDoc(text: string): Promise<DocBlock[]>;
-  readDocRaw(project: string, path: string): Promise<GitViewResult<string>>;
-  taskOffsets(text: string): Promise<number[]>;
   /** Ensures a code-server instance is running for `project` and returns
    *  its URL — call openTab(project, url) with the result to actually show
    *  it; this call alone does not open a tab. */
@@ -416,127 +402,6 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
   };
 }
 
-export type DocsHandlers = {
-  list(project: string): Promise<GitViewResult<DocEntry[]>>;
-  read(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
-  write(project: string, path: string, content: string): Promise<GitViewResult<null>>;
-  /** Pure — no project, no filesystem, never fails. Lets the renderer
-   *  preview an unsaved Dev-mode edit through the same parser read() uses,
-   *  without writing the draft to disk just to look at it. */
-  parse(text: string): DocBlock[];
-  /** The raw markdown source, not the parsed model — Dev-mode editing needs
-   *  the actual text a save would write back, which the model cannot
-   *  losslessly reconstruct (reference links, exact list markers, and so
-   *  on are not represented in it). Plain text is safe to expose: it only
-   *  ever lands in a textarea's value, never in innerHTML. */
-  readRaw(project: string, path: string): Promise<GitViewResult<string>>;
-  /** Pure — no project, no filesystem, never fails. */
-  taskOffsets(text: string): number[];
-};
-
-export type DocsHandlerDeps = {
-  reader: DocReader;
-  /** Name to absolute path, from config. The renderer never sees a path. */
-  projects: Readonly<Record<string, string>>;
-  language: "ar" | "en";
-};
-
-function docFailureText(code: DocFailureCode, language: "ar" | "en"): string {
-  switch (code) {
-    case "too-large":
-      return MESSAGES.docTooLarge(language);
-    case "not-found":
-      return MESSAGES.docNotFound(language);
-    // "outside-root" and "unreadable" are both refusals. Neither says which
-    // one it was: a caller probing for a file it is not allowed to read
-    // learns nothing from the difference, and the user cannot act on it.
-    default:
-      return MESSAGES.docUnavailable(language);
-  }
-}
-
-/**
- * Documents cross this boundary as a parsed model, never as markdown source
- * and never as HTML — the renderer builds nodes from data it cannot execute
- * (see markdown.ts). Projects are named, not pathed, for the same reason
- * the git handlers take a sessionId: main owns the mapping, so a compromised
- * renderer can only ever reach a directory the user configured.
- */
-export function createDocsHandlers(deps: DocsHandlerDeps): DocsHandlers {
-  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
-    return { ok: false, text, language: deps.language };
-  }
-
-  function rootFor(project: unknown): string | undefined {
-    if (!isString(project)) return undefined;
-    return deps.projects[project];
-  }
-
-  return {
-    async list(project) {
-      const root = rootFor(project);
-      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
-      try {
-        const outcome = await deps.reader.list(root);
-        return outcome.ok
-          ? { ok: true, value: outcome.value }
-          : fail(docFailureText(outcome.error.code, deps.language));
-      } catch {
-        // P15: the contract says it resolves; the cost of trusting that at
-        // the call site is an unhandled rejection in the main process.
-        return fail(MESSAGES.docUnavailable(deps.language));
-      }
-    },
-
-    async read(project, path) {
-      const root = rootFor(project);
-      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
-      if (!isString(path)) return fail(MESSAGES.invalidArgument(deps.language));
-      try {
-        const outcome = await deps.reader.read(root, path);
-        if (!outcome.ok) return fail(docFailureText(outcome.error.code, deps.language));
-        return { ok: true, value: parseMarkdown(outcome.value) };
-      } catch {
-        return fail(MESSAGES.docUnavailable(deps.language));
-      }
-    },
-
-    async write(project, path, content) {
-      const root = rootFor(project);
-      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
-      if (!isString(path) || !isString(content)) return fail(MESSAGES.invalidArgument(deps.language));
-      try {
-        const outcome = await deps.reader.write(root, path, content);
-        return outcome.ok ? outcome : fail(docFailureText(outcome.error.code, deps.language));
-      } catch {
-        return fail(MESSAGES.docUnavailable(deps.language));
-      }
-    },
-
-    parse(text) {
-      return parseMarkdown(text);
-    },
-
-    async readRaw(project, path) {
-      const root = rootFor(project);
-      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
-      if (!isString(path)) return fail(MESSAGES.invalidArgument(deps.language));
-      try {
-        const outcome = await deps.reader.read(root, path);
-        return outcome.ok
-          ? { ok: true, value: outcome.value }
-          : fail(docFailureText(outcome.error.code, deps.language));
-      } catch {
-        return fail(MESSAGES.docUnavailable(deps.language));
-      }
-    },
-
-    taskOffsets(text) {
-      return findTaskMarkerOffsets(text);
-    },
-  };
-}
-
 export type EditorHandlers = {
   /** Ensures a code-server instance is running for `project` and returns
    *  its URL — the renderer then opens that URL as an ordinary Workspace
@@ -565,9 +430,9 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
         // The manager's own failure detail is developer-facing (e.g. "did
         // not become ready in time") — same discipline as docFailureText:
         // wrap it behind one bilingual headline rather than surface it raw.
-        return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.docUnavailable(deps.language));
+        return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.editorUnavailable(deps.language));
       } catch {
-        return fail(MESSAGES.docUnavailable(deps.language));
+        return fail(MESSAGES.editorUnavailable(deps.language));
       }
     },
   };

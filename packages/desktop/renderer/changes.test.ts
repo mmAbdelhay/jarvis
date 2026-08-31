@@ -53,12 +53,6 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     setWorkspaceBounds: vi.fn(async () => {}),
     setWorkspaceVisible: vi.fn(async () => {}),
     onWorkspace: vi.fn(),
-    listDocs: vi.fn(async () => notStubbed),
-    readDoc: vi.fn(async () => notStubbed),
-    writeDoc: vi.fn(async () => notStubbed),
-    parseDoc: vi.fn(async () => []),
-    readDocRaw: vi.fn(async () => notStubbed),
-    taskOffsets: vi.fn(async () => []),
     openEditor: vi.fn(async () => notStubbed),
     getSettings: vi.fn(async () => {
       throw new Error("not stubbed in this test");
