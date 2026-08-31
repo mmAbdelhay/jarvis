@@ -166,6 +166,31 @@ describe("workspace chrome", () => {
     expect(calls).toContainEqual({ call: "openTab", args: ["acme", "github.com"] });
   });
 
+  // Empty string is not a URL — normalizeInput rejects it and BrowserHost.open
+  // no-ops, so "+" must send something real, not the blank the address bar
+  // shows as a placeholder.
+  it("opens a real tab, not an empty one, when + is clicked", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-new-tab")?.click();
+
+    const call = calls.find((entry) => entry.call === "openTab");
+    expect(call?.args[0]).toBe("acme");
+    expect(call?.args[1]).toEqual(expect.any(String));
+    expect(call?.args[1]).not.toBe("");
+  });
+
+  it("selects the address bar's text after opening a new tab, ready to be typed over", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    const address = document.getElementById("workspace-address") as HTMLInputElement;
+    const selectSpy = vi.spyOn(address, "select");
+
+    document.getElementById("workspace-new-tab")?.click();
+
+    expect(document.activeElement).toBe(address);
+    expect(selectSpy).toHaveBeenCalled();
+  });
+
   it("navigates the active tab instead of opening another one", () => {
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
     const address = document.getElementById("workspace-address") as HTMLInputElement;

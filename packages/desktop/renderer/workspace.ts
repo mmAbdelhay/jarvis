@@ -14,6 +14,13 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
+// "+" has no typed input to go on, unlike Enter on the address bar. An
+// empty string is not a URL — normalizeInput would reject it and
+// BrowserHost.open would silently no-op — so a new tab needs a real
+// default to open, with the address bar left selected so typing over it
+// is the very next thing the user can do.
+const NEW_TAB_URL = "https://duckduckgo.com";
+
 let latest: WorkspaceState = { tabs: [], activeTabId: undefined };
 
 function activeTab(): WorkspaceTab | undefined {
@@ -54,7 +61,9 @@ export function initWorkspace(projects: string[]): void {
   });
 
   $("workspace-new-tab").addEventListener("click", () => {
-    void window.jarvis.openTab(selectedProject(), "");
+    void window.jarvis.openTab(selectedProject(), NEW_TAB_URL);
+    address.focus();
+    address.select();
   });
   $("workspace-back").addEventListener("click", () => {
     const tab = activeTab();
