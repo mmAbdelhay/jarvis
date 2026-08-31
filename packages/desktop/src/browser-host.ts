@@ -49,6 +49,10 @@ export class BrowserHost {
   readonly #maxTabs: number;
   #bounds: Rect | undefined;
   #visible = false;
+  /** Set by hideAll — distinct from #visible, which means "leave the whole
+   *  route". This means "nothing to show right now" while the route itself
+   *  stays visible: the renderer's selected project has no open tab. */
+  #suppressed = false;
 
   constructor(createView: ViewFactory, options?: { maxTabs?: number; store?: TabStore }) {
     this.#createView = createView;
@@ -69,6 +73,7 @@ export class BrowserHost {
     if (target.kind === "rejected") return;
 
     this.#evictIfFull();
+    this.#suppressed = false;
 
     const tab = this.#store.open(project, target.url, kind);
     if (kind === "editor") {
@@ -101,6 +106,7 @@ export class BrowserHost {
 
   activate(id: TabId): void {
     this.#store.activate(id);
+    this.#suppressed = false;
     this.#syncVisibility();
   }
 
@@ -136,6 +142,19 @@ export class BrowserHost {
    */
   setVisible(visible: boolean): void {
     this.#visible = visible;
+    this.#syncVisibility();
+  }
+
+  /**
+   * Hides every view without touching which tab is "active" — for the
+   * renderer's project switch: a project with no open tab has nothing to
+   * show, but the previously active tab (from a different project) must
+   * stay remembered so switching back finds it exactly as it was. Cleared
+   * by the next open() or activate(), which is how the renderer actually
+   * reveals something again.
+   */
+  hideAll(): void {
+    this.#suppressed = true;
     this.#syncVisibility();
   }
 
@@ -187,7 +206,7 @@ export class BrowserHost {
   #syncVisibility(): void {
     const activeId = this.#store.snapshot().activeTabId;
     for (const [id, view] of this.#views) {
-      view.setVisible(this.#visible && id === activeId);
+      view.setVisible(this.#visible && !this.#suppressed && id === activeId);
     }
   }
 }

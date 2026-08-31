@@ -194,6 +194,44 @@ describe("BrowserHost", () => {
     expect(views[1]?.visible).toBe(true);
   });
 
+  // The renderer switches its selected project without necessarily
+  // switching which tab is "active" (a project with no open tabs has
+  // nothing to activate) — hideAll is how it clears the page area without
+  // that meaning "leave the route", which setVisible(false) would.
+  it("hides every view without changing which tab is active", () => {
+    host.open("acme", "one.example");
+    host.setVisible(true);
+
+    host.hideAll();
+
+    expect(views[0]?.visible).toBe(false);
+    expect(host.state().activeTabId).toBe(host.state().tabs[0]?.id);
+  });
+
+  // hideAll's suppression must not outlive its purpose: the moment the
+  // renderer activates a real tab again (switching to a project that does
+  // have one open), that tab's view has to actually reappear.
+  it("clears the suppression when a tab is activated again", () => {
+    host.open("acme", "one.example");
+    const id = host.state().tabs[0]?.id ?? "";
+    host.setVisible(true);
+    host.hideAll();
+
+    host.activate(id);
+
+    expect(views[0]?.visible).toBe(true);
+  });
+
+  it("clears the suppression when a new tab is opened", () => {
+    host.open("acme", "one.example");
+    host.setVisible(true);
+    host.hideAll();
+
+    host.open("acme", "two.example");
+
+    expect(views[1]?.visible).toBe(true);
+  });
+
   it("hides every view when the route is left", () => {
     host.open("acme", "one.example");
     host.setVisible(true);

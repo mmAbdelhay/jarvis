@@ -345,6 +345,7 @@ app.whenReady().then(async () => {
     ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
       workspace.setVisible(visible === true),
     );
+    ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
     ipcMain.handle("docs:list", (_event, project: string) => docs.list(project));
     ipcMain.handle("docs:read", (_event, project: string, path: string) => docs.read(project, path));
     ipcMain.handle("docs:write", (_event, project: unknown, path: unknown, content: unknown) => {

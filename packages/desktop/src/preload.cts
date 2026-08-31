@@ -50,6 +50,7 @@ const api: RendererApi = {
   tabReload: (id) => ipcRenderer.invoke("workspace:reload", id),
   setWorkspaceBounds: (bounds) => ipcRenderer.invoke("workspace:bounds", bounds),
   setWorkspaceVisible: (visible) => ipcRenderer.invoke("workspace:visible", visible),
+  hideAllTabs: () => ipcRenderer.invoke("workspace:hideAll"),
   onWorkspace: (cb) => {
     ipcRenderer.on("workspace:update", (_e, state) => cb(state));
   },

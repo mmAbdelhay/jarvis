@@ -318,6 +318,9 @@ export type RendererApi = {
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;
+  /** Hides every tab's page without changing which tab is active — for
+   *  switching to a project with no open tab. */
+  hideAllTabs(): Promise<void>;
   onWorkspace(cb: (state: WorkspaceState) => void): void;
   listDocs(project: string): Promise<GitViewResult<DocEntry[]>>;
   readDoc(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
