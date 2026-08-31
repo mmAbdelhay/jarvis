@@ -2,14 +2,17 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Guards the contract between app.ts's `$(id)` lookups and index.html's markup.
-// $() throws `Missing element #x` at module top level for any id not present
-// in the DOM, which blanks the entire dashboard on load. A typo here is
-// invisible to tsc (ids are plain strings) and only surfaces at runtime, so
-// this test derives the id list directly from app.ts's source rather than
-// hand-copying it, so it can't silently drift out of sync.
+// Guards the contract between app.ts's/changes.ts's `$(id)` lookups and
+// index.html's markup. $() throws `Missing element #x` for any id not
+// present in the DOM — at module top level in app.ts (blanking the entire
+// dashboard on load) or inside openChanges/showView in changes.ts (breaking
+// the Changes route Tasks 13-15 build on). A typo here is invisible to tsc
+// (ids are plain strings) and only surfaces at runtime, so this test derives
+// the id list directly from both modules' source rather than hand-copying
+// it, so it can't silently drift out of sync.
 
 const appSource = readFileSync(fileURLToPath(new URL("./app.ts", import.meta.url)), "utf8");
+const changesSource = readFileSync(fileURLToPath(new URL("./changes.ts", import.meta.url)), "utf8");
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -23,9 +26,9 @@ function idsPassedTo$(source: string): string[] {
 }
 
 describe("$() id contract", () => {
-  const ids = idsPassedTo$(appSource);
+  const ids = [...idsPassedTo$(appSource), ...idsPassedTo$(changesSource)];
 
-  it("finds at least one $() call in app.ts (sanity check the extraction itself works)", () => {
+  it("finds at least one $() call in app.ts and changes.ts (sanity check the extraction itself works)", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 

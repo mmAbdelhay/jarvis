@@ -69,7 +69,12 @@ function describeTool(tool: ToolSpec): string {
   return `- ${tool.name}: ${tool.description}${schema}`;
 }
 
-function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[], context: BrainContext): string {
+function buildPrompt(
+  systemPrompt: string,
+  text: string,
+  tools: readonly ToolSpec[],
+  context: BrainContext,
+): string {
   const projectsLine =
     context.projects.length === 0
       ? "(no projects configured)"
@@ -83,6 +88,16 @@ function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[], cont
             const summary = session.summary === "" ? "" : ` "${session.summary}"`;
             return `${session.id} — project ${session.project}, agent ${session.agentId}, state ${session.state}${summary}`;
           })
+          .join("; ");
+
+  const changesLine =
+    context.changes.length === 0
+      ? "(none)"
+      : context.changes
+          .map(
+            (entry) =>
+              `${entry.sessionId} — project ${entry.project}, branch ${entry.branch}, ${entry.files} files, +${entry.insertions} -${entry.deletions}`,
+          )
           .join("; ");
 
   return [
@@ -99,6 +114,7 @@ function buildPrompt(systemPrompt: string, text: string, tools: ToolSpec[], cont
     // the Critical 1/2 seam this closes.
     `Known projects: ${projectsLine}`,
     `Running sessions: ${sessionsLine}`,
+    `Uncommitted changes: ${changesLine}`,
     "",
     `User: ${text}`,
   ].join("\n");
@@ -128,7 +144,7 @@ export function createBrain(config: BrainConfig): Brain {
       context,
     }: {
       text: string;
-      tools: ToolSpec[];
+      tools: readonly ToolSpec[];
       context: BrainContext;
     }): Promise<BrainReply> {
       const prompt = buildPrompt(config.systemPrompt, text, tools, context);

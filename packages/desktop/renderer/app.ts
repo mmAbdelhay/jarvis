@@ -1,6 +1,7 @@
-import type { Session, SessionState, SystemMetrics, Turn } from "@jarvis/core";
+import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { applyStaticChrome, openChanges, showView, wireCommitBar, wireDiffModes } from "./changes.js";
 import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 declare global {
@@ -15,16 +16,45 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
+// The two inputs arrive on independent channels: sessions on "sessions:update"
+// and counts on "git:counts". Both are kept so whichever lands second can
+// re-render with the other's latest value, instead of the row losing its
+// counts every time a session's state changes.
+let latestSessions: Session[] = [];
+let latestChanges = new Map<string, SessionChanges>();
+
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
-window.jarvis.onSessions((sessions) => renderSessions(sessions));
+window.jarvis.onSessions((sessions) => {
+  latestSessions = sessions;
+  renderSessions(latestSessions);
+});
 window.jarvis.onTurn((turn) => renderTurn(turn));
 window.jarvis.onListening((listening) => renderListening(listening));
 window.jarvis.onNotice((notice) => renderNotice(notice));
+window.jarvis.onChangeCounts((changes) => {
+  latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
+  renderSessions(latestSessions);
+});
 
 startClock();
+applyStaticChrome();
 wireComposer();
 wireMicButton();
 wireHistoryPanel();
+wireNav();
+wireDiffModes();
+wireCommitBar();
+
+function wireNav(): void {
+  document.getElementById("nav-dashboard")?.addEventListener("click", () => showView("dashboard"));
+  document.getElementById("nav-changes")?.addEventListener("click", () => {
+    // With no session chosen yet, the most recently active one is the one
+    // the user just spoke about.
+    const latest = [...latestSessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
+    if (latest === undefined) return;
+    void openChanges(latest.id);
+  });
+}
 
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
@@ -86,6 +116,9 @@ function buildSessionRow(session: Session): HTMLElement {
   spacer.style.flexGrow = "1";
   head.append(spacer);
 
+  const diffBadge = buildDiffBadge(session, latestChanges.get(session.id));
+  if (diffBadge !== undefined) head.append(diffBadge);
+
   const state = document.createElement("span");
   state.className = "session__state mono";
   state.textContent = session.state;
@@ -104,7 +137,52 @@ function buildSessionRow(session: Session): HTMLElement {
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
 
   row.append(head, summary, meta);
+  // The dashboard is where a user picks which session's changes to read.
+  // This row is shared with the History panel (buildHistoryRow below), whose
+  // full-screen `.history-overlay` sits on top of everything else — without
+  // closing it first, openChanges() renders the Changes view underneath the
+  // scrim and the click appears to do nothing (I1). Closing it here is a
+  // no-op for the live Sessions panel, where the overlay is already hidden.
+  row.addEventListener("click", () => {
+    closeHistoryOverlay();
+    void openChanges(session.id);
+  });
   return row;
+}
+
+// A live session's badge comes only from the live tracker stream, and only
+// when there is something to show. A past session's badge comes only from
+// its own *recorded* counts (SessionStore.updateGit, frozen at end by
+// ruling P28's ChangeTracker fix) — never the live tracker, whose entry for
+// a finished session's repoPath could by now belong to whatever different
+// session (or the user's own edits) is currently touching that same
+// project (ruling P21). `branch === ""` is the honest "never recorded
+// anything for this session" signal: SessionStore's upsert() never writes
+// the git columns at all, so a session that ended before any refresh cycle
+// (or before Task 16 existed) is left at that column's schema default,
+// which no real git read ever produces. That case renders no badge — kept
+// visibly different from a genuine "recorded zero changes" session, which
+// still renders "+0 −0" rather than being silently indistinguishable from
+// "we have no idea" (the exact conflation ruling P21 exists to avoid).
+function buildDiffBadge(session: Session, live: SessionChanges | undefined): HTMLElement | undefined {
+  if (session.endedAt === undefined) {
+    if (live === undefined || (live.insertions === 0 && live.deletions === 0)) return undefined;
+    return diffPill(live.insertions, live.deletions);
+  }
+  if (session.branch === undefined || session.branch === "") return undefined;
+  return diffPill(session.insertions ?? 0, session.deletions ?? 0);
+}
+
+function diffPill(insertions: number, deletions: number): HTMLElement {
+  const diff = document.createElement("div");
+  diff.className = "session__diff mono";
+  // dir is pinned LTR: this is a numeric counter with +/− signs, and an
+  // RTL ancestor would otherwise reorder the sign and the digits.
+  diff.dir = "ltr";
+  // One space, matching design/Main.dc.html lines 96 and 107 verbatim
+  // (a single bordered pill carrying both numbers, not two spans).
+  diff.textContent = `+${insertions} −${deletions}`;
+  return diff;
 }
 
 function summaryFallback(state: SessionState): string {
@@ -173,15 +251,20 @@ function wireHistoryPanel(): void {
         renderHistoryList([]);
       });
   };
-  const close = (): void => {
-    overlay.hidden = true;
-  };
-
   button?.addEventListener("click", open);
-  closeButton?.addEventListener("click", close);
+  closeButton?.addEventListener("click", closeHistoryOverlay);
   overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
+    if (event.target === overlay) closeHistoryOverlay();
   });
+}
+
+// Shared with buildSessionRow's row click handler (I1): a History row opens
+// the Changes view behind this same full-screen overlay unless it is closed
+// first. A no-op when the overlay doesn't exist yet (app.test.ts's minimal
+// DOM harness) or is already hidden.
+function closeHistoryOverlay(): void {
+  const overlay = document.getElementById("history-overlay");
+  if (overlay instanceof HTMLElement) overlay.hidden = true;
 }
 
 function renderHistoryList(sessions: Session[]): void {
@@ -276,6 +359,13 @@ function renderTurn(turn: Turn): void {
   empty?.remove();
   conversation.append(bubble);
   conversation.scrollTop = conversation.scrollHeight;
+
+  // Voice and text are one input path: a turn whose tool call asked to show
+  // the changes opens the view here, so "وريني التغييرات" does the same
+  // thing as clicking Changes.
+  if (turn.view === "changes" && turn.sessionId !== undefined) {
+    void openChanges(turn.sessionId, turn.path);
+  }
 }
 
 function wireComposer(): void {

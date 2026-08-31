@@ -11,6 +11,14 @@ class FakeStore implements SessionStore {
   history(): Session[] {
     return [...this.rows.values()];
   }
+  updateGit(
+    sessionId: string,
+    git: { branch: string; insertions: number; deletions: number; changedFiles: number },
+  ): void {
+    const existing = this.rows.get(sessionId);
+    if (existing === undefined) return;
+    this.rows.set(sessionId, { ...existing, ...git });
+  }
 }
 
 const agent: AgentConfig = { id: "claude-mm", command: "claude-mm", model: "opus" };

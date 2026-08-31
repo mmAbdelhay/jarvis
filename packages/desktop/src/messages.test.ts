@@ -56,6 +56,107 @@ describe("MESSAGES", () => {
   });
 });
 
+// arabicFilesCount sits in a *governed* position (mudaf ilayhi of the verbal
+// noun "حفظ", an iḍāfa) rather than arabicSessionsCount's standalone-label
+// position, so it must not share arabicSessionsCount's table: the dual is
+// genitive (ملفين), not nominative (ملفان). Every count is asserted here so
+// a future re-merge of the two tables gets caught.
+describe("commitButtonLabel", () => {
+  it("uses the singular/plural English noun, including at zero", () => {
+    expect(MESSAGES.commitButtonLabel(0, "en")).toBe("Commit 0 files");
+    expect(MESSAGES.commitButtonLabel(1, "en")).toBe("Commit 1 file");
+    expect(MESSAGES.commitButtonLabel(2, "en")).toBe("Commit 2 files");
+  });
+
+  it("says just the bare verb at zero, since there is no noun for it to govern", () => {
+    expect(MESSAGES.commitButtonLabel(0, "ar")).toBe("حفظ");
+  });
+
+  it("uses the genitive dual (ملفين), not the nominative dual (ملفان)", () => {
+    expect(MESSAGES.commitButtonLabel(2, "ar")).toBe("حفظ ملفين");
+  });
+
+  it("follows Arabic's singular/3-10-plural/11+ counted-noun forms for the rest", () => {
+    expect(MESSAGES.commitButtonLabel(1, "ar")).toBe("حفظ ملف واحد");
+    expect(MESSAGES.commitButtonLabel(3, "ar")).toBe("حفظ 3 ملفات");
+    expect(MESSAGES.commitButtonLabel(11, "ar")).toBe("حفظ 11 ملفًا");
+  });
+});
+
+describe("pathBranchSeparator", () => {
+  it("renders in both languages", () => {
+    expect(MESSAGES.pathBranchSeparator("en")).toBe("on");
+    expect(MESSAGES.pathBranchSeparator("ar")).toBe("على");
+  });
+});
+
+describe("unknownSession", () => {
+  it("names the session id at the tail in both languages", () => {
+    expect(MESSAGES.unknownSession("s1", "ar").endsWith("s1")).toBe(true);
+    expect(MESSAGES.unknownSession("s1", "en").endsWith("s1")).toBe(true);
+  });
+
+  // MINOR finding on Task 10's review: sessionId is renderer-supplied and
+  // was echoed back unbounded.
+  it("caps an unbounded sessionId instead of echoing it in full", () => {
+    const huge = "x".repeat(10_000);
+    const text = MESSAGES.unknownSession(huge, "en");
+    expect(text.length).toBeLessThan(200);
+    expect(text).not.toContain(huge);
+  });
+});
+
+describe("invalidArgument", () => {
+  it("renders in both languages without echoing anything back", () => {
+    expect(MESSAGES.invalidArgument("en").length).toBeGreaterThan(0);
+    expect(MESSAGES.invalidArgument("ar").length).toBeGreaterThan(0);
+  });
+});
+
+describe("changesShowCurrentState", () => {
+  it("names the agent and states the caveat in both languages", () => {
+    expect(MESSAGES.changesShowCurrentState("claude-acme", "en")).toBe(
+      "This session has ended — what's shown below is the repository's current state, not necessarily claude-acme's work.",
+    );
+    expect(MESSAGES.changesShowCurrentState("claude-acme", "ar")).toBe(
+      "انتهت هذه الجلسة — ما يظهر أدناه هو الحالة الحالية للمستودع، وليس بالضرورة ما كتبه claude-acme.",
+    );
+  });
+});
+
+// Ruling P25: these three notices and core's gitDiffOpenedText
+// (packages/core/src/git/messages.ts) describe the same GitFileDiff
+// conditions for the same file at the same moment, so diffBinaryFile and
+// diffTooLarge reuse gitDiffOpenedText's own wording rather than a second
+// vocabulary — asserted here by pinning the exact strings.
+describe("diffBinaryFile", () => {
+  it("renders in both languages, matching core's gitDiffOpenedText wording", () => {
+    expect(MESSAGES.diffBinaryFile("en")).toBe("Binary file — no diff to show.");
+    expect(MESSAGES.diffBinaryFile("ar")).toBe("هذا ملف ثنائي ولا يمكن عرض فروقه.");
+  });
+});
+
+describe("diffTooLarge", () => {
+  it("renders in both languages, matching core's gitDiffOpenedText wording", () => {
+    expect(MESSAGES.diffTooLarge("en")).toBe("Too large to show a diff for.");
+    expect(MESSAGES.diffTooLarge("ar")).toBe("الملف كبير جدًا لعرض الفروق.");
+  });
+
+  // Ruling P8: tooLarge and binary describe different facts (never read at
+  // all, vs. confirmed not text) and must not share wording.
+  it("is worded distinctly from diffBinaryFile in both languages", () => {
+    expect(MESSAGES.diffTooLarge("en")).not.toBe(MESSAGES.diffBinaryFile("en"));
+    expect(MESSAGES.diffTooLarge("ar")).not.toBe(MESSAGES.diffBinaryFile("ar"));
+  });
+});
+
+describe("diffNoChanges", () => {
+  it("renders in both languages", () => {
+    expect(MESSAGES.diffNoChanges("en")).toBe("No changes to show.");
+    expect(MESSAGES.diffNoChanges("ar")).toBe("لا توجد تغييرات لعرضها.");
+  });
+});
+
 describe("errorMessage", () => {
   it("extracts the message from an Error", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");

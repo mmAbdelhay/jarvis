@@ -99,7 +99,7 @@ const tools: ToolSpec[] = [
   },
 ];
 
-const emptyContext: BrainContext = { projects: [], sessions: [] };
+const emptyContext: BrainContext = { projects: [], sessions: [], changes: [] };
 
 describe("createBrain", () => {
   it("returns the SDK's text reply for the current utterance", async () => {
@@ -169,7 +169,7 @@ describe("createBrain", () => {
     await brain.ask({
       text: "افتح سعودي سيل",
       tools,
-      context: { projects: ["acme", "storefront"], sessions: [] },
+      context: { projects: ["acme", "storefront"], sessions: [], changes: [] },
     });
 
     const call = calls[0];
@@ -194,6 +194,7 @@ describe("createBrain", () => {
             summary: "running tests",
           },
         ],
+        changes: [],
       },
     });
 
@@ -270,5 +271,62 @@ describe("createBrain", () => {
     await brain.ask({ text: "hello", tools, context: emptyContext });
 
     expect(calls[0]?.options?.tools).toEqual([]);
+  });
+
+  it("tells the model which sessions have uncommitted changes", async () => {
+    let capturedPrompt = "";
+    const brain = createBrain({
+      systemPrompt: "You are Jarvis.",
+      cwd: "/tmp",
+      query: ({ prompt }) => {
+        capturedPrompt = prompt;
+        return (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: "ok" }] } };
+        })();
+      },
+    });
+
+    await brain.ask({
+      text: "what changed?",
+      tools: [],
+      context: {
+        projects: ["acme"],
+        sessions: [],
+        changes: [
+          {
+            sessionId: "s1",
+            project: "acme",
+            repoPath: "/projects/acme",
+            branch: "feat/checkout-retry",
+            detached: false,
+            files: 7,
+            insertions: 128,
+            deletions: 34,
+          },
+        ],
+      },
+    });
+
+    expect(capturedPrompt).toContain(
+      "s1 — project acme, branch feat/checkout-retry, 7 files, +128 -34",
+    );
+  });
+
+  it("says so plainly when nothing is uncommitted", async () => {
+    let capturedPrompt = "";
+    const brain = createBrain({
+      systemPrompt: "You are Jarvis.",
+      cwd: "/tmp",
+      query: ({ prompt }) => {
+        capturedPrompt = prompt;
+        return (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: "ok" }] } };
+        })();
+      },
+    });
+
+    await brain.ask({ text: "hi", tools: [], context: { projects: [], sessions: [], changes: [] } });
+
+    expect(capturedPrompt).toContain("Uncommitted changes: (none)");
   });
 });

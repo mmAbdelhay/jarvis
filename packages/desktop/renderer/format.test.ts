@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
+import { detectLanguage, formatAgo, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
 
 describe("formatBytes", () => {
   it("formats gigabytes with one decimal", () => {
@@ -71,6 +71,56 @@ describe("detectLanguage", () => {
 
   it("treats empty input as English", () => {
     expect(detectLanguage("")).toBe("en");
+  });
+});
+
+describe("formatAgo", () => {
+  const now = 1_700_000_000_000;
+
+  it("counts minutes and hours the way the artboard does", () => {
+    expect(formatAgo(now - 6 * 60_000, now)).toBe("6m ago");
+    expect(formatAgo(now - 90 * 60_000, now)).toBe("1h ago");
+    expect(formatAgo(now - 50 * 60 * 60_000, now)).toBe("2d ago");
+  });
+
+  it("says just now under a minute, and never shows a negative age", () => {
+    expect(formatAgo(now - 5_000, now)).toBe("just now");
+    expect(formatAgo(now + 60_000, now)).toBe("just now");
+  });
+
+  // I2: this string is user-facing (the Changes view header), so it must
+  // not be an English-only lane — same rule as every other piece of chrome
+  // the review names.
+  it("is bilingual: Arabic when asked for it", () => {
+    expect(formatAgo(now - 6 * 60_000, now, "ar")).toBe("قبل 6 دقائق");
+    expect(formatAgo(now - 90 * 60_000, now, "ar")).toBe("قبل ساعة");
+    expect(formatAgo(now - 50 * 60 * 60_000, now, "ar")).toBe("قبل يومين");
+    expect(formatAgo(now - 5_000, now, "ar")).toBe("الآن");
+  });
+
+  // Arabic counted nouns need a dual (not "قبل 2 يوم"/"قبل 2 س") and a
+  // register consistent across units (full words throughout, not "قبل 6 د"
+  // beside "قبل 1 يوم") — both were the phase-2 review's non-blocking
+  // findings, fixed here rather than deferred.
+  it("uses Arabic's singular/dual/3-10-plural/11+ forms for minutes", () => {
+    expect(formatAgo(now - 1 * 60_000, now, "ar")).toBe("قبل دقيقة");
+    expect(formatAgo(now - 2 * 60_000, now, "ar")).toBe("قبل دقيقتين");
+    expect(formatAgo(now - 5 * 60_000, now, "ar")).toBe("قبل 5 دقائق");
+    expect(formatAgo(now - 15 * 60_000, now, "ar")).toBe("قبل 15 دقيقة");
+  });
+
+  it("uses Arabic's singular/dual/3-10-plural/11+ forms for hours", () => {
+    expect(formatAgo(now - 1 * 60 * 60_000, now, "ar")).toBe("قبل ساعة");
+    expect(formatAgo(now - 2 * 60 * 60_000, now, "ar")).toBe("قبل ساعتين");
+    expect(formatAgo(now - 5 * 60 * 60_000, now, "ar")).toBe("قبل 5 ساعات");
+    expect(formatAgo(now - 15 * 60 * 60_000, now, "ar")).toBe("قبل 15 ساعة");
+  });
+
+  it("uses Arabic's singular/dual/3-10-plural/11+ forms for days", () => {
+    expect(formatAgo(now - 1 * 24 * 60 * 60_000, now, "ar")).toBe("قبل يوم");
+    expect(formatAgo(now - 2 * 24 * 60 * 60_000, now, "ar")).toBe("قبل يومين");
+    expect(formatAgo(now - 5 * 24 * 60 * 60_000, now, "ar")).toBe("قبل 5 أيام");
+    expect(formatAgo(now - 15 * 24 * 60 * 60_000, now, "ar")).toBe("قبل 15 يومًا");
   });
 });
 

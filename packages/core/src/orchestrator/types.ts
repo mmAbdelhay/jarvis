@@ -1,3 +1,5 @@
+import type { SessionChanges } from "../git/tracker.js";
+
 export type Turn = {
   role: "user" | "assistant";
   text: string;
@@ -5,6 +7,12 @@ export type Turn = {
   sessionId?: string;
   agentId?: string;
   model?: string;
+  // Set when a turn's tool call means "and show me this": the renderer
+  // switches to the Changes view for `sessionId`, selecting `path` when
+  // present. This is what makes the git view reachable by voice — without
+  // it, a spoken "وريني التغييرات" would answer in words only.
+  view?: "changes";
+  path?: string;
   at: number;
 };
 
@@ -35,6 +43,11 @@ export type BrainSessionSummary = {
 export type BrainContext = {
   projects: string[];
   sessions: BrainSessionSummary[];
+  // Uncommitted work per session. Without this the model cannot answer
+  // "which project has changes?" without calling git.status on every session
+  // in turn, and cannot pick the right session when the user says
+  // "احفظ التغييرات" with two sessions running.
+  changes: SessionChanges[];
 };
 
 export type BrainReply = {
@@ -43,5 +56,9 @@ export type BrainReply = {
 };
 
 export type Brain = {
-  ask(input: { text: string; tools: ToolSpec[]; context: BrainContext }): Promise<BrainReply>;
+  ask(input: {
+    text: string;
+    tools: readonly ToolSpec[];
+    context: BrainContext;
+  }): Promise<BrainReply>;
 };

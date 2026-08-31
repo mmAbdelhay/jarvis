@@ -1,16 +1,17 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
-import { AgentRegistry, Orchestrator, SessionManager } from "@jarvis/core";
+import { AgentRegistry, ChangeTracker, Orchestrator, SessionManager } from "@jarvis/core";
 import {
   MacSpeech,
   createBrain,
+  createGitProvider,
   createMetricsReader,
   createSpawner,
   createSqliteSessionStore,
   runCommand,
   transcribe,
 } from "@jarvis/platform";
-import { buildWiring } from "./ipc.js";
+import { buildWiring, createGitHandlers } from "./ipc.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { loadConfig } from "./config.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -39,11 +40,44 @@ app.whenReady().then(async () => {
     const sessionStore = createSqliteSessionStore(config.sessionsDbPath);
     const sessions = new SessionManager(createSpawner(), sessionStore);
     const speech = new MacSpeech({ arabicVoice: "Majed" });
+    const git = createGitProvider();
+    const changeTracker = new ChangeTracker({ git, sessions });
+    // A session starting/finishing/dying re-triggers a refresh too, but
+    // that subscription lives in buildWiring's onSessionsChange handler
+    // below (ruling P16: this used to be subscribed here *and* there —
+    // every session transition fired two refreshes, and this copy was
+    // never unsubscribed, unlike wiring's own teardown in `stop()`). Only
+    // the initial refresh, before wiring exists, stays here.
+    void changeTracker.refresh();
+
+    // Task 16's writer: every refresh (the initial one above, wiring's
+    // per-session-change and 5s-interval refreshes below, and the ones
+    // git:setStaged/git:commit trigger through createGitHandlers) ends
+    // here, recording each session's counts against its own row so
+    // history keeps them after the session and its live ChangeTracker
+    // entry are gone (P21). A session reaching "done"/"dead" itself fires
+    // a sessions:update, which wiring's onSessionsChange handler turns
+    // into an immediate (not merely the next 5s tick) refreshChanges()
+    // call — so the counts persisted here for a session that just ended
+    // are its last *live* snapshot, taken right as it tore down, not a
+    // stale interval sample.
+    changeTracker.onChange((changes) => {
+      for (const entry of changes) {
+        sessionStore.updateGit(entry.sessionId, {
+          branch: entry.branch,
+          insertions: entry.insertions,
+          deletions: entry.deletions,
+          changedFiles: entry.files,
+        });
+      }
+    });
 
     const orchestrator = new Orchestrator({
       brain: createBrain(config.brain),
       registry,
       sessions,
+      git,
+      changes: () => changeTracker.snapshot(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
     });
@@ -91,6 +125,12 @@ app.whenReady().then(async () => {
       intervalMs: 2000,
       onSessionsChange: (cb) => sessions.onChange(cb),
       onTurn: (cb) => orchestrator.onTurn(cb),
+      onChangeCounts: (cb) => changeTracker.onChange(cb),
+      refreshChanges: () => changeTracker.refresh(),
+      // Slower than the 2s metrics tick: a git status on a large repository
+      // is far more expensive than reading /proc-equivalent counters, and
+      // change counts do not need second-level freshness.
+      changesIntervalMs: 5000,
     });
     wiring.start();
     window.on("closed", () => wiring.stop());
@@ -103,6 +143,31 @@ app.whenReady().then(async () => {
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
     ipcMain.handle("history:list", () => sessionStore.history());
+
+    // The main process owns the sessionId -> projectPath mapping, so a
+    // compromised renderer can request git data only for a repo a real
+    // session is already running against, never an arbitrary path — see
+    // createGitHandlers' own doc comment. Registered here, before
+    // `window.loadFile` below, following the same ordering fix as
+    // "input:send"/"history:list" above and phase 1's Task 12 ruling: a
+    // handler must exist before the page that could invoke it loads.
+    const gitHandlers = createGitHandlers({
+      git,
+      sessions: { get: (id) => sessions.get(id) },
+      language: PRIMARY_LANGUAGE,
+      refresh: () => changeTracker.refresh(),
+    });
+
+    ipcMain.handle("git:changes", (_event, sessionId: string) => gitHandlers.changes(sessionId));
+    ipcMain.handle("git:diff", (_event, sessionId: string, path: string) =>
+      gitHandlers.fileDiff(sessionId, path),
+    );
+    ipcMain.handle("git:setStaged", (_event, sessionId: string, path: string, staged: boolean) =>
+      gitHandlers.setStaged(sessionId, path, staged),
+    );
+    ipcMain.handle("git:commit", (_event, sessionId: string, message: string) =>
+      gitHandlers.commit(sessionId, message),
+    );
 
     const recorder = new Recorder(defaultRecorderDeps);
 

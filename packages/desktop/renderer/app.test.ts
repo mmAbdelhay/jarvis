@@ -10,16 +10,24 @@
 // #clock-date so startClock has somewhere to write, #voice-state itself),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session } from "@jarvis/core";
+import type { Session, SessionChanges } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
 
 type Callbacks = {
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
   onSessions?: (sessions: Session[]) => void;
+  onChangeCounts?: (changes: SessionChanges[]) => void;
 };
 
-async function loadApp(getHistory: () => Promise<Session[]> = async () => []): Promise<Callbacks> {
+async function loadApp(
+  getHistory: () => Promise<Session[]> = async () => [],
+  gitChanges: (sessionId: string) => Promise<unknown> = async () => ({
+    ok: false,
+    text: "not stubbed in this test",
+    language: "en",
+  }),
+): Promise<Callbacks> {
   vi.resetModules();
   document.body.innerHTML = `
     <span id="clock-time"></span>
@@ -35,6 +43,25 @@ async function loadApp(getHistory: () => Promise<Session[]> = async () => []): P
     <div id="history-overlay" hidden></div>
     <span id="history-count"></span>
     <div id="history-list"></div>
+    <div class="main"></div>
+    <div class="main main--changes" id="view-changes" hidden>
+      <div id="changes-project"></div>
+      <div id="changes-path"></div>
+      <div id="changes-branch"></div>
+      <div id="changes-add" dir="ltr"></div>
+      <div id="changes-del" dir="ltr"></div>
+      <div id="changes-by"></div>
+      <div id="changes-stale-notice" hidden></div>
+      <div id="changes-error" hidden></div>
+      <div id="changes-count"></div>
+      <div id="changes-file-list"></div>
+      <div id="diff-filename"></div>
+      <div id="diff-body"></div>
+      <input id="commit-message" type="text" />
+      <button id="commit-button" type="button"></button>
+    </div>
+    <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
+    <button id="nav-changes" class="nav-btn" type="button"></button>
   `;
 
   const callbacks: Callbacks = {};
@@ -46,6 +73,9 @@ async function loadApp(getHistory: () => Promise<Session[]> = async () => []): P
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
     },
+    onChangeCounts: (cb: (changes: SessionChanges[]) => void) => {
+      callbacks.onChangeCounts = cb;
+    },
     onTurn: vi.fn(),
     onListening: (cb: (listening: boolean) => void) => {
       callbacks.onListening = cb;
@@ -54,6 +84,10 @@ async function loadApp(getHistory: () => Promise<Session[]> = async () => []): P
       callbacks.onNotice = cb;
     },
     getHistory: vi.fn(getHistory),
+    gitChanges: vi.fn(gitChanges),
+    gitDiff: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
+    gitSetStaged: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
+    gitCommit: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
   };
 
   await import("./app.js");
@@ -260,6 +294,33 @@ describe("history panel", () => {
     expect(overlayEl().hidden).toBe(true);
   });
 
+  // I1: buildSessionRow's click handler (shared with the live Sessions
+  // panel) calls openChanges(), which renders the Changes view — but
+  // nothing closed this full-screen overlay first, so the view rendered
+  // underneath the scrim and the click appeared to do nothing.
+  it("closes on clicking a history row, so the Changes view underneath is not hidden by the scrim", async () => {
+    const gitChanges = vi.fn(async () => ({ ok: true, value: {
+      session: { id: "past", project: "acme", projectPath: "/p", agentId: "claude-mm", lastActivityAt: 1000, endedAt: 5000 },
+      changes: { repoPath: "/p", branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
+    } }));
+    await loadApp(async () => [makeSession({ id: "past", endedAt: 5000 })], gitChanges);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(overlayEl().hidden).toBe(false);
+
+    const row = document.querySelector<HTMLElement>("#history-list .session");
+    expect(row).not.toBeNull();
+    row?.click();
+
+    expect(overlayEl().hidden).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(gitChanges).toHaveBeenCalledWith("past");
+    expect(document.getElementById("view-changes")?.hidden).toBe(false);
+  });
+
   // The app's primary language is Arabic (MESSAGES.PRIMARY_LANGUAGE), so the
   // history badge is expected in MSA's counted-noun forms, not English —
   // this pins the call site's wiring, not just sessionsCount() itself
@@ -305,5 +366,206 @@ describe("Arabic project names", () => {
     const project = document.querySelector("#sessions .session__project");
     expect((project as HTMLElement).dir).toBe("ltr");
     expect(project?.classList.contains("arabic")).toBe(false);
+  });
+});
+
+function makeChanges(overrides: Partial<SessionChanges> = {}): SessionChanges {
+  return {
+    sessionId: "s1",
+    project: "acme",
+    repoPath: "/p/acme",
+    branch: "main",
+    detached: false,
+    files: 7,
+    insertions: 128,
+    deletions: 34,
+    ...overrides,
+  };
+}
+
+describe("session change-count badges", () => {
+  it("puts insertion and deletion counts on the session row that owns them", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1", project: "acme" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128");
+    // U+2212 minus sign, matching the artboard's "−34" — not an ASCII hyphen.
+    expect(row?.textContent).toContain("−34");
+  });
+
+  it("shows no counts for a session with no known changes", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s2", project: "storefront" })]);
+    onChangeCounts?.([]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders no badge for a session that has no entry in the counts snapshot at all", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ id: "s3" })]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("does not render a +0 −0 badge for a session whose changes are all zero", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", files: 0, insertions: 0, deletions: 0 })]);
+
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders a badge when only one side is non-zero (insertions only)", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", insertions: 8, deletions: 0 })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+8");
+    expect(row?.textContent).toContain("−0");
+  });
+
+  // The tracker refreshes on its own interval, independent of session
+  // updates, so counts can land on either channel first. Both must
+  // eventually paint the same row.
+  it("renders the badge once the session row appears, even if counts arrived first", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).toBeNull();
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+  });
+
+  it("keeps showing a session's counts across a re-render triggered by the other channel", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1", state: "running" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+
+    // A session state change re-renders the row from `latestSessions` alone;
+    // the counts map must not be forgotten.
+    onSessions?.([makeSession({ id: "s1", state: "waiting" })]);
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128");
+  });
+
+  it("drops the badge once a session that ended is no longer in either snapshot", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+    expect(document.querySelector(".session__diff")).not.toBeNull();
+
+    // The session ends: SessionManager drops it from the live list, and the
+    // tracker's next refresh (it only walks live sessions) stops including
+    // it in the snapshot it broadcasts.
+    onSessions?.([]);
+    onChangeCounts?.([]);
+    expect(document.querySelector(".session__diff")).toBeNull();
+  });
+
+  it("renders very large counts without breaking the row's layout classes", async () => {
+    const { onSessions, onChangeCounts } = await loadApp();
+    onSessions?.([makeSession({ id: "s1" })]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1", insertions: 128_734, deletions: 40_921 })]);
+
+    const row = document.querySelector(".session");
+    expect(row?.textContent).toContain("+128734");
+    expect(row?.textContent).toContain("−40921");
+    expect(document.querySelectorAll(".session__diff").length).toBe(1);
+  });
+
+  // buildSessionRow is shared by the live panel and the History panel
+  // (Arabic project names test above pins the same sharing for dir/.arabic).
+  // A past session keeps the same id it had while live, so if the counts
+  // snapshot has not yet dropped that id, `latestChanges` can still hold a
+  // live-looking entry for it. Ruling P21: a finished session must never
+  // show a live change count — that would be a lie about it, since counts
+  // are only ever fed by the live "git:counts" stream. Gated on
+  // `endedAt === undefined`, so a history row renders no badge at all,
+  // regardless of what the stale snapshot still holds.
+  it("never shows a live change count on a past session, even with a stale entry still in the snapshot", async () => {
+    const past = makeSession({ id: "s1", project: "acme", endedAt: 5000 });
+    const { onChangeCounts } = await loadApp(async () => [past]);
+    onChangeCounts?.([makeChanges({ sessionId: "s1" })]);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = document.querySelector("#history-list .session");
+    expect(row?.querySelector(".session__diff")).toBeNull();
+    expect(row?.textContent).not.toContain("+128");
+  });
+});
+
+// C2(b): a past session's badge comes only from its own *recorded* counts
+// (SessionStore.updateGit, frozen at end), never the live tracker snapshot
+// — which the test above already pins is ignored for a past session. These
+// pin the recorded-count consumer itself, and the "recorded zero" vs
+// "never recorded" distinction the review calls out by name (P21).
+describe("history row recorded change-count badge", () => {
+  it("shows a past session's own recorded counts, not a live snapshot's", async () => {
+    const past = makeSession({
+      id: "s1",
+      endedAt: 5000,
+      branch: "feat/checkout-retry",
+      insertions: 12,
+      deletions: 3,
+      changedFiles: 2,
+    });
+    const { onChangeCounts } = await loadApp(async () => [past]);
+    // A live entry for the same id, e.g. from a different session that
+    // later reused the same repo — must never leak into the past row.
+    onChangeCounts?.([makeChanges({ sessionId: "s1", insertions: 999, deletions: 999 })]);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = document.querySelector("#history-list .session");
+    expect(row?.textContent).toContain("+12");
+    expect(row?.textContent).toContain("−3");
+    expect(row?.textContent).not.toContain("999");
+  });
+
+  it("renders a visible '+0 −0' badge for a session that recorded genuinely zero changes", async () => {
+    const past = makeSession({
+      id: "s1",
+      endedAt: 5000,
+      branch: "main",
+      insertions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    await loadApp(async () => [past]);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = document.querySelector("#history-list .session");
+    const badge = row?.querySelector(".session__diff");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe("+0 −0");
+  });
+
+  it("renders no badge at all for a session nothing was ever recorded for, distinct from a recorded zero", async () => {
+    const past = makeSession({ id: "s1", endedAt: 5000, branch: "" });
+    await loadApp(async () => [past]);
+
+    document.getElementById("history-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = document.querySelector("#history-list .session");
+    expect(row?.querySelector(".session__diff")).toBeNull();
   });
 });
