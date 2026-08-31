@@ -16,10 +16,12 @@ import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js
 const TOOLS = [
   {
     name: "session.start",
-    description: "Start an agent session in a project",
+    description:
+      "Start an agent session in a project, and give the agent its first instruction",
     inputSchema: {
       project: "Name of the project to open, from the list of known projects",
       agent: "(optional) explicit agent id to use instead of routing",
+      task: "(optional) what the user asked that session to do, in their own words and their own language — typed into the agent once it is ready. Pass it whenever the user asked for work, not just for a session; leave it out only when they asked for nothing more than an open session",
     },
   },
   {
@@ -258,6 +260,14 @@ export class Orchestrator {
     } catch (error) {
       return { context: {}, error: MESSAGES.sessionStartFailed(errorMessage(error), language) };
     }
+
+    // "Open acme and fetch my bugs" is one turn, and the id this task
+    // needs did not exist when the brain chose its tool calls — so the brain
+    // cannot chain session.send itself, and without this the request loses
+    // everything after "open acme". Delivery waits for the agent's
+    // prompt (see SessionManager.sendWhenReady); an absent or empty task is
+    // dropped there rather than checked twice.
+    this.#options.sessions.sendWhenReady(session.id, stringInput(call.input, "task"));
 
     return {
       context: {

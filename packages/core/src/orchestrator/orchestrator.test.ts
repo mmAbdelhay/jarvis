@@ -108,6 +108,70 @@ describe("Orchestrator", () => {
     expect(turn.agentId).toBe("claude-acme");
   });
 
+  // The whole point of "start a session in acme and fetch my bugs": the
+  // brain has one turn, and the session id it would need for session.send
+  // does not exist until session.start has already run. Without `task` the
+  // request loses everything after "start a session".
+  it("types the task into the session it just started", async () => {
+    const written: string[] = [];
+    sessions = new SessionManager(() => ({
+      ...fakeProcess(),
+      write: (data: string) => written.push(data),
+      onOutput: (listener: (chunk: string) => void) => listener("banner"),
+    }));
+    const orchestrator = build(
+      brainReturning({
+        text: "Starting.",
+        toolCalls: [
+          {
+            name: "session.start",
+            input: { project: "acme", task: "fetch the bugs assigned to me" },
+          },
+        ],
+      }),
+    );
+
+    await orchestrator.handle("open acme and fetch my bugs", "en");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(written).toEqual(["fetch the bugs assigned to me\r"]);
+  });
+
+  it("starts the session normally when no task is given", async () => {
+    const written: string[] = [];
+    sessions = new SessionManager(() => ({
+      ...fakeProcess(),
+      write: (data: string) => written.push(data),
+      onOutput: (listener: (chunk: string) => void) => listener("banner"),
+    }));
+    const orchestrator = build(
+      brainReturning({
+        text: "Starting.",
+        toolCalls: [{ name: "session.start", input: { project: "acme" } }],
+      }),
+    );
+
+    await orchestrator.handle("open acme", "en");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(written).toEqual([]);
+  });
+
+  it("declares the task in the session.start tool schema", async () => {
+    let seen: readonly { name: string; inputSchema: Record<string, string> }[] = [];
+    const orchestrator = build({
+      ask: async ({ tools }) => {
+        seen = tools as typeof seen;
+        return { text: "ok", toolCalls: [] };
+      },
+    });
+
+    await orchestrator.handle("hello", "en");
+
+    const start = seen.find((tool) => tool.name === "session.start");
+    expect(Object.keys(start?.inputSchema ?? {})).toContain("task");
+  });
+
   it("honours an explicit agent in the tool call", async () => {
     const orchestrator = build(
       brainReturning({

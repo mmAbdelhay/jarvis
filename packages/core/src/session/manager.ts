@@ -19,6 +19,31 @@ import type {
  */
 const MAX_LOG_CHARS = 256 * 1024;
 
+/**
+ * How long a starting session's output must stay quiet before a queued task
+ * is typed into it.
+ *
+ * An agent under a pty is a terminal UI, and it drops what is typed before
+ * it has drawn its input box — so "send as soon as the session exists" loses
+ * the task, silently and intermittently. Output going quiet is the signal
+ * that the banner is finished and the agent is waiting, and unlike a fixed
+ * delay it adapts to how long that actually took on the day.
+ */
+const READY_QUIET_MS = 400;
+
+/**
+ * One-shot timer seam. Defaulted to setTimeout so no production call site
+ * changes; injected by tests, which is the only way to assert that nothing
+ * was sent *yet* without sleeping. Deliberately not an interval — nothing in
+ * this class polls (ruling P16); this fires once and is cleared.
+ */
+export type Schedule = (fn: () => void, ms: number) => () => void;
+
+const defaultSchedule: Schedule = (fn, ms) => {
+  const timer = setTimeout(fn, ms);
+  return () => clearTimeout(timer);
+};
+
 export class SessionManager {
   readonly #spawn: Spawner;
   readonly #store: SessionStore | undefined;
@@ -32,14 +57,20 @@ export class SessionManager {
   readonly #logs = new Map<string, string[]>();
   readonly #logSizes = new Map<string, number>();
   readonly #outputListeners = new Set<(output: SessionOutput) => void>();
+  // Tasks waiting for their session to finish starting up, with the timer
+  // that will deliver them. Cleared on delivery and on session exit, so a
+  // session that dies during startup never has its task typed into nothing.
+  readonly #pendingTasks = new Map<string, { text: string; cancel: () => void }>();
+  readonly #schedule: Schedule;
 
   // `store` is optional so every existing `new SessionManager(spawner)`
   // call site (production and test) keeps working unchanged; passing one
   // wires session history persistence with no polling — every state
   // transition already flows through #persist below.
-  constructor(spawn: Spawner, store?: SessionStore) {
+  constructor(spawn: Spawner, store?: SessionStore, options?: { schedule?: Schedule }) {
     this.#spawn = spawn;
     this.#store = store;
+    this.#schedule = options?.schedule ?? defaultSchedule;
   }
 
   start(input: StartInput): Session {
@@ -86,6 +117,45 @@ export class SessionManager {
     const handle = this.#processes.get(id);
     if (handle === undefined) throw new Error(`No session ${id}`);
     handle.write(`${text}\r`);
+  }
+
+  /**
+   * Submits `text` to a session once it has finished starting up — the task
+   * a user gave in the same breath as "start a session in acme".
+   *
+   * It cannot be sent immediately: the agent is a terminal UI that ignores
+   * input typed before its prompt exists. So the text is held until the
+   * session's output has been quiet for READY_QUIET_MS, which is the
+   * observable end of its startup banner.
+   *
+   * An empty or whitespace-only task is dropped rather than submitted: a
+   * bare carriage return would put the agent into an empty turn. An unknown
+   * id is ignored for the same reason `write` ignores one — this is called
+   * on a session that may already have failed to start, and taking the
+   * user's turn down over it would be worse than losing the task.
+   */
+  sendWhenReady(id: string, text: string): void {
+    if (text.trim() === "") return;
+    if (!this.#processes.has(id)) return;
+    this.#pendingTasks.get(id)?.cancel();
+    this.#pendingTasks.set(id, { text, cancel: () => {} });
+    this.#armTask(id);
+  }
+
+  // Restarted on every chunk: a banner arriving in four pieces is one agent
+  // still starting, not four chances to interrupt it.
+  #armTask(id: string): void {
+    const pending = this.#pendingTasks.get(id);
+    if (pending === undefined) return;
+    pending.cancel();
+    pending.cancel = this.#schedule(() => {
+      this.#pendingTasks.delete(id);
+      // The session can still have died between the last chunk and this
+      // timer; `send` throws on an unknown id, and this runs outside any
+      // caller's try/catch.
+      if (!this.#processes.has(id)) return;
+      this.send(id, pending.text);
+    }, READY_QUIET_MS);
   }
 
   /**
@@ -155,6 +225,7 @@ export class SessionManager {
 
   #onOutput(id: string, chunk: string): void {
     this.#appendLog(id, chunk);
+    this.#armTask(id);
     for (const listener of [...this.#outputListeners]) listener({ sessionId: id, chunk });
     const summary = lastNonEmptyLine(chunk);
     this.#update(id, {
@@ -184,6 +255,14 @@ export class SessionManager {
   }
 
   #onExit(id: string, code: number): void {
+    // A task still waiting to be typed in dies with the session. The process
+    // is gone, so there is nothing to type it into, and a task queued for a
+    // session that failed to start must not survive to surprise anyone.
+    const pending = this.#pendingTasks.get(id);
+    if (pending !== undefined) {
+      pending.cancel();
+      this.#pendingTasks.delete(id);
+    }
     this.#update(id, { state: code === 0 ? "done" : "dead", exitCode: code });
   }
 
