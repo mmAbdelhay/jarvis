@@ -74,6 +74,16 @@ describe("parseUsage", () => {
     });
     expect(negative).toEqual({ ok: false, reason: "unavailable" });
   });
+
+  it("returns an independent reading each time (no shared mutable singleton)", () => {
+    const a = parseUsage(undefined);
+    const b = parseUsage(undefined);
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
+    // Mutating one must never poison a later reading.
+    (a as { reason: string }).reason = "poisoned";
+    expect(parseUsage(undefined)).toEqual({ ok: false, reason: "unavailable" });
+  });
 });
 
 // A stand-in for the SDK's Query: an async iterable that also exposes the
@@ -304,6 +314,36 @@ describe("createCapacityReader", () => {
         const env = capturedOptions?.["env"] as Record<string, string>;
         expect(env["CLAUDE_CONFIG_DIR"]).toBe("/c/acme");
         expect(env["CLAUDE_CONFIG_DIR"]).not.toBe("/should-never-win");
+      });
+    });
+
+    describe("with ANTHROPIC_API_KEY set in process.env", () => {
+      const originalKey = process.env["ANTHROPIC_API_KEY"];
+
+      beforeEach(() => {
+        process.env["ANTHROPIC_API_KEY"] = "sk-test-should-be-stripped";
+      });
+
+      afterEach(() => {
+        if (originalKey === undefined) {
+          delete process.env["ANTHROPIC_API_KEY"];
+        } else {
+          process.env["ANTHROPIC_API_KEY"] = originalKey;
+        }
+      });
+
+      it("deletes ANTHROPIC_API_KEY from the child env rather than inheriting it", async () => {
+        const query = fakeQuery({ usage: LIVE_SHAPE });
+        const read = createCapacityReader({
+          cwd: "/tmp/brain",
+          query: (params) => {
+            capturedOptions = params.options as unknown as Record<string, unknown>;
+            return query;
+          },
+        });
+        await read("/c/mm");
+        const env = capturedOptions?.["env"] as Record<string, string>;
+        expect(env["ANTHROPIC_API_KEY"]).toBeUndefined();
       });
     });
   });

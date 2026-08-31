@@ -43,7 +43,12 @@ export type UsageQuery = {
  */
 export type CapacityQueryFn = (params: { prompt: string; options: Options }) => UsageQuery;
 
-const UNAVAILABLE: CapacityReading = { ok: false, reason: "unavailable" };
+function freshUnavailable(): CapacityReading {
+  // A fresh object literal on every call rather than a shared singleton: a
+  // shared UNAVAILABLE constant returned to every caller means one
+  // downstream mutation of a reading could poison every future reading.
+  return { ok: false, reason: "unavailable" };
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -87,17 +92,17 @@ function parseWindow(value: unknown): RateWindow | undefined {
  */
 export function parseUsage(raw: unknown): CapacityReading {
   const usage = asRecord(raw);
-  if (usage === undefined) return UNAVAILABLE;
+  if (usage === undefined) return freshUnavailable();
 
   // False for API-key / Bedrock / Vertex auth, where plan limits do not
   // apply at all and `rate_limits` is null.
-  if (usage["rate_limits_available"] === false) return UNAVAILABLE;
+  if (usage["rate_limits_available"] === false) return freshUnavailable();
 
   const limits = asRecord(usage["rate_limits"]);
-  if (limits === undefined) return UNAVAILABLE;
+  if (limits === undefined) return freshUnavailable();
 
   const fiveHour = parseWindow(limits["five_hour"]);
-  if (fiveHour === undefined) return UNAVAILABLE;
+  if (fiveHour === undefined) return freshUnavailable();
 
   return { ok: true, fiveHour, sevenDay: parseWindow(limits["seven_day"]) };
 }
@@ -120,7 +125,7 @@ async function runRead(query: UsageQuery): Promise<CapacityReading> {
     raw = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
   }
 
-  if (!read) return UNAVAILABLE;
+  if (!read) return freshUnavailable();
   return parseUsage(raw);
 }
 
@@ -150,6 +155,15 @@ export function createCapacityReader(config: {
     // resolved.
     const abortController = new AbortController();
     try {
+      // Deleting rather than leaving it set-or-unset keeps the child's env
+      // identical regardless of whether this process happens to have the
+      // key set: an inherited ANTHROPIC_API_KEY would make the SDK
+      // subprocess authenticate by key instead of the target account's
+      // subscription, so every account would silently report
+      // rate_limits_available: false forever, with nothing to explain why.
+      const env = { ...process.env };
+      delete env["ANTHROPIC_API_KEY"];
+
       const options: Options = {
         maxTurns: 1,
         cwd: config.cwd,
@@ -158,8 +172,9 @@ export function createCapacityReader(config: {
         abortController,
         // This is what makes the reading belong to THIS account: the SDK
         // subprocess is pointed at that account's config directory, the
-        // same mechanism the user's own wrapper scripts use.
-        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        // same mechanism the user's own wrapper scripts use. Placed after
+        // the env spread so an inherited CLAUDE_CONFIG_DIR can never win.
+        env: { ...env, CLAUDE_CONFIG_DIR: configDir },
       };
 
       // One word. The reading is a side effect of the round trip, so the
@@ -167,14 +182,14 @@ export function createCapacityReader(config: {
       const opened = query({ prompt: "ok", options });
 
       const timeout = new Promise<CapacityReading>((resolve) => {
-        timer = setTimeout(() => resolve(UNAVAILABLE), timeoutMs);
+        timer = setTimeout(() => resolve(freshUnavailable()), timeoutMs);
       });
       return await Promise.race([runRead(opened), timeout]);
     } catch {
       // A throw from the experimental API, a spawn failure, a shape change
       // mid-iteration: all of them are "we don't know", never a rejection
       // into a caller that has a panel to paint.
-      return UNAVAILABLE;
+      return freshUnavailable();
     } finally {
       clearTimeout(timer);
       // Whether this resolved by finishing the drain, by timing out, or by
