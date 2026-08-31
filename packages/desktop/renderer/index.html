@@ -787,6 +787,155 @@
 
   .main--session:not([hidden]) { display: flex; }
 
+  /* Workspace route: same flush-to-the-edge frame and [hidden] cascade
+     discipline as .main--changes/.main--session above. NO display in the
+     base rule — an author rule here would out-cascade the UA's
+     [hidden]{display:none} (view-display-css.test.ts pins this shape). */
+  .main--workspace {
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .main--workspace:not([hidden]) { display: flex; }
+
+  .workspace-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace-project {
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+
+  .workspace-modes { margin-left: auto; display: flex; gap: 6px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+
+  .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+  .workspace-browser[hidden] { display: none; }
+
+  .workspace-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 8px 10px 0; }
+
+  .workspace-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+  }
+
+  .workspace-tab--on { background: var(--panel); color: var(--text); }
+  .workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace-tab-close { opacity: 0.6; }
+  .workspace-tab-close:hover { opacity: 1; color: var(--del); }
+
+  .workspace-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace-nav {
+    font: inherit;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+  }
+
+  .workspace-nav[disabled] { opacity: 0.35; cursor: default; }
+
+  .workspace-address {
+    flex-grow: 1;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+
+  /* The slot a native WebContentsView is positioned over. It stays empty:
+     nothing the renderer paints here would ever be visible, since the
+     hosted view is a native overlay, not a DOM child (see views.ts). */
+  .workspace-page { flex-grow: 1; min-height: 0; }
+
+  .workspace-docs { display: grid; grid-template-columns: 260px 1fr; flex-grow: 1; min-height: 0; }
+  .workspace-docs[hidden] { display: none; }
+
+  .workspace-doc-tree {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px;
+  }
+
+  .workspace-doc-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+
+  .workspace-doc-item {
+    text-align: left;
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .workspace-doc-item--on { background: var(--panel); color: var(--accent); }
+
+  .workspace-doc-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 14px 20px;
+    overflow-y: auto;
+  }
+
+  .workspace-doc-body { font-size: 13px; line-height: 1.65; color: var(--text); max-width: 78ch; }
+  .workspace-doc-body pre {
+    background: var(--panel);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+  }
+  .workspace-doc-body table { border-collapse: collapse; margin: 8px 0; }
+  .workspace-doc-body th, .workspace-doc-body td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    text-align: left;
+    font-size: 12px;
+  }
+  .workspace-doc-body blockquote {
+    border-left: 3px solid var(--border);
+    margin: 0;
+    padding-left: 12px;
+    color: var(--text-dim);
+  }
+
   .session-head {
     display: flex;
     align-items: center;
@@ -1157,6 +1306,7 @@
       <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button">Dashboard</button>
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
       <button id="nav-session" class="nav-btn" type="button">Session</button>
+      <button id="nav-workspace" class="nav-btn" type="button">Workspace</button>
     </div>
     <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
     <div class="spacer"></div>
@@ -1352,6 +1502,43 @@
       <div class="vrule"></div>
       <div id="session-view-agent" class="mono changes-muted"></div>
     </div>
+
+  <div class="main main--workspace" id="view-workspace" hidden>
+
+    <div class="workspace-head">
+      <select id="workspace-project" class="workspace-project mono"></select>
+      <div class="workspace-modes">
+        <button id="workspace-mode-browser" class="diff-mode diff-mode--on" type="button">Browser</button>
+        <button id="workspace-mode-docs" class="diff-mode" type="button">Docs</button>
+      </div>
+    </div>
+
+    <div id="workspace-browser" class="workspace-browser">
+      <div id="workspace-tabs" class="workspace-tabs"></div>
+      <div class="workspace-bar">
+        <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
+        <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
+        <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
+        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+        <button id="workspace-new-tab" class="workspace-nav" type="button" title="New tab">+</button>
+      </div>
+      <div id="workspace-error" class="changes-error" hidden></div>
+      <div id="workspace-page" class="workspace-page"></div>
+    </div>
+
+    <div id="workspace-docs" class="workspace-docs" hidden>
+      <div class="workspace-doc-tree">
+        <div class="lbl">DOCUMENTS</div>
+        <div id="workspace-doc-list" class="workspace-doc-list"></div>
+      </div>
+      <div class="workspace-doc-pane">
+        <div id="workspace-doc-title" class="mono changes-dim"></div>
+        <div id="workspace-doc-body" class="workspace-doc-body"></div>
+      </div>
+    </div>
+
+  </div>
 
     <div class="session-log-wrap">
       <div id="session-terminal" class="session-terminal" dir="ltr"></div>

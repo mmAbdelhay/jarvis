@@ -75,3 +75,10 @@ describe(".main / .main--changes [hidden] cascade", () => {
     expect(body).toMatch(/display\s*:\s*flex/);
   });
 });
+  it("never sets display on .main--workspace outside a :not([hidden]) rule", () => {
+    const rules = [...htmlSource.matchAll(/\.main--workspace[^{]*\{[^}]*\}/g)].map((m) => m[0]);
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
+    }
+  });
