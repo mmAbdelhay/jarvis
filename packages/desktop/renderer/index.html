@@ -182,14 +182,24 @@
   .netinfo .up { color: var(--accent); }
   .netinfo .unit { color: var(--text-muted); font-size: 10px; }
 
+  /* No `display` here: an author rule on `.main` itself would out-cascade
+     the UA stylesheet's `[hidden] { display: none }` regardless of
+     specificity, so `showView()` toggling the `hidden` attribute would
+     never actually hide it (this exact bug, previously fixed the same way
+     for `.history-overlay` below — see history-overlay-css.test.ts, mirrored
+     for `.main`/`.main--changes` in view-display-css.test.ts). `.main` and
+     `.main--changes` (which also carries the `.main` class — see
+     `<div class="main main--changes">`) each set `display` only on their
+     own `:not([hidden])` variant further down. */
   .main {
-    display: grid;
     grid-template-columns: 330px minmax(0, 1fr) 400px;
     gap: 16px;
     padding: 16px 20px;
     flex-grow: 1;
     overflow: hidden;
   }
+
+  .main:not([hidden]) { display: grid; }
 
   .col-left {
     display: flex;
@@ -670,13 +680,18 @@
      grid with a column flex, or the changes header would sit 16-20px
      inset from where the artboard draws it. */
   .main--changes {
-    display: flex;
     flex-direction: column;
     padding: 0;
     gap: 0;
     overflow: hidden;
     min-height: 0;
   }
+
+  /* Same specificity as `.main:not([hidden])` above (one class + one
+     pseudo-class each) — wins on source order, since this rule comes
+     later, so a visible `#view-changes` gets flex, not the dashboard's
+     grid. Both rules stay inert together while `hidden` is present. */
+  .main--changes:not([hidden]) { display: flex; }
 
   .changes-head {
     display: flex;
