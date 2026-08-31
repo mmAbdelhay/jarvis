@@ -315,6 +315,10 @@ export type RendererApi = {
   onWorkspace(cb: (state: WorkspaceState) => void): void;
   listDocs(project: string): Promise<GitViewResult<DocEntry[]>>;
   readDoc(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
+  writeDoc(project: string, path: string, content: string): Promise<GitViewResult<null>>;
+  /** Parses arbitrary text with no filesystem access — used to preview a
+   *  Dev-mode edit that has not been saved yet. */
+  parseDoc(text: string): Promise<DocBlock[]>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;
@@ -391,6 +395,11 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
 export type DocsHandlers = {
   list(project: string): Promise<GitViewResult<DocEntry[]>>;
   read(project: string, path: string): Promise<GitViewResult<DocBlock[]>>;
+  write(project: string, path: string, content: string): Promise<GitViewResult<null>>;
+  /** Pure — no project, no filesystem, never fails. Lets the renderer
+   *  preview an unsaved Dev-mode edit through the same parser read() uses,
+   *  without writing the draft to disk just to look at it. */
+  parse(text: string): DocBlock[];
 };
 
 export type DocsHandlerDeps = {
@@ -458,6 +467,22 @@ export function createDocsHandlers(deps: DocsHandlerDeps): DocsHandlers {
       } catch {
         return fail(MESSAGES.docUnavailable(deps.language));
       }
+    },
+
+    async write(project, path, content) {
+      const root = rootFor(project);
+      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+      if (!isString(path) || !isString(content)) return fail(MESSAGES.invalidArgument(deps.language));
+      try {
+        const outcome = await deps.reader.write(root, path, content);
+        return outcome.ok ? outcome : fail(docFailureText(outcome.error.code, deps.language));
+      } catch {
+        return fail(MESSAGES.docUnavailable(deps.language));
+      }
+    },
+
+    parse(text) {
+      return parseMarkdown(text);
     },
   };
 }

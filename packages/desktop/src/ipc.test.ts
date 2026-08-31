@@ -763,6 +763,93 @@ describe("docs handlers", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it("writes content through to the configured project's root", async () => {
+    const calls: [string, string, string][] = [];
+    const handlers = createDocsHandlers({
+      reader: reader({
+        write: (root, path, content) => {
+          calls.push([root, path, content]);
+          return Promise.resolve({ ok: true, value: null });
+        },
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.write("acme", "a.md", "new content");
+
+    expect(result).toEqual({ ok: true, value: null });
+    expect(calls).toEqual([["/p/acme", "a.md", "new content"]]);
+  });
+
+  it("refuses to write to an unknown project without touching the reader", async () => {
+    let called = false;
+    const handlers = createDocsHandlers({
+      reader: reader({
+        write: () => {
+          called = true;
+          return Promise.resolve({ ok: true, value: null });
+        },
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.write("/etc", "a.md", "pwned");
+
+    expect(called).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a non-string path or content on write", async () => {
+    const handlers = createDocsHandlers({ reader: reader(), projects, language: "en" });
+
+    const byPath = await handlers.write("acme", undefined as unknown as string, "x");
+    const byContent = await handlers.write("acme", "a.md", undefined as unknown as string);
+
+    expect(byPath.ok).toBe(false);
+    expect(byContent.ok).toBe(false);
+  });
+
+  it("reports a write failure as localised text", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({
+        write: () => Promise.resolve({ ok: false, error: { code: "not-found", detail: "x" } }),
+      }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.write("acme", "a.md", "x");
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.text.length).toBeGreaterThan(0);
+  });
+
+  it("survives a reader whose write throws instead of returning a failure", async () => {
+    const handlers = createDocsHandlers({
+      reader: reader({ write: () => Promise.reject(new Error("boom")) }),
+      projects,
+      language: "en",
+    });
+
+    const result = await handlers.write("acme", "a.md", "x");
+
+    expect(result.ok).toBe(false);
+  });
+
+  // parse is pure — no project, no filesystem, no failure mode. It exists
+  // so the renderer can preview unsaved edits (Dev-mode text that has not
+  // been written to disk yet) through the same parser read() already uses,
+  // without ever writing that draft to disk just to look at it.
+  it("parses arbitrary text with no filesystem access at all", () => {
+    const handlers = createDocsHandlers({ reader: reader(), projects, language: "en" });
+
+    expect(handlers.parse("# Title")).toEqual([
+      { kind: "heading", level: 1, children: [{ kind: "text", text: "Title" }] },
+    ]);
+  });
 });
 
 describe("buildWiring workspace", () => {

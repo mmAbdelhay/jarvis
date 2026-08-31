@@ -320,6 +320,15 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("docs:list", (_event, project: string) => docs.list(project));
     ipcMain.handle("docs:read", (_event, project: string, path: string) => docs.read(project, path));
+    ipcMain.handle("docs:write", (_event, project: unknown, path: unknown, content: unknown) => {
+      if (typeof project !== "string" || typeof path !== "string" || typeof content !== "string") {
+        return { ok: false, text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+      }
+      return docs.write(project, path, content);
+    });
+    ipcMain.handle("docs:parse", (_event, text: unknown) =>
+      docs.parse(typeof text === "string" ? text : ""),
+    );
     ipcMain.handle("projects:list", () => Object.keys(config.projects));
 
     // The only user-triggered call in the app that spends money: one billed
