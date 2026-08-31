@@ -1,6 +1,6 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
-import { AgentRegistry, Orchestrator, SessionManager } from "@jarvis/core";
+import { AgentRegistry, ChangeTracker, Orchestrator, SessionManager } from "@jarvis/core";
 import {
   MacSpeech,
   createBrain,
@@ -40,12 +40,24 @@ app.whenReady().then(async () => {
     const sessionStore = createSqliteSessionStore(config.sessionsDbPath);
     const sessions = new SessionManager(createSpawner(), sessionStore);
     const speech = new MacSpeech({ arabicVoice: "Majed" });
+    const git = createGitProvider();
+    const changeTracker = new ChangeTracker({ git, sessions });
+    // Refreshed whenever a session starts/finishes/dies (the same event
+    // SessionManager already emits for the sessions list) so the counts
+    // the brain reads on the next turn are never more than one session
+    // transition stale. A git problem never blocks this — refresh() itself
+    // treats a broken repo as "no counts" rather than throwing.
+    sessions.onChange(() => {
+      void changeTracker.refresh();
+    });
+    void changeTracker.refresh();
 
     const orchestrator = new Orchestrator({
       brain: createBrain(config.brain),
       registry,
       sessions,
-      git: createGitProvider(),
+      git,
+      changes: () => changeTracker.snapshot(),
       speak: (text, language) => speech.speak(text, language),
       projects: config.projects,
     });

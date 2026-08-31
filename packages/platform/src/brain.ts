@@ -90,6 +90,16 @@ function buildPrompt(
           })
           .join("; ");
 
+  const changesLine =
+    context.changes.length === 0
+      ? "(none)"
+      : context.changes
+          .map(
+            (entry) =>
+              `${entry.sessionId} — project ${entry.project}, branch ${entry.branch}, ${entry.files} files, +${entry.insertions} -${entry.deletions}`,
+          )
+          .join("; ");
+
   return [
     systemPrompt,
     "",
@@ -104,6 +114,7 @@ function buildPrompt(
     // the Critical 1/2 seam this closes.
     `Known projects: ${projectsLine}`,
     `Running sessions: ${sessionsLine}`,
+    `Uncommitted changes: ${changesLine}`,
     "",
     `User: ${text}`,
   ].join("\n");

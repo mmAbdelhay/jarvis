@@ -2,6 +2,7 @@ import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
 import type { GitProvider } from "../git/types.js";
+import type { SessionChanges } from "../git/tracker.js";
 import {
   gitChangesText,
   gitCommitText,
@@ -117,6 +118,7 @@ export type OrchestratorOptions = {
   registry: AgentRegistry;
   sessions: SessionManager;
   git: GitProvider;
+  changes: () => SessionChanges[];
   speak(text: string, language: "ar" | "en"): Promise<void>;
   projects: Record<string, string>;
 };
@@ -177,6 +179,10 @@ export class Orchestrator {
         state: session.state,
         summary: session.summary,
       })),
+      // Read through the injected getter, not stored: the tracker refreshes
+      // asynchronously and a cached copy here would go stale between turns —
+      // the same reasoning the sessions list above already documents.
+      changes: this.#options.changes(),
     };
   }
 

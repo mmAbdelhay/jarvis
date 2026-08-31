@@ -1,3 +1,5 @@
+import type { SessionChanges } from "../git/tracker.js";
+
 export type Turn = {
   role: "user" | "assistant";
   text: string;
@@ -41,6 +43,11 @@ export type BrainSessionSummary = {
 export type BrainContext = {
   projects: string[];
   sessions: BrainSessionSummary[];
+  // Uncommitted work per session. Without this the model cannot answer
+  // "which project has changes?" without calling git.status on every session
+  // in turn, and cannot pick the right session when the user says
+  // "احفظ التغييرات" with two sessions running.
+  changes: SessionChanges[];
 };
 
 export type BrainReply = {

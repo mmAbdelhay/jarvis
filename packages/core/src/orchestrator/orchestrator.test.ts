@@ -5,6 +5,7 @@ import { AgentRegistry } from "../registry/registry.js";
 import { SessionManager } from "../session/manager.js";
 import type { ProcessHandle, Session } from "../session/types.js";
 import type { GitProvider } from "../git/types.js";
+import type { SessionChanges } from "../git/tracker.js";
 
 function fakeGitProvider(overrides: Partial<GitProvider> = {}): GitProvider {
   return {
@@ -68,6 +69,7 @@ describe("Orchestrator", () => {
       registry,
       sessions,
       git: fakeGitProvider(),
+      changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -224,6 +226,7 @@ describe("Orchestrator", () => {
       registry,
       sessions: throwingSessions,
       git: fakeGitProvider(),
+      changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -394,6 +397,7 @@ describe("Orchestrator", () => {
       registry,
       sessions: throwingSessions,
       git: fakeGitProvider(),
+      changes: () => [],
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -518,6 +522,7 @@ describe("Orchestrator", () => {
       registry: localRegistry,
       sessions,
       git: fakeGitProvider(),
+      changes: () => [],
       speak,
       projects: { a: "/Users/x/projects/a" },
     });
@@ -659,12 +664,17 @@ describe("git tools", () => {
     speak = vi.fn(async () => {});
   });
 
-  function buildOrchestrator(options: { brain: Brain; git: GitProvider }): Orchestrator {
+  function buildOrchestrator(options: {
+    brain: Brain;
+    git?: GitProvider;
+    changes?: () => SessionChanges[];
+  }): Orchestrator {
     return new Orchestrator({
       brain: options.brain,
       registry,
       sessions,
-      git: options.git,
+      git: options.git ?? fakeGitProvider(),
+      changes: options.changes ?? (() => []),
       speak,
       projects: { acme: "/Users/x/projects/acme" },
     });
@@ -810,5 +820,36 @@ describe("git tools", () => {
     const turn = await orchestrator.handle("commit", "en");
 
     expect(turn.text).toContain("Write a commit message first.");
+  });
+
+  it("rebuilds the change context on every turn instead of caching it", async () => {
+    const seen: number[] = [];
+    let files = 1;
+    const orchestrator = buildOrchestrator({
+      brain: {
+        ask: async ({ context }) => {
+          seen.push(context.changes[0]?.files ?? 0);
+          return { text: "ok", toolCalls: [] };
+        },
+      },
+      changes: () => [
+        {
+          sessionId: "s1",
+          project: "p",
+          repoPath: "/p",
+          branch: "main",
+          detached: false,
+          files,
+          insertions: 0,
+          deletions: 0,
+        },
+      ],
+    });
+
+    await orchestrator.handle("one", "en");
+    files = 5;
+    await orchestrator.handle("two", "en");
+
+    expect(seen).toEqual([1, 5]);
   });
 });
