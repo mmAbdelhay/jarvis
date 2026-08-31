@@ -1,9 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseUnifiedDiff } from "@jarvis/core";
 import { simpleGit } from "simple-git";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGitProvider } from "./git.js";
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 
 const cleanups: (() => Promise<void>)[] = [];
 
@@ -164,5 +168,196 @@ describe("createGitProvider().changes", () => {
   it("returns a failure, not a rejection, for a path that does not exist", async () => {
     const outcome = await createGitProvider().changes("/definitely/not/here");
     expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("createGitProvider().diff", () => {
+  it("returns parsed hunks for a modified tracked file", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.error.code}`);
+
+    expect(outcome.value.path).toBe("kept.txt");
+    expect(outcome.value.binary).toBe(false);
+    expect(outcome.value.hunks).toHaveLength(1);
+    const kinds = outcome.value.hunks[0]?.lines.map((line) => line.kind);
+    expect(kinds).toContain("removed");
+    expect(kinds).toContain("added");
+  });
+
+  it("diffs against HEAD so a staged change is still visible", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+    await simpleGit(dir).add(["kept.txt"]);
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks).toHaveLength(1);
+  });
+
+  it("diffs against HEAD so an unstaged edit on top of a staged one is still visible", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\n", "utf8");
+    await simpleGit(dir).add(["kept.txt"]);
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nTHREE\n", "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    const texts = outcome.value.hunks.flatMap((hunk) => hunk.lines.map((line) => line.text));
+    expect(texts).toContain("TWO");
+    expect(texts).toContain("THREE");
+  });
+
+  it("renders an untracked file as one all-added hunk", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "new.txt"), "alpha\nbeta\n", "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "new.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks[0]?.lines).toEqual([
+      { kind: "added", text: "alpha", beforeLine: undefined, afterLine: 1 },
+      { kind: "added", text: "beta", beforeLine: undefined, afterLine: 2 },
+    ]);
+  });
+
+  it("renders a staged (but not yet committed) new file as one all-added hunk", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "new.txt"), "alpha\nbeta\n", "utf8");
+    await simpleGit(dir).add(["new.txt"]);
+
+    const outcome = await createGitProvider().diff(dir, "new.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks[0]?.lines.map((line) => line.text)).toEqual(["alpha", "beta"]);
+  });
+
+  it("refuses a path that escapes the repository", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().diff(dir, "../../../etc/passwd");
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses an absolute path", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().diff(dir, "/etc/passwd");
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("returns an empty diff, not a failure, for an unchanged file", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks).toEqual([]);
+  });
+
+  it("returns an empty diff for a path git has never heard of", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().diff(dir, "never-existed.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks).toEqual([]);
+    expect(outcome.value.binary).toBe(false);
+  });
+
+  it("reports a deleted file as an all-removed diff", async () => {
+    const dir = await makeRepo();
+    await rm(join(dir, "kept.txt"));
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    const kinds = outcome.value.hunks.flatMap((hunk) => hunk.lines.map((line) => line.kind));
+    expect(kinds.every((kind) => kind === "removed")).toBe(true);
+    expect(kinds.length).toBeGreaterThan(0);
+  });
+
+  it("diffs a renamed file by its new path, against HEAD, as newly added content", async () => {
+    const dir = await makeRepo();
+    await simpleGit(dir).mv("kept.txt", "renamed.txt");
+
+    const outcome = await createGitProvider().diff(dir, "renamed.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    // renamed.txt does not exist at HEAD under this path, so a HEAD-relative
+    // diff shows its whole content as added — consistent with diffing
+    // against HEAD everywhere else, and it must not fail or come back empty.
+    expect(outcome.value.hunks).toHaveLength(1);
+    const kinds = outcome.value.hunks[0]?.lines.map((line) => line.kind);
+    expect(kinds?.every((kind) => kind === "added")).toBe(true);
+  });
+
+  it("detects a binary file instead of returning empty hunks", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), Buffer.from([0, 1, 2, 3, 0, 255]));
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.binary).toBe(true);
+    expect(outcome.value.hunks).toEqual([]);
+  });
+
+  it("treats a binary untracked file as binary, not as text with a NUL byte in it", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "new.bin"), Buffer.from([0, 1, 2, 3]));
+
+    const outcome = await createGitProvider().diff(dir, "new.bin");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.binary).toBe(true);
+    expect(outcome.value.hunks).toEqual([]);
+  });
+
+  it("caps a large untracked file as binary instead of reading it whole", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "huge.txt"), "x".repeat(2_000_001), "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "huge.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.binary).toBe(true);
+    expect(outcome.value.hunks).toEqual([]);
+  });
+
+  it("returns a not-a-repo failure instead of throwing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jarvis-plain-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+
+    const outcome = await createGitProvider().diff(dir, "whatever.txt");
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("matches a captured real `git diff` fixture for a modified file", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "one\nTWO\nthree\nfour\n", "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "kept.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+
+    const rawFixture = await readFile(join(FIXTURES, "diff-modified.txt"), "utf8");
+    const expected = parseUnifiedDiff("kept.txt", rawFixture);
+
+    // Confirms two independent things at once: the fixture is genuine `git
+    // diff` output (captured once with the real git binary, committed so a
+    // reviewer can re-run this), and the live provider — talking to its own
+    // temp repo — produces the exact same hunks the parser derives from it.
+    expect(outcome.value).toEqual(expected);
+    expect(outcome.value.hunks).toEqual([
+      {
+        header: "@@ -1,3 +1,4 @@",
+        lines: [
+          { kind: "context", text: "one", beforeLine: 1, afterLine: 1 },
+          { kind: "removed", text: "two", beforeLine: 2, afterLine: undefined },
+          { kind: "added", text: "TWO", beforeLine: undefined, afterLine: 2 },
+          { kind: "context", text: "three", beforeLine: 3, afterLine: 3 },
+          { kind: "added", text: "four", beforeLine: undefined, afterLine: 4 },
+        ],
+      },
+    ]);
+  });
+
+  it("matches a captured real file's content for an added file", async () => {
+    const dir = await makeRepo();
+    const content = await readFile(join(FIXTURES, "diff-added-content.txt"), "utf8");
+    await writeFile(join(dir, "new.txt"), content, "utf8");
+
+    const outcome = await createGitProvider().diff(dir, "new.txt");
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.value.hunks[0]?.lines.map((line) => line.text)).toEqual(["alpha", "beta"]);
   });
 });

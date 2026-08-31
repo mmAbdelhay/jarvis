@@ -1,4 +1,6 @@
-import { simpleGit, type SimpleGit } from "simple-git";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, join, normalize } from "node:path";
+import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
 import type {
   GitChanges,
   GitCommitResult,
@@ -9,6 +11,7 @@ import type {
   GitProvider,
   GitStatusLetter,
 } from "@jarvis/core";
+import { simpleGit, type SimpleGit } from "simple-git";
 
 // This module is the only place in the repository that imports simple-git.
 // `core` declares GitProvider; everything OS-facing lives here. simple-git
@@ -93,6 +96,23 @@ async function readChanges(git: SimpleGit, repoPath: string): Promise<GitChanges
   };
 }
 
+// A file bigger than this is reported as `binary: true` rather than shipped
+// to the renderer. The renderer builds one DOM node per line; an unbounded
+// generated file would freeze the window, and the diff is not readable at
+// that size anyway.
+const MAX_DIFF_BYTES = 2_000_000;
+
+/**
+ * Rejects a path that would read outside the repository. The path arrives
+ * from the renderer and from the brain, so neither may be trusted to have
+ * come from the changed-file list we produced.
+ */
+function insideRepo(filePath: string): boolean {
+  if (isAbsolute(filePath)) return false;
+  const normalized = normalize(filePath);
+  return !normalized.startsWith("..") && normalized !== ".";
+}
+
 export function createGitProvider(): GitProvider {
   async function open(repoPath: string): Promise<GitOutcome<SimpleGit>> {
     try {
@@ -118,8 +138,43 @@ export function createGitProvider(): GitProvider {
       }
     },
 
-    async diff(_repoPath, _filePath): Promise<GitOutcome<GitFileDiff>> {
-      return failure("failed", "not implemented");
+    async diff(repoPath, filePath): Promise<GitOutcome<GitFileDiff>> {
+      if (!insideRepo(filePath)) {
+        return failure("failed", `path outside the repository: ${filePath}`);
+      }
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      const git = opened.value;
+
+      try {
+        const status = await git.status();
+        const untracked = status.not_added.some((path) => path === filePath);
+
+        if (untracked) {
+          const info = await stat(join(repoPath, filePath));
+          if (info.size > MAX_DIFF_BYTES) {
+            return { ok: true, value: { path: filePath, binary: true, hunks: [] } };
+          }
+          const buffer = await readFile(join(repoPath, filePath));
+          if (buffer.includes(0)) {
+            return { ok: true, value: { path: filePath, binary: true, hunks: [] } };
+          }
+          return { ok: true, value: addedFileDiff(filePath, buffer.toString("utf8")) };
+        }
+
+        // Diffed against HEAD rather than the index, so one call shows a
+        // change whether it is staged, unstaged, or both — matching
+        // `changes()` above, which sums the unstaged and staged summaries
+        // for the same file into one row. Showing only one of the two would
+        // make the file list and the diff pane disagree about the same file.
+        const raw = await git.diff(["HEAD", "--", filePath]);
+        if (raw.length > MAX_DIFF_BYTES) {
+          return { ok: true, value: { path: filePath, binary: true, hunks: [] } };
+        }
+        return { ok: true, value: parseUnifiedDiff(filePath, raw) };
+      } catch (error) {
+        return failure("failed", errorMessage(error));
+      }
     },
 
     async stage(_repoPath, _paths): Promise<GitOutcome<null>> {
