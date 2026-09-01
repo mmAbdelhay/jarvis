@@ -23,8 +23,9 @@ const $ = (id: string): HTMLElement => {
 export const EDITOR_TABS = ["params", "auth", "headers", "body", "assert", "docs"] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
 
-const BODY_MODES = ["none", "json", "text", "xml", "formUrlEncoded", "multipartForm"] as const;
-const AUTH_MODES = ["none", "bearer", "basic", "apikey"] as const;
+const BODY_MODES = ["none", "json", "text", "xml", "graphql", "formUrlEncoded", "multipartForm"] as const;
+const AUTH_MODES = ["none", "bearer", "basic", "apikey", "oauth2"] as const;
+const OAUTH2_GRANTS = ["client_credentials", "password", "authorization_code"] as const;
 
 /** The rows each tab edits, and which key of the request they live under. */
 const PAIR_KEY: Partial<Record<EditorTab, string>> = {
@@ -311,6 +312,56 @@ function authPanel(): HTMLElement {
         textInput(auth()["basic"]?.["password"] ?? "", "{{password}}", (value) => setAuth("basic", "password", value)),
       ),
     );
+  } else if (mode === "oauth2") {
+    const oauth = auth()["oauth2"] ?? {};
+    const grant = document.createElement("select");
+    grant.id = "api-oauth-grant";
+    grant.className = "mono";
+    for (const name of OAUTH2_GRANTS) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      grant.append(option);
+    }
+    grant.value = OAUTH2_GRANTS.includes(oauth["grantType"] as (typeof OAUTH2_GRANTS)[number])
+      ? (oauth["grantType"] as string)
+      : "client_credentials";
+    grant.addEventListener("change", () => {
+      setAuth("oauth2", "grantType", grant.value);
+      renderEditor();
+    });
+    panel.append(labelled("grant", grant));
+
+    const field = (key: string, placeholder: string): HTMLElement =>
+      labelled(
+        key,
+        textInput(oauth[key] ?? "", placeholder, (value) => setAuth("oauth2", key, value)),
+      );
+
+    // Only the fields the chosen grant actually uses: an authorization URL
+    // means nothing to client credentials, and showing it invites filling it
+    // in and wondering why nothing happens.
+    if (grant.value === "authorization_code") {
+      panel.append(field("authorizationUrl", "https://auth/authorize"), field("callbackUrl", "http://localhost/callback"));
+    }
+    panel.append(field("accessTokenUrl", "https://auth/token"));
+    if (grant.value === "password") {
+      panel.append(field("username", "user"), field("password", "{{password}}"));
+    }
+    panel.append(field("clientId", "{{clientId}}"), field("clientSecret", "{{clientSecret}}"), field("scope", "read write"));
+
+    const placement = document.createElement("select");
+    placement.id = "api-oauth-placement";
+    placement.className = "mono";
+    for (const name of ["body", "basic_auth_header"]) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      placement.append(option);
+    }
+    placement.value = oauth["credentialsPlacement"] ?? "body";
+    placement.addEventListener("change", () => setAuth("oauth2", "credentialsPlacement", placement.value));
+    panel.append(labelled("credentials", placement));
   } else if (mode === "apikey") {
     panel.append(
       labelled("key", textInput(auth()["apikey"]?.["key"] ?? "", "X-API-Key", (value) => setAuth("apikey", "key", value))),
@@ -377,6 +428,37 @@ function bodyPanel(): HTMLElement {
 
   if (mode === "none") return panel;
 
+  if (mode === "graphql") {
+    const graphql = (bodies()["graphql"] ?? {}) as Record<string, string>;
+
+    const query = document.createElement("textarea");
+    query.id = "api-body";
+    query.className = "mono";
+    query.spellcheck = false;
+    query.placeholder = "query { }";
+    query.value = graphql["query"] ?? "";
+    query.addEventListener("change", () =>
+      setField("body", { ...bodies(), graphql: { ...graphql, query: query.value } }),
+    );
+
+    const variablesLabel = document.createElement("div");
+    variablesLabel.className = "lbl";
+    variablesLabel.textContent = "variables";
+
+    const variables = document.createElement("textarea");
+    variables.id = "api-graphql-vars";
+    variables.className = "mono";
+    variables.spellcheck = false;
+    variables.placeholder = "{ }";
+    variables.value = graphql["variables"] ?? "";
+    variables.addEventListener("change", () =>
+      setField("body", { ...bodies(), graphql: { ...graphql, variables: variables.value } }),
+    );
+
+    panel.append(query, variablesLabel, variables);
+    return panel;
+  }
+
   if (mode === "formUrlEncoded" || mode === "multipartForm") {
     panel.append(bodyPairs(mode));
     return panel;
@@ -403,22 +485,34 @@ function bodyPairs(mode: string): HTMLElement {
   list.forEach((pair, index) => {
     const row = document.createElement("div");
     row.className = "api-pair";
+    const isFile = (pair as { type?: string }).type === "file";
+    const value = Array.isArray(pair.value) ? (pair.value as string[]).join(", ") : (pair.value ?? "");
+
+    const valueControl = isFile
+      ? filePickerControl(value, (paths) => {
+          const next = [...list];
+          next[index] = { ...pair, value: paths as unknown as string };
+          write(next);
+          renderEditor();
+        })
+      : textInput(String(value), "value", (typed) => {
+          const next = [...list];
+          next[index] = { ...pair, value: typed };
+          write(next);
+        });
+
     row.append(
       enableBox(pair.enabled !== false, (checked) => {
         const next = [...list];
         next[index] = { ...pair, enabled: checked };
         write(next);
       }),
-      textInput(pair.name ?? "", "name", (value) => {
+      textInput(pair.name ?? "", "name", (typed) => {
         const next = [...list];
-        next[index] = { ...pair, name: value };
+        next[index] = { ...pair, name: typed };
         write(next);
       }),
-      textInput(pair.value ?? "", "value", (value) => {
-        const next = [...list];
-        next[index] = { ...pair, value };
-        write(next);
-      }),
+      valueControl,
       removeControl(() => {
         write(list.filter((_pair, i) => i !== index));
         renderEditor();
@@ -432,11 +526,50 @@ function bodyPairs(mode: string): HTMLElement {
   add.className = "settings-add";
   add.textContent = "+ field";
   add.addEventListener("click", () => {
-    write([...list, { name: "", value: "", enabled: true }]);
+    write([...list, { name: "", value: "", enabled: true, ...(mode === "multipartForm" ? { type: "text" } : {}) }]);
     renderEditor();
   });
   table.append(add);
+
+  if (mode === "multipartForm") {
+    const addFile = document.createElement("button");
+    addFile.type = "button";
+    addFile.id = "api-add-file";
+    addFile.className = "settings-add";
+    addFile.textContent = "+ file";
+    addFile.addEventListener("click", () => {
+      write([...list, { name: "", value: [] as unknown as string, enabled: true, type: "file" }]);
+      renderEditor();
+    });
+    table.append(addFile);
+  }
+
   return table;
+}
+
+/** A file field's value is a list of paths, chosen through the system
+ *  picker — typing one by hand is how you get a request that fails at send
+ *  time with a path that never existed. */
+function filePickerControl(current: string, onPick: (paths: string[]) => void): HTMLElement {
+  const wrapper = document.createElement("span");
+  wrapper.className = "api-file-field";
+
+  const label = document.createElement("span");
+  label.className = "api-file-name mono";
+  label.textContent = current === "" ? "(no file)" : current;
+
+  const choose = document.createElement("button");
+  choose.type = "button";
+  choose.className = "settings-add api-file-choose";
+  choose.textContent = "choose";
+  choose.addEventListener("click", () => {
+    void window.jarvis.pickFiles({ multiple: true }).then((paths) => {
+      if (paths.length > 0) onPick(paths);
+    });
+  });
+
+  wrapper.append(label, choose);
+  return wrapper;
 }
 
 /** Pretty-prints the JSON body in place. Invalid JSON is left exactly as it

@@ -13,23 +13,36 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
-export const RESPONSE_TABS = ["body", "headers", "tests"] as const;
+export const RESPONSE_TABS = ["body", "headers", "tests", "console"] as const;
 export type ResponseTab = (typeof RESPONSE_TABS)[number];
 
-type View = { response: ApiResponse | ApiFailure | undefined; assertions: AssertionResult[]; hasScript: boolean };
+type ScriptTest = { name: string; passed: boolean; error?: string };
+
+type View = {
+  response: ApiResponse | ApiFailure | undefined;
+  assertions: AssertionResult[];
+  /** What the request's own scripts printed and asserted, when it has any. */
+  scripts?: { logs: string[]; tests: ScriptTest[]; error?: string };
+};
 
 let activeTab: ResponseTab = "body";
 /** Raw shows exactly the bytes that came back; pretty is a convenience that
  *  can only be offered for JSON. */
 let raw = false;
-let view: View = { response: undefined, assertions: [], hasScript: false };
+let view: View = { response: undefined, assertions: [] };
 
 export function setResponse(next: View): void {
   view = next;
   // A new response with failures is worth landing on: the tab that has
   // something to say wins over the one that was open.
-  if (next.assertions.some((assertion) => !assertion.passed)) activeTab = "tests";
-  else if (activeTab === "tests" && next.assertions.length === 0) activeTab = "body";
+  const failed =
+    next.assertions.some((assertion) => !assertion.passed) ||
+    (next.scripts?.tests ?? []).some((test) => !test.passed);
+  if (failed) activeTab = "tests";
+  else if (next.scripts?.error !== undefined) activeTab = "console";
+  else if (activeTab === "tests" && next.assertions.length === 0 && (next.scripts?.tests.length ?? 0) === 0) {
+    activeTab = "body";
+  } else if (activeTab === "console" && (next.scripts?.logs.length ?? 0) === 0) activeTab = "body";
   renderResponse();
 }
 
@@ -58,7 +71,6 @@ export function renderResponse(): void {
   }
 
   head.append(statusBadge(response), copyButton(response.body));
-  if (view.hasScript) head.append(scriptNote());
   if (response.unresolved.length > 0) head.append(unresolvedNote(response.unresolved));
 
   for (const tab of RESPONSE_TABS) strip.append(tabButton(tab, response));
@@ -69,6 +81,10 @@ export function renderResponse(): void {
   }
   if (activeTab === "tests") {
     panel.append(testList());
+    return;
+  }
+  if (activeTab === "console") {
+    panel.append(consoleView());
     return;
   }
   panel.append(bodyView(response.body));
@@ -104,13 +120,6 @@ function copyButton(body: string): HTMLElement {
   return button;
 }
 
-function scriptNote(): HTMLElement {
-  const note = document.createElement("span");
-  note.className = "api-note";
-  note.textContent = MESSAGES.apiScriptsNotRun(PRIMARY_LANGUAGE);
-  return note;
-}
-
 function unresolvedNote(names: string[]): HTMLElement {
   const note = document.createElement("span");
   note.className = "api-note";
@@ -126,17 +135,22 @@ function tabButton(tab: ResponseTab, response: ApiResponse): HTMLElement {
   button.dataset["tab"] = tab;
   button.textContent = tab;
 
+  const allTests = [...view.assertions, ...(view.scripts?.tests ?? [])];
   const count =
     tab === "headers"
       ? Object.keys(response.headers).length
       : tab === "tests"
-        ? view.assertions.length
-        : 0;
+        ? allTests.length
+        : tab === "console"
+          ? (view.scripts?.logs.length ?? 0) + (view.scripts?.error === undefined ? 0 : 1)
+          : 0;
   if (count > 0) {
     const badge = document.createElement("span");
     badge.className = "api-tab-count";
     // A failing test count is the one badge that has to be noticeable.
-    const failed = tab === "tests" && view.assertions.some((assertion) => !assertion.passed);
+    const failed =
+      (tab === "tests" && allTests.some((test) => !("passed" in test ? test.passed : true))) ||
+      (tab === "console" && view.scripts?.error !== undefined);
     badge.classList.toggle("api-tab-count--bad", failed);
     badge.textContent = String(count);
     button.append(badge);
@@ -188,11 +202,41 @@ function headerTable(headers: Record<string, string>): HTMLElement {
   return table;
 }
 
+/** Everything a script printed, plus the error that stopped it if one did.
+ *  A post-response script that threw must not look like a quiet success. */
+function consoleView(): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "api-console";
+
+  if (view.scripts?.error !== undefined) {
+    const error = document.createElement("div");
+    error.className = "api-console-error mono";
+    error.textContent = view.scripts.error;
+    panel.append(error);
+  }
+
+  for (const line of view.scripts?.logs ?? []) {
+    const row = document.createElement("div");
+    row.className = "api-console-line mono";
+    row.textContent = line;
+    panel.append(row);
+  }
+
+  if (panel.children.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "api-empty";
+    empty.textContent = MESSAGES.apiNoConsole(PRIMARY_LANGUAGE);
+    panel.append(empty);
+  }
+  return panel;
+}
+
 function testList(): HTMLElement {
   const list = document.createElement("div");
   list.className = "api-tests";
 
-  if (view.assertions.length === 0) {
+  const scriptTests = view.scripts?.tests ?? [];
+  if (view.assertions.length === 0 && scriptTests.length === 0) {
     const empty = document.createElement("div");
     empty.className = "api-empty";
     empty.textContent = MESSAGES.apiNoTests(PRIMARY_LANGUAGE);
@@ -200,12 +244,34 @@ function testList(): HTMLElement {
     return list;
   }
 
-  const passed = view.assertions.filter((assertion) => assertion.passed).length;
+  const total = view.assertions.length + scriptTests.length;
+  const passed =
+    view.assertions.filter((assertion) => assertion.passed).length +
+    scriptTests.filter((test) => test.passed).length;
   const summary = document.createElement("div");
   summary.className = "api-tests-summary";
-  summary.classList.toggle("api-tests-summary--bad", passed !== view.assertions.length);
-  summary.textContent = MESSAGES.apiTestsPassed(passed, view.assertions.length, PRIMARY_LANGUAGE);
+  summary.classList.toggle("api-tests-summary--bad", passed !== total);
+  summary.textContent = MESSAGES.apiTestsPassed(passed, total, PRIMARY_LANGUAGE);
   list.append(summary);
+
+  // The tests block's own results, beside the declarative assertions: both
+  // are tests, and splitting them across two places would hide half of them.
+  for (const test of scriptTests) {
+    const row = document.createElement("div");
+    row.className = "api-test";
+    row.classList.toggle("api-test--failed", !test.passed);
+
+    const mark = document.createElement("span");
+    mark.className = "api-test-mark";
+    mark.textContent = test.passed ? "✓" : "✗";
+
+    const text = document.createElement("span");
+    text.className = "mono";
+    text.textContent = test.error === undefined ? test.name : `${test.name} — ${test.error}`;
+
+    row.append(mark, text);
+    list.append(row);
+  }
 
   for (const assertion of view.assertions) {
     const row = document.createElement("div");

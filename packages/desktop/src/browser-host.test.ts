@@ -659,6 +659,47 @@ describe("BrowserHost terminal tabs", () => {
     expect(views[0]?.visible).toBe(false);
   });
 
+  // The OAuth2 authorization-code dance: the provider sends the user back to
+  // a callback carrying ?code=, and the app already has a browser to catch it.
+  it("resolves with the redirect that carries the code, and closes the tab", async () => {
+    const pending = host.openForResult("acme", "https://auth.test/authorize", "https://cb.test/");
+    expect(host.state().tabs).toHaveLength(1);
+
+    views[0]?.emit({ kind: "navigated", url: "https://auth.test/login", canGoBack: false, canGoForward: false });
+    views[0]?.emit({ kind: "navigated", url: "https://cb.test/?code=abc", canGoBack: true, canGoForward: false });
+
+    await expect(pending).resolves.toBe("https://cb.test/?code=abc");
+    expect(host.state().tabs).toHaveLength(0);
+    expect(views[0]?.destroyed).toBe(true);
+  });
+
+  it("waits for a redirect that matches, not merely any navigation", async () => {
+    let settled = false;
+    void host.openForResult("acme", "https://auth.test/a", "https://cb.test/").then(() => {
+      settled = true;
+    });
+
+    views[0]?.emit({ kind: "navigated", url: "https://auth.test/consent", canGoBack: false, canGoForward: false });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(host.state().tabs).toHaveLength(1);
+  });
+
+  // With no callback URL configured, any redirect carrying a code or an
+  // error is the answer — the honest default rather than waiting forever.
+  it("accepts any code-bearing redirect when no prefix was given", async () => {
+    const pending = host.openForResult("acme", "https://auth.test/a");
+
+    views[0]?.emit({ kind: "navigated", url: "http://localhost:9/cb?code=xyz", canGoBack: false, canGoForward: false });
+
+    await expect(pending).resolves.toContain("code=xyz");
+  });
+
+  it("rejects a URL that is not one", async () => {
+    await expect(host.openForResult("acme", "not a url")).rejects.toThrow();
+  });
+
   it("ignores navigation controls aimed at a terminal tab", () => {
     host.openTerminal("acme");
     const id = host.state().tabs[0]!.id;

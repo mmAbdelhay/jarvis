@@ -1246,6 +1246,19 @@ describe("api handlers", () => {
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests: () => ({ name: "Imported", requests: [] }),
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
+      truncateBody: (body: string) => body,
+      store: {
+        read: () =>
+          Promise.resolve({
+            history: [],
+            cookies: [],
+            settings: { proxyUrl: "", verifyCertificate: true, timeoutMs: 30_000 },
+          }),
+        addHistory: (_project, entry) => Promise.resolve([entry]),
+        clearHistory: () => Promise.resolve(),
+        saveCookies: () => Promise.resolve(),
+        saveSettings: (_project, settings) => Promise.resolve(settings),
+      },
       evaluateAssertions: (assertions) =>
         assertions.map((assertion) => ({
           target: assertion.name ?? "",
@@ -1256,13 +1269,16 @@ describe("api handlers", () => {
       toCurl: () => "curl 'http://h'",
       sendRequest: () =>
         Promise.resolve({
-          status: 200,
-          statusText: "OK",
-          headers: {},
-          body: "{}",
-          timeMs: 5,
-          bytes: 2,
-          unresolved: [],
+          response: {
+            status: 200,
+            statusText: "OK",
+            headers: {},
+            body: "{}",
+            timeMs: 5,
+            bytes: 2,
+            unresolved: [],
+          },
+          cookies: [],
         }),
       projects: { acme: "/p/acme" },
       language: "en",
@@ -1350,6 +1366,20 @@ describe("api editing handlers", () => {
       readRequest: () => Promise.reject(new Error("unused")),
       writeRequest: () => Promise.resolve(),
       sendRequest: () => Promise.reject(new Error("unused")),
+      truncateBody: (body: string) => body,
+      store: {
+        read: () =>
+          Promise.resolve({
+            history: [],
+            cookies: [],
+            settings: { proxyUrl: "", verifyCertificate: true, timeoutMs: 30_000 },
+          }),
+        addHistory: (_project, entry) => Promise.resolve([entry]),
+        clearHistory: () => Promise.resolve(),
+        saveCookies: () => Promise.resolve(),
+        saveSettings: (_project, settings) => Promise.resolve(settings),
+      },
+
       createRequest: (folder, name) => Promise.resolve(`${folder}/${name}.bru`),
       createFolder: (parent, name) => Promise.resolve(`${parent}/${name}`),
       renameRequest: (path, name) => Promise.resolve(`renamed:${path}:${name}`),

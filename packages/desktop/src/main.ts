@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,9 +28,16 @@ import {
   createShellManager,
   createCollection,
   createFolder,
+  apiFetch,
+  createApiStore,
+  createCookieJar,
   createRequest,
   deleteEntry,
+  dispatcherFor,
   evaluateAssertions,
+  fetchOAuth2Token,
+  runScript,
+  truncateBody,
   listCollections,
   postmanToRequests,
   readCollection,
@@ -250,13 +257,144 @@ app.whenReady().then(async () => {
     const shells = createShellManager({ spawn: createRealShellSpawner() });
     // The API tab. Requests are issued from here, in the main process, which
     // is what makes CORS irrelevant — see http-runner.ts.
+    const apiStore = createApiStore(join(homedir(), ".config/jarvis/api.json"));
+
+    /**
+     * One send, with everything a request can ask for around it: the
+     * project's cookie jar and network settings, its pre-request and
+     * post-response scripts, and an OAuth2 token when the request wants one.
+     *
+     * Assembled here rather than inside http-runner.ts because every piece of
+     * it is a policy decision — which jar, whose settings, whether scripts run
+     * — and the runner's job is only to make the call.
+     */
+    async function sendApiRequest(
+      request: Record<string, unknown>,
+      variables: Record<string, string>,
+      project: string,
+    ) {
+      const state = await apiStore.read(project);
+      const jar = createCookieJar(state.cookies);
+      const settings = state.settings;
+
+      const http = (request["http"] ?? {}) as { method?: string; url?: string; auth?: string };
+      const scriptBlock = (request["script"] ?? {}) as { req?: string; res?: string };
+      const logs: string[] = [];
+      const tests: { name: string; passed: boolean; error?: string }[] = [];
+      let scriptError: string | undefined;
+
+      const scriptRequest = {
+        method: (http.method ?? "get").toUpperCase(),
+        url: http.url ?? "",
+        headers: {},
+        body: request["body"],
+      };
+
+      // The pre-request script runs first, and the variables it sets are
+      // available to the request it precedes — that is the whole point of it.
+      let resolved = { ...variables };
+      if (typeof scriptBlock.req === "string" && scriptBlock.req.trim() !== "") {
+        const outcome = runScript(scriptBlock.req, { variables: resolved, request: scriptRequest });
+        resolved = { ...resolved, ...outcome.variables };
+        logs.push(...outcome.logs);
+        tests.push(...outcome.tests);
+        scriptError = outcome.error;
+      }
+
+      // OAuth2 is fetched after the pre-request script, so a script can set
+      // the client secret the token call needs.
+      let token;
+      if (http.auth === "oauth2") {
+        const config = ((request["auth"] ?? {}) as Record<string, never>)["oauth2"] ?? {};
+        const result = await fetchOAuth2Token(config, resolved, {
+          fetch: apiFetch,
+          now: () => Date.now(),
+          authorize: (url, redirectUri) => authorizeInWorkspace(project, url, redirectUri),
+        });
+        if (!result.ok) {
+          return {
+            response: { failed: true as const, detail: `OAuth2: ${result.detail}`, timeMs: 0 },
+            cookies: jar.list(),
+            scripts: { logs, tests, ...(scriptError === undefined ? {} : { error: scriptError }) },
+          };
+        }
+        token = result.token;
+      }
+
+      const response = await sendRequest(
+        request,
+        resolved,
+        {
+          fetch: apiFetch,
+          now: () => Date.now(),
+          jar,
+          readFile: (path) => readFile(path),
+          dispatcherFor,
+          ...(token === undefined ? {} : { token }),
+        },
+        {
+          verifyCertificate: settings.verifyCertificate,
+          timeoutMs: settings.timeoutMs,
+          ...(settings.proxyUrl === "" ? {} : { proxyUrl: settings.proxyUrl }),
+        },
+      );
+
+      // The post-response script and the tests block see the response. A
+      // response body that is JSON arrives parsed, which is what every
+      // example in the wild assumes.
+      if (!("failed" in response)) {
+        let parsed: unknown = response.body;
+        try {
+          parsed = JSON.parse(response.body);
+        } catch {
+          // Not JSON; the script gets the text.
+        }
+        const scriptResponse = {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+          body: parsed,
+          responseTime: response.timeMs,
+        };
+        const after = [scriptBlock.res, request["tests"]].filter(
+          (code): code is string => typeof code === "string" && code.trim() !== "",
+        );
+        for (const code of after) {
+          const outcome = runScript(code, {
+            variables: resolved,
+            request: scriptRequest,
+            response: scriptResponse,
+          });
+          logs.push(...outcome.logs);
+          tests.push(...outcome.tests);
+          scriptError = scriptError ?? outcome.error;
+        }
+      }
+
+      await apiStore.saveCookies(project, jar.list());
+
+      return {
+        response,
+        cookies: jar.list(),
+        ...(logs.length === 0 && tests.length === 0 && scriptError === undefined
+          ? {}
+          : { scripts: { logs, tests, ...(scriptError === undefined ? {} : { error: scriptError }) } }),
+      };
+    }
+
+    /** Drives an OAuth2 authorization-code redirect through a Workspace tab:
+     *  the app already has a browser, and sending the user to their system
+     *  browser to copy a code back by hand would be the worse product. */
+    function authorizeInWorkspace(project: string, url: string, redirectUri = ""): Promise<string> {
+      return workspace.openForResult(project, url, redirectUri);
+    }
+
     const api = createApiHandlers({
       listCollections,
       readCollection,
       readRequest,
       writeRequest,
-      sendRequest: (request, variables) =>
-        sendRequest(request, variables, { fetch, now: () => Date.now() }),
+      sendRequest: (request, variables, project) => sendApiRequest(request, variables, project),
       evaluateAssertions,
       toCurl,
       createRequest,
@@ -268,6 +406,8 @@ app.whenReady().then(async () => {
       writeEnvironment,
       postmanToRequests,
       writeImported,
+      truncateBody,
+      store: apiStore,
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
     });
@@ -495,6 +635,36 @@ app.whenReady().then(async () => {
         variables as Record<string, string>,
       ),
     );
+    ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
+    ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
+    ipcMain.handle("api:cookies", (_event, p: unknown) => api.cookies(p as string));
+    ipcMain.handle("api:clearCookies", (_event, p: unknown) => api.clearCookies(p as string));
+    ipcMain.handle("api:removeCookie", (_event, p: unknown, n: unknown, d: unknown, path: unknown) =>
+      api.removeCookie(p as string, n as string, d as string, path as string),
+    );
+    ipcMain.handle("api:settings", (_event, p: unknown) => api.settings(p as string));
+    ipcMain.handle("api:saveSettings", (_event, p: unknown, settings: unknown) =>
+      api.saveSettings(p as string, settings as never),
+    );
+    // A native picker, for a multipart file field and for importing a
+    // collection. Cancelling returns [] — it is not a failure.
+    ipcMain.handle("dialog:pickFiles", async (_event, options: unknown) => {
+      const multiple = (options as { multiple?: boolean } | undefined)?.multiple === true;
+      const result = await dialog.showOpenDialog(window, {
+        properties: multiple ? ["openFile", "multiSelections"] : ["openFile"],
+      });
+      return result.canceled ? [] : result.filePaths;
+    });
+    ipcMain.handle("dialog:readJson", async (_event, path: unknown) => {
+      if (typeof path !== "string") {
+        return { ok: false, text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+      }
+      try {
+        return { ok: true, value: JSON.parse(await readFile(path, "utf8")) };
+      } catch (error) {
+        return { ok: false, text: errorMessage(error), language: PRIMARY_LANGUAGE };
+      }
+    });
     ipcMain.handle("api:curl", (_event, p: unknown, request: unknown, variables: unknown) =>
       api.curl(p as string, request as Record<string, unknown>, variables as Record<string, string>),
     );

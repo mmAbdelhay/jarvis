@@ -67,6 +67,16 @@ const api: RendererApi = {
   sendApiRequest: (project, request, variables) =>
     ipcRenderer.invoke("api:send", project, request, variables),
   apiCurl: (project, request, variables) => ipcRenderer.invoke("api:curl", project, request, variables),
+  apiHistory: (project) => ipcRenderer.invoke("api:history", project),
+  clearApiHistory: (project) => ipcRenderer.invoke("api:clearHistory", project),
+  apiCookies: (project) => ipcRenderer.invoke("api:cookies", project),
+  clearApiCookies: (project) => ipcRenderer.invoke("api:clearCookies", project),
+  removeApiCookie: (project, name, domain, path) =>
+    ipcRenderer.invoke("api:removeCookie", project, name, domain, path),
+  apiSettings: (project) => ipcRenderer.invoke("api:settings", project),
+  saveApiSettings: (project, settings) => ipcRenderer.invoke("api:saveSettings", project, settings),
+  pickFiles: (options) => ipcRenderer.invoke("dialog:pickFiles", options),
+  readJsonFile: (path) => ipcRenderer.invoke("dialog:readJson", path),
   createApiRequest: (project, folderPath, name, seq) =>
     ipcRenderer.invoke("api:createRequest", project, folderPath, name, seq),
   createApiFolder: (project, parentPath, name) =>

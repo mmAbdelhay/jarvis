@@ -65,6 +65,13 @@ function harness(): Recorded[] {
           <button id="api-send"></button>
           <button id="api-save"><span id="api-dirty" hidden></span></button>
           <button id="api-curl"></button>
+          <button id="api-history-toggle"></button>
+          <button id="api-cookies-toggle"></button>
+          <button id="api-settings-toggle"></button>
+          <div id="api-side-panel" hidden>
+            <div id="api-side-tabs"></div>
+            <div id="api-side-body"></div>
+          </div>
           <span id="api-status"></span>
           <div id="api-tabs"></div>
           <div id="api-panel"></div>
@@ -116,6 +123,15 @@ function harness(): Recorded[] {
     createApiCollection: () => Promise.resolve({ ok: true, value: "" }),
     saveApiEnvironment: () => Promise.resolve({ ok: true, value: "" }),
     importPostmanCollection: () => Promise.resolve({ ok: true, value: "" }),
+    apiHistory: () => Promise.resolve({ ok: true, value: [] }),
+    clearApiHistory: () => Promise.resolve({ ok: true, value: undefined }),
+    apiCookies: () => Promise.resolve({ ok: true, value: [] }),
+    clearApiCookies: () => Promise.resolve({ ok: true, value: [] }),
+    removeApiCookie: () => Promise.resolve({ ok: true, value: [] }),
+    apiSettings: () => Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
+    saveApiSettings: () => Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
+    pickFiles: () => Promise.resolve([]),
+    readJsonFile: () => Promise.resolve({ ok: true, value: {} }),
     attachTerminal: () => Promise.resolve(""),
     sendTerminalInput: record("sendTerminalInput"),
     resizeTerminal: record("resizeTerminal"),

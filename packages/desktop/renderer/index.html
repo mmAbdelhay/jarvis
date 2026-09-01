@@ -1029,6 +1029,26 @@
   }
   .api-secret { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted); }
 
+  /* History, cookies and network settings, opened over the request editor
+     rather than beside it: all three are read in a moment and closed again,
+     and a permanent column for them would cost the editor its width. */
+  .api-side-panel { border-bottom: 1px solid var(--border); background: var(--panel); }
+  .api-side-panel[hidden] { display: none; }
+  .api-side-body { padding: 10px 14px; max-height: 220px; overflow-y: auto; }
+  .api-history, .api-cookies { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .api-history-row, .api-cookie-row { display: flex; align-items: center; gap: 8px; font-size: 11px; width: 100%; }
+  .api-history-status { width: 32px; color: var(--good); }
+  .api-history-status--bad { color: var(--del); }
+  .api-history-url { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .api-history-time, .api-cookie-scope { color: var(--text-muted); flex-shrink: 0; }
+  .api-cookie-row .mono { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .api-console { display: flex; flex-direction: column; gap: 3px; }
+  .api-console-line { font-size: 11px; }
+  .api-console-error { font-size: 11px; color: var(--del); }
+  .api-file-field { display: flex; align-items: center; gap: 6px; flex-grow: 1; min-width: 0; }
+  .api-file-name { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+  #api-graphql-vars { width: 100%; min-height: 70px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 6px; }
+
   .api-panel { padding: 10px 14px; overflow-y: auto; flex-shrink: 0; max-height: 38%; }
   .api-panel-body { display: flex; flex-direction: column; gap: 8px; }
   .api-field { display: flex; align-items: center; gap: 8px; }
@@ -1986,6 +2006,9 @@
               <button id="api-save" class="workspace-nav" type="button"
                       style="width: auto; padding: 0 12px;" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
               <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
+              <button id="api-history-toggle" class="workspace-nav" type="button" title="Request history">hist</button>
+              <button id="api-cookies-toggle" class="workspace-nav" type="button" title="Cookies">cookies</button>
+              <button id="api-settings-toggle" class="workspace-nav" type="button" title="Proxy, TLS and timeout">net</button>
               <span id="api-status" class="mono api-status-line"></span>
             </div>
             <div id="api-env-panel" class="api-env-panel" hidden>
@@ -1998,6 +2021,10 @@
                 <button id="api-env-close" class="settings-add" type="button">close</button>
               </div>
               <div id="api-env-vars" class="api-pairs"></div>
+            </div>
+            <div id="api-side-panel" class="api-side-panel" hidden>
+              <div id="api-side-tabs" class="api-tab-strip"></div>
+              <div id="api-side-body" class="api-side-body"></div>
             </div>
             <div id="api-tabs" class="api-tab-strip"></div>
             <div id="api-panel" class="api-panel"></div>

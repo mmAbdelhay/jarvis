@@ -151,6 +151,63 @@ export class BrowserHost {
     return tab.id;
   }
 
+  /**
+   * Opens a tab and resolves with the first URL it navigates to that starts
+   * with `redirectPrefix` — the OAuth2 authorization-code dance, where the
+   * provider sends the user back to a callback carrying `?code=`.
+   *
+   * The app already has a browser, so this is where that flow belongs;
+   * sending the user to their system browser to copy a code back by hand
+   * would be the worse product. The tab closes itself the moment the redirect
+   * arrives, which is also what stops the callback URL — which carries the
+   * code — from being loaded at all.
+   */
+  openForResult(project: string, url: string, redirectPrefix = ""): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const target = normalizeInput(url);
+      // Only a real URL. normalizeInput turns anything else into a web
+      // search, which for an authorization endpoint means silently sending
+      // the user's client id to a search engine instead of to their provider.
+      if (target.kind !== "url") {
+        reject(new Error("Not a valid authorization URL"));
+        return;
+      }
+
+      this.#evictIfFull();
+      this.#suppressed = false;
+      const tab = this.#store.open(project, target.url, "web");
+      this.#store.update(tab.id, { title: `${project} — Authorize` });
+
+      const view = this.#createView(`persist:project-${encodeURIComponent(project)}`);
+      this.#views.set(tab.id, view);
+
+      let settled = false;
+      const finish = (outcome: () => void): void => {
+        if (settled) return;
+        settled = true;
+        this.close(tab.id);
+        outcome();
+      };
+
+      view.onEvent((event) => {
+        this.#onViewEvent(tab.id, project, event);
+        if (event.kind !== "navigated") return;
+        // An empty prefix means "any redirect that carries a code or an
+        // error", which is the honest default when the config named no
+        // callback URL of its own.
+        const matches =
+          redirectPrefix === ""
+            ? event.url.includes("code=") || event.url.includes("error=")
+            : event.url.startsWith(redirectPrefix);
+        if (matches) finish(() => resolve(event.url));
+      });
+
+      if (this.#bounds !== undefined) view.setBounds(this.#bounds);
+      view.loadURL(target.url);
+      this.#syncVisibility();
+    });
+  }
+
   navigate(id: TabId, input: string): void {
     const view = this.#views.get(id);
     if (view === undefined) return;

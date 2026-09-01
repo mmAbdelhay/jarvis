@@ -15,6 +15,11 @@ let sendResult: unknown;
 let collections: unknown[];
 let prompts: (string | null)[];
 let confirmAnswer: boolean;
+let historyRows: unknown[];
+let cookieRows: unknown[];
+let settingsValue: { proxyUrl: string; verifyCertificate: boolean; timeoutMs: number };
+let pickedFiles: string[];
+let jsonFile: unknown;
 
 function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
   return {
@@ -80,6 +85,14 @@ function markup(): string {
       <button id="api-send"></button>
       <button id="api-save"><span id="api-dirty" hidden></span></button>
       <button id="api-curl"></button>
+      <button id="api-history-toggle"></button>
+      <button id="api-cookies-toggle"></button>
+      <button id="api-settings-toggle"></button>
+      <div id="api-side-panel" hidden>
+        <div id="api-side-tabs"></div>
+        <div id="api-side-body"></div>
+      </div>
+
       <span id="api-status"></span>
       <div id="api-tabs"></div>
       <div id="api-panel"></div>
@@ -95,6 +108,16 @@ function harness(): void {
   prompts = [];
   confirmAnswer = true;
   collections = [{ name: "api", path: "/p/api" }];
+  historyRows = [
+    { at: 1, name: "Health", method: "GET", url: "http://h/health", status: 200, timeMs: 12, bytes: 4, bodyPreview: "{}" },
+    { at: 2, name: "Bad", method: "POST", url: "http://h/x", status: 500, timeMs: 30, bytes: 9, bodyPreview: "" },
+  ];
+  cookieRows = [
+    { name: "sid", value: "abc", domain: "h", path: "/", secure: true, httpOnly: true },
+  ];
+  settingsValue = { proxyUrl: "", verifyCertificate: true, timeoutMs: 30_000 };
+  pickedFiles = ["/tmp/collection.json"];
+  jsonFile = { ok: true, value: { info: { name: "D" } } };
   requestFile = {
     meta: { name: "Health", type: "http", seq: "1" },
     http: { method: "get", url: "{{base}}/health", body: "none", auth: "none" },
@@ -133,6 +156,19 @@ function harness(): void {
     createApiCollection: record("createApiCollection", () => ({ ok: true, value: "/p/new" })),
     saveApiEnvironment: record("saveApiEnvironment", () => ({ ok: true, value: "/p/api/environments/local.bru" })),
     importPostmanCollection: record("importPostmanCollection", () => ({ ok: true, value: "/p/imported" })),
+    apiHistory: record("apiHistory", () => ({ ok: true, value: historyRows })),
+    clearApiHistory: record("clearApiHistory", () => ({ ok: true, value: undefined })),
+    apiCookies: record("apiCookies", () => ({ ok: true, value: cookieRows })),
+    clearApiCookies: record("clearApiCookies", () => ({ ok: true, value: [] })),
+    removeApiCookie: record("removeApiCookie", () => ({ ok: true, value: [] })),
+    apiSettings: record("apiSettings", () => ({ ok: true, value: settingsValue })),
+    saveApiSettings: (...args: unknown[]) => {
+      calls.push({ call: "saveApiSettings", args });
+      settingsValue = args[1] as typeof settingsValue;
+      return Promise.resolve({ ok: true, value: settingsValue });
+    },
+    pickFiles: record("pickFiles", () => pickedFiles),
+    readJsonFile: record("readJsonFile", () => jsonFile),
   };
   window.prompt = () => prompts.shift() ?? null;
   window.confirm = () => confirmAnswer;
@@ -484,8 +520,7 @@ describe("api response", () => {
     expect(document.querySelector(".api-test--failed")?.textContent).toContain("got 500");
   });
 
-  it("names unresolved variables and a script it did not run", async () => {
-    requestFile = { ...requestFile, script: { req: "x" } };
+  it("names variables that had no value", async () => {
     sendResult = {
       response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: ["token"] },
       assertions: [],
@@ -497,9 +532,190 @@ describe("api response", () => {
     document.getElementById("api-send")?.click();
     await settle();
 
-    const notes = [...document.querySelectorAll(".api-note")].map((n) => n.textContent).join(" ");
-    expect(notes).toContain("token");
-    expect(notes).toContain("not run here");
+    expect(document.querySelector(".api-note")?.textContent).toContain("token");
+  });
+
+  // Scripts run now, so what they printed has somewhere to go.
+  it("shows what a script printed on the console tab", async () => {
+    sendResult = {
+      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      assertions: [],
+      scripts: { logs: ["token refreshed", "id 41"], tests: [] },
+    };
+    const module = await load();
+    await show(module);
+    await openFirst();
+
+    document.getElementById("api-send")?.click();
+    await settle();
+
+    tabButton("api-response-tabs", "console")?.click();
+    expect([...document.querySelectorAll(".api-console-line")].map((n) => n.textContent)).toEqual([
+      "token refreshed",
+      "id 41",
+    ]);
+  });
+
+  // A post-response script that threw must not look like a quiet success.
+  it("lands on the console when a script failed", async () => {
+    sendResult = {
+      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      assertions: [],
+      scripts: { logs: [], tests: [], error: "token is not defined" },
+    };
+    const module = await load();
+    await show(module);
+    await openFirst();
+
+    document.getElementById("api-send")?.click();
+    await settle();
+
+    expect(document.querySelector(".api-console-error")?.textContent).toBe("token is not defined");
+  });
+
+  // Both kinds of test are tests; splitting them across two places would
+  // hide half of them.
+  it("counts a tests block beside the declarative assertions", async () => {
+    sendResult = {
+      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      assertions: [{ target: "res.status", expression: "eq 200", passed: true, actual: "200" }],
+      scripts: {
+        logs: [],
+        tests: [
+          { name: "has an id", passed: true },
+          { name: "is fast", passed: false, error: "expected 900 to be below 500" },
+        ],
+      },
+    };
+    const module = await load();
+    await show(module);
+    await openFirst();
+
+    document.getElementById("api-send")?.click();
+    await settle();
+
+    expect(document.querySelector(".api-tests-summary")?.textContent).toBe("2 of 3 passed");
+    expect(document.querySelector(".api-test--failed")?.textContent).toContain(
+      "expected 900 to be below 500",
+    );
+  });
+});
+
+describe("api history, cookies and network settings", () => {
+  beforeEach(() => harness());
+
+  it("opens the history drawer and lists what was sent", async () => {
+    const module = await load();
+    await show(module);
+
+    document.getElementById("api-history-toggle")?.click();
+    await settle();
+
+    expect((document.getElementById("api-side-panel") as HTMLElement).hidden).toBe(false);
+    const rows = [...document.querySelectorAll(".api-history-row .api-history-url")];
+    expect(rows.map((row) => row.textContent)).toEqual(["http://h/health", "http://h/x"]);
+    expect(document.querySelectorAll(".api-history-status--bad")).toHaveLength(1);
+  });
+
+  // Clicking the open drawer again is the only way to get the height back.
+  it("closes the drawer when its own button is clicked again", async () => {
+    const module = await load();
+    await show(module);
+
+    document.getElementById("api-history-toggle")?.click();
+    await settle();
+    document.getElementById("api-history-toggle")?.click();
+
+    expect((document.getElementById("api-side-panel") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("clears the history", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-history-toggle")?.click();
+    await settle();
+
+    document.getElementById("api-history-clear")?.click();
+    await settle();
+
+    expect(calls.some((e) => e.call === "clearApiHistory")).toBe(true);
+    expect(document.querySelector(".api-empty")?.textContent).toContain("Nothing sent");
+  });
+
+  // The flags are the reason a cookie is or is not being sent.
+  it("lists cookies with their scope and flags", async () => {
+    const module = await load();
+    await show(module);
+
+    document.getElementById("api-cookies-toggle")?.click();
+    await settle();
+
+    expect(document.querySelector(".api-cookie-row .mono")?.textContent).toBe("sid=abc");
+    expect(document.querySelector(".api-cookie-scope")?.textContent).toBe("h/ · secure httpOnly");
+  });
+
+  it("removes one cookie and clears them all", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-cookies-toggle")?.click();
+    await settle();
+
+    document.querySelector<HTMLElement>(".api-cookie-row .api-pair-remove")?.click();
+    await settle();
+    expect(calls.find((e) => e.call === "removeApiCookie")?.args).toEqual(["acme", "sid", "h", "/"]);
+
+    document.getElementById("api-cookies-clear")?.click();
+    await settle();
+    expect(calls.some((e) => e.call === "clearApiCookies")).toBe(true);
+  });
+
+  it("edits the proxy and the timeout", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-settings-toggle")?.click();
+    await settle();
+
+    const proxy = document.getElementById("api-setting-proxy") as HTMLInputElement;
+    proxy.value = "http://proxy:8080";
+    change(proxy);
+    await settle();
+
+    expect(calls.find((e) => e.call === "saveApiSettings")?.args[1]).toMatchObject({
+      proxyUrl: "http://proxy:8080",
+    });
+  });
+
+  // A half-typed number must not become a zero-millisecond timeout, which
+  // would fail every request instantly.
+  it("ignores a timeout that is not a number", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-settings-toggle")?.click();
+    await settle();
+
+    const timeout = document.getElementById("api-setting-timeout") as HTMLInputElement;
+    timeout.value = "soon";
+    change(timeout);
+    await settle();
+
+    expect(calls.some((e) => e.call === "saveApiSettings")).toBe(false);
+  });
+
+  it("turns certificate verification off deliberately", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-settings-toggle")?.click();
+    await settle();
+
+    const verify = document.getElementById("api-setting-verify") as HTMLInputElement;
+    expect(verify.checked).toBe(true);
+    verify.checked = false;
+    change(verify);
+    await settle();
+
+    expect(calls.find((e) => e.call === "saveApiSettings")?.args[1]).toMatchObject({
+      verifyCertificate: false,
+    });
   });
 });
 
@@ -580,28 +796,40 @@ describe("api collection editing", () => {
     ]);
   });
 
-  it("imports a pasted Postman collection", async () => {
-    prompts = ['{"info":{"name":"D"}}'];
+  it("imports a Postman collection from a file the user picks", async () => {
     const module = await load();
     await show(module);
 
     document.getElementById("api-import")?.click();
     await settle();
 
+    expect(calls.some((e) => e.call === "pickFiles")).toBe(true);
     expect(calls.find((e) => e.call === "importPostmanCollection")?.args[2]).toEqual({
       info: { name: "D" },
     });
   });
 
-  it("says so when the pasted import is not JSON", async () => {
-    prompts = ["not json"];
+  // Cancelling a picker is not a failure and must not start an import.
+  it("does nothing when the file picker is cancelled", async () => {
+    pickedFiles = [];
     const module = await load();
     await show(module);
 
     document.getElementById("api-import")?.click();
     await settle();
 
-    expect(document.getElementById("api-status")?.textContent).toContain("JSON");
+    expect(calls.some((e) => e.call === "importPostmanCollection")).toBe(false);
+  });
+
+  it("reports a file that could not be read as JSON", async () => {
+    jsonFile = { ok: false, text: "Unexpected token", language: "en" };
+    const module = await load();
+    await show(module);
+
+    document.getElementById("api-import")?.click();
+    await settle();
+
+    expect(document.getElementById("api-status")?.textContent).toBe("Unexpected token");
     expect(calls.some((e) => e.call === "importPostmanCollection")).toBe(false);
   });
 

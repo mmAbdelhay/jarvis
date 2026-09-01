@@ -20,8 +20,12 @@ import type { WorkspaceState } from "@jarvis/core";
 import type {
   ApiFailure,
   ApiResponse,
+  ApiSettings,
   AssertionResult,
   BrunoVariable,
+  Cookie,
+  HistoryEntry,
+  ScriptResult,
   Bookmark,
   BookmarkStore,
   BrunoCollection,
@@ -370,6 +374,18 @@ export type RendererApi = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ): Promise<GitViewResult<ApiSendResult>>;
+  apiHistory(project: string): Promise<GitViewResult<HistoryEntry[]>>;
+  clearApiHistory(project: string): Promise<GitViewResult<void>>;
+  apiCookies(project: string): Promise<GitViewResult<Cookie[]>>;
+  clearApiCookies(project: string): Promise<GitViewResult<Cookie[]>>;
+  removeApiCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
+  apiSettings(project: string): Promise<GitViewResult<ApiSettings>>;
+  saveApiSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
+  /** Opens a native file picker. Returns the chosen paths, or [] if the user
+   *  cancelled — cancelling is not a failure. */
+  pickFiles(options?: { multiple?: boolean }): Promise<string[]>;
+  /** Reads a JSON file the user picked, for importing a collection. */
+  readJsonFile(path: string): Promise<GitViewResult<unknown>>;
   apiCurl(
     project: string,
     request: Record<string, unknown>,
@@ -620,6 +636,13 @@ export type ApiHandlers = ApiEditHandlers & {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ): Promise<GitViewResult<ApiSendResult>>;
+  history(project: string): Promise<GitViewResult<HistoryEntry[]>>;
+  clearHistory(project: string): Promise<GitViewResult<void>>;
+  cookies(project: string): Promise<GitViewResult<Cookie[]>>;
+  clearCookies(project: string): Promise<GitViewResult<Cookie[]>>;
+  removeCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
+  settings(project: string): Promise<GitViewResult<ApiSettings>>;
+  saveSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
   /** The request as a shell command, with variables resolved. */
   curl(
     project: string,
@@ -631,6 +654,10 @@ export type ApiHandlers = ApiEditHandlers & {
 export type ApiSendResult = {
   response: ApiResponse | ApiFailure;
   assertions: AssertionResult[];
+  /** What the request's own scripts and tests block did, when it has them. */
+  scripts?: { logs: string[]; tests: ScriptResult["tests"]; error?: string };
+  history: HistoryEntry[];
+  cookies: Cookie[];
 };
 
 export type ApiEditHandlers = {
@@ -654,15 +681,31 @@ export type ApiHandlerDeps = {
   readCollection: (collectionPath: string) => Promise<BrunoTree>;
   readRequest: (path: string) => Promise<Record<string, unknown>>;
   writeRequest: (path: string, json: Record<string, unknown>) => Promise<void>;
+  /** Sends the request for one project: interpolates, runs its scripts, uses
+   *  that project's cookie jar and settings, and reports what happened. */
   sendRequest: (
     request: Record<string, unknown>,
     variables: Record<string, string>,
-  ) => Promise<ApiResponse | ApiFailure>;
+    project: string,
+  ) => Promise<{
+    response: ApiResponse | ApiFailure;
+    scripts?: { logs: string[]; tests: ScriptResult["tests"]; error?: string };
+    cookies: Cookie[];
+  }>;
+  truncateBody: (body: string) => string;
   evaluateAssertions: (
     assertions: readonly { name?: string; value?: string; enabled?: boolean }[],
     subject: { status: number; headers: Record<string, string>; body: string; timeMs: number },
   ) => AssertionResult[];
   toCurl: (request: Record<string, unknown>, variables: Record<string, string>) => string;
+  /** The project's persisted API state: history, cookies and settings. */
+  store: {
+    read: (project: string) => Promise<{ history: HistoryEntry[]; cookies: Cookie[]; settings: ApiSettings }>;
+    addHistory: (project: string, entry: HistoryEntry) => Promise<HistoryEntry[]>;
+    clearHistory: (project: string) => Promise<void>;
+    saveCookies: (project: string, cookies: readonly Cookie[]) => Promise<void>;
+    saveSettings: (project: string, settings: ApiSettings) => Promise<ApiSettings>;
+  };
   /** Name to absolute path, from config. The renderer never sees a path it
    *  was not first given, and never one this map does not contain. */
   createRequest: (folderPath: string, name: string, seq: number) => Promise<string>;
@@ -749,6 +792,51 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
       } catch {
         return fail(MESSAGES.apiUnavailable(deps.language));
       }
+    },
+
+    async history(project) {
+      if (rootFor(project) === undefined) return unknownProject();
+      return { ok: true, value: (await deps.store.read(project)).history };
+    },
+
+    async clearHistory(project) {
+      if (rootFor(project) === undefined) return unknownProject();
+      await deps.store.clearHistory(project);
+      return { ok: true, value: undefined };
+    },
+
+    async cookies(project) {
+      if (rootFor(project) === undefined) return unknownProject();
+      return { ok: true, value: (await deps.store.read(project)).cookies };
+    },
+
+    async clearCookies(project) {
+      if (rootFor(project) === undefined) return unknownProject();
+      await deps.store.saveCookies(project, []);
+      return { ok: true, value: [] };
+    },
+
+    async removeCookie(project, name, domain, path) {
+      if (rootFor(project) === undefined) return unknownProject();
+      const { cookies } = await deps.store.read(project);
+      const kept = cookies.filter(
+        (cookie) => !(cookie.name === name && cookie.domain === domain && cookie.path === path),
+      );
+      await deps.store.saveCookies(project, kept);
+      return { ok: true, value: kept };
+    },
+
+    async settings(project) {
+      if (rootFor(project) === undefined) return unknownProject();
+      return { ok: true, value: (await deps.store.read(project)).settings };
+    },
+
+    async saveSettings(project, settings) {
+      if (rootFor(project) === undefined) return unknownProject();
+      if (typeof settings !== "object" || settings === null) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      return { ok: true, value: await deps.store.saveSettings(project, settings) };
     },
 
     async collections(project) {
@@ -880,10 +968,29 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       try {
-        const response = await deps.sendRequest(request, variables ?? {});
+        const outcome = await deps.sendRequest(request, variables ?? {}, project);
+        const { response } = outcome;
         const assertions = Array.isArray(request["assertions"])
           ? (request["assertions"] as { name?: string; value?: string; enabled?: boolean }[])
           : [];
+
+        const meta = (request["meta"] ?? {}) as { name?: string };
+        const http = (request["http"] ?? {}) as { method?: string; url?: string };
+        const state = await deps.store.read(project);
+        const history =
+          "failed" in response
+            ? state.history
+            : await deps.store.addHistory(project, {
+                at: Date.now(),
+                name: meta.name ?? "",
+                method: (http.method ?? "get").toUpperCase(),
+                url: http.url ?? "",
+                status: response.status,
+                timeMs: response.timeMs,
+                bytes: response.bytes,
+                bodyPreview: deps.truncateBody(response.body),
+              });
+
         return {
           ok: true,
           value: {
@@ -898,6 +1005,9 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
                     body: response.body,
                     timeMs: response.timeMs,
                   }),
+            ...(outcome.scripts === undefined ? {} : { scripts: outcome.scripts }),
+            history,
+            cookies: outcome.cookies,
           },
         };
       } catch {

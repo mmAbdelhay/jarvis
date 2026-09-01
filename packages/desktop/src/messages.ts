@@ -117,6 +117,12 @@ export const MESSAGES = {
   // file and it must be clear which of them actually ran.
   apiTestsPassed: (passed: number, total: number, language: "ar" | "en"): string =>
     language === "ar" ? `نجح ${passed} من ${total}` : `${passed} of ${total} passed`,
+  apiNoHistory: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد سجل بعد." : "Nothing sent yet.",
+  apiNoCookies: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد كوكيز محفوظة." : "No cookies stored.",
+  apiNoConsole: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تطبع السكربتات شيئًا." : "The scripts printed nothing.",
   apiNoTests: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد تحققات لهذا الطلب." : "This request has no assertions.",
   // The bookmark store's failures (a disk write that failed, mainly) —

@@ -1,5 +1,13 @@
 import type { WorkspaceTab } from "@jarvis/core";
-import type { BrunoCollection, BrunoFolder, BrunoTree, BrunoVariable } from "@jarvis/platform";
+import type {
+  ApiSettings,
+  BrunoCollection,
+  BrunoFolder,
+  BrunoTree,
+  BrunoVariable,
+  Cookie,
+  HistoryEntry,
+} from "@jarvis/platform";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { currentTab, initEditor, renderEditor, setHttp } from "./api-editor.js";
 import { renderResponse, setResponse } from "./api-response.js";
@@ -49,6 +57,16 @@ const state: State = {
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
+/** The side panel's three drawers: what was sent before, what the jar is
+ *  holding, and how requests reach the network. */
+const SIDE_PANELS = ["history", "cookies", "settings"] as const;
+type SidePanel = (typeof SIDE_PANELS)[number];
+
+let history: HistoryEntry[] = [];
+let cookies: Cookie[] = [];
+let settings: ApiSettings = { proxyUrl: "", verifyCertificate: true, timeoutMs: 30_000 };
+let sidePanel: SidePanel = "history";
+
 export function initApi(): void {
   initEditor({
     request: () => state.request,
@@ -89,6 +107,9 @@ export function initApi(): void {
   $("api-env-add").addEventListener("click", () => addEnvironmentVariable());
   $("api-env-save").addEventListener("click", () => void saveEnvironment());
   $("api-env-close").addEventListener("click", () => closeEnvironmentEditor());
+  $("api-history-toggle").addEventListener("click", () => toggleSidePanel("history"));
+  $("api-cookies-toggle").addEventListener("click", () => toggleSidePanel("cookies"));
+  $("api-settings-toggle").addEventListener("click", () => toggleSidePanel("settings"));
 
   // Cmd+Enter sends and Cmd+S saves, the two things a request editor is for.
   // Scoped to the pane: these must not fire while the user is in a terminal
@@ -177,7 +198,7 @@ function clearRequest(): void {
   state.request = undefined;
   state.requestPath = undefined;
   state.dirty = false;
-  setResponse({ response: undefined, assertions: [], hasScript: false });
+  setResponse({ response: undefined, assertions: [] });
 }
 
 function renderEnvironments(): void {
@@ -360,7 +381,7 @@ async function openRequest(path: string): Promise<void> {
   state.request = result.value;
   state.requestPath = path;
   state.dirty = false;
-  setResponse({ response: undefined, assertions: [], hasScript: false });
+  setResponse({ response: undefined, assertions: [] });
   renderAll();
 }
 
@@ -403,13 +424,24 @@ async function send(): Promise<void> {
   // checked against.
   const value = result.ok
     ? result.value
-    : { response: { failed: true as const, detail: result.text, timeMs: 0 }, assertions: [] };
+    : {
+        response: { failed: true as const, detail: result.text, timeMs: 0 },
+        assertions: [],
+        scripts: undefined,
+        history: undefined,
+        cookies: undefined,
+      };
 
   setResponse({
     response: value.response,
     assertions: value.assertions,
-    hasScript: request["script"] !== undefined || request["tests"] !== undefined,
+    ...(value.scripts === undefined ? {} : { scripts: value.scripts }),
   });
+  // A send updates history and the cookie jar, both of which have their own
+  // panels; keeping the copies here in step avoids a stale panel.
+  if (value.history !== undefined) history = value.history;
+  if (value.cookies !== undefined) cookies = value.cookies;
+  if (!($("api-side-panel") as HTMLElement).hidden) renderSidePanel();
 }
 
 async function newRequest(): Promise<void> {
@@ -481,17 +513,19 @@ async function deleteEntry(path: string, name: string): Promise<void> {
 async function importPostman(): Promise<void> {
   const project = state.project;
   if (project === undefined) return;
-  const text = window.prompt(MESSAGES.apiImport(PRIMARY_LANGUAGE), "");
-  if (text === null || text.trim() === "") return;
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    setStatus("Not valid JSON");
+  // A file picker rather than a paste box: a Postman export is a file, and
+  // asking someone to paste one into a prompt is asking them to lose it.
+  const paths = await window.jarvis.pickFiles();
+  const path = paths[0];
+  if (path === undefined) return;
+
+  const file = await window.jarvis.readJsonFile(path);
+  if (!file.ok) {
+    setStatus(file.text);
     return;
   }
-  const result = await window.jarvis.importPostmanCollection(project, "", parsed);
+  const result = await window.jarvis.importPostmanCollection(project, "", file.value);
   if (!result.ok) {
     setStatus(result.text);
     return;
@@ -612,6 +646,231 @@ async function saveEnvironment(): Promise<void> {
   state.environment = name;
   ($("api-environment") as HTMLSelectElement).value = name;
   renderEnvironmentEditor();
+}
+
+function toggleSidePanel(which: SidePanel): void {
+  const panel = $("api-side-panel") as HTMLElement;
+  // Clicking the drawer that is already open closes it, which is the only
+  // way to get the editor's full height back.
+  if (!panel.hidden && sidePanel === which) {
+    panel.hidden = true;
+    return;
+  }
+  sidePanel = which;
+  panel.hidden = false;
+  void refreshSideData();
+}
+
+async function refreshSideData(): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+
+  if (sidePanel === "history") {
+    const result = await window.jarvis.apiHistory(project);
+    history = result.ok ? result.value : [];
+  } else if (sidePanel === "cookies") {
+    const result = await window.jarvis.apiCookies(project);
+    cookies = result.ok ? result.value : [];
+  } else {
+    const result = await window.jarvis.apiSettings(project);
+    if (result.ok) settings = result.value;
+  }
+  renderSidePanel();
+}
+
+function renderSidePanel(): void {
+  const strip = $("api-side-tabs");
+  strip.replaceChildren();
+  for (const name of SIDE_PANELS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "api-tab";
+    button.classList.toggle("api-tab--on", name === sidePanel);
+    button.dataset["panel"] = name;
+    button.textContent = name;
+    button.addEventListener("click", () => toggleSidePanel(name));
+    strip.append(button);
+  }
+
+  const body = $("api-side-body");
+  body.replaceChildren();
+  if (sidePanel === "history") body.append(historyView());
+  else if (sidePanel === "cookies") body.append(cookiesView());
+  else body.append(settingsView());
+}
+
+function historyView(): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "api-history";
+
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.id = "api-history-clear";
+  clear.className = "settings-add";
+  clear.textContent = "clear";
+  clear.addEventListener("click", () => {
+    const project = state.project;
+    if (project === undefined) return;
+    void window.jarvis.clearApiHistory(project).then(() => {
+      history = [];
+      renderSidePanel();
+    });
+  });
+  list.append(clear);
+
+  if (history.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "api-empty";
+    empty.textContent = MESSAGES.apiNoHistory(PRIMARY_LANGUAGE);
+    list.append(empty);
+    return list;
+  }
+
+  for (const entry of history) {
+    const row = document.createElement("div");
+    row.className = "api-history-row";
+
+    const status = document.createElement("span");
+    status.className = "api-history-status";
+    status.classList.toggle("api-history-status--bad", entry.status >= 400);
+    status.textContent = String(entry.status);
+
+    const method = document.createElement("span");
+    method.className = `api-method-badge api-method-badge--${entry.method.toLowerCase()}`;
+    method.textContent = entry.method;
+
+    const url = document.createElement("span");
+    url.className = "mono api-history-url";
+    url.textContent = entry.url;
+
+    const timing = document.createElement("span");
+    timing.className = "api-history-time";
+    timing.textContent = `${entry.timeMs}ms`;
+
+    row.append(status, method, url, timing);
+    list.append(row);
+  }
+  return list;
+}
+
+function cookiesView(): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "api-cookies";
+
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.id = "api-cookies-clear";
+  clear.className = "settings-add";
+  clear.textContent = "clear";
+  clear.addEventListener("click", () => {
+    const project = state.project;
+    if (project === undefined) return;
+    void window.jarvis.clearApiCookies(project).then((result) => {
+      cookies = result.ok ? result.value : [];
+      renderSidePanel();
+    });
+  });
+  list.append(clear);
+
+  if (cookies.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "api-empty";
+    empty.textContent = MESSAGES.apiNoCookies(PRIMARY_LANGUAGE);
+    list.append(empty);
+    return list;
+  }
+
+  for (const cookie of cookies) {
+    const row = document.createElement("div");
+    row.className = "api-cookie-row";
+
+    const name = document.createElement("span");
+    name.className = "mono";
+    name.textContent = `${cookie.name}=${cookie.value}`;
+
+    const scope = document.createElement("span");
+    scope.className = "api-cookie-scope";
+    // The flags are the reason a cookie is or is not being sent, so they
+    // belong on the row rather than behind anything.
+    const flags = [cookie.secure ? "secure" : "", cookie.httpOnly ? "httpOnly" : ""].filter((flag) => flag !== "");
+    scope.textContent = `${cookie.domain}${cookie.path}${flags.length > 0 ? ` · ${flags.join(" ")}` : ""}`;
+
+    const remove = document.createElement("span");
+    remove.className = "api-pair-remove";
+    remove.textContent = "×";
+    remove.setAttribute("role", "button");
+    remove.addEventListener("click", () => {
+      const project = state.project;
+      if (project === undefined) return;
+      void window.jarvis
+        .removeApiCookie(project, cookie.name, cookie.domain, cookie.path)
+        .then((result) => {
+          cookies = result.ok ? result.value : cookies;
+          renderSidePanel();
+        });
+    });
+
+    row.append(name, scope, remove);
+    list.append(row);
+  }
+  return list;
+}
+
+function settingsView(): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "api-panel-body";
+
+  const proxy = document.createElement("input");
+  proxy.type = "text";
+  proxy.id = "api-setting-proxy";
+  proxy.className = "mono";
+  proxy.placeholder = "http://proxy:8080";
+  proxy.value = settings.proxyUrl;
+  proxy.addEventListener("change", () => void saveSettings({ proxyUrl: proxy.value }));
+
+  const timeout = document.createElement("input");
+  timeout.type = "text";
+  timeout.id = "api-setting-timeout";
+  timeout.className = "mono";
+  timeout.value = String(settings.timeoutMs);
+  timeout.addEventListener("change", () => {
+    const value = Number(timeout.value);
+    // A half-typed number must not become a zero-millisecond timeout, which
+    // would fail every request instantly.
+    if (Number.isFinite(value) && value >= 0) void saveSettings({ timeoutMs: value });
+  });
+
+  const verifyLabel = document.createElement("label");
+  verifyLabel.className = "api-field";
+  const verify = document.createElement("input");
+  verify.type = "checkbox";
+  verify.id = "api-setting-verify";
+  verify.checked = settings.verifyCertificate;
+  verify.addEventListener("change", () => void saveSettings({ verifyCertificate: verify.checked }));
+  const verifyText = document.createElement("span");
+  verifyText.className = "lbl";
+  verifyText.textContent = "verify certificates";
+  verifyLabel.append(verify, verifyText);
+
+  panel.append(labelledField("proxy", proxy), labelledField("timeout (ms)", timeout), verifyLabel);
+  return panel;
+}
+
+function labelledField(text: string, control: HTMLElement): HTMLElement {
+  const label = document.createElement("label");
+  label.className = "api-field";
+  const span = document.createElement("span");
+  span.className = "lbl";
+  span.textContent = text;
+  label.append(span, control);
+  return label;
+}
+
+async function saveSettings(patch: Partial<ApiSettings>): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+  const result = await window.jarvis.saveApiSettings(project, { ...settings, ...patch });
+  if (result.ok) settings = result.value;
 }
 
 async function copyCurl(): Promise<void> {
