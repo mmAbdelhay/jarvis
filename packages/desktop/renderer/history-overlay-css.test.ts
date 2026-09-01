@@ -1,3 +1,6 @@
+// The stylesheet lives beside index.html rather than inside it, so a CSS
+// assertion reads styles.css and a markup assertion reads index.html. They
+// were one file until the redesign moved 1,747 lines of CSS out of it.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -31,7 +34,7 @@ import { describe, expect, it } from "vitest";
 // still rests on the cascade-origin reasoning above, not a live
 // measurement from this test suite.
 const htmlSource = readFileSync(
-  fileURLToPath(new URL("./index.html", import.meta.url)),
+  fileURLToPath(new URL("./styles.css", import.meta.url)),
   "utf8",
 );
 

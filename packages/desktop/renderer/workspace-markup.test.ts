@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+// The stylesheet lives beside index.html rather than inside it, so a CSS
+// assertion reads styles.css and a markup assertion reads index.html. They
+// were one file until the redesign moved 1,747 lines of CSS out of it.
 const html = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
+const css = readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
 
 describe("workspace markup", () => {
   it("has a nav button", () => {
@@ -88,7 +92,7 @@ describe("workspace markup", () => {
   // than the flex shorthand (see .session-terminal, .workspace-browser),
   // so either form counts.
   it("gives the page slot a flexible height rather than sizing it to content", () => {
-    expect(html).toMatch(/\.workspace-page\s*\{[^}]*flex(-grow)?:\s*1/);
+    expect(css).toMatch(/\.workspace-page\s*\{[^}]*flex(-grow)?:\s*1/);
   });
 });
 
@@ -98,21 +102,21 @@ describe("workspace markup", () => {
 // exactly what happened on screen.
 describe("api bar layout", () => {
   it("sizes the API bar's buttons to their labels", () => {
-    expect(html).toMatch(/\.api-bar button \{[^}]*width:\s*auto/);
+    expect(css).toMatch(/\.api-bar button \{[^}]*width:\s*auto/);
   });
 
   it("lets only the URL field absorb and give up width", () => {
-    expect(html).toMatch(/\.api-bar \.workspace-address \{[^}]*flex:\s*1/);
-    expect(html).toMatch(/\.api-bar button \{[^}]*flex-shrink:\s*0/);
+    expect(css).toMatch(/\.api-bar \.workspace-address \{[^}]*flex:\s*1/);
+    expect(css).toMatch(/\.api-bar button \{[^}]*flex-shrink:\s*0/);
   });
 
   // An empty select collapses to its border and reads as a glitch.
   it("keeps an empty select from collapsing", () => {
-    expect(html).toMatch(/\.api-bar select \{[^}]*min-width/);
+    expect(css).toMatch(/\.api-bar select \{[^}]*min-width/);
   });
 
   it("wraps the bar rather than pushing buttons off the edge", () => {
-    expect(html).toMatch(/\.api-bar \{[^}]*flex-wrap:\s*wrap/);
+    expect(css).toMatch(/\.api-bar \{[^}]*flex-wrap:\s*wrap/);
   });
 
   // A stray inline width would put the bar back where it was, one button at
