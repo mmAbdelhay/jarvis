@@ -26,6 +26,11 @@ import {
   createRealCodeServerSpawner,
   createRealShellSpawner,
   createShellManager,
+  listCollections,
+  readCollection,
+  readRequest,
+  sendRequest,
+  writeRequest,
   createRealDbGateSpawner,
   createSqliteSessionStore,
   randomPassword,
@@ -37,6 +42,7 @@ import {
 } from "@jarvis/platform";
 import {
   buildWiring,
+  createApiHandlers,
   createBookmarksHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
@@ -231,6 +237,19 @@ app.whenReady().then(async () => {
     // and the database this hosts no page and opens no port: the tab has no
     // view at all, and its screen is drawn by the renderer's own xterm.
     const shells = createShellManager({ spawn: createRealShellSpawner() });
+    // The API tab. Requests are issued from here, in the main process, which
+    // is what makes CORS irrelevant — see http-runner.ts.
+    const api = createApiHandlers({
+      listCollections,
+      readCollection,
+      readRequest,
+      writeRequest,
+      sendRequest: (request, variables) =>
+        sendRequest(request, variables, { fetch, now: () => Date.now() }),
+      projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
     const terminal = createTerminalHandlers({
       shells,
       openTerminalTab: (project) => workspace.openTerminal(project),
@@ -424,6 +443,35 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),
+    );
+    // Opening the tab is main's job (only it holds the BrowserHost); deciding
+    // whether one already exists is the renderer's, exactly as it is for the
+    // Editor and Database buttons.
+    ipcMain.handle("api:open", (_event, project: unknown) => {
+      if (typeof project !== "string" || config.projects[project] === undefined) {
+        return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+      }
+      workspace.openApi(project);
+      return { ok: true, value: undefined };
+    });
+    ipcMain.handle("api:collections", (_event, project: unknown) =>
+      api.collections(project as string),
+    );
+    ipcMain.handle("api:tree", (_event, project: unknown, path: unknown) =>
+      api.tree(project as string, path as string),
+    );
+    ipcMain.handle("api:request", (_event, project: unknown, path: unknown) =>
+      api.request(project as string, path as string),
+    );
+    ipcMain.handle("api:save", (_event, project: unknown, path: unknown, json: unknown) =>
+      api.save(project as string, path as string, json as Record<string, unknown>),
+    );
+    ipcMain.handle("api:send", (_event, project: unknown, request: unknown, variables: unknown) =>
+      api.send(
+        project as string,
+        request as Record<string, unknown>,
+        variables as Record<string, string>,
+      ),
     );
     ipcMain.handle("terminal:open", (_event, project: unknown) =>
       terminal.open(typeof project === "string" ? project : ""),

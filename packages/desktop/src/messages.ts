@@ -77,6 +77,12 @@ export const MESSAGES = {
     language === "ar"
       ? `الدخول: ${login} · كلمة المرور: ${password}`
       : `login ${login} · password ${password}`,
+  // The API tab's failures: a collection that could not be read, a request
+  // that could not be saved, a runner that threw. The runner's own detail
+  // (a refused connection, a DNS failure) is developer-facing and rides
+  // underneath, same split as editorUnavailable.
+  apiUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر تنفيذ الطلب." : "Could not run the request.",
   // The bookmark store's failures (a disk write that failed, mainly) —
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>

@@ -6,7 +6,9 @@ import {
   createBookmarksHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
+  createApiHandlers,
   createTerminalHandlers,
+  type ApiHandlerDeps,
   createGitHandlers,
   createSettingsHandlers,
   type WiringDeps,
@@ -1216,5 +1218,108 @@ describe("terminal handlers", () => {
     handlers.close("tab-7");
 
     expect(killed).toEqual(["tab-7"]);
+  });
+});
+
+describe("api handlers", () => {
+  function handlers(overrides: Partial<ApiHandlerDeps> = {}) {
+    const saved: { path: string; json: unknown }[] = [];
+    const deps: ApiHandlerDeps = {
+      listCollections: () => Promise.resolve([{ name: "api", path: "/p/acme/api" }]),
+      readCollection: (path) =>
+        Promise.resolve({
+          collection: { name: "api", path },
+          root: { name: "api", path, requests: [], folders: [] },
+          environments: [],
+        }),
+      readRequest: () => Promise.resolve({ meta: { name: "R" } }),
+      writeRequest: (path, json) => {
+        saved.push({ path, json });
+        return Promise.resolve();
+      },
+      sendRequest: () =>
+        Promise.resolve({
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          body: "{}",
+          timeMs: 5,
+          bytes: 2,
+          unresolved: [],
+        }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+      ...overrides,
+    };
+    return { api: createApiHandlers(deps), saved };
+  }
+
+  it("lists a project's collections", async () => {
+    const { api } = handlers();
+
+    expect(await api.collections("acme")).toEqual({
+      ok: true,
+      value: [{ name: "api", path: "/p/acme/api" }],
+    });
+  });
+
+  it("refuses an unknown project", async () => {
+    const { api } = handlers();
+
+    expect((await api.collections("nope")).ok).toBe(false);
+  });
+
+  // The renderer names, main resolves: a path the renderer supplies is only
+  // ever accepted if it is inside the project it claims to belong to.
+  it("refuses a path outside the project", async () => {
+    const { api } = handlers();
+
+    expect((await api.request("acme", "/etc/passwd")).ok).toBe(false);
+    expect((await api.request("acme", "/p/acme/../secrets/x.bru")).ok).toBe(false);
+  });
+
+  it("accepts a path inside the project", async () => {
+    const { api } = handlers();
+
+    expect((await api.request("acme", "/p/acme/api/list.bru")).ok).toBe(true);
+  });
+
+  it("refuses to save outside the project, without touching the store", async () => {
+    const { api, saved } = handlers();
+
+    const result = await api.save("acme", "/tmp/evil.bru", { meta: {} });
+
+    expect(result.ok).toBe(false);
+    expect(saved).toEqual([]);
+  });
+
+  it("saves a request inside the project", async () => {
+    const { api, saved } = handlers();
+
+    await api.save("acme", "/p/acme/api/list.bru", { meta: { name: "R" } });
+
+    expect(saved).toEqual([{ path: "/p/acme/api/list.bru", json: { meta: { name: "R" } } }]);
+  });
+
+  it("sends a request and returns the response", async () => {
+    const { api } = handlers();
+
+    const result = await api.send("acme", { meta: {} }, {});
+
+    expect(result.ok && result.value).toMatchObject({ status: 200, timeMs: 5 });
+  });
+
+  it("wraps a runner that throws behind one localised headline", async () => {
+    const { api } = handlers({ sendRequest: () => Promise.reject(new Error("boom")) });
+
+    const result = await api.send("acme", { meta: {} }, {});
+
+    expect(result).toEqual({ ok: false, text: "Could not run the request.", language: "en" });
+  });
+
+  it("wraps a collection read that throws", async () => {
+    const { api } = handlers({ readCollection: () => Promise.reject(new Error("nope")) });
+
+    expect((await api.tree("acme", "/p/acme/api")).ok).toBe(false);
   });
 });

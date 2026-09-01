@@ -59,6 +59,13 @@ const api: RendererApi = {
   openEditor: (project) => ipcRenderer.invoke("editor:open", project),
   openDatabase: (project) => ipcRenderer.invoke("database:open", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
+  openApiTab: (project) => ipcRenderer.invoke("api:open", project),
+  listApiCollections: (project) => ipcRenderer.invoke("api:collections", project),
+  readApiTree: (project, path) => ipcRenderer.invoke("api:tree", project, path),
+  readApiRequest: (project, path) => ipcRenderer.invoke("api:request", project, path),
+  saveApiRequest: (project, path, json) => ipcRenderer.invoke("api:save", project, path, json),
+  sendApiRequest: (project, request, variables) =>
+    ipcRenderer.invoke("api:send", project, request, variables),
   attachTerminal: (tabId) => ipcRenderer.invoke("terminal:attach", tabId),
   sendTerminalInput: (tabId, data) => ipcRenderer.invoke("terminal:input", tabId, data),
   resizeTerminal: (tabId, cols, rows) => ipcRenderer.invoke("terminal:resize", tabId, cols, rows),

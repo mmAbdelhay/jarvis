@@ -15,10 +15,15 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
+import { resolve, sep } from "node:path";
 import type { WorkspaceState } from "@jarvis/core";
 import type {
+  ApiFailure,
+  ApiResponse,
   Bookmark,
   BookmarkStore,
+  BrunoCollection,
+  BrunoTree,
   CodeServerManager,
   DbGateManager,
   ShellManager,
@@ -346,6 +351,23 @@ export type RendererApi = {
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
   openTerminal(project: string): Promise<GitViewResult<void>>;
+  /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
+   *  per project: a collection tree is a view of the filesystem, not a
+   *  session, so a second tab would be a duplicate. */
+  openApiTab(project: string): Promise<GitViewResult<void>>;
+  listApiCollections(project: string): Promise<GitViewResult<BrunoCollection[]>>;
+  readApiTree(project: string, collectionPath: string): Promise<GitViewResult<BrunoTree>>;
+  readApiRequest(project: string, path: string): Promise<GitViewResult<Record<string, unknown>>>;
+  saveApiRequest(
+    project: string,
+    path: string,
+    json: Record<string, unknown>,
+  ): Promise<GitViewResult<void>>;
+  sendApiRequest(
+    project: string,
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+  ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
   /** Announces that this tab's xterm exists; returns whatever the shell
    *  printed before it did. */
   attachTerminal(tabId: string): Promise<string>;
@@ -561,6 +583,130 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     close(tabId) {
       if (!isString(tabId)) return;
       deps.shells.kill(tabId);
+    },
+  };
+}
+
+export type ApiHandlers = {
+  collections(project: string): Promise<GitViewResult<BrunoCollection[]>>;
+  tree(project: string, collectionPath: string): Promise<GitViewResult<BrunoTree>>;
+  request(project: string, path: string): Promise<GitViewResult<Record<string, unknown>>>;
+  save(project: string, path: string, json: Record<string, unknown>): Promise<GitViewResult<void>>;
+  send(
+    project: string,
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+  ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
+};
+
+export type ApiHandlerDeps = {
+  listCollections: (projectPath: string) => Promise<BrunoCollection[]>;
+  readCollection: (collectionPath: string) => Promise<BrunoTree>;
+  readRequest: (path: string) => Promise<Record<string, unknown>>;
+  writeRequest: (path: string, json: Record<string, unknown>) => Promise<void>;
+  sendRequest: (
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+  ) => Promise<ApiResponse | ApiFailure>;
+  /** Name to absolute path, from config. The renderer never sees a path it
+   *  was not first given, and never one this map does not contain. */
+  projects: Readonly<Record<string, string>>;
+  language: "ar" | "en";
+};
+
+/**
+ * The API tab's main-process half.
+ *
+ * Every path the renderer sends is checked against the project it claims to
+ * belong to before it reaches the filesystem. The renderer does receive real
+ * paths here — a collection tree is a filesystem view, and hiding them would
+ * mean inventing an id scheme for files — so containment is the guarantee
+ * that replaces "the renderer never sees a path": a path may be shown, but
+ * only a path inside the named project is ever acted on.
+ */
+export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  const unknownProject = (): { ok: false; text: string; language: "ar" | "en" } =>
+    fail(MESSAGES.unknownProject(deps.language));
+
+  /** The project's root, or undefined if the renderer named one that is not
+   *  configured. */
+  function rootFor(project: unknown): string | undefined {
+    return isString(project) ? deps.projects[project] : undefined;
+  }
+
+  /** True only if `path` is inside `root`. resolve() collapses any `..`
+   *  first, so a traversal cannot smuggle its way past the prefix test, and
+   *  the separator guards against `/p/acme-other` passing for
+   *  `/p/acme`. */
+  function contains(root: string, path: unknown): boolean {
+    if (!isString(path)) return false;
+    const resolved = resolve(path);
+    return resolved === resolve(root) || resolved.startsWith(`${resolve(root)}${sep}`);
+  }
+
+  return {
+    async collections(project) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      try {
+        return { ok: true, value: await deps.listCollections(root) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async tree(project, collectionPath) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      if (!contains(root, collectionPath)) return unknownProject();
+      try {
+        return { ok: true, value: await deps.readCollection(collectionPath) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async request(project, path) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      if (!contains(root, path)) return unknownProject();
+      try {
+        return { ok: true, value: await deps.readRequest(path) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async save(project, path, json) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      if (!contains(root, path)) return unknownProject();
+      if (typeof json !== "object" || json === null) return fail(MESSAGES.invalidArgument(deps.language));
+      try {
+        await deps.writeRequest(path, json);
+        return { ok: true, value: undefined };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async send(project, request, variables) {
+      if (rootFor(project) === undefined) return unknownProject();
+      if (typeof request !== "object" || request === null) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      try {
+        return { ok: true, value: await deps.sendRequest(request, variables ?? {}) };
+      } catch {
+        // A runner that threw rather than returning an ApiFailure is a bug
+        // on our side, not a failed request; it still must not reach the
+        // renderer as a raw message.
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
     },
   };
 }
