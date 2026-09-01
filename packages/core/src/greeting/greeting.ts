@@ -14,6 +14,22 @@ export type GreetingInput = {
   /** Session rows, most recently active first — SessionStore.history()'s order. */
   history: readonly Session[];
   dirtyProjects: readonly DirtyProject[];
+  /** What to say, per language. Absent falls back to DEFAULT_GREETING. */
+  template?: Partial<Record<Language, string>>;
+};
+
+/**
+ * What Jarvis says on opening, unless configured otherwise.
+ *
+ * `{lastSession}` and `{uncommitted}` are available and deliberately not used
+ * here: the default is a greeting, not a status report. They remain because
+ * the information is real — the session you were last in, the work you left
+ * uncommitted — and putting it back should be a matter of typing a
+ * placeholder rather than asking for the code again.
+ */
+export const DEFAULT_GREETING: Record<Language, string> = {
+  en: "Good {timeOfDay} sir, how can I help you today?",
+  ar: "{timeOfDay} يا سيدي، كيف أقدر أساعدك اليوم؟",
 };
 
 /**
@@ -51,6 +67,24 @@ function timeOfDay(now: number, language: Language): string {
   if (hour >= 5 && hour < 12) return language === "ar" ? "صباح الخير." : "Good morning.";
   if (hour >= 12 && hour < 17) return language === "ar" ? "مساء الخير." : "Good afternoon.";
   return language === "ar" ? "مساء الخير." : "Good evening.";
+}
+
+/**
+ * What `{timeOfDay}` becomes inside a template.
+ *
+ * English contributes the bare word — the template supplies the "Good" and
+ * whatever follows it — while Arabic contributes the whole phrase, because
+ * صباح الخير is not decomposable into an adjective and a noun the way "good
+ * morning" is. A template that reads "{timeOfDay} يا سيدي" therefore works,
+ * and one that tries to write "صباح {timeOfDay}" does not; that asymmetry is
+ * the language's, not this function's.
+ */
+function timeOfDayWord(now: number, language: Language): string {
+  if (language === "ar") return timeOfDay(now, language).replace(/[.]$/, "");
+  const hour = new Date(now).getHours();
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 17) return "afternoon";
+  return "evening";
 }
 
 /** Same en-GB clock the dashboard and the provider lines use. */
@@ -96,14 +130,27 @@ function uncommittedLine(projects: readonly DirtyProject[], language: Language):
  * could drift apart.
  */
 export function greetingText(input: GreetingInput, language: Language): string {
-  const lines = [`${timeOfDay(input.now, language)} ${READY[language]}`];
+  const configured = input.template?.[language]?.trim();
+  const template = configured === undefined || configured === "" ? DEFAULT_GREETING[language] : configured;
 
   const last = input.history[0];
-  if (last !== undefined) lines.push(lastSessionLine(last, input.now, language));
+  const values: Record<string, string> = {
+    timeOfDay: timeOfDayWord(input.now, language),
+    ready: READY[language],
+    lastSession: last === undefined ? "" : lastSessionLine(last, input.now, language),
+    uncommitted:
+      input.dirtyProjects.length === 0 ? "" : uncommittedLine(input.dirtyProjects, language),
+  };
 
-  if (input.dirtyProjects.length > 0) {
-    lines.push(uncommittedLine(input.dirtyProjects, language));
-  }
+  const filled = template.replace(/\{\s*(\w+)\s*\}/g, (match, name: string) =>
+    Object.hasOwn(values, name) ? (values[name] ?? "") : match,
+  );
 
-  return lines.join("\n");
+  // A placeholder that had nothing to say leaves an empty line behind; the
+  // greeting should not open with a gap because there was no last session.
+  return filled
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join("\n");
 }

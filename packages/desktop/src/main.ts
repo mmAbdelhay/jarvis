@@ -148,7 +148,10 @@ app.whenReady().then(async () => {
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
     const sessions = new SessionManager(createPtySpawner(), sessionStore);
-    const speech = new MacSpeech({ arabicVoice: "Majed" });
+    const speech = new MacSpeech({
+      arabicVoice: config.voice.arabicVoice,
+      englishVoice: config.voice.englishVoice,
+    });
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -953,7 +956,12 @@ app.whenReady().then(async () => {
     // up to 5s. Spoken as well as shown — the same string, so the two can
     // never drift — and this is the only place the app speaks unprompted.
     const greeting = greetingText(
-      { now: Date.now(), history: sessionStore.history(), dirtyProjects: await dirtyProjects },
+      {
+        now: Date.now(),
+        history: sessionStore.history(),
+        dirtyProjects: await dirtyProjects,
+        template: config.voice.greeting,
+      },
       PRIMARY_LANGUAGE,
     );
     window.webContents.send("turn:new", {

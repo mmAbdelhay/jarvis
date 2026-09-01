@@ -20,12 +20,19 @@ function session(overrides: Partial<Session> = {}): Session {
   };
 }
 
+/** The reporting placeholders are no longer in the default greeting, so the
+ *  tests that cover their formatting ask for them explicitly. */
+const REPORTING = {
+  en: "{ready}\n{lastSession}\n{uncommitted}",
+  ar: "{ready}\n{lastSession}\n{uncommitted}",
+};
+
 describe("greetingText", () => {
   it("greets the morning between 05:00 and 11:59", () => {
     const at = new Date("2026-08-31T09:00:00").getTime();
 
     expect(greetingText({ now: at, history: [], dirtyProjects: [] }, "en")).toContain(
-      "Good morning.",
+      "Good morning sir",
     );
   });
 
@@ -33,13 +40,13 @@ describe("greetingText", () => {
     const at = new Date("2026-08-31T13:00:00").getTime();
 
     expect(greetingText({ now: at, history: [], dirtyProjects: [] }, "en")).toContain(
-      "Good afternoon.",
+      "Good afternoon sir",
     );
   });
 
   it("greets the evening from 17:00", () => {
     expect(greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "en")).toContain(
-      "Good evening.",
+      "Good evening sir",
     );
   });
 
@@ -49,21 +56,21 @@ describe("greetingText", () => {
     const at = new Date("2026-08-31T03:00:00").getTime();
 
     expect(greetingText({ now: at, history: [], dirtyProjects: [] }, "en")).toContain(
-      "Good evening.",
+      "Good evening sir",
     );
   });
 
-  it("says Jarvis is ready", () => {
-    expect(greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "en")).toContain(
-      "Jarvis is ready.",
-    );
+  it("renders {ready} when a template asks for it", () => {
+    expect(
+      greetingText({ now: EVENING, history: [], dirtyProjects: [], template: REPORTING }, "en"),
+    ).toContain("Jarvis is ready.");
   });
 
   // The store returns history most-recently-active first, so the head of the
   // list is the session the user was last in.
   it("names the last session's project, agent and clock time", () => {
     const text = greetingText(
-      { now: EVENING, history: [session()], dirtyProjects: [] },
+      { now: EVENING, history: [session()], dirtyProjects: [], template: REPORTING },
       "en",
     );
 
@@ -79,6 +86,7 @@ describe("greetingText", () => {
         now: EVENING,
         history: [session({ lastActivityAt: new Date("2026-08-28T14:32:00").getTime() })],
         dirtyProjects: [],
+        template: REPORTING,
       },
       "en",
     );
@@ -103,6 +111,7 @@ describe("greetingText", () => {
           { project: "acme", changedFiles: 4 },
           { project: "storefront", changedFiles: 2 },
         ],
+        template: REPORTING,
       },
       "en",
     );
@@ -116,12 +125,13 @@ describe("greetingText", () => {
     expect(text).not.toContain("Uncommitted");
   });
 
-  it("puts each part on its own line", () => {
+  it("puts each part of a multi-line template on its own line", () => {
     const text = greetingText(
       {
         now: EVENING,
         history: [session()],
         dirtyProjects: [{ project: "acme", changedFiles: 4 }],
+        template: REPORTING,
       },
       "en",
     );
@@ -129,12 +139,52 @@ describe("greetingText", () => {
     expect(text.split("\n")).toHaveLength(3);
   });
 
+  // A placeholder with nothing to say should not leave the greeting opening
+  // on a blank line.
+  it("drops a line whose only placeholder had nothing to say", () => {
+    const text = greetingText(
+      { now: EVENING, history: [], dirtyProjects: [], template: REPORTING },
+      "en",
+    );
+
+    expect(text).toBe("Jarvis is ready.");
+  });
+
+  it("uses the configured template over the default", () => {
+    const text = greetingText(
+      { now: EVENING, history: [], dirtyProjects: [], template: { en: "Evening, boss." } },
+      "en",
+    );
+
+    expect(text).toBe("Evening, boss.");
+  });
+
+  it("falls back to the default when the configured template is blank", () => {
+    const text = greetingText(
+      { now: EVENING, history: [], dirtyProjects: [], template: { en: "   " } },
+      "en",
+    );
+
+    expect(text).toBe("Good evening sir, how can I help you today?");
+  });
+
+  // A typo in a template should show as itself rather than vanishing, so it
+  // can be seen and fixed.
+  it("leaves an unknown placeholder alone", () => {
+    const text = greetingText(
+      { now: EVENING, history: [], dirtyProjects: [], template: { en: "Hello {nope}." } },
+      "en",
+    );
+
+    expect(text).toBe("Hello {nope}.");
+  });
+
   describe("in Arabic", () => {
     it("greets the morning", () => {
       const at = new Date("2026-08-31T09:00:00").getTime();
 
       expect(greetingText({ now: at, history: [], dirtyProjects: [] }, "ar")).toContain(
-        "صباح الخير.",
+        "صباح الخير",
       );
     });
 
@@ -146,21 +196,32 @@ describe("greetingText", () => {
 
       expect(
         greetingText({ now: afternoon, history: [], dirtyProjects: [] }, "ar"),
-      ).toContain("مساء الخير.");
+      ).toContain("مساء الخير");
       expect(greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "ar")).toContain(
-        "مساء الخير.",
+        "مساء الخير",
       );
     });
 
-    it("says Jarvis is ready", () => {
-      expect(greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "ar")).toContain(
-        "جارفِس جاهز.",
+    it("renders {ready} when a template asks for it", () => {
+      expect(
+        greetingText({ now: EVENING, history: [], dirtyProjects: [], template: REPORTING }, "ar"),
+      ).toContain("جارفِس جاهز.");
+    });
+
+    // صباح الخير is not decomposable into an adjective and a noun the way
+    // "good morning" is, so Arabic's {timeOfDay} carries the whole phrase.
+    it("gives {timeOfDay} the whole phrase, not a bare word", () => {
+      const text = greetingText(
+        { now: EVENING, history: [], dirtyProjects: [], template: { ar: "{timeOfDay} يا سيدي" } },
+        "ar",
       );
+
+      expect(text).toBe("مساء الخير يا سيدي");
     });
 
     it("names the last session with the value at the clause tail", () => {
       const text = greetingText(
-        { now: EVENING, history: [session()], dirtyProjects: [] },
+        { now: EVENING, history: [session()], dirtyProjects: [], template: REPORTING },
         "ar",
       );
 
@@ -173,6 +234,7 @@ describe("greetingText", () => {
           now: EVENING,
           history: [],
           dirtyProjects: [{ project: "acme", changedFiles: 4 }],
+          template: REPORTING,
         },
         "ar",
       );

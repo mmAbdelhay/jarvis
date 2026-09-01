@@ -349,3 +349,63 @@ describe("databases", () => {
     ).toThrow("Config `databases.storefront[0].readonly` must be true or false");
   });
 });
+
+describe("voice", () => {
+  const base = {
+    agents: { a: { command: "a", default: true } },
+    brain: { cwd: "/tmp/brain" },
+  };
+
+  // Left unset, `say` uses the system default, which is female — the thing
+  // this default exists to change.
+  it("defaults to the British male voice and the plain greeting", () => {
+    const config = parseConfig(base);
+
+    expect(config.voice.englishVoice).toBe("Daniel");
+    expect(config.voice.arabicVoice).toBe("Majed");
+    expect(config.voice.greeting.en).toBe("Good {timeOfDay} sir, how can I help you today?");
+  });
+
+  it("takes the configured voices and greetings", () => {
+    const config = parseConfig({
+      ...base,
+      voice: {
+        englishVoice: "Oliver",
+        arabicVoice: "Tarik",
+        greeting: { en: "Evening, boss.", ar: "مرحبا" },
+      },
+    });
+
+    expect(config.voice).toEqual({
+      englishVoice: "Oliver",
+      arabicVoice: "Tarik",
+      greeting: { en: "Evening, boss.", ar: "مرحبا" },
+    });
+  });
+
+  // Preference, not configuration the app cannot run without: a half-filled
+  // section keeps the defaults for the rest.
+  it("fills a missing field from the defaults", () => {
+    const config = parseConfig({ ...base, voice: { englishVoice: "Oliver" } });
+
+    expect(config.voice.englishVoice).toBe("Oliver");
+    expect(config.voice.arabicVoice).toBe("Majed");
+    expect(config.voice.greeting.en).toContain("{timeOfDay}");
+  });
+
+  it("rejects a section that is not an object", () => {
+    expect(() => parseConfig({ ...base, voice: "loud" })).toThrow("Config `voice` must be an object");
+  });
+
+  it("rejects a voice name that is not a string", () => {
+    expect(() => parseConfig({ ...base, voice: { englishVoice: 7 } })).toThrow(
+      "Config `voice.englishVoice` must be a string",
+    );
+  });
+
+  it("rejects a greeting that is not a string", () => {
+    expect(() => parseConfig({ ...base, voice: { greeting: { en: 7 } } })).toThrow(
+      "Config `voice.greeting.en` must be a string",
+    );
+  });
+});

@@ -17,6 +17,11 @@ const draft: JarvisConfig = {
   },
   projects: { acme: "/Users/x/projects/acme" },
   databases: {},
+  voice: {
+    englishVoice: "Daniel",
+    arabicVoice: "Majed",
+    greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
+  },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",

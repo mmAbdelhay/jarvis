@@ -16,6 +16,11 @@ function sample(): JarvisConfig {
     },
     projects: { acme: "/x/projects/acme" },
     databases: {},
+    voice: {
+      englishVoice: "Daniel",
+      arabicVoice: "Majed",
+      greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
+    },
     brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-mm" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
@@ -38,6 +43,10 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
+    <input id="settings-voice-en" />
+    <input id="settings-voice-ar" />
+    <textarea id="settings-greeting-en"></textarea>
+    <textarea id="settings-greeting-ar"></textarea>
     <input id="settings-whisper-binary" />
     <input id="settings-whisper-model" />`;
 
@@ -485,5 +494,39 @@ describe("databases section", () => {
     const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]).toBeUndefined();
     expect(saved.databases["acme-2"]?.[0]?.id).toBe("main");
+  });
+});
+
+describe("voice section", () => {
+  it("shows the configured voices and greetings", async () => {
+    harness();
+    initSettings();
+    await openSettings();
+
+    expect((document.getElementById("settings-voice-en") as HTMLInputElement).value).toBe("Daniel");
+    expect((document.getElementById("settings-voice-ar") as HTMLInputElement).value).toBe("Majed");
+    expect((document.getElementById("settings-greeting-en") as HTMLTextAreaElement).value).toContain(
+      "{timeOfDay}",
+    );
+  });
+
+  it("saves an edited voice and greeting", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    const voice = document.getElementById("settings-voice-en") as HTMLInputElement;
+    voice.value = "Oliver";
+    change(voice);
+    const greeting = document.getElementById("settings-greeting-en") as HTMLTextAreaElement;
+    greeting.value = "Evening, boss.";
+    change(greeting);
+
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.voice.englishVoice).toBe("Oliver");
+    expect(saved.voice.greeting.en).toBe("Evening, boss.");
   });
 });

@@ -62,6 +62,7 @@ export function toRawConfig(config: JarvisConfig): unknown {
       cwd: config.brain.cwd,
       systemPrompt: config.brain.systemPrompt,
     },
+    voice: config.voice,
     whisper: config.whisper,
   };
 }

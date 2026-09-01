@@ -396,6 +396,31 @@
       </section>
 
       <section class="settings-section">
+        <div class="lbl">VOICE</div>
+        <div class="settings-field">
+          <label for="settings-voice-en">english voice</label>
+          <input id="settings-voice-en" type="text" class="mono" autocomplete="off" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-voice-ar">arabic voice</label>
+          <input id="settings-voice-ar" type="text" class="mono" autocomplete="off" />
+        </div>
+        <div class="settings-field settings-field--wide">
+          <label for="settings-greeting-en">greeting (english)</label>
+          <textarea id="settings-greeting-en" class="mono"></textarea>
+        </div>
+        <div class="settings-field settings-field--wide">
+          <label for="settings-greeting-ar">greeting (arabic)</label>
+          <textarea id="settings-greeting-ar" class="mono"></textarea>
+        </div>
+        <div class="settings-note">
+          <code>{timeOfDay}</code> becomes morning, afternoon or evening.
+          <code>{ready}</code>, <code>{lastSession}</code> and <code>{uncommitted}</code>
+          are available; a line whose only placeholder has nothing to say is dropped.
+        </div>
+      </section>
+
+      <section class="settings-section">
         <div class="lbl">WHISPER</div>
         <div class="settings-field">
           <label for="settings-whisper-binary">binary path</label>

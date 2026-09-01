@@ -40,6 +40,7 @@ function renderSettings(): void {
   renderProjects();
   renderDatabases();
   renderBrain();
+  renderVoice();
   renderWhisper();
 }
 
@@ -563,6 +564,16 @@ function renderBrain(): void {
   select.value = draft.brain.accountId ?? "";
 }
 
+// ------------------------------------------------------------------ Voice
+
+function renderVoice(): void {
+  if (draft === undefined) return;
+  ($("settings-voice-en") as HTMLInputElement).value = draft.voice.englishVoice;
+  ($("settings-voice-ar") as HTMLInputElement).value = draft.voice.arabicVoice;
+  ($("settings-greeting-en") as HTMLTextAreaElement).value = draft.voice.greeting.en;
+  ($("settings-greeting-ar") as HTMLTextAreaElement).value = draft.voice.greeting.ar;
+}
+
 // ---------------------------------------------------------------- Whisper
 
 function renderWhisper(): void {
@@ -622,6 +633,27 @@ function wireStaticFields(): void {
   $("settings-whisper-model").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.whisper.modelPath = ($("settings-whisper-model") as HTMLInputElement).value;
+    clearSaveStatus();
+  });
+
+  $("settings-voice-en").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.voice.englishVoice = ($("settings-voice-en") as HTMLInputElement).value;
+    clearSaveStatus();
+  });
+  $("settings-voice-ar").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.voice.arabicVoice = ($("settings-voice-ar") as HTMLInputElement).value;
+    clearSaveStatus();
+  });
+  $("settings-greeting-en").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.voice.greeting.en = ($("settings-greeting-en") as HTMLTextAreaElement).value;
+    clearSaveStatus();
+  });
+  $("settings-greeting-ar").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.voice.greeting.ar = ($("settings-greeting-ar") as HTMLTextAreaElement).value;
     clearSaveStatus();
   });
 

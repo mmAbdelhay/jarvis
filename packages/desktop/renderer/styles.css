@@ -1884,3 +1884,16 @@
    A disk at 98% said so in exactly the same grey as a disk at 12%. */
 .sysinfo .warn { color: var(--warn); }
 .sysinfo .bad { color: var(--bad); }
+
+
+/* The placeholder legend under the greeting fields. */
+.settings-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.settings-note code {
+  font-family: var(--font-mono);
+  color: var(--accent-text);
+}

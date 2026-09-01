@@ -46,6 +46,13 @@ brain:
   systemPrompt: |
     You are Jarvis, a voice assistant that runs coding sessions.
 
+voice:
+  englishVoice: Daniel        # any `say -v` name; Daniel is the British male
+  arabicVoice: Majed
+  greeting:
+    en: "Good {timeOfDay} sir, how can I help you today?"
+    ar: "{timeOfDay} يا سيدي، كيف أقدر أساعدك اليوم؟"
+
 whisper:
   binaryPath: /Users/you/.voicemode/services/whisper/build/bin/whisper-cli
   modelPath: /Users/you/.whisper-models/ggml-large-v3-turbo.bin
@@ -69,6 +76,18 @@ project is rejected at load. There is deliberately no `password:` field —
 this file on every save and it should never come to hold a secret. A connection
 with no resolvable password makes DbGate ask for it and keep it in that
 project's own workspace.
+
+**The greeting is a template.** `{timeOfDay}` becomes morning, afternoon or
+evening — in Arabic it carries the whole phrase, since صباح الخير is not
+decomposable the way "good morning" is. `{ready}`, `{lastSession}` and
+`{uncommitted}` are also available and left out of the default deliberately:
+the default is a greeting, not a status report, and putting the report back is
+a matter of typing a placeholder. A line whose only placeholder has nothing to
+say is dropped rather than left blank.
+
+**An unknown voice name fails quietly.** macOS's `say` falls back to the system
+default rather than erroring, so a typo in `englishVoice` sounds like the
+setting did nothing.
 
 **Comments do not survive a Settings save.** If you keep notes in this file,
 keep them somewhere else too.

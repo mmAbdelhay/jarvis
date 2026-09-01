@@ -860,6 +860,11 @@ const sampleConfig: JarvisConfig = {
   registry: { agents: { "claude-mm": { command: "claude-mm" } }, routing: [] },
   projects: { acme: "/p/acme" },
   databases: {},
+  voice: {
+    englishVoice: "Daniel",
+    arabicVoice: "Majed",
+    greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
+  },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
   sessionsDbPath: "/tmp/sessions.db",

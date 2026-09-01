@@ -2,9 +2,22 @@ import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type { BrainConfig, DatabasesConfig, DbGateConnection, DbGateEngine } from "@jarvis/platform";
 import { DB_GATE_ENGINES } from "@jarvis/platform";
+
+/** What Jarvis sounds like, and what it says on opening. */
+export type VoiceConfig = {
+  /** A `say -v` voice name. An unknown name makes macOS fall back to the
+   *  system default silently rather than failing, so a typo here is quiet. */
+  englishVoice: string;
+  arabicVoice: string;
+  /** The greeting, per language. `{timeOfDay}` becomes morning/afternoon/
+   *  evening; `{ready}`, `{lastSession}` and `{uncommitted}` are available
+   *  and left out of the default deliberately — see DEFAULT_GREETING. */
+  greeting: { en: string; ar: string };
+};
 
 export type JarvisConfig = {
   registry: RegistryConfig;
@@ -14,6 +27,7 @@ export type JarvisConfig = {
    *  DbGate that manages its own connections instead. */
   databases: DatabasesConfig;
   brain: BrainConfig;
+  voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
@@ -30,6 +44,16 @@ export function defaultSessionsDbPath(): string {
 }
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
+
+/**
+ * Daniel is macOS's British male voice, and the register the app is named
+ * for. Left unset, `say` uses the system default, which is female — the
+ * thing this default exists to change.
+ *
+ * Majed is the Arabic male voice, and was already what Arabic used.
+ */
+const DEFAULT_ENGLISH_VOICE = "Daniel";
+const DEFAULT_ARABIC_VOICE = "Majed";
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
@@ -68,6 +92,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const projects = parseProjects(root["projects"]);
   const databases = parseDatabases(root["databases"], projects);
   const whisper = parseWhisper(root["whisper"]);
+  const voice = parseVoice(root["voice"]);
 
   const accountId = brainConfig.accountId;
   if (accountId !== undefined && typeof accountId !== "string") {
@@ -99,6 +124,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
       cwd: expandTilde(typeof brainConfig.cwd === "string" ? brainConfig.cwd : DEFAULT_BRAIN_CWD),
       ...(brainAccount === undefined ? {} : brainAccount),
     },
+    voice,
     whisper,
     sessionsDbPath: defaultSessionsDbPath(),
   };
@@ -316,6 +342,55 @@ function parseDatabases(rawDatabases: unknown, projects: Record<string, string>)
     });
   }
   return result;
+}
+
+/**
+ * The `voice:` section. Every field has a default, so an absent section — or
+ * an absent field within it — is not an error: this is preference, not
+ * configuration the app cannot run without.
+ */
+function parseVoice(rawVoice: unknown): VoiceConfig {
+  const defaults: VoiceConfig = {
+    englishVoice: DEFAULT_ENGLISH_VOICE,
+    arabicVoice: DEFAULT_ARABIC_VOICE,
+    greeting: { ...DEFAULT_GREETING },
+  };
+  if (rawVoice === undefined) return defaults;
+  if (typeof rawVoice !== "object" || rawVoice === null || Array.isArray(rawVoice)) {
+    throw new Error("Config `voice` must be an object");
+  }
+
+  const voice = rawVoice as Record<string, unknown>;
+  const text = (key: string, fallback: string): string => {
+    const value = voice[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== "string") throw new Error(`Config \`voice.${key}\` must be a string`);
+    return value;
+  };
+
+  const rawGreeting = voice["greeting"];
+  if (
+    rawGreeting !== undefined &&
+    (typeof rawGreeting !== "object" || rawGreeting === null || Array.isArray(rawGreeting))
+  ) {
+    throw new Error("Config `voice.greeting` must be an object");
+  }
+  const greeting = (rawGreeting ?? {}) as Record<string, unknown>;
+  for (const language of ["en", "ar"] as const) {
+    const value = greeting[language];
+    if (value !== undefined && typeof value !== "string") {
+      throw new Error(`Config \`voice.greeting.${language}\` must be a string`);
+    }
+  }
+
+  return {
+    englishVoice: text("englishVoice", DEFAULT_ENGLISH_VOICE),
+    arabicVoice: text("arabicVoice", DEFAULT_ARABIC_VOICE),
+    greeting: {
+      en: typeof greeting["en"] === "string" ? greeting["en"] : DEFAULT_GREETING.en,
+      ar: typeof greeting["ar"] === "string" ? greeting["ar"] : DEFAULT_GREETING.ar,
+    },
+  };
 }
 
 function parseProjects(rawProjects: unknown): Record<string, string> {
