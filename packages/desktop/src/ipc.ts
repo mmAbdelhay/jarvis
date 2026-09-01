@@ -322,6 +322,11 @@ export type RendererApi = {
    *  relative to the window's content area. A hosted view is a native
    *  overlay, so it has to be told; nothing about CSS layout reaches it. */
   setWorkspaceBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
+  /** Opens or closes DevTools for one tab. They render into a view the main
+   *  process positions from setDevToolsBounds, so the panel is part of the
+   *  Workspace layout rather than a detached window. */
+  setDevTools(tabId: string, open: boolean): Promise<void>;
+  setDevToolsBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;

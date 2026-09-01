@@ -871,6 +871,9 @@
   .workspace-bookmark-remove:hover { opacity: 1; color: var(--del); }
 
   .workspace-bookmark-toggle--on { color: var(--accent); border-color: var(--accent); }
+  /* A workspace-nav button in its "on" state — currently the bookmarks
+     sidebar toggle, which is the one nav button that holds a state. */
+  .workspace-nav--on { color: var(--accent); border-color: var(--accent); }
 
   /* The find bar the terminal addons inject, one per terminal. Positioned
      over the top-right of its own terminal's box, which is why every
@@ -903,6 +906,21 @@
   /* The terminal shares the page slot's region rather than sitting beside
      it: exactly one of the two is ever showing, since a terminal tab has no
      hosted view and a hosted tab has no terminal. */
+  /* The DevTools panel takes a share of the browser column's height, which
+     the renderer sets inline as it is dragged. No flex-grow: its size is the
+     drag's business, and the page slot above absorbs the rest. */
+  .workspace-devtools { flex-shrink: 0; min-height: 0; }
+  .workspace-devtools[hidden] { display: none; }
+
+  .workspace-devtools-handle {
+    flex-shrink: 0;
+    height: 6px;
+    cursor: row-resize;
+    background: var(--border);
+  }
+  .workspace-devtools-handle:hover { background: var(--accent); }
+  .workspace-devtools-handle[hidden] { display: none; }
+
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
   .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
@@ -1743,6 +1761,8 @@
               style="width: auto; padding: 0 12px;" title="Browse the project's databases">Database</button>
       <button id="workspace-open-terminal" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Open a shell in the project's directory">Terminal</button>
+      <button id="workspace-toggle-bookmarks" class="workspace-nav" type="button"
+              title="Show or hide the bookmarks sidebar">&#9776;</button>
       <span id="workspace-tool-status" class="mono"></span>
       <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
     </div>
@@ -1760,11 +1780,18 @@
           <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
           <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
                  autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+          <button id="workspace-toggle-devtools" class="workspace-nav" type="button"
+                  title="Open DevTools for this page">&#9881;</button>
           <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
                   title="Bookmark this page">☆</button>
         </div>
         <div id="workspace-error" class="changes-error" hidden></div>
         <div id="workspace-page" class="workspace-page"></div>
+        <!-- The DevTools panel. Like the page slot it holds no content: a
+             hosted view is positioned over the rectangle it measures. The
+             handle above it drags the split between the two. -->
+        <div id="workspace-devtools-handle" class="workspace-devtools-handle" hidden></div>
+        <div id="workspace-devtools" class="workspace-devtools" hidden></div>
         <!-- Terminal tabs have no hosted view, so their screen is drawn
              here, in the renderer's own DOM, over the same region a hosted
              page would occupy. Hidden unless a terminal tab is active. -->

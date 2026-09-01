@@ -9,6 +9,8 @@ import {
 } from "./browser-host.js";
 
 class FakeView implements HostedView {
+  devToolsOpen = false;
+  devToolsBounds: Rect | undefined;
   loaded: string[] = [];
   bounds: Rect | undefined;
   visible = false;
@@ -38,6 +40,12 @@ class FakeView implements HostedView {
   }
   destroy(): void {
     this.destroyed = true;
+  }
+  setDevTools(open: boolean): void {
+    this.devToolsOpen = open;
+  }
+  setDevToolsBounds(bounds: Rect): void {
+    this.devToolsBounds = bounds;
   }
   onEvent(listener: (event: HostedViewEvent) => void): void {
     this.#listeners.push(listener);

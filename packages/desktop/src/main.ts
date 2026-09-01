@@ -408,6 +408,13 @@ app.whenReady().then(async () => {
       if (typeof id === "string") workspace.reload(id);
     });
     ipcMain.handle("workspace:bounds", (_event, bounds: Rect) => workspace.setBounds(bounds));
+    ipcMain.handle("workspace:devtools", (_event, tabId: unknown, open: unknown) => {
+      if (typeof tabId !== "string" || typeof open !== "boolean") return;
+      workspace.setDevTools(tabId, open);
+    });
+    ipcMain.handle("workspace:devtoolsBounds", (_event, bounds: Rect) =>
+      workspace.setDevToolsBounds(bounds),
+    );
     ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
       workspace.setVisible(visible === true),
     );

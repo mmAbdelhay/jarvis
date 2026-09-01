@@ -22,6 +22,7 @@ function harness(): Recorded[] {
       <button id="workspace-open-editor"></button>
       <button id="workspace-open-database"></button>
       <button id="workspace-open-terminal"></button>
+      <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
@@ -34,10 +35,13 @@ function harness(): Recorded[] {
           <button id="workspace-forward"></button>
           <button id="workspace-reload"></button>
           <input id="workspace-address" />
+          <button id="workspace-toggle-devtools"></button>
           <button id="workspace-bookmark-toggle"></button>
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
+        <div id="workspace-devtools-handle" hidden></div>
+        <div id="workspace-devtools" hidden></div>
         <div id="workspace-terminal" hidden></div>
       </div>
     </div>`;
@@ -58,6 +62,8 @@ function harness(): Recorded[] {
     tabForward: record("tabForward"),
     tabReload: record("tabReload"),
     setWorkspaceBounds: record("setWorkspaceBounds"),
+    setDevTools: record("setDevTools"),
+    setDevToolsBounds: record("setDevToolsBounds"),
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
@@ -899,5 +905,183 @@ describe("open a terminal", () => {
 
     expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
     expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(true);
+  });
+});
+
+describe("bookmarks sidebar toggle", () => {
+  let calls: Recorded[];
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme"]);
+    void calls;
+  });
+
+  const sidebar = () => document.getElementById("workspace-bookmarks") as HTMLElement;
+
+  it("starts visible", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    expect(sidebar().hidden).toBe(false);
+  });
+
+  it("hides the sidebar when toggled off, and brings it back", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    document.getElementById("workspace-toggle-bookmarks")?.click();
+    expect(sidebar().hidden).toBe(true);
+
+    document.getElementById("workspace-toggle-bookmarks")?.click();
+    expect(sidebar().hidden).toBe(false);
+  });
+
+  it("keeps the sidebar hidden across renders once toggled off", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    document.getElementById("workspace-toggle-bookmarks")?.click();
+
+    renderWorkspace({ tabs: [tab({ id: "tab-2" })], activeTabId: "tab-2" });
+
+    expect(sidebar().hidden).toBe(true);
+  });
+
+  // The toggle is the user's preference for browser tabs; a hosted app has
+  // no bookmarks sidebar at all, and toggling it back on must not put one
+  // over an editor.
+  it("does not reveal the sidebar over a hosted-app tab", () => {
+    renderWorkspace({ tabs: [tab({ kind: "editor" })], activeTabId: "tab-1" });
+
+    document.getElementById("workspace-toggle-bookmarks")?.click();
+
+    expect(sidebar().hidden).toBe(true);
+  });
+
+  it("marks the toggle as on while the sidebar is showing", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const toggle = document.getElementById("workspace-toggle-bookmarks") as HTMLElement;
+
+    expect(toggle.classList.contains("workspace-nav--on")).toBe(true);
+
+    toggle.click();
+
+    expect(toggle.classList.contains("workspace-nav--on")).toBe(false);
+  });
+});
+
+describe("devtools panel", () => {
+  let calls: Recorded[];
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme"]);
+    // Which tabs have DevTools open is module state that does not reset
+    // between tests; a render with no tabs prunes every id, which is the
+    // same path a closed tab takes.
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+  });
+
+  const panel = () => document.getElementById("workspace-devtools") as HTMLElement;
+  const handle = () => document.getElementById("workspace-devtools-handle") as HTMLElement;
+
+  it("is closed until it is asked for", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    expect(panel().hidden).toBe(true);
+    expect(handle().hidden).toBe(true);
+  });
+
+  it("opens for the active tab and tells main which tab it belongs to", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    expect(panel().hidden).toBe(false);
+    expect(handle().hidden).toBe(false);
+    expect(calls).toContainEqual({ call: "setDevTools", args: ["tab-1", true] });
+  });
+
+  it("closes on a second click", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    expect(panel().hidden).toBe(true);
+    expect(calls).toContainEqual({ call: "setDevTools", args: ["tab-1", false] });
+  });
+
+  // DevTools belong to one page, so the panel follows the tab rather than
+  // the window: switching to a tab that never opened them shows nothing.
+  it("is remembered per tab", () => {
+    const tabs = [tab(), tab({ id: "tab-2" })];
+    renderWorkspace({ tabs, activeTabId: "tab-1" });
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    renderWorkspace({ tabs, activeTabId: "tab-2" });
+    expect(panel().hidden).toBe(true);
+
+    renderWorkspace({ tabs, activeTabId: "tab-1" });
+    expect(panel().hidden).toBe(false);
+  });
+
+  it("does nothing without an active tab to inspect", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    expect(panel().hidden).toBe(true);
+    expect(calls.some((entry) => entry.call === "setDevTools")).toBe(false);
+  });
+
+  it("forgets a tab that has been closed", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    expect(panel().hidden).toBe(true);
+  });
+
+  it("marks its toggle as on while the panel is showing", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const toggle = document.getElementById("workspace-toggle-devtools") as HTMLElement;
+
+    toggle.click();
+    expect(toggle.classList.contains("workspace-nav--on")).toBe(true);
+
+    toggle.click();
+    expect(toggle.classList.contains("workspace-nav--on")).toBe(false);
+  });
+
+  // Both rectangles are measured by the renderer, exactly as the page slot
+  // already was — the hosted views know nothing about CSS.
+  it("reports the panel's own rectangle to main", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    panel().getBoundingClientRect = () =>
+      ({ x: 10, y: 400, width: 900, height: 300 }) as DOMRect;
+
+    document.getElementById("workspace-toggle-devtools")?.click();
+
+    expect(calls).toContainEqual({
+      call: "setDevToolsBounds",
+      args: [{ x: 10, y: 400, width: 900, height: 300 }],
+    });
+  });
+
+  it("resizes the panel when its handle is dragged", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    document.getElementById("workspace-toggle-devtools")?.click();
+    const before = panel().style.height;
+    // jsdom lays nothing out, so the column it is a fraction of has to be
+    // given a real box for the drag to divide.
+    const column = panel().parentElement as HTMLElement;
+    column.getBoundingClientRect = () =>
+      ({ x: 0, y: 100, width: 1000, height: 600, bottom: 700, top: 100 }) as DOMRect;
+
+    handle().dispatchEvent(new MouseEvent("mousedown", { clientY: 500, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientY: 300, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    expect(panel().style.height).not.toBe(before);
   });
 });

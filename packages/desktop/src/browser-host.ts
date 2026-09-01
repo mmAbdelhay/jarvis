@@ -33,6 +33,13 @@ export type HostedView = {
   reload(): void;
   destroy(): void;
   onEvent(listener: (event: HostedViewEvent) => void): void;
+  /** Opens or closes this page's DevTools. They are rendered into a second
+   *  view the host positions itself, rather than a detached window, so that
+   *  they can be sized as part of the layout. */
+  setDevTools(open: boolean): void;
+  /** Where the DevTools view sits, in window pixels — measured by the
+   *  renderer exactly as the page slot is. */
+  setDevToolsBounds(bounds: Rect): void;
 };
 
 export type ViewFactory = (partition: string) => HostedView;
@@ -56,6 +63,7 @@ export class BrowserHost {
   readonly #views = new Map<TabId, HostedView>();
   readonly #maxTabs: number;
   #bounds: Rect | undefined;
+  #devToolsBounds: Rect | undefined;
   #visible = false;
   /** Set by hideAll — distinct from #visible, which means "leave the whole
    *  route". This means "nothing to show right now" while the route itself
@@ -99,6 +107,7 @@ export class BrowserHost {
 
     view.onEvent((event) => this.#onViewEvent(tab.id, project, event));
     if (this.#bounds !== undefined) view.setBounds(this.#bounds);
+    if (this.#devToolsBounds !== undefined) view.setDevToolsBounds(this.#devToolsBounds);
     view.loadURL(target.url);
     this.#syncVisibility();
   }
@@ -163,6 +172,24 @@ export class BrowserHost {
   setBounds(bounds: Rect): void {
     this.#bounds = bounds;
     for (const view of this.#views.values()) view.setBounds(bounds);
+  }
+
+  /**
+   * Opens or closes DevTools for one tab. The open/closed choice belongs to
+   * the renderer, which is the side that knows whether it has laid out a
+   * slot for them; this only routes it to the right view.
+   */
+  setDevTools(id: TabId, open: boolean): void {
+    this.#views.get(id)?.setDevTools(open);
+  }
+
+  /** Where the DevTools panel sits, measured by the renderer like every
+   *  other rectangle. Applied to every view, same as setBounds: only the
+   *  active one is visible, and a tab switched back to must already be in
+   *  the right place rather than jumping on its first frame. */
+  setDevToolsBounds(bounds: Rect): void {
+    this.#devToolsBounds = bounds;
+    for (const view of this.#views.values()) view.setDevToolsBounds(bounds);
   }
 
   /**

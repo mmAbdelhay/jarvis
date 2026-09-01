@@ -1,6 +1,7 @@
 import { WebContentsView, type BrowserWindow } from "electron";
 import {
   bridgeEvents,
+  type Rect,
   type ViewFactory,
   type WebContentsLike,
 } from "./browser-host.js";
@@ -38,6 +39,52 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
 
     const contents = view.webContents;
 
+    // DevTools, when they have been asked for. Rendered into a second view
+    // of our own rather than opened as a detached window or docked by
+    // Chromium: docking is a BrowserWindow feature and a hosted view has no
+    // window of its own, and a detached window could not be sized as part of
+    // the layout. setDevToolsWebContents is the supported way to host them
+    // anywhere — the panel is then just another rectangle the renderer
+    // measures, exactly like the page slot.
+    let devTools: WebContentsView | undefined;
+    let devToolsBounds: Rect | undefined;
+    let devToolsWanted = false;
+    let pageVisible = false;
+
+    const syncDevToolsVisibility = (): void => {
+      devTools?.setVisible(pageVisible && devToolsWanted);
+    };
+
+    const openDevTools = (): void => {
+      if (devTools === undefined) {
+        devTools = new WebContentsView({
+          webPreferences: { contextIsolation: true, nodeIntegration: false },
+        });
+        window.contentView.addChildView(devTools);
+        if (devToolsBounds !== undefined) devTools.setBounds(devToolsBounds);
+        contents.setDevToolsWebContents(devTools.webContents);
+      }
+      // openDevTools() is what actually loads the panel into the view above.
+      // 'detach' keeps Chromium from trying to dock them itself; the view is
+      // already ours to place.
+      contents.openDevTools({ mode: "detach" });
+      syncDevToolsVisibility();
+    };
+
+    const closeDevTools = (): void => {
+      contents.closeDevTools();
+      syncDevToolsVisibility();
+    };
+
+    // Closing DevTools does not destroy the view they were rendered into —
+    // the docs are explicit that this is the caller's job.
+    const destroyDevTools = (): void => {
+      if (devTools === undefined) return;
+      window.contentView.removeChildView(devTools);
+      devTools.webContents.close();
+      devTools = undefined;
+    };
+
     return {
       loadURL: (url) => {
         // A load rejects on an aborted or failed navigation; did-fail-load
@@ -46,13 +93,28 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
         void contents.loadURL(url).catch(() => undefined);
       },
       setBounds: (bounds) => view.setBounds(bounds),
-      setVisible: (visible) => view.setVisible(visible),
+      setVisible: (visible) => {
+        pageVisible = visible;
+        view.setVisible(visible);
+        syncDevToolsVisibility();
+      },
       goBack: () => contents.navigationHistory.goBack(),
       goForward: () => contents.navigationHistory.goForward(),
       reload: () => contents.reload(),
       destroy: () => {
+        destroyDevTools();
         window.contentView.removeChildView(view);
         contents.close();
+      },
+      setDevTools: (open) => {
+        if (open === devToolsWanted) return;
+        devToolsWanted = open;
+        if (open) openDevTools();
+        else closeDevTools();
+      },
+      setDevToolsBounds: (bounds) => {
+        devToolsBounds = bounds;
+        devTools?.setBounds(bounds);
       },
       onEvent: (listener) => {
         bridgeEvents(

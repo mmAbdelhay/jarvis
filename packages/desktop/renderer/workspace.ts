@@ -77,6 +77,23 @@ async function switchToProject(project: string): Promise<void> {
 
 let bookmarks: Bookmark[] = [];
 
+/** Whether the user wants the bookmarks sidebar at all. Their preference for
+ *  browser tabs only — a hosted app has no sidebar to show either way, so
+ *  this is ANDed with the chrome rule rather than replacing it. Session-local
+ *  on purpose: it is a glance-level choice, not a setting. */
+let bookmarksVisible = true;
+
+/** Which tabs have DevTools open. DevTools belong to one page, so this
+ *  follows the tab rather than the window: switching to a tab that never
+ *  opened them shows nothing, and closing a tab forgets it. */
+const devToolsByTab = new Set<string>();
+
+/** The panel's share of the browser column's height. Dragged by the handle
+ *  above it, clamped so neither the page nor the panel is squeezed away. */
+let devToolsFraction = 0.4;
+const MIN_DEVTOOLS_FRACTION = 0.15;
+const MAX_DEVTOOLS_FRACTION = 0.85;
+
 /** Refetches the *selected* project's bookmarks and redraws the sidebar —
  *  called on init and every project switch, never kept in sync with tabs
  *  (a different project's tabs collapsing into a pill does not touch it). */
@@ -165,6 +182,106 @@ async function toggleBookmark(): Promise<void> {
   renderBookmarks();
 }
 
+/** The sidebar shows only when both the chrome rule and the user's own
+ *  toggle allow it. Kept in one function because those two reasons to be
+ *  hidden are decided in different places and must not drift. */
+function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && activeTab()?.kind !== "web"): void {
+  ($("workspace-bookmarks") as HTMLElement).hidden = hostedApp || !bookmarksVisible;
+  $("workspace-toggle-bookmarks").classList.toggle("workspace-nav--on", bookmarksVisible);
+}
+
+function toggleBookmarksSidebar(): void {
+  bookmarksVisible = !bookmarksVisible;
+  renderBookmarksVisibility();
+  // The sidebar is 200px of the page slot's width; a hosted view pinned to
+  // the old rectangle would be left overlapping or short.
+  reportWorkspaceBounds();
+}
+
+/** Shows or hides the DevTools panel for whatever tab is active, sizes it,
+ *  and reports both rectangles — the panel's, and the page slot's, which
+ *  just changed with it. */
+function renderDevTools(): void {
+  const tab = activeTab();
+  const open = tab !== undefined && devToolsByTab.has(tab.id);
+  const panel = $("workspace-devtools") as HTMLElement;
+
+  panel.hidden = !open;
+  ($("workspace-devtools-handle") as HTMLElement).hidden = !open;
+  $("workspace-toggle-devtools").classList.toggle("workspace-nav--on", open);
+
+  if (!open) return;
+
+  const available = panel.parentElement?.clientHeight ?? 0;
+  // A column with no layout yet measures zero; a percentage still lands
+  // correctly once it does, where a computed pixel height would not.
+  panel.style.height =
+    available === 0
+      ? `${Math.round(devToolsFraction * 100)}%`
+      : `${Math.round(available * devToolsFraction)}px`;
+  reportDevToolsBounds();
+}
+
+function reportDevToolsBounds(): void {
+  const rect = $("workspace-devtools").getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  void window.jarvis.setDevToolsBounds({
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  });
+}
+
+function toggleDevTools(): void {
+  const tab = activeTab();
+  // Nothing to inspect: DevTools attach to a page, and with no tab open
+  // there is no page.
+  if (tab === undefined) return;
+
+  const open = !devToolsByTab.has(tab.id);
+  if (open) devToolsByTab.add(tab.id);
+  else devToolsByTab.delete(tab.id);
+
+  void window.jarvis.setDevTools(tab.id, open);
+  renderDevTools();
+  // The page slot just gave up (or got back) the panel's share of the
+  // column, and the hosted view is pinned to the old rectangle until told.
+  reportWorkspaceBounds();
+}
+
+/** Drags the split between the page and the DevTools panel. The pointer is
+ *  tracked on the window rather than the handle, so a fast drag that leaves
+ *  the 6px strip does not silently stop resizing. */
+function wireDevToolsHandle(): void {
+  $("workspace-devtools-handle").addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    const panel = $("workspace-devtools") as HTMLElement;
+    const column = panel.parentElement;
+    if (column === null) return;
+
+    const onMove = (move: MouseEvent): void => {
+      const box = column.getBoundingClientRect();
+      if (box.height === 0) return;
+      devToolsFraction = Math.min(
+        MAX_DEVTOOLS_FRACTION,
+        Math.max(MIN_DEVTOOLS_FRACTION, (box.bottom - move.clientY) / box.height),
+      );
+      panel.style.height = `${Math.round(box.height * devToolsFraction)}px`;
+      reportDevToolsBounds();
+      reportWorkspaceBounds();
+    };
+
+    const onUp = (): void => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
 function updateBookmarkToggle(): void {
   const toggle = $("workspace-bookmark-toggle") as HTMLButtonElement;
   const tab = activeTab();
@@ -228,6 +345,10 @@ export function initWorkspace(projects: string[]): void {
   initWorkspaceTerminals();
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
+  $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksSidebar());
+  $("workspace-toggle-devtools").addEventListener("click", () => toggleDevTools());
+  wireDevToolsHandle();
+  renderBookmarksVisibility(false);
   void refreshBookmarks();
 }
 
@@ -401,7 +522,7 @@ export function renderWorkspace(state: WorkspaceState): void {
   // sidebar is the quickest way to open something.
   const hostedApp = tab !== undefined && tab.kind !== "web";
   ($("workspace-bar") as HTMLElement).hidden = hostedApp;
-  ($("workspace-bookmarks") as HTMLElement).hidden = hostedApp;
+  renderBookmarksVisibility(hostedApp);
 
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.
@@ -429,6 +550,13 @@ export function renderWorkspace(state: WorkspaceState): void {
   // must not be moved to nowhere just because a terminal is on top.
   ($("workspace-page") as HTMLElement).hidden = tab?.kind === "terminal" && tab.project === selected;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
+
+  // A closed tab takes its DevTools with it: main destroys the panel's view
+  // along with the page's, so an id left here would resurrect a panel for a
+  // later tab that happened to reuse it.
+  const liveTabs = new Set(state.tabs.map((openTab) => openTab.id));
+  for (const id of devToolsByTab) if (!liveTabs.has(id)) devToolsByTab.delete(id);
+  renderDevTools();
 
   // Hiding the bar and the sidebar resizes the page slot the hosted view
   // is pinned to, and nothing else re-measures it — a resize is the only
