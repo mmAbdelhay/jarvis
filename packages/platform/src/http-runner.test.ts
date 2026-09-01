@@ -476,3 +476,134 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
     expect((captured[0]?.init as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 });
+
+describe("sendRequest: redirects and the cookie jar", () => {
+  /** A fetch that answers a scripted sequence, recording each call. */
+  function chain(responses: Response[]) {
+    const captured: { url: string; init: RequestInit }[] = [];
+    let index = 0;
+    return {
+      captured,
+      deps: {
+        fetch: ((url: string, init: RequestInit) => {
+          captured.push({ url, init });
+          return Promise.resolve(responses[index++] ?? new Response("done", { status: 200 }));
+        }) as unknown as typeof fetch,
+        now: () => 0,
+      },
+    };
+  }
+
+  function redirect(to: string, status = 302, setCookie?: string): Response {
+    const response = new Response(null, { status, headers: { location: to } });
+    if (setCookie !== undefined) response.headers.append("set-cookie", setCookie);
+    return response;
+  }
+
+  // The bug this exists for: a login endpoint answers 302 with Set-Cookie,
+  // fetch follows it silently, and the cookie is set on a response nobody
+  // ever sees — the jar stays empty and the next request is anonymous.
+  it("stores a cookie set on a redirect, not only on the final response", async () => {
+    const { deps } = chain([redirect("https://api.test/home", 302, "sid=abc; Path=/")]);
+    const jar = createCookieJar();
+
+    await sendRequest(
+      { meta: {}, http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" } },
+      {},
+      { ...deps, jar },
+    );
+
+    expect(jar.headerFor("https://api.test/home")).toBe("sid=abc");
+  });
+
+  it("sends the cookie it just received on the next hop", async () => {
+    const { captured, deps } = chain([redirect("https://api.test/home", 302, "sid=abc; Path=/")]);
+
+    await sendRequest(
+      { meta: {}, http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" } },
+      {},
+      { ...deps, jar: createCookieJar() },
+    );
+
+    expect(captured[1]?.url).toBe("https://api.test/home");
+    expect((captured[1]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=abc");
+  });
+
+  // What every browser does, and what an API that redirects after a POST
+  // expects.
+  it("turns a redirected POST into a GET with no body", async () => {
+    const { captured, deps } = chain([redirect("https://api.test/done", 303)]);
+
+    await sendRequest(
+      {
+        meta: {},
+        http: { method: "post", url: "https://api.test/submit", body: "json", auth: "none" },
+        body: { json: '{"a":1}' },
+      },
+      {},
+      { ...deps, jar: createCookieJar() },
+    );
+
+    expect(captured[1]?.init.method).toBe("GET");
+    expect(captured[1]?.init.body).toBeUndefined();
+  });
+
+  it("resolves a relative Location against the URL it came from", async () => {
+    const { captured, deps } = chain([redirect("/v2/orders")]);
+
+    await sendRequest(
+      { meta: {}, http: { method: "get", url: "https://api.test/v1/orders", body: "none", auth: "none" } },
+      {},
+      { ...deps, jar: createCookieJar() },
+    );
+
+    expect(captured[1]?.url).toBe("https://api.test/v2/orders");
+  });
+
+  // A loop must stop rather than run until the timeout.
+  it("gives up after ten hops", async () => {
+    const { captured, deps } = chain(
+      Array.from({ length: 20 }, () => redirect("https://api.test/loop")),
+    );
+
+    await sendRequest(
+      { meta: {}, http: { method: "get", url: "https://api.test/loop", body: "none", auth: "none" } },
+      {},
+      { ...deps, jar: createCookieJar() },
+    );
+
+    expect(captured).toHaveLength(11);
+  });
+
+  it("leaves redirect handling to fetch when there is no jar", async () => {
+    const { captured, deps } = chain([new Response("ok", { status: 200 })]);
+
+    await sendRequest(
+      { meta: {}, http: { method: "get", url: "https://api.test/x", body: "none", auth: "none" } },
+      {},
+      deps,
+    );
+
+    expect((captured[0]?.init as RequestInit).redirect).toBeUndefined();
+  });
+
+  // The other bug live testing found: a multipart body built from a different
+  // realm's FormData is not recognised as one — it is stringified, and the
+  // request goes out as text/plain with no fields in it.
+  it("builds the multipart body with the classes the caller supplied", async () => {
+    const { captured, deps } = chain([new Response("ok")]);
+    class TaggedFormData extends FormData {}
+
+    await sendRequest(
+      {
+        meta: {},
+        http: { method: "post", url: "https://api.test/upload", body: "multipartForm", auth: "none" },
+        body: { multipartForm: [{ name: "a", value: "1", type: "text", enabled: true }] },
+      },
+      {},
+      { ...deps, multipart: { FormData: TaggedFormData, File } },
+    );
+
+    expect(captured[0]?.init.body).toBeInstanceOf(TaggedFormData);
+  });
+});

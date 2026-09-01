@@ -1,4 +1,4 @@
-import { Agent, ProxyAgent, fetch as undiciFetch } from "undici";
+import { Agent, FormData as UndiciFormData, ProxyAgent, fetch as undiciFetch } from "undici";
 import type { NetworkOptions } from "./http-runner.js";
 
 // The network layer behind the API tab's requests.
@@ -13,6 +13,18 @@ import type { NetworkOptions } from "./http-runner.js";
 // copy of undici is only honoured by this copy's fetch.
 
 export const apiFetch = undiciFetch as unknown as typeof fetch;
+
+/** The FormData and File belonging to the same implementation as apiFetch.
+ *  A multipart body built from another realm's FormData is not recognised as
+ *  one — it is stringified, and the request goes out as text/plain with no
+ *  fields in it at all. Found by uploading a file and watching the server
+ *  receive nothing. */
+export const apiMultipart = {
+  FormData: UndiciFormData as unknown as typeof FormData,
+  // undici exports no File of its own; the global one is a Blob and undici
+  // accepts any Blob as a form part, so this half needs no swapping.
+  File: globalThis.File,
+};
 
 /**
  * Builds the dispatcher for one request, or returns undefined when the

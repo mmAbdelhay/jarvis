@@ -38,6 +38,11 @@ export type SendDeps = {
   /** Per-request network options: a proxy to go through, whether to insist
    *  on a valid certificate, how long to wait. */
   dispatcherFor?: (options: NetworkOptions) => unknown;
+  /** The FormData and File classes belonging to the same implementation as
+   *  `fetch`. A multipart body built from a *different* realm's FormData is
+   *  not recognised as one and is stringified instead — the request then goes
+   *  out as text/plain and the server sees no fields at all. */
+  multipart?: { FormData: typeof FormData; File: typeof File };
   /** A token already obtained for an oauth2 request. */
   token?: { accessToken: string; placement: "header" | "url"; headerPrefix: string; queryKey: string };
 };
@@ -54,6 +59,14 @@ export type NetworkOptions = {
 type Pair = { name?: string; value?: string; enabled?: boolean };
 
 const VARIABLE = /\{\{\s*([^}\s]+)\s*\}\}/g;
+
+/** Enough hops for a real login dance, few enough that a redirect loop stops
+ *  rather than running until the timeout. */
+const MAX_REDIRECTS = 10;
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
 
 /**
  * Substitutes `{{name}}` from `variables`.
@@ -160,19 +173,58 @@ export async function sendRequest(
   const signal = network.timeoutMs > 0 ? AbortSignal.timeout(network.timeoutMs) : undefined;
 
   try {
-    const response = await deps.fetch(url.toString(), {
+    let response = await deps.fetch(url.toString(), {
       method,
       headers,
       ...(body === undefined ? {} : { body }),
       ...(dispatcher === undefined ? {} : { dispatcher }),
       ...(signal === undefined ? {} : { signal }),
+      // With a jar, redirects are followed by hand. A login endpoint that
+      // answers 302 with Set-Cookie is the ordinary case, and letting fetch
+      // follow it silently means the cookie is set on a response nobody ever
+      // sees — the jar stays empty and the next request is anonymous.
+      ...(deps.jar === undefined ? {} : { redirect: "manual" as const }),
     } as RequestInit);
 
     // getSetCookie is the only way to see several Set-Cookie headers; reading
     // the header directly joins them into one unparseable string.
-    const setCookies =
-      typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
-    if (setCookies.length > 0) deps.jar?.store(url.toString(), setCookies);
+    const collect = (from: Response, at: string): void => {
+      const setCookies = typeof from.headers.getSetCookie === "function" ? from.headers.getSetCookie() : [];
+      if (setCookies.length > 0) deps.jar?.store(at, setCookies);
+    };
+
+    let current = url.toString();
+    collect(response, current);
+
+    if (deps.jar !== undefined) {
+      for (let hop = 0; hop < MAX_REDIRECTS && isRedirect(response.status); hop += 1) {
+        const location = response.headers.get("location");
+        if (location === null) break;
+        const next = new URL(location, current).toString();
+
+        // 303, and 301/302 on anything other than GET/HEAD, become a GET
+        // without a body — what every browser does, and what an API that
+        // redirects after a POST expects.
+        const asGet = response.status === 303 || (method !== "GET" && method !== "HEAD");
+        const hopHeaders: Record<string, string> = { ...headers };
+        delete hopHeaders["Cookie"];
+        const jarHeader = deps.jar.headerFor(next);
+        if (jarHeader !== "") hopHeaders["Cookie"] = jarHeader;
+        if (asGet) delete hopHeaders["Content-Type"];
+
+        response = await deps.fetch(next, {
+          method: asGet ? "GET" : method,
+          headers: hopHeaders,
+          ...(asGet || body === undefined ? {} : { body }),
+          ...(dispatcher === undefined ? {} : { dispatcher }),
+          ...(signal === undefined ? {} : { signal }),
+          redirect: "manual" as const,
+        } as RequestInit);
+
+        current = next;
+        collect(response, current);
+      }
+    }
     const text = await response.text();
     return {
       status: response.status,
@@ -279,7 +331,7 @@ async function buildBody(
     for (const name of Object.keys(headers)) {
       if (name.toLowerCase() === "content-type") delete headers[name];
     }
-    const form = new FormData();
+    const form = new (deps.multipart?.FormData ?? FormData)();
     for (const field of ((body["multipartForm"] as MultipartField[] | undefined) ?? [])) {
       if (field.enabled === false || field.name === undefined) continue;
       const name = resolve(field.name);
@@ -291,9 +343,10 @@ async function buildBody(
           const bytes = await deps.readFile?.(full);
           if (bytes === undefined) continue;
           const fileName = full.slice(full.lastIndexOf("/") + 1);
+          const FileClass = deps.multipart?.File ?? File;
           form.append(
             name,
-            new File([bytes as BlobPart], fileName, {
+            new FileClass([bytes as BlobPart], fileName, {
               ...(field.contentType === undefined || field.contentType === ""
                 ? {}
                 : { type: field.contentType }),
