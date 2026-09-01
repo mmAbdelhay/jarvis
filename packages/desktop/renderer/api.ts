@@ -246,11 +246,18 @@ function displayUrl(): string {
   const http = (state.request?.["http"] ?? {}) as Record<string, unknown>;
   const base = String(http["url"] ?? "");
   const params = Array.isArray(state.request?.["params"]) ? (state.request?.["params"] as Record<string, unknown>[]) : [];
-  const query = params
-    .filter((param) => param["enabled"] !== false && (param["type"] ?? "query") === "query" && param["name"])
-    .map((param) => `${String(param["name"])}=${String(param["value"] ?? "")}`);
-  if (query.length === 0) return base;
-  return `${base}${base.includes("?") ? "&" : "?"}${query.join("&")}`;
+
+  // Encoded, and parsed back the same way. Joining raw values means a value
+  // containing & or = is read back as two params — the user's input silently
+  // rewritten into something else.
+  const query = new URLSearchParams();
+  for (const param of params) {
+    if (param["enabled"] === false || (param["type"] ?? "query") !== "query" || !param["name"]) continue;
+    query.append(String(param["name"]), String(param["value"] ?? ""));
+  }
+  const text = query.toString();
+  if (text === "") return base;
+  return `${base}${base.includes("?") ? "&" : "?"}${text}`;
 }
 
 /** Typing a URL with a query string in it splits the query back out into the

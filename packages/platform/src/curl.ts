@@ -8,6 +8,8 @@ import { interpolate } from "./http-runner.js";
 
 type Pair = { name?: string; value?: string; enabled?: boolean; type?: string };
 
+type MultipartField = { name?: string; value?: string | string[]; enabled?: boolean; type?: string };
+
 /** Single-quotes for a POSIX shell, the only quoting that needs no escape
  *  table: everything inside is literal except the quote itself. */
 function quote(value: string): string {
@@ -46,14 +48,58 @@ export function toCurl(
     parts.push("-u", quote(`${resolve(basic["username"] ?? "")}:${resolve(basic["password"] ?? "")}`));
   }
 
+  if (http.auth === "apikey") {
+    const apikey = auth["apikey"] ?? {};
+    const key = resolve(apikey["key"] ?? "");
+    if (key !== "") {
+      const value = resolve(apikey["value"] ?? "");
+      // The query placement is already on the URL above only if it was a
+      // param; an apikey in the query has to be added here.
+      if (apikey["placement"] === "queryparams" || apikey["placement"] === "query") {
+        const at = parts.lastIndexOf(quote(url));
+        url += `${url.includes("?") ? "&" : "?"}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+        if (at !== -1) parts[at] = quote(url);
+      } else {
+        parts.push("-H", quote(`${key}: ${value}`));
+      }
+    }
+  }
+
   const bodies = (request["body"] ?? {}) as Record<string, unknown>;
   const mode = http.body ?? "none";
   if (mode === "json" || mode === "text" || mode === "xml") {
     parts.push("--data-raw", quote(resolve(String(bodies[mode] ?? ""))));
+  } else if (mode === "graphql") {
+    const graphql = (bodies["graphql"] ?? {}) as { query?: string; variables?: string };
+    const raw = resolve(graphql.variables ?? "").trim();
+    let variables: unknown;
+    if (raw !== "") {
+      try {
+        variables = JSON.parse(raw);
+      } catch {
+        variables = raw;
+      }
+    }
+    const payload = { query: resolve(graphql.query ?? ""), ...(variables === undefined ? {} : { variables }) };
+    parts.push("--data-raw", quote(JSON.stringify(payload)));
   } else if (mode === "formUrlEncoded") {
     for (const field of ((bodies["formUrlEncoded"] as Pair[] | undefined) ?? [])) {
       if (field.enabled === false || field.name === undefined) continue;
       parts.push("--data-urlencode", quote(`${resolve(field.name)}=${resolve(field.value ?? "")}`));
+    }
+  } else if (mode === "multipartForm") {
+    // curl's own @-syntax for a file, so the command uploads the same file
+    // this request would.
+    for (const field of ((bodies["multipartForm"] as MultipartField[] | undefined) ?? [])) {
+      if (field.enabled === false || field.name === undefined) continue;
+      const name = resolve(field.name);
+      if (field.type === "file") {
+        for (const path of Array.isArray(field.value) ? field.value : []) {
+          parts.push("-F", quote(`${name}=@${resolve(path)}`));
+        }
+        continue;
+      }
+      parts.push("-F", quote(`${name}=${resolve(typeof field.value === "string" ? field.value : "")}`));
     }
   }
 

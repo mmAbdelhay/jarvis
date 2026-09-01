@@ -478,11 +478,21 @@ function bodyPairs(mode: string): HTMLElement {
   const table = document.createElement("div");
   table.className = "api-pairs";
   table.dataset["key"] = mode;
-  const list = Array.isArray(bodies()[mode]) ? (bodies()[mode] as Pair[]) : [];
 
+  /** Read at the moment of the edit, never captured at render time: a handler
+   *  closing over the list as it was would spread a stale array, and the
+   *  second of two edits in a row would silently discard the first. */
+  const current = (): Pair[] => (Array.isArray(bodies()[mode]) ? (bodies()[mode] as Pair[]) : []);
   const write = (next: Pair[]): void => setField("body", { ...bodies(), [mode]: next });
+  const patch = (index: number, changes: Partial<Pair>): void => {
+    const list = [...current()];
+    const pair = list[index];
+    if (pair === undefined) return;
+    list[index] = { ...pair, ...changes };
+    write(list);
+  };
 
-  list.forEach((pair, index) => {
+  current().forEach((pair, index) => {
     const row = document.createElement("div");
     row.className = "api-pair";
     const isFile = (pair as { type?: string }).type === "file";
@@ -490,31 +500,17 @@ function bodyPairs(mode: string): HTMLElement {
 
     const valueControl = isFile
       ? filePickerControl(value, (paths) => {
-          const next = [...list];
-          next[index] = { ...pair, value: paths as unknown as string };
-          write(next);
+          patch(index, { value: paths as unknown as string });
           renderEditor();
         })
-      : textInput(String(value), "value", (typed) => {
-          const next = [...list];
-          next[index] = { ...pair, value: typed };
-          write(next);
-        });
+      : textInput(String(value), "value", (typed) => patch(index, { value: typed }));
 
     row.append(
-      enableBox(pair.enabled !== false, (checked) => {
-        const next = [...list];
-        next[index] = { ...pair, enabled: checked };
-        write(next);
-      }),
-      textInput(pair.name ?? "", "name", (typed) => {
-        const next = [...list];
-        next[index] = { ...pair, name: typed };
-        write(next);
-      }),
+      enableBox(pair.enabled !== false, (checked) => patch(index, { enabled: checked })),
+      textInput(pair.name ?? "", "name", (typed) => patch(index, { name: typed })),
       valueControl,
       removeControl(() => {
-        write(list.filter((_pair, i) => i !== index));
+        write(current().filter((_pair, i) => i !== index));
         renderEditor();
       }),
     );
@@ -526,7 +522,7 @@ function bodyPairs(mode: string): HTMLElement {
   add.className = "settings-add";
   add.textContent = "+ field";
   add.addEventListener("click", () => {
-    write([...list, { name: "", value: "", enabled: true, ...(mode === "multipartForm" ? { type: "text" } : {}) }]);
+    write([...current(), { name: "", value: "", enabled: true, ...(mode === "multipartForm" ? { type: "text" } : {}) }]);
     renderEditor();
   });
   table.append(add);
@@ -538,7 +534,7 @@ function bodyPairs(mode: string): HTMLElement {
     addFile.className = "settings-add";
     addFile.textContent = "+ file";
     addFile.addEventListener("click", () => {
-      write([...list, { name: "", value: [] as unknown as string, enabled: true, type: "file" }]);
+      write([...current(), { name: "", value: [] as unknown as string, enabled: true, type: "file" }]);
       renderEditor();
     });
     table.append(addFile);

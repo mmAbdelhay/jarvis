@@ -177,6 +177,40 @@ describe("sendRequest", () => {
     expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer abc");
   });
 
+  // The editor offers apikey auth; sending nothing for it is a request that
+  // looks configured and is not.
+  it("sends an API key in a header", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "get", url: "http://h", body: "none", auth: "apikey" },
+        auth: { apikey: { key: "X-API-Key", value: "{{k}}", placement: "header" } },
+      },
+      { k: "secret" },
+      deps,
+    );
+
+    expect((captured[0]?.init.headers as Record<string, string>)["X-API-Key"]).toBe("secret");
+  });
+
+  it("sends an API key in the query when that is where it belongs", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "get", url: "http://h/x", body: "none", auth: "apikey" },
+        auth: { apikey: { key: "api_key", value: "secret", placement: "queryparams" } },
+      },
+      {},
+      deps,
+    );
+
+    expect(captured[0]?.url).toBe("http://h/x?api_key=secret");
+  });
+
   it("sets basic auth as a base64 credential", async () => {
     const { captured, deps } = harness();
 

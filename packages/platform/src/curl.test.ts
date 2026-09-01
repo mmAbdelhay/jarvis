@@ -61,6 +61,50 @@ describe("toCurl", () => {
     ).toContain("-u 'u:p'");
   });
 
+  it("adds an API key header", () => {
+    expect(
+      toCurl(
+        request({
+          http: { method: "get", url: "http://h", body: "none", auth: "apikey" },
+          auth: { apikey: { key: "X-API-Key", value: "{{k}}", placement: "header" } },
+        }),
+        { k: "secret" },
+      ),
+    ).toContain("-H 'X-API-Key: secret'");
+  });
+
+  // A cURL command that quietly drops the body is not the request.
+  it("includes a GraphQL body", () => {
+    const command = toCurl(
+      request({
+        http: { method: "post", url: "http://h/graphql", body: "graphql", auth: "none" },
+        body: { graphql: { query: "{ a }", variables: '{"b":1}' } },
+      }),
+      {},
+    );
+
+    expect(command).toContain("--data-raw");
+    expect(command).toContain("{ a }");
+  });
+
+  it("names each file of a multipart body with -F", () => {
+    const command = toCurl(
+      request({
+        http: { method: "post", url: "http://h/upload", body: "multipartForm", auth: "none" },
+        body: {
+          multipartForm: [
+            { name: "note", value: "hi", type: "text", enabled: true },
+            { name: "doc", value: ["/tmp/a.pdf"], type: "file", enabled: true },
+          ],
+        },
+      }),
+      {},
+    );
+
+    expect(command).toContain("-F 'note=hi'");
+    expect(command).toContain("-F 'doc=@/tmp/a.pdf'");
+  });
+
   it("adds a raw body and a form body", () => {
     expect(
       toCurl(

@@ -143,7 +143,7 @@ export async function sendRequest(
     headers[resolve(header.name)] = resolve(header.value ?? "");
   }
 
-  applyAuth(request, http.auth, headers, resolve);
+  applyAuth(request, http.auth, headers, resolve, url);
 
   // An OAuth2 token is fetched by the caller (it needs a browser for one of
   // the grants) and handed in already resolved, so this only has to place it.
@@ -251,6 +251,7 @@ function applyAuth(
   mode: string | undefined,
   headers: Record<string, string>,
   resolve: (text: string) => string,
+  url: URL,
 ): void {
   if (mode === undefined || mode === "none" || mode === "inherit") return;
   const auth = (request["auth"] ?? {}) as Record<string, Record<string, string>>;
@@ -265,6 +266,21 @@ function applyAuth(
     const basic = auth["basic"] ?? {};
     const credential = `${resolve(basic["username"] ?? "")}:${resolve(basic["password"] ?? "")}`;
     headers["Authorization"] = `Basic ${Buffer.from(credential).toString("base64")}`;
+    return;
+  }
+
+  if (mode === "apikey") {
+    const apikey = auth["apikey"] ?? {};
+    const key = resolve(apikey["key"] ?? "");
+    if (key === "") return;
+    const value = resolve(apikey["value"] ?? "");
+    // Bruno writes the query placement as "queryparams"; anything else means
+    // a header, which is where an API key usually goes.
+    if (apikey["placement"] === "queryparams" || apikey["placement"] === "query") {
+      url.searchParams.set(key, value);
+    } else {
+      headers[key] = value;
+    }
   }
 }
 

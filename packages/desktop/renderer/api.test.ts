@@ -399,6 +399,64 @@ describe("api request editor", () => {
     expect((document.getElementById("api-url") as HTMLInputElement).value).toBe("http://h/orders?page=2");
   });
 
+  // Each row's handler used to close over the list as it was at render time,
+  // so a second edit spread the original array and silently discarded the
+  // first. Two edits in a row is the ordinary case.
+  it("keeps both edits when two body fields are changed in a row", async () => {
+    requestFile = {
+      ...requestFile,
+      http: { method: "post", url: "http://h", body: "formUrlEncoded", auth: "none" },
+      body: {
+        formUrlEncoded: [
+          { name: "a", value: "1", enabled: true },
+          { name: "b", value: "2", enabled: true },
+        ],
+      },
+    };
+    const module = await load();
+    await show(module);
+    await openFirst();
+    tabButton("api-tabs", "body")?.click();
+
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("#api-panel .api-pair input[type=text]")];
+    inputs[1]!.value = "one";
+    change(inputs[1]!);
+    inputs[3]!.value = "two";
+    change(inputs[3]!);
+
+    document.getElementById("api-save")?.click();
+    await settle();
+
+    const json = calls.find((e) => e.call === "saveApiRequest")?.args[2] as Record<string, unknown>;
+    const fields = (json["body"] as Record<string, unknown>)["formUrlEncoded"] as Record<string, unknown>[];
+    expect(fields.map((field) => field["value"])).toEqual(["one", "two"]);
+  });
+
+  // A value carrying & or = used to be split into two params by the display
+  // and re-parse, which loses what the user typed.
+  it("keeps a query value that contains & and = intact", async () => {
+    const module = await load();
+    await show(module);
+    await openFirst();
+    tabButton("api-tabs", "params")?.click();
+
+    // Add a param by hand and give it an awkward value.
+    [...document.querySelectorAll<HTMLElement>("#api-panel button")].at(-1)?.click();
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("#api-panel input[type=text]")];
+    inputs[0]!.value = "q";
+    change(inputs[0]!);
+    inputs[1]!.value = "a&b=c";
+    change(inputs[1]!);
+
+    // Re-render the toolbar, which is where the URL is rebuilt from params.
+    const url = document.getElementById("api-url") as HTMLInputElement;
+    change(url);
+    tabButton("api-tabs", "params")?.click();
+
+    const after = [...document.querySelectorAll<HTMLInputElement>("#api-panel input[type=text]")];
+    expect(after.map((input) => input.value)).toEqual(["q", "a&b=c"]);
+  });
+
   it("enables Save only once something has changed", async () => {
     const module = await load();
     await show(module);
