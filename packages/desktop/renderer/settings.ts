@@ -1,4 +1,5 @@
 import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
+import type { DbGateConnection, DbGateEngine } from "@jarvis/platform";
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
@@ -37,6 +38,7 @@ function renderSettings(): void {
   renderAgents();
   renderRouting();
   renderProjects();
+  renderDatabases();
   renderBrain();
   renderWhisper();
 }
@@ -55,12 +57,41 @@ function fieldInput(labelText: string, value: string, onChange: (value: string) 
   label.textContent = labelText;
   const input = document.createElement("input");
   input.type = "text";
+  // A connection row carries nine of these; the label alone is not enough
+  // to address one from a test or from the DOM.
+  input.dataset["field"] = labelText;
   input.value = value;
   input.addEventListener("change", () => {
     onChange(input.value);
     clearSaveStatus();
   });
   label.append(input);
+  return label;
+}
+
+/** One labelled `<select>`, committing on change — fieldInput's sibling. */
+function fieldSelect(
+  labelText: string,
+  value: string,
+  options: string[],
+  onChange: (value: string) => void,
+): HTMLElement {
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  const select = document.createElement("select");
+  select.dataset["field"] = labelText;
+  for (const option of options) {
+    const element = document.createElement("option");
+    element.value = option;
+    element.textContent = option;
+    select.append(element);
+  }
+  select.value = value;
+  select.addEventListener("change", () => {
+    onChange(select.value);
+    clearSaveStatus();
+  });
+  label.append(select);
   return label;
 }
 
@@ -331,12 +362,23 @@ function renameProject(oldName: string, newName: string): void {
   if (path === undefined) return;
   delete draft.projects[oldName];
   draft.projects[newName] = path;
+  // `databases` is keyed by project name, and parseConfig rejects a key
+  // naming no configured project — so the connections move with the rename
+  // in the same mutation rather than being orphaned by it.
+  const connections = draft.databases[oldName];
+  if (connections !== undefined) {
+    delete draft.databases[oldName];
+    draft.databases[newName] = connections;
+  }
   renderSettings();
 }
 
 function removeProject(name: string): void {
   if (draft === undefined) return;
   delete draft.projects[name];
+  // Same reason as the rename above: a connection list keyed to a project
+  // that no longer exists is a config parseConfig would refuse to load.
+  delete draft.databases[name];
 }
 
 function addProject(): void {
@@ -344,6 +386,145 @@ function addProject(): void {
   let n = 1;
   while (draft.projects[`new-project-${n}`] !== undefined) n += 1;
   draft.projects[`new-project-${n}`] = "";
+  renderSettings();
+}
+
+// -------------------------------------------------------------- Databases
+
+// The same four engines @jarvis/platform's DB_GATE_ENGINES lists, restated
+// here rather than imported: a *type* import from another workspace package
+// is erased at compile time and costs nothing, but a value import is a bare
+// specifier that is runtime-fatal in the bundled renderer — the same reason
+// workspace.ts restates the Bookmark type instead of importing it. The
+// DbGateEngine annotation is what keeps the two lists from drifting: drop an
+// engine from platform's union and this stops compiling.
+const ENGINE_OPTIONS: readonly DbGateEngine[] = ["mysql", "mariadb", "postgres", "sqlite"];
+
+/** Every connection across every project, flattened into rows. Each row
+ *  names its own project, so moving a connection is a select change rather
+ *  than a delete and a re-add. */
+function renderDatabases(): void {
+  if (draft === undefined) return;
+  const container = $("settings-databases");
+  container.replaceChildren();
+  for (const [project, connections] of Object.entries(draft.databases)) {
+    connections.forEach((connection, index) => {
+      container.append(renderConnectionRow(project, index, connection));
+    });
+  }
+  // parseConfig rejects a connection keyed to a project that does not
+  // exist, so with no projects there is no valid row to add — the UI must
+  // not be able to produce a draft that cannot be saved.
+  ($("settings-database-add") as HTMLButtonElement).disabled =
+    Object.keys(draft.projects).length === 0;
+}
+
+function renderConnectionRow(project: string, index: number, connection: DbGateConnection): HTMLElement {
+  if (draft === undefined) return document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "settings-row";
+
+  const projectField = fieldSelect("project", project, Object.keys(draft.projects), (value) =>
+    moveConnection(project, index, value),
+  );
+  const idField = fieldInput("id", connection.id, (value) => {
+    if (value !== "") updateConnection(project, index, { id: value });
+  });
+  const labelField = fieldInput("label", connection.label ?? "", (value) =>
+    updateConnection(project, index, { label: value === "" ? undefined : value }),
+  );
+  const engineField = fieldSelect("engine", connection.engine, [...ENGINE_OPTIONS], (value) =>
+    updateConnection(project, index, { engine: value as DbGateEngine }),
+  );
+  const hostField = fieldInput("host", connection.host ?? "", (value) =>
+    updateConnection(project, index, { host: value === "" ? undefined : value }),
+  );
+  const portField = fieldInput("port", connection.port === undefined ? "" : String(connection.port), (value) => {
+    if (value === "") {
+      updateConnection(project, index, { port: undefined });
+      return;
+    }
+    // A half-typed port is not a reason to write NaN into the draft, which
+    // parseConfig would then reject with a message about a field the user
+    // thinks they filled in correctly. An unparseable value is simply not
+    // committed; the field re-renders with the last good one.
+    const port = Number(value);
+    if (Number.isFinite(port)) updateConnection(project, index, { port });
+  });
+  const userField = fieldInput("user", connection.user ?? "", (value) =>
+    updateConnection(project, index, { user: value === "" ? undefined : value }),
+  );
+  const databaseField = fieldInput("database", connection.database ?? "", (value) =>
+    updateConnection(project, index, { database: value === "" ? undefined : value }),
+  );
+  // The *name* of an environment variable, never a password: jarvis.yaml is
+  // rewritten on every save and holds no secrets. Left empty, DbGate asks
+  // for the password itself and keeps it in that project's own workspace.
+  const passwordField = fieldInput("passwordEnv", connection.passwordEnv ?? "", (value) =>
+    updateConnection(project, index, { passwordEnv: value === "" ? undefined : value }),
+  );
+
+  row.append(
+    projectField,
+    idField,
+    labelField,
+    engineField,
+    hostField,
+    portField,
+    userField,
+    databaseField,
+    passwordField,
+    spacer(),
+    removeControl(() => removeConnection(project, index)),
+  );
+  return row;
+}
+
+function updateConnection(project: string, index: number, patch: Partial<DbGateConnection>): void {
+  if (draft === undefined) return;
+  const connection = draft.databases[project]?.[index];
+  if (connection === undefined) return;
+  Object.assign(connection, patch);
+  // An explicit `undefined` in the patch means "cleared", and a key whose
+  // value is undefined must not survive into the YAML.
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete (connection as Record<string, unknown>)[key];
+  }
+}
+
+function moveConnection(project: string, index: number, toProject: string): void {
+  if (draft === undefined || toProject === project) return;
+  const connections = draft.databases[project];
+  const connection = connections?.[index];
+  if (connections === undefined || connection === undefined) return;
+  if (draft.projects[toProject] === undefined) return;
+
+  const remaining = connections.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.databases[project];
+  else draft.databases[project] = remaining;
+  draft.databases[toProject] = [...(draft.databases[toProject] ?? []), connection];
+  renderSettings();
+}
+
+function removeConnection(project: string, index: number): void {
+  if (draft === undefined) return;
+  const connections = draft.databases[project];
+  if (connections === undefined) return;
+  const remaining = connections.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.databases[project];
+  else draft.databases[project] = remaining;
+}
+
+function addConnection(): void {
+  if (draft === undefined) return;
+  const project = Object.keys(draft.projects)[0];
+  if (project === undefined) return;
+  const existing = draft.databases[project] ?? [];
+  // Ids are unique within a project (parseConfig enforces it) and end up in
+  // environment variable names, so the generated one stays in [A-Za-z0-9_].
+  let n = 1;
+  while (existing.some((connection) => connection.id === `connection_${n}`)) n += 1;
+  draft.databases[project] = [...existing, { id: `connection_${n}`, engine: "mysql" }];
   renderSettings();
 }
 
@@ -446,6 +627,10 @@ function wireStaticFields(): void {
   });
   $("settings-project-add").addEventListener("click", () => {
     addProject();
+    clearSaveStatus();
+  });
+  $("settings-database-add").addEventListener("click", () => {
+    addConnection();
     clearSaveStatus();
   });
 

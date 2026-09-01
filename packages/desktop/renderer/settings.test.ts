@@ -33,6 +33,8 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <div id="settings-routing"></div>
     <button id="settings-project-add"></button>
     <div id="settings-projects"></div>
+    <button id="settings-database-add"></button>
+    <div id="settings-databases"></div>
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
@@ -345,5 +347,143 @@ describe("Save and restart", () => {
 
     expect(document.getElementById("settings-status")?.textContent).toBe("");
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
+  });
+});
+
+describe("databases section", () => {
+  function withConnections(): JarvisConfig {
+    return {
+      ...sample(),
+      databases: {
+        acme: [
+          { id: "main", label: "Local", engine: "mysql", host: "127.0.0.1", port: 3306, user: "root" },
+        ],
+      },
+    };
+  }
+
+  it("renders one row per connection", async () => {
+    harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    expect(document.querySelectorAll("#settings-databases .settings-row")).toHaveLength(1);
+  });
+
+  it("edits a connection field into the draft", async () => {
+    const { calls } = harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    const host = document.querySelector<HTMLInputElement>(
+      '#settings-databases input[data-field="host"]',
+    )!;
+    host.value = "db.internal";
+    change(host);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.databases["acme"]?.[0]?.host).toBe("db.internal");
+  });
+
+  it("commits a port as a number, and ignores a non-numeric one", async () => {
+    const { calls } = harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    const port = document.querySelector<HTMLInputElement>(
+      '#settings-databases input[data-field="port"]',
+    )!;
+    port.value = "3307";
+    change(port);
+    port.value = "not a port";
+    change(port);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.databases["acme"]?.[0]?.port).toBe(3307);
+  });
+
+  it("removes a connection from its own remove control", async () => {
+    harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-databases .settings-row-remove")?.click();
+
+    expect(document.querySelectorAll("#settings-databases .settings-row")).toHaveLength(0);
+  });
+
+  it("adds a connection with an id that does not collide", async () => {
+    harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-database-add")?.click();
+
+    const ids = [...document.querySelectorAll<HTMLInputElement>(
+      '#settings-databases input[data-field="id"]',
+    )].map((input) => input.value);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("disables + Add connection when no project is configured", async () => {
+    harness({ ...sample(), projects: {}, databases: {}, registry: sample().registry });
+    initSettings();
+    await openSettings();
+
+    expect((document.getElementById("settings-database-add") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("moves a connection between projects through its project select", async () => {
+    const config = withConnections();
+    config.projects = { acme: "/x/a", "storefront": "/x/b" };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    const select = document.querySelector<HTMLSelectElement>("#settings-databases select")!;
+    select.value = "storefront";
+    change(select);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.databases["acme"]).toBeUndefined();
+    expect(saved.databases["storefront"]?.[0]?.id).toBe("main");
+  });
+
+  // A connection keyed to a project that no longer exists is a config
+  // parseConfig would reject outright, so the two mutations travel together.
+  it("drops a deleted project's connections in the same mutation", async () => {
+    const { calls } = harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-projects .settings-row-remove")?.click();
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.databases["acme"]).toBeUndefined();
+  });
+
+  it("follows a project rename", async () => {
+    const { calls } = harness(withConnections());
+    initSettings();
+    await openSettings();
+
+    const nameInput = document.querySelector<HTMLInputElement>("#settings-projects input")!;
+    nameInput.value = "acme-2";
+    change(nameInput);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.databases["acme"]).toBeUndefined();
+    expect(saved.databases["acme-2"]?.[0]?.id).toBe("main");
   });
 });
