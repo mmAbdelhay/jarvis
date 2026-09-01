@@ -45,6 +45,7 @@ export type IpcChannels = {
   "sessions:update": Session[];
   "turn:new": Turn;
   "voice:listening": boolean;
+  "voice:speaking": boolean;
   "voice:notice": VoiceNotice;
   "git:counts": SessionChanges[];
   "providers:update": ProviderStatus[];
@@ -263,6 +264,9 @@ export type RendererApi = {
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;
   onListening(cb: (listening: boolean) => void): void;
+  /** True while an utterance is being spoken. The renderer cannot time this
+   *  itself: it knows the text, not how long saying it takes. */
+  onSpeaking(cb: (speaking: boolean) => void): void;
   // A transient status, distinct from a turn: e.g. "recorded but heard
   // nothing" — shown briefly in the voice-state element, never added to
   // the conversation as a hollow turn.

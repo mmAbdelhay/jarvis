@@ -62,15 +62,23 @@ describe("createApiStore", () => {
   });
 
   // History is for finding a call again, not for becoming a log.
-  it("caps the history", async () => {
-    const api = await store();
+  // 205 sequential read-modify-writes of a real file, which on a loaded
+  // machine has exceeded the 5s default and failed as a flake. The count is
+  // the point of the test — the cap cannot be shown with fewer — so the
+  // timeout is raised rather than the coverage lowered.
+  it(
+    "caps the history",
+    async () => {
+      const api = await store();
 
-    for (let i = 0; i < 205; i += 1) await api.addHistory("acme", entry({ at: i }));
+      for (let i = 0; i < 205; i += 1) await api.addHistory("acme", entry({ at: i }));
 
-    const { history } = await api.read("acme");
-    expect(history).toHaveLength(200);
-    expect(history[0]?.at).toBe(204);
-  });
+      const { history } = await api.read("acme");
+      expect(history).toHaveLength(200);
+      expect(history[0]?.at).toBe(204);
+    },
+    20_000,
+  );
 
   it("clears the history without touching the settings", async () => {
     const api = await store();

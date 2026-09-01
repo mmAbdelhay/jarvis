@@ -114,6 +114,23 @@
            decorative orb, concentric rings and a letterspaced wordmark, none
            of which said anything true about the app. Voice is unchanged:
            ⌥Space still starts it and the header's dot reports listening. -->
+      <!-- The agent's presence. It reports a state the app actually knows —
+           idle, listening, thinking, speaking — which is what earns it the
+           space; a shape that merely pulsed would be the decoration this
+           screen had before. -->
+      <section id="presence" class="presence presence--idle">
+        <div class="presence__orb" aria-hidden="true">
+          <span class="presence__ring presence__ring--outer"></span>
+          <span class="presence__ring presence__ring--inner"></span>
+          <span class="presence__arc"></span>
+          <span class="presence__core"></span>
+        </div>
+        <div class="presence__text">
+          <div id="presence-state" class="presence__state">Idle</div>
+          <div id="presence-hint" class="presence__hint">⌥Space to talk</div>
+        </div>
+      </section>
+
       <section class="centre">
         <header class="centre__head">
           <h2 id="centre-title" class="centre__title">Sessions</h2>

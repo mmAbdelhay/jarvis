@@ -23,6 +23,8 @@ vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 
 type Callbacks = {
   onMetrics?: (metrics: SystemMetrics) => void;
+  onTurn?: (turn: { role: string; text: string; language: string; at: number }) => void;
+  onSpeaking?: (speaking: boolean) => void;
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
   onSessions?: (sessions: Session[]) => void;
@@ -60,6 +62,10 @@ async function loadApp(
     <span id="header-disk"></span>
     <span id="net-down"></span>
     <span id="net-up"></span>
+    <div id="conversation"></div>
+    <section id="presence" class="presence presence--idle"></section>
+    <div id="presence-state"></div>
+    <div id="presence-hint"></div>
     <h2 id="centre-title"></h2>
     <span id="centre-count"></span>
     <div id="centre-body"></div>
@@ -122,7 +128,9 @@ async function loadApp(
     onChangeCounts: (cb: (changes: SessionChanges[]) => void) => {
       callbacks.onChangeCounts = cb;
     },
-    onTurn: vi.fn(),
+    onTurn: (cb: (turn: { role: string; text: string; language: string; at: number }) => void) => {
+      callbacks.onTurn = cb;
+    },
     onSessionOutput: (cb: (output: SessionOutput) => void) => {
       callbacks.onSessionOutput = cb;
     },
@@ -130,6 +138,9 @@ async function loadApp(
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
+    onSpeaking: (cb: (speaking: boolean) => void) => {
+      callbacks.onSpeaking = cb;
+    },
     onListening: (cb: (listening: boolean) => void) => {
       callbacks.onListening = cb;
     },
@@ -852,5 +863,72 @@ describe("the Dashboard's centre", () => {
 
     expect(document.querySelector(".orb")).toBeNull();
     expect(document.querySelector(".brand-title")).toBeNull();
+  });
+});
+
+describe("the agent's presence", () => {
+  const presence = () => document.getElementById("presence")?.className ?? "";
+  const state = () => document.getElementById("presence-state")?.textContent ?? "";
+
+  it("is idle when nothing is happening", async () => {
+    await loadApp();
+
+    expect(presence()).toContain("presence--idle");
+    expect(state()).toBe("Idle");
+  });
+
+  it("listens when the microphone opens", async () => {
+    const { onListening } = await loadApp();
+
+    onListening?.(true);
+
+    expect(presence()).toContain("presence--listening");
+    expect(state()).toBe("Listening…");
+  });
+
+  it("speaks while an utterance is being said", async () => {
+    const { onSpeaking } = await loadApp();
+
+    onSpeaking?.(true);
+    expect(presence()).toContain("presence--speaking");
+
+    onSpeaking?.(false);
+    expect(presence()).toContain("presence--idle");
+  });
+
+  // Two can be true at once — the microphone opens again while the last
+  // reply is still being spoken — so the most specific one wins.
+  it("prefers speaking over listening", async () => {
+    const { onListening, onSpeaking } = await loadApp();
+
+    onListening?.(true);
+    onSpeaking?.(true);
+
+    expect(presence()).toContain("presence--speaking");
+  });
+
+  it("thinks between a question being sent and an answer arriving", async () => {
+    const { onTurn } = await loadApp();
+    const input = document.getElementById("composer") as HTMLInputElement;
+    input.value = "what is the state of the build?";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(presence()).toContain("presence--thinking");
+
+    onTurn?.({ role: "assistant", text: "Green.", language: "en", at: Date.now() });
+
+    expect(presence()).toContain("presence--idle");
+  });
+
+  // The user's own turn is the question, not the answer to it.
+  it("keeps thinking when the echoed user turn arrives", async () => {
+    const { onTurn } = await loadApp();
+    const input = document.getElementById("composer") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    onTurn?.({ role: "user", text: "hello", language: "en", at: Date.now() });
+
+    expect(presence()).toContain("presence--thinking");
   });
 });

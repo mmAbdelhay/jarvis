@@ -187,6 +187,24 @@ app.whenReady().then(async () => {
       );
     }
 
+    /**
+     * Speaks, and tells the renderer while it is happening.
+     *
+     * The Dashboard's presence indicator reports what Jarvis is doing, and
+     * "speaking" is the one state the renderer cannot work out for itself:
+     * the text arrives as a turn, but how long it takes to say is known only
+     * here. Announced around every utterance rather than guessed from the
+     * length of the text.
+     */
+    const announceSpeaking = async (text: string, language: "ar" | "en"): Promise<void> => {
+      window.webContents.send("voice:speaking", true);
+      try {
+        await speech.speak(text, language);
+      } finally {
+        window.webContents.send("voice:speaking", false);
+      }
+    };
+
     const speech = piperReady
       ? new RoutedSpeech(
           new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel }),
@@ -250,7 +268,7 @@ app.whenReady().then(async () => {
       sessions,
       git,
       changes: () => changeTracker.snapshot(),
-      speak: (text, language) => speech.speak(text, language),
+      speak: (text, language) => announceSpeaking(text, language),
       projects: config.projects,
       providers: {
         snapshot: () => providers.snapshot(),
@@ -1040,7 +1058,7 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       at: Date.now(),
     });
-    speech.speak(greeting, PRIMARY_LANGUAGE);
+    void announceSpeaking(greeting, PRIMARY_LANGUAGE);
 
     const report = await reportPromise;
     console.log(report.message);

@@ -14,6 +14,9 @@ const api: RendererApi = {
   onTurn: (cb) => {
     ipcRenderer.on("turn:new", (_e, t) => cb(t));
   },
+  onSpeaking: (cb) => {
+    ipcRenderer.on("voice:speaking", (_e, speaking) => cb(speaking));
+  },
   onListening: (cb) => {
     ipcRenderer.on("voice:listening", (_e, listening) => cb(listening));
   },

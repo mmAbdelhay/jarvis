@@ -47,6 +47,60 @@ let latestChanges = new Map<string, SessionChanges>();
  *  Workspace's project selector. */
 let knownProjects: string[] = [];
 
+/**
+ * What the agent is doing, for the Dashboard's presence indicator.
+ *
+ * Three of the four states are reported by the main process; "thinking" is
+ * inferred here, because it is the gap between a question leaving and an
+ * answer arriving and nothing else observes both ends of it.
+ */
+type Presence = "idle" | "listening" | "thinking" | "speaking";
+
+const PRESENCE_TEXT: Record<Presence, { state: string; hint: string }> = {
+  idle: { state: "Idle", hint: "⌥Space to talk" },
+  listening: { state: "Listening…", hint: "⌥⇧Space to stop" },
+  thinking: { state: "Thinking…", hint: "working on it" },
+  speaking: { state: "Speaking…", hint: "⌥Space to interrupt" },
+};
+
+let listening = false;
+let speaking = false;
+let thinking = false;
+
+/** Speaking outranks listening outranks thinking: it is the most specific
+ *  thing happening, and two of them can be true at once — the microphone
+ *  opens again while the last reply is still being spoken. */
+function renderPresence(): void {
+  const state: Presence = speaking ? "speaking" : listening ? "listening" : thinking ? "thinking" : "idle";
+  const element = document.getElementById("presence");
+  if (element === null) return;
+
+  element.className = `presence presence--${state}`;
+  const text = PRESENCE_TEXT[state];
+  const stateElement = document.getElementById("presence-state");
+  const hintElement = document.getElementById("presence-hint");
+  if (stateElement !== null) stateElement.textContent = text.state;
+  if (hintElement !== null) hintElement.textContent = text.hint;
+}
+
+export function setPresenceListening(value: boolean): void {
+  listening = value;
+  renderPresence();
+}
+
+export function setPresenceSpeaking(value: boolean): void {
+  speaking = value;
+  // An answer being spoken is an answer that has arrived.
+  if (value) thinking = false;
+  renderPresence();
+}
+
+/** Set when a question is sent, cleared when the assistant answers. */
+export function setPresenceThinking(value: boolean): void {
+  thinking = value;
+  renderPresence();
+}
+
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
   const previous = latestSessions;
@@ -55,8 +109,20 @@ window.jarvis.onSessions((sessions) => {
   updateSessionHeader(latestSessions);
   autoOpenNewSession(previous, sessions);
 });
-window.jarvis.onTurn((turn) => renderTurn(turn));
-window.jarvis.onListening((listening) => renderListening(listening));
+window.jarvis.onTurn((turn) => {
+  renderTurn(turn);
+  // An assistant turn is the answer arriving, which is the end of thinking
+  // whether or not it is about to be spoken.
+  if (turn.role === "assistant") setPresenceThinking(false);
+});
+window.jarvis.onListening((listening) => {
+  renderListening(listening);
+  setPresenceListening(listening);
+});
+window.jarvis.onSpeaking((speaking) => setPresenceSpeaking(speaking));
+// Draw the resting state once at startup: nothing has happened yet, and an
+// indicator that says nothing until the first event is worse than none.
+renderPresence();
 window.jarvis.onNotice((notice) => renderNotice(notice));
 window.jarvis.onChangeCounts((changes) => {
   latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
@@ -592,6 +658,9 @@ function wireComposer(): void {
     const text = input.value.trim();
     if (text === "") return;
     input.value = "";
+    // The gap between the question leaving and the answer arriving is the
+    // one state nothing else observes both ends of.
+    setPresenceThinking(true);
     void window.jarvis.send(text, detectLanguage(text));
   };
 

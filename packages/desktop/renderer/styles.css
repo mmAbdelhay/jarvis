@@ -1901,3 +1901,125 @@
 
 .settings-voice-pick { display: flex; align-items: center; gap: var(--s2); flex-grow: 1; }
 .settings-voice-pick select { flex-grow: 1; }
+
+
+/* ── The agent's presence ────────────────────────────────────────────────
+   Four states the app genuinely knows, each with motion that means
+   something: still when there is nothing to say, breathing while it listens,
+   turning while it works, pulsing while it speaks. The screen used to carry
+   an orb that did none of this, which is why it was removed; this one earns
+   the room by reporting.
+
+   Every animation is switched off under prefers-reduced-motion. The states
+   remain legible there, because the colour and the word carry them too — the
+   motion is a second channel, never the only one. */
+.presence {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  margin-bottom: var(--s3);
+  background: var(--surface);
+  border-radius: var(--r-panel);
+  flex-shrink: 0;
+}
+
+.presence__orb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+}
+
+.presence__ring,
+.presence__arc,
+.presence__core {
+  position: absolute;
+  border-radius: 50%;
+  inset: 0;
+}
+
+.presence__ring {
+  border: 1px solid var(--border-strong);
+  transition: border-color 240ms ease, transform 240ms ease, opacity 240ms ease;
+}
+
+.presence__ring--inner { inset: 9px; }
+
+.presence__arc {
+  border: 1px solid transparent;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.presence__core {
+  inset: 20px;
+  background: var(--border-strong);
+  transition: background 240ms ease, transform 240ms ease;
+}
+
+/* Idle: almost nothing. A screen at rest should look at rest. */
+.presence--idle .presence__core { background: var(--text-muted); }
+
+/* Listening: a slow breath, and the accent, because this is the state the
+   user put the app into deliberately. */
+.presence--listening .presence__ring { border-color: var(--accent); }
+.presence--listening .presence__core { background: var(--accent); }
+.presence--listening .presence__ring--outer { animation: presence-breathe 2.4s ease-in-out infinite; }
+.presence--listening .presence__ring--inner {
+  animation: presence-breathe 2.4s ease-in-out infinite reverse;
+}
+
+/* Thinking: one arc turning. Rotation reads as work in a way a pulse does
+   not — a pulse says "alive", a rotation says "busy". */
+.presence--thinking .presence__arc {
+  opacity: 1;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  animation: presence-spin 1.1s linear infinite;
+}
+.presence--thinking .presence__core { background: var(--accent-quiet); }
+
+/* Speaking: faster, and on the core rather than the rings, so it reads as
+   coming from the middle outward. */
+.presence--speaking .presence__ring { border-color: var(--accent); }
+.presence--speaking .presence__core {
+  background: var(--accent);
+  animation: presence-pulse 620ms ease-in-out infinite;
+}
+
+.presence__state {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.presence__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+@keyframes presence-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes presence-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes presence-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.22); }
+}
+
+/* Motion is the second channel, never the only one: the colour and the word
+   still say which state this is. */
+@media (prefers-reduced-motion: reduce) {
+  .presence__ring,
+  .presence__arc,
+  .presence__core {
+    animation: none !important;
+  }
+}
