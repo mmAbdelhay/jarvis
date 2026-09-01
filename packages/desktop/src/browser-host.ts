@@ -226,7 +226,13 @@ export class BrowserHost {
 
   #evictIfFull(): void {
     while (this.#views.size >= this.#maxTabs) {
-      const oldest = this.#store.leastRecentlyActive()[0];
+      // Only a tab that actually holds a view. The cap exists to bound
+      // Chromium renderer processes, and a terminal tab is not one — closing
+      // it here would drop the tab without reaping the shell behind it,
+      // since main only kills a shell on its own close handler. It would
+      // also fail to free anything, so the loop would go on to evict every
+      // terminal before reaching a page.
+      const oldest = this.#store.leastRecentlyActive().find((id) => this.#views.has(id));
       if (oldest === undefined) return;
       this.#views.get(oldest)?.destroy();
       this.#views.delete(oldest);

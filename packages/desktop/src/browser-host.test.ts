@@ -613,6 +613,29 @@ describe("BrowserHost terminal tabs", () => {
     expect(views[0]?.destroyed).toBe(false);
   });
 
+  // Eviction exists to cap Chromium renderer processes. A terminal tab is
+  // not one, and closing it here would drop its tab without reaping the
+  // shell behind it — main only kills a shell on the close handler.
+  it("never evicts a terminal tab to make room for a page", () => {
+    const small = new BrowserHost(
+      () => {
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      },
+      { maxTabs: 2 },
+    );
+    small.openTerminal("acme");
+    small.open("acme", "https://one.test");
+    small.open("acme", "https://two.test");
+
+    small.open("acme", "https://three.test");
+
+    const kinds = small.state().tabs.map((tab) => tab.kind);
+    expect(kinds).toContain("terminal");
+    expect(kinds.filter((kind) => kind === "web")).toHaveLength(2);
+  });
+
   it("ignores navigation controls aimed at a terminal tab", () => {
     host.openTerminal("acme");
     const id = host.state().tabs[0]!.id;
