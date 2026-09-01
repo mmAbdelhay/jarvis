@@ -11,7 +11,8 @@ function harness(): Recorded[] {
     <div id="view-workspace">
       <select id="workspace-project"></select>
       <button id="workspace-open-editor"></button>
-      <span id="workspace-editor-status"></span>
+      <button id="workspace-open-database"></button>
+      <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
         <div id="workspace-bookmarks">
@@ -49,6 +50,11 @@ function harness(): Recorded[] {
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
+    openDatabase: () =>
+      Promise.resolve({
+        ok: true,
+        value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw-fixed" },
+      }),
     listBookmarks: () => Promise.resolve({ ok: true, value: [] }),
     addBookmark: (...args: unknown[]) => {
       calls.push({ call: "addBookmark", args });
@@ -731,8 +737,86 @@ describe("open in editor", () => {
     await flush();
 
     expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
-    expect(document.getElementById("workspace-editor-status")?.textContent).toBe(
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "Could not open the editor.",
+    );
+  });
+});
+
+describe("open in database", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  it("opens the DbGate URL as a database tab for the selected project", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-open-database")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:51234/", "database"],
+    });
+  });
+
+  it("shows the instance's login in the shared status line", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-open-database")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "login jarvis · password pw-fixed",
+    );
+  });
+
+  // Reopening a project that already has a Database tab is a tab switch,
+  // not a reason to open a duplicate — same rule the editor follows.
+  it("activates the existing database tab instead of opening a duplicate", async () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-9", kind: "database", url: "http://127.0.0.1:51234/" })],
+      activeTabId: "tab-9",
+    });
+
+    document.getElementById("workspace-open-database")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-9"] });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("opens a new database tab when the existing one belongs to another project", async () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-9", kind: "database", project: "storefront" })],
+      activeTabId: "tab-9",
+    });
+
+    document.getElementById("workspace-open-database")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:51234/", "database"],
+    });
+  });
+
+  it("shows a localised error and does not open a tab when DbGate cannot start", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    jarvis["openDatabase"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open the database browser.", language: "en" });
+
+    document.getElementById("workspace-open-database")?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Could not open the database browser.",
     );
   });
 });

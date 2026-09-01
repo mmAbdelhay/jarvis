@@ -979,8 +979,8 @@
      hosted view is a native overlay, not a DOM child (see views.ts). */
   .workspace-page { flex-grow: 1; min-height: 0; }
 
-  #workspace-editor-status { font-size: 11px; color: var(--text-muted); }
-  #workspace-editor-status.workspace-editor-status--error { color: var(--del); }
+  #workspace-tool-status { font-size: 11px; color: var(--text-muted); }
+  #workspace-tool-status.workspace-tool-status--error { color: var(--del); }
 
   /* Settings route: same flush frame and [hidden] cascade discipline as
      every other route in this file — NO display in the base rule. */
@@ -1701,7 +1701,9 @@
       <select id="workspace-project" class="workspace-project mono"></select>
       <button id="workspace-open-editor" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Open the project's files in a full code editor">Editor</button>
-      <span id="workspace-editor-status" class="mono"></span>
+      <button id="workspace-open-database" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 12px;" title="Browse the project's databases">Database</button>
+      <span id="workspace-tool-status" class="mono"></span>
       <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
     </div>
 

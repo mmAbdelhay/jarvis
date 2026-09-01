@@ -1,4 +1,5 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
 // Structurally the same shape the preload bridge and main process pass
 // across IPC (packages/desktop/src/ipc.ts's Bookmark, from @jarvis/platform)
@@ -221,6 +222,7 @@ export function initWorkspace(projects: string[]): void {
   window.addEventListener("resize", reportWorkspaceBounds);
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
+  $("workspace-open-database").addEventListener("click", () => void openDatabase());
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
   void refreshBookmarks();
@@ -242,17 +244,49 @@ async function openEditor(): Promise<void> {
     return;
   }
 
-  const status = $("workspace-editor-status");
+  const status = $("workspace-tool-status");
   status.textContent = "";
-  status.classList.remove("workspace-editor-status--error");
+  status.classList.remove("workspace-tool-status--error");
 
   const result = await window.jarvis.openEditor(project);
   if (!result.ok) {
     status.textContent = result.text;
-    status.classList.add("workspace-editor-status--error");
+    status.classList.add("workspace-tool-status--error");
     return;
   }
   void window.jarvis.openTab(project, result.value, "editor");
+}
+
+/** Ensures a DbGate instance is running for the selected project and opens
+ *  it as an ordinary browser tab, exactly as openEditor does — the database
+ *  browser is not a separate surface, just a hosted page like the editor.
+ *
+ *  DbGate has no bind-address option and always listens on 0.0.0.0, so its
+ *  instances are guarded by a login generated at spawn; the credential goes
+ *  into the status line, since the user has to type it once per instance. */
+async function openDatabase(): Promise<void> {
+  const project = selectedProject();
+
+  // Already open for this project — a tab switch, not a second instance.
+  const existing = latest.tabs.find((tab) => tab.kind === "database" && tab.project === project);
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    return;
+  }
+
+  const status = $("workspace-tool-status");
+  status.textContent = "";
+  status.classList.remove("workspace-tool-status--error");
+
+  const result = await window.jarvis.openDatabase(project);
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+    return;
+  }
+
+  status.textContent = MESSAGES.databaseLogin(result.value.login, result.value.password, PRIMARY_LANGUAGE);
+  void window.jarvis.openTab(project, result.value.url, "database");
 }
 
 function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTMLElement {
