@@ -16,6 +16,7 @@ const draft: JarvisConfig = {
     routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
   },
   projects: { acme: "/Users/x/projects/acme" },
+  databases: {},
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",

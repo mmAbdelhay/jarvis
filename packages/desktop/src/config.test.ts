@@ -242,3 +242,110 @@ describe("brain.accountId", () => {
     expect(config.brain).not.toHaveProperty("configDir");
   });
 });
+
+describe("databases", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { "storefront": "/p/storefront" },
+  };
+
+  it("defaults to an empty record when the section is absent", () => {
+    expect(parseConfig(base).databases).toEqual({});
+  });
+
+  it("parses a connection list for a configured project", () => {
+    const config = parseConfig({
+      ...base,
+      databases: {
+        "storefront": [
+          {
+            id: "main",
+            label: "Sail (local)",
+            engine: "mysql",
+            host: "127.0.0.1",
+            port: 3306,
+            user: "sail",
+            database: "store_saas",
+            passwordEnv: "STORE_SAAS_DB_PASSWORD",
+          },
+        ],
+      },
+    });
+
+    expect(config.databases["storefront"]).toEqual([
+      {
+        id: "main",
+        label: "Sail (local)",
+        engine: "mysql",
+        host: "127.0.0.1",
+        port: 3306,
+        user: "sail",
+        database: "store_saas",
+        passwordEnv: "STORE_SAAS_DB_PASSWORD",
+      },
+    ]);
+  });
+
+  it("keeps a connection that declares nothing but an id and an engine", () => {
+    const config = parseConfig({ ...base, databases: { "storefront": [{ id: "main", engine: "sqlite" }] } });
+
+    expect(config.databases["storefront"]).toEqual([{ id: "main", engine: "sqlite" }]);
+  });
+
+  it("rejects a key naming no configured project", () => {
+    expect(() => parseConfig({ ...base, databases: { nope: [] } })).toThrow(
+      'Config `databases` names no configured project: "nope"',
+    );
+  });
+
+  it("rejects an unknown engine", () => {
+    expect(() =>
+      parseConfig({ ...base, databases: { "storefront": [{ id: "main", engine: "oracle" }] } }),
+    ).toThrow("Config `databases.storefront[0].engine` must be one of mysql, mariadb, postgres, sqlite");
+  });
+
+  it("rejects a duplicate id within one project", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        databases: {
+          "storefront": [
+            { id: "main", engine: "mysql" },
+            { id: "main", engine: "mysql" },
+          ],
+        },
+      }),
+    ).toThrow('Config `databases.storefront[1].id` duplicates an earlier connection: "main"');
+  });
+
+  it("rejects an id that is not usable as an environment-variable suffix", () => {
+    expect(() =>
+      parseConfig({ ...base, databases: { "storefront": [{ id: "main db", engine: "mysql" }] } }),
+    ).toThrow("Config `databases.storefront[0].id` must contain only letters, digits and underscores");
+  });
+
+  it("rejects a non-numeric port", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        databases: { "storefront": [{ id: "main", engine: "mysql", port: "3306" }] },
+      }),
+    ).toThrow("Config `databases.storefront[0].port` must be a number");
+  });
+
+  it("rejects a project whose value is not an array", () => {
+    expect(() => parseConfig({ ...base, databases: { "storefront": {} } })).toThrow(
+      "Config `databases.storefront` must be an array",
+    );
+  });
+
+  it("rejects a non-boolean readonly", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        databases: { "storefront": [{ id: "main", engine: "mysql", readonly: "yes" }] },
+      }),
+    ).toThrow("Config `databases.storefront[0].readonly` must be true or false");
+  });
+});

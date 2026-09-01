@@ -15,6 +15,7 @@ function sample(): JarvisConfig {
       routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
     },
     projects: { acme: "/x/projects/acme" },
+    databases: {},
     brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-mm" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",

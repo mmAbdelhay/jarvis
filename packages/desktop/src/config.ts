@@ -3,11 +3,16 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
-import type { BrainConfig } from "@jarvis/platform";
+import type { BrainConfig, DatabasesConfig, DbGateConnection, DbGateEngine } from "@jarvis/platform";
+import { DB_GATE_ENGINES } from "@jarvis/platform";
 
 export type JarvisConfig = {
   registry: RegistryConfig;
   projects: Record<string, string>;
+  /** Per-project DbGate connections, keyed by project name. An absent
+   *  `databases:` section parses to {} — a project with no entry spawns a
+   *  DbGate that manages its own connections instead. */
+  databases: DatabasesConfig;
   brain: BrainConfig;
   whisper: { binaryPath: string; modelPath: string };
   // Beside jarvis.yaml itself, not user-configurable — see the note on
@@ -61,6 +66,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     }
   });
   const projects = parseProjects(root["projects"]);
+  const databases = parseDatabases(root["databases"], projects);
   const whisper = parseWhisper(root["whisper"]);
 
   const accountId = brainConfig.accountId;
@@ -84,6 +90,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     projects: Object.fromEntries(
       Object.entries(projects).map(([name, path]) => [name, expandTilde(path)]),
     ),
+    databases,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -228,6 +235,87 @@ function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: str
       typeof whisper["modelPath"] === "string" ? whisper["modelPath"] : DEFAULT_WHISPER_MODEL_PATH,
     ),
   };
+}
+
+// A DbGate connection id is interpolated straight into environment
+// variable *names* (SERVER_main, PASSWORD_MODE_main, …), so it is held to
+// what a variable name may contain rather than to what YAML will accept.
+const CONNECTION_ID_PATTERN = /^[A-Za-z0-9_]+$/;
+
+/**
+ * `databases:` maps a project name to that project's DbGate connections.
+ * Validated against the already-parsed `projects` for the same reason
+ * routing rules are validated against agents: a section keyed to a project
+ * that does not exist can never be opened, and saying so at load time beats
+ * a Database button that silently does nothing.
+ *
+ * The section is optional and an absent one is not an error — every
+ * jarvis.yaml written before this feature existed keeps loading unchanged.
+ */
+function parseDatabases(rawDatabases: unknown, projects: Record<string, string>): DatabasesConfig {
+  if (rawDatabases === undefined) return {};
+  if (typeof rawDatabases !== "object" || rawDatabases === null || Array.isArray(rawDatabases)) {
+    throw new Error("Config `databases` must be an object");
+  }
+
+  const result: DatabasesConfig = {};
+  for (const [project, rawList] of Object.entries(rawDatabases as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`databases\` names no configured project: "${project}"`);
+    }
+    if (!Array.isArray(rawList)) {
+      throw new Error(`Config \`databases.${project}\` must be an array`);
+    }
+
+    const seen = new Set<string>();
+    result[project] = rawList.map((rawEntry, index) => {
+      const where = `databases.${project}[${index}]`;
+      if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        throw new Error(`Config \`${where}\` must be an object`);
+      }
+      const entry = rawEntry as Record<string, unknown>;
+
+      const id = entry["id"];
+      if (typeof id !== "string" || id === "") {
+        throw new Error(`Config \`${where}.id\` must be a non-empty string`);
+      }
+      if (!CONNECTION_ID_PATTERN.test(id)) {
+        throw new Error(`Config \`${where}.id\` must contain only letters, digits and underscores`);
+      }
+      if (seen.has(id)) {
+        throw new Error(`Config \`${where}.id\` duplicates an earlier connection: "${id}"`);
+      }
+      seen.add(id);
+
+      const engine = entry["engine"];
+      if (typeof engine !== "string" || !DB_GATE_ENGINES.includes(engine as DbGateEngine)) {
+        throw new Error(`Config \`${where}.engine\` must be one of ${DB_GATE_ENGINES.join(", ")}`);
+      }
+
+      const port = entry["port"];
+      if (port !== undefined && typeof port !== "number") {
+        throw new Error(`Config \`${where}.port\` must be a number`);
+      }
+      const readonly = entry["readonly"];
+      if (readonly !== undefined && typeof readonly !== "boolean") {
+        throw new Error(`Config \`${where}.readonly\` must be true or false`);
+      }
+
+      const connection: DbGateConnection = { id, engine: engine as DbGateEngine };
+      for (const key of ["label", "host", "user", "database", "file", "passwordEnv"] as const) {
+        const value = entry[key];
+        if (value === undefined) continue;
+        if (typeof value !== "string") {
+          throw new Error(`Config \`${where}.${key}\` must be a string`);
+        }
+        connection[key] = value;
+      }
+      if (port !== undefined) connection.port = port;
+      if (readonly !== undefined) connection.readonly = readonly;
+      return connection;
+    });
+  }
+  return result;
 }
 
 function parseProjects(rawProjects: unknown): Record<string, string> {

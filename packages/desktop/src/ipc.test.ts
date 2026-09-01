@@ -849,6 +849,7 @@ describe("bookmarks handlers", () => {
 const sampleConfig: JarvisConfig = {
   registry: { agents: { "claude-mm": { command: "claude-mm" } }, routing: [] },
   projects: { acme: "/p/acme" },
+  databases: {},
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
   sessionsDbPath: "/tmp/sessions.db",
