@@ -66,6 +66,18 @@ const api: RendererApi = {
   saveApiRequest: (project, path, json) => ipcRenderer.invoke("api:save", project, path, json),
   sendApiRequest: (project, request, variables) =>
     ipcRenderer.invoke("api:send", project, request, variables),
+  createApiRequest: (project, folderPath, name, seq) =>
+    ipcRenderer.invoke("api:createRequest", project, folderPath, name, seq),
+  createApiFolder: (project, parentPath, name) =>
+    ipcRenderer.invoke("api:createFolder", project, parentPath, name),
+  renameApiEntry: (project, path, name, isFolder) =>
+    ipcRenderer.invoke("api:rename", project, path, name, isFolder),
+  deleteApiEntry: (project, path) => ipcRenderer.invoke("api:delete", project, path),
+  createApiCollection: (project, name) => ipcRenderer.invoke("api:createCollection", project, name),
+  saveApiEnvironment: (project, collectionPath, name, variables) =>
+    ipcRenderer.invoke("api:saveEnvironment", project, collectionPath, name, variables),
+  importPostmanCollection: (project, name, collection) =>
+    ipcRenderer.invoke("api:importPostman", project, name, collection),
   attachTerminal: (tabId) => ipcRenderer.invoke("terminal:attach", tabId),
   sendTerminalInput: (tabId, data) => ipcRenderer.invoke("terminal:input", tabId, data),
   resizeTerminal: (tabId, cols, rows) => ipcRenderer.invoke("terminal:resize", tabId, cols, rows),

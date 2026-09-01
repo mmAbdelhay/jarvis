@@ -26,10 +26,19 @@ import {
   createRealCodeServerSpawner,
   createRealShellSpawner,
   createShellManager,
+  createCollection,
+  createFolder,
+  createRequest,
+  deleteEntry,
   listCollections,
+  postmanToRequests,
   readCollection,
   readRequest,
+  renameFolder,
+  renameRequest,
   sendRequest,
+  writeEnvironment,
+  writeImported,
   writeRequest,
   createRealDbGateSpawner,
   createSqliteSessionStore,
@@ -246,6 +255,15 @@ app.whenReady().then(async () => {
       writeRequest,
       sendRequest: (request, variables) =>
         sendRequest(request, variables, { fetch, now: () => Date.now() }),
+      createRequest,
+      createFolder,
+      renameRequest,
+      renameFolder,
+      deleteEntry,
+      createCollection,
+      writeEnvironment,
+      postmanToRequests,
+      writeImported,
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
     });
@@ -472,6 +490,27 @@ app.whenReady().then(async () => {
         request as Record<string, unknown>,
         variables as Record<string, string>,
       ),
+    );
+    ipcMain.handle("api:createRequest", (_event, p: unknown, folder: unknown, name: unknown, seq: unknown) =>
+      api.createRequest(p as string, folder as string, name as string, seq as number),
+    );
+    ipcMain.handle("api:createFolder", (_event, p: unknown, parent: unknown, name: unknown) =>
+      api.createFolder(p as string, parent as string, name as string),
+    );
+    ipcMain.handle("api:rename", (_event, p: unknown, path: unknown, name: unknown, folder: unknown) =>
+      api.renameEntry(p as string, path as string, name as string, folder === true),
+    );
+    ipcMain.handle("api:delete", (_event, p: unknown, path: unknown) =>
+      api.deleteEntry(p as string, path as string),
+    );
+    ipcMain.handle("api:createCollection", (_event, p: unknown, name: unknown) =>
+      api.createCollection(p as string, name as string),
+    );
+    ipcMain.handle("api:saveEnvironment", (_event, p: unknown, path: unknown, name: unknown, vars: unknown) =>
+      api.saveEnvironment(p as string, path as string, name as string, vars as never[]),
+    );
+    ipcMain.handle("api:importPostman", (_event, p: unknown, name: unknown, collection: unknown) =>
+      api.importPostman(p as string, name as string, collection),
     );
     ipcMain.handle("terminal:open", (_event, project: unknown) =>
       terminal.open(typeof project === "string" ? project : ""),

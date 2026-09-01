@@ -1237,6 +1237,15 @@ describe("api handlers", () => {
         saved.push({ path, json });
         return Promise.resolve();
       },
+      createRequest: (folder, name) => Promise.resolve(`${folder}/${name}.bru`),
+      createFolder: (parent, name) => Promise.resolve(`${parent}/${name}`),
+      renameRequest: (path, name) => Promise.resolve(`${path}:${name}`),
+      renameFolder: (path, name) => Promise.resolve(`${path}:${name}`),
+      deleteEntry: () => Promise.resolve(),
+      createCollection: (root, name) => Promise.resolve(`${root}/${name}`),
+      writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
+      postmanToRequests: () => ({ name: "Imported", requests: [] }),
+      writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
       sendRequest: () =>
         Promise.resolve({
           status: 200,
@@ -1321,5 +1330,136 @@ describe("api handlers", () => {
     const { api } = handlers({ readCollection: () => Promise.reject(new Error("nope")) });
 
     expect((await api.tree("acme", "/p/acme/api")).ok).toBe(false);
+  });
+});
+
+describe("api editing handlers", () => {
+  function handlers(overrides: Partial<ApiHandlerDeps> = {}) {
+    const deleted: string[] = [];
+    const deps: ApiHandlerDeps = {
+      listCollections: () => Promise.resolve([]),
+      readCollection: () => Promise.reject(new Error("unused")),
+      readRequest: () => Promise.reject(new Error("unused")),
+      writeRequest: () => Promise.resolve(),
+      sendRequest: () => Promise.reject(new Error("unused")),
+      createRequest: (folder, name) => Promise.resolve(`${folder}/${name}.bru`),
+      createFolder: (parent, name) => Promise.resolve(`${parent}/${name}`),
+      renameRequest: (path, name) => Promise.resolve(`renamed:${path}:${name}`),
+      renameFolder: (path, name) => Promise.resolve(`folder:${path}:${name}`),
+      deleteEntry: (path) => {
+        deleted.push(path);
+        return Promise.resolve();
+      },
+      createCollection: (root, name) => Promise.resolve(`${root}/${name}`),
+      writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
+      postmanToRequests: () => ({ name: "Imported", requests: [] }),
+      writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
+      projects: { acme: "/p/acme" },
+      language: "en",
+      ...overrides,
+    };
+    return { api: createApiHandlers(deps), deleted };
+  }
+
+  it("creates a request inside the project", async () => {
+    const { api } = handlers();
+
+    expect(await api.createRequest("acme", "/p/acme/api", "New", 1)).toEqual({
+      ok: true,
+      value: "/p/acme/api/New.bru",
+    });
+  });
+
+  it("refuses to create outside the project", async () => {
+    const { api } = handlers();
+
+    expect((await api.createRequest("acme", "/tmp", "New", 1)).ok).toBe(false);
+  });
+
+  it("refuses a blank name", async () => {
+    const { api } = handlers();
+
+    expect((await api.createRequest("acme", "/p/acme/api", "   ", 1)).ok).toBe(false);
+  });
+
+  it("renames a request or a folder depending on which it is", async () => {
+    const { api } = handlers();
+
+    expect(await api.renameEntry("acme", "/p/acme/api/a.bru", "B", false)).toEqual({
+      ok: true,
+      value: "renamed:/p/acme/api/a.bru:B",
+    });
+    expect(await api.renameEntry("acme", "/p/acme/api/f", "G", true)).toEqual({
+      ok: true,
+      value: "folder:/p/acme/api/f:G",
+    });
+  });
+
+  it("deletes inside the project", async () => {
+    const { api, deleted } = handlers();
+
+    await api.deleteEntry("acme", "/p/acme/api/a.bru");
+
+    expect(deleted).toEqual(["/p/acme/api/a.bru"]);
+  });
+
+  // A mis-click in a tree view must not be able to remove the project root.
+  it("refuses to delete the project root itself", async () => {
+    const { api, deleted } = handlers();
+
+    expect((await api.deleteEntry("acme", "/p/acme")).ok).toBe(false);
+    expect(deleted).toEqual([]);
+  });
+
+  it("refuses to delete outside the project", async () => {
+    const { api, deleted } = handlers();
+
+    expect((await api.deleteEntry("acme", "/etc/hosts")).ok).toBe(false);
+    expect(deleted).toEqual([]);
+  });
+
+  it("creates a collection at the project root", async () => {
+    const { api } = handlers();
+
+    expect(await api.createCollection("acme", "orders")).toEqual({
+      ok: true,
+      value: "/p/acme/orders",
+    });
+  });
+
+  it("saves an environment inside the collection", async () => {
+    const { api } = handlers();
+
+    expect(
+      await api.saveEnvironment("acme", "/p/acme/api", "local", [
+        { name: "base", value: "http://h", enabled: true, secret: false },
+      ]),
+    ).toEqual({ ok: true, value: "/p/acme/api/environments/local.bru" });
+  });
+
+  it("imports a Postman collection", async () => {
+    const { api } = handlers();
+
+    expect(await api.importPostman("acme", "", {})).toEqual({
+      ok: true,
+      value: "/p/acme/Imported",
+    });
+  });
+
+  // An import fails for reasons about the file the user chose, and they are
+  // the one who can fix it — so that message survives rather than being
+  // replaced by a generic headline.
+  it("passes the importer's own message through on a bad file", async () => {
+    const { api } = handlers({
+      postmanToRequests: () => {
+        throw new Error("Only Postman Collection v2.0 and v2.1 are supported");
+      },
+    });
+
+    expect(await api.importPostman("acme", "", {})).toEqual({
+      ok: false,
+      text: "Only Postman Collection v2.0 and v2.1 are supported",
+      language: "en",
+    });
   });
 });

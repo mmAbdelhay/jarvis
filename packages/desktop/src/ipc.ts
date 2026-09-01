@@ -20,6 +20,7 @@ import type { WorkspaceState } from "@jarvis/core";
 import type {
   ApiFailure,
   ApiResponse,
+  BrunoVariable,
   Bookmark,
   BookmarkStore,
   BrunoCollection,
@@ -368,6 +369,18 @@ export type RendererApi = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
+  createApiRequest(project: string, folderPath: string, name: string, seq: number): Promise<GitViewResult<string>>;
+  createApiFolder(project: string, parentPath: string, name: string): Promise<GitViewResult<string>>;
+  renameApiEntry(project: string, path: string, name: string, isFolder: boolean): Promise<GitViewResult<string>>;
+  deleteApiEntry(project: string, path: string): Promise<GitViewResult<void>>;
+  createApiCollection(project: string, name: string): Promise<GitViewResult<string>>;
+  saveApiEnvironment(
+    project: string,
+    collectionPath: string,
+    name: string,
+    variables: BrunoVariable[],
+  ): Promise<GitViewResult<string>>;
+  importPostmanCollection(project: string, name: string, collection: unknown): Promise<GitViewResult<string>>;
   /** Announces that this tab's xterm exists; returns whatever the shell
    *  printed before it did. */
   attachTerminal(tabId: string): Promise<string>;
@@ -587,7 +600,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
   };
 }
 
-export type ApiHandlers = {
+export type ApiHandlers = ApiEditHandlers & {
   collections(project: string): Promise<GitViewResult<BrunoCollection[]>>;
   tree(project: string, collectionPath: string): Promise<GitViewResult<BrunoTree>>;
   request(project: string, path: string): Promise<GitViewResult<Record<string, unknown>>>;
@@ -597,6 +610,22 @@ export type ApiHandlers = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
+};
+
+export type ApiEditHandlers = {
+  createRequest(project: string, folderPath: string, name: string, seq: number): Promise<GitViewResult<string>>;
+  createFolder(project: string, parentPath: string, name: string): Promise<GitViewResult<string>>;
+  renameEntry(project: string, path: string, name: string, isFolder: boolean): Promise<GitViewResult<string>>;
+  deleteEntry(project: string, path: string): Promise<GitViewResult<void>>;
+  createCollection(project: string, name: string): Promise<GitViewResult<string>>;
+  saveEnvironment(
+    project: string,
+    collectionPath: string,
+    name: string,
+    variables: BrunoVariable[],
+  ): Promise<GitViewResult<string>>;
+  /** Reads a Postman export and writes it as a new collection. */
+  importPostman(project: string, name: string, collection: unknown): Promise<GitViewResult<string>>;
 };
 
 export type ApiHandlerDeps = {
@@ -610,6 +639,23 @@ export type ApiHandlerDeps = {
   ) => Promise<ApiResponse | ApiFailure>;
   /** Name to absolute path, from config. The renderer never sees a path it
    *  was not first given, and never one this map does not contain. */
+  createRequest: (folderPath: string, name: string, seq: number) => Promise<string>;
+  createFolder: (parentPath: string, name: string) => Promise<string>;
+  renameRequest: (path: string, name: string) => Promise<string>;
+  renameFolder: (path: string, name: string) => Promise<string>;
+  deleteEntry: (path: string) => Promise<void>;
+  createCollection: (projectPath: string, name: string) => Promise<string>;
+  writeEnvironment: (
+    collectionPath: string,
+    name: string,
+    variables: BrunoVariable[],
+  ) => Promise<string>;
+  postmanToRequests: (collection: unknown) => { name: string; requests: readonly unknown[] };
+  writeImported: (
+    projectPath: string,
+    name: string,
+    requests: readonly never[],
+  ) => Promise<string>;
   projects: Readonly<Record<string, string>>;
   language: "ar" | "en";
 };
@@ -646,6 +692,24 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
     if (!isString(path)) return false;
     const resolved = resolve(path);
     return resolved === resolve(root) || resolved.startsWith(`${resolve(root)}${sep}`);
+  }
+
+  /** Shared by every write: the project must be known, the path must be
+   *  inside it, and the name must be something. */
+  async function guardedWrite(
+    project: string,
+    path: string,
+    name: string,
+    write: () => Promise<string>,
+  ): Promise<GitViewResult<string>> {
+    const root = rootFor(project);
+    if (root === undefined || !contains(root, path)) return unknownProject();
+    if (!isString(name) || name.trim() === "") return fail(MESSAGES.invalidArgument(deps.language));
+    try {
+      return { ok: true, value: await write() };
+    } catch {
+      return fail(MESSAGES.apiUnavailable(deps.language));
+    }
   }
 
   return {
@@ -691,6 +755,84 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
         return { ok: true, value: undefined };
       } catch {
         return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async createRequest(project, folderPath, name, seq) {
+      return guardedWrite(project, folderPath, name, () =>
+        deps.createRequest(folderPath, name, typeof seq === "number" ? seq : 1),
+      );
+    },
+
+    async createFolder(project, parentPath, name) {
+      return guardedWrite(project, parentPath, name, () => deps.createFolder(parentPath, name));
+    },
+
+    async renameEntry(project, path, name, isFolder) {
+      return guardedWrite(project, path, name, () =>
+        isFolder === true ? deps.renameFolder(path, name) : deps.renameRequest(path, name),
+      );
+    },
+
+    async deleteEntry(project, path) {
+      const root = rootFor(project);
+      if (root === undefined || !contains(root, path)) return unknownProject();
+      // Never the collection root itself: deleting that from a tree view is
+      // a mis-click away from removing every request in it, and the
+      // filesystem is the right place for that decision.
+      if (resolve(path) === resolve(root)) return unknownProject();
+      try {
+        await deps.deleteEntry(path);
+        return { ok: true, value: undefined };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async createCollection(project, name) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      if (!isString(name) || name.trim() === "") return fail(MESSAGES.invalidArgument(deps.language));
+      try {
+        return { ok: true, value: await deps.createCollection(root, name) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async saveEnvironment(project, collectionPath, name, variables) {
+      const root = rootFor(project);
+      if (root === undefined || !contains(root, collectionPath)) return unknownProject();
+      if (!isString(name) || name.trim() === "" || !Array.isArray(variables)) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      try {
+        return { ok: true, value: await deps.writeEnvironment(collectionPath, name, variables) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
+    async importPostman(project, name, collection) {
+      const root = rootFor(project);
+      if (root === undefined) return unknownProject();
+      try {
+        const converted = deps.postmanToRequests(collection);
+        const target = isString(name) && name.trim() !== "" ? name : converted.name;
+        return {
+          ok: true,
+          value: await deps.writeImported(root, target, converted.requests as readonly never[]),
+        };
+      } catch (error) {
+        // The importer's own message ("Only Postman Collection v2.0 and
+        // v2.1 are supported") is the useful part here, unlike a runner's
+        // internal detail — an import fails for reasons about the file the
+        // user chose, and they are the one who can fix it.
+        return {
+          ok: false,
+          text: error instanceof Error ? error.message : MESSAGES.apiUnavailable(deps.language),
+          language: deps.language,
+        };
       }
     },
 
