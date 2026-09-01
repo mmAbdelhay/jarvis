@@ -926,7 +926,7 @@
   .workspace-api { display: flex; flex-direction: row; flex-grow: 1; min-height: 0; }
   .workspace-api[hidden] { display: none; }
   .workspace-api-sidebar {
-    width: 230px;
+    width: 250px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -935,6 +935,7 @@
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
+  .api-sidebar-actions { display: flex; flex-wrap: wrap; gap: 4px; }
   .workspace-api-main {
     display: flex;
     flex-direction: column;
@@ -944,7 +945,14 @@
   }
   .api-tree { display: flex; flex-direction: column; gap: 2px; }
   .api-group { padding-left: 10px; border-left: 1px solid var(--border); }
-  .api-folder { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+  .api-folder {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 4px 0;
+  }
   .api-request {
     display: flex;
     align-items: center;
@@ -953,14 +961,19 @@
     border-radius: 4px;
     cursor: pointer;
   }
-  .api-request:hover { background: var(--panel); }
+  .api-request:hover, .api-folder:hover { background: var(--panel); }
   .api-request--on { background: var(--panel); color: var(--accent); }
-  .api-request-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .api-method { font-size: 10px; width: 42px; flex-shrink: 0; color: var(--text-muted); }
-  .api-method--get { color: var(--good); }
-  .api-method--post { color: var(--accent); }
-  .api-method--put, .api-method--patch { color: var(--warn, #d9a85a); }
-  .api-method--delete { color: var(--del); }
+  .api-request-name { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .api-method-badge { font-size: 10px; width: 46px; flex-shrink: 0; color: var(--text-muted); }
+  .api-method-badge--get { color: var(--good); }
+  .api-method-badge--post { color: var(--accent); }
+  .api-method-badge--put, .api-method-badge--patch { color: #d9a85a; }
+  .api-method-badge--delete { color: var(--del); }
+  .api-entry-actions { display: flex; gap: 4px; opacity: 0; flex-shrink: 0; }
+  .api-request:hover .api-entry-actions, .api-folder:hover .api-entry-actions { opacity: 0.7; }
+  .api-entry-action { cursor: pointer; color: var(--text-muted); }
+  .api-entry-action:hover { color: var(--accent); }
+  .api-entry-action--del:hover { color: var(--del); }
   .api-empty { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
 
   .api-bar {
@@ -970,15 +983,41 @@
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
   }
-  .api-editor {
-    padding: 10px 14px;
-    overflow-y: auto;
-    flex-shrink: 0;
-    max-height: 45%;
+  .api-status-line { font-size: 11px; color: var(--text-muted); }
+  .api-dirty { color: var(--accent); margin-left: 4px; }
+
+  .api-tab-strip { display: flex; gap: 2px; padding: 6px 14px 0; border-bottom: 1px solid var(--border); }
+  .api-tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
   }
-  .api-pairs { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 12px; }
-  .api-pair { display: flex; gap: 6px; align-items: center; }
-  .api-pair input {
+  .api-tab:hover { color: var(--text); }
+  .api-tab--on { color: var(--accent); border-bottom-color: var(--accent); }
+  .api-tab-count {
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text-muted);
+  }
+  .api-tab-count--bad { background: var(--del); color: var(--ground); }
+
+  .api-panel { padding: 10px 14px; overflow-y: auto; flex-shrink: 0; max-height: 38%; }
+  .api-panel-body { display: flex; flex-direction: column; gap: 8px; }
+  .api-field { display: flex; align-items: center; gap: 8px; }
+  .api-field .lbl { width: 72px; flex-shrink: 0; }
+  .api-field input, .api-field select { flex-grow: 1; }
+  .api-pairs { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .api-pair { display: flex; gap: 6px; align-items: center; width: 100%; }
+  .api-pair input[type="text"] {
     flex-grow: 1;
     min-width: 0;
     color: var(--text);
@@ -987,13 +1026,13 @@
     border-radius: 4px;
     padding: 3px 6px;
   }
-  .api-pair-remove { color: var(--text-muted); cursor: pointer; }
+  .api-enable { flex-shrink: 0; }
+  .api-pair-remove { color: var(--text-muted); cursor: pointer; flex-shrink: 0; }
   .api-pair-remove:hover { color: var(--del); }
-  .api-body-row { display: flex; align-items: center; gap: 8px; }
-  #api-body {
+  .api-body-head { display: flex; align-items: center; gap: 8px; }
+  #api-body, #api-docs {
     width: 100%;
-    min-height: 120px;
-    margin-top: 6px;
+    min-height: 110px;
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--border);
@@ -1001,12 +1040,30 @@
     padding: 6px;
   }
 
+  .api-response-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    padding-right: 14px;
+  }
+  .api-response-bar .api-tab-strip { border-bottom: none; }
+  .api-response-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .api-status { font-size: 12px; color: var(--good); }
+  .api-status--bad, .api-status--failed { color: var(--del); }
+  .api-note { font-size: 11px; color: var(--text-muted); }
   .api-response { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; }
-  .api-response-head { font-size: 12px; color: var(--good); }
-  .api-response-head--bad { color: var(--del); }
-  .api-response-head--failed { color: var(--del); }
-  .api-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .api-response-body { margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+  .api-header-table { display: flex; flex-direction: column; gap: 3px; }
+  .api-header-row { display: flex; gap: 10px; font-size: 11px; }
+  .api-header-name { width: 220px; flex-shrink: 0; color: var(--text-muted); }
+  .api-tests { display: flex; flex-direction: column; gap: 4px; }
+  .api-tests-summary { font-size: 12px; color: var(--good); margin-bottom: 4px; }
+  .api-tests-summary--bad { color: var(--del); }
+  .api-test { display: flex; gap: 8px; font-size: 11px; align-items: baseline; }
+  .api-test-mark { color: var(--good); }
+  .api-test--failed .api-test-mark { color: var(--del); }
 
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
@@ -1890,6 +1947,12 @@
         <div id="workspace-api" class="workspace-api" hidden>
           <div class="workspace-api-sidebar">
             <select id="api-collection" class="workspace-project mono"></select>
+            <div class="api-sidebar-actions">
+              <button id="api-new-request" class="settings-add" type="button">+ request</button>
+              <button id="api-new-folder" class="settings-add" type="button">+ folder</button>
+              <button id="api-new-collection" class="settings-add" type="button">+ collection</button>
+              <button id="api-import" class="settings-add" type="button">import</button>
+            </div>
             <div id="api-tree" class="api-tree"></div>
           </div>
           <div class="workspace-api-main">
@@ -1898,21 +1961,19 @@
               <input id="api-url" class="workspace-address mono" type="text" dir="ltr"
                      autocomplete="off" spellcheck="false" placeholder="https://" />
               <select id="api-environment" class="mono"></select>
+              <button id="api-env-edit" class="workspace-nav" type="button" title="Edit this environment">env</button>
               <button id="api-send" class="workspace-nav" type="button"
                       style="width: auto; padding: 0 12px;">Send</button>
               <button id="api-save" class="workspace-nav" type="button"
-                      style="width: auto; padding: 0 12px;" disabled>Save</button>
+                      style="width: auto; padding: 0 12px;" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
+              <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
+              <span id="api-status" class="mono api-status-line"></span>
             </div>
-            <div class="api-editor">
-              <div class="lbl">PARAMS</div>
-              <div id="api-params" class="api-pairs"></div>
-              <div class="lbl">HEADERS</div>
-              <div id="api-headers" class="api-pairs"></div>
-              <div class="api-body-row">
-                <div class="lbl">BODY</div>
-                <select id="api-body-mode" class="mono"></select>
-              </div>
-              <textarea id="api-body" class="mono" spellcheck="false" hidden></textarea>
+            <div id="api-tabs" class="api-tab-strip"></div>
+            <div id="api-panel" class="api-panel"></div>
+            <div class="api-response-bar">
+              <div id="api-response-tabs" class="api-tab-strip"></div>
+              <div id="api-response-head" class="api-response-head"></div>
             </div>
             <div id="api-response" class="api-response"></div>
           </div>

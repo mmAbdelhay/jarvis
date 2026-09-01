@@ -20,6 +20,7 @@ import type { WorkspaceState } from "@jarvis/core";
 import type {
   ApiFailure,
   ApiResponse,
+  AssertionResult,
   BrunoVariable,
   Bookmark,
   BookmarkStore,
@@ -368,7 +369,12 @@ export type RendererApi = {
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
-  ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
+  ): Promise<GitViewResult<ApiSendResult>>;
+  apiCurl(
+    project: string,
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+  ): Promise<GitViewResult<string>>;
   createApiRequest(project: string, folderPath: string, name: string, seq: number): Promise<GitViewResult<string>>;
   createApiFolder(project: string, parentPath: string, name: string): Promise<GitViewResult<string>>;
   renameApiEntry(project: string, path: string, name: string, isFolder: boolean): Promise<GitViewResult<string>>;
@@ -605,11 +611,26 @@ export type ApiHandlers = ApiEditHandlers & {
   tree(project: string, collectionPath: string): Promise<GitViewResult<BrunoTree>>;
   request(project: string, path: string): Promise<GitViewResult<Record<string, unknown>>>;
   save(project: string, path: string, json: Record<string, unknown>): Promise<GitViewResult<void>>;
+  /** Sends the request and, when it answers, evaluates its assert block
+   *  against the response. The two travel together because assertions are
+   *  about a response that main already has in hand — asking for them
+   *  separately would mean shipping the body back across IPC to be checked. */
   send(
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
-  ): Promise<GitViewResult<ApiResponse | ApiFailure>>;
+  ): Promise<GitViewResult<ApiSendResult>>;
+  /** The request as a shell command, with variables resolved. */
+  curl(
+    project: string,
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+  ): Promise<GitViewResult<string>>;
+};
+
+export type ApiSendResult = {
+  response: ApiResponse | ApiFailure;
+  assertions: AssertionResult[];
 };
 
 export type ApiEditHandlers = {
@@ -637,6 +658,11 @@ export type ApiHandlerDeps = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ) => Promise<ApiResponse | ApiFailure>;
+  evaluateAssertions: (
+    assertions: readonly { name?: string; value?: string; enabled?: boolean }[],
+    subject: { status: number; headers: Record<string, string>; body: string; timeMs: number },
+  ) => AssertionResult[];
+  toCurl: (request: Record<string, unknown>, variables: Record<string, string>) => string;
   /** Name to absolute path, from config. The renderer never sees a path it
    *  was not first given, and never one this map does not contain. */
   createRequest: (folderPath: string, name: string, seq: number) => Promise<string>;
@@ -713,6 +739,18 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
   }
 
   return {
+    async curl(project, request, variables) {
+      if (rootFor(project) === undefined) return unknownProject();
+      if (typeof request !== "object" || request === null) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      try {
+        return { ok: true, value: deps.toCurl(request, variables ?? {}) };
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+    },
+
     async collections(project) {
       const root = rootFor(project);
       if (root === undefined) return unknownProject();
@@ -842,7 +880,26 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       try {
-        return { ok: true, value: await deps.sendRequest(request, variables ?? {}) };
+        const response = await deps.sendRequest(request, variables ?? {});
+        const assertions = Array.isArray(request["assertions"])
+          ? (request["assertions"] as { name?: string; value?: string; enabled?: boolean }[])
+          : [];
+        return {
+          ok: true,
+          value: {
+            response,
+            // Nothing to check against a request that never answered.
+            assertions:
+              "failed" in response
+                ? []
+                : deps.evaluateAssertions(assertions, {
+                    status: response.status,
+                    headers: response.headers,
+                    body: response.body,
+                    timeMs: response.timeMs,
+                  }),
+          },
+        };
       } catch {
         // A runner that threw rather than returning an ApiFailure is a bug
         // on our side, not a failed request; it still must not reach the

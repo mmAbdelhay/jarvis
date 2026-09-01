@@ -30,6 +30,7 @@ import {
   createFolder,
   createRequest,
   deleteEntry,
+  evaluateAssertions,
   listCollections,
   postmanToRequests,
   readCollection,
@@ -37,6 +38,7 @@ import {
   renameFolder,
   renameRequest,
   sendRequest,
+  toCurl,
   writeEnvironment,
   writeImported,
   writeRequest,
@@ -255,6 +257,8 @@ app.whenReady().then(async () => {
       writeRequest,
       sendRequest: (request, variables) =>
         sendRequest(request, variables, { fetch, now: () => Date.now() }),
+      evaluateAssertions,
+      toCurl,
       createRequest,
       createFolder,
       renameRequest,
@@ -490,6 +494,9 @@ app.whenReady().then(async () => {
         request as Record<string, unknown>,
         variables as Record<string, string>,
       ),
+    );
+    ipcMain.handle("api:curl", (_event, p: unknown, request: unknown, variables: unknown) =>
+      api.curl(p as string, request as Record<string, unknown>, variables as Record<string, string>),
     );
     ipcMain.handle("api:createRequest", (_event, p: unknown, folder: unknown, name: unknown, seq: unknown) =>
       api.createRequest(p as string, folder as string, name as string, seq as number),

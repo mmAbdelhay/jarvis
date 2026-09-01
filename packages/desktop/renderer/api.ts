@@ -1,18 +1,21 @@
 import type { WorkspaceTab } from "@jarvis/core";
-import type { ApiFailure, ApiResponse, BrunoCollection, BrunoFolder, BrunoTree } from "@jarvis/platform";
+import type { BrunoCollection, BrunoFolder, BrunoTree, BrunoVariable } from "@jarvis/platform";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { currentTab, initEditor, renderEditor, setHttp } from "./api-editor.js";
+import { renderResponse, setResponse } from "./api-response.js";
 
-// The Workspace's API tab: a request builder and response viewer over the
-// project's own Bruno collections.
+// The Workspace's API tab.
 //
 // Like a Terminal tab this has no hosted view — the surface is drawn here,
-// in the renderer's DOM, over the region a hosted page would occupy. Unlike
-// a Terminal there is one tab per project: a collection tree is a view of
-// the filesystem, not a session.
+// over the region a hosted page would occupy — and unlike a Terminal there is
+// one per project: a collection tree is a view of the filesystem, not a
+// session.
 //
-// Everything a .bru file contains is preserved. Jarvis edits a handful of
-// fields and writes the whole parsed object back, so scripts, assertions and
-// docs a request carries survive a save untouched — see bruno.ts.
+// This module owns the state, the tree and the toolbar. The request editor
+// (api-editor.ts) and the response pane (api-response.ts) own their own
+// halves; all three read the one request object below, and every edit goes
+// back to disk as the whole parsed .bru, so scripts, docs and anything else
+// a request carries survive a save untouched.
 
 const $ = (id: string): HTMLElement => {
   const element = document.getElementById(id);
@@ -20,65 +23,86 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
-type Pair = { name?: string; value?: string; enabled?: boolean; type?: string };
-
-/** Everything the pane is showing. One object so a re-render is a pure
- *  function of it, rather than of a dozen scattered flags. */
 type State = {
   project: string | undefined;
   collections: BrunoCollection[];
+  collectionPath: string;
   tree: BrunoTree | undefined;
-  /** The request being edited, as its whole parsed .bru object. */
   request: Record<string, unknown> | undefined;
   requestPath: string | undefined;
   dirty: boolean;
   sending: boolean;
-  response: ApiResponse | ApiFailure | undefined;
   environment: string;
 };
 
 const state: State = {
   project: undefined,
   collections: [],
+  collectionPath: "",
   tree: undefined,
   request: undefined,
   requestPath: undefined,
   dirty: false,
   sending: false,
-  response: undefined,
   environment: "",
 };
 
-const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"];
-const BODY_MODES = ["none", "json", "text", "xml", "formUrlEncoded"];
+const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
 export function initApi(): void {
-  ($("api-collection") as HTMLSelectElement).addEventListener("change", () => {
-    void loadTree(($("api-collection") as HTMLSelectElement).value);
+  initEditor({
+    request: () => state.request,
+    changed: () => markDirty(),
   });
-  ($("api-environment") as HTMLSelectElement).addEventListener("change", () => {
-    state.environment = ($("api-environment") as HTMLSelectElement).value;
+
+  const collection = $("api-collection") as HTMLSelectElement;
+  collection.addEventListener("change", () => void loadTree(collection.value));
+
+  const environment = $("api-environment") as HTMLSelectElement;
+  environment.addEventListener("change", () => {
+    state.environment = environment.value;
   });
-  ($("api-method") as HTMLSelectElement).addEventListener("change", () => {
-    editHttp("method", ($("api-method") as HTMLSelectElement).value);
+
+  const method = $("api-method") as HTMLSelectElement;
+  for (const name of METHODS) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name.toUpperCase();
+    method.append(option);
+  }
+  method.addEventListener("change", () => {
+    setHttp("method", method.value);
+    renderTree();
   });
-  ($("api-url") as HTMLInputElement).addEventListener("change", () => {
-    editHttp("url", ($("api-url") as HTMLInputElement).value);
-  });
-  ($("api-body-mode") as HTMLSelectElement).addEventListener("change", () => {
-    editHttp("body", ($("api-body-mode") as HTMLSelectElement).value);
-    renderEditor();
-  });
-  ($("api-body") as HTMLTextAreaElement).addEventListener("change", () => {
-    editBody(($("api-body") as HTMLTextAreaElement).value);
-  });
+
+  const url = $("api-url") as HTMLInputElement;
+  url.addEventListener("change", () => applyUrl(url.value));
+
   $("api-send").addEventListener("click", () => void send());
   $("api-save").addEventListener("click", () => void save());
+  $("api-curl").addEventListener("click", () => void copyCurl());
+  $("api-new-request").addEventListener("click", () => void newRequest());
+  $("api-new-folder").addEventListener("click", () => void newFolder());
+  $("api-new-collection").addEventListener("click", () => void newCollection());
+  $("api-import").addEventListener("click", () => void importPostman());
+  $("api-env-edit").addEventListener("click", () => void editEnvironment());
+
+  // Cmd+Enter sends and Cmd+S saves, the two things a request editor is for.
+  // Scoped to the pane: these must not fire while the user is in a terminal
+  // or the Changes view.
+  document.addEventListener("keydown", (event) => {
+    if (($("workspace-api") as HTMLElement).hidden) return;
+    if (!event.metaKey) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void send();
+    } else if (event.key === "s") {
+      event.preventDefault();
+      void save();
+    }
+  });
 }
 
-/** Shows the pane for the active api tab, and reloads when it belongs to a
- *  different project than the one currently on screen. Driven entirely by
- *  workspace state, like the terminal panes. */
 export function renderApi(
   tabs: WorkspaceTab[],
   activeTabId: string | undefined,
@@ -101,10 +125,7 @@ async function loadCollections(): Promise<void> {
 
   const result = await window.jarvis.listApiCollections(project);
   state.collections = result.ok ? result.value : [];
-  state.tree = undefined;
-  state.request = undefined;
-  state.requestPath = undefined;
-  state.response = undefined;
+  clearRequest();
 
   const select = $("api-collection") as HTMLSelectElement;
   select.replaceChildren();
@@ -117,8 +138,9 @@ async function loadCollections(): Promise<void> {
 
   const first = state.collections[0];
   if (first === undefined) {
-    renderTree();
-    renderEditor();
+    state.tree = undefined;
+    state.collectionPath = "";
+    renderAll();
     return;
   }
   select.value = first.path;
@@ -131,11 +153,31 @@ async function loadTree(collectionPath: string): Promise<void> {
 
   const result = await window.jarvis.readApiTree(project, collectionPath);
   state.tree = result.ok ? result.value : undefined;
+  state.collectionPath = collectionPath;
+  clearRequest();
+  state.environment = state.tree?.environments[0]?.name ?? "";
+  renderEnvironments();
+  renderAll();
+}
+
+/** Re-reads the tree without losing the request open in the editor — after a
+ *  save, where the name or method in the tree may have changed. */
+async function refreshTree(): Promise<void> {
+  const project = state.project;
+  if (project === undefined || state.collectionPath === "") return;
+  const result = await window.jarvis.readApiTree(project, state.collectionPath);
+  if (result.ok) state.tree = result.value;
+  renderTree();
+}
+
+function clearRequest(): void {
   state.request = undefined;
   state.requestPath = undefined;
-  state.response = undefined;
-  state.environment = state.tree?.environments[0]?.name ?? "";
+  state.dirty = false;
+  setResponse({ response: undefined, assertions: [], hasScript: false });
+}
 
+function renderEnvironments(): void {
   const select = $("api-environment") as HTMLSelectElement;
   select.replaceChildren();
   const none = document.createElement("option");
@@ -149,10 +191,75 @@ async function loadTree(collectionPath: string): Promise<void> {
     select.append(option);
   }
   select.value = state.environment;
+}
 
+function renderAll(): void {
   renderTree();
+  renderToolbar();
   renderEditor();
   renderResponse();
+}
+
+function renderToolbar(): void {
+  const has = state.request !== undefined;
+  const http = (state.request?.["http"] ?? {}) as Record<string, unknown>;
+
+  ($("api-method") as HTMLSelectElement).disabled = !has;
+  ($("api-method") as HTMLSelectElement).value = String(http["method"] ?? "get");
+  const url = $("api-url") as HTMLInputElement;
+  url.disabled = !has;
+  url.value = displayUrl();
+  ($("api-send") as HTMLButtonElement).disabled = !has || state.sending;
+  ($("api-save") as HTMLButtonElement).disabled = !has || !state.dirty;
+  ($("api-curl") as HTMLButtonElement).disabled = !has;
+  ($("api-dirty") as HTMLElement).hidden = !state.dirty;
+}
+
+/** The URL as the user should see it: the stored URL plus its enabled query
+ *  params, so the address bar reads like an address rather than half of one.
+ *  Bruno keeps params in their own block; this is where the two are joined. */
+function displayUrl(): string {
+  const http = (state.request?.["http"] ?? {}) as Record<string, unknown>;
+  const base = String(http["url"] ?? "");
+  const params = Array.isArray(state.request?.["params"]) ? (state.request?.["params"] as Record<string, unknown>[]) : [];
+  const query = params
+    .filter((param) => param["enabled"] !== false && (param["type"] ?? "query") === "query" && param["name"])
+    .map((param) => `${String(param["name"])}=${String(param["value"] ?? "")}`);
+  if (query.length === 0) return base;
+  return `${base}${base.includes("?") ? "&" : "?"}${query.join("&")}`;
+}
+
+/** Typing a URL with a query string in it splits the query back out into the
+ *  params table, which is where Bruno keeps it — so pasting a URL from a log
+ *  or a browser does the thing the user meant. */
+function applyUrl(value: string): void {
+  if (state.request === undefined) return;
+  const [base = "", query = ""] = value.split("?");
+  setHttp("url", base);
+
+  if (query === "") {
+    // Only clear params the URL owned; a param the user typed by hand in the
+    // table has no query string to have come from.
+    const existing = Array.isArray(state.request["params"]) ? (state.request["params"] as Record<string, unknown>[]) : [];
+    state.request["params"] = existing.filter((param) => (param["type"] ?? "query") !== "query");
+  } else {
+    const parsed = new URLSearchParams(query);
+    const others = Array.isArray(state.request["params"])
+      ? (state.request["params"] as Record<string, unknown>[]).filter((param) => (param["type"] ?? "query") !== "query")
+      : [];
+    state.request["params"] = [
+      ...others,
+      ...[...parsed.entries()].map(([name, entry]) => ({ name, value: entry, type: "query", enabled: true })),
+    ];
+  }
+  markDirty();
+  renderToolbar();
+  renderEditor();
+}
+
+function markDirty(): void {
+  state.dirty = true;
+  renderToolbar();
 }
 
 function renderTree(): void {
@@ -173,12 +280,14 @@ function folderNodes(folder: BrunoFolder, isRoot = false): HTMLElement[] {
   const nodes: HTMLElement[] = [];
 
   if (!isRoot) {
-    const label = document.createElement("div");
-    label.className = "api-folder";
+    const row = document.createElement("div");
+    row.className = "api-folder";
+    const name = document.createElement("span");
     // A folder name comes from the filesystem: text, like everything else
     // this file builds.
-    label.textContent = folder.name;
-    nodes.push(label);
+    name.textContent = folder.name;
+    row.append(name, entryActions(folder.path, folder.name, true));
+    nodes.push(row);
   }
 
   for (const request of folder.requests) {
@@ -188,13 +297,13 @@ function folderNodes(folder: BrunoFolder, isRoot = false): HTMLElement[] {
     row.addEventListener("click", () => void openRequest(request.path));
 
     const method = document.createElement("span");
-    method.className = `api-method api-method--${request.method.toLowerCase()}`;
+    method.className = `api-method-badge api-method-badge--${request.method.toLowerCase()}`;
     method.textContent = request.method;
     const name = document.createElement("span");
     name.className = "api-request-name";
     name.textContent = request.name;
 
-    row.append(method, name);
+    row.append(method, name, entryActions(request.path, request.name, false));
     nodes.push(row);
   }
 
@@ -208,192 +317,64 @@ function folderNodes(folder: BrunoFolder, isRoot = false): HTMLElement[] {
   return nodes;
 }
 
+function entryActions(path: string, name: string, isFolder: boolean): HTMLElement {
+  const actions = document.createElement("span");
+  actions.className = "api-entry-actions";
+
+  const rename = document.createElement("span");
+  rename.className = "api-entry-action";
+  rename.textContent = "✎";
+  rename.title = MESSAGES.apiRename(PRIMARY_LANGUAGE);
+  rename.setAttribute("role", "button");
+  rename.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void renameEntry(path, name, isFolder);
+  });
+
+  const remove = document.createElement("span");
+  remove.className = "api-entry-action api-entry-action--del";
+  remove.textContent = "×";
+  remove.title = MESSAGES.apiDelete(PRIMARY_LANGUAGE);
+  remove.setAttribute("role", "button");
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void deleteEntry(path, name);
+  });
+
+  actions.append(rename, remove);
+  return actions;
+}
+
 async function openRequest(path: string): Promise<void> {
   const project = state.project;
   if (project === undefined) return;
   // Switching away from unsaved edits would lose them silently, which is the
   // one thing a request editor must never do.
-  if (state.dirty && !confirmDiscard()) return;
+  if (state.dirty && !window.confirm(MESSAGES.apiDiscardEdits(PRIMARY_LANGUAGE))) return;
 
   const result = await window.jarvis.readApiRequest(project, path);
   if (!result.ok) return;
   state.request = result.value;
   state.requestPath = path;
   state.dirty = false;
-  state.response = undefined;
-  renderTree();
-  renderEditor();
-  renderResponse();
-}
-
-/** Overridable in tests; a bare confirm() is the right control here — the
- *  choice is binary and immediate. */
-function confirmDiscard(): boolean {
-  return window.confirm(MESSAGES.apiDiscardEdits(PRIMARY_LANGUAGE));
-}
-
-function http(): Record<string, unknown> {
-  const existing = state.request?.["http"];
-  return typeof existing === "object" && existing !== null
-    ? (existing as Record<string, unknown>)
-    : {};
-}
-
-function editHttp(field: string, value: string): void {
-  if (state.request === undefined) return;
-  state.request["http"] = { ...http(), [field]: value };
-  markDirty();
-}
-
-function editBody(value: string): void {
-  if (state.request === undefined) return;
-  const mode = String(http()["body"] ?? "none");
-  if (mode === "none") return;
-  const body = (state.request["body"] ?? {}) as Record<string, unknown>;
-  state.request["body"] = { ...body, [mode]: value };
-  markDirty();
-}
-
-function editPair(kind: "headers" | "params", index: number, field: "name" | "value", value: string): void {
-  if (state.request === undefined) return;
-  const list = [...((state.request[kind] as Pair[] | undefined) ?? [])];
-  const pair = list[index];
-  if (pair === undefined) return;
-  list[index] = { ...pair, [field]: value };
-  state.request[kind] = list;
-  markDirty();
-}
-
-function addPair(kind: "headers" | "params"): void {
-  if (state.request === undefined) return;
-  const list = [...((state.request[kind] as Pair[] | undefined) ?? [])];
-  list.push(kind === "params" ? { name: "", value: "", type: "query", enabled: true } : { name: "", value: "", enabled: true });
-  state.request[kind] = list;
-  markDirty();
-  renderEditor();
-}
-
-function removePair(kind: "headers" | "params", index: number): void {
-  if (state.request === undefined) return;
-  const list = ((state.request[kind] as Pair[] | undefined) ?? []).filter((_pair, i) => i !== index);
-  state.request[kind] = list;
-  markDirty();
-  renderEditor();
-}
-
-function markDirty(): void {
-  state.dirty = true;
-  ($("api-save") as HTMLButtonElement).disabled = false;
-}
-
-function renderEditor(): void {
-  const has = state.request !== undefined;
-  ($("api-method") as HTMLSelectElement).disabled = !has;
-  ($("api-url") as HTMLInputElement).disabled = !has;
-  ($("api-send") as HTMLButtonElement).disabled = !has || state.sending;
-  ($("api-save") as HTMLButtonElement).disabled = !has || !state.dirty;
-
-  const method = $("api-method") as HTMLSelectElement;
-  if (method.options.length === 0) {
-    for (const name of METHODS) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name.toUpperCase();
-      method.append(option);
-    }
-  }
-  const modes = $("api-body-mode") as HTMLSelectElement;
-  if (modes.options.length === 0) {
-    for (const name of BODY_MODES) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      modes.append(option);
-    }
-  }
-
-  method.value = String(http()["method"] ?? "get");
-  ($("api-url") as HTMLInputElement).value = String(http()["url"] ?? "");
-  const bodyMode = String(http()["body"] ?? "none");
-  modes.value = bodyMode;
-
-  const body = $("api-body") as HTMLTextAreaElement;
-  body.hidden = bodyMode === "none" || bodyMode === "formUrlEncoded";
-  const bodies = (state.request?.["body"] ?? {}) as Record<string, unknown>;
-  body.value = bodyMode === "none" ? "" : String(bodies[bodyMode] ?? "");
-
-  renderPairs("params");
-  renderPairs("headers");
-}
-
-function renderPairs(kind: "headers" | "params"): void {
-  const container = $(`api-${kind}`);
-  container.replaceChildren();
-  const list = (state.request?.[kind] as Pair[] | undefined) ?? [];
-
-  list.forEach((pair, index) => {
-    const row = document.createElement("div");
-    row.className = "api-pair";
-
-    const name = document.createElement("input");
-    name.type = "text";
-    name.className = "mono";
-    name.dataset["field"] = "name";
-    name.value = pair.name ?? "";
-    name.addEventListener("change", () => editPair(kind, index, "name", name.value));
-
-    const value = document.createElement("input");
-    value.type = "text";
-    value.className = "mono";
-    value.dataset["field"] = "value";
-    value.value = pair.value ?? "";
-    value.addEventListener("change", () => editPair(kind, index, "value", value.value));
-
-    const remove = document.createElement("span");
-    remove.className = "api-pair-remove";
-    remove.textContent = "×";
-    remove.setAttribute("role", "button");
-    remove.addEventListener("click", () => removePair(kind, index));
-
-    row.append(name, value, remove);
-    container.append(row);
-  });
-
-  const add = document.createElement("button");
-  add.type = "button";
-  add.className = "settings-add";
-  add.textContent = kind === "params" ? "+ param" : "+ header";
-  add.addEventListener("click", () => addPair(kind));
-  container.append(add);
+  setResponse({ response: undefined, assertions: [], hasScript: false });
+  renderAll();
 }
 
 async function save(): Promise<void> {
   const { project, requestPath, request } = state;
-  if (project === undefined || requestPath === undefined || request === undefined) return;
+  if (project === undefined || requestPath === undefined || request === undefined || !state.dirty) return;
 
   const result = await window.jarvis.saveApiRequest(project, requestPath, request);
   if (!result.ok) return;
   state.dirty = false;
-  ($("api-save") as HTMLButtonElement).disabled = true;
-  // A saved request may have changed method, name or seq, all of which the
-  // tree shows.
-  const collection = ($("api-collection") as HTMLSelectElement).value;
-  if (collection !== "") await loadTreePreservingSelection(collection);
+  renderToolbar();
+  await refreshTree();
 }
 
-async function loadTreePreservingSelection(collectionPath: string): Promise<void> {
-  const keptPath = state.requestPath;
-  const keptRequest = state.request;
-  await loadTree(collectionPath);
-  state.requestPath = keptPath;
-  state.request = keptRequest;
-  renderTree();
-  renderEditor();
-}
-
-/** The variables a request is sent with: the selected environment's, in
- *  file order. Secrets are included here because they are needed to make the
- *  call — they are only never written back to disk. */
+/** The variables a request is sent with: the selected environment's. Secrets
+ *  are included because they are needed to make the call — what Jarvis never
+ *  does is write one into a request file. */
 function variables(): Record<string, string> {
   const environment = state.tree?.environments.find((entry) => entry.name === state.environment);
   const resolved: Record<string, string> = {};
@@ -409,66 +390,159 @@ async function send(): Promise<void> {
   if (project === undefined || request === undefined || state.sending) return;
 
   state.sending = true;
-  ($("api-send") as HTMLButtonElement).disabled = true;
+  renderToolbar();
   const result = await window.jarvis.sendApiRequest(project, request, variables());
   state.sending = false;
-  ($("api-send") as HTMLButtonElement).disabled = false;
+  renderToolbar();
 
-  state.response = result.ok ? result.value : { failed: true, detail: result.text, timeMs: 0 };
-  renderResponse();
+  // Assertions are evaluated in main, where the response already is: asking
+  // for them separately would mean shipping the body back across IPC to be
+  // checked against.
+  const value = result.ok
+    ? result.value
+    : { response: { failed: true as const, detail: result.text, timeMs: 0 }, assertions: [] };
+
+  setResponse({
+    response: value.response,
+    assertions: value.assertions,
+    hasScript: request["script"] !== undefined || request["tests"] !== undefined,
+  });
 }
 
-function renderResponse(): void {
-  const container = $("api-response");
-  container.replaceChildren();
-  const response = state.response;
-  if (response === undefined) return;
+async function newRequest(): Promise<void> {
+  const project = state.project;
+  if (project === undefined || state.collectionPath === "") return;
+  const name = window.prompt(MESSAGES.apiNewRequest(PRIMARY_LANGUAGE), "New request");
+  if (name === null || name.trim() === "") return;
 
-  const head = document.createElement("div");
-  head.className = "api-response-head";
+  const seq = (state.tree?.root.requests.length ?? 0) + 1;
+  const result = await window.jarvis.createApiRequest(project, folderForNew(), name, seq);
+  if (!result.ok) return;
+  await refreshTree();
+  await openRequest(result.value);
+}
 
-  if ("failed" in response) {
-    head.classList.add("api-response-head--failed");
-    head.textContent = response.detail;
-    container.append(head);
+/** A new request lands beside the one that is open, or at the collection root
+ *  when nothing is. */
+function folderForNew(): string {
+  const path = state.requestPath;
+  if (path === undefined) return state.collectionPath;
+  return path.slice(0, path.lastIndexOf("/"));
+}
+
+async function newFolder(): Promise<void> {
+  const project = state.project;
+  if (project === undefined || state.collectionPath === "") return;
+  const name = window.prompt(MESSAGES.apiNewFolder(PRIMARY_LANGUAGE), "folder");
+  if (name === null || name.trim() === "") return;
+
+  const result = await window.jarvis.createApiFolder(project, folderForNew(), name);
+  if (result.ok) await refreshTree();
+}
+
+async function newCollection(): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+  const name = window.prompt(MESSAGES.apiNewCollection(PRIMARY_LANGUAGE), "api");
+  if (name === null || name.trim() === "") return;
+
+  const result = await window.jarvis.createApiCollection(project, name);
+  if (result.ok) await loadCollections();
+}
+
+async function renameEntry(path: string, current: string, isFolder: boolean): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+  const name = window.prompt(MESSAGES.apiRename(PRIMARY_LANGUAGE), current);
+  if (name === null || name.trim() === "" || name === current) return;
+
+  const result = await window.jarvis.renameApiEntry(project, path, name, isFolder);
+  if (!result.ok) return;
+  // The open request may be the one that just moved.
+  if (state.requestPath === path) state.requestPath = result.value;
+  await refreshTree();
+}
+
+async function deleteEntry(path: string, name: string): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+  if (!window.confirm(MESSAGES.apiConfirmDelete(name, PRIMARY_LANGUAGE))) return;
+
+  const result = await window.jarvis.deleteApiEntry(project, path);
+  if (!result.ok) return;
+  if (state.requestPath === path) clearRequest();
+  await refreshTree();
+  renderAll();
+}
+
+async function importPostman(): Promise<void> {
+  const project = state.project;
+  if (project === undefined) return;
+  const text = window.prompt(MESSAGES.apiImport(PRIMARY_LANGUAGE), "");
+  if (text === null || text.trim() === "") return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    setStatus("Not valid JSON");
     return;
   }
-
-  head.classList.toggle("api-response-head--bad", response.status >= 400);
-  // HTTP/2 has no status text at all, so joining unconditionally leaves a
-  // double space — "200  · 12ms" — which reads as a missing word.
-  const status = [String(response.status), response.statusText].filter((part) => part !== "").join(" ");
-  head.textContent = `${status} · ${response.timeMs}ms · ${response.bytes} B`;
-  container.append(head);
-
-  if (response.unresolved.length > 0) {
-    const note = document.createElement("div");
-    note.className = "api-note";
-    note.textContent = MESSAGES.apiUnresolved(response.unresolved.join(", "), PRIMARY_LANGUAGE);
-    container.append(note);
+  const result = await window.jarvis.importPostmanCollection(project, "", parsed);
+  if (!result.ok) {
+    setStatus(result.text);
+    return;
   }
-
-  // Scripts and assertions are preserved on save but never run here, so a
-  // request that carries one behaves differently than it would under
-  // `bru run`. Saying so beats letting someone trust a green result.
-  if (state.request?.["script"] !== undefined || state.request?.["tests"] !== undefined) {
-    const note = document.createElement("div");
-    note.className = "api-note";
-    note.textContent = MESSAGES.apiScriptsNotRun(PRIMARY_LANGUAGE);
-    container.append(note);
-  }
-
-  const body = document.createElement("pre");
-  body.className = "api-response-body mono";
-  body.textContent = prettify(response.body);
-  container.append(body);
+  await loadCollections();
 }
 
-/** Pretty-prints JSON, and leaves everything else exactly as it came. */
-function prettify(body: string): string {
-  try {
-    return JSON.stringify(JSON.parse(body), null, 2);
-  } catch {
-    return body;
-  }
+/** The environment editor is a prompt over the variables as `name=value`
+ *  lines: small, and it keeps the whole feature to one round trip. A richer
+ *  editor is a later change, not a missing one — nothing here is unreachable
+ *  without it. */
+async function editEnvironment(): Promise<void> {
+  const project = state.project;
+  if (project === undefined || state.collectionPath === "") return;
+
+  const current = state.tree?.environments.find((entry) => entry.name === state.environment);
+  const name = current?.name ?? window.prompt(MESSAGES.apiNewCollection(PRIMARY_LANGUAGE), "local");
+  if (name === null || name.trim() === "") return;
+
+  const asText = (current?.variables ?? [])
+    .map((variable) => `${variable.name}=${variable.value}`)
+    .join("\n");
+  const edited = window.prompt(`${name}`, asText);
+  if (edited === null) return;
+
+  const variables: BrunoVariable[] = edited
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const at = line.indexOf("=");
+      const key = at === -1 ? line : line.slice(0, at);
+      const value = at === -1 ? "" : line.slice(at + 1);
+      const existing = current?.variables.find((variable) => variable.name === key);
+      return { name: key, value, enabled: true, secret: existing?.secret ?? false };
+    });
+
+  const result = await window.jarvis.saveApiEnvironment(project, state.collectionPath, name, variables);
+  if (result.ok) await loadTree(state.collectionPath);
+}
+
+async function copyCurl(): Promise<void> {
+  const { project, request } = state;
+  if (project === undefined || request === undefined) return;
+  const result = await window.jarvis.apiCurl(project, request, variables());
+  if (!result.ok) return;
+  await navigator.clipboard?.writeText(result.value);
+  setStatus(MESSAGES.apiCopied(PRIMARY_LANGUAGE));
+}
+
+function setStatus(text: string): void {
+  $("api-status").textContent = text;
+}
+
+export function activeEditorTab(): string {
+  return currentTab();
 }

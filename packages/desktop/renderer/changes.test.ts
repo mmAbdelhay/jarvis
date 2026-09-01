@@ -63,6 +63,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     readApiRequest: vi.fn(async () => notStubbed),
     saveApiRequest: vi.fn(async () => notStubbed),
     sendApiRequest: vi.fn(async () => notStubbed),
+    apiCurl: vi.fn(async () => notStubbed),
     createApiRequest: vi.fn(async () => notStubbed),
     createApiFolder: vi.fn(async () => notStubbed),
     renameApiEntry: vi.fn(async () => notStubbed),

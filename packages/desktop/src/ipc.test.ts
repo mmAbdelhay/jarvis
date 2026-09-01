@@ -1246,6 +1246,14 @@ describe("api handlers", () => {
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests: () => ({ name: "Imported", requests: [] }),
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
+      evaluateAssertions: (assertions) =>
+        assertions.map((assertion) => ({
+          target: assertion.name ?? "",
+          expression: assertion.value ?? "",
+          passed: true,
+          actual: "200",
+        })),
+      toCurl: () => "curl 'http://h'",
       sendRequest: () =>
         Promise.resolve({
           status: 200,
@@ -1315,7 +1323,7 @@ describe("api handlers", () => {
 
     const result = await api.send("acme", { meta: {} }, {});
 
-    expect(result.ok && result.value).toMatchObject({ status: 200, timeMs: 5 });
+    expect(result.ok && result.value.response).toMatchObject({ status: 200, timeMs: 5 });
   });
 
   it("wraps a runner that throws behind one localised headline", async () => {
@@ -1353,6 +1361,8 @@ describe("api editing handlers", () => {
       createCollection: (root, name) => Promise.resolve(`${root}/${name}`),
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests: () => ({ name: "Imported", requests: [] }),
+      evaluateAssertions: () => [],
+      toCurl: () => "curl 'http://h'",
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
       projects: { acme: "/p/acme" },
       language: "en",

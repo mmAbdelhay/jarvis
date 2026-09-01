@@ -66,6 +66,7 @@ const api: RendererApi = {
   saveApiRequest: (project, path, json) => ipcRenderer.invoke("api:save", project, path, json),
   sendApiRequest: (project, request, variables) =>
     ipcRenderer.invoke("api:send", project, request, variables),
+  apiCurl: (project, request, variables) => ipcRenderer.invoke("api:curl", project, request, variables),
   createApiRequest: (project, folderPath, name, seq) =>
     ipcRenderer.invoke("api:createRequest", project, folderPath, name, seq),
   createApiFolder: (project, parentPath, name) =>

@@ -98,6 +98,27 @@ export const MESSAGES = {
     language === "ar"
       ? "لم تُنفَّذ السكربتات الخاصة بهذا الطلب."
       : "This request carries a script, which is not run here.",
+  apiNewRequest: (language: "ar" | "en"): string => (language === "ar" ? "طلب جديد" : "New request"),
+  apiNewFolder: (language: "ar" | "en"): string => (language === "ar" ? "مجلد جديد" : "New folder"),
+  apiNewCollection: (language: "ar" | "en"): string =>
+    language === "ar" ? "مجموعة جديدة" : "New collection",
+  apiImport: (language: "ar" | "en"): string =>
+    language === "ar" ? "استيراد من Postman" : "Import from Postman",
+  apiRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
+  apiDelete: (language: "ar" | "en"): string => (language === "ar" ? "حذف" : "Delete"),
+  apiConfirmDelete: (name: string, language: "ar" | "en"): string =>
+    language === "ar" ? `حذف ${name}؟` : `Delete ${name}?`,
+  apiCopyCurl: (language: "ar" | "en"): string => (language === "ar" ? "نسخ كـ cURL" : "Copy as cURL"),
+  apiCopied: (language: "ar" | "en"): string => (language === "ar" ? "تم النسخ" : "Copied"),
+  apiNoRequest: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر طلبًا من القائمة." : "Pick a request from the list.",
+  apiSending: (language: "ar" | "en"): string => (language === "ar" ? "جارٍ الإرسال…" : "Sending…"),
+  // Assertions are evaluated here; scripts are not. The two live in the same
+  // file and it must be clear which of them actually ran.
+  apiTestsPassed: (passed: number, total: number, language: "ar" | "en"): string =>
+    language === "ar" ? `نجح ${passed} من ${total}` : `${passed} of ${total} passed`,
+  apiNoTests: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد تحققات لهذا الطلب." : "This request has no assertions.",
   // The bookmark store's failures (a disk write that failed, mainly) —
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>

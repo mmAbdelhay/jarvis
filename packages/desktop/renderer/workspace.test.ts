@@ -46,16 +46,23 @@ function harness(): Recorded[] {
         <div id="workspace-terminal" hidden></div>
         <div id="workspace-api" hidden>
           <select id="api-collection"></select>
+          <button id="api-new-request"></button>
+          <button id="api-new-folder"></button>
+          <button id="api-new-collection"></button>
+          <button id="api-import"></button>
           <div id="api-tree"></div>
           <select id="api-method"></select>
           <input id="api-url" />
           <select id="api-environment"></select>
+          <button id="api-env-edit"></button>
           <button id="api-send"></button>
-          <button id="api-save"></button>
-          <div id="api-params"></div>
-          <div id="api-headers"></div>
-          <select id="api-body-mode"></select>
-          <textarea id="api-body"></textarea>
+          <button id="api-save"><span id="api-dirty" hidden></span></button>
+          <button id="api-curl"></button>
+          <span id="api-status"></span>
+          <div id="api-tabs"></div>
+          <div id="api-panel"></div>
+          <div id="api-response-tabs"></div>
+          <div id="api-response-head"></div>
           <div id="api-response"></div>
         </div>
       </div>
@@ -93,7 +100,15 @@ function harness(): Recorded[] {
     readApiTree: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     readApiRequest: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     saveApiRequest: () => Promise.resolve({ ok: true, value: undefined }),
-    sendApiRequest: () => Promise.resolve({ ok: true, value: undefined }),
+    sendApiRequest: () => Promise.resolve({ ok: true, value: { response: undefined, assertions: [] } }),
+    apiCurl: () => Promise.resolve({ ok: true, value: "curl" }),
+    createApiRequest: () => Promise.resolve({ ok: true, value: "" }),
+    createApiFolder: () => Promise.resolve({ ok: true, value: "" }),
+    renameApiEntry: () => Promise.resolve({ ok: true, value: "" }),
+    deleteApiEntry: () => Promise.resolve({ ok: true, value: undefined }),
+    createApiCollection: () => Promise.resolve({ ok: true, value: "" }),
+    saveApiEnvironment: () => Promise.resolve({ ok: true, value: "" }),
+    importPostmanCollection: () => Promise.resolve({ ok: true, value: "" }),
     attachTerminal: () => Promise.resolve(""),
     sendTerminalInput: record("sendTerminalInput"),
     resizeTerminal: record("resizeTerminal"),
