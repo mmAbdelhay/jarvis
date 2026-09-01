@@ -337,13 +337,16 @@ export function renderWorkspace(state: WorkspaceState): void {
 
   const tab = activeTab();
 
-  // Back/forward/reload/address mean nothing for a code editor — nobody
-  // navigates it like a webpage, and neither do bookmarks: the sidebar
-  // belongs to the browser, so it goes away with the rest of the browser
-  // chrome while the editor is the active tab.
-  const editing = tab?.kind === "editor";
-  ($("workspace-bar") as HTMLElement).hidden = editing;
-  ($("workspace-bookmarks") as HTMLElement).hidden = editing;
+  // Back/forward/reload/address mean nothing for a hosted app — nobody
+  // navigates a code editor or a SQL client like a webpage — and neither do
+  // bookmarks: the sidebar belongs to the browser, so it goes away with the
+  // rest of the browser chrome. Stated as "not a web tab" rather than as a
+  // list of kinds, so a fourth hosted app inherits the rule for free. With
+  // no tab open at all the chrome stays: that is the state where the
+  // sidebar is the quickest way to open something.
+  const hostedApp = tab !== undefined && tab.kind !== "web";
+  ($("workspace-bar") as HTMLElement).hidden = hostedApp;
+  ($("workspace-bookmarks") as HTMLElement).hidden = hostedApp;
 
   const address = $("workspace-address") as HTMLInputElement;
   // Never overwrite what the user is in the middle of typing.

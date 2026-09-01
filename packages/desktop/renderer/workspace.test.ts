@@ -259,6 +259,20 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(false);
   });
 
+  // A DbGate tab is a hosted app like the editor: neither the address bar
+  // nor the bookmarks sidebar means anything over it.
+  it("hides the address bar when the active tab is a database", () => {
+    renderWorkspace({ tabs: [tab({ kind: "database" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("hides the bookmarks sidebar when the active tab is a database", () => {
+    renderWorkspace({ tabs: [tab({ kind: "database" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(true);
+  });
+
   // "+" has a fixed spot in the workspace head — it is never relocated by
   // renderWorkspace, regardless of how many tabs are open or what kind the
   // active one is.
