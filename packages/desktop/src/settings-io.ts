@@ -53,6 +53,10 @@ export function toRawConfig(config: JarvisConfig): unknown {
     agents: config.registry.agents,
     routing: config.registry.routing ?? [],
     projects: config.projects,
+    // Written only when there is something to write: an empty `databases:
+    // {}` key in a file that never had one is noise in a config that is
+    // still hand-edited, and parseConfig treats absent and empty alike.
+    ...(Object.keys(config.databases ?? {}).length === 0 ? {} : { databases: config.databases }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

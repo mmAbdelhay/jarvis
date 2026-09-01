@@ -168,3 +168,39 @@ describe("writeSettingsFile", () => {
     expect(entries.some((name) => name.startsWith("jarvis.yaml.bak-"))).toBe(false);
   });
 });
+
+describe("databases round-trip", () => {
+  it("keeps a project's connections through validateDraft", () => {
+    const withDatabases: JarvisConfig = {
+      ...draft,
+      databases: {
+        acme: [{ id: "main", engine: "mysql", host: "127.0.0.1", port: 3306 }],
+      },
+    };
+
+    const validated = validateDraft(withDatabases);
+
+    expect(validated.ok).toBe(true);
+    expect(validated.ok && validated.value.databases["acme"]).toEqual([
+      { id: "main", engine: "mysql", host: "127.0.0.1", port: 3306 },
+    ]);
+  });
+
+  it("omits the databases key entirely when there are no connections", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect("databases" in raw).toBe(false);
+  });
+
+  it("writes the section to the file when there is one", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+
+    await writeSettingsFile(path, {
+      ...draft,
+      databases: { acme: [{ id: "main", engine: "mysql" }] },
+    });
+
+    expect(await readFile(path, "utf8")).toContain("databases:");
+  });
+});
