@@ -43,8 +43,11 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
-    <input id="settings-voice-en" />
-    <input id="settings-voice-ar" />
+    <select id="settings-voice-en"></select>
+    <button id="settings-voice-en-play"></button>
+    <select id="settings-voice-ar"></select>
+    <button id="settings-voice-ar-play"></button>
+    <div id="settings-voice-note"></div>
     <textarea id="settings-greeting-en"></textarea>
     <textarea id="settings-greeting-ar"></textarea>
     <input id="settings-whisper-binary" />
@@ -53,6 +56,17 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
   const calls: Recorded[] = [];
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
     getSettings: () => Promise.resolve(config),
+    listVoices: () =>
+      Promise.resolve([
+        { name: "Daniel", language: "en_GB", upgraded: false },
+        { name: "Daniel (Enhanced)", language: "en_GB", upgraded: true },
+        { name: "Samantha", language: "en_US", upgraded: false },
+        { name: "Majed", language: "ar_001", upgraded: false },
+      ]),
+    previewVoice: (...args: unknown[]) => {
+      calls.push({ call: "previewVoice", args });
+      return Promise.resolve();
+    },
     saveSettings: (draft: unknown) => {
       calls.push({ call: "saveSettings", args: [draft] });
       return Promise.resolve({ ok: true });
@@ -498,25 +512,90 @@ describe("databases section", () => {
 });
 
 describe("voice section", () => {
-  it("shows the configured voices and greetings", async () => {
+  /** Settings loads the voice list after its first render. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  }
+
+  it("offers the installed voices for each language", async () => {
     harness();
     initSettings();
     await openSettings();
+    await settle();
 
-    expect((document.getElementById("settings-voice-en") as HTMLInputElement).value).toBe("Daniel");
-    expect((document.getElementById("settings-voice-ar") as HTMLInputElement).value).toBe("Majed");
-    expect((document.getElementById("settings-greeting-en") as HTMLTextAreaElement).value).toContain(
-      "{timeOfDay}",
-    );
+    const english = [...document.querySelectorAll("#settings-voice-en option")].map((o) => o.textContent);
+    expect(english).toEqual(["Daniel · en_GB", "Daniel (Enhanced) · en_GB", "Samantha · en_US"]);
+
+    const arabic = [...document.querySelectorAll("#settings-voice-ar option")].map((o) => o.textContent);
+    expect(arabic).toEqual(["Majed · ar_001"]);
+  });
+
+  it("selects the configured voice", async () => {
+    harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe("Daniel");
+  });
+
+  // Opening Settings must not silently rewrite a configured voice to
+  // whatever happened to come first in the list.
+  it("keeps a configured voice that is not installed selectable", async () => {
+    const config = sample();
+    config.voice.englishVoice = "Oliver";
+    harness(config);
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const select = document.getElementById("settings-voice-en") as HTMLSelectElement;
+    expect(select.value).toBe("Oliver");
+    expect(select.options[0]?.textContent).toBe("Oliver (not installed)");
+  });
+
+  it("plays a sample in the selected voice", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    document.getElementById("settings-voice-en-play")?.click();
+
+    expect(calls).toContainEqual({ call: "previewVoice", args: ["Daniel", "en"] });
+  });
+
+  // The difference between a user who thinks the app sounds bad and one who
+  // knows there is a better voice a download away.
+  it("says how to get better voices when only compact ones are installed", async () => {
+    const { calls } = harness();
+    void calls;
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["listVoices"] = () =>
+      Promise.resolve([{ name: "Daniel", language: "en_GB", upgraded: false }]);
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect(document.getElementById("settings-voice-note")?.textContent).toContain("Manage Voices");
+  });
+
+  it("says nothing when an upgraded voice is already installed", async () => {
+    harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect(document.getElementById("settings-voice-note")?.textContent).toBe("");
   });
 
   it("saves an edited voice and greeting", async () => {
     const { calls } = harness();
     initSettings();
     await openSettings();
+    await settle();
 
-    const voice = document.getElementById("settings-voice-en") as HTMLInputElement;
-    voice.value = "Oliver";
+    const voice = document.getElementById("settings-voice-en") as HTMLSelectElement;
+    voice.value = "Daniel (Enhanced)";
     change(voice);
     const greeting = document.getElementById("settings-greeting-en") as HTMLTextAreaElement;
     greeting.value = "Evening, boss.";
@@ -526,7 +605,7 @@ describe("voice section", () => {
     await Promise.resolve();
 
     const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
-    expect(saved.voice.englishVoice).toBe("Oliver");
+    expect(saved.voice.englishVoice).toBe("Daniel (Enhanced)");
     expect(saved.voice.greeting.en).toBe("Evening, boss.");
   });
 });

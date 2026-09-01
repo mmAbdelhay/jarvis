@@ -71,6 +71,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     removeApiCookie: vi.fn(async () => notStubbed),
     apiSettings: vi.fn(async () => notStubbed),
     saveApiSettings: vi.fn(async () => notStubbed),
+    listVoices: vi.fn(async () => []),
+    previewVoice: vi.fn(async () => {}),
     pickFiles: vi.fn(async () => []),
     readJsonFile: vi.fn(async () => notStubbed),
     createApiRequest: vi.fn(async () => notStubbed),

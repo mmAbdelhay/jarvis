@@ -399,11 +399,19 @@
         <div class="lbl">VOICE</div>
         <div class="settings-field">
           <label for="settings-voice-en">english voice</label>
-          <input id="settings-voice-en" type="text" class="mono" autocomplete="off" />
+          <div class="settings-voice-pick">
+            <select id="settings-voice-en" class="mono"></select>
+            <button id="settings-voice-en-play" class="settings-add" type="button"
+                    aria-label="Hear this voice">&#9654; play</button>
+          </div>
         </div>
         <div class="settings-field">
           <label for="settings-voice-ar">arabic voice</label>
-          <input id="settings-voice-ar" type="text" class="mono" autocomplete="off" />
+          <div class="settings-voice-pick">
+            <select id="settings-voice-ar" class="mono"></select>
+            <button id="settings-voice-ar-play" class="settings-add" type="button"
+                    aria-label="Hear this voice">&#9654; play</button>
+          </div>
         </div>
         <div class="settings-field settings-field--wide">
           <label for="settings-greeting-en">greeting (english)</label>
@@ -413,6 +421,7 @@
           <label for="settings-greeting-ar">greeting (arabic)</label>
           <textarea id="settings-greeting-ar" class="mono"></textarea>
         </div>
+        <div id="settings-voice-note" class="settings-note"></div>
         <div class="settings-note">
           <code>{timeOfDay}</code> becomes morning, afternoon or evening.
           <code>{ready}</code>, <code>{lastSession}</code> and <code>{uncommitted}</code>

@@ -52,6 +52,9 @@ import {
   writeRequest,
   createRealDbGateSpawner,
   createSqliteSessionStore,
+  defaultSpeechRunner,
+  listInstalledVoices,
+  defaultVoiceLister,
   randomPassword,
   findFreePort,
   readStatusPage,
@@ -103,6 +106,14 @@ function setDockIcon(): void {
   }
 }
 
+/** What a voice preview says. The greeting itself, so the sample is the
+ *  sentence the user will actually hear every morning rather than a neutral
+ *  line that hides how the voice handles it. */
+const VOICE_SAMPLE = {
+  en: "Good evening sir, how can I help you today?",
+  ar: "مساء الخير يا سيدي، كيف أقدر أساعدك اليوم؟",
+};
+
 app.whenReady().then(async () => {
   setDockIcon();
   try {
@@ -148,10 +159,11 @@ app.whenReady().then(async () => {
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
     const sessions = new SessionManager(createPtySpawner(), sessionStore);
-    const speech = new MacSpeech({
-      arabicVoice: config.voice.arabicVoice,
-      englishVoice: config.voice.englishVoice,
-    });
+    const speech = new MacSpeech(
+      { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
+      defaultSpeechRunner,
+      defaultVoiceLister,
+    );
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -669,6 +681,16 @@ app.whenReady().then(async () => {
         variables as Record<string, string>,
       ),
     );
+    ipcMain.handle("voice:list", () => listInstalledVoices());
+    // The sample is spoken through the same MacSpeech the app uses, so a
+    // preview sounds exactly like the thing being chosen — including the
+    // Enhanced upgrade, which is the whole point of listening first.
+    ipcMain.handle("voice:preview", (_event, name: unknown, language: unknown) => {
+      if (typeof name !== "string" || name.trim() === "") return;
+      const spoken = language === "ar" ? VOICE_SAMPLE.ar : VOICE_SAMPLE.en;
+      const preview = new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner);
+      void preview.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
+    });
     ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
     ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
     ipcMain.handle("api:cookies", (_event, p: unknown) => api.cookies(p as string));
@@ -955,6 +977,10 @@ app.whenReady().then(async () => {
     // the thing a person opening the app is owed, and the health probe takes
     // up to 5s. Spoken as well as shown — the same string, so the two can
     // never drift — and this is the only place the app speaks unprompted.
+    // The listing that upgrades a compact voice to its Enhanced variant is a
+    // process spawn; waiting for it here means the first thing the app says
+    // already sounds like the voice the user chose.
+    await speech.ready;
     const greeting = greetingText(
       {
         now: Date.now(),

@@ -31,6 +31,11 @@ export async function openSettings(): Promise<void> {
   clearSaveStatus();
   draft = await window.jarvis.getSettings();
   renderSettings();
+  // Re-read every time rather than once: a voice installed in System
+  // Settings while Jarvis is open should appear the next time this route is
+  // opened, not the next time the app restarts. After the first render, so
+  // the section appears immediately and fills in when the listing arrives.
+  void loadVoices();
 }
 
 function renderSettings(): void {
@@ -566,12 +571,75 @@ function renderBrain(): void {
 
 // ------------------------------------------------------------------ Voice
 
+/** Every installed voice, read once when Settings first opens. */
+let installedVoices: { name: string; language: string; upgraded: boolean }[] = [];
+
 function renderVoice(): void {
   if (draft === undefined) return;
-  ($("settings-voice-en") as HTMLInputElement).value = draft.voice.englishVoice;
-  ($("settings-voice-ar") as HTMLInputElement).value = draft.voice.arabicVoice;
+  fillVoiceSelect("settings-voice-en", "en", draft.voice.englishVoice);
+  fillVoiceSelect("settings-voice-ar", "ar", draft.voice.arabicVoice);
   ($("settings-greeting-en") as HTMLTextAreaElement).value = draft.voice.greeting.en;
   ($("settings-greeting-ar") as HTMLTextAreaElement).value = draft.voice.greeting.ar;
+  renderVoiceNote();
+}
+
+/**
+ * macOS ships every voice in a compact form and offers Enhanced and Premium
+ * downloads for many of them; the compact ones are the robotic-sounding
+ * originals. Saying so here is the difference between a user who thinks the
+ * app sounds bad and one who knows there is a better voice a download away.
+ */
+function renderVoiceNote(): void {
+  const note = $("settings-voice-note");
+  note.replaceChildren();
+  if (installedVoices.length === 0) return;
+  if (installedVoices.some((voice) => voice.upgraded)) return;
+
+  note.textContent =
+    "Every installed voice is the compact version, which is why they sound synthetic. " +
+    "System Settings → Accessibility → Spoken Content → System Voice → Manage Voices " +
+    "downloads the Enhanced ones; Jarvis picks the better version up on its own.";
+}
+
+/** The voices worth offering for a language: its own, then everything else,
+ *  since a name that is not in the list at all cannot be chosen back. */
+function fillVoiceSelect(id: string, language: "ar" | "en", current: string): void {
+  const select = $(id) as HTMLSelectElement;
+  const prefix = language === "ar" ? "ar" : "en";
+
+  const matching = installedVoices.filter((voice) => voice.language.startsWith(prefix));
+  const names = matching.map((voice) => voice.name);
+  // A configured voice that is not installed still has to be selectable, or
+  // opening Settings would silently rewrite it to whatever came first.
+  if (current !== "" && !names.includes(current)) names.unshift(current);
+
+  select.replaceChildren();
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.value = name;
+    const voice = matching.find((entry) => entry.name === name);
+    option.textContent =
+      voice === undefined ? `${name} (not installed)` : `${name} · ${voice.language}`;
+    select.append(option);
+  }
+  select.value = current;
+}
+
+async function loadVoices(): Promise<void> {
+  try {
+    installedVoices = await window.jarvis.listVoices();
+  } catch {
+    // Without a listing the selects still hold the configured names; the
+    // section degrades to what it was before rather than breaking.
+    installedVoices = [];
+  }
+  renderVoice();
+}
+
+function previewVoice(id: string, language: "ar" | "en"): void {
+  const name = ($(id) as HTMLSelectElement).value;
+  if (name === "") return;
+  void window.jarvis.previewVoice(name, language);
 }
 
 // ---------------------------------------------------------------- Whisper
@@ -638,14 +706,16 @@ function wireStaticFields(): void {
 
   $("settings-voice-en").addEventListener("change", () => {
     if (draft === undefined) return;
-    draft.voice.englishVoice = ($("settings-voice-en") as HTMLInputElement).value;
+    draft.voice.englishVoice = ($("settings-voice-en") as HTMLSelectElement).value;
     clearSaveStatus();
   });
   $("settings-voice-ar").addEventListener("change", () => {
     if (draft === undefined) return;
-    draft.voice.arabicVoice = ($("settings-voice-ar") as HTMLInputElement).value;
+    draft.voice.arabicVoice = ($("settings-voice-ar") as HTMLSelectElement).value;
     clearSaveStatus();
   });
+  $("settings-voice-en-play").addEventListener("click", () => previewVoice("settings-voice-en", "en"));
+  $("settings-voice-ar-play").addEventListener("click", () => previewVoice("settings-voice-ar", "ar"));
   $("settings-greeting-en").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.voice.greeting.en = ($("settings-greeting-en") as HTMLTextAreaElement).value;

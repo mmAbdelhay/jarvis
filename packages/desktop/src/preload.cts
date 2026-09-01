@@ -75,6 +75,8 @@ const api: RendererApi = {
     ipcRenderer.invoke("api:removeCookie", project, name, domain, path),
   apiSettings: (project) => ipcRenderer.invoke("api:settings", project),
   saveApiSettings: (project, settings) => ipcRenderer.invoke("api:saveSettings", project, settings),
+  listVoices: () => ipcRenderer.invoke("voice:list"),
+  previewVoice: (name, language) => ipcRenderer.invoke("voice:preview", name, language),
   pickFiles: (options) => ipcRenderer.invoke("dialog:pickFiles", options),
   readJsonFile: (path) => ipcRenderer.invoke("dialog:readJson", path),
   createApiRequest: (project, folderPath, name, seq) =>

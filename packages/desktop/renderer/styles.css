@@ -1897,3 +1897,7 @@
   font-family: var(--font-mono);
   color: var(--accent-text);
 }
+
+
+.settings-voice-pick { display: flex; align-items: center; gap: var(--s2); flex-grow: 1; }
+.settings-voice-pick select { flex-grow: 1; }

@@ -85,6 +85,14 @@ the default is a greeting, not a status report, and putting the report back is
 a matter of typing a placeholder. A line whose only placeholder has nothing to
 say is dropped rather than left blank.
 
+**macOS voices are compact by default, and compact voices sound robotic.**
+Enhanced and Premium versions are separate downloads: System Settings →
+Accessibility → Spoken Content → System Voice → Manage Voices. Jarvis picks the
+better version up on its own — a config that says `Daniel` uses
+`Daniel (Enhanced)` the moment it exists, with no second edit. The Voice
+section of Settings lists what is installed with a **play** button, and says so
+when only compact voices are present.
+
 **An unknown voice name fails quietly.** macOS's `say` falls back to the system
 default rather than erroring, so a typo in `englishVoice` sounds like the
 setting did nothing.

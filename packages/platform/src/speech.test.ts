@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MacSpeech } from "./speech.js";
+import { bestVariant, parseVoiceList, MacSpeech } from "./speech.js";
 import type { SpeechRunner } from "./speech.js";
 
 function fakeRunner() {
@@ -225,5 +225,126 @@ describe("defaultSpeechRunner", () => {
     const utterance = defaultSpeechRunner("this-command-does-not-exist-jarvis-test", []);
     const result = await utterance.done;
     expect(result.code).not.toBe(0);
+  });
+});
+
+describe("bestVariant", () => {
+  // macOS ships every voice compact and offers Enhanced and Premium as
+  // downloads. The compact one is the robotic original, and a config that
+  // says "Daniel" would keep using it forever.
+  it("prefers an installed Enhanced voice over the compact one", () => {
+    expect(bestVariant("Daniel", ["Daniel", "Daniel (Enhanced)", "Karen"])).toBe(
+      "Daniel (Enhanced)",
+    );
+  });
+
+  it("prefers Premium over Enhanced, as macOS ranks them", () => {
+    expect(bestVariant("Daniel", ["Daniel", "Daniel (Enhanced)", "Daniel (Premium)"])).toBe(
+      "Daniel (Premium)",
+    );
+  });
+
+  it("keeps the compact voice when nothing better is installed", () => {
+    expect(bestVariant("Daniel", ["Daniel", "Karen"])).toBe("Daniel");
+  });
+
+  // A name that is not installed at all is passed through: `say` falls back
+  // to the system default, and rewriting it here would hide the mistake.
+  it("passes an unknown name through untouched", () => {
+    expect(bestVariant("Oliver", ["Daniel"])).toBe("Oliver");
+  });
+
+  it("does not match a different voice that merely starts the same", () => {
+    expect(bestVariant("Dan", ["Daniel (Enhanced)"])).toBe("Dan");
+  });
+});
+
+describe("parseVoiceList", () => {
+  it("reads the names out of say's own listing", () => {
+    const output = [
+      "Daniel              en_GB    # Hello! My name is Daniel.",
+      "Daniel (Enhanced)   en_GB    # Hello! My name is Daniel.",
+      "Majed               ar_001   # مرحبًا! اسمي ماجد.",
+    ].join("\n");
+
+    expect(parseVoiceList(output)).toEqual(["Daniel", "Daniel (Enhanced)", "Majed"]);
+  });
+
+  it("survives an empty listing", () => {
+    expect(parseVoiceList("")).toEqual([]);
+  });
+});
+
+describe("MacSpeech voice resolution", () => {
+  function harness(installed: string[]) {
+    const args: string[][] = [];
+    const speech = new MacSpeech(
+      { arabicVoice: "Majed", englishVoice: "Daniel" },
+      (_command, given) => {
+        args.push(given);
+        return { kill: () => {}, done: Promise.resolve({ code: 0 }) };
+      },
+      async () => installed,
+    );
+    return { speech, args };
+  }
+
+  it("speaks with the best installed variant", async () => {
+    const { speech, args } = harness(["Daniel", "Daniel (Enhanced)", "Majed"]);
+    await speech.ready;
+
+    await speech.speak("hello", "en");
+
+    expect(args[0]).toEqual(["-v", "Daniel (Enhanced)", "hello"]);
+  });
+
+  it("resolves Arabic the same way", async () => {
+    const { speech, args } = harness(["Majed", "Majed (Enhanced)"]);
+    await speech.ready;
+
+    await speech.speak("مرحبا", "ar");
+
+    expect(args[0]).toEqual(["-v", "Majed (Enhanced)", "مرحبا"]);
+  });
+
+  // Listing voices is an optimisation, not a requirement.
+  it("uses the configured name when the listing fails", async () => {
+    const args: string[][] = [];
+    const speech = new MacSpeech(
+      { arabicVoice: "Majed", englishVoice: "Daniel" },
+      (_command, given) => {
+        args.push(given);
+        return { kill: () => {}, done: Promise.resolve({ code: 0 }) };
+      },
+      async () => {
+        throw new Error("say is missing");
+      },
+    );
+    await speech.ready;
+
+    await speech.speak("hello", "en");
+
+    expect(args[0]).toEqual(["-v", "Daniel", "hello"]);
+  });
+
+  // Shelling out before every utterance would put a process spawn in front of
+  // every spoken word.
+  it("lists the voices once, however much it speaks", async () => {
+    let listings = 0;
+    const speech = new MacSpeech(
+      { arabicVoice: "Majed", englishVoice: "Daniel" },
+      () => ({ kill: () => {}, done: Promise.resolve({ code: 0 }) }),
+      async () => {
+        listings += 1;
+        return ["Daniel (Enhanced)"];
+      },
+    );
+
+    await speech.ready;
+    await speech.speak("one", "en");
+    await speech.speak("two", "en");
+    await speech.speak("three", "ar");
+
+    expect(listings).toBe(1);
   });
 });

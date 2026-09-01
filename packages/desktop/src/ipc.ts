@@ -32,6 +32,7 @@ import type {
   BrunoTree,
   CodeServerManager,
   DbGateManager,
+  InstalledVoice,
   ShellManager,
 } from "@jarvis/platform";
 import type { JarvisConfig } from "./config.js";
@@ -381,6 +382,11 @@ export type RendererApi = {
   removeApiCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
   apiSettings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveApiSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
+  /** Every installed macOS voice, for the Settings picker. */
+  listVoices(): Promise<InstalledVoice[]>;
+  /** Speaks a short sample in one voice, so a name can be chosen by ear
+   *  rather than by guessing what it sounds like. */
+  previewVoice(name: string, language: "ar" | "en"): Promise<void>;
   /** Opens a native file picker. Returns the chosen paths, or [] if the user
    *  cancelled — cancelling is not a failure. */
   pickFiles(options?: { multiple?: boolean }): Promise<string[]>;
