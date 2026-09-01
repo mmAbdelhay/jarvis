@@ -83,6 +83,21 @@ export const MESSAGES = {
   // underneath, same split as editorUnavailable.
   apiUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر تنفيذ الطلب." : "Could not run the request.",
+  apiNoCollections: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد مجموعات في هذا المشروع. أنشئ مجلدًا يحتوي على bruno.json."
+      : "No collections in this project. Create a folder containing bruno.json.",
+  apiDiscardEdits: (language: "ar" | "en"): string =>
+    language === "ar" ? "تجاهل التعديلات غير المحفوظة؟" : "Discard unsaved changes?",
+  apiUnresolved: (names: string, language: "ar" | "en"): string =>
+    language === "ar" ? `متغيرات بلا قيمة: ${names}` : `No value for: ${names}`,
+  // Scripts are preserved on save but never executed here, so a request that
+  // carries one behaves differently than it would under `bru run`. Saying so
+  // beats letting someone trust a green result.
+  apiScriptsNotRun: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم تُنفَّذ السكربتات الخاصة بهذا الطلب."
+      : "This request carries a script, which is not run here.",
   // The bookmark store's failures (a disk write that failed, mainly) —
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>

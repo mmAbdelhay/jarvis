@@ -1,5 +1,6 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { initApi, renderApi } from "./api.js";
 import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
 
 // Structurally the same shape the preload bridge and main process pass
@@ -347,6 +348,8 @@ export function initWorkspace(projects: string[]): void {
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
   $("workspace-open-terminal").addEventListener("click", () => void openTerminal());
+  $("workspace-open-api").addEventListener("click", () => void openApi());
+  initApi();
   initWorkspaceTerminals();
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
@@ -430,6 +433,31 @@ async function openTerminal(): Promise<void> {
   status.classList.remove("workspace-tool-status--error");
 
   const result = await window.jarvis.openTerminal(selectedProject());
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+  }
+}
+
+/** Opens the project's API tab, or activates the one it already has.
+ *
+ *  Unlike a terminal there is exactly one per project: a collection tree is
+ *  a view of the filesystem rather than a session, so a second tab would be
+ *  a duplicate of the first, not a second workspace. */
+async function openApi(): Promise<void> {
+  const project = selectedProject();
+
+  const existing = latest.tabs.find((tab) => tab.kind === "api" && tab.project === project);
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    return;
+  }
+
+  const status = $("workspace-tool-status");
+  status.textContent = "";
+  status.classList.remove("workspace-tool-status--error");
+
+  const result = await window.jarvis.openApiTab(project);
   if (!result.ok) {
     status.textContent = result.text;
     status.classList.add("workspace-tool-status--error");
@@ -556,6 +584,7 @@ export function renderWorkspace(state: WorkspaceState): void {
   ($("workspace-page") as HTMLElement).hidden =
     tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
+  renderApi(state.tabs, state.activeTabId, selected);
 
   // A closed tab takes its DevTools with it: main destroys the panel's view
   // along with the page's, so an id left here would resurrect a panel for a

@@ -22,6 +22,7 @@ function harness(): Recorded[] {
       <button id="workspace-open-editor"></button>
       <button id="workspace-open-database"></button>
       <button id="workspace-open-terminal"></button>
+      <button id="workspace-open-api"></button>
       <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
@@ -43,6 +44,20 @@ function harness(): Recorded[] {
         <div id="workspace-devtools-handle" hidden></div>
         <div id="workspace-devtools" hidden></div>
         <div id="workspace-terminal" hidden></div>
+        <div id="workspace-api" hidden>
+          <select id="api-collection"></select>
+          <div id="api-tree"></div>
+          <select id="api-method"></select>
+          <input id="api-url" />
+          <select id="api-environment"></select>
+          <button id="api-send"></button>
+          <button id="api-save"></button>
+          <div id="api-params"></div>
+          <div id="api-headers"></div>
+          <select id="api-body-mode"></select>
+          <textarea id="api-body"></textarea>
+          <div id="api-response"></div>
+        </div>
       </div>
     </div>`;
 
@@ -73,6 +88,12 @@ function harness(): Recorded[] {
         value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw-fixed" },
       }),
     openTerminal: record("openTerminal"),
+    openApiTab: record("openApiTab"),
+    listApiCollections: () => Promise.resolve({ ok: true, value: [] }),
+    readApiTree: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
+    readApiRequest: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
+    saveApiRequest: () => Promise.resolve({ ok: true, value: undefined }),
+    sendApiRequest: () => Promise.resolve({ ok: true, value: undefined }),
     attachTerminal: () => Promise.resolve(""),
     sendTerminalInput: record("sendTerminalInput"),
     resizeTerminal: record("resizeTerminal"),
@@ -1089,5 +1110,62 @@ describe("devtools panel", () => {
     window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
 
     expect(panel().style.height).not.toBe(before);
+  });
+});
+
+describe("open the API tab", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  it("opens an api tab for the selected project", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-open-api")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openApiTab", args: ["acme"] });
+  });
+
+  // One per project: a collection tree is a view of the filesystem, not a
+  // session, so a second tab would be a duplicate of the first.
+  it("activates the existing api tab instead of opening a second", async () => {
+    renderWorkspace({ tabs: [tab({ id: "tab-5", kind: "api", url: "" })], activeTabId: "tab-5" });
+
+    document.getElementById("workspace-open-api")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-5"] });
+    expect(calls.some((entry) => entry.call === "openApiTab")).toBe(false);
+  });
+
+  it("opens one when the existing api tab belongs to another project", async () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-5", kind: "api", project: "storefront", url: "" })],
+      activeTabId: "tab-5",
+    });
+
+    document.getElementById("workspace-open-api")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openApiTab", args: ["acme"] });
+  });
+
+  it("shows a localised failure in the shared status line", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    jarvis["openApiTab"] = () =>
+      Promise.resolve({ ok: false, text: "I don't know a project by that name.", language: "en" });
+
+    document.getElementById("workspace-open-api")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "I don't know a project by that name.",
+    );
   });
 });

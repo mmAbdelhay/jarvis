@@ -921,6 +921,93 @@
   .workspace-devtools-handle:hover { background: var(--accent); }
   .workspace-devtools-handle[hidden] { display: none; }
 
+  /* The API tab: a sidebar of collections beside the request editor and its
+     response, sharing the page slot's region the same way the terminal does. */
+  .workspace-api { display: flex; flex-direction: row; flex-grow: 1; min-height: 0; }
+  .workspace-api[hidden] { display: none; }
+  .workspace-api-sidebar {
+    width: 230px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .workspace-api-main {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .api-tree { display: flex; flex-direction: column; gap: 2px; }
+  .api-group { padding-left: 10px; border-left: 1px solid var(--border); }
+  .api-folder { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+  .api-request {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .api-request:hover { background: var(--panel); }
+  .api-request--on { background: var(--panel); color: var(--accent); }
+  .api-request-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .api-method { font-size: 10px; width: 42px; flex-shrink: 0; color: var(--text-muted); }
+  .api-method--get { color: var(--good); }
+  .api-method--post { color: var(--accent); }
+  .api-method--put, .api-method--patch { color: var(--warn, #d9a85a); }
+  .api-method--delete { color: var(--del); }
+  .api-empty { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+
+  .api-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .api-editor {
+    padding: 10px 14px;
+    overflow-y: auto;
+    flex-shrink: 0;
+    max-height: 45%;
+  }
+  .api-pairs { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 12px; }
+  .api-pair { display: flex; gap: 6px; align-items: center; }
+  .api-pair input {
+    flex-grow: 1;
+    min-width: 0;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+  }
+  .api-pair-remove { color: var(--text-muted); cursor: pointer; }
+  .api-pair-remove:hover { color: var(--del); }
+  .api-body-row { display: flex; align-items: center; gap: 8px; }
+  #api-body {
+    width: 100%;
+    min-height: 120px;
+    margin-top: 6px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px;
+  }
+
+  .api-response { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; }
+  .api-response-head { font-size: 12px; color: var(--good); }
+  .api-response-head--bad { color: var(--del); }
+  .api-response-head--failed { color: var(--del); }
+  .api-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .api-response-body { margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
   .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
@@ -1761,6 +1848,8 @@
               style="width: auto; padding: 0 12px;" title="Browse the project's databases">Database</button>
       <button id="workspace-open-terminal" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Open a shell in the project's directory">Terminal</button>
+      <button id="workspace-open-api" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 12px;" title="Send requests from the project's collections">API</button>
       <button id="workspace-toggle-bookmarks" class="workspace-nav" type="button"
               title="Show or hide the bookmarks sidebar">&#9776;</button>
       <span id="workspace-tool-status" class="mono"></span>
@@ -1796,6 +1885,38 @@
              here, in the renderer's own DOM, over the same region a hosted
              page would occupy. Hidden unless a terminal tab is active. -->
         <div id="workspace-terminal" class="workspace-terminal" hidden></div>
+        <!-- The API tab. Like the terminal it has no hosted view; the whole
+             surface is drawn by the renderer over the page slot's region. -->
+        <div id="workspace-api" class="workspace-api" hidden>
+          <div class="workspace-api-sidebar">
+            <select id="api-collection" class="workspace-project mono"></select>
+            <div id="api-tree" class="api-tree"></div>
+          </div>
+          <div class="workspace-api-main">
+            <div class="api-bar">
+              <select id="api-method" class="mono"></select>
+              <input id="api-url" class="workspace-address mono" type="text" dir="ltr"
+                     autocomplete="off" spellcheck="false" placeholder="https://" />
+              <select id="api-environment" class="mono"></select>
+              <button id="api-send" class="workspace-nav" type="button"
+                      style="width: auto; padding: 0 12px;">Send</button>
+              <button id="api-save" class="workspace-nav" type="button"
+                      style="width: auto; padding: 0 12px;" disabled>Save</button>
+            </div>
+            <div class="api-editor">
+              <div class="lbl">PARAMS</div>
+              <div id="api-params" class="api-pairs"></div>
+              <div class="lbl">HEADERS</div>
+              <div id="api-headers" class="api-pairs"></div>
+              <div class="api-body-row">
+                <div class="lbl">BODY</div>
+                <select id="api-body-mode" class="mono"></select>
+              </div>
+              <textarea id="api-body" class="mono" spellcheck="false" hidden></textarea>
+            </div>
+            <div id="api-response" class="api-response"></div>
+          </div>
+        </div>
       </div>
     </div>
 
