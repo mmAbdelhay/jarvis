@@ -64,6 +64,27 @@ const VARIABLE = /\{\{\s*([^}\s]+)\s*\}\}/g;
  *  rather than running until the timeout. */
 const MAX_REDIRECTS = 10;
 
+/** Anything that looks like a host, so a URL typed without a scheme can be
+ *  given one rather than refused. */
+const HOSTLIKE = /^[\w.-]+(:\d+)?(\/|$|\?)/;
+const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$|\?)/;
+
+/**
+ * Supplies a missing scheme. The Workspace's address bar already accepts
+ * `github.com`, and an API URL should not be the one place that refuses it.
+ * Loopback gets http, because a development server rarely has a certificate.
+ */
+export function withScheme(url: string): string {
+  // `localhost:8000` is a host and a port, not a scheme — the two are
+  // indistinguishable by shape alone, so a colon followed by digits settles
+  // it before the scheme test gets a chance to be wrong.
+  const isHostPort = /^[a-zA-Z][a-zA-Z0-9+.-]*:\d/.test(url);
+  if (!isHostPort && /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return url;
+  if (LOOPBACK.test(url)) return `http://${url}`;
+  if (HOSTLIKE.test(url)) return `https://${url}`;
+  return url;
+}
+
 function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
@@ -113,7 +134,7 @@ export async function sendRequest(
   const method = (http.method ?? "get").toUpperCase();
 
   let url: URL;
-  const resolvedUrl = resolve(http.url ?? "");
+  const resolvedUrl = withScheme(resolve(http.url ?? "").trim());
   try {
     url = new URL(resolvedUrl);
   } catch {
@@ -133,13 +154,16 @@ export async function sendRequest(
   for (const param of (request["params"] as Pair[] | undefined) ?? []) {
     const type = (param as { type?: string }).type;
     if (param.enabled === false || (type !== undefined && type !== "query")) continue;
-    if (param.name === undefined) continue;
+    // A row with no name is half-typed, not a parameter. Sending it makes
+    // fetch reject the whole request for a reason that has nothing to do
+    // with what the user was doing.
+    if (param.name === undefined || param.name.trim() === "") continue;
     url.searchParams.append(resolve(param.name), resolve(param.value ?? ""));
   }
 
   const headers: Record<string, string> = {};
   for (const header of (request["headers"] as Pair[] | undefined) ?? []) {
-    if (header.enabled === false || header.name === undefined) continue;
+    if (header.enabled === false || header.name === undefined || header.name.trim() === "") continue;
     headers[resolve(header.name)] = resolve(header.value ?? "");
   }
 
@@ -159,7 +183,11 @@ export async function sendRequest(
   const hasOwnCookie = Object.keys(headers).some((name) => name.toLowerCase() === "cookie");
   if (jarHeader !== "" && !hasOwnCookie) headers["Cookie"] = jarHeader;
 
-  const body = await buildBody(request, http.body, headers, resolve, deps);
+  // fetch refuses a body on GET or HEAD outright, so a request whose method
+  // was changed from POST — leaving the body mode behind — would fail for a
+  // reason that has nothing to do with what the user changed.
+  const carriesBody = method !== "GET" && method !== "HEAD";
+  const body = carriesBody ? await buildBody(request, http.body, headers, resolve, deps) : undefined;
 
   const settings = (request["settings"] ?? {}) as { timeout?: number };
   const network: NetworkOptions = {
@@ -318,7 +346,7 @@ async function buildBody(
     defaultContentType("application/x-www-form-urlencoded");
     const form = new URLSearchParams();
     for (const field of (body["formUrlEncoded"] as Pair[] | undefined) ?? []) {
-      if (field.enabled === false || field.name === undefined) continue;
+      if (field.enabled === false || field.name === undefined || field.name.trim() === "") continue;
       form.append(resolve(field.name), resolve(field.value ?? ""));
     }
     return form.toString();
@@ -349,7 +377,7 @@ async function buildBody(
     }
     const form = new (deps.multipart?.FormData ?? FormData)();
     for (const field of ((body["multipartForm"] as MultipartField[] | undefined) ?? [])) {
-      if (field.enabled === false || field.name === undefined) continue;
+      if (field.enabled === false || field.name === undefined || field.name.trim() === "") continue;
       const name = resolve(field.name);
 
       if (field.type === "file") {

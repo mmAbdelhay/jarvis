@@ -161,6 +161,98 @@ describe("sendRequest", () => {
     expect(headers["X-Off"]).toBeUndefined();
   });
 
+  // The editor's "+ add" creates exactly this row. Sending it made the whole
+  // request fail with "Headers.append: \"\" is an invalid header name".
+  it("skips a half-typed header rather than failing the request", async () => {
+    const { captured, deps } = harness();
+
+    const result = await sendRequest(
+      get({ headers: [{ name: "", value: "x", enabled: true }, { name: "Accept", value: "json", enabled: true }] }),
+      { base: "http://h" },
+      deps,
+    );
+
+    expect("failed" in result).toBe(false);
+    expect(captured[0]?.init.headers).toEqual({ Accept: "json" });
+  });
+
+  it("skips a param and a form field with no name too", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/x", body: "formUrlEncoded", auth: "none" },
+        params: [{ name: "", value: "1", type: "query", enabled: true }],
+        body: { formUrlEncoded: [{ name: "", value: "1", enabled: true }] },
+      },
+      {},
+      deps,
+    );
+
+    expect(captured[0]?.url).toBe("http://h/x");
+    expect(captured[0]?.init.body).toBe("");
+  });
+
+  // Switching a POST to a GET leaves the body mode behind; fetch refuses the
+  // combination outright, so the request would fail for a reason that has
+  // nothing to do with what the user changed.
+  it("never sends a body with GET or HEAD", async () => {
+    const { captured, deps } = harness();
+
+    const result = await sendRequest(
+      { ...get(), http: { method: "get", url: "http://h", body: "json", auth: "none" }, body: { json: "{}" } },
+      {},
+      deps,
+    );
+
+    expect("failed" in result).toBe(false);
+    expect(captured[0]?.init.body).toBeUndefined();
+  });
+
+  // The Workspace address bar accepts github.com; an API URL should not be
+  // the one place that refuses it.
+  it("assumes https for a URL written without a scheme", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: "httpbin.org/get", body: "none", auth: "none" } },
+      {},
+      deps,
+    );
+
+    expect(captured[0]?.url).toBe("https://httpbin.org/get");
+  });
+
+  it("assumes http for localhost, which rarely has a certificate", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: "localhost:8000/api", body: "none", auth: "none" } },
+      {},
+      deps,
+    );
+
+    expect(captured[0]?.url).toBe("http://localhost:8000/api");
+  });
+
+  // A scheme is still a scheme, and a host:port is not one.
+  it.each([
+    ["https://api.test/x", "https://api.test/x"],
+    ["http://api.test/x", "http://api.test/x"],
+    ["api.test:8443/x", "https://api.test:8443/x"],
+  ])("leaves %s as %s", async (input, expected) => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: input, body: "none", auth: "none" } },
+      {},
+      deps,
+    );
+
+    expect(captured[0]?.url).toBe(expected);
+  });
+
   it("sets bearer auth from the request", async () => {
     const { captured, deps } = harness();
 

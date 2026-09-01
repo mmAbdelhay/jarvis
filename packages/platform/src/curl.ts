@@ -1,4 +1,4 @@
-import { interpolate } from "./http-runner.js";
+import { interpolate, withScheme } from "./http-runner.js";
 
 // "Copy as cURL": the request as a command someone else can run.
 //
@@ -27,16 +27,18 @@ export function toCurl(
   const parts: string[] = ["curl"];
   if (method !== "GET") parts.push("-X", method);
 
-  let url = resolve(http.url ?? "");
+  let url = withScheme(resolve(http.url ?? "").trim());
   const query = ((request["params"] as Pair[] | undefined) ?? [])
-    .filter((param) => param.enabled !== false && (param.type ?? "query") === "query" && param.name)
+    .filter(
+      (param) => param.enabled !== false && (param.type ?? "query") === "query" && (param.name ?? "").trim() !== "",
+    )
     .map((param) => `${encodeURIComponent(resolve(param.name ?? ""))}=${encodeURIComponent(resolve(param.value ?? ""))}`);
   if (query.length > 0) url += `${url.includes("?") ? "&" : "?"}${query.join("&")}`;
   parts.push(quote(url));
 
   for (const header of ((request["headers"] as Pair[] | undefined) ?? [])) {
-    if (header.enabled === false || header.name === undefined) continue;
-    parts.push("-H", quote(`${resolve(header.name)}: ${resolve(header.value ?? "")}`));
+    if (header.enabled === false || (header.name ?? "").trim() === "") continue;
+    parts.push("-H", quote(`${resolve(header.name ?? "")}: ${resolve(header.value ?? "")}`));
   }
 
   const auth = (request["auth"] ?? {}) as Record<string, Record<string, string>>;
