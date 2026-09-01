@@ -379,6 +379,33 @@ describe("api request editor", () => {
     expect((document.getElementById("api-body") as HTMLTextAreaElement).value).toBe('{\n  "a": 1\n}');
   });
 
+  // A format button that appears to do nothing is indistinguishable from a
+  // broken one.
+  it("says why a body is not JSON, and says when it is", async () => {
+    const module = await load();
+    await show(module);
+    await openFirst();
+    tabButton("api-tabs", "body")?.click();
+    const mode = document.getElementById("api-body-mode") as HTMLSelectElement;
+    mode.value = "json";
+    change(mode);
+
+    const area = document.getElementById("api-body") as HTMLTextAreaElement;
+    area.value = '{"a":';
+    change(area);
+    document.getElementById("api-format")?.click();
+
+    const status = document.getElementById("api-body-valid");
+    expect(status?.className).toBe("api-body-bad");
+    expect(status?.textContent).not.toBe("");
+
+    area.value = '{"a":1}';
+    change(area);
+    document.getElementById("api-format")?.click();
+
+    expect(document.getElementById("api-body-valid")?.className).toBe("api-body-ok");
+  });
+
   // Reformatting is a convenience; destroying something half-typed to
   // provide it would not be one.
   it("leaves an unparseable body alone when formatting", async () => {

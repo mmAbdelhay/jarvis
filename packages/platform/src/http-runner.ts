@@ -266,12 +266,43 @@ export async function sendRequest(
       unresolved,
     };
   } catch (error) {
-    return {
-      failed: true,
-      detail: error instanceof Error ? error.message : String(error),
-      timeMs: deps.now() - started,
-    };
+    return { failed: true, detail: failureDetail(error), timeMs: deps.now() - started };
   }
+}
+
+/**
+ * What actually went wrong.
+ *
+ * Node's fetch reports every transport failure as the word "fetch failed" and
+ * hides the reason — ECONNREFUSED, ENOTFOUND, a TLS error — on the error's
+ * `cause`. On screen that reads as a bug in the app rather than as a server
+ * that is not running.
+ */
+function failureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause === undefined || cause === null) return message;
+
+  const record = typeof cause === "object" ? (cause as Record<string, unknown>) : {};
+  // undici wraps a connection failure in an AggregateError whose own message
+  // is empty and whose reason is in `errors[0]` — without unwrapping it, the
+  // detail is a bare code and a dangling colon.
+  const nested = Array.isArray(record["errors"]) ? (record["errors"] as unknown[])[0] : undefined;
+  const messageOf = (value: unknown): string =>
+    typeof value === "object" && value !== null && typeof (value as { message?: unknown }).message === "string"
+      ? (value as { message: string }).message
+      : "";
+
+  const causeMessage = messageOf(cause) || messageOf(nested) || (typeof cause === "string" ? cause : "");
+  const code = typeof record["code"] === "string" ? record["code"] : undefined;
+
+  const detail =
+    causeMessage === ""
+      ? (code ?? "")
+      : code !== undefined && !causeMessage.includes(code)
+        ? `${code}: ${causeMessage}`
+        : causeMessage;
+  return detail === "" || detail === message ? message : `${message} — ${detail}`;
 }
 
 function applyAuth(

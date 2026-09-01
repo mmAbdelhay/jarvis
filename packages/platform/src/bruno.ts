@@ -140,8 +140,19 @@ async function readFolder(path: string, name: string, isRoot = false): Promise<B
   // Bruno orders by `seq`; ties fall back to the name so the tree is stable
   // rather than dependent on readdir's order.
   folder.requests.sort((a, b) => a.seq - b.seq || a.name.localeCompare(b.name));
-  folder.folders.sort((a, b) => a.name.localeCompare(b.name));
+  // A collection's bruno.json often sits at the root of an ordinary
+  // repository, so a plain walk of its directories lists src/, config/,
+  // __pycache__ and every other folder in the project as though they were
+  // part of the collection. A folder belongs in the tree only if there is a
+  // request somewhere inside it.
+  folder.folders = folder.folders
+    .filter(hasRequests)
+    .sort((a, b) => a.name.localeCompare(b.name));
   return folder;
+}
+
+function hasRequests(folder: BrunoFolder): boolean {
+  return folder.requests.length > 0 || folder.folders.some(hasRequests);
 }
 
 async function readRequestFile(path: string): Promise<BrunoRequestFile | undefined> {

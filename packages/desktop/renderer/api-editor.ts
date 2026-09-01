@@ -422,7 +422,17 @@ function bodyPanel(): HTMLElement {
     format.className = "settings-add";
     format.textContent = "format";
     format.addEventListener("click", () => formatJsonBody());
-    head.append(format);
+
+    // Whether the body is JSON at all, said out loud. A format button that
+    // does nothing is indistinguishable from a broken one, and a body that
+    // will be rejected by the server should say so before it is sent.
+    const status = document.createElement("span");
+    status.id = "api-body-valid";
+    const problem = jsonProblem(String(bodies()["json"] ?? ""));
+    status.className = problem === undefined ? "api-body-ok" : "api-body-bad";
+    status.textContent = problem ?? "valid JSON";
+
+    head.append(format, status);
   }
   panel.append(head);
 
@@ -568,17 +578,31 @@ function filePickerControl(current: string, onPick: (paths: string[]) => void): 
   return wrapper;
 }
 
+/** Why the body is not JSON, or undefined when it is. An empty body counts
+ *  as valid: there is nothing wrong with a request that carries none yet. */
+function jsonProblem(raw: string): string | undefined {
+  if (raw.trim() === "") return undefined;
+  try {
+    JSON.parse(raw);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : "not valid JSON";
+  }
+}
+
 /** Pretty-prints the JSON body in place. Invalid JSON is left exactly as it
- *  is: reformatting is a convenience, and destroying something half-typed to
- *  provide it would not be one. */
+ *  is — reformatting is a convenience, and destroying something half-typed to
+ *  provide it would not be one — but the reason is shown rather than the
+ *  button appearing to do nothing. */
 function formatJsonBody(): void {
   const raw = String(bodies()["json"] ?? "");
-  try {
-    setField("body", { ...bodies(), json: JSON.stringify(JSON.parse(raw), null, 2) });
+  const problem = jsonProblem(raw);
+  if (problem !== undefined || raw.trim() === "") {
     renderEditor();
-  } catch {
-    // Left alone on purpose.
+    return;
   }
+  setField("body", { ...bodies(), json: JSON.stringify(JSON.parse(raw), null, 2) });
+  renderEditor();
 }
 
 function docsPanel(): HTMLElement {

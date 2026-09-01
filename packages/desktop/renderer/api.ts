@@ -361,6 +361,7 @@ function folderNodes(folder: BrunoFolder, isRoot = false): HTMLElement[] {
     // A folder name comes from the filesystem: text, like everything else
     // this file builds.
     name.textContent = folder.name;
+    name.title = folder.name;
     row.append(name, entryActions(folder.path, folder.name, true));
     nodes.push(row);
   }
@@ -377,6 +378,8 @@ function folderNodes(folder: BrunoFolder, isRoot = false): HTMLElement[] {
     const name = document.createElement("span");
     name.className = "api-request-name";
     name.textContent = request.name;
+    // The sidebar truncates; the whole name has to be reachable somehow.
+    name.title = `${request.method} ${request.url}`;
 
     row.append(method, name, entryActions(request.path, request.name, false));
     nodes.push(row);
@@ -423,6 +426,9 @@ function entryActions(path: string, name: string, isFolder: boolean): HTMLElemen
 async function openRequest(path: string): Promise<void> {
   const project = state.project;
   if (project === undefined) return;
+  // A message from an earlier action (a failed import, say) must not sit
+  // there looking like it is about this one.
+  setStatus("");
   // Switching away from unsaved edits would lose them silently, which is the
   // one thing a request editor must never do.
   if (state.dirty && !window.confirm(MESSAGES.apiDiscardEdits(PRIMARY_LANGUAGE))) return;

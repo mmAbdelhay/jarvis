@@ -392,6 +392,72 @@ describe("sendRequest", () => {
     expect(result).toEqual({ failed: true, detail: "ECONNREFUSED", timeMs: 42 });
   });
 
+  // Node's fetch reports every transport failure as the word "fetch failed"
+  // and hides the reason on the error's cause. On screen that reads as a bug
+  // in the app rather than as a server that is not running.
+  it("says why a request failed, not just that it did", async () => {
+    const failure = new Error("fetch failed");
+    (failure as { cause?: unknown }).cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8000"), {
+      code: "ECONNREFUSED",
+    });
+    const { deps } = harness(failure);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps);
+
+    expect("failed" in result && result.detail).toBe(
+      "fetch failed — connect ECONNREFUSED 127.0.0.1:8000",
+    );
+  });
+
+  it("names the code when the cause does not repeat it", async () => {
+    const failure = new Error("fetch failed");
+    (failure as { cause?: unknown }).cause = Object.assign(new Error("Client network socket disconnected"), {
+      code: "ECONNRESET",
+    });
+    const { deps } = harness(failure);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps);
+
+    expect("failed" in result && result.detail).toContain("ECONNRESET:");
+  });
+
+  // undici wraps a refused connection in an AggregateError whose own message
+  // is empty; without unwrapping it the detail was a bare code and a dangling
+  // colon.
+  it("unwraps an AggregateError rather than printing a dangling code", async () => {
+    const failure = new Error("fetch failed");
+    (failure as { cause?: unknown }).cause = Object.assign(new AggregateError([], ""), {
+      code: "ECONNREFUSED",
+      errors: [new Error("connect ECONNREFUSED 127.0.0.1:8088")],
+    });
+    const { deps } = harness(failure);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps);
+
+    // The code is not repeated, because the message already carries it.
+    expect("failed" in result && result.detail).toBe(
+      "fetch failed — connect ECONNREFUSED 127.0.0.1:8088",
+    );
+  });
+
+  it("falls back to the code alone when nothing carries a message", async () => {
+    const failure = new Error("fetch failed");
+    (failure as { cause?: unknown }).cause = Object.assign(new Error(""), { code: "ENOTFOUND" });
+    const { deps } = harness(failure);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps);
+
+    expect("failed" in result && result.detail).toBe("fetch failed — ENOTFOUND");
+  });
+
+  it("leaves a failure with no cause exactly as it is", async () => {
+    const { deps } = harness(new Error("Something broke"));
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps);
+
+    expect("failed" in result && result.detail).toBe("Something broke");
+  });
+
   it("refuses a URL that is not a URL, without calling fetch", async () => {
     const { captured, deps } = harness();
 

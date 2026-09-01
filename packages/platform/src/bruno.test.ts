@@ -159,6 +159,34 @@ describe("readCollection", () => {
     expect(tree.root.requests.map((request) => request.name)).toEqual(["List orders"]);
   });
 
+  // A collection's bruno.json often sits at the root of an ordinary
+  // repository. Walking every directory listed src/, config/ and __pycache__
+  // as though they were part of the collection.
+  it("leaves out a folder that holds no requests at any depth", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+    await mkdir(join(path, "src", "__pycache__"), { recursive: true });
+    await mkdir(join(path, "docs"), { recursive: true });
+    await mkdir(join(path, "orders"), { recursive: true });
+    await writeFile(join(path, "orders", "list.bru"), REQUEST);
+
+    const tree = await readCollection(path);
+
+    expect(tree.root.folders.map((folder) => folder.name)).toEqual(["orders"]);
+  });
+
+  it("keeps a folder whose only requests are further down", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+    await mkdir(join(path, "v1", "orders"), { recursive: true });
+    await writeFile(join(path, "v1", "orders", "list.bru"), REQUEST);
+
+    const tree = await readCollection(path);
+
+    expect(tree.root.folders[0]?.name).toBe("v1");
+    expect(tree.root.folders[0]?.folders[0]?.requests[0]?.name).toBe("List orders");
+  });
+
   it("ignores the environments directory as a folder", async () => {
     const root = await project();
     const path = await collection(root, "api");
@@ -272,6 +300,9 @@ describe("collection editing", () => {
     const root = await project();
     const path = await collection(root, "api");
     await createFolder(path, "old");
+    // A folder with no requests is not shown at all, so it needs one to be
+    // findable in the tree afterwards.
+    await createRequest(join(path, "old"), "Inside", 1);
 
     const moved = await renameFolder(join(path, "old"), "new");
 
