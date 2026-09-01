@@ -27,6 +27,12 @@ export class FakeTerminal {
   opened: unknown;
   addons: unknown[] = [];
 
+  /** What getSelection() returns — set by a test simulating a drag. */
+  selection = "";
+  cleared = 0;
+  /** xterm's unicode facade; the addon sets activeVersion through it. */
+  unicode = { activeVersion: "6" };
+
   /** The handler attachCustomKeyEventHandler was given, if any. */
   keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
 
@@ -66,6 +72,13 @@ export class FakeTerminal {
     this.disposed = true;
   }
 
+  getSelection(): string {
+    return this.selection;
+  }
+  clear(): void {
+    this.cleared += 1;
+  }
+
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
     this.keyHandler = handler;
   }
@@ -79,7 +92,13 @@ export class FakeTerminal {
 
   /** Simulates a key reaching the emulator. Returns what the handler said:
    *  false means "handled here, do not let xterm encode it". */
-  pressKey(init: { key: string; shiftKey?: boolean; altKey?: boolean }): boolean {
+  pressKey(init: {
+    key: string;
+    shiftKey?: boolean;
+    altKey?: boolean;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+  }): boolean {
     return this.keyHandler?.({ type: "keydown", ...init } as unknown as KeyboardEvent) ?? true;
   }
 

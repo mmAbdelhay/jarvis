@@ -1,4 +1,5 @@
 import type { WorkspaceTab } from "@jarvis/core";
+import { enhanceTerminal } from "./terminal-addons.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -105,7 +106,7 @@ export function renderWorkspaceTerminals(
     active?.kind === "terminal" && active.project === selectedProject ? active.id : undefined;
   host.hidden = showing === undefined;
 
-  if (showing !== undefined) ensurePane(showing, host);
+  if (showing !== undefined) ensurePane(showing, selectedProject, host);
   for (const [tabId, pane] of panes) pane.element.hidden = tabId !== showing;
 
   if (showing === undefined) return;
@@ -116,7 +117,7 @@ export function renderWorkspaceTerminals(
   pane?.terminal.focus();
 }
 
-function ensurePane(tabId: string, host: HTMLElement): Pane {
+function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   const existing = panes.get(tabId);
   if (existing !== undefined) return existing;
 
@@ -141,20 +142,17 @@ function ensurePane(tabId: string, host: HTMLElement): Pane {
   // Ctrl-C, arrows and Escape work rather than only plain text.
   terminal.onData((data) => void window.jarvis.sendTerminalInput(tabId, data));
 
-  // Shift+Enter, and Option+Enter as its Mac alias.
-  //
-  // xterm encodes both as a bare CR, exactly what plain Enter sends, so
-  // nothing downstream can tell "newline" from "run this" — which is why
-  // Shift+Enter appears to do nothing. ESC+CR is the sequence the
-  // convention settled on for the distinction (it is what Claude Code's own
-  // /terminal-setup configures iTerm2 to send), so it is written directly
-  // and xterm is told not to encode the key itself.
-  terminal.attachCustomKeyEventHandler((event) => {
-    if (event.type !== "keydown") return true;
-    if (event.key !== "Enter" || !(event.shiftKey || event.altKey)) return true;
-    void window.jarvis.sendTerminalInput(tabId, "\u001b\r");
-    return false;
+  // Addons, key bindings and the find bar — shared with the Session view's
+  // terminal so the two behave identically. After open(): WebGL needs a real
+  // element to attach a context to.
+  enhanceTerminal(terminal, element, {
+    sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+    // A link opens as an ordinary browser tab in the same project, which is
+    // what puts it through normalizeInput and the app's navigation rules
+    // instead of handing an arbitrary string to the OS.
+    openLink: (url) => void window.jarvis.openTab(project, url),
   });
+
   // The pty's size has to track the pane's, or a full-screen program draws
   // to a width that does not exist.
   terminal.onResize(({ cols, rows }) => void window.jarvis.resizeTerminal(tabId, cols, rows));

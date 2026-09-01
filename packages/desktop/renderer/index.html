@@ -872,12 +872,40 @@
 
   .workspace-bookmark-toggle--on { color: var(--accent); border-color: var(--accent); }
 
+  /* The find bar the terminal addons inject, one per terminal. Positioned
+     over the top-right of its own terminal's box, which is why every
+     terminal host is a positioned element. */
+  .terminal-find {
+    position: absolute;
+    top: 8px;
+    right: 16px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .terminal-find[hidden] { display: none; }
+  .terminal-find-input {
+    width: 180px;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 12px;
+  }
+  .terminal-find-close { color: var(--text-muted); cursor: pointer; }
+  .terminal-find-close:hover { color: var(--del); }
+
   /* The terminal shares the page slot's region rather than sitting beside
      it: exactly one of the two is ever showing, since a terminal tab has no
      hosted view and a hosted tab has no terminal. */
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
-  .workspace-terminal-pane { position: absolute; inset: 0; }
+  .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
@@ -1143,6 +1171,8 @@
     min-height: 0;
     padding: 10px 14px;
     background: var(--ground);
+    /* The find bar is absolutely positioned inside this box. */
+    position: relative;
   }
 
   /* xterm renders its own scrollbar inside .xterm-viewport; styled to match

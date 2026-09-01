@@ -2,6 +2,7 @@ import type { Session, SessionOutput } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
 import { detectLanguage } from "./format.js";
+import { enhanceTerminal } from "./terminal-addons.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -54,6 +55,8 @@ const THEME = {
 let terminal: Terminal | undefined;
 let fit: FitAddon | undefined;
 let currentId: string | undefined;
+/** The open session's project, for links clicked in its terminal. */
+let currentProject: string | undefined;
 /** Guards against sending a resize before a terminal has been opened. */
 let attached = false;
 
@@ -126,17 +129,20 @@ function ensureTerminal(): Terminal | undefined {
     void window.jarvis.sendSessionInput(currentId, data);
   });
 
-  // Shift+Enter, and Option+Enter as its Mac alias. xterm encodes both as a
-  // bare CR — exactly what plain Enter sends — so an agent cannot tell
-  // "newline" from "send this message", which is why Shift+Enter appears to
-  // do nothing. ESC+CR is the sequence the convention settled on, and the
-  // one Claude Code's own /terminal-setup configures iTerm2 to send.
-  term.attachCustomKeyEventHandler((event) => {
-    if (event.type !== "keydown") return true;
-    if (event.key !== "Enter" || !(event.shiftKey || event.altKey)) return true;
-    if (currentId === undefined) return false;
-    void window.jarvis.sendSessionInput(currentId, "\u001b\r");
-    return false;
+  // Addons, key bindings and the find bar — shared with the Workspace's
+  // terminal tabs so the two behave identically. After open(): WebGL needs a
+  // real element to attach a context to.
+  enhanceTerminal(term, host, {
+    sendInput: (data) => {
+      if (currentId === undefined) return;
+      void window.jarvis.sendSessionInput(currentId, data);
+    },
+    // A link clicked in an agent's output opens as a Workspace browser tab in
+    // that agent's own project, rather than being handed to the OS.
+    openLink: (url) => {
+      if (currentProject === undefined) return;
+      void window.jarvis.openTab(currentProject, url);
+    },
   });
 
   // The pty's size must track the pane's, or the agent draws its UI to a
@@ -182,6 +188,7 @@ function refit(): void {
  */
 export async function openSession(session: Session): Promise<void> {
   currentId = session.id;
+  currentProject = session.project;
   renderHeader(session);
   showView("session");
   setVoiceTarget(session.id);

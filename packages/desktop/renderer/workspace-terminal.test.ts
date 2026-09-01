@@ -253,3 +253,101 @@ describe("workspace terminals", () => {
     expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
   });
 });
+
+describe("terminal key bindings and addons", () => {
+  beforeEach(() => harness());
+
+  it("copies the selection on Cmd+C rather than letting the browser miss it", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: (text: string) => (written.push(text), Promise.resolve()) },
+      configurable: true,
+    });
+    FakeTerminal.instances[0]!.selection = "SELECTED";
+
+    const handled = FakeTerminal.instances[0]?.pressKey({ key: "c", metaKey: true });
+
+    expect(handled).toBe(false);
+    expect(written).toEqual(["SELECTED"]);
+  });
+
+  // With nothing selected Cmd+C has nothing to copy and must not swallow the
+  // key — the terminal's own handling stays in charge.
+  it("leaves Cmd+C alone when there is no selection", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(FakeTerminal.instances[0]?.pressKey({ key: "c", metaKey: true })).toBe(true);
+  });
+
+  it("pastes the clipboard into the pty on Cmd+V", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    Object.defineProperty(navigator, "clipboard", {
+      value: { readText: () => Promise.resolve("pasted") },
+      configurable: true,
+    });
+
+    const handled = FakeTerminal.instances[0]?.pressKey({ key: "v", metaKey: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handled).toBe(false);
+    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", "pasted"] });
+  });
+
+  it("clears the screen on Cmd+K", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    const handled = FakeTerminal.instances[0]?.pressKey({ key: "k", metaKey: true });
+
+    expect(handled).toBe(false);
+    expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+
+  // Ctrl chords are real control bytes a program may want; only Cmd is the
+  // app's to take.
+  it("never takes a Ctrl chord for itself", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(FakeTerminal.instances[0]?.pressKey({ key: "c", ctrlKey: true })).toBe(true);
+    expect(FakeTerminal.instances[0]?.pressKey({ key: "k", ctrlKey: true })).toBe(true);
+  });
+
+  it("opens the find bar on Cmd+F and closes it on Escape", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const bar = document.querySelector<HTMLElement>(".terminal-find")!;
+    expect(bar.hidden).toBe(true);
+
+    FakeTerminal.instances[0]?.pressKey({ key: "f", metaKey: true });
+    expect(bar.hidden).toBe(false);
+
+    document
+      .querySelector(".terminal-find-input")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(bar.hidden).toBe(true);
+  });
+
+  it("gives each terminal its own find bar", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    const tabs = [tab(), tab({ id: "tab-2" })];
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    renderWorkspaceTerminals(tabs, "tab-2", "acme");
+
+    expect(document.querySelectorAll(".terminal-find")).toHaveLength(2);
+  });
+
+  it("switches the terminal to unicode 11 width rules", async () => {
+    const { renderWorkspaceTerminals } = await load();
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(FakeTerminal.instances[0]?.unicode.activeVersion).toBe("11");
+  });
+});
