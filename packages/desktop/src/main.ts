@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,11 +19,14 @@ import {
   createBrain,
   createCapacityReader,
   createCodeServerManager,
+  createDbGateManager,
   createGitProvider,
   createMetricsReader,
   createPtySpawner,
   createRealCodeServerSpawner,
+  createRealDbGateSpawner,
   createSqliteSessionStore,
+  randomPassword,
   findFreePort,
   readStatusPage,
   runCommand,
@@ -32,6 +36,7 @@ import {
 import {
   buildWiring,
   createBookmarksHandlers,
+  createDatabaseHandlers,
   createEditorHandlers,
   createGitHandlers,
   createSettingsHandlers,
@@ -196,6 +201,29 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // One DbGate process per project, on the same terms as code-server:
+    // started lazily, reused, killed on quit. Each gets its own workspace
+    // directory so a project's saved connections stay its own, and the
+    // connections declared in jarvis.yaml are seeded into it at spawn.
+    const dbgateRoot = join(homedir(), ".config/jarvis/dbgate");
+    const dbgate = createDbGateManager({
+      spawn: createRealDbGateSpawner(),
+      findFreePort,
+      waitUntilReady,
+      ensureDir: async (path) => {
+        await mkdir(path, { recursive: true });
+      },
+      workspaceRoot: dbgateRoot,
+      connectionsFor: (project) => config.databases[project] ?? [],
+      env: process.env,
+      randomPassword,
+    });
+    const database = createDatabaseHandlers({
+      dbgate,
+      projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
     const bookmarks = createBookmarksHandlers({
       store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
       language: PRIMARY_LANGUAGE,
@@ -260,6 +288,8 @@ app.whenReady().then(async () => {
       workspace.destroy();
       // Each open editor is a live code-server child process, same reasoning.
       codeServer.stopAll();
+      // And each open Database tab is a live dbgate-serve child process.
+      dbgate.stopAll();
     });
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
@@ -363,6 +393,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
     ipcMain.handle("editor:open", (_event, project: unknown) =>
       editor.open(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("database:open", (_event, project: unknown) =>
+      database.open(typeof project === "string" ? project : ""),
     );
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),

@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiring,
   createBookmarksHandlers,
+  createDatabaseHandlers,
   createEditorHandlers,
   createGitHandlers,
   createSettingsHandlers,
   type WiringDeps,
 } from "./ipc.js";
-import type { Bookmark, BookmarkStore, CodeServerManager } from "@jarvis/platform";
+import type { Bookmark, BookmarkStore, CodeServerManager, DbGateManager } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig } from "./config.js";
@@ -959,5 +960,116 @@ describe("createSettingsHandlers", () => {
     handlers.restart();
 
     expect(called).toBe(true);
+  });
+});
+
+describe("database handlers", () => {
+  function dbgate(overrides: Partial<DbGateManager> = {}): DbGateManager {
+    return {
+      open: () =>
+        Promise.resolve({ ok: true, url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" }),
+      stopAll: () => {},
+      ...overrides,
+    };
+  }
+
+  it("opens the project's database browser and returns its URL and credential", async () => {
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate(),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    expect(await handlers.open("acme")).toEqual({
+      ok: true,
+      value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
+    });
+  });
+
+  // Unlike the editor, the manager is keyed by project *name*: it owns the
+  // workspace directory and the connection set, and never needs a path.
+  it("passes the project name through to the manager", async () => {
+    const opened: string[] = [];
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate({
+        open: (project) => {
+          opened.push(project);
+          return Promise.resolve({
+            ok: true,
+            url: "http://127.0.0.1:51234/",
+            login: "jarvis",
+            password: "pw",
+          });
+        },
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    await handlers.open("acme");
+
+    expect(opened).toEqual(["acme"]);
+  });
+
+  it("refuses an unknown project without starting an instance", async () => {
+    let called = false;
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate({
+        open: () => {
+          called = true;
+          return Promise.resolve({
+            ok: true,
+            url: "http://127.0.0.1:51234/",
+            login: "jarvis",
+            password: "pw",
+          });
+        },
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open("nope");
+
+    expect(called).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a non-string project", async () => {
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate(),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    expect((await handlers.open(undefined as unknown as string)).ok).toBe(false);
+  });
+
+  it("wraps a manager failure behind one localised headline", async () => {
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate({
+        open: () => Promise.resolve({ ok: false, detail: "did not report a port in time" }),
+      }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = await handlers.open("acme");
+
+    expect(result).toEqual({
+      ok: false,
+      text: "Could not open the database browser.",
+      language: "en",
+    });
+  });
+
+  it("catches a manager that throws", async () => {
+    const handlers = createDatabaseHandlers({
+      dbgate: dbgate({ open: () => Promise.reject(new Error("boom")) }),
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    expect((await handlers.open("acme")).ok).toBe(false);
   });
 });

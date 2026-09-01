@@ -16,7 +16,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import type { WorkspaceState } from "@jarvis/core";
-import type { Bookmark, BookmarkStore, CodeServerManager } from "@jarvis/platform";
+import type { Bookmark, BookmarkStore, CodeServerManager, DbGateManager } from "@jarvis/platform";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -325,6 +325,10 @@ export type RendererApi = {
    *  its URL — call openTab(project, url) with the result to actually show
    *  it; this call alone does not open a tab. */
   openEditor(project: string): Promise<GitViewResult<string>>;
+  /** Ensures a DbGate instance is running for `project` and returns its URL
+   *  plus the credential it is guarded with — call openTab(project, url,
+   *  "database") with the result to actually show it. */
+  openDatabase(project: string): Promise<GitViewResult<DatabaseCredentials>>;
   listBookmarks(project: string): Promise<GitViewResult<Bookmark[]>>;
   addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
   removeBookmark(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
@@ -436,6 +440,49 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
         return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.editorUnavailable(deps.language));
       } catch {
         return fail(MESSAGES.editorUnavailable(deps.language));
+      }
+    },
+  };
+}
+
+export type DatabaseCredentials = { url: string; login: string; password: string };
+
+export type DatabaseHandlers = {
+  /** Ensures a DbGate instance is running for `project` and returns its URL
+   *  plus the credential that instance is guarded with — the renderer then
+   *  opens the URL as a "database" tab and shows the credential. */
+  open(project: string): Promise<GitViewResult<DatabaseCredentials>>;
+};
+
+export type DatabaseHandlerDeps = {
+  dbgate: DbGateManager;
+  /** Only used to reject a project name that is not configured. Unlike the
+   *  editor, the manager needs no path: it is keyed by project name and
+   *  owns both the workspace directory and the connection set. */
+  projects: Readonly<Record<string, string>>;
+  language: "ar" | "en";
+};
+
+export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  return {
+    async open(project) {
+      if (!isString(project) || deps.projects[project] === undefined) {
+        return fail(MESSAGES.unknownProject(deps.language));
+      }
+      try {
+        const result = await deps.dbgate.open(project);
+        // The manager's own detail ("did not report a port in time") is
+        // developer-facing — wrapped behind one bilingual headline, same
+        // discipline as createEditorHandlers.
+        return result.ok
+          ? { ok: true, value: { url: result.url, login: result.login, password: result.password } }
+          : fail(MESSAGES.databaseUnavailable(deps.language));
+      } catch {
+        return fail(MESSAGES.databaseUnavailable(deps.language));
       }
     },
   };

@@ -62,6 +62,21 @@ export const MESSAGES = {
   // viewer's shared failure text.
   editorUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر فتح المحرر." : "Could not open the editor.",
+  // Shown when a DbGate instance fails to start or become ready for a
+  // Database tab. Covers both "dbgate-serve is not installed" and "it never
+  // began listening": the manager's own detail (a missing binary, a port
+  // that was never announced) is developer-facing and rides underneath,
+  // same split as editorUnavailable above.
+  databaseUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر فتح قاعدة البيانات." : "Could not open the database browser.",
+  // DbGate has no bind-address option and always listens on 0.0.0.0, so
+  // every instance is guarded by a login generated at spawn. This is how
+  // the user learns it; both halves are opaque technical tokens and stay
+  // LTR in either language.
+  databaseLogin: (login: string, password: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الدخول: ${login} · كلمة المرور: ${password}`
+      : `login ${login} · password ${password}`,
   // The bookmark store's failures (a disk write that failed, mainly) —
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>
