@@ -3,6 +3,7 @@ export * from "./pty.js";
 export * from "./shell.js";
 export * from "./metrics.js";
 export * from "./speech.js";
+export * from "./piper.js";
 export * from "./stt.js";
 export * from "./brain.js";
 export * from "./session-store.js";

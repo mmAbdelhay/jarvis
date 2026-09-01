@@ -47,8 +47,11 @@ brain:
     You are Jarvis, a voice assistant that runs coding sessions.
 
 voice:
-  englishVoice: Daniel        # any `say -v` name; Daniel is the British male
-  arabicVoice: Majed
+  engine: piper               # piper (neural, local) or say (macOS)
+  piperBinary: ~/.local/bin/piper
+  piperModel: ~/.config/jarvis/voices/en-gb-alan-low.onnx
+  englishVoice: Daniel        # used when engine is `say`
+  arabicVoice: Majed          # always used for Arabic
   greeting:
     en: "Good {timeOfDay} sir, how can I help you today?"
     ar: "{timeOfDay} يا سيدي، كيف أقدر أساعدك اليوم؟"
@@ -84,6 +87,22 @@ decomposable the way "good morning" is. `{ready}`, `{lastSession}` and
 the default is a greeting, not a status report, and putting the report back is
 a matter of typing a placeholder. A line whose only placeholder has nothing to
 say is dropped rather than left blank.
+
+**English speaks through Piper by default; Arabic always through macOS.**
+A Piper model speaks one language, so Arabic keeps using `say -v Majed`
+whichever engine English is on. Piper is installed with
+`uv tool install piper-tts`, and its voice model is a file you download once:
+
+```bash
+mkdir -p ~/.config/jarvis/voices && cd ~/.config/jarvis/voices
+curl -L -o alan.tar.gz \
+  https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-en-gb-alan-low.tar.gz
+tar xzf alan.tar.gz && rm alan.tar.gz
+```
+
+If either the binary or the model is missing, Jarvis says so on stdout and
+falls back to macOS voices rather than going silent — being mute is a worse
+failure than sounding synthetic.
 
 **macOS voices are compact by default, and compact voices sound robotic.**
 Enhanced and Premium versions are separate downloads: System Settings →

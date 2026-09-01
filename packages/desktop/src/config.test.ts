@@ -376,7 +376,7 @@ describe("voice", () => {
       },
     });
 
-    expect(config.voice).toEqual({
+    expect(config.voice).toMatchObject({
       englishVoice: "Oliver",
       arabicVoice: "Tarik",
       greeting: { en: "Evening, boss.", ar: "مرحبا" },
@@ -400,6 +400,26 @@ describe("voice", () => {
   it("rejects a voice name that is not a string", () => {
     expect(() => parseConfig({ ...base, voice: { englishVoice: 7 } })).toThrow(
       "Config `voice.englishVoice` must be a string",
+    );
+  });
+
+  // Piper is the default because macOS ships only compact voices and its
+  // Enhanced downloads have no command-line installer.
+  it("defaults to the piper engine, with absolute paths", () => {
+    const config = parseConfig(base);
+
+    expect(config.voice.engine).toBe("piper");
+    expect(config.voice.piperBinary.startsWith("/")).toBe(true);
+    expect(config.voice.piperModel.endsWith(".onnx")).toBe(true);
+  });
+
+  it("takes say as the engine when asked", () => {
+    expect(parseConfig({ ...base, voice: { engine: "say" } }).voice.engine).toBe("say");
+  });
+
+  it("rejects an engine it does not have", () => {
+    expect(() => parseConfig({ ...base, voice: { engine: "elevenlabs" } })).toThrow(
+      "Config `voice.engine` must be piper or say",
     );
   });
 

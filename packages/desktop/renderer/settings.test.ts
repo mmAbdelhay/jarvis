@@ -17,7 +17,10 @@ function sample(): JarvisConfig {
     projects: { acme: "/x/projects/acme" },
     databases: {},
     voice: {
-      englishVoice: "Daniel",
+      engine: "say" as const,
+    piperBinary: "/opt/piper",
+    piperModel: "/voices/alan.onnx",
+    englishVoice: "Daniel",
       arabicVoice: "Majed",
       greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
     },
@@ -58,10 +61,11 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     getSettings: () => Promise.resolve(config),
     listVoices: () =>
       Promise.resolve([
-        { name: "Daniel", language: "en_GB", upgraded: false },
-        { name: "Daniel (Enhanced)", language: "en_GB", upgraded: true },
-        { name: "Samantha", language: "en_US", upgraded: false },
-        { name: "Majed", language: "ar_001", upgraded: false },
+        { name: "Alan (neural)", language: "en_GB", upgraded: true, engine: "piper" },
+        { name: "Daniel", language: "en_GB", upgraded: false, engine: "say" },
+        { name: "Daniel (Enhanced)", language: "en_GB", upgraded: true, engine: "say" },
+        { name: "Samantha", language: "en_US", upgraded: false, engine: "say" },
+        { name: "Majed", language: "ar_001", upgraded: false, engine: "say" },
       ]),
     previewVoice: (...args: unknown[]) => {
       calls.push({ call: "previewVoice", args });
@@ -524,7 +528,12 @@ describe("voice section", () => {
     await settle();
 
     const english = [...document.querySelectorAll("#settings-voice-en option")].map((o) => o.textContent);
-    expect(english).toEqual(["Daniel · en_GB", "Daniel (Enhanced) · en_GB", "Samantha · en_US"]);
+    expect(english).toEqual([
+      "Alan (neural) · en_GB",
+      "Daniel · en_GB",
+      "Daniel (Enhanced) · en_GB",
+      "Samantha · en_US",
+    ]);
 
     const arabic = [...document.querySelectorAll("#settings-voice-ar option")].map((o) => o.textContent);
     expect(arabic).toEqual(["Majed · ar_001"]);
@@ -571,7 +580,7 @@ describe("voice section", () => {
     const { calls } = harness();
     void calls;
     (window as unknown as { jarvis: Record<string, unknown> }).jarvis["listVoices"] = () =>
-      Promise.resolve([{ name: "Daniel", language: "en_GB", upgraded: false }]);
+      Promise.resolve([{ name: "Daniel", language: "en_GB", upgraded: false, engine: "say" }]);
     initSettings();
     await openSettings();
     await settle();
@@ -607,5 +616,61 @@ describe("voice section", () => {
     const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.voice.englishVoice).toBe("Daniel (Enhanced)");
     expect(saved.voice.greeting.en).toBe("Evening, boss.");
+  });
+});
+
+describe("choosing the engine by choosing a voice", () => {
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  }
+
+  // The picker is the single control: there is no second switch to get out of
+  // step with the name on screen.
+  it("switches to the neural engine when its voice is chosen", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const select = document.getElementById("settings-voice-en") as HTMLSelectElement;
+    select.value = "Alan (neural)";
+    change(select);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.voice.engine).toBe("piper");
+  });
+
+  it("switches back to say when a system voice is chosen", async () => {
+    const config = sample();
+    config.voice.engine = "piper";
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const select = document.getElementById("settings-voice-en") as HTMLSelectElement;
+    select.value = "Samantha";
+    change(select);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.voice.engine).toBe("say");
+    expect(saved.voice.englishVoice).toBe("Samantha");
+  });
+
+  it("shows the neural voice as selected when it is the engine", async () => {
+    const config = sample();
+    config.voice.engine = "piper";
+    harness(config);
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe(
+      "Alan (neural)",
+    );
   });
 });

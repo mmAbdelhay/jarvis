@@ -382,8 +382,11 @@ export type RendererApi = {
   removeApiCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
   apiSettings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveApiSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
-  /** Every installed macOS voice, for the Settings picker. */
-  listVoices(): Promise<InstalledVoice[]>;
+  /** Every voice that can be chosen, for the Settings picker. The neural
+   *  engine appears among them rather than as a separate control: from where
+   *  the user stands it is simply the best-sounding English voice on the
+   *  list. `engine` is what tells the renderer which one it picked. */
+  listVoices(): Promise<PickableVoice[]>;
   /** Speaks a short sample in one voice, so a name can be chosen by ear
    *  rather than by guessing what it sounds like. */
   previewVoice(name: string, language: "ar" | "en"): Promise<void>;
@@ -656,6 +659,8 @@ export type ApiHandlers = ApiEditHandlers & {
     variables: Record<string, string>,
   ): Promise<GitViewResult<string>>;
 };
+
+export type PickableVoice = InstalledVoice & { engine: "piper" | "say" };
 
 export type ApiSendResult = {
   response: ApiResponse | ApiFailure;

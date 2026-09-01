@@ -861,6 +861,9 @@ const sampleConfig: JarvisConfig = {
   projects: { acme: "/p/acme" },
   databases: {},
   voice: {
+    engine: "say" as const,
+    piperBinary: "/opt/piper",
+    piperModel: "/voices/alan.onnx",
     englishVoice: "Daniel",
     arabicVoice: "Majed",
     greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },

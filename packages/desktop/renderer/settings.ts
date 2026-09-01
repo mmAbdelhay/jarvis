@@ -572,11 +572,23 @@ function renderBrain(): void {
 // ------------------------------------------------------------------ Voice
 
 /** Every installed voice, read once when Settings first opens. */
-let installedVoices: { name: string; language: string; upgraded: boolean }[] = [];
+let installedVoices: { name: string; language: string; upgraded: boolean; engine: "piper" | "say" }[] =
+  [];
+
+/** Which entry the English picker should be showing: the neural engine when
+ *  it is selected, otherwise the configured `say` voice. The picker is the
+ *  single control — choosing a voice is what chooses the engine. */
+function selectedEnglishVoice(): string {
+  if (draft === undefined) return "";
+  if (draft.voice.engine === "piper") {
+    return installedVoices.find((voice) => voice.engine === "piper")?.name ?? draft.voice.englishVoice;
+  }
+  return draft.voice.englishVoice;
+}
 
 function renderVoice(): void {
   if (draft === undefined) return;
-  fillVoiceSelect("settings-voice-en", "en", draft.voice.englishVoice);
+  fillVoiceSelect("settings-voice-en", "en", selectedEnglishVoice());
   fillVoiceSelect("settings-voice-ar", "ar", draft.voice.arabicVoice);
   ($("settings-greeting-en") as HTMLTextAreaElement).value = draft.voice.greeting.en;
   ($("settings-greeting-ar") as HTMLTextAreaElement).value = draft.voice.greeting.ar;
@@ -706,7 +718,12 @@ function wireStaticFields(): void {
 
   $("settings-voice-en").addEventListener("change", () => {
     if (draft === undefined) return;
-    draft.voice.englishVoice = ($("settings-voice-en") as HTMLSelectElement).value;
+    const chosen = ($("settings-voice-en") as HTMLSelectElement).value;
+    const voice = installedVoices.find((entry) => entry.name === chosen);
+    // Choosing a voice is what chooses the engine; there is no second switch
+    // to get out of step with the name on screen.
+    draft.voice.engine = voice?.engine ?? "say";
+    if (draft.voice.engine === "say") draft.voice.englishVoice = chosen;
     clearSaveStatus();
   });
   $("settings-voice-ar").addEventListener("change", () => {

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,8 @@ import {
 } from "@jarvis/core";
 import {
   MacSpeech,
+  PiperSpeech,
+  RoutedSpeech,
   createBookmarkStore,
   createBrain,
   createCapacityReader,
@@ -109,6 +112,9 @@ function setDockIcon(): void {
 /** What a voice preview says. The greeting itself, so the sample is the
  *  sentence the user will actually hear every morning rather than a neutral
  *  line that hides how the voice handles it. */
+/** How the Piper engine appears in the voice picker. */
+const PIPER_VOICE = "Alan (neural)";
+
 const VOICE_SAMPLE = {
   en: "Good evening sir, how can I help you today?",
   ar: "مساء الخير يا سيدي، كيف أقدر أساعدك اليوم؟",
@@ -159,11 +165,34 @@ app.whenReady().then(async () => {
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
     const sessions = new SessionManager(createPtySpawner(), sessionStore);
-    const speech = new MacSpeech(
+    // macOS's own voices, always — Arabic goes through these whichever engine
+    // English uses, because a Piper model speaks one language.
+    const macSpeech = new MacSpeech(
       { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
       defaultSpeechRunner,
       defaultVoiceLister,
     );
+
+    // Piper only if it is actually installed. Configured-but-absent must fall
+    // back rather than leave the app silent: the model is a 60MB download the
+    // user may not have made yet, and being mute is a worse failure than
+    // sounding synthetic.
+    const piperReady =
+      config.voice.engine === "piper" &&
+      existsSync(config.voice.piperBinary) &&
+      existsSync(config.voice.piperModel);
+    if (config.voice.engine === "piper" && !piperReady) {
+      console.log(
+        `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel}) — using macOS voices.`,
+      );
+    }
+
+    const speech = piperReady
+      ? new RoutedSpeech(
+          new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel }),
+          macSpeech,
+        )
+      : macSpeech;
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -681,14 +710,29 @@ app.whenReady().then(async () => {
         variables as Record<string, string>,
       ),
     );
-    ipcMain.handle("voice:list", () => listInstalledVoices());
+    ipcMain.handle("voice:list", async () => {
+      const installed = await listInstalledVoices();
+      // Piper is offered beside the system voices rather than in a separate
+      // control: from where the user stands it is simply the best-sounding
+      // English voice on the list.
+      const system = installed.map((voice) => ({ ...voice, engine: "say" as const }));
+      return piperReady
+        ? [{ name: PIPER_VOICE, language: "en_GB", upgraded: true, engine: "piper" as const }, ...system]
+        : system;
+    });
     // The sample is spoken through the same MacSpeech the app uses, so a
     // preview sounds exactly like the thing being chosen — including the
     // Enhanced upgrade, which is the whole point of listening first.
     ipcMain.handle("voice:preview", (_event, name: unknown, language: unknown) => {
       if (typeof name !== "string" || name.trim() === "") return;
       const spoken = language === "ar" ? VOICE_SAMPLE.ar : VOICE_SAMPLE.en;
-      const preview = new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner);
+      // PIPER_VOICE is not a `say` voice, so a preview of it has to go through
+      // Piper — otherwise the button would demo a different voice than the one
+      // being chosen, which is the one thing a preview must not do.
+      const preview =
+        name === PIPER_VOICE && piperReady
+          ? new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel })
+          : new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner);
       void preview.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
     });
     ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
@@ -980,7 +1024,7 @@ app.whenReady().then(async () => {
     // The listing that upgrades a compact voice to its Enhanced variant is a
     // process spawn; waiting for it here means the first thing the app says
     // already sounds like the voice the user chose.
-    await speech.ready;
+    await macSpeech.ready;
     const greeting = greetingText(
       {
         now: Date.now(),

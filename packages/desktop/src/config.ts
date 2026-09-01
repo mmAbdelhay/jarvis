@@ -9,6 +9,15 @@ import { DB_GATE_ENGINES } from "@jarvis/platform";
 
 /** What Jarvis sounds like, and what it says on opening. */
 export type VoiceConfig = {
+  /** "piper" is a local neural engine and sounds markedly better than any
+   *  macOS voice that can be installed without the GUI; "say" is macOS's own.
+   *  Arabic always goes through `say`, whichever is chosen — a Piper model
+   *  speaks one language. */
+  engine: "piper" | "say";
+  /** Absolute, because the app is launched from Finder and its PATH does not
+   *  include ~/.local/bin. */
+  piperBinary: string;
+  piperModel: string;
   /** A `say -v` voice name. An unknown name makes macOS fall back to the
    *  system default silently rather than failing, so a typo here is quiet. */
   englishVoice: string;
@@ -54,6 +63,16 @@ const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
  */
 const DEFAULT_ENGLISH_VOICE = "Daniel";
 const DEFAULT_ARABIC_VOICE = "Majed";
+
+/**
+ * Piper by default, falling back to `say` at runtime when the model is not
+ * there. macOS ships only compact voices and its Enhanced downloads have no
+ * command-line installer, so a local neural engine is the only good English
+ * voice that can be set up without the user opening System Settings.
+ */
+const DEFAULT_ENGINE = "piper";
+const DEFAULT_PIPER_BINARY = join(homedir(), ".local/bin/piper");
+const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-low.onnx");
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
@@ -351,6 +370,9 @@ function parseDatabases(rawDatabases: unknown, projects: Record<string, string>)
  */
 function parseVoice(rawVoice: unknown): VoiceConfig {
   const defaults: VoiceConfig = {
+    engine: DEFAULT_ENGINE,
+    piperBinary: DEFAULT_PIPER_BINARY,
+    piperModel: DEFAULT_PIPER_MODEL,
     englishVoice: DEFAULT_ENGLISH_VOICE,
     arabicVoice: DEFAULT_ARABIC_VOICE,
     greeting: { ...DEFAULT_GREETING },
@@ -383,7 +405,15 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     }
   }
 
+  const engine = voice["engine"];
+  if (engine !== undefined && engine !== "piper" && engine !== "say") {
+    throw new Error("Config `voice.engine` must be piper or say");
+  }
+
   return {
+    engine: engine ?? DEFAULT_ENGINE,
+    piperBinary: expandTilde(text("piperBinary", DEFAULT_PIPER_BINARY)),
+    piperModel: expandTilde(text("piperModel", DEFAULT_PIPER_MODEL)),
     englishVoice: text("englishVoice", DEFAULT_ENGLISH_VOICE),
     arabicVoice: text("arabicVoice", DEFAULT_ARABIC_VOICE),
     greeting: {
