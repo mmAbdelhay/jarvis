@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import type { DbGateConnection, DbGateEngine } from "./dbgate-types.js";
 
 /** DbGate names an engine as `<engine>@<plugin package>`; the plugin half
@@ -56,4 +58,206 @@ export function connectionEnv(
   }
 
   return result;
+}
+
+export type DbGateProcess = {
+  kill(): void;
+  onExit(listener: (code: number | null) => void): void;
+  /** DbGate announces the port it actually bound on stdout; the manager
+   *  has no other way to learn it. Chunks arrive as the OS delivers them
+   *  and may split the line anywhere, so listeners must buffer. */
+  onStdout(listener: (chunk: string) => void): void;
+};
+
+export type DbGateSpawner = (args: {
+  env: Record<string, string>;
+  workspaceDir: string;
+}) => DbGateProcess;
+
+export type DbGateResult =
+  | { ok: true; url: string; login: string; password: string }
+  | { ok: false; detail: string };
+
+export type DbGateManager = {
+  /** Starts (or reuses) the DbGate instance for `project` and returns its
+   *  URL plus the credential that instance is guarded with. */
+  open(project: string): Promise<DbGateResult>;
+  /** Kills every running instance — called on app quit. Each instance is a
+   *  live child process; it does not go away with the window on its own. */
+  stopAll(): void;
+};
+
+export type DbGateManagerDeps = {
+  spawn: DbGateSpawner;
+  /** Only a *hint*: DbGate's npm build runs getPort() over it and may bind
+   *  somewhere else entirely. See waitForPort below. */
+  findFreePort: () => Promise<number>;
+  waitUntilReady: (url: string) => Promise<boolean>;
+  /** DbGate creates its own subdirectories with a non-recursive mkdir, so
+   *  the workspace directory itself has to exist before it starts. */
+  ensureDir: (path: string) => Promise<void>;
+  workspaceRoot: string;
+  connectionsFor: (project: string) => readonly DbGateConnection[];
+  /** Jarvis's own environment, the source for every `passwordEnv` lookup. */
+  env: Readonly<Record<string, string | undefined>>;
+  randomPassword: () => string;
+  portTimeoutMs?: number;
+};
+
+/** The line DbGate's npm build logs once it is listening. Parsing someone
+ *  else's log output is a real coupling, and it is deliberate: the npm
+ *  build picks its own port, so this is the only place the truth exists.
+ *  A release that reformats this line fails loudly (a timeout, then
+ *  databaseUnavailable), never silently. */
+const PORT_LINE = /DbGate API listening on port (\d+)/;
+
+const DEFAULT_PORT_TIMEOUT_MS = 20_000;
+
+/**
+ * One DbGate process per project, started lazily on first use and reused
+ * after that — reopening a project you already have open returns the same
+ * URL without spawning a second instance. Structured to mirror
+ * createCodeServerManager, with the three differences DbGate forces:
+ * the port is read from stdout rather than assigned, the workspace
+ * directory is created up front, and every instance is guarded by a
+ * generated login because DbGate always binds 0.0.0.0 and offers no
+ * bind-address option of its own.
+ */
+export function createDbGateManager(deps: DbGateManagerDeps): DbGateManager {
+  const running = new Map<string, { result: DbGateResult; process: DbGateProcess }>();
+
+  return {
+    async open(project) {
+      const existing = running.get(project);
+      if (existing !== undefined) return existing.result;
+
+      const workspaceDir = `${deps.workspaceRoot}/${project}`;
+      const password = deps.randomPassword();
+
+      let child: DbGateProcess;
+      try {
+        await deps.ensureDir(workspaceDir);
+        const hint = await deps.findFreePort();
+        child = deps.spawn({
+          workspaceDir,
+          env: {
+            PORT: String(hint),
+            WORKSPACE_DIR: workspaceDir,
+            // DbGate listens on 0.0.0.0 with no way to ask for loopback, so
+            // an unguarded instance is reachable from the local network for
+            // as long as it runs. This credential is generated per spawn and
+            // lives only in the child's environment.
+            LOGIN: "jarvis",
+            PASSWORD: password,
+            ...connectionEnv(deps.connectionsFor(project), deps.env),
+          },
+        });
+      } catch (error) {
+        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+      }
+
+      const port = await waitForPort(child, deps.portTimeoutMs ?? DEFAULT_PORT_TIMEOUT_MS);
+      if (!port.ok) {
+        child.kill();
+        return port;
+      }
+
+      const url = `http://127.0.0.1:${port.port}/`;
+      if (!(await deps.waitUntilReady(url))) {
+        child.kill();
+        return { ok: false, detail: "dbgate-serve did not become ready in time" };
+      }
+
+      const result: DbGateResult = { ok: true, url, login: "jarvis", password };
+      running.set(project, { result, process: child });
+      child.onExit(() => running.delete(project));
+      return result;
+    },
+
+    stopAll() {
+      for (const { process } of running.values()) process.kill();
+      running.clear();
+    },
+  };
+}
+
+/** Buffers stdout until DbGate reports the port it bound, or gives up.
+ *  A process that exits first is its own answer — waiting out the full
+ *  timeout for a child that is already gone helps nobody. */
+function waitForPort(
+  child: DbGateProcess,
+  timeoutMs: number,
+): Promise<{ ok: true; port: number } | { ok: false; detail: string }> {
+  return new Promise((resolve) => {
+    let buffer = "";
+    let settled = false;
+    const settle = (value: { ok: true; port: number } | { ok: false; detail: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const timer = setTimeout(
+      () => settle({ ok: false, detail: "dbgate-serve did not report a port in time" }),
+      timeoutMs,
+    );
+
+    child.onStdout((chunk) => {
+      buffer += chunk;
+      const match = PORT_LINE.exec(buffer);
+      if (match?.[1] !== undefined) settle({ ok: true, port: Number(match[1]) });
+    });
+    child.onExit(() => settle({ ok: false, detail: "dbgate-serve exited before it started listening" }));
+  });
+}
+
+/**
+ * The real spawner: `dbgate-serve` (community edition, installed globally
+ * via npm) with Jarvis's environment layered over the process's own.
+ *
+ * `cwd` is the project's own workspace directory, and that is not
+ * incidental: dbgate-serve's bin script runs `dotenv.config()` against its
+ * working directory, so starting it anywhere else would let a stray .env —
+ * a project's Laravel .env, say — silently reconfigure the database
+ * browser. The workspace directory is one Jarvis created and controls.
+ *
+ * stdout is piped because the port is only knowable from it. stderr is
+ * ignored, same as code-server's spawner.
+ */
+export function createRealDbGateSpawner(): DbGateSpawner {
+  return ({ env, workspaceDir }) => {
+    const child = spawn("dbgate-serve", [], {
+      cwd: workspaceDir,
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+
+    const exitListeners: ((code: number | null) => void)[] = [];
+    // A missing binary arrives as an async "error" event, not a throw. Left
+    // unhandled it takes the process down; treated as an exit it becomes an
+    // ordinary "never reported a port" failure the caller already handles.
+    child.on("error", () => {
+      for (const listener of exitListeners) listener(null);
+    });
+
+    return {
+      kill: () => child.kill(),
+      onExit: (listener) => {
+        exitListeners.push(listener);
+        child.on("exit", (code) => listener(code));
+      },
+      onStdout: (listener) => {
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk: string) => listener(chunk));
+      },
+    };
+  };
+}
+
+/** The per-instance web password. 32 hex characters from the platform CSPRNG
+ *  — this is the only thing standing between a DbGate instance and anyone
+ *  else on the network, so it is not Math.random(). */
+export function randomPassword(): string {
+  return randomBytes(16).toString("hex");
 }
