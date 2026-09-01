@@ -146,6 +146,24 @@ function ensureSpawnHelperExecutable(): void {
 }
 
 /**
+ * A copy of `env` with the two classes of variable above removed: the
+ * markers a Claude Code session leaves for its children, and the ambient
+ * API key that would outrank an account wrapper's own credentials.
+ *
+ * Shared by the agent spawner and the Terminal tab's shell spawner
+ * (shell.ts), because the reasoning is identical for both: a shell the user
+ * opens in Jarvis is a top-level shell, and running `claude` in it must not
+ * produce a session degraded by a marker Jarvis happened to inherit from
+ * the terminal it was launched from.
+ */
+export function sanitizedShellEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = { ...env };
+  for (const marker of INHERITED_AGENT_MARKERS) delete clean[marker];
+  delete clean[BILLING_OVERRIDE];
+  return clean;
+}
+
+/**
  * Creates a Spawner that runs each agent under its own pty.
  *
  * `env` defaults to the Electron main process's environment, which is what
@@ -159,9 +177,7 @@ export function createPtySpawner(env: NodeJS.ProcessEnv = process.env): Spawner 
   const pty = require("node-pty") as PtyModule;
 
   return (agent: AgentConfig, projectPath: string): ProcessHandle => {
-    const childEnv: NodeJS.ProcessEnv = { ...env, TERM };
-    for (const marker of INHERITED_AGENT_MARKERS) delete childEnv[marker];
-    delete childEnv[BILLING_OVERRIDE];
+    const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(env), TERM };
 
     const child = pty.spawn(agent.command, argsFor(agent), {
       name: TERM,

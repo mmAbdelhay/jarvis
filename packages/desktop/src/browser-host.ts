@@ -47,6 +47,7 @@ export const MAX_TABS = 8;
 const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
   editor: "Editor",
   database: "Database",
+  terminal: "Terminal",
 };
 
 export class BrowserHost {
@@ -100,6 +101,29 @@ export class BrowserHost {
     if (this.#bounds !== undefined) view.setBounds(this.#bounds);
     view.loadURL(target.url);
     this.#syncVisibility();
+  }
+
+  /**
+   * Opens a terminal tab: a tab in the same store as every other, with no
+   * hosted view behind it. Its pty lives in the main process and its screen
+   * is drawn by the renderer's own xterm instance, so there is no URL to
+   * normalise and nothing to load.
+   *
+   * #syncVisibility iterates over views alone, so activating a tab that has
+   * none hides every hosted page as a consequence — which is exactly what
+   * has to happen, since a native view would otherwise float over the
+   * terminal's DOM.
+   *
+   * Returns the new tab's id: main needs it to key the pty it is about to
+   * spawn for this tab.
+   */
+  openTerminal(project: string): TabId {
+    this.#evictIfFull();
+    this.#suppressed = false;
+    const tab = this.#store.open(project, "", "terminal");
+    this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS.terminal}` });
+    this.#syncVisibility();
+    return tab.id;
   }
 
   navigate(id: TabId, input: string): void {

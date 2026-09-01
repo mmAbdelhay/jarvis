@@ -1,5 +1,6 @@
 export * from "./spawn.js";
 export * from "./pty.js";
+export * from "./shell.js";
 export * from "./metrics.js";
 export * from "./speech.js";
 export * from "./stt.js";

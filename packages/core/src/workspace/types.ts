@@ -9,8 +9,13 @@ export type TabId = string;
  *  them (nobody navigates a code editor or a SQL client like a webpage)
  *  and their titles must stay stable — both change their own document.title
  *  with whatever file, panel or table has focus, which would otherwise make
- *  the tab strip unreadable. */
-export type TabKind = "web" | "editor" | "database";
+ *  the tab strip unreadable.
+ *
+ *  "terminal" is the odd one: it is a tab with no hosted page at all. Its
+ *  pty lives in the main process and its screen is drawn by the renderer's
+ *  own xterm instance, so it has no URL, no view, and nothing for the
+ *  address bar or the history controls to act on. */
+export type TabKind = "web" | "editor" | "database" | "terminal";
 
 export type WorkspaceTab = {
   id: TabId;

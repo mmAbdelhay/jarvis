@@ -546,3 +546,82 @@ describe("bridgeEvents", () => {
     expect(prevented).toBe(false);
   });
 });
+
+describe("BrowserHost terminal tabs", () => {
+  let views: FakeView[];
+  let host: BrowserHost;
+
+  beforeEach(() => {
+    views = [];
+    host = new BrowserHost(() => {
+      const view = new FakeView();
+      views.push(view);
+      return view;
+    });
+    host.setVisible(true);
+  });
+
+  it("opens a terminal tab with no hosted view behind it", () => {
+    host.openTerminal("acme");
+
+    expect(host.state().tabs).toHaveLength(1);
+    expect(host.state().tabs[0]?.kind).toBe("terminal");
+    expect(views).toHaveLength(0);
+  });
+
+  it("gives a terminal tab a stable title naming its project", () => {
+    host.openTerminal("acme");
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Terminal");
+  });
+
+  it("makes the new terminal the active tab", () => {
+    host.openTerminal("acme");
+
+    expect(host.state().activeTabId).toBe(host.state().tabs[0]?.id);
+  });
+
+  // The terminal is drawn in the renderer's own DOM, so every hosted page
+  // has to get out of the way — otherwise a native view floats over it.
+  it("hides every hosted page while a terminal tab is active", () => {
+    host.open("acme", "https://github.com");
+    expect(views[0]?.visible).toBe(true);
+
+    host.openTerminal("acme");
+
+    expect(views[0]?.visible).toBe(false);
+  });
+
+  it("shows the page again when a web tab is reactivated", () => {
+    host.open("acme", "https://github.com");
+    const webTabId = host.state().tabs[0]!.id;
+    host.openTerminal("acme");
+
+    host.activate(webTabId);
+
+    expect(views[0]?.visible).toBe(true);
+  });
+
+  it("closes a terminal tab without touching any view", () => {
+    host.open("acme", "https://github.com");
+    host.openTerminal("acme");
+    const terminalId = host.state().tabs[1]!.id;
+
+    host.close(terminalId);
+
+    expect(host.state().tabs).toHaveLength(1);
+    expect(views[0]?.destroyed).toBe(false);
+  });
+
+  it("ignores navigation controls aimed at a terminal tab", () => {
+    host.openTerminal("acme");
+    const id = host.state().tabs[0]!.id;
+
+    host.back(id);
+    host.forward(id);
+    host.reload(id);
+    host.navigate(id, "https://github.com");
+
+    expect(host.state().tabs[0]?.url).toBe("");
+  });
+});
