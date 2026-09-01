@@ -2,7 +2,20 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { listCollections, readCollection, readRequest, writeRequest } from "./bruno.js";
+import {
+  createCollection,
+  createFolder,
+  createRequest,
+  deleteEntry,
+  listCollections,
+  readCollection,
+  readRequest,
+  renameFolder,
+  renameRequest,
+  writeEnvironment,
+  writeImported,
+  writeRequest,
+} from "./bruno.js";
 
 const made: string[] = [];
 
@@ -201,5 +214,118 @@ describe("readRequest / writeRequest", () => {
     });
 
     expect(await readFile(path, "utf8")).toContain("name: New");
+  });
+});
+
+describe("collection editing", () => {
+  it("creates a request that reads back as an empty GET", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+
+    const file = await createRequest(path, "New request", 3);
+
+    const json = await readRequest(file);
+    expect(json["meta"]).toMatchObject({ name: "New request", seq: "3" });
+    expect(json["http"]).toMatchObject({ method: "get", url: "" });
+  });
+
+  // A request is named by the user; the file it lands in is not.
+  it("keeps a hostile name out of the filename", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+
+    const file = await createRequest(path, "../../etc/passwd", 1);
+
+    // The property that matters is containment: no separator survives, so
+    // the file cannot land anywhere but inside the collection.
+    expect(file.startsWith(`${path}/`)).toBe(true);
+    expect(file.slice(path.length + 1)).not.toContain("/");
+    expect(file).toBe(join(path, "..-..-etc-passwd.bru"));
+    // The displayed name is untouched — only the filename is sanitised.
+    expect((await readRequest(file))["meta"]).toMatchObject({ name: "../../etc/passwd" });
+  });
+
+  it("creates a folder", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+
+    await createFolder(path, "orders");
+    await createRequest(join(path, "orders"), "List", 1);
+
+    expect((await readCollection(path)).root.folders[0]?.requests[0]?.name).toBe("List");
+  });
+
+  // Bruno shows meta.name, so renaming only the file would leave a request
+  // still calling itself by its old name everywhere it is displayed.
+  it("renames a request in its file and in its meta", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+    const file = await createRequest(path, "Old", 1);
+
+    const moved = await renameRequest(file, "New");
+
+    expect(moved).toBe(join(path, "New.bru"));
+    expect((await readRequest(moved))["meta"]).toMatchObject({ name: "New" });
+  });
+
+  it("renames a folder", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+    await createFolder(path, "old");
+
+    const moved = await renameFolder(join(path, "old"), "new");
+
+    expect((await readCollection(path)).root.folders[0]?.path).toBe(moved);
+  });
+
+  it("deletes a request and a folder", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+    const file = await createRequest(path, "Doomed", 1);
+    await createFolder(path, "gone");
+
+    await deleteEntry(file);
+    await deleteEntry(join(path, "gone"));
+
+    const tree = await readCollection(path);
+    expect(tree.root.requests).toEqual([]);
+    expect(tree.root.folders).toEqual([]);
+  });
+
+  it("creates a collection that listCollections then finds", async () => {
+    const root = await project();
+
+    const path = await createCollection(root, "orders-api");
+
+    expect(await listCollections(root)).toContainEqual({ name: "orders-api", path });
+  });
+
+  it("writes an environment that reads back with its secrets flagged", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+
+    await writeEnvironment(path, "local", [
+      { name: "base", value: "http://localhost", enabled: true, secret: false },
+      { name: "token", value: "abc", enabled: true, secret: true },
+    ]);
+
+    const tree = await readCollection(path);
+    expect(tree.environments[0]?.name).toBe("local");
+    expect(tree.environments[0]?.variables).toHaveLength(2);
+    expect(tree.environments[0]?.variables[1]).toMatchObject({ name: "token", secret: true });
+  });
+
+  it("writes an imported collection as a folder tree", async () => {
+    const root = await project();
+
+    const path = await writeImported(root, "Imported", [
+      { segments: ["Health"], json: { meta: { name: "Health", type: "http", seq: "1" }, http: { method: "get", url: "http://h", body: "none", auth: "none" } } },
+      { segments: ["Orders", "List"], json: { meta: { name: "List", type: "http", seq: "1" }, http: { method: "get", url: "http://o", body: "none", auth: "none" } } },
+    ]);
+
+    const tree = await readCollection(path);
+    expect(tree.root.requests.map((request) => request.name)).toEqual(["Health"]);
+    expect(tree.root.folders[0]?.name).toBe("Orders");
+    expect(tree.root.folders[0]?.requests[0]?.name).toBe("List");
   });
 });

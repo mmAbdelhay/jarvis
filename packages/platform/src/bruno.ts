@@ -1,6 +1,7 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import lang from "@usebruno/lang";
+import type { ImportedRequest } from "./postman-import.js";
 
 // Bruno collections, read and written where they live: in the project's own
 // repository, as the .bru files Bruno desktop and `bru run` already use.
@@ -10,7 +11,7 @@ import lang from "@usebruno/lang";
 // file-format decision rests on — see the byte-identical test in
 // bruno.test.ts, which is the one to look at if a version bump ever breaks
 // something here.
-const { bruToJsonV2, jsonToBruV2, bruToEnvJsonV2 } = lang;
+const { bruToJsonV2, jsonToBruV2, bruToEnvJsonV2, envJsonToBruV2 } = lang;
 
 export type BrunoCollection = { name: string; path: string };
 
@@ -201,4 +202,109 @@ export async function readRequest(path: string): Promise<Record<string, unknown>
 export async function writeRequest(path: string, json: Record<string, unknown>): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
   await writeFile(path, jsonToBruV2(json), "utf8");
+}
+
+
+/** A filename that cannot escape its directory or collide with the shell.
+ *  A request is named by the user; the file it lands in is not. */
+function safeFileName(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9 ._-]/g, "-").trim();
+  return cleaned === "" ? "untitled" : cleaned;
+}
+
+/** Creates an empty GET request in `folderPath`, and returns its path. */
+export async function createRequest(folderPath: string, name: string, seq: number): Promise<string> {
+  const path = join(folderPath, `${safeFileName(name)}.bru`);
+  await writeRequest(path, {
+    meta: { name, type: "http", seq: String(seq) },
+    http: { method: "get", url: "", body: "none", auth: "none" },
+  });
+  return path;
+}
+
+export async function createFolder(parentPath: string, name: string): Promise<string> {
+  const path = join(parentPath, safeFileName(name));
+  await mkdir(path, { recursive: true });
+  return path;
+}
+
+/**
+ * Renames a request. The file moves *and* the `meta.name` inside it changes:
+ * Bruno shows the meta name, so renaming only the file would leave a request
+ * that still calls itself by its old name everywhere it is displayed.
+ */
+export async function renameRequest(path: string, name: string): Promise<string> {
+  const json = await readRequest(path);
+  const meta = (json["meta"] ?? {}) as Record<string, unknown>;
+  json["meta"] = { ...meta, name };
+
+  const target = join(dirname(path), `${safeFileName(name)}.bru`);
+  await writeRequest(path, json);
+  if (target !== path) await rename(path, target);
+  return target;
+}
+
+export async function renameFolder(path: string, name: string): Promise<string> {
+  const target = join(dirname(path), safeFileName(name));
+  if (target !== path) await rename(path, target);
+  return target;
+}
+
+/** Removes a request or a folder. Recursive for a folder, since a collection
+ *  folder is only ever the requests inside it. */
+export async function deleteEntry(path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true });
+}
+
+/** Creates a collection directory with the bruno.json that marks it, so it
+ *  is discoverable by listCollections and openable by Bruno desktop. */
+export async function createCollection(projectPath: string, name: string): Promise<string> {
+  const path = join(projectPath, safeFileName(name));
+  await mkdir(join(path, ENVIRONMENTS_DIR), { recursive: true });
+  await writeFile(
+    join(path, MARKER),
+    `${JSON.stringify({ version: "1", name, type: "collection" }, null, 2)}\n`,
+    "utf8",
+  );
+  return path;
+}
+
+/** Writes one environment file. Variables marked secret keep their flag and
+ *  their value here — this is the file the user chose to store them in; what
+ *  Jarvis never does is move a secret into a request. */
+export async function writeEnvironment(
+  collectionPath: string,
+  name: string,
+  variables: BrunoVariable[],
+): Promise<string> {
+  const path = join(collectionPath, ENVIRONMENTS_DIR, `${safeFileName(name)}.bru`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, envJsonToBruV2({ variables }), "utf8");
+  return path;
+}
+
+/** Writes an imported collection to disk, creating a folder per path segment
+ *  so a Postman folder tree arrives as a folder tree. */
+export async function writeImported(
+  projectPath: string,
+  name: string,
+  requests: readonly ImportedRequest[],
+): Promise<string> {
+  const collectionPath = await createCollection(projectPath, name);
+
+  let seq = 1;
+  for (const request of requests) {
+    const segments = [...request.segments];
+    const fileName = segments.pop() ?? `request-${seq}`;
+    const folder = segments.reduce((path, segment) => join(path, safeFileName(segment)), collectionPath);
+    await mkdir(folder, { recursive: true });
+
+    const json = { ...request.json };
+    const meta = (json["meta"] ?? {}) as Record<string, unknown>;
+    json["meta"] = { ...meta, seq: String(seq) };
+    await writeRequest(join(folder, `${safeFileName(fileName)}.bru`), json);
+    seq += 1;
+  }
+
+  return collectionPath;
 }

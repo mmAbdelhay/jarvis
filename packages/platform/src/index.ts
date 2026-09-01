@@ -14,5 +14,8 @@ export * from "./capacity.js";
 export * from "./bookmarks.js";
 export * from "./bruno.js";
 export * from "./http-runner.js";
+export * from "./assertions.js";
+export * from "./curl.js";
+export * from "./postman-import.js";
 export * from "./dbgate-types.js";
 export * from "./dbgate.js";
