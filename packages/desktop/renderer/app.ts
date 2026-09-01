@@ -169,14 +169,28 @@ function renderMetrics(metrics: SystemMetrics): void {
   // Always-visible header summary, alongside network speed — the
   // Dashboard's own System panel still has the full byte-level detail.
   $("header-cpu").textContent = `${Math.round(metrics.cpuPercent)}%`;
-  $("header-mem").textContent =
-    metrics.memoryTotalBytes > 0
-      ? `${Math.round((metrics.memoryUsedBytes / metrics.memoryTotalBytes) * 100)}%`
-      : "--%";
-  $("header-disk").textContent =
-    metrics.diskTotalBytes > 0
-      ? `${Math.round((metrics.diskUsedBytes / metrics.diskTotalBytes) * 100)}%`
-      : "--%";
+  setHeaderMetric("header-mem", metrics.memoryUsedBytes, metrics.memoryTotalBytes);
+  setHeaderMetric("header-disk", metrics.diskUsedBytes, metrics.diskTotalBytes);
+}
+
+/**
+ * One header figure, coloured by how close it is to full.
+ *
+ * A disk at 98% used to be stated in exactly the same grey as a disk at 12%,
+ * which makes the number decorative: nobody reads a strip of identical grey
+ * percentages. The thresholds are what turn it back into information.
+ */
+function setHeaderMetric(id: string, used: number, total: number): void {
+  const element = $(id);
+  if (total <= 0) {
+    element.textContent = "--%";
+    element.classList.remove("warn", "bad");
+    return;
+  }
+  const percent = Math.round((used / total) * 100);
+  element.textContent = `${percent}%`;
+  element.classList.toggle("warn", percent >= 90 && percent < 95);
+  element.classList.toggle("bad", percent >= 95);
 }
 
 /** Sessions live in the Dashboard's centre now. They were also listed in a

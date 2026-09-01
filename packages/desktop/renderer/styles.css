@@ -199,16 +199,16 @@
 
   .spacer { flex-grow: 1; }
 
+  /* Ambient: the time, the network and the machine are facts you glance at,
+     not things you act on. Boxing each one gave them the same weight as
+     navigation, which is what made the bar feel busy. */
   .clock, .netinfo, .sysinfo {
     display: flex;
     align-items: center;
-    gap: 10px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-size: 12px;
-    color: var(--text-dim);
+    gap: var(--s2);
+    padding: 0;
+    font-size: 11px;
+    color: var(--text-muted);
   }
 
   .clock .sep { color: var(--border-strong); }
@@ -673,16 +673,20 @@
 
   .nav { display: flex; gap: 4px; margin-inline-start: 14px; }
 
+  /* Navigation is the one thing in this bar that is not ambient, so it is
+     the one thing at full contrast. */
   .nav-btn {
     font: inherit;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: 13px;
+    color: var(--text-secondary);
     background: none;
     border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 4px 11px;
+    border-radius: var(--r-control);
+    padding: 5px var(--s3);
     cursor: pointer;
   }
+
+  .nav-btn:hover { color: var(--text); }
 
   .nav-btn--on {
     background: var(--surface-raised);
@@ -1169,25 +1173,30 @@
      tied to whatever tabs happen to be open. */
   .workspace-new-tab { margin-left: auto; }
 
+  /* One button, everywhere. It is square when it carries an icon and sized
+     to its text when it carries a word — which is what the API bar had to
+     override locally, one button at a time, before this rule existed. */
   .workspace-nav {
     font: inherit;
     font-size: 13px;
-    color: var(--text-muted);
-    background: none;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-control);
     width: 28px;
     height: 28px;
     cursor: pointer;
   }
 
+  .workspace-nav:hover { color: var(--text); border-color: var(--border-strong); }
+
   .workspace-nav[disabled] { opacity: 0.35; cursor: default; }
 
   .workspace-address {
     flex-grow: 1;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text);
-    background: var(--panel);
+    background: var(--surface-sunken);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 6px 10px;
@@ -1869,3 +1878,9 @@
 
 .composer__mic:hover { color: var(--accent); border-color: var(--accent); }
 .composer__mic.listening { color: var(--accent); border-color: var(--accent); background: var(--accent-quiet); }
+
+
+/* ── The system strip's thresholds ───────────────────────────────────────
+   A disk at 98% said so in exactly the same grey as a disk at 12%. */
+.sysinfo .warn { color: var(--warn); }
+.sysinfo .bad { color: var(--bad); }

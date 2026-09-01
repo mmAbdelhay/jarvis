@@ -10,7 +10,7 @@
 // #clock-date so startClock has somewhere to write, #voice-state itself),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session, SessionChanges, SessionOutput } from "@jarvis/core";
+import type { Session, SessionChanges, SessionOutput, SystemMetrics } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
@@ -22,6 +22,7 @@ vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 
 type Callbacks = {
+  onMetrics?: (metrics: SystemMetrics) => void;
   onListening?: (listening: boolean) => void;
   onNotice?: (notice: VoiceNotice) => void;
   onSessions?: (sessions: Session[]) => void;
@@ -47,6 +48,18 @@ async function loadApp(
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
     <button id="mic-button"></button>
+    <span id="cpu-value"></span>
+    <div id="cpu-bar"></div>
+    <span id="mem-value"></span>
+    <div id="mem-bar"></div>
+    <span id="disk-value"></span>
+    <span id="disk-total"></span>
+    <span id="uptime-value"></span>
+    <span id="header-cpu"></span>
+    <span id="header-mem"></span>
+    <span id="header-disk"></span>
+    <span id="net-down"></span>
+    <span id="net-up"></span>
     <h2 id="centre-title"></h2>
     <span id="centre-count"></span>
     <div id="centre-body"></div>
@@ -91,7 +104,9 @@ async function loadApp(
     send: vi.fn(async () => {}),
     startVoice: vi.fn(async () => {}),
     stopVoice: vi.fn(async () => {}),
-    onMetrics: vi.fn(),
+    onMetrics: (cb: (metrics: SystemMetrics) => void) => {
+      callbacks.onMetrics = cb;
+    },
     onProviders: vi.fn(),
     onWorkspace: vi.fn(),
     // The Dashboard's centre lists these when nothing is running, so the
@@ -747,6 +762,47 @@ describe("opening a session", () => {
 async function settle(): Promise<void> {
   for (let i = 0; i < 6; i += 1) await Promise.resolve();
 }
+
+describe("the header's system strip", () => {
+  const metrics = (over: Partial<SystemMetrics> = {}): SystemMetrics => ({
+    cpuPercent: 10,
+    memoryUsedBytes: 1,
+    memoryTotalBytes: 10,
+    diskUsedBytes: 1,
+    diskTotalBytes: 10,
+    networkDownMbps: 0,
+    networkUpMbps: 0,
+    uptimeSeconds: 0,
+    ...over,
+  });
+
+  // A disk at 98% was stated in exactly the same grey as a disk at 12%.
+  it("marks a nearly full disk", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ diskUsedBytes: 98, diskTotalBytes: 100 }));
+
+    expect(document.getElementById("header-disk")?.className).toContain("bad");
+  });
+
+  it("warns before it is critical", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ memoryUsedBytes: 91, memoryTotalBytes: 100 }));
+
+    expect(document.getElementById("header-mem")?.className).toContain("warn");
+  });
+
+  it("says nothing about a machine that is fine", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ diskUsedBytes: 12, diskTotalBytes: 100 }));
+
+    const disk = document.getElementById("header-disk");
+    expect(disk?.textContent).toBe("12%");
+    expect(disk?.className).toBe("");
+  });
+});
 
 describe("the Dashboard's centre", () => {
   // Idle is the state this screen is in most of the time, and it used to be
