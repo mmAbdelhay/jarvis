@@ -126,12 +126,15 @@ function argsFor(agent: AgentConfig): string[] {
  * "posix_spawnp failed" that names nothing.
  *
  * Restoring the bit here makes the failure self-healing across reinstalls
- * instead of a mystery that has to be rediagnosed each time. Best-effort
+ * instead of a mystery that has to be rediagnosed each time. Exported
+ * because shell.ts spawns under the same node-pty and hits the same wall:
+ * a Terminal tab opened before any agent session would otherwise be the
+ * first thing to fail after a reinstall. Best-effort
  * on purpose: if the file is missing (another platform's build) or the
  * chmod is refused, the spawn below will raise the real error, and
  * masking that with an error of our own would be worse.
  */
-function ensureSpawnHelperExecutable(): void {
+export function ensureSpawnHelperExecutable(): void {
   try {
     const entry = require.resolve("node-pty");
     const helper = join(dirname(dirname(entry)), "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");

@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { DEFAULT_COLS, DEFAULT_ROWS, sanitizedShellEnv } from "./pty.js";
+import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
 
 // node-pty is a native module, loaded lazily through createRequire for the
 // same reason pty.ts does it: the unit tests inject a fake spawner and must
