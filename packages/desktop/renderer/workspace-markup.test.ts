@@ -91,3 +91,34 @@ describe("workspace markup", () => {
     expect(html).toMatch(/\.workspace-page\s*\{[^}]*flex(-grow)?:\s*1/);
   });
 });
+
+// .workspace-nav is a 28px square built for an icon button. Every button in
+// the API bar carries a word instead, and without a width of their own the
+// labels overflow the square and print on top of one another — which is
+// exactly what happened on screen.
+describe("api bar layout", () => {
+  it("sizes the API bar's buttons to their labels", () => {
+    expect(html).toMatch(/\.api-bar button \{[^}]*width:\s*auto/);
+  });
+
+  it("lets only the URL field absorb and give up width", () => {
+    expect(html).toMatch(/\.api-bar \.workspace-address \{[^}]*flex:\s*1/);
+    expect(html).toMatch(/\.api-bar button \{[^}]*flex-shrink:\s*0/);
+  });
+
+  // An empty select collapses to its border and reads as a glitch.
+  it("keeps an empty select from collapsing", () => {
+    expect(html).toMatch(/\.api-bar select \{[^}]*min-width/);
+  });
+
+  it("wraps the bar rather than pushing buttons off the edge", () => {
+    expect(html).toMatch(/\.api-bar \{[^}]*flex-wrap:\s*wrap/);
+  });
+
+  // A stray inline width would put the bar back where it was, one button at
+  // a time.
+  it("keeps the sizing in the stylesheet, not on the buttons", () => {
+    const bar = html.slice(html.indexOf('<div class="api-bar">'), html.indexOf('id="api-tabs"'));
+    expect(bar).not.toContain("style=\"width: auto");
+  });
+});

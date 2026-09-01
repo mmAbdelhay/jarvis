@@ -982,7 +982,35 @@
     gap: 8px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
+    /* At a narrow window the row wraps rather than pushing its buttons off
+       the edge; nothing here is optional enough to be allowed to vanish. */
+    flex-wrap: wrap;
   }
+  /* .workspace-nav is a 28px square built for an icon. Every button in this
+     bar carries a word, so the bar sizes them to their text — otherwise the
+     labels overflow the square and print on top of each other. */
+  .api-bar button {
+    width: auto;
+    min-width: 0;
+    padding: 0 10px;
+    height: 28px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  /* An empty select collapses to its border and reads as a glitch; both of
+     these are empty until a collection is picked. */
+  .api-bar select { flex-shrink: 0; min-width: 96px; }
+  /* Same reasoning for the two rows that borrow .workspace-nav for a
+     worded button: the ask row and the environment editor's head. */
+  .api-ask button, .api-env-head button {
+    width: auto;
+    padding: 0 10px;
+    height: 28px;
+    white-space: nowrap;
+  }
+  /* The URL is the one thing that should absorb the leftover width, and the
+     one thing allowed to shrink when there is none to absorb. */
+  .api-bar .workspace-address { flex: 1 1 220px; min-width: 120px; }
   .api-status-line { font-size: 11px; color: var(--text-muted); }
   .api-dirty { color: var(--accent); margin-left: 4px; }
 
@@ -2019,10 +2047,8 @@
                      autocomplete="off" spellcheck="false" placeholder="https://" />
               <select id="api-environment" class="mono"></select>
               <button id="api-env-edit" class="workspace-nav" type="button" title="Edit this environment">env</button>
-              <button id="api-send" class="workspace-nav" type="button"
-                      style="width: auto; padding: 0 12px;">Send</button>
-              <button id="api-save" class="workspace-nav" type="button"
-                      style="width: auto; padding: 0 12px;" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
+              <button id="api-send" class="workspace-nav" type="button">Send</button>
+              <button id="api-save" class="workspace-nav" type="button" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
               <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
               <button id="api-history-toggle" class="workspace-nav" type="button" title="Request history">hist</button>
               <button id="api-cookies-toggle" class="workspace-nav" type="button" title="Cookies">cookies</button>
@@ -2034,8 +2060,7 @@
                 <span class="lbl">ENVIRONMENT</span>
                 <input id="api-env-name" class="mono" type="text" spellcheck="false" />
                 <button id="api-env-add" class="settings-add" type="button">+ variable</button>
-                <button id="api-env-save" class="workspace-nav" type="button"
-                        style="width: auto; padding: 0 12px;">Save</button>
+                <button id="api-env-save" class="workspace-nav" type="button">Save</button>
                 <button id="api-env-close" class="settings-add" type="button">close</button>
               </div>
               <div id="api-env-vars" class="api-pairs"></div>
@@ -2047,8 +2072,7 @@
             <div id="api-ask" class="api-ask" hidden>
               <span id="api-ask-label" class="lbl"></span>
               <input id="api-ask-input" class="mono" type="text" spellcheck="false" />
-              <button id="api-ask-ok" class="workspace-nav" type="button"
-                      style="width: auto; padding: 0 12px;">OK</button>
+              <button id="api-ask-ok" class="workspace-nav" type="button">OK</button>
               <button id="api-ask-cancel" class="settings-add" type="button">cancel</button>
             </div>
             <div id="api-side-panel" class="api-side-panel" hidden>
