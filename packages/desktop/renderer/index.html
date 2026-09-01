@@ -872,6 +872,14 @@
 
   .workspace-bookmark-toggle--on { color: var(--accent); border-color: var(--accent); }
 
+  /* The terminal shares the page slot's region rather than sitting beside
+     it: exactly one of the two is ever showing, since a terminal tab has no
+     hosted view and a hosted tab has no terminal. */
+  .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
+  .workspace-terminal[hidden] { display: none; }
+  .workspace-terminal-pane { position: absolute; inset: 0; }
+  .workspace-terminal-pane[hidden] { display: none; }
+
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar
      below it, the classic "attached tab" look — a uniform bottom padding
@@ -1703,6 +1711,8 @@
               style="width: auto; padding: 0 12px;" title="Open the project's files in a full code editor">Editor</button>
       <button id="workspace-open-database" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Browse the project's databases">Database</button>
+      <button id="workspace-open-terminal" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 12px;" title="Open a shell in the project's directory">Terminal</button>
       <span id="workspace-tool-status" class="mono"></span>
       <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
     </div>
@@ -1725,6 +1735,10 @@
         </div>
         <div id="workspace-error" class="changes-error" hidden></div>
         <div id="workspace-page" class="workspace-page"></div>
+        <!-- Terminal tabs have no hosted view, so their screen is drawn
+             here, in the renderer's own DOM, over the same region a hosted
+             page would occupy. Hidden unless a terminal tab is active. -->
+        <div id="workspace-terminal" class="workspace-terminal" hidden></div>
       </div>
     </div>
 

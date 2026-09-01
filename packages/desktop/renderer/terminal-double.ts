@@ -6,14 +6,18 @@
 // keystrokes go back to the pty, which session's output is filtered out)
 // rather than on xterm's own rendering, which is not ours to test.
 //
-// It lives beside the source rather than inside a test file because two test
-// files (session-view.test.ts and app.test.ts) mock the same module and must
-// agree on the double's shape.
+// It lives beside the source rather than inside a test file because several
+// test files (session-view.test.ts, app.test.ts and workspace-terminal.test.ts)
+// mock the same module and must agree on the double's shape.
 
 export type FakeTerminalOptions = Record<string, unknown>;
 
 export class FakeTerminal {
   static last: FakeTerminal | undefined;
+  /** Every terminal built, in construction order. The Workspace holds one
+   *  per terminal tab, so `last` alone is not enough there. Reset with
+   *  `FakeTerminal.instances = []` in a beforeEach. */
+  static instances: FakeTerminal[] = [];
 
   readonly options: FakeTerminalOptions;
   /** Every chunk written, in order — the terminal's whole input stream. */
@@ -26,9 +30,12 @@ export class FakeTerminal {
   #dataListeners: ((data: string) => void)[] = [];
   #resizeListeners: ((size: { cols: number; rows: number }) => void)[] = [];
 
+  disposed = false;
+
   constructor(options: FakeTerminalOptions = {}) {
     this.options = options;
     FakeTerminal.last = this;
+    FakeTerminal.instances.push(this);
   }
 
   /** Everything written, joined — what the screen would be showing. */
@@ -52,7 +59,9 @@ export class FakeTerminal {
   focus(): void {
     this.focused += 1;
   }
-  dispose(): void {}
+  dispose(): void {
+    this.disposed = true;
+  }
 
   onData(listener: (data: string) => void): void {
     this.#dataListeners.push(listener);

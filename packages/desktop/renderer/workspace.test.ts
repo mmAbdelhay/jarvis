@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceState } from "@jarvis/core";
+import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
+
+// workspace.ts pulls in workspace-terminal.ts, which hosts a real terminal
+// emulator; jsdom has neither a canvas nor real character cells, so the
+// vendored xterm modules are doubled here the same way session-view.test.ts
+// and app.test.ts do it. The terminal's own behaviour is covered by
+// workspace-terminal.test.ts.
+vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
+vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
 
 type Recorded = { call: string; args: unknown[] };
@@ -12,6 +21,7 @@ function harness(): Recorded[] {
       <select id="workspace-project"></select>
       <button id="workspace-open-editor"></button>
       <button id="workspace-open-database"></button>
+      <button id="workspace-open-terminal"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
@@ -28,6 +38,7 @@ function harness(): Recorded[] {
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
+        <div id="workspace-terminal" hidden></div>
       </div>
     </div>`;
 
@@ -55,6 +66,12 @@ function harness(): Recorded[] {
         ok: true,
         value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw-fixed" },
       }),
+    openTerminal: record("openTerminal"),
+    attachTerminal: () => Promise.resolve(""),
+    sendTerminalInput: record("sendTerminalInput"),
+    resizeTerminal: record("resizeTerminal"),
+    onTerminalData: () => {},
+    onTerminalExit: () => {},
     listBookmarks: () => Promise.resolve({ ok: true, value: [] }),
     addBookmark: (...args: unknown[]) => {
       calls.push({ call: "addBookmark", args });
@@ -818,5 +835,53 @@ describe("open in database", () => {
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "Could not open the database browser.",
     );
+  });
+});
+
+describe("open a terminal", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  it("opens a terminal for the selected project", async () => {
+    document.getElementById("workspace-open-terminal")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openTerminal", args: ["acme"] });
+  });
+
+  // Unlike the editor and the database there is no instance to reuse: two
+  // terminals in one project is an ordinary thing to want.
+  it("opens a second terminal for a project that already has one", async () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+
+    document.getElementById("workspace-open-terminal")?.click();
+    await flush();
+
+    expect(calls.filter((entry) => entry.call === "openTerminal")).toHaveLength(1);
+  });
+
+  it("shows a localised error when the shell cannot start", async () => {
+    jarvis["openTerminal"] = () =>
+      Promise.resolve({ ok: false, text: "I don't know a project by that name.", language: "en" });
+
+    document.getElementById("workspace-open-terminal")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "I don't know a project by that name.",
+    );
+  });
+
+  it("hides the address bar and bookmarks while a terminal tab is active", () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-bar")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(true);
   });
 });

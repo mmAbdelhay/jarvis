@@ -1,5 +1,6 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
 
 // Structurally the same shape the preload bridge and main process pass
 // across IPC (packages/desktop/src/ipc.ts's Bookmark, from @jarvis/platform)
@@ -223,6 +224,8 @@ export function initWorkspace(projects: string[]): void {
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
+  $("workspace-open-terminal").addEventListener("click", () => void openTerminal());
+  initWorkspaceTerminals();
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
   void refreshBookmarks();
@@ -287,6 +290,24 @@ async function openDatabase(): Promise<void> {
 
   status.textContent = MESSAGES.databaseLogin(result.value.login, result.value.password, PRIMARY_LANGUAGE);
   void window.jarvis.openTab(project, result.value.url, "database");
+}
+
+/** Opens a shell in the selected project's directory as a new tab.
+ *
+ *  Unlike the editor and the database this always opens a *new* one: two
+ *  terminals in the same project is an ordinary thing to want, and there is
+ *  no instance to reuse — the tab and its pty are created together by main,
+ *  and the tab arrives here through the ordinary workspace update. */
+async function openTerminal(): Promise<void> {
+  const status = $("workspace-tool-status");
+  status.textContent = "";
+  status.classList.remove("workspace-tool-status--error");
+
+  const result = await window.jarvis.openTerminal(selectedProject());
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+  }
 }
 
 function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTMLElement {
@@ -399,6 +420,7 @@ export function renderWorkspace(state: WorkspaceState): void {
   }
 
   updateBookmarkToggle();
+  renderWorkspaceTerminals(state.tabs, state.activeTabId);
 
   // Hiding the bar and the sidebar resizes the page slot the hosted view
   // is pinned to, and nothing else re-measures it — a resize is the only

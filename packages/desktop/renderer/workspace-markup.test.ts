@@ -28,6 +28,8 @@ describe("workspace markup", () => {
     "workspace-bookmark-toggle",
     "workspace-open-editor",
     "workspace-open-database",
+    "workspace-open-terminal",
+    "workspace-terminal",
     "workspace-tool-status",
     "workspace-bar",
   ])("has #%s", (id) => {
