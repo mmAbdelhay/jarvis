@@ -42,6 +42,13 @@ export type ViewFactory = (partition: string) => HostedView;
  *  long day of opening tabs, from taking the machine down with it. */
 export const MAX_TABS = 8;
 
+/** The tab-strip label for each hosted app, keyed by its TabKind. A "web"
+ *  tab has no entry: it wears the page's own title. */
+const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
+  editor: "Editor",
+  database: "Database",
+};
+
 export class BrowserHost {
   readonly #createView: ViewFactory;
   readonly #store: TabStore;
@@ -76,12 +83,12 @@ export class BrowserHost {
     this.#suppressed = false;
 
     const tab = this.#store.open(project, target.url, kind);
-    if (kind === "editor") {
-      // code-server's own document.title tracks whatever file or panel has
-      // focus inside it; the tab strip would be unreadable if that leaked
-      // through, so this label is fixed once, here, and #onViewEvent's
+    if (kind !== "web") {
+      // A hosted app's own document.title tracks whatever file, panel or
+      // table has focus inside it; the tab strip would be unreadable if that
+      // leaked through, so this label is fixed once, here, and #onViewEvent's
       // "title" case never overwrites it for a tab of this kind.
-      this.#store.update(tab.id, { title: `${project} — Editor` });
+      this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS[kind]}` });
     }
     // The partition is what makes a project's logins its own.
     // encodeURIComponent because a project name is user-supplied config and
@@ -174,9 +181,9 @@ export class BrowserHost {
         });
         break;
       case "title":
-        // An editor tab's title is fixed at open() and never follows the
+        // A hosted app's title is fixed at open() and never follows the
         // page's own document.title — see the comment there.
-        if (this.#store.get(id)?.kind !== "editor") this.#store.update(id, { title: event.title });
+        if (this.#store.get(id)?.kind === "web") this.#store.update(id, { title: event.title });
         break;
       case "loading":
         this.#store.update(id, { loading: event.loading });

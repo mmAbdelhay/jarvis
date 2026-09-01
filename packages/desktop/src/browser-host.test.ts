@@ -383,6 +383,22 @@ describe("BrowserHost", () => {
 
     expect(host.state().tabs[0]?.title).toBe("One");
   });
+
+  // DbGate retitles itself with whatever table or query tab has focus, so
+  // a database tab needs the same fixed label an editor tab gets.
+  it("gives a database tab a stable title naming its project", () => {
+    host.open("acme", "http://127.0.0.1:51234", "database");
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Database");
+  });
+
+  it("ignores page-title-updated for a database tab", () => {
+    host.open("acme", "http://127.0.0.1:51234", "database");
+
+    views[0]?.emit({ kind: "title", title: "orders — DbGate" });
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Database");
+  });
 });
 
 class FakeContents implements WebContentsLike {
