@@ -1222,75 +1222,145 @@
   #settings-status { font-size: 11px; color: var(--good); }
   #settings-status.settings-status--error { color: var(--del); }
 
-  .settings-body { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 40px; }
+  /* The route is read at a measure, not swept across a 27-inch monitor. A
+     row's label and its field belong in the same glance. */
+  .settings-body {
+    flex-grow: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--s5) var(--s5) var(--s6);
+  }
 
+  .settings-inner {
+    max-width: var(--measure);
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  /* A panel per section, separated by surface rather than by a rule across
+     the page. */
   .settings-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 14px 0;
-    border-bottom: 1px solid var(--border);
+    gap: var(--s3);
+    padding: var(--s4) var(--s5) var(--s5);
+    background: var(--surface);
+    border-radius: var(--r-panel);
   }
-  .settings-section:last-child { border-bottom: none; }
 
-  .settings-section-head { display: flex; align-items: center; gap: 10px; }
+  .settings-section-head { display: flex; align-items: center; gap: var(--s3); }
+
+  /* The section's own name outranks the labels inside it by size and weight,
+     rather than by being shouted in small capitals. */
+  .settings-section-head .lbl {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text);
+  }
 
   .settings-add {
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--accent);
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 10px;
+    border-radius: var(--r-control);
+    padding: 3px var(--s3);
     cursor: pointer;
   }
   .settings-add:hover { border-color: var(--accent); }
 
-  .settings-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .settings-rows { display: flex; flex-direction: column; gap: var(--s2); }
 
   .settings-row {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-end;
+    gap: var(--s3);
     flex-wrap: wrap;
-    padding: 8px 10px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    padding: var(--s3);
+    background: var(--surface-raised);
+    border-radius: var(--r-control);
+  }
+
+  /* Labels above their fields. Beside them, every row became a sentence read
+     left to right across the whole window. */
+  .settings-row label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+
+  /* A checkbox keeps its label beside it — stacking a word over a 13px box
+     is the one place the rule above reads worse. */
+  .settings-row label:has(input[type="checkbox"]) {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--s2);
+    flex: 0 0 auto;
   }
 
   .settings-row input[type="text"],
   .settings-row select {
     font: inherit;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text);
-    background: var(--ground);
+    background: var(--surface-sunken);
     border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 4px 8px;
-    min-width: 90px;
+    border-radius: var(--r-control);
+    padding: 5px var(--s2);
+    width: 100%;
+    min-width: 0;
   }
 
-  .settings-row label {
-    font-size: 10px;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  .settings-row input[type="text"]:focus,
+  .settings-row select:focus {
+    outline: none;
+    border-color: var(--accent);
   }
+
+  /* Width by content: a path needs room, a name does not. They were all
+     equal, which is how a path came to truncate beside an empty args field. */
+  .settings-row label[data-field="path"],
+  .settings-row label[data-field="configDir"],
+  .settings-row label[data-field="url"],
+  .settings-row label[data-field="accessTokenUrl"] { flex: 3 1 240px; }
+  .settings-row label[data-field="command"] { flex: 2 1 150px; }
+  .settings-row label[data-field="id"],
+  .settings-row label[data-field="name"] { flex: 1 1 130px; }
+  .settings-row label[data-field="args"],
+  .settings-row label[data-field="model"],
+  .settings-row label[data-field="intent"] { flex: 1 1 100px; }
+  .settings-row label[data-field="port"],
+  .settings-row label[data-field="engine"] { flex: 0 1 100px; }
+
+  /* The row's controls sit at its end rather than wrapping onto a line of
+     their own, which read as a second, emptier row. */
+  .settings-row > button,
+  .settings-row .settings-test-status,
+  .settings-row .settings-row-remove { flex: 0 0 auto; align-self: center; }
+  /* Beside the other controls, not pushed to the far edge — on a row that
+     wraps, margin-left:auto puts it alone on a line of its own. */
+  .settings-row .settings-row-remove { margin-left: 0; }
 
   .settings-row-spacer { flex-grow: 1; }
 
-  .settings-test-status { font-size: 11px; min-width: 14px; text-align: center; }
+  .settings-test-status { font-size: 12px; min-width: 14px; text-align: center; }
   .settings-test-status--ok { color: var(--good); }
   .settings-test-status--fail { color: var(--del); }
 
   .settings-row-remove {
     color: var(--text-muted);
     cursor: pointer;
-    padding: 2px 6px;
-    font-size: 13px;
+    padding: 2px var(--s2);
+    font-size: 14px;
   }
   .settings-row-remove:hover { color: var(--del); }
 

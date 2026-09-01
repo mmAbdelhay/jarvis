@@ -54,7 +54,12 @@ function clearSaveStatus(): void {
  *  every keystroke. */
 function fieldInput(labelText: string, value: string, onChange: (value: string) => void): HTMLElement {
   const label = document.createElement("label");
-  label.textContent = labelText;
+  // The label carries the field name too, so the stylesheet can give a path
+  // more width than a port without knowing anything about either.
+  label.dataset["field"] = labelText;
+  const caption = document.createElement("span");
+  caption.textContent = labelText;
+  label.append(caption);
   const input = document.createElement("input");
   input.type = "text";
   // A connection row carries nine of these; the label alone is not enough
@@ -77,7 +82,10 @@ function fieldSelect(
   onChange: (value: string) => void,
 ): HTMLElement {
   const label = document.createElement("label");
-  label.textContent = labelText;
+  label.dataset["field"] = labelText;
+  const caption = document.createElement("span");
+  caption.textContent = labelText;
+  label.append(caption);
   const select = document.createElement("select");
   select.dataset["field"] = labelText;
   for (const option of options) {
