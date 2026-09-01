@@ -85,6 +85,12 @@ function markup(): string {
       <button id="api-send"></button>
       <button id="api-save"><span id="api-dirty" hidden></span></button>
       <button id="api-curl"></button>
+      <div id="api-ask" hidden>
+        <span id="api-ask-label"></span>
+        <input id="api-ask-input" />
+        <button id="api-ask-ok"></button>
+        <button id="api-ask-cancel"></button>
+      </div>
       <button id="api-history-toggle"></button>
       <button id="api-cookies-toggle"></button>
       <button id="api-settings-toggle"></button>
@@ -170,7 +176,11 @@ function harness(): void {
     pickFiles: record("pickFiles", () => pickedFiles),
     readJsonFile: record("readJsonFile", () => jsonFile),
   };
-  window.prompt = () => prompts.shift() ?? null;
+  // Electron has no window.prompt, so the pane asks with its own row; a test
+  // answers it the way a person would.
+  window.prompt = () => {
+    throw new Error("prompt() is not supported");
+  };
   window.confirm = () => confirmAnswer;
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText: () => Promise.resolve() },
@@ -180,6 +190,22 @@ function harness(): void {
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
+}
+
+/** Answers the pane's inline name row, or cancels it. */
+async function answerAsk(): Promise<void> {
+  await settle();
+  const row = document.getElementById("api-ask") as HTMLElement;
+  if (row === null || row.hidden) return;
+  const answer = prompts.shift() ?? null;
+  const input = document.getElementById("api-ask-input") as HTMLInputElement;
+  if (answer === null) {
+    document.getElementById("api-ask-cancel")?.click();
+  } else {
+    input.value = answer;
+    document.getElementById("api-ask-ok")?.click();
+  }
+  await settle();
 }
 
 async function load() {
@@ -786,7 +812,7 @@ describe("api collection editing", () => {
     await show(module);
 
     document.getElementById("api-new-request")?.click();
-    await settle();
+    await answerAsk();
 
     expect(calls.find((e) => e.call === "createApiRequest")?.args.slice(0, 3)).toEqual([
       "acme",
@@ -795,13 +821,58 @@ describe("api collection editing", () => {
     ]);
   });
 
+  // Electron throws on window.prompt, so the pane must never call it: every
+  // create and rename silently did nothing until this row replaced it.
+  it("asks for a name in the pane, not through window.prompt", async () => {
+    prompts = ["Created"];
+    const module = await load();
+    await show(module);
+
+    document.getElementById("api-new-request")?.click();
+    await settle();
+
+    expect((document.getElementById("api-ask") as HTMLElement).hidden).toBe(false);
+    expect(document.getElementById("api-ask-label")?.textContent).toBe("New request");
+    expect((document.getElementById("api-ask-input") as HTMLInputElement).value).toBe("New request");
+  });
+
+  it("accepts the name on Enter and hides the row", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-new-request")?.click();
+    await settle();
+
+    const input = document.getElementById("api-ask-input") as HTMLInputElement;
+    input.value = "Typed";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+
+    expect((document.getElementById("api-ask") as HTMLElement).hidden).toBe(true);
+    expect(calls.find((e) => e.call === "createApiRequest")?.args[2]).toBe("Typed");
+  });
+
+  it("cancels on Escape without creating anything", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-new-request")?.click();
+    await settle();
+
+    document
+      .getElementById("api-ask-input")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+
+    expect((document.getElementById("api-ask") as HTMLElement).hidden).toBe(true);
+    expect(calls.some((e) => e.call === "createApiRequest")).toBe(false);
+  });
+
   it("does nothing when the name prompt is cancelled", async () => {
     prompts = [null];
     const module = await load();
     await show(module);
 
     document.getElementById("api-new-request")?.click();
-    await settle();
+    await answerAsk();
 
     expect(calls.some((e) => e.call === "createApiRequest")).toBe(false);
   });
@@ -812,9 +883,9 @@ describe("api collection editing", () => {
     await show(module);
 
     document.getElementById("api-new-folder")?.click();
-    await settle();
+    await answerAsk();
     document.getElementById("api-new-collection")?.click();
-    await settle();
+    await answerAsk();
 
     expect(calls.some((e) => e.call === "createApiFolder")).toBe(true);
     expect(calls.find((e) => e.call === "createApiCollection")?.args).toEqual(["acme", "second"]);
@@ -826,7 +897,7 @@ describe("api collection editing", () => {
     await show(module);
 
     document.querySelector<HTMLElement>(".api-request .api-entry-action")?.click();
-    await settle();
+    await answerAsk();
 
     expect(calls.find((e) => e.call === "renameApiEntry")?.args).toEqual([
       "acme",

@@ -65,6 +65,12 @@ function harness(): Recorded[] {
           <button id="api-send"></button>
           <button id="api-save"><span id="api-dirty" hidden></span></button>
           <button id="api-curl"></button>
+          <div id="api-ask" hidden>
+            <span id="api-ask-label"></span>
+            <input id="api-ask-input" />
+            <button id="api-ask-ok"></button>
+            <button id="api-ask-cancel"></button>
+          </div>
           <button id="api-history-toggle"></button>
           <button id="api-cookies-toggle"></button>
           <button id="api-settings-toggle"></button>

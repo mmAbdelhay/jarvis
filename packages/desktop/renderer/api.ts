@@ -57,6 +57,50 @@ const state: State = {
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
+/**
+ * Asks for a name, in the pane.
+ *
+ * Electron does not implement window.prompt — calling it throws
+ * "prompt() is not supported" — so every create and rename in this pane
+ * silently did nothing. This is the replacement: an inline row, Enter to
+ * accept, Escape to cancel, resolving to null when cancelled exactly as
+ * prompt() was expected to.
+ */
+function ask(label: string, initial: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const row = $("api-ask") as HTMLElement;
+    const input = $("api-ask-input") as HTMLInputElement;
+    $("api-ask-label").textContent = label;
+    input.value = initial;
+    row.hidden = false;
+    input.focus();
+    input.select();
+
+    const close = (value: string | null): void => {
+      row.hidden = true;
+      input.removeEventListener("keydown", onKey);
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      resolve(value);
+    };
+    const onOk = (): void => close(input.value.trim() === "" ? null : input.value);
+    const onCancel = (): void => close(null);
+    const onKey = (event: KeyboardEvent): void => {
+      // The row is a text field; its keys are its own and must not reach the
+      // pane's Cmd+Enter / Cmd+S shortcuts.
+      event.stopPropagation();
+      if (event.key === "Enter") onOk();
+      else if (event.key === "Escape") onCancel();
+    };
+
+    const ok = $("api-ask-ok");
+    const cancel = $("api-ask-cancel");
+    input.addEventListener("keydown", onKey);
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+  });
+}
+
 /** The side panel's three drawers: what was sent before, what the jar is
  *  holding, and how requests reach the network. */
 const SIDE_PANELS = ["history", "cookies", "settings"] as const;
@@ -454,8 +498,8 @@ async function send(): Promise<void> {
 async function newRequest(): Promise<void> {
   const project = state.project;
   if (project === undefined || state.collectionPath === "") return;
-  const name = window.prompt(MESSAGES.apiNewRequest(PRIMARY_LANGUAGE), "New request");
-  if (name === null || name.trim() === "") return;
+  const name = await ask(MESSAGES.apiNewRequest(PRIMARY_LANGUAGE), "New request");
+  if (name === null) return;
 
   const seq = (state.tree?.root.requests.length ?? 0) + 1;
   const result = await window.jarvis.createApiRequest(project, folderForNew(), name, seq);
@@ -475,8 +519,8 @@ function folderForNew(): string {
 async function newFolder(): Promise<void> {
   const project = state.project;
   if (project === undefined || state.collectionPath === "") return;
-  const name = window.prompt(MESSAGES.apiNewFolder(PRIMARY_LANGUAGE), "folder");
-  if (name === null || name.trim() === "") return;
+  const name = await ask(MESSAGES.apiNewFolder(PRIMARY_LANGUAGE), "folder");
+  if (name === null) return;
 
   const result = await window.jarvis.createApiFolder(project, folderForNew(), name);
   if (result.ok) await refreshTree();
@@ -485,8 +529,8 @@ async function newFolder(): Promise<void> {
 async function newCollection(): Promise<void> {
   const project = state.project;
   if (project === undefined) return;
-  const name = window.prompt(MESSAGES.apiNewCollection(PRIMARY_LANGUAGE), "api");
-  if (name === null || name.trim() === "") return;
+  const name = await ask(MESSAGES.apiNewCollection(PRIMARY_LANGUAGE), "api");
+  if (name === null) return;
 
   const result = await window.jarvis.createApiCollection(project, name);
   if (result.ok) await loadCollections();
@@ -495,8 +539,8 @@ async function newCollection(): Promise<void> {
 async function renameEntry(path: string, current: string, isFolder: boolean): Promise<void> {
   const project = state.project;
   if (project === undefined) return;
-  const name = window.prompt(MESSAGES.apiRename(PRIMARY_LANGUAGE), current);
-  if (name === null || name.trim() === "" || name === current) return;
+  const name = await ask(MESSAGES.apiRename(PRIMARY_LANGUAGE), current);
+  if (name === null || name === current) return;
 
   const result = await window.jarvis.renameApiEntry(project, path, name, isFolder);
   if (!result.ok) return;

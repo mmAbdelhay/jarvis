@@ -1032,6 +1032,24 @@
   /* History, cookies and network settings, opened over the request editor
      rather than beside it: all three are read in a moment and closed again,
      and a permanent column for them would cost the editor its width. */
+  .api-ask {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .api-ask[hidden] { display: none; }
+  .api-ask input {
+    flex-grow: 1;
+    color: var(--text);
+    background: var(--ground);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+  }
+
   .api-side-panel { border-bottom: 1px solid var(--border); background: var(--panel); }
   .api-side-panel[hidden] { display: none; }
   .api-side-body { padding: 10px 14px; max-height: 220px; overflow-y: auto; }
@@ -2021,6 +2039,17 @@
                 <button id="api-env-close" class="settings-add" type="button">close</button>
               </div>
               <div id="api-env-vars" class="api-pairs"></div>
+            </div>
+            <!-- Electron does not implement window.prompt: calling it throws
+                 "prompt() is not supported", which is why every create and
+                 rename in this pane silently did nothing. This is the
+                 replacement. -->
+            <div id="api-ask" class="api-ask" hidden>
+              <span id="api-ask-label" class="lbl"></span>
+              <input id="api-ask-input" class="mono" type="text" spellcheck="false" />
+              <button id="api-ask-ok" class="workspace-nav" type="button"
+                      style="width: auto; padding: 0 12px;">OK</button>
+              <button id="api-ask-cancel" class="settings-add" type="button">cancel</button>
             </div>
             <div id="api-side-panel" class="api-side-panel" hidden>
               <div id="api-side-tabs" class="api-tab-strip"></div>
