@@ -13,5 +13,6 @@ export * from "./status-page.js";
 export * from "./capacity.js";
 export * from "./bookmarks.js";
 export * from "./bruno.js";
+export * from "./http-runner.js";
 export * from "./dbgate-types.js";
 export * from "./dbgate.js";
