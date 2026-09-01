@@ -27,7 +27,10 @@
       <button id="nav-workspace" class="nav-btn" type="button">Workspace</button>
       <button id="nav-settings" class="nav-btn" type="button">Settings</button>
     </div>
-    <div class="pill"><span class="pill-dot"></span><span>Online</span></div>
+    <!-- Voice's own state lives here now, beside the status dot, rather than
+         under a wordmark in the middle of the screen. It is ambient
+         information about the app, which is what this strip is for. -->
+    <div class="pill"><span class="pill-dot"></span><span id="voice-state">Online</span></div>
     <div class="spacer"></div>
     <div class="clock mono">
       <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
@@ -101,49 +104,23 @@
         <div class="providers-body" id="providers"></div>
       </div>
 
-      <div class="panel sessions-panel">
-        <div class="ph">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><path d="M4 17l6-6-6-6M12 19h8"></path></svg>
-          <div class="pt">Sessions</div>
-          <div class="spacer"></div>
-          <div id="session-count" class="mono" style="font-size: 10px; color: var(--text-muted);">0 live</div>
-        </div>
-        <div class="sessions-body" id="sessions">
-          <div class="sessions-empty">No active sessions.</div>
-        </div>
-      </div>
-
     </div>
 
     <div class="col-center">
 
-      <div class="orb">
-        <div class="orb-ring orb-ring--outer"></div>
-        <div class="orb-ring orb-ring--inner"></div>
-        <div class="orb-core"></div>
-        <div class="orb-nucleus"></div>
-        <div class="waveform">
-          <span style="height: 13px; opacity: 0.5;"></span>
-          <span style="height: 21px;"></span>
-          <span style="height: 15px; opacity: 0.75;"></span>
-          <span style="height: 24px;"></span>
-          <span style="height: 11px; opacity: 0.5;"></span>
-        </div>
-      </div>
-
-      <div class="brand-block">
-        <div class="brand-title">JARVIS</div>
-        <div class="voice-state">
-          <span class="pill-dot"></span>
-          <span id="voice-state">⌥Space to start · ⌥⇧Space to stop</span>
-        </div>
-      </div>
-
-      <div class="voice-controls">
-        <button id="mic-button" class="voice-btn" type="button" aria-label="Start or stop voice input (⌥Space / ⌥⇧Space)">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
-        </button>
-      </div>
+      <!-- The centre holds what you came to look at: the agents that are
+           running, or — since idle is the state this screen is in most of the
+           time — the projects one could be started in. It used to hold a
+           decorative orb, concentric rings and a letterspaced wordmark, none
+           of which said anything true about the app. Voice is unchanged:
+           ⌥Space still starts it and the header's dot reports listening. -->
+      <section class="centre">
+        <header class="centre__head">
+          <h2 id="centre-title" class="centre__title">Sessions</h2>
+          <span id="centre-count" class="centre__count mono"></span>
+        </header>
+        <div id="centre-body" class="centre__body"></div>
+      </section>
 
     </div>
 
@@ -159,6 +136,11 @@
       </div>
 
       <div class="composer">
+        <button id="mic-button" class="composer__mic" type="button"
+                aria-label="Start or stop voice input (⌥Space / ⌥⇧Space)">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        </button>
         <input id="composer" type="text" placeholder="Type, or press ⌥Space to talk, ⌥⇧Space to stop…" autocomplete="off" />
         <button id="composer-send" type="button" aria-label="Send">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>

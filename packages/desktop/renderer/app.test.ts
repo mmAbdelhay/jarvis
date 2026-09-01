@@ -47,8 +47,9 @@ async function loadApp(
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
     <button id="mic-button"></button>
-    <span id="session-count"></span>
-    <div id="sessions"></div>
+    <h2 id="centre-title"></h2>
+    <span id="centre-count"></span>
+    <div id="centre-body"></div>
     <button id="history-button"></button>
     <button id="history-close"></button>
     <div id="history-overlay" hidden></div>
@@ -93,7 +94,13 @@ async function loadApp(
     onMetrics: vi.fn(),
     onProviders: vi.fn(),
     onWorkspace: vi.fn(),
-    getProjects: vi.fn(async () => []),
+    // The Dashboard's centre lists these when nothing is running, so the
+    // harness has to name some.
+    getProjects: vi.fn(async () => ["acme", "storefront"]),
+    // What a project row's buttons call.
+    openEditor: vi.fn(async () => ({ ok: true, value: "" })),
+    openTerminal: vi.fn(async () => ({ ok: true, value: undefined })),
+    openApiTab: vi.fn(async () => ({ ok: true, value: undefined })),
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
     },
@@ -398,7 +405,7 @@ describe("Arabic project names", () => {
     const { onSessions } = await loadApp();
     onSessions?.([makeSession({ project: "سعودي سيل" })]);
 
-    const project = document.querySelector("#sessions .session__project");
+    const project = document.querySelector("#centre-body .session__project");
     expect(project).not.toBeNull();
     expect(project?.textContent).toBe("سعودي سيل");
     expect((project as HTMLElement).dir).toBe("rtl");
@@ -409,7 +416,7 @@ describe("Arabic project names", () => {
     const { onSessions } = await loadApp();
     onSessions?.([makeSession({ project: "acme" })]);
 
-    const project = document.querySelector("#sessions .session__project");
+    const project = document.querySelector("#centre-body .session__project");
     expect((project as HTMLElement).dir).toBe("ltr");
     expect(project?.classList.contains("arabic")).toBe(false);
   });
@@ -676,7 +683,7 @@ describe("opening a session", () => {
     getSessionLog.mockClear();
     onChangeCounts?.([]);
 
-    document.querySelector<HTMLElement>("#sessions .session")?.click();
+    document.querySelector<HTMLElement>("#centre-body .session")?.click();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -713,7 +720,7 @@ describe("opening a session", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const badge = document.querySelector<HTMLElement>("#sessions .session__diff");
+    const badge = document.querySelector<HTMLElement>("#centre-body .session__diff");
     expect(badge).not.toBeNull();
     badge?.click();
     await Promise.resolve();
@@ -733,5 +740,61 @@ describe("opening a session", () => {
     onSessionOutput?.({ sessionId: "s1", chunk: "live line\n" });
 
     expect(FakeTerminal.last?.text).toBe("live line\n");
+  });
+});
+
+/** Lets the getProjects promise and its render settle. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+}
+
+describe("the Dashboard's centre", () => {
+  // Idle is the state this screen is in most of the time, and it used to be
+  // the state it handled worst — an empty middle beneath a decorative orb.
+  it("lists the configured projects when nothing is running", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    await settle();
+
+    expect(document.getElementById("centre-title")?.textContent).toBe("Projects");
+    expect([...document.querySelectorAll(".project-row__name")].map((n) => n.textContent)).toEqual([
+      "acme",
+      "storefront",
+    ]);
+  });
+
+  it("gives the centre back to sessions the moment one is running", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    await settle();
+
+    onSessions?.([makeSession({ id: "s1", project: "acme" })]);
+
+    expect(document.getElementById("centre-title")?.textContent).toBe("Running");
+    expect(document.querySelectorAll("#centre-body .session")).toHaveLength(1);
+    expect(document.querySelectorAll(".project-row")).toHaveLength(0);
+  });
+
+  it("opens a project's editor, terminal or API tab and goes there", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    await settle();
+
+    document.querySelector<HTMLElement>(".project-row__editor")?.click();
+    document.querySelector<HTMLElement>(".project-row__terminal")?.click();
+
+    expect(window.jarvis.openEditor).toHaveBeenCalledWith("acme");
+    expect(window.jarvis.openTerminal).toHaveBeenCalledWith("acme");
+    // The route change itself is views.ts's job and is tested there; this
+    // harness lays down only the routes it exercises.
+  });
+
+  // The orb, the rings and the centred wordmark were decoration that said
+  // nothing true about the app.
+  it("no longer draws an orb or a wordmark in the middle", async () => {
+    await loadApp();
+
+    expect(document.querySelector(".orb")).toBeNull();
+    expect(document.querySelector(".brand-title")).toBeNull();
   });
 });

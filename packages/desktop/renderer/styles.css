@@ -155,11 +155,6 @@
     transition: width 400ms ease;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 0.25; transform: scale(1); }
-    50% { opacity: 0.6; transform: scale(1.04); }
-  }
-
   #app {
     width: 100%;
     height: 100vh;
@@ -410,113 +405,14 @@
   .session--starting .session__diff { color: var(--warn); border-color: var(--warn-quiet); }
   .session--dead .session__diff { color: var(--bad); border-color: var(--bad-quiet); }
 
+  /* The column used to centre an orb in the middle of the screen, which is
+     why it was a centring flex box. It now holds one panel that should fill
+     the height available to it. */
   .col-center {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 26px;
     min-width: 0;
-  }
-
-  .orb {
-    position: relative;
-    width: 300px;
-    height: 300px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .orb-ring {
-    position: absolute;
-    border-radius: 50%;
-    animation: pulse 3600ms ease-in-out infinite;
-  }
-
-  .orb-ring--outer { width: 300px; height: 300px; border: 1px solid var(--surface-raised); }
-  .orb-ring--inner { width: 236px; height: 236px; border: 1px solid var(--accent-quiet); animation-delay: 400ms; }
-
-  .orb-core {
-    position: absolute;
-    width: 172px;
-    height: 172px;
-    border-radius: 50%;
-    border: 1px solid var(--accent-quiet);
-    background: var(--surface-sunken);
-  }
-
-  .orb-nucleus {
-    position: absolute;
-    width: 108px;
-    height: 108px;
-    border-radius: 50%;
-    background: var(--surface-raised);
-    border: 1px solid var(--accent);
-  }
-
-  .waveform {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    z-index: 1;
-  }
-
-  .waveform span {
-    width: 4px;
-    border-radius: 2px;
-    background: var(--accent);
-  }
-
-  .brand-block {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .brand-title {
-    font-size: 24px;
-    font-weight: 600;
-    letter-spacing: 0.26em;
-  }
-
-  .voice-state {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 7px 16px;
-  }
-
-  .voice-state .pill-dot { background: var(--accent); }
-  .voice-state span:last-child { font-size: 12px; color: var(--text-secondary); }
-
-  .voice-controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .voice-btn {
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .voice-btn--active {
-    background: var(--surface-raised);
-    border-color: var(--accent);
+    min-height: 0;
   }
 
   .col-right {
@@ -1798,3 +1694,108 @@
   }
 
   .commit-btn:disabled { opacity: 0.45; cursor: default; }
+
+
+/* ── The Dashboard's centre ──────────────────────────────────────────────
+   Rows, not cards: a list of sessions is scanned down one column of
+   information, and a grid of cards would spread the same fields sideways to
+   no purpose. */
+.centre {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+  background: var(--surface);
+  border-radius: var(--r-panel);
+  overflow: hidden;
+}
+
+.centre__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+}
+
+.centre__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.centre__count { font-size: 12px; color: var(--text-muted); }
+
+.centre__body {
+  flex-grow: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s3) var(--s4);
+}
+
+.centre__empty {
+  padding: var(--s5);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* A project, when nothing is running. The row is a launcher: the name, what
+   is uncommitted in it, and the three places you would go next. */
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-control);
+}
+.project-row:hover { background: var(--surface-raised); }
+
+.project-row__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.project-row__dirty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.project-row__spacer { flex-grow: 1; }
+
+/* Visible at rest. Hidden until hover, the row read as inert text and the
+   screen looked as empty as the orb it replaced. */
+.project-row__actions { display: flex; gap: var(--s1); opacity: 0.55; }
+.project-row:hover .project-row__actions { opacity: 1; }
+
+.project-row__action {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 3px var(--s2);
+  cursor: pointer;
+}
+
+.project-row__action:hover { color: var(--accent); border-color: var(--accent); }
+
+/* The mic, rehomed into the composer where speaking belongs. */
+.composer__mic {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  cursor: pointer;
+}
+
+.composer__mic:hover { color: var(--accent); border-color: var(--accent); }
+.composer__mic.listening { color: var(--accent); border-color: var(--accent); background: var(--accent-quiet); }

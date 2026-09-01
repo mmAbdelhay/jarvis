@@ -42,6 +42,10 @@ const $ = (id: string): HTMLElement => {
 // counts every time a session's state changes.
 let latestSessions: Session[] = [];
 let latestChanges = new Map<string, SessionChanges>();
+/** The configured projects, for the Dashboard's centre when nothing is
+ *  running. Filled once at startup, from the same call that wires the
+ *  Workspace's project selector. */
+let knownProjects: string[] = [];
 
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
@@ -136,7 +140,13 @@ function wireNav(): void {
   // route's markup.
   void window.jarvis
     .getProjects()
-    .then((projects) => initWorkspace(projects))
+    .then((projects) => {
+      knownProjects = projects;
+      initWorkspace(projects);
+      // The centre may already have rendered its empty state before this
+      // resolved; with the names in hand it has something to say.
+      renderCentre(latestSessions);
+    })
     .catch(() => undefined);
 }
 
@@ -169,16 +179,95 @@ function renderMetrics(metrics: SystemMetrics): void {
       : "--%";
 }
 
+/** Sessions live in the Dashboard's centre now. They were also listed in a
+ *  narrow card in the left rail, which meant rendering the same rows twice
+ *  into two different widths; the card is gone. */
 function renderSessions(sessions: Session[]): void {
-  $("session-count").textContent = `${sessions.length} live`;
-  if (sessions.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "sessions-empty";
-    empty.textContent = "No active sessions.";
-    $("sessions").replaceChildren(empty);
+  renderCentre(sessions);
+}
+
+/**
+ * The Dashboard's centre: the agents that are running, or the projects one
+ * could be started in.
+ *
+ * Idle is the state this screen is in most of the time, and it used to be the
+ * state it handled worst — an empty middle beneath a decorative orb. A project
+ * list is the honest thing to show instead, because it is what you would go
+ * looking for next.
+ */
+function renderCentre(sessions: Session[]): void {
+  const title = $("centre-title");
+  const count = $("centre-count");
+  const body = $("centre-body");
+
+  if (sessions.length > 0) {
+    title.textContent = "Running";
+    count.textContent = `${sessions.length} live`;
+    body.replaceChildren(...sessions.map(buildSessionRow));
     return;
   }
-  $("sessions").replaceChildren(...sessions.map(renderSession));
+
+  title.textContent = "Projects";
+  count.textContent = knownProjects.length === 0 ? "" : `${knownProjects.length}`;
+  if (knownProjects.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "centre__empty";
+    empty.textContent = "No projects configured. Add one in Settings.";
+    body.replaceChildren(empty);
+    return;
+  }
+  body.replaceChildren(...knownProjects.map(buildProjectRow));
+}
+
+/** A project as a launcher: its name, what is uncommitted in it, and the
+ *  three places you would go next. */
+function buildProjectRow(project: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "project-row";
+
+  const name = document.createElement("span");
+  name.className = "project-row__name";
+  const language = detectLanguage(project);
+  name.dir = language === "ar" ? "rtl" : "ltr";
+  if (language === "ar") name.classList.add("arabic");
+  name.textContent = project;
+  row.append(name);
+
+  // A dirty count exists only where a session has reported one. There is no
+  // per-project count for a project with no session, and inventing one would
+  // need main-process work this redesign is not doing.
+  const changes = [...latestChanges.values()].find((entry) => entry.project === project);
+  if (changes !== undefined && changes.files > 0) {
+    const dirty = document.createElement("span");
+    dirty.className = "project-row__dirty";
+    dirty.textContent = `${changes.files} changed`;
+    row.append(dirty);
+  }
+
+  const spacer = document.createElement("span");
+  spacer.className = "project-row__spacer";
+  row.append(spacer);
+
+  const actions = document.createElement("span");
+  actions.className = "project-row__actions";
+  for (const [label, open] of [
+    ["editor", () => window.jarvis.openEditor(project)],
+    ["terminal", () => window.jarvis.openTerminal(project)],
+    ["api", () => window.jarvis.openApiTab(project)],
+  ] as const) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `project-row__action project-row__${label}`;
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      void open();
+      showView("workspace");
+    });
+    actions.append(button);
+  }
+  row.append(actions);
+
+  return row;
 }
 
 function renderSession(session: Session): HTMLElement {
