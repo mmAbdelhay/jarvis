@@ -27,6 +27,9 @@ export class FakeTerminal {
   opened: unknown;
   addons: unknown[] = [];
 
+  /** The handler attachCustomKeyEventHandler was given, if any. */
+  keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
+
   #dataListeners: ((data: string) => void)[] = [];
   #resizeListeners: ((size: { cols: number; rows: number }) => void)[] = [];
 
@@ -63,11 +66,21 @@ export class FakeTerminal {
     this.disposed = true;
   }
 
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
+    this.keyHandler = handler;
+  }
+
   onData(listener: (data: string) => void): void {
     this.#dataListeners.push(listener);
   }
   onResize(listener: (size: { cols: number; rows: number }) => void): void {
     this.#resizeListeners.push(listener);
+  }
+
+  /** Simulates a key reaching the emulator. Returns what the handler said:
+   *  false means "handled here, do not let xterm encode it". */
+  pressKey(init: { key: string; shiftKey?: boolean; altKey?: boolean }): boolean {
+    return this.keyHandler?.({ type: "keydown", ...init } as unknown as KeyboardEvent) ?? true;
   }
 
   /** Simulates the user typing. */

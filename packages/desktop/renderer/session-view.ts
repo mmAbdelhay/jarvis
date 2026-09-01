@@ -126,6 +126,19 @@ function ensureTerminal(): Terminal | undefined {
     void window.jarvis.sendSessionInput(currentId, data);
   });
 
+  // Shift+Enter, and Option+Enter as its Mac alias. xterm encodes both as a
+  // bare CR — exactly what plain Enter sends — so an agent cannot tell
+  // "newline" from "send this message", which is why Shift+Enter appears to
+  // do nothing. ESC+CR is the sequence the convention settled on, and the
+  // one Claude Code's own /terminal-setup configures iTerm2 to send.
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown") return true;
+    if (event.key !== "Enter" || !(event.shiftKey || event.altKey)) return true;
+    if (currentId === undefined) return false;
+    void window.jarvis.sendSessionInput(currentId, "\u001b\r");
+    return false;
+  });
+
   // The pty's size must track the pane's, or the agent draws its UI to a
   // width that does not exist and the result is visibly mangled.
   term.onResize(({ cols, rows }) => {

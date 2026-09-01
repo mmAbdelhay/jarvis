@@ -140,6 +140,21 @@ function ensurePane(tabId: string, host: HTMLElement): Pane {
   // Every keystroke verbatim, control bytes included — that is what makes
   // Ctrl-C, arrows and Escape work rather than only plain text.
   terminal.onData((data) => void window.jarvis.sendTerminalInput(tabId, data));
+
+  // Shift+Enter, and Option+Enter as its Mac alias.
+  //
+  // xterm encodes both as a bare CR, exactly what plain Enter sends, so
+  // nothing downstream can tell "newline" from "run this" — which is why
+  // Shift+Enter appears to do nothing. ESC+CR is the sequence the
+  // convention settled on for the distinction (it is what Claude Code's own
+  // /terminal-setup configures iTerm2 to send), so it is written directly
+  // and xterm is told not to encode the key itself.
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown") return true;
+    if (event.key !== "Enter" || !(event.shiftKey || event.altKey)) return true;
+    void window.jarvis.sendTerminalInput(tabId, "\u001b\r");
+    return false;
+  });
   // The pty's size has to track the pane's, or a full-screen program draws
   // to a width that does not exist.
   terminal.onResize(({ cols, rows }) => void window.jarvis.resizeTerminal(tabId, cols, rows));

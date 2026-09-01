@@ -226,6 +226,32 @@ describe("keyboard input", () => {
     expect(jarvis.sendSessionInput).toHaveBeenCalledWith("s1", "i");
   });
 
+  // Shift+Enter means "newline, not send" to Claude Code and every other
+  // agent UI — but only if the terminal distinguishes it from Enter, which
+  // xterm does not on its own: it encodes both as a bare CR.
+  it("sends ESC+CR for shift+enter rather than the bare CR xterm would", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+
+    const handled = term().pressKey({ key: "Enter", shiftKey: true });
+
+    expect(handled).toBe(false);
+    expect(jarvis.sendSessionInput).toHaveBeenCalledWith(
+      "s1",
+      `${String.fromCharCode(27)}${String.fromCharCode(13)}`,
+    );
+  });
+
+  it("leaves a plain Enter to xterm's own encoding", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+
+    expect(term().pressKey({ key: "Enter" })).toBe(true);
+    expect(jarvis.sendSessionInput).not.toHaveBeenCalled();
+  });
+
   // Control bytes are the difference between a terminal and a text box:
   // Ctrl-C, arrow keys and Escape all arrive this way and must not be
   // filtered, trimmed or re-encoded.

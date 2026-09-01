@@ -14,6 +14,9 @@ vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 
 type Recorded = { call: string; args: unknown[] };
 
+/** ESC then CR: what Shift+Enter must send to mean "newline, not run". */
+const ESC_CR = "\u001b\r";
+
 /** Ctrl-C, written as an escape so the byte itself never sits in the file. */
 const CTRL_C = "\u0003";
 
@@ -175,6 +178,49 @@ describe("workspace terminals", () => {
     FakeTerminal.instances[0]?.emitData(CTRL_C);
 
     expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", CTRL_C] });
+  });
+
+  // xterm sends a bare CR for Shift+Enter, identical to Enter, so a shell or
+  // a TUI cannot tell them apart. ESC+CR is the sequence the convention
+  // settled on — it is what Claude Code's own terminal setup configures
+  // iTerm2 to send — and it is the only way Shift+Enter can mean "newline"
+  // rather than "run this".
+  it("sends ESC+CR for shift+enter instead of a bare carriage return", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    const handled = FakeTerminal.instances[0]?.pressKey({ key: "Enter", shiftKey: true });
+
+    expect(handled).toBe(false);
+    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", ESC_CR] });
+  });
+
+  // Option+Enter is the same gesture on a Mac keyboard and the alias every
+  // terminal that supports one supports too.
+  it("treats option+enter the same way", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    FakeTerminal.instances[0]?.pressKey({ key: "Enter", altKey: true });
+
+    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", ESC_CR] });
+  });
+
+  it("leaves a plain Enter to xterm", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    const handled = FakeTerminal.instances[0]?.pressKey({ key: "Enter" });
+
+    expect(handled).toBe(true);
+    expect(calls.some((entry) => entry.call === "sendTerminalInput")).toBe(false);
+  });
+
+  it("leaves every other shifted key to xterm", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(FakeTerminal.instances[0]?.pressKey({ key: "A", shiftKey: true })).toBe(true);
   });
 
   it("reports a new cell grid to the pty", async () => {
