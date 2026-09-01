@@ -24,6 +24,8 @@ import {
   createMetricsReader,
   createPtySpawner,
   createRealCodeServerSpawner,
+  createRealShellSpawner,
+  createShellManager,
   createRealDbGateSpawner,
   createSqliteSessionStore,
   randomPassword,
@@ -38,6 +40,7 @@ import {
   createBookmarksHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
+  createTerminalHandlers,
   createGitHandlers,
   createSettingsHandlers,
   PROVIDER_HEALTH_INTERVAL_MS,
@@ -224,6 +227,17 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // One login shell per Terminal tab, under a real pty. Unlike the editor
+    // and the database this hosts no page and opens no port: the tab has no
+    // view at all, and its screen is drawn by the renderer's own xterm.
+    const shells = createShellManager({ spawn: createRealShellSpawner() });
+    const terminal = createTerminalHandlers({
+      shells,
+      openTerminalTab: (project) => workspace.openTerminal(project),
+      projects: config.projects,
+      language: PRIMARY_LANGUAGE,
+    });
+
     const bookmarks = createBookmarksHandlers({
       store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
       language: PRIMARY_LANGUAGE,
@@ -290,6 +304,8 @@ app.whenReady().then(async () => {
       codeServer.stopAll();
       // And each open Database tab is a live dbgate-serve child process.
       dbgate.stopAll();
+      // And each open Terminal tab is a live shell.
+      shells.stopAll();
     });
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
@@ -369,7 +385,12 @@ app.whenReady().then(async () => {
       workspace.open(project, input, kind === "editor" || kind === "database" ? kind : "web");
     });
     ipcMain.handle("workspace:close", (_event, id: unknown) => {
-      if (typeof id === "string") workspace.close(id);
+      if (typeof id !== "string") return;
+      // A terminal tab's shell is a child process of its own; closing the
+      // tab has to reap it. kill() on a tab with no shell is a no-op, so
+      // this needs no test of the tab's kind.
+      terminal.close(id);
+      workspace.close(id);
     });
     ipcMain.handle("workspace:activate", (_event, id: unknown) => {
       if (typeof id === "string") workspace.activate(id);
@@ -397,6 +418,25 @@ app.whenReady().then(async () => {
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),
     );
+    ipcMain.handle("terminal:open", (_event, project: unknown) =>
+      terminal.open(typeof project === "string" ? project : ""),
+    );
+    // The renderer's xterm for this tab is ready: hand over whatever the
+    // shell printed before it existed, then stream the rest.
+    ipcMain.handle("terminal:attach", (_event, tabId: unknown) => {
+      if (typeof tabId !== "string") return "";
+      return shells.attach(
+        tabId,
+        (chunk) => window.webContents.send("terminal:data", { tabId, chunk }),
+        (code) => window.webContents.send("terminal:exit", { tabId, code }),
+      );
+    });
+    ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
+      terminal.input(tabId as string, data as string);
+    });
+    ipcMain.handle("terminal:resize", (_event, tabId: unknown, cols: unknown, rows: unknown) => {
+      terminal.resize(tabId as string, cols as number, rows as number);
+    });
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );

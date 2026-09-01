@@ -16,7 +16,13 @@ import {
   type Turn,
 } from "@jarvis/core";
 import type { WorkspaceState } from "@jarvis/core";
-import type { Bookmark, BookmarkStore, CodeServerManager, DbGateManager } from "@jarvis/platform";
+import type {
+  Bookmark,
+  BookmarkStore,
+  CodeServerManager,
+  DbGateManager,
+  ShellManager,
+} from "@jarvis/platform";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -32,6 +38,8 @@ export type IpcChannels = {
   "providers:update": ProviderStatus[];
   "session:output": SessionOutput;
   "workspace:update": WorkspaceState;
+  "terminal:data": { tabId: string; chunk: string };
+  "terminal:exit": { tabId: string; code: number };
 };
 
 /**
@@ -329,6 +337,17 @@ export type RendererApi = {
    *  plus the credential it is guarded with — call openTab(project, url,
    *  "database") with the result to actually show it. */
   openDatabase(project: string): Promise<GitViewResult<DatabaseCredentials>>;
+  /** Opens a terminal tab for `project` and starts its shell. The new tab
+   *  arrives through the ordinary workspace:update, so nothing is returned
+   *  but success or a localised failure. */
+  openTerminal(project: string): Promise<GitViewResult<void>>;
+  /** Announces that this tab's xterm exists; returns whatever the shell
+   *  printed before it did. */
+  attachTerminal(tabId: string): Promise<string>;
+  sendTerminalInput(tabId: string, data: string): Promise<void>;
+  resizeTerminal(tabId: string, cols: number, rows: number): Promise<void>;
+  onTerminalData(cb: (tabId: string, chunk: string) => void): void;
+  onTerminalExit(cb: (tabId: string, code: number) => void): void;
   listBookmarks(project: string): Promise<GitViewResult<Bookmark[]>>;
   addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
   removeBookmark(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
@@ -484,6 +503,59 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
       } catch {
         return fail(MESSAGES.databaseUnavailable(deps.language));
       }
+    },
+  };
+}
+
+export type TerminalHandlers = {
+  /** Opens a terminal tab for `project` and starts its shell. Synchronous:
+   *  there is no port to wait for and no page to load — the tab and the pty
+   *  both exist by the time this returns. */
+  open(project: string): GitViewResult<void>;
+  input(tabId: string, data: string): void;
+  resize(tabId: string, cols: number, rows: number): void;
+  /** Kills the tab's shell. Called when the tab is closed. */
+  close(tabId: string): void;
+};
+
+export type TerminalHandlerDeps = {
+  shells: ShellManager;
+  /** Opens the tab itself and returns its id — BrowserHost.openTerminal,
+   *  injected so these handlers stay testable without a window. */
+  openTerminalTab: (project: string) => string;
+  /** Name to absolute path, from config. The renderer never sees a path. */
+  projects: Readonly<Record<string, string>>;
+  language: "ar" | "en";
+};
+
+export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
+  return {
+    open(project) {
+      const cwd = isString(project) ? deps.projects[project] : undefined;
+      if (cwd === undefined) {
+        return { ok: false, text: MESSAGES.unknownProject(deps.language), language: deps.language };
+      }
+      // The tab first, then the shell: the pty is keyed by the tab id, and
+      // a shell with no tab to draw it would be an orphan process.
+      deps.shells.start(deps.openTerminalTab(project), cwd);
+      return { ok: true, value: undefined };
+    },
+
+    input(tabId, data) {
+      // Both arguments cross an untyped IPC boundary; a keystroke stream is
+      // no reason to relax that.
+      if (!isString(tabId) || !isString(data)) return;
+      deps.shells.write(tabId, data);
+    },
+
+    resize(tabId, cols, rows) {
+      if (!isString(tabId) || typeof cols !== "number" || typeof rows !== "number") return;
+      deps.shells.resize(tabId, cols, rows);
+    },
+
+    close(tabId) {
+      if (!isString(tabId)) return;
+      deps.shells.kill(tabId);
     },
   };
 }

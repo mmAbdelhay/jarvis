@@ -6,11 +6,18 @@ import {
   createBookmarksHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
+  createTerminalHandlers,
   createGitHandlers,
   createSettingsHandlers,
   type WiringDeps,
 } from "./ipc.js";
-import type { Bookmark, BookmarkStore, CodeServerManager, DbGateManager } from "@jarvis/platform";
+import type {
+  Bookmark,
+  BookmarkStore,
+  CodeServerManager,
+  DbGateManager,
+  ShellManager,
+} from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig } from "./config.js";
@@ -1071,5 +1078,143 @@ describe("database handlers", () => {
     });
 
     expect((await handlers.open("acme")).ok).toBe(false);
+  });
+});
+
+describe("terminal handlers", () => {
+  function shells(): {
+    manager: ShellManager;
+    started: { tabId: string; cwd: string }[];
+    written: { tabId: string; data: string }[];
+    killed: string[];
+  } {
+    const started: { tabId: string; cwd: string }[] = [];
+    const written: { tabId: string; data: string }[] = [];
+    const killed: string[] = [];
+    return {
+      started,
+      written,
+      killed,
+      manager: {
+        start: (tabId, cwd) => started.push({ tabId, cwd }),
+        attach: () => "",
+        write: (tabId, data) => written.push({ tabId, data }),
+        resize: () => {},
+        kill: (tabId) => killed.push(tabId),
+        stopAll: () => {},
+      },
+    };
+  }
+
+  it("opens a terminal tab and starts a shell in the project's directory", () => {
+    const { manager, started } = shells();
+    const opened: string[] = [];
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: (project) => {
+        opened.push(project);
+        return "tab-7";
+      },
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = handlers.open("acme");
+
+    expect(result.ok).toBe(true);
+    expect(opened).toEqual(["acme"]);
+    expect(started).toEqual([{ tabId: "tab-7", cwd: "/p/acme" }]);
+  });
+
+  it("refuses an unknown project without opening a tab or a shell", () => {
+    const { manager, started } = shells();
+    let openedTab = false;
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => {
+        openedTab = true;
+        return "tab-7";
+      },
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    const result = handlers.open("nope");
+
+    expect(result.ok).toBe(false);
+    expect(openedTab).toBe(false);
+    expect(started).toEqual([]);
+  });
+
+  it("refuses a non-string project", () => {
+    const { manager } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+    });
+
+    expect(handlers.open(undefined as unknown as string).ok).toBe(false);
+  });
+
+  it("forwards input for a tab to that tab's shell", () => {
+    const { manager, written } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+    });
+
+    handlers.input("tab-7", "ls\r");
+
+    expect(written).toEqual([{ tabId: "tab-7", data: "ls\r" }]);
+  });
+
+  // Every argument here crosses an untyped IPC boundary.
+  it("ignores input whose tab id or data is not a string", () => {
+    const { manager, written } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+    });
+
+    handlers.input(undefined as unknown as string, "ls");
+    handlers.input("tab-7", undefined as unknown as string);
+
+    expect(written).toEqual([]);
+  });
+
+  it("ignores a resize with non-numeric dimensions", () => {
+    const resized: [string, number, number][] = [];
+    const { manager } = shells();
+    const handlers = createTerminalHandlers({
+      shells: { ...manager, resize: (tabId, cols, rows) => resized.push([tabId, cols, rows]) },
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+    });
+
+    handlers.resize("tab-7", "80" as unknown as number, 24);
+    handlers.resize("tab-7", 80, 24);
+
+    expect(resized).toEqual([["tab-7", 80, 24]]);
+  });
+
+  it("kills a tab's shell when the tab is closed", () => {
+    const { manager, killed } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+    });
+
+    handlers.close("tab-7");
+
+    expect(killed).toEqual(["tab-7"]);
   });
 });

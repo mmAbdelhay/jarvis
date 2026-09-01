@@ -56,6 +56,16 @@ const api: RendererApi = {
   },
   openEditor: (project) => ipcRenderer.invoke("editor:open", project),
   openDatabase: (project) => ipcRenderer.invoke("database:open", project),
+  openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
+  attachTerminal: (tabId) => ipcRenderer.invoke("terminal:attach", tabId),
+  sendTerminalInput: (tabId, data) => ipcRenderer.invoke("terminal:input", tabId, data),
+  resizeTerminal: (tabId, cols, rows) => ipcRenderer.invoke("terminal:resize", tabId, cols, rows),
+  onTerminalData: (cb) => {
+    ipcRenderer.on("terminal:data", (_e, payload) => cb(payload.tabId, payload.chunk));
+  },
+  onTerminalExit: (cb) => {
+    ipcRenderer.on("terminal:exit", (_e, payload) => cb(payload.tabId, payload.code));
+  },
   listBookmarks: (project) => ipcRenderer.invoke("bookmarks:list", project),
   addBookmark: (project, bookmark) => ipcRenderer.invoke("bookmarks:add", project, bookmark),
   removeBookmark: (project, url) => ipcRenderer.invoke("bookmarks:remove", project, url),
