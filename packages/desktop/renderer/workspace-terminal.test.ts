@@ -77,16 +77,41 @@ describe("workspace terminals", () => {
   it("builds one terminal for the active terminal tab", async () => {
     const { renderWorkspaceTerminals } = await load();
 
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
     expect(FakeTerminal.instances).toHaveLength(1);
     expect(document.getElementById("workspace-terminal")?.hidden).toBe(false);
   });
 
+  // Switching to a project with no open tab leaves the previous project's
+  // tab "active" in the store (that is how switching back restores it), and
+  // main hides the hosted views behind a flag the renderer cannot see. A
+  // terminal is the renderer's own DOM, so it has to apply the same rule
+  // itself or it would go on showing another project's shell.
+  it("hides a terminal belonging to a project other than the selected one", async () => {
+    const { renderWorkspaceTerminals } = await load();
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    renderWorkspaceTerminals([tab()], "tab-1", "storefront");
+
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
+  });
+
+  it("brings it back when its project is selected again", async () => {
+    const { renderWorkspaceTerminals } = await load();
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    renderWorkspaceTerminals([tab()], "tab-1", "storefront");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(false);
+    expect(FakeTerminal.instances).toHaveLength(1);
+  });
+
   it("keeps the host hidden when the active tab is not a terminal", async () => {
     const { renderWorkspaceTerminals } = await load();
 
-    renderWorkspaceTerminals([tab({ kind: "web", url: "https://github.com" })], "tab-1");
+    renderWorkspaceTerminals([tab({ kind: "web", url: "https://github.com" })], "tab-1", "acme");
 
     expect(FakeTerminal.instances).toHaveLength(0);
     expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
@@ -98,9 +123,9 @@ describe("workspace terminals", () => {
     const { renderWorkspaceTerminals } = await load();
     const tabs = [tab(), tab({ id: "tab-2", kind: "web", url: "https://x.test" })];
 
-    renderWorkspaceTerminals(tabs, "tab-1");
-    renderWorkspaceTerminals(tabs, "tab-2");
-    renderWorkspaceTerminals(tabs, "tab-1");
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    renderWorkspaceTerminals(tabs, "tab-2", "acme");
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
 
     expect(FakeTerminal.instances).toHaveLength(1);
   });
@@ -109,8 +134,8 @@ describe("workspace terminals", () => {
     const { renderWorkspaceTerminals } = await load();
     const tabs = [tab(), tab({ id: "tab-2" })];
 
-    renderWorkspaceTerminals(tabs, "tab-1");
-    renderWorkspaceTerminals(tabs, "tab-2");
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    renderWorkspaceTerminals(tabs, "tab-2", "acme");
 
     const panes = [...document.querySelectorAll<HTMLElement>(".workspace-terminal-pane")];
     expect(panes).toHaveLength(2);
@@ -120,8 +145,8 @@ describe("workspace terminals", () => {
   it("writes the output of the tab it belongs to, and no other", async () => {
     const { renderWorkspaceTerminals } = await load();
     const tabs = [tab(), tab({ id: "tab-2" })];
-    renderWorkspaceTerminals(tabs, "tab-1");
-    renderWorkspaceTerminals(tabs, "tab-2");
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    renderWorkspaceTerminals(tabs, "tab-2", "acme");
 
     dataListener?.("tab-1", "hello");
 
@@ -133,7 +158,7 @@ describe("workspace terminals", () => {
     harness("$ ");
     const { renderWorkspaceTerminals } = await load();
 
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -145,7 +170,7 @@ describe("workspace terminals", () => {
   // a signal rather than as text.
   it("sends every keystroke back with its own tab id", async () => {
     const { renderWorkspaceTerminals } = await load();
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
     FakeTerminal.instances[0]?.emitData(CTRL_C);
 
@@ -154,7 +179,7 @@ describe("workspace terminals", () => {
 
   it("reports a new cell grid to the pty", async () => {
     const { renderWorkspaceTerminals } = await load();
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
     FakeTerminal.instances[0]?.emitResize(120, 40);
 
@@ -164,7 +189,7 @@ describe("workspace terminals", () => {
   // The tab is kept, because its scrollback is usually why you were there.
   it("says so in the terminal when the shell exits", async () => {
     const { renderWorkspaceTerminals } = await load();
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
     exitListener?.("tab-1", 130);
 
@@ -173,9 +198,9 @@ describe("workspace terminals", () => {
 
   it("disposes a closed tab's terminal and removes its pane", async () => {
     const { renderWorkspaceTerminals } = await load();
-    renderWorkspaceTerminals([tab()], "tab-1");
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
-    renderWorkspaceTerminals([], undefined);
+    renderWorkspaceTerminals([], undefined, "acme");
 
     expect(FakeTerminal.instances[0]?.disposed).toBe(true);
     expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(0);

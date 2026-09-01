@@ -78,7 +78,11 @@ export function initWorkspaceTerminals(): void {
  * renderer never tracks "which terminal is open" separately from which tab
  * is active.
  */
-export function renderWorkspaceTerminals(tabs: WorkspaceTab[], activeTabId: string | undefined): void {
+export function renderWorkspaceTerminals(
+  tabs: WorkspaceTab[],
+  activeTabId: string | undefined,
+  selectedProject: string,
+): void {
   const host = $("workspace-terminal");
   const live = new Set(tabs.filter((tab) => tab.kind === "terminal").map((tab) => tab.id));
 
@@ -92,7 +96,13 @@ export function renderWorkspaceTerminals(tabs: WorkspaceTab[], activeTabId: stri
   }
 
   const active = tabs.find((tab) => tab.id === activeTabId);
-  const showing = active?.kind === "terminal" ? active.id : undefined;
+  // The active tab may belong to a project the user has since switched away
+  // from: hideAll() leaves it active in the store so that switching back
+  // restores it, and main hides the hosted views behind a flag of its own.
+  // A terminal is the renderer's own DOM, so it applies the same rule here
+  // rather than going on showing another project's shell.
+  const showing =
+    active?.kind === "terminal" && active.project === selectedProject ? active.id : undefined;
   host.hidden = showing === undefined;
 
   if (showing !== undefined) ensurePane(showing, host);

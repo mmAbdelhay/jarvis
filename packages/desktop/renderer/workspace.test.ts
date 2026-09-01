@@ -878,6 +878,22 @@ describe("open a terminal", () => {
     );
   });
 
+  // The page slot and the terminal are flex siblings that both grow; with
+  // both showing they would split the height and the terminal would get
+  // half a screen.
+  it("gives the terminal the whole slot by hiding the page while it is active", () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-page")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("shows the page slot again when a hosted tab is reactivated", () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+    renderWorkspace({ tabs: [tab({ id: "tab-2", kind: "web" })], activeTabId: "tab-2" });
+
+    expect(document.getElementById("workspace-page")?.hasAttribute("hidden")).toBe(false);
+  });
+
   it("hides the address bar and bookmarks while a terminal tab is active", () => {
     renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
 

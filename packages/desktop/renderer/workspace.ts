@@ -420,7 +420,15 @@ export function renderWorkspace(state: WorkspaceState): void {
   }
 
   updateBookmarkToggle();
-  renderWorkspaceTerminals(state.tabs, state.activeTabId);
+
+  // The page slot and the terminal host are flex siblings that both grow, so
+  // exactly one of them may be in the layout at a time — with both showing
+  // they would split the height and the terminal would get half a screen.
+  // Hiding the slot also makes its rectangle zero, which is why
+  // reportWorkspaceBounds below refuses to report a zero rect: a hosted view
+  // must not be moved to nowhere just because a terminal is on top.
+  ($("workspace-page") as HTMLElement).hidden = tab?.kind === "terminal" && tab.project === selected;
+  renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
 
   // Hiding the bar and the sidebar resizes the page slot the hosted view
   // is pinned to, and nothing else re-measures it — a resize is the only
