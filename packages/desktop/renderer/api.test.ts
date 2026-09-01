@@ -70,6 +70,13 @@ function markup(): string {
       <input id="api-url" />
       <select id="api-environment"></select>
       <button id="api-env-edit"></button>
+      <div id="api-env-panel" hidden>
+        <input id="api-env-name" />
+        <button id="api-env-add"></button>
+        <button id="api-env-save"></button>
+        <button id="api-env-close"></button>
+        <div id="api-env-vars"></div>
+      </div>
       <button id="api-send"></button>
       <button id="api-save"><span id="api-dirty" hidden></span></button>
       <button id="api-curl"></button>
@@ -598,18 +605,87 @@ describe("api collection editing", () => {
     expect(calls.some((e) => e.call === "importPostmanCollection")).toBe(false);
   });
 
-  it("edits the selected environment as name=value lines", async () => {
-    prompts = ["base=http://edited\ntoken=abc"];
+  it("opens the environment editor filled from the selected environment", async () => {
     const module = await load();
     await show(module);
 
     document.getElementById("api-env-edit")?.click();
+
+    expect((document.getElementById("api-env-panel") as HTMLElement).hidden).toBe(false);
+    expect((document.getElementById("api-env-name") as HTMLInputElement).value).toBe("local");
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    expect(inputs.map((input) => input.value)).toEqual(["base", "http://localhost:8000"]);
+  });
+
+  it("edits, adds and saves environment variables", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-env-edit")?.click();
+
+    const value = document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")[1]!;
+    value.value = "http://edited";
+    change(value);
+
+    document.getElementById("api-env-add")?.click();
+    const added = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    added[2]!.value = "token";
+    change(added[2]!);
+    added[3]!.value = "abc";
+    change(added[3]!);
+
+    document.getElementById("api-env-save")?.click();
     await settle();
 
     expect(calls.find((e) => e.call === "saveApiEnvironment")?.args[3]).toEqual([
       { name: "base", value: "http://edited", enabled: true, secret: false },
       { name: "token", value: "abc", enabled: true, secret: false },
     ]);
+  });
+
+  it("marks a variable secret", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-env-edit")?.click();
+
+    const secret = document.querySelector<HTMLInputElement>("#api-env-vars .api-secret input")!;
+    secret.checked = true;
+    change(secret);
+    document.getElementById("api-env-save")?.click();
+    await settle();
+
+    const saved = calls.find((e) => e.call === "saveApiEnvironment")?.args[3] as Record<string, unknown>[];
+    expect(saved[0]).toMatchObject({ name: "base", secret: true });
+  });
+
+  // A half-typed row is not a variable.
+  it("drops a variable with no name on save", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-env-edit")?.click();
+    document.getElementById("api-env-add")?.click();
+
+    document.getElementById("api-env-save")?.click();
+    await settle();
+
+    expect(calls.find((e) => e.call === "saveApiEnvironment")?.args[3]).toHaveLength(1);
+  });
+
+  // Cancelling must leave the collection exactly as it was.
+  it("discards edits when the editor is closed", async () => {
+    const module = await load();
+    await show(module);
+    document.getElementById("api-env-edit")?.click();
+    const value = document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")[1]!;
+    value.value = "http://edited";
+    change(value);
+
+    document.getElementById("api-env-close")?.click();
+    expect((document.getElementById("api-env-panel") as HTMLElement).hidden).toBe(true);
+
+    document.getElementById("api-env-edit")?.click();
+    const reopened = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    expect(reopened[1]?.value).toBe("http://localhost:8000");
+    expect(calls.some((e) => e.call === "saveApiEnvironment")).toBe(false);
   });
 
   it("copies the request as a cURL command", async () => {

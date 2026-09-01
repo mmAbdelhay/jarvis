@@ -55,6 +55,13 @@ function harness(): Recorded[] {
           <input id="api-url" />
           <select id="api-environment"></select>
           <button id="api-env-edit"></button>
+          <div id="api-env-panel" hidden>
+            <input id="api-env-name" />
+            <button id="api-env-add"></button>
+            <button id="api-env-save"></button>
+            <button id="api-env-close"></button>
+            <div id="api-env-vars"></div>
+          </div>
           <button id="api-send"></button>
           <button id="api-save"><span id="api-dirty" hidden></span></button>
           <button id="api-curl"></button>

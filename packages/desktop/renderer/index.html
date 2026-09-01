@@ -1010,6 +1010,25 @@
   }
   .api-tab-count--bad { background: var(--del); color: var(--ground); }
 
+  /* The environment editor, opened over the request editor rather than in a
+     dialog: it belongs to the collection on screen, and a modal would hide
+     the request whose variables you are here to fix. */
+  .api-env-panel {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .api-env-panel[hidden] { display: none; }
+  .api-env-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .api-env-head input {
+    color: var(--text);
+    background: var(--ground);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+  }
+  .api-secret { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted); }
+
   .api-panel { padding: 10px 14px; overflow-y: auto; flex-shrink: 0; max-height: 38%; }
   .api-panel-body { display: flex; flex-direction: column; gap: 8px; }
   .api-field { display: flex; align-items: center; gap: 8px; }
@@ -1968,6 +1987,17 @@
                       style="width: auto; padding: 0 12px;" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
               <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
               <span id="api-status" class="mono api-status-line"></span>
+            </div>
+            <div id="api-env-panel" class="api-env-panel" hidden>
+              <div class="api-env-head">
+                <span class="lbl">ENVIRONMENT</span>
+                <input id="api-env-name" class="mono" type="text" spellcheck="false" />
+                <button id="api-env-add" class="settings-add" type="button">+ variable</button>
+                <button id="api-env-save" class="workspace-nav" type="button"
+                        style="width: auto; padding: 0 12px;">Save</button>
+                <button id="api-env-close" class="settings-add" type="button">close</button>
+              </div>
+              <div id="api-env-vars" class="api-pairs"></div>
             </div>
             <div id="api-tabs" class="api-tab-strip"></div>
             <div id="api-panel" class="api-panel"></div>

@@ -85,7 +85,10 @@ export function initApi(): void {
   $("api-new-folder").addEventListener("click", () => void newFolder());
   $("api-new-collection").addEventListener("click", () => void newCollection());
   $("api-import").addEventListener("click", () => void importPostman());
-  $("api-env-edit").addEventListener("click", () => void editEnvironment());
+  $("api-env-edit").addEventListener("click", () => openEnvironmentEditor());
+  $("api-env-add").addEventListener("click", () => addEnvironmentVariable());
+  $("api-env-save").addEventListener("click", () => void saveEnvironment());
+  $("api-env-close").addEventListener("click", () => closeEnvironmentEditor());
 
   // Cmd+Enter sends and Cmd+S saves, the two things a request editor is for.
   // Scoped to the pane: these must not fire while the user is in a terminal
@@ -496,38 +499,119 @@ async function importPostman(): Promise<void> {
   await loadCollections();
 }
 
-/** The environment editor is a prompt over the variables as `name=value`
- *  lines: small, and it keeps the whole feature to one round trip. A richer
- *  editor is a later change, not a missing one — nothing here is unreachable
- *  without it. */
-async function editEnvironment(): Promise<void> {
-  const project = state.project;
-  if (project === undefined || state.collectionPath === "") return;
+/** The variables being edited in the environment panel. A copy, not the
+ *  tree's own: cancelling has to leave the collection as it was. */
+let editingEnvironment: { name: string; variables: BrunoVariable[] } | undefined;
 
+function openEnvironmentEditor(): void {
+  if (state.collectionPath === "") return;
   const current = state.tree?.environments.find((entry) => entry.name === state.environment);
-  const name = current?.name ?? window.prompt(MESSAGES.apiNewCollection(PRIMARY_LANGUAGE), "local");
-  if (name === null || name.trim() === "") return;
+  editingEnvironment = {
+    name: current?.name ?? "local",
+    variables: (current?.variables ?? []).map((variable) => ({ ...variable })),
+  };
+  renderEnvironmentEditor();
+}
 
-  const asText = (current?.variables ?? [])
-    .map((variable) => `${variable.name}=${variable.value}`)
-    .join("\n");
-  const edited = window.prompt(`${name}`, asText);
-  if (edited === null) return;
+function closeEnvironmentEditor(): void {
+  editingEnvironment = undefined;
+  renderEnvironmentEditor();
+}
 
-  const variables: BrunoVariable[] = edited
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .map((line) => {
-      const at = line.indexOf("=");
-      const key = at === -1 ? line : line.slice(0, at);
-      const value = at === -1 ? "" : line.slice(at + 1);
-      const existing = current?.variables.find((variable) => variable.name === key);
-      return { name: key, value, enabled: true, secret: existing?.secret ?? false };
+function renderEnvironmentEditor(): void {
+  const panel = $("api-env-panel") as HTMLElement;
+  panel.hidden = editingEnvironment === undefined;
+  const rows = $("api-env-vars");
+  rows.replaceChildren();
+  if (editingEnvironment === undefined) return;
+
+  ($("api-env-name") as HTMLInputElement).value = editingEnvironment.name;
+
+  editingEnvironment.variables.forEach((variable, index) => {
+    const row = document.createElement("div");
+    row.className = "api-pair";
+
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.className = "api-enable";
+    enabled.checked = variable.enabled !== false;
+    enabled.addEventListener("change", () => {
+      variable.enabled = enabled.checked;
     });
 
-  const result = await window.jarvis.saveApiEnvironment(project, state.collectionPath, name, variables);
-  if (result.ok) await loadTree(state.collectionPath);
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "mono";
+    name.placeholder = "name";
+    name.value = variable.name;
+    name.addEventListener("change", () => {
+      variable.name = name.value;
+    });
+
+    const value = document.createElement("input");
+    value.type = "text";
+    value.className = "mono";
+    value.placeholder = "value";
+    value.value = variable.value;
+    value.addEventListener("change", () => {
+      variable.value = value.value;
+    });
+
+    // Marking a variable secret is Bruno's own flag; it travels with the
+    // file and is why a token is distinguishable from a base URL at all.
+    const secretLabel = document.createElement("label");
+    secretLabel.className = "api-secret";
+    const secret = document.createElement("input");
+    secret.type = "checkbox";
+    secret.checked = variable.secret === true;
+    secret.addEventListener("change", () => {
+      variable.secret = secret.checked;
+    });
+    const secretText = document.createElement("span");
+    secretText.textContent = "secret";
+    secretLabel.append(secret, secretText);
+
+    const remove = document.createElement("span");
+    remove.className = "api-pair-remove";
+    remove.textContent = "×";
+    remove.setAttribute("role", "button");
+    remove.addEventListener("click", () => {
+      if (editingEnvironment === undefined) return;
+      editingEnvironment.variables = editingEnvironment.variables.filter((_entry, i) => i !== index);
+      renderEnvironmentEditor();
+    });
+
+    row.append(enabled, name, value, secretLabel, remove);
+    rows.append(row);
+  });
+}
+
+function addEnvironmentVariable(): void {
+  if (editingEnvironment === undefined) return;
+  editingEnvironment.variables.push({ name: "", value: "", enabled: true, secret: false });
+  renderEnvironmentEditor();
+}
+
+async function saveEnvironment(): Promise<void> {
+  const project = state.project;
+  if (project === undefined || editingEnvironment === undefined) return;
+  const name = ($("api-env-name") as HTMLInputElement).value.trim();
+  if (name === "") return;
+
+  const result = await window.jarvis.saveApiEnvironment(
+    project,
+    state.collectionPath,
+    name,
+    // A variable with no name is a half-typed row, not a variable.
+    editingEnvironment.variables.filter((variable) => variable.name.trim() !== ""),
+  );
+  if (!result.ok) return;
+  editingEnvironment = undefined;
+  await loadTree(state.collectionPath);
+  // loadTree resets to the first environment; stay on the one just saved.
+  state.environment = name;
+  ($("api-environment") as HTMLSelectElement).value = name;
+  renderEnvironmentEditor();
 }
 
 async function copyCurl(): Promise<void> {
