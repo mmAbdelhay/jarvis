@@ -252,6 +252,22 @@ describe("api pane", () => {
     expect(document.querySelector(".api-response-body")?.textContent).toBe('{\n  "ok": true\n}');
   });
 
+  // HTTP/2 sends no status text; joining unconditionally would render
+  // "200  · 1ms", which reads as a word gone missing.
+  it("renders a status with no status text without a gap", async () => {
+    sendResult = { status: 200, statusText: "", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] };
+    const module = await load();
+    await show(module);
+    document.querySelector<HTMLElement>(".api-request")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    document.getElementById("api-send")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector(".api-response-head")?.textContent).toBe("200 · 1ms · 0 B");
+  });
+
   it("leaves a non-JSON body exactly as it came", async () => {
     sendResult = { status: 200, statusText: "OK", headers: {}, body: "<html>", timeMs: 1, bytes: 6, unresolved: [] };
     const module = await load();

@@ -435,7 +435,10 @@ function renderResponse(): void {
   }
 
   head.classList.toggle("api-response-head--bad", response.status >= 400);
-  head.textContent = `${response.status} ${response.statusText} · ${response.timeMs}ms · ${response.bytes} B`;
+  // HTTP/2 has no status text at all, so joining unconditionally leaves a
+  // double space — "200  · 12ms" — which reads as a missing word.
+  const status = [String(response.status), response.statusText].filter((part) => part !== "").join(" ");
+  head.textContent = `${status} · ${response.timeMs}ms · ${response.bytes} B`;
   container.append(head);
 
   if (response.unresolved.length > 0) {
