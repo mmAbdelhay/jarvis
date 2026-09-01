@@ -79,7 +79,32 @@ import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
 
+/** An asset beside the compiled main process. `import.meta.url` is
+ *  dist/src/main.js at runtime and the build copies assets to dist/assets,
+ *  which is one hop up — the same move copy-vendor.mjs makes for the
+ *  renderer's vendored files. */
+function iconPath(file: string): string {
+  return fileURLToPath(new URL(`../assets/${file}`, import.meta.url));
+}
+
+/**
+ * The dock icon while developing.
+ *
+ * A packaged .app takes its icon from the bundle, but `electron .` shows
+ * Electron's own until it is told otherwise — which is every run during
+ * development, and the only version of the app that exists today.
+ */
+function setDockIcon(): void {
+  if (process.platform !== "darwin" || app.dock === undefined) return;
+  try {
+    app.dock.setIcon(iconPath("icon.png"));
+  } catch {
+    // A missing or unreadable icon is not a reason to fail to start.
+  }
+}
+
 app.whenReady().then(async () => {
+  setDockIcon();
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
@@ -193,6 +218,10 @@ app.whenReady().then(async () => {
       width: 1440,
       height: 900,
       backgroundColor: "#060a0f",
+      // Windows and Linux take the icon from the window; macOS takes it from
+      // the bundle at package time and from the dock while developing, which
+      // is what setDockIcon below is for.
+      icon: iconPath("icon.png"),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
         // This renderer displays untrusted agent output and holds

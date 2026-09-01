@@ -21,3 +21,10 @@ const to = join(here, "..", "dist", "renderer", "vendor");
 
 await mkdir(to, { recursive: true });
 await cp(from, to, { recursive: true });
+
+// The app icon, resolved from dist/src/main.js as ../../assets — so it has
+// to exist beside the compiled output as well as beside the source.
+const assetsFrom = join(here, "..", "assets");
+const assetsTo = join(here, "..", "dist", "assets");
+await mkdir(assetsTo, { recursive: true });
+await cp(assetsFrom, assetsTo, { recursive: true });
