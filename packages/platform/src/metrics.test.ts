@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readMetrics } from "./metrics.js";
+import { cacheSource, readMetrics } from "./metrics.js";
 import type { MetricsSource } from "./metrics.js";
 
 const source: MetricsSource = {
@@ -165,5 +165,99 @@ describe("readMetrics: what the numbers mean", () => {
 
     expect(metrics.diskUsedBytes).toBe(0);
     expect(metrics.diskTotalBytes).toBe(0);
+  });
+});
+
+describe("cacheSource", () => {
+  function counting() {
+    const calls = { currentLoad: 0, mem: 0, fsSize: 0, networkStats: 0, time: 0 };
+    const base: MetricsSource = {
+      currentLoad: async () => {
+        calls.currentLoad += 1;
+        return { currentLoad: 10 };
+      },
+      mem: async () => {
+        calls.mem += 1;
+        return { used: 1, total: 10, available: 4 };
+      },
+      fsSize: async () => {
+        calls.fsSize += 1;
+        return [{ mount: "/", used: 1, size: 10, available: 4 }];
+      },
+      networkStats: async () => {
+        calls.networkStats += 1;
+        return [{ rx_sec: 0, tx_sec: 0 }];
+      },
+      time: () => {
+        calls.time += 1;
+        return { uptime: 100 };
+      },
+    };
+    return { calls, base };
+  }
+
+  // A full sample costs about 240ms and the dashboard polls every two
+  // seconds; disk alone was 113ms of it, re-read every tick for a number
+  // that changes over hours.
+  it("reads disk once across many samples inside its window", async () => {
+    const { calls, base } = counting();
+    let clock = 0;
+    const source = cacheSource(base, () => clock);
+
+    for (let i = 0; i < 10; i += 1) {
+      await readMetrics(source);
+      clock += 2000;
+    }
+
+    expect(calls.fsSize).toBe(1);
+  });
+
+  it("still reads CPU and network every single sample", async () => {
+    const { calls, base } = counting();
+    let clock = 0;
+    const source = cacheSource(base, () => clock);
+
+    for (let i = 0; i < 5; i += 1) {
+      await readMetrics(source);
+      clock += 2000;
+    }
+
+    expect(calls.currentLoad).toBe(5);
+    expect(calls.networkStats).toBe(5);
+  });
+
+  it("re-reads once the value has gone stale", async () => {
+    const { calls, base } = counting();
+    let clock = 0;
+    const source = cacheSource(base, () => clock, { memoryMs: 5000, diskMs: 10_000, uptimeMs: 10_000 });
+
+    await readMetrics(source);
+    clock = 4000;
+    await readMetrics(source);
+    expect(calls.mem).toBe(1);
+
+    clock = 6000;
+    await readMetrics(source);
+    expect(calls.mem).toBe(2);
+  });
+
+  // Uptime is a clock: a cached one has to be corrected by how long it was
+  // held, or the display sits still for a minute at a time.
+  it("advances a cached uptime instead of repeating it", async () => {
+    const { base } = counting();
+    let clock = 0;
+    const source = cacheSource(base, () => clock, { memoryMs: 1, diskMs: 1, uptimeMs: 60_000 });
+
+    expect(source.time().uptime).toBe(100);
+    clock = 30_000;
+    expect(source.time().uptime).toBe(130);
+  });
+
+  it("returns the same values a plain source would", async () => {
+    const { base } = counting();
+    const direct = await readMetrics(base);
+    const cached = await readMetrics(cacheSource(base, () => 0));
+
+    expect(cached).toEqual(direct);
   });
 });

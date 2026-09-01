@@ -1039,15 +1039,26 @@ app.whenReady().then(async () => {
     // the thing a person opening the app is owed, and the health probe takes
     // up to 5s. Spoken as well as shown — the same string, so the two can
     // never drift — and this is the only place the app speaks unprompted.
-    // The listing that upgrades a compact voice to its Enhanced variant is a
-    // process spawn; waiting for it here means the first thing the app says
-    // already sounds like the voice the user chose.
-    await macSpeech.ready;
+    // Nothing here waits for anything the greeting does not use. Two things
+    // were being waited on unconditionally, and together they left the
+    // conversation panel empty for about two seconds on every launch:
+    //
+    //   `say -v ?` takes 1.2s, and it only decides which macOS voice to use —
+    //   which the default configuration does not, because English goes
+    //   through Piper.
+    //
+    //   Scanning four repositories for uncommitted work takes 0.9s, and the
+    //   default greeting no longer mentions it. A template that asks for
+    //   {uncommitted} still gets it; one that does not, does not pay for it.
+    if (!piperReady) await macSpeech.ready;
+
+    const template = config.voice.greeting[PRIMARY_LANGUAGE] ?? "";
+    const wantsUncommitted = template.includes("{uncommitted}");
     const greeting = greetingText(
       {
         now: Date.now(),
         history: sessionStore.history(),
-        dirtyProjects: await dirtyProjects,
+        dirtyProjects: wantsUncommitted ? await dirtyProjects : [],
         template: config.voice.greeting,
       },
       PRIMARY_LANGUAGE,

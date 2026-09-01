@@ -39,6 +39,77 @@ export async function readMetrics(source: MetricsSource): Promise<SystemMetrics>
   };
 }
 
+/**
+ * How long each reading stays good enough.
+ *
+ * A full sample costs about 240ms — `fsSize` alone is 113ms, because it
+ * enumerates every mounted volume — and the dashboard polls every two
+ * seconds. That was a tenth of a core, permanently, in the process that also
+ * serves every IPC call.
+ *
+ * The fix is not to sample less often but to sample each thing as often as it
+ * actually changes. CPU and network are why the poll is fast in the first
+ * place; disk usage and uptime do not change meaningfully between two ticks,
+ * and re-reading them was the whole cost.
+ */
+export type MetricsTtls = { memoryMs: number; diskMs: number; uptimeMs: number };
+
+export const DEFAULT_METRICS_TTLS: MetricsTtls = {
+  memoryMs: 6_000,
+  diskMs: 60_000,
+  uptimeMs: 60_000,
+};
+
+/**
+ * Wraps a source so its expensive readings are reused until they go stale.
+ * The shape is unchanged — every sample still returns a complete snapshot —
+ * so nothing downstream knows or cares that some of it is a few seconds old.
+ */
+export function cacheSource(
+  source: MetricsSource,
+  now: () => number = Date.now,
+  ttls: MetricsTtls = DEFAULT_METRICS_TTLS,
+): MetricsSource {
+  type Cached<T> = { value: T; at: number };
+  let memory: Cached<Awaited<ReturnType<MetricsSource["mem"]>>> | undefined;
+  let disk: Cached<Awaited<ReturnType<MetricsSource["fsSize"]>>> | undefined;
+  let uptime: Cached<ReturnType<MetricsSource["time"]>> | undefined;
+
+  const fresh = <T>(entry: Cached<T> | undefined, ttl: number): entry is Cached<T> =>
+    entry !== undefined && now() - entry.at < ttl;
+
+  return {
+    currentLoad: () => source.currentLoad(),
+    networkStats: () => source.networkStats(),
+
+    mem: async () => {
+      if (fresh(memory, ttls.memoryMs)) return memory.value;
+      const value = await source.mem();
+      memory = { value, at: now() };
+      return value;
+    },
+
+    fsSize: async () => {
+      if (fresh(disk, ttls.diskMs)) return disk.value;
+      const value = await source.fsSize();
+      disk = { value, at: now() };
+      return value;
+    },
+
+    time: () => {
+      if (fresh(uptime, ttls.uptimeMs)) {
+        // Uptime is a clock, so a cached one is corrected by how long it has
+        // been held rather than repeated — the display would otherwise sit
+        // still for a minute at a time.
+        return { uptime: uptime.value.uptime + Math.floor((now() - uptime.at) / 1000) };
+      }
+      const value = source.time();
+      uptime = { value, at: now() };
+      return value;
+    },
+  };
+}
+
 export function createMetricsReader(): () => Promise<SystemMetrics> {
   const source: MetricsSource = {
     currentLoad: () => si.currentLoad(),
@@ -47,7 +118,8 @@ export function createMetricsReader(): () => Promise<SystemMetrics> {
     networkStats: () => si.networkStats(),
     time: () => si.time(),
   };
-  return () => readMetrics(source);
+  const cached = cacheSource(source);
+  return () => readMetrics(cached);
 }
 
 /**
