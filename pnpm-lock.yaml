@@ -97,6 +97,9 @@ importers:
       systeminformation:
         specifier: ^5.33.6
         version: 5.33.6
+      undici:
+        specifier: 8.10.1
+        version: 8.10.1
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -1289,6 +1292,10 @@ packages:
 
   undici@8.10.0:
     resolution: {integrity: sha512-HvltHd7avK13QIw/oLe4qoOLyoVSoafqJ2jYOrtMRBkbYT31eiBQ8O0ehRKZiEZCMEyLFQNIADpgCWC5fALvYQ==}
+    engines: {node: '>=22.19.0'}
+
+  undici@8.10.1:
+    resolution: {integrity: sha512-YQ3WlbqjYMmNpdvDH64jAgLjxuAR9+649calDWhbshYaeQGO2bR4nI94ORJmwI3J9YhoKQnpyGOK+0zlWS5N5Q==}
     engines: {node: '>=22.19.0'}
 
   unpipe@1.0.0:
@@ -2524,6 +2531,8 @@ snapshots:
     optional: true
 
   undici@8.10.0: {}
+
+  undici@8.10.1: {}
 
   unpipe@1.0.0: {}
 

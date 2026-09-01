@@ -17,7 +17,8 @@
     "@usebruno/lang": "0.38.0",
     "node-pty": "^1.1.0",
     "simple-git": "^3.36.0",
-    "systeminformation": "^5.33.6"
+    "systeminformation": "^5.33.6",
+    "undici": "8.10.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2"

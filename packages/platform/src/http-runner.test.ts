@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createCookieJar } from "./cookies.js";
 import { interpolate, sendRequest } from "./http-runner.js";
 
 type Captured = { url: string; init: RequestInit };
@@ -276,5 +277,202 @@ describe("sendRequest", () => {
 
     expect("failed" in result).toBe(true);
     expect(captured).toEqual([]);
+  });
+});
+
+describe("sendRequest: graphql, files, cookies and network options", () => {
+  it("sends a GraphQL query and its variables as one JSON body", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/graphql", body: "graphql", auth: "none" },
+        body: { graphql: { query: "{ user(id: {{id}}) { name } }", variables: '{"a":1}' } },
+      },
+      { id: "7" },
+      deps,
+    );
+
+    expect(JSON.parse(String(captured[0]?.init.body))).toEqual({
+      query: "{ user(id: 7) { name } }",
+      variables: { a: 1 },
+    });
+    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
+
+  it("omits variables entirely when there are none", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/graphql", body: "graphql", auth: "none" },
+        body: { graphql: { query: "{ a }", variables: "" } },
+      },
+      {},
+      deps,
+    );
+
+    expect(JSON.parse(String(captured[0]?.init.body))).toEqual({ query: "{ a }" });
+  });
+
+  it("uploads a file in a multipart body", async () => {
+    const { captured, deps } = harness();
+    const read: string[] = [];
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/upload", body: "multipartForm", auth: "none" },
+        body: {
+          multipartForm: [
+            { name: "note", value: "hello", type: "text", enabled: true },
+            { name: "doc", value: ["./a.txt"], type: "file", enabled: true, contentType: "text/plain" },
+          ],
+        },
+      },
+      {},
+      {
+        ...deps,
+        resolvePath: (path) => `/collection/${path}`,
+        readFile: (path) => {
+          read.push(path);
+          return Promise.resolve(new TextEncoder().encode("file body"));
+        },
+      },
+    );
+
+    const form = captured[0]?.init.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get("note")).toBe("hello");
+    const file = form.get("doc") as File;
+    expect(file.name).toBe("a.txt");
+    expect(await file.text()).toBe("file body");
+    expect(read).toEqual(["/collection/./a.txt"]);
+  });
+
+  // The boundary is FormData's to choose; any Content-Type set by hand would
+  // be wrong and would break the request.
+  it("drops a hand-set Content-Type for a multipart body", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h", body: "multipartForm", auth: "none" },
+        headers: [{ name: "Content-Type", value: "multipart/form-data", enabled: true }],
+        body: { multipartForm: [{ name: "a", value: "1", type: "text", enabled: true }] },
+      },
+      {},
+      deps,
+    );
+
+    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+  });
+
+  it("sends the jar's cookies and stores what came back", async () => {
+    const response = new Response("ok", { status: 200 });
+    response.headers.append("set-cookie", "sid=new; Path=/");
+    const { captured, deps } = harness(response);
+    const jar = createCookieJar();
+    jar.store("http://h/", ["existing=1; Path=/"]);
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: "http://h/x", body: "none", auth: "none" } },
+      {},
+      { ...deps, jar },
+    );
+
+    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("existing=1");
+    expect(jar.headerFor("http://h/")).toContain("sid=new");
+  });
+
+  // An explicit Cookie header is the author saying what they want sent.
+  it("never overrides a Cookie header the request set itself", async () => {
+    const { captured, deps } = harness();
+    const jar = createCookieJar();
+    jar.store("http://h/", ["sid=jar; Path=/"]);
+
+    await sendRequest(
+      {
+        ...get(),
+        http: { method: "get", url: "http://h/x", body: "none", auth: "none" },
+        headers: [{ name: "Cookie", value: "sid=mine", enabled: true }],
+      },
+      {},
+      { ...deps, jar },
+    );
+
+    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=mine");
+  });
+
+  it("passes a dispatcher built from the network options", async () => {
+    const { captured, deps } = harness();
+    const seen: unknown[] = [];
+
+    await sendRequest(get(), { base: "http://h" }, {
+      ...deps,
+      dispatcherFor: (options) => {
+        seen.push(options);
+        return { marker: true };
+      },
+    }, { verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" });
+
+    expect(seen).toEqual([{ verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" }]);
+    expect((captured[0]?.init as Record<string, unknown>)["dispatcher"]).toEqual({ marker: true });
+  });
+
+  // A request's own timeout setting is more specific than the global one.
+  it("prefers the request's own timeout over the global one", async () => {
+    const { deps } = harness();
+    const seen: { timeoutMs: number }[] = [];
+
+    await sendRequest({ ...get(), settings: { timeout: 250 } }, { base: "http://h" }, {
+      ...deps,
+      dispatcherFor: (options) => {
+        seen.push(options);
+        return undefined;
+      },
+    }, { verifyCertificate: true, timeoutMs: 9000 });
+
+    expect(seen[0]?.timeoutMs).toBe(250);
+  });
+
+  it("places an OAuth2 token in the Authorization header", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: "http://h", body: "none", auth: "oauth2" } },
+      {},
+      {
+        ...deps,
+        token: { accessToken: "t0ken", placement: "header", headerPrefix: "Bearer", queryKey: "access_token" },
+      },
+    );
+
+    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer t0ken");
+  });
+
+  it("places an OAuth2 token in the query when the provider wants it there", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(
+      { ...get(), http: { method: "get", url: "http://h/x", body: "none", auth: "oauth2" } },
+      {},
+      { ...deps, token: { accessToken: "t0ken", placement: "url", headerPrefix: "Bearer", queryKey: "tok" } },
+    );
+
+    expect(captured[0]?.url).toBe("http://h/x?tok=t0ken");
+  });
+
+  it("attaches an abort signal when there is a timeout", async () => {
+    const { captured, deps } = harness();
+
+    await sendRequest(get(), { base: "http://h" }, deps, { verifyCertificate: true, timeoutMs: 1000 });
+
+    expect((captured[0]?.init as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 });

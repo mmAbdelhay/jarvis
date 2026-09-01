@@ -8,6 +8,8 @@
 // fetch and the clock are injected so every behaviour below is testable
 // without a network or a real elapsed millisecond.
 
+import type { CookieJar } from "./cookies.js";
+
 export type ApiResponse = {
   status: number;
   statusText: string;
@@ -21,7 +23,33 @@ export type ApiResponse = {
 
 export type ApiFailure = { failed: true; detail: string; timeMs: number };
 
-export type SendDeps = { fetch: typeof fetch; now: () => number };
+export type SendDeps = {
+  fetch: typeof fetch;
+  now: () => number;
+  /** The project's cookie jar, when it has one. An API you log into with one
+   *  request and call with the next needs it; without one the second request
+   *  is anonymous. */
+  jar?: CookieJar;
+  /** Reads a file a multipart body refers to. Injected so the runner stays
+   *  testable without a filesystem. */
+  readFile?: (path: string) => Promise<Uint8Array>;
+  /** Resolves a request-relative file path against its collection. */
+  resolvePath?: (path: string) => string;
+  /** Per-request network options: a proxy to go through, whether to insist
+   *  on a valid certificate, how long to wait. */
+  dispatcherFor?: (options: NetworkOptions) => unknown;
+  /** A token already obtained for an oauth2 request. */
+  token?: { accessToken: string; placement: "header" | "url"; headerPrefix: string; queryKey: string };
+};
+
+/** What the Settings tab controls, and what a collection can carry. */
+export type NetworkOptions = {
+  proxyUrl?: string;
+  /** false is a deliberate choice for a development server with a
+   *  self-signed certificate; it is never the default. */
+  verifyCertificate: boolean;
+  timeoutMs: number;
+};
 
 type Pair = { name?: string; value?: string; enabled?: boolean };
 
@@ -57,6 +85,7 @@ export async function sendRequest(
   request: Record<string, unknown>,
   variables: Record<string, string>,
   deps: SendDeps,
+  options?: NetworkOptions,
 ): Promise<ApiResponse | ApiFailure> {
   const started = deps.now();
   const unresolved: string[] = [];
@@ -102,14 +131,48 @@ export async function sendRequest(
   }
 
   applyAuth(request, http.auth, headers, resolve);
-  const body = buildBody(request, http.body, headers, resolve);
+
+  // An OAuth2 token is fetched by the caller (it needs a browser for one of
+  // the grants) and handed in already resolved, so this only has to place it.
+  if (deps.token !== undefined) {
+    if (deps.token.placement === "url") url.searchParams.set(deps.token.queryKey, deps.token.accessToken);
+    else headers["Authorization"] = `${deps.token.headerPrefix} ${deps.token.accessToken}`.trim();
+  }
+
+  // The jar is consulted after the request's own headers, and never
+  // overrides one the request set by hand: an explicit Cookie header is the
+  // author saying what they want sent.
+  const jarHeader = deps.jar?.headerFor(url.toString()) ?? "";
+  const hasOwnCookie = Object.keys(headers).some((name) => name.toLowerCase() === "cookie");
+  if (jarHeader !== "" && !hasOwnCookie) headers["Cookie"] = jarHeader;
+
+  const body = await buildBody(request, http.body, headers, resolve, deps);
+
+  const settings = (request["settings"] ?? {}) as { timeout?: number };
+  const network: NetworkOptions = {
+    verifyCertificate: options?.verifyCertificate ?? true,
+    timeoutMs: typeof settings.timeout === "number" && settings.timeout > 0 ? settings.timeout : (options?.timeoutMs ?? 0),
+    ...(options?.proxyUrl === undefined ? {} : { proxyUrl: options.proxyUrl }),
+  };
+  const dispatcher = deps.dispatcherFor?.(network);
+  // A request with no timeout can hang forever, and a UI waiting on it looks
+  // broken rather than busy.
+  const signal = network.timeoutMs > 0 ? AbortSignal.timeout(network.timeoutMs) : undefined;
 
   try {
     const response = await deps.fetch(url.toString(), {
       method,
       headers,
       ...(body === undefined ? {} : { body }),
-    });
+      ...(dispatcher === undefined ? {} : { dispatcher }),
+      ...(signal === undefined ? {} : { signal }),
+    } as RequestInit);
+
+    // getSetCookie is the only way to see several Set-Cookie headers; reading
+    // the header directly joins them into one unparseable string.
+    const setCookies =
+      typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
+    if (setCookies.length > 0) deps.jar?.store(url.toString(), setCookies);
     const text = await response.text();
     return {
       status: response.status,
@@ -153,12 +216,13 @@ function applyAuth(
   }
 }
 
-function buildBody(
+async function buildBody(
   request: Record<string, unknown>,
   mode: string | undefined,
   headers: Record<string, string>,
   resolve: (text: string) => string,
-): string | undefined {
+  deps: SendDeps,
+): Promise<string | FormData | undefined> {
   if (mode === undefined || mode === "none") return undefined;
   const body = (request["body"] ?? {}) as Record<string, unknown>;
 
@@ -191,7 +255,67 @@ function buildBody(
     }
     return form.toString();
   }
-  // Anything else (multipart, file, graphql) is out of scope for now and is
-  // sent as nothing rather than as a guess.
+  if (mode === "graphql") {
+    defaultContentType("application/json");
+    const graphql = (body["graphql"] ?? {}) as { query?: string; variables?: string };
+    const query = resolve(graphql.query ?? "");
+    const raw = resolve(graphql.variables ?? "").trim();
+    let parsed: unknown = undefined;
+    if (raw !== "") {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // Variables that are not JSON are sent as the string they are; the
+        // server's error about them is more useful than one invented here.
+        parsed = raw;
+      }
+    }
+    return JSON.stringify(parsed === undefined ? { query } : { query, variables: parsed });
+  }
+
+  if (mode === "multipartForm") {
+    // The boundary is FormData's to choose, so any Content-Type set here
+    // would be wrong — deleted rather than left to break the request.
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() === "content-type") delete headers[name];
+    }
+    const form = new FormData();
+    for (const field of ((body["multipartForm"] as MultipartField[] | undefined) ?? [])) {
+      if (field.enabled === false || field.name === undefined) continue;
+      const name = resolve(field.name);
+
+      if (field.type === "file") {
+        const paths = Array.isArray(field.value) ? field.value : [];
+        for (const path of paths) {
+          const full = deps.resolvePath?.(resolve(path)) ?? resolve(path);
+          const bytes = await deps.readFile?.(full);
+          if (bytes === undefined) continue;
+          const fileName = full.slice(full.lastIndexOf("/") + 1);
+          form.append(
+            name,
+            new File([bytes as BlobPart], fileName, {
+              ...(field.contentType === undefined || field.contentType === ""
+                ? {}
+                : { type: field.contentType }),
+            }),
+          );
+        }
+        continue;
+      }
+
+      form.append(name, resolve(typeof field.value === "string" ? field.value : ""));
+    }
+    return form;
+  }
+
   return undefined;
 }
+
+type MultipartField = {
+  name?: string;
+  /** A text field carries a string; a file field carries a list of paths. */
+  value?: string | string[];
+  enabled?: boolean;
+  type?: string;
+  contentType?: string;
+};
