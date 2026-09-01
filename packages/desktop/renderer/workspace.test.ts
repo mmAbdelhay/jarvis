@@ -893,6 +893,12 @@ describe("open a terminal", () => {
     expect(document.getElementById("workspace-page")?.hasAttribute("hidden")).toBe(true);
   });
 
+  it("gives an api tab the whole slot too", () => {
+    renderWorkspace({ tabs: [tab({ kind: "api", url: "" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-page")?.hasAttribute("hidden")).toBe(true);
+  });
+
   it("shows the page slot again when a hosted tab is reactivated", () => {
     renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
     renderWorkspace({ tabs: [tab({ id: "tab-2", kind: "web" })], activeTabId: "tab-2" });

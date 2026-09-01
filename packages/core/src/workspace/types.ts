@@ -11,11 +11,12 @@ export type TabId = string;
  *  with whatever file, panel or table has focus, which would otherwise make
  *  the tab strip unreadable.
  *
- *  "terminal" is the odd one: it is a tab with no hosted page at all. Its
- *  pty lives in the main process and its screen is drawn by the renderer's
- *  own xterm instance, so it has no URL, no view, and nothing for the
- *  address bar or the history controls to act on. */
-export type TabKind = "web" | "editor" | "database" | "terminal";
+ *  "terminal" and "api" are the odd ones: tabs with no hosted page at all.
+ *  A terminal's pty and an api tab's requests live in the main process while
+ *  their surfaces are drawn by the renderer itself, so they have no URL, no
+ *  view, and nothing for the address bar or the history controls to act
+ *  on. */
+export type TabKind = "web" | "editor" | "database" | "terminal" | "api";
 
 export type WorkspaceTab = {
   id: TabId;

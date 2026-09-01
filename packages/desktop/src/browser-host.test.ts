@@ -644,6 +644,21 @@ describe("BrowserHost terminal tabs", () => {
     expect(kinds.filter((kind) => kind === "web")).toHaveLength(2);
   });
 
+  it("opens an api tab with no hosted view, titled for its project", () => {
+    host.openApi("acme");
+
+    expect(host.state().tabs[0]?.kind).toBe("api");
+    expect(host.state().tabs[0]?.title).toBe("acme — API");
+    expect(views).toHaveLength(0);
+  });
+
+  it("hides every hosted page while an api tab is active", () => {
+    host.open("acme", "https://github.com");
+    host.openApi("acme");
+
+    expect(views[0]?.visible).toBe(false);
+  });
+
   it("ignores navigation controls aimed at a terminal tab", () => {
     host.openTerminal("acme");
     const id = host.state().tabs[0]!.id;

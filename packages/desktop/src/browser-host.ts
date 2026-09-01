@@ -55,6 +55,7 @@ const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
   editor: "Editor",
   database: "Database",
   terminal: "Terminal",
+  api: "API",
 };
 
 export class BrowserHost {
@@ -115,22 +116,37 @@ export class BrowserHost {
   /**
    * Opens a terminal tab: a tab in the same store as every other, with no
    * hosted view behind it. Its pty lives in the main process and its screen
-   * is drawn by the renderer's own xterm instance, so there is no URL to
-   * normalise and nothing to load.
+   * is drawn by the renderer's own xterm instance.
+   */
+  openTerminal(project: string): TabId {
+    return this.#openViewless(project, "terminal");
+  }
+
+  /**
+   * Opens an API tab. Same shape as a terminal: no hosted page, a surface
+   * the renderer draws, and requests issued from the main process.
+   */
+  openApi(project: string): TabId {
+    return this.#openViewless(project, "api");
+  }
+
+  /**
+   * A tab with no hosted view behind it. There is no URL to normalise and
+   * nothing to load; the renderer draws the surface itself.
    *
    * #syncVisibility iterates over views alone, so activating a tab that has
    * none hides every hosted page as a consequence — which is exactly what
    * has to happen, since a native view would otherwise float over the
-   * terminal's DOM.
+   * renderer's own DOM.
    *
-   * Returns the new tab's id: main needs it to key the pty it is about to
-   * spawn for this tab.
+   * Returns the new tab's id: main needs it to key whatever it is about to
+   * start for this tab.
    */
-  openTerminal(project: string): TabId {
+  #openViewless(project: string, kind: "terminal" | "api"): TabId {
     this.#evictIfFull();
     this.#suppressed = false;
-    const tab = this.#store.open(project, "", "terminal");
-    this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS.terminal}` });
+    const tab = this.#store.open(project, "", kind);
+    this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS[kind]}` });
     this.#syncVisibility();
     return tab.id;
   }

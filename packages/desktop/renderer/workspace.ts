@@ -88,6 +88,11 @@ let bookmarksVisible = true;
  *  opened them shows nothing, and closing a tab forgets it. */
 const devToolsByTab = new Set<string>();
 
+/** Tab kinds whose surface the renderer draws itself, over the region a
+ *  hosted page would occupy. The page slot and these panes are flex
+ *  siblings that both grow, so exactly one may be in the layout at a time. */
+const RENDERER_DRAWN: ReadonlySet<WorkspaceTab["kind"]> = new Set(["terminal", "api"]);
+
 /** The panel's share of the browser column's height. Dragged by the handle
  *  above it, clamped so neither the page nor the panel is squeezed away. */
 let devToolsFraction = 0.4;
@@ -548,7 +553,8 @@ export function renderWorkspace(state: WorkspaceState): void {
   // Hiding the slot also makes its rectangle zero, which is why
   // reportWorkspaceBounds below refuses to report a zero rect: a hosted view
   // must not be moved to nowhere just because a terminal is on top.
-  ($("workspace-page") as HTMLElement).hidden = tab?.kind === "terminal" && tab.project === selected;
+  ($("workspace-page") as HTMLElement).hidden =
+    tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
 
   // A closed tab takes its DevTools with it: main destroys the panel's view
