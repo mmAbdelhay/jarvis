@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createShellManager, type ShellProcess, type ShellSpawner } from "./shell.js";
+import { createShellManager, shellEnv, type ShellProcess, type ShellSpawner } from "./shell.js";
 
 class FakeShell implements ShellProcess {
   written: string[] = [];
@@ -167,5 +167,39 @@ describe("createShellManager", () => {
     instance.stopAll();
 
     expect(shells.map((shell) => shell.killed)).toEqual([true, true]);
+  });
+});
+
+describe("shellEnv", () => {
+  it("points ZDOTDIR at the wrapper and names the command log", () => {
+    const env = shellEnv(
+      { HOME: "/home/me" },
+      { zdotdir: "/jarvis/zdotdir", commandLog: "/jarvis/commands.log" },
+    );
+
+    expect(env["ZDOTDIR"]).toBe("/jarvis/zdotdir");
+    expect(env["JARVIS_COMMAND_LOG"]).toBe("/jarvis/commands.log");
+  });
+
+  // No integration must mean no trace of it: a ZDOTDIR left pointing
+  // anywhere would change which startup files the user's shell reads.
+  it("leaves ZDOTDIR alone when there is no wrapper", () => {
+    const env = shellEnv({ HOME: "/home/me" }, {});
+
+    expect(env["ZDOTDIR"]).toBeUndefined();
+    expect(env["JARVIS_COMMAND_LOG"]).toBeUndefined();
+  });
+
+  it("does not inherit a ZDOTDIR the user had set when there is no wrapper", () => {
+    const env = shellEnv({ HOME: "/home/me", ZDOTDIR: "/home/me/.config/zsh" }, {});
+
+    expect(env["ZDOTDIR"]).toBe("/home/me/.config/zsh");
+  });
+
+  it("keeps the terminal markers a modern prompt checks for", () => {
+    const env = shellEnv({ HOME: "/home/me" }, {});
+
+    expect(env["TERM"]).toBe("xterm-256color");
+    expect(env["COLORTERM"]).toBe("truecolor");
   });
 });

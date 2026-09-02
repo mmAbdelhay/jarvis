@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
+import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 
 // node-pty is a native module, loaded lazily through createRequire for the
 // same reason pty.ts does it: the unit tests inject a fake spawner and must
@@ -127,6 +128,42 @@ function shellCommand(env: NodeJS.ProcessEnv): string {
   return shell === undefined || shell === "" ? "/bin/zsh" : shell;
 }
 
+export type ShellIntegration = {
+  /** The Jarvis-owned ZDOTDIR wrapper, when one was installed. */
+  zdotdir?: string | undefined;
+  /** Where the wrapper's preexec hook appends `<epoch>\t<cwd>\t<command>`. */
+  commandLog?: string | undefined;
+};
+
+/**
+ * The environment a Terminal tab's shell is started with.
+ *
+ * COLORTERM is set beside TERM because modern prompts (starship,
+ * powerlevel) check it to decide whether they may use 24-bit colour;
+ * xterm.js renders it fine, and without the marker they fall back to a
+ * duller palette.
+ *
+ * ZDOTDIR is set only when a wrapper was actually installed. An absent
+ * integration must leave no trace: pointing ZDOTDIR anywhere changes which
+ * startup files the shell reads, and a half-installed redirection is the
+ * one failure that could cost the user their PATH. Whatever ZDOTDIR the
+ * user had set passes through untouched.
+ */
+export function shellEnv(
+  env: NodeJS.ProcessEnv,
+  integration: ShellIntegration,
+): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedShellEnv(env),
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    ...(integration.zdotdir === undefined ? {} : { ZDOTDIR: integration.zdotdir }),
+    ...(integration.commandLog === undefined
+      ? {}
+      : { [JARVIS_COMMAND_LOG_ENV]: integration.commandLog }),
+  };
+}
+
 /**
  * The real spawner: the user's login shell under a pty, rooted at the
  * project.
@@ -137,11 +174,14 @@ function shellCommand(env: NodeJS.ProcessEnv): string {
  * so a non-login shell here would be a stripped-down impostor of the one
  * they get in a terminal window.
  *
- * COLORTERM is set beside TERM because modern prompts (starship, powerlevel)
- * check it to decide whether they may use 24-bit colour; xterm.js renders it
- * fine, and without the marker they fall back to a duller palette.
+ * `integration` carries the completion feature's ZDOTDIR wrapper, when one
+ * was installed — see shellEnv and zsh-integration.ts. An empty one is the
+ * terminal as it was before autocomplete existed.
  */
-export function createRealShellSpawner(env: NodeJS.ProcessEnv = process.env): ShellSpawner {
+export function createRealShellSpawner(
+  env: NodeJS.ProcessEnv = process.env,
+  integration: ShellIntegration = {},
+): ShellSpawner {
   // node-pty's own shape: onExit hands over an event object, not a bare
   // code, which is the one place it differs from ShellProcess.
   type NodePtyProcess = {
@@ -165,7 +205,7 @@ export function createRealShellSpawner(env: NodeJS.ProcessEnv = process.env): Sh
       cols,
       rows,
       cwd,
-      env: { ...sanitizedShellEnv(env), TERM: "xterm-256color", COLORTERM: "truecolor" },
+      env: shellEnv(env, integration),
     });
 
     return {

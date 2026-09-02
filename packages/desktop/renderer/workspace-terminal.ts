@@ -1,5 +1,6 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { enhanceTerminal } from "./terminal-addons.js";
+import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -142,10 +143,27 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   // Ctrl-C, arrows and Escape work rather than only plain text.
   terminal.onData((data) => void window.jarvis.sendTerminalInput(tabId, data));
 
+  // Autocomplete: a dropdown under the cursor, completing from this user's
+  // own shell history. Guarded because it is an enhancement and never a
+  // requirement — a terminal that could not wire it must still be a
+  // terminal, which is the same rule the addon stack follows. Its key
+  // handling goes through enhanceTerminal rather than being attached
+  // separately: xterm keeps only one custom key handler.
+  let completion: Completion = { handleKey: () => true };
+  try {
+    completion = attachCompletion(terminal, element, {
+      suggest: (input) => window.jarvis.suggestCompletions(tabId, input),
+      sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+    });
+  } catch {
+    // No dropdown. The shell is untouched.
+  }
+
   // Addons, key bindings and the find bar — shared with the Session view's
   // terminal so the two behave identically. After open(): WebGL needs a real
   // element to attach a context to.
   enhanceTerminal(terminal, element, {
+    interceptKey: (event) => completion.handleKey(event),
     sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
     // A link opens as an ordinary browser tab in the same project, which is
     // what puts it through normalizeInput and the app's navigation rules

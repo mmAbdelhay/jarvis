@@ -65,6 +65,10 @@ function harness(buffered = ""): void {
       calls.push({ call: "resizeTerminal", args: [tabId, cols, rows] });
       return Promise.resolve();
     },
+    suggestCompletions: (tabId: string, input: string) => {
+      calls.push({ call: "suggestCompletions", args: [tabId, input] });
+      return Promise.resolve(["git status"]);
+    },
   };
 }
 
@@ -368,5 +372,53 @@ describe("terminal key bindings and addons", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
 
     expect(FakeTerminal.instances[0]?.unicode.activeVersion).toBe("11");
+  });
+
+  it("asks for completions against the pane's own tab", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine("~/p > git sta");
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toContainEqual({ call: "suggestCompletions", args: ["tab-1", "git sta"] });
+    expect(document.querySelector(".terminal-completion")?.textContent).toContain("git status");
+  });
+
+  // xterm keeps exactly one custom key handler. Attaching the dropdown's
+  // separately would silently replace the addon stack's and take Cmd+F,
+  // Cmd+V and Shift+Enter with it, so both go through the one handler —
+  // and this asserts they still coexist.
+  it("claims Tab for an open dropdown while leaving Cmd+F to the find bar", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine("~/p > git sta");
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(terminal.pressKey({ key: "Tab" })).toBe(false);
+    terminal.pressKey({ key: "f", metaKey: true });
+    expect(document.querySelector(".terminal-find")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("gives each terminal its own dropdown", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    const tabs = [tab(), tab({ id: "tab-2" })];
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    renderWorkspaceTerminals(tabs, "tab-2", "acme");
+
+    expect(document.querySelectorAll(".terminal-completion")).toHaveLength(2);
   });
 });

@@ -190,6 +190,47 @@ makes it mean *newline* to Claude Code and every other agent UI. **⌘F** finds,
 **⌘C** copies the selection, **⌘V** pastes, **⌘K** clears. Ctrl chords are left
 alone — those are real control bytes a program may want.
 
+### Autocomplete
+
+As you type, a dropdown appears under the cursor with the commands you
+actually run. **↑/↓** move, **Tab** or **Enter** accepts, **Esc** closes.
+Accepting only fills the line in — you still press Enter yourself.
+
+Suggestions come from three places, in order:
+
+1. **Your shell history**, whole, arguments included — `saml2aws login`, not
+   `saml2aws`. Ranked by how often and how recently you have run something,
+   and boosted for the directory you are in, so `./scripts/port-forward-dev2.sh`
+   surfaces in the repo it belongs to and stays out of the way everywhere else.
+2. **Paths**, completed against the directory the token you are typing names.
+3. **A small built-in table** of subcommands and flags for `git`, `docker`,
+   `npm`, `pnpm`, `gh` and `go`.
+
+While the dropdown is shut, every key goes to zsh unchanged — Tab is still
+zsh's own completion, ↑ is still history. Nothing is intercepted until there
+is something to intercept it for.
+
+Finding the prompt needs a shell hook, which Jarvis installs by pointing the
+terminal's `ZDOTDIR` at a directory of its own whose files source yours.
+**Your `~/.zshrc`, `~/.zprofile`, `~/.zshenv` and `~/.zsh_history` are read and
+never modified.** Directory affinity needs a working directory that zsh's
+history does not record, so Jarvis keeps its own log at
+`~/.config/jarvis/terminal-commands.log`.
+
+zsh only. Under any other shell nothing is installed and no dropdown appears —
+the terminal is exactly the one you have today. The same is true of every
+failure: an unreadable history, a wrapper that cannot be written, a prompt with
+no marks. To turn the whole thing off, including the `ZDOTDIR` injection:
+
+```yaml
+terminal:
+  completion:
+    enabled: false
+```
+
+See **[configuration](configuration.md)** for `historyPath` and
+`commandLogPath`.
+
 ## API
 
 A request builder over the project's own Bruno collections. See

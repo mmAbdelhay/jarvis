@@ -36,6 +36,65 @@ export class FakeTerminal {
   /** The handler attachCustomKeyEventHandler was given, if any. */
   keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
 
+  /** The screen, as rows of text. Set by a test to say what the shell has
+   *  drawn; terminal-completion.ts reads its input line out of here rather
+   *  than modelling keystrokes, so this is what it sees. */
+  lines: string[] = [];
+  cursor = { x: 0, y: 0 };
+  baseY = 0;
+  cols = 80;
+  rows = 24;
+
+  /** xterm's buffer facade, over `lines` and `cursor`. */
+  get buffer(): {
+    active: {
+      cursorX: number;
+      cursorY: number;
+      baseY: number;
+      getLine(y: number): { translateToString(t?: boolean, s?: number, e?: number): string } | undefined;
+    };
+  } {
+    const lines = this.lines;
+    return {
+      active: {
+        cursorX: this.cursor.x,
+        cursorY: this.cursor.y,
+        baseY: this.baseY,
+        getLine: (y: number) => {
+          const line = lines[y];
+          if (line === undefined) return undefined;
+          return {
+            translateToString: (_t?: boolean, s = 0, e = line.length) => line.slice(s, e),
+          };
+        },
+      },
+    };
+  }
+
+  /** xterm's parser facade. Only the OSC registration is modelled, because
+   *  that is the only part Jarvis uses. */
+  readonly parser = {
+    handlers: new Map<number, (data: string) => boolean | Promise<boolean>>(),
+    registerOscHandler: (
+      ident: number,
+      callback: (data: string) => boolean | Promise<boolean>,
+    ): { dispose(): void } => {
+      this.parser.handlers.set(ident, callback);
+      return { dispose: () => this.parser.handlers.delete(ident) };
+    },
+    /** Simulates the shell emitting an OSC sequence. */
+    emitOsc: (ident: number, data: string): void => {
+      void this.parser.handlers.get(ident)?.(data);
+    },
+  };
+
+  /** Simulates the shell drawing a prompt and the user typing after it:
+   *  sets the row and puts the cursor at its end. */
+  typeLine(line: string, row = 0): void {
+    this.lines[row] = line;
+    this.cursor = { x: line.length, y: row };
+  }
+
   #dataListeners: ((data: string) => void)[] = [];
   #resizeListeners: ((size: { cols: number; rows: number }) => void)[] = [];
 

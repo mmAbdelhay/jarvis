@@ -67,6 +67,7 @@ const api: RendererApi = {
   openCluster: (project, cluster) => ipcRenderer.invoke("cluster:open", project, cluster),
   clusterNames: (project) => ipcRenderer.invoke("cluster:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
+  suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
   openApiTab: (project) => ipcRenderer.invoke("api:open", project),
   listApiCollections: (project) => ipcRenderer.invoke("api:collections", project),
   readApiTree: (project, path) => ipcRenderer.invoke("api:tree", project, path),
