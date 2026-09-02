@@ -17,6 +17,8 @@ function sample(): JarvisConfig {
     projects: { acme: "/x/projects/acme" },
     databases: {},
     editors: {},
+    clusters: {},
+    headlamp: { binary: "/some/path" },
     voice: {
       engine: "say" as const,
     piperBinary: "/opt/piper",

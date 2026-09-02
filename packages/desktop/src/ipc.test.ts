@@ -940,6 +940,8 @@ const sampleConfig: JarvisConfig = {
   projects: { acme: "/p/acme" },
   databases: {},
   editors: {},
+  clusters: {},
+  headlamp: { binary: "/some/path" },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",

@@ -18,6 +18,8 @@ const draft: JarvisConfig = {
   projects: { acme: "/Users/x/projects/acme" },
   databases: {},
   editors: {},
+  clusters: {},
+  headlamp: { binary: "/some/path" },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",
@@ -260,5 +262,30 @@ describe("editor roots round-trip", () => {
 
     expect(result.ok).toBe(false);
     await expect(readFile(path, "utf8")).rejects.toThrow();
+  });
+});
+
+describe("clusters and headlamp round-trip", () => {
+  it("preserves clusters and headlamp through a save it cannot edit", () => {
+    const raw = toRawConfig({
+      ...draft,
+      clusters: { acme: [{ name: "dev", context: "arn:…:cluster/app_dev" }] },
+      headlamp: { binary: "/opt/hl" },
+    }) as Record<string, unknown>;
+
+    expect(raw["clusters"]).toEqual({ acme: [{ name: "dev", context: "arn:…:cluster/app_dev" }] });
+    expect(raw["headlamp"]).toEqual({ binary: "/opt/hl" });
+  });
+
+  it("omits the clusters key entirely when no project has one", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect("clusters" in raw).toBe(false);
+  });
+
+  it("still writes headlamp when the binary is the platform default", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect(raw["headlamp"]).toEqual({ binary: draft.headlamp.binary });
   });
 });

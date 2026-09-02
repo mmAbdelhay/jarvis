@@ -551,3 +551,69 @@ describe("editors", () => {
     expect(config.editors["acme"]).toEqual([{ name: "all", path: "." }]);
   });
 });
+
+describe("clusters", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  it("parses a project's clusters in config order", () => {
+    const config = parseConfig({
+      ...base,
+      clusters: {
+        acme: [
+          { name: "dev", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev" },
+          { name: "chaos", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_staging" },
+        ],
+      },
+    });
+    expect(config.clusters["acme"]).toEqual([
+      { name: "dev", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev" },
+      { name: "chaos", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_staging" },
+    ]);
+  });
+
+  it("defaults to no clusters when the section is absent", () => {
+    expect(parseConfig(base).clusters).toEqual({});
+  });
+
+  it("refuses a project it does not know", () => {
+    expect(() =>
+      parseConfig({ ...base, clusters: { nope: [{ name: "d", context: "c" }] } }),
+    ).toThrow(/names no configured project/);
+  });
+
+  it("refuses an empty name", () => {
+    expect(() =>
+      parseConfig({ ...base, clusters: { acme: [{ name: "", context: "c" }] } }),
+    ).toThrow(/`clusters.acme\[0\].name` must be a non-empty string/);
+  });
+
+  it("refuses an empty context", () => {
+    expect(() =>
+      parseConfig({ ...base, clusters: { acme: [{ name: "d", context: "" }] } }),
+    ).toThrow(/`clusters.acme\[0\].context` must be a non-empty string/);
+  });
+
+  it("refuses two clusters of one project sharing a name", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        clusters: { acme: [{ name: "dev", context: "a" }, { name: "dev", context: "b" }] },
+      }),
+    ).toThrow(/duplicates an earlier cluster/);
+  });
+
+  it("takes headlamp.binary when given, and a platform default when not", () => {
+    expect(parseConfig({ ...base, headlamp: { binary: "/opt/hl" } }).headlamp.binary).toBe("/opt/hl");
+    expect(parseConfig(base).headlamp.binary).not.toBe("");
+  });
+
+  it("expands a tilde in headlamp.binary", () => {
+    expect(parseConfig({ ...base, headlamp: { binary: "~/hl" } }).headlamp.binary).toBe(
+      join(homedir(), "hl"),
+    );
+  });
+});

@@ -61,6 +61,14 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // actually has editor roots, so a file that never had the key does not
     // grow an empty one on the first save.
     ...(Object.keys(config.editors ?? {}).length === 0 ? {} : { editors: config.editors }),
+    // Same rule as `databases:` and `editors:` above — written only when
+    // there is something to write, and guarded because validateDraft hands
+    // this function renderer-supplied data cast to JarvisConfig, which an
+    // older renderer may not have filled in.
+    ...(Object.keys(config.clusters ?? {}).length === 0 ? {} : { clusters: config.clusters }),
+    ...(config.headlamp?.binary === undefined
+      ? {}
+      : { headlamp: { binary: config.headlamp.binary } }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

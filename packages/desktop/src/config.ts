@@ -6,12 +6,13 @@ import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type {
   BrainConfig,
+  ClustersConfig,
   DatabasesConfig,
   DbGateConnection,
   DbGateEngine,
   EditorsConfig,
 } from "@jarvis/platform";
-import { DB_GATE_ENGINES } from "@jarvis/platform";
+import { DB_GATE_ENGINES, defaultHeadlampBinary } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 
 /** What Jarvis sounds like, and what it says on opening. */
@@ -46,6 +47,14 @@ export type JarvisConfig = {
    *  section parses to {} — a project with no entry opens the editor at the
    *  project directory, which is what every project did before this existed. */
   editors: EditorsConfig;
+  /** Per-project Kubernetes contexts the Cluster button may open, keyed by
+   *  project name. An absent `clusters:` section parses to {} — that
+   *  project's button is disabled, like Personal's. */
+  clusters: ClustersConfig;
+  /** Where `headlamp-server` lives. Not on PATH and never will be: it is
+   *  only distributed inside the Headlamp desktop bundle, so this is a
+   *  declared path like `voice.piperBinary`, with a per-OS default. */
+  headlamp: { binary: string };
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -122,6 +131,8 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const projects = parseProjects(root["projects"]);
   const databases = parseDatabases(root["databases"], projects);
   const editors = parseEditors(root["editors"], projects);
+  const clusters = parseClusters(root["clusters"], projects);
+  const headlamp = parseHeadlamp(root["headlamp"]);
   const whisper = parseWhisper(root["whisper"]);
   const voice = parseVoice(root["voice"]);
 
@@ -148,6 +159,8 @@ export function parseConfig(raw: unknown): JarvisConfig {
     ),
     databases,
     editors,
+    clusters,
+    headlamp,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -452,6 +465,76 @@ function parseEditors(rawEditors: unknown, projects: Record<string, string>): Ed
     });
   }
   return result;
+}
+
+/**
+ * The `clusters:` section — the same shape as `editors:`, and validated the
+ * same way, minus the containment rules: a context is a name in the user's
+ * kubeconfig, not a path, so there is nothing to escape from.
+ *
+ * It deliberately does not check a context against ~/.kube/config. That
+ * would mean reading the kubeconfig at startup and refusing to launch
+ * Jarvis at all over a cluster the user was not going to open; a context
+ * that is missing or renamed surfaces when the button is pressed instead.
+ */
+function parseClusters(rawClusters: unknown, projects: Record<string, string>): ClustersConfig {
+  if (rawClusters === undefined) return {};
+  if (typeof rawClusters !== "object" || rawClusters === null || Array.isArray(rawClusters)) {
+    throw new Error("Config `clusters` must be an object");
+  }
+
+  const result: ClustersConfig = {};
+  for (const [project, rawList] of Object.entries(rawClusters as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`clusters\` names no configured project: "${project}"`);
+    }
+    if (!Array.isArray(rawList)) {
+      throw new Error(`Config \`clusters.${project}\` must be an array`);
+    }
+
+    const seen = new Set<string>();
+    result[project] = rawList.map((rawEntry, index) => {
+      const where = `clusters.${project}[${index}]`;
+      if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        throw new Error(`Config \`${where}\` must be an object`);
+      }
+      const entry = rawEntry as Record<string, unknown>;
+
+      const name = entry["name"];
+      if (typeof name !== "string" || name === "") {
+        throw new Error(`Config \`${where}.name\` must be a non-empty string`);
+      }
+      if (seen.has(name)) {
+        throw new Error(`Config \`${where}.name\` duplicates an earlier cluster: "${name}"`);
+      }
+      seen.add(name);
+
+      const context = entry["context"];
+      if (typeof context !== "string" || context === "") {
+        throw new Error(`Config \`${where}.context\` must be a non-empty string`);
+      }
+
+      return { name, context };
+    });
+  }
+  return result;
+}
+
+/** The `headlamp:` section. One key, with a per-OS default, so an absent
+ *  section is not an error — only a binary that turns out not to exist is,
+ *  and that is the manager's failure to report, not this one's. */
+function parseHeadlamp(rawHeadlamp: unknown): { binary: string } {
+  const fallback = { binary: defaultHeadlampBinary(process.platform, process.env) };
+  if (rawHeadlamp === undefined) return fallback;
+  if (typeof rawHeadlamp !== "object" || rawHeadlamp === null || Array.isArray(rawHeadlamp)) {
+    throw new Error("Config `headlamp` must be an object");
+  }
+  const binary = (rawHeadlamp as Record<string, unknown>)["binary"];
+  if (binary === undefined) return fallback;
+  if (typeof binary !== "string" || binary === "") {
+    throw new Error("Config `headlamp.binary` must be a non-empty string");
+  }
+  return { binary: expandTilde(binary) };
 }
 
 /**
