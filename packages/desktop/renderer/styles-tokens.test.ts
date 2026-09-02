@@ -22,6 +22,26 @@ describe("design tokens", () => {
     expect([...rules.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((match) => match[0])).toEqual([]);
   });
 
+  // A var() naming a token that was never declared resolves to nothing, and
+  // the property silently falls back to its initial value — a background
+  // becomes transparent, a colour becomes black, and nothing errors. The
+  // session state dot shipped invisible this way, painted with a var(--add)
+  // that does not exist in this file.
+  it("uses no token it does not declare", () => {
+    const declared = new Set(
+      [...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]),
+    );
+    // Set from JS per element rather than declared here — the renderer
+    // writes it inline as each tab's own accent.
+    const setAtRuntime = new Set(["--tab-color"]);
+    const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]));
+    const undeclared = [...used].filter(
+      (name) => !declared.has(name) && !setAtRuntime.has(name as string),
+    );
+
+    expect(undeclared).toEqual([]);
+  });
+
   it("names three levels of surface and three of text", () => {
     for (const token of [
       "--bg",

@@ -39,7 +39,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onChangeCounts: vi.fn(),
     onSessionOutput: vi.fn(),
     getSessionLog: vi.fn(async () => ""),
-    getSessionTranscript: vi.fn(async () => ""),
+    getSessionTranscript: vi.fn(async () => []),
     resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),

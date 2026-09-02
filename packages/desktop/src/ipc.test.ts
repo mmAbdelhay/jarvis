@@ -3135,7 +3135,7 @@ describe("createTranscriptHandler", () => {
       history: () => [session({ transcriptPath: "/t/s1.jsonl" })],
       readFile: async () => JSON.stringify({ type: "user", message: { content: "hi there" } }),
     });
-    expect(await handler("s1")).toContain("hi there");
+    expect(await handler("s1")).toEqual([{ role: "user", text: "hi there", tools: [] }]);
   });
 
   // A session Jarvis spawned has a pty backlog instead; asking for its
@@ -3145,12 +3145,12 @@ describe("createTranscriptHandler", () => {
       history: () => [session()],
       readFile: async () => "should not be read",
     });
-    expect(await handler("s1")).toBe("");
+    expect(await handler("s1")).toEqual([]);
   });
 
   it("returns nothing for an unknown session", async () => {
     const handler = createTranscriptHandler({ history: () => [], readFile: async () => "x" });
-    expect(await handler("nope")).toBe("");
+    expect(await handler("nope")).toEqual([]);
   });
 
   // A transcript deleted since the import must not take down the view.
@@ -3161,7 +3161,7 @@ describe("createTranscriptHandler", () => {
         throw new Error("ENOENT");
       },
     });
-    expect(await handler("s1")).toBe("");
+    expect(await handler("s1")).toEqual([]);
   });
 
   it("ignores a non-string session id", async () => {
@@ -3169,7 +3169,7 @@ describe("createTranscriptHandler", () => {
       history: () => [session({ transcriptPath: "/t/s1.jsonl" })],
       readFile: async () => "x",
     });
-    expect(await handler(undefined)).toBe("");
+    expect(await handler(undefined)).toEqual([]);
   });
 });
 

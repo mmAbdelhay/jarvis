@@ -1,7 +1,14 @@
 import type { Session, SessionOutput } from "@jarvis/core";
+import type { TranscriptEntry } from "@jarvis/platform";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
-import { detectLanguage, projectLabel } from "./format.js";
+import {
+  detectLanguage,
+  dominantLanguage,
+  formatAgo,
+  formatEndedAt,
+  projectLabel,
+} from "./format.js";
 import {
   NO_PROJECT,
   agentsIn,
@@ -351,29 +358,66 @@ function buildSessionTableRow(session: Session): HTMLElement {
   const row = document.createElement("tr");
   row.className = "session-table-row";
 
-  // Every cell goes in as textContent. A summary is whatever the user typed
-  // into an agent and reaches this table straight out of a transcript, so it
-  // is data to display, never markup to run.
-  const cell = (text: string, className = ""): HTMLElement => {
-    const td = document.createElement("td");
-    if (className !== "") td.className = className;
-    const language = detectLanguage(text);
-    td.dir = language === "ar" ? "rtl" : "ltr";
-    td.classList.toggle("arabic", language === "ar");
-    td.textContent = text;
-    return td;
-  };
+  // The prompt is what a reader scans for, so it carries the row: full size
+  // on its own line, with everything that merely locates the session — the
+  // project, the directory it ran in, the branch — muted beneath it. Seven
+  // columns of equal weight made the thing you are looking for the same size
+  // as the word "done".
+  const main = document.createElement("td");
+  main.className = "session-cell-main";
 
-  row.append(
-    cell(projectLabel(session), "session-table-project"),
-    cell(session.summary === "" ? "—" : session.summary, "session-table-summary"),
-    cell([session.agentId, session.model].filter(Boolean).join(" · "), "mono changes-muted"),
-    cell(session.branch === undefined || session.branch === "" ? "—" : session.branch, "mono changes-muted"),
-    cell(session.state, "mono changes-dim"),
-    cell(formatWhen(session.lastActivityAt), "mono changes-muted"),
-  );
+  const summary = document.createElement("div");
+  summary.className = "session-summary";
+  const text = session.summary === "" ? "No prompt recorded" : session.summary;
+  const language = detectLanguage(text);
+  summary.dir = language === "ar" ? "rtl" : "ltr";
+  summary.classList.toggle("arabic", language === "ar");
+  summary.classList.toggle("session-summary--empty", session.summary === "");
+  summary.textContent = text;
+
+  const meta = document.createElement("div");
+  meta.className = "session-meta mono";
+  const label = document.createElement("span");
+  label.className = "session-chip";
+  label.textContent = projectLabel(session);
+  meta.append(label, detail(session.projectPath));
+  if (session.branch !== undefined && session.branch !== "") meta.append(detail(session.branch));
+
+  main.append(summary, meta);
+
+  const agent = document.createElement("td");
+  agent.className = "session-cell-agent mono";
+  const agentChip = document.createElement("span");
+  agentChip.className = "session-chip";
+  agentChip.textContent = session.agentId;
+  // The model on hover rather than on a second wrapped line: it matters when
+  // you ask for it and is noise on all 96 rows at once.
+  if (session.model !== undefined) agentChip.title = session.model;
+  agent.append(agentChip);
+
+  const state = document.createElement("td");
+  state.className = "session-cell-state mono";
+  // The dot and its word live in a span, not in the cell: `display: flex` on
+  // a <td> takes it out of table layout, which loses the row's shared height
+  // and leaves its bottom border drawn at a different place from its
+  // neighbours'.
+  const stateBox = document.createElement("span");
+  stateBox.className = "session-state";
+  const dot = document.createElement("span");
+  dot.className = `session-dot session-dot--${session.state}`;
+  const stateText = document.createElement("span");
+  stateText.textContent = session.state;
+  stateBox.append(dot, stateText);
+  state.append(stateBox);
+
+  const when = document.createElement("td");
+  when.className = "session-cell-when mono";
+  when.textContent = formatAgo(session.lastActivityAt, Date.now());
+  // The exact moment is one hover away; "4m ago" is what the row is read for.
+  when.title = formatEndedAt(session.lastActivityAt);
 
   const actions = document.createElement("td");
+  actions.className = "session-cell-actions";
   const resume = document.createElement("button");
   resume.type = "button";
   resume.className = "session-table-resume";
@@ -385,17 +429,18 @@ function buildSessionTableRow(session: Session): HTMLElement {
     void resumeInTerminal(session.id);
   });
   actions.append(resume);
-  row.append(actions);
 
+  row.append(main, agent, state, when, actions);
   row.addEventListener("click", () => void openSession(session));
   return row;
 }
 
-/** Local time, to the minute: a history row answers "when did I last touch
- *  this", which seconds do not help with. */
-function formatWhen(at: number): string {
-  const date = new Date(at);
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+/** One muted fragment of a row's second line. */
+function detail(text: string): HTMLElement {
+  const element = document.createElement("span");
+  element.className = "session-detail-part";
+  element.textContent = text;
+  return element;
 }
 
 /**
@@ -517,21 +562,26 @@ export async function openSession(session: Session): Promise<void> {
   // session's terminal.
   if (currentId !== session.id) return;
 
-  // A session Jarvis spawned replays its pty backlog. One started in a
-  // terminal has no pty and no backlog — only the transcript the importer
-  // recorded a path to — so without this fallback the view opened blank,
-  // which is exactly what "clicking a session shows nothing" was. Asked for
-  // only when the backlog is empty: a live session's backlog is the truth,
-  // and a round trip for a transcript it does not have would be waste.
+  // A session Jarvis spawned replays its pty backlog into the emulator —
+  // that output really is a terminal's. One started in a terminal has no pty
+  // and no backlog, only a recorded conversation, and a conversation laid
+  // out in xterm is monospace with no way to tell whose words are whose. So
+  // the two take different surfaces, and only one is ever on screen.
   if (backlog === "") {
+    let entries: TranscriptEntry[] = [];
     try {
-      backlog = await window.jarvis.getSessionTranscript(session.id);
+      entries = await window.jarvis.getSessionTranscript(session.id);
     } catch (error) {
       console.error(`Failed to load session transcript: ${errorMessage(error)}`);
     }
     if (currentId !== session.id) return;
+    if (entries.length > 0) {
+      renderTranscriptView(entries);
+      return;
+    }
   }
 
+  showSurface("terminal");
   // Through the pane rather than straight to xterm: the backlog can carry
   // the same integration marks the live stream does, and a block whose
   // command finished before the view was opened is still a block.
@@ -627,6 +677,62 @@ function renderResume(session: Session): void {
   };
 }
 
+
+/**
+ * A recorded conversation, laid out as one.
+ *
+ * Every turn's words go in through textContent: a transcript is whatever
+ * someone typed at an agent, so it is displayed and never interpreted. Tools
+ * are named as chips beside the reply rather than printed inline, because
+ * which tools ran is the shape of a turn while their arguments are not.
+ */
+function renderTranscriptView(entries: TranscriptEntry[]): void {
+  const view = $("session-transcript");
+  if (view === null) return;
+  view.replaceChildren(...entries.map(buildTranscriptTurn));
+  showSurface("transcript");
+  view.scrollTop = 0;
+}
+
+function buildTranscriptTurn(entry: TranscriptEntry): HTMLElement {
+  const turn = document.createElement("div");
+  turn.className = `transcript-turn transcript-turn--${entry.role}`;
+
+  if (entry.text !== "") {
+    const body = document.createElement("div");
+    body.className = "transcript-text";
+    // Dominance, not presence: a turn is a paragraph, and an English reply
+    // that quotes one Arabic string is English. Laying the whole block
+    // right-to-left because of that quotation moved its full stops to the
+    // front of every line.
+    const language = dominantLanguage(entry.text);
+    body.dir = language === "ar" ? "rtl" : "ltr";
+    body.classList.toggle("arabic", language === "ar");
+    body.textContent = entry.text;
+    turn.append(body);
+  }
+
+  if (entry.tools.length > 0) {
+    const tools = document.createElement("div");
+    tools.className = "transcript-tools";
+    for (const name of entry.tools) {
+      const chip = document.createElement("span");
+      chip.className = "transcript-tool";
+      chip.textContent = name;
+      tools.append(chip);
+    }
+    turn.append(tools);
+  }
+  return turn;
+}
+
+/** Exactly one of the session view's two surfaces is ever on screen. */
+function showSurface(which: "terminal" | "transcript"): void {
+  const terminalHost = $("session-terminal");
+  if (terminalHost !== null) terminalHost.hidden = which !== "terminal";
+  const transcript = $("session-transcript");
+  if (transcript !== null) transcript.hidden = which !== "transcript";
+}
 
 /** Sets text and direction together — an Arabic project name must not be
  *  laid out left-to-right. Same rule as changes.ts's own setText. */

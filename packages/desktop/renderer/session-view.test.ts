@@ -32,6 +32,7 @@ function layoutDom(): void {
       <button id="session-back" hidden></button>
       <div id="session-detail" hidden></div>
       <div id="session-terminal"></div>
+      <div id="session-transcript" hidden></div>
       <div id="session-empty" hidden></div>
       <div id="session-table" hidden>
         <input id="session-search" />
@@ -62,7 +63,7 @@ type Jarvis = Pick<
 function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
-    getSessionTranscript: vi.fn(async () => ""),
+    getSessionTranscript: vi.fn(async () => []),
     resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
     getHistory: vi.fn(async () => [] as Session[]),
     sendSessionInput: vi.fn(async () => {}),
@@ -147,21 +148,73 @@ describe("openSession", () => {
   // A session started in a terminal has no pty backlog at all — only the
   // transcript the importer recorded. Before this, clicking one opened a
   // blank screen, which is what "clicking a session does nothing" was.
-  it("falls back to the transcript when there is no backlog", async () => {
+  // A recorded conversation is not terminal output, so it is laid out as
+  // one instead of written into xterm.
+  it("shows the transcript as a conversation when there is no backlog", async () => {
     stubJarvis({
       getSessionLog: vi.fn(async () => ""),
-      getSessionTranscript: vi.fn(async () => "› fetch all my bugs\r\n"),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "fetch all my bugs", tools: [] },
+        { role: "assistant" as const, text: "On it.", tools: ["Bash"] },
+      ]),
     });
     const { openSession } = await import("./session-view.js");
     await openSession(makeSession());
 
-    expect(term().text).toContain("fetch all my bugs");
+    const view = document.getElementById("session-transcript");
+    expect(view?.hidden).toBe(false);
+    expect(document.getElementById("session-terminal")?.hidden).toBe(true);
+    expect(view?.querySelectorAll(".transcript-turn")).toHaveLength(2);
+    expect(view?.textContent).toContain("fetch all my bugs");
+    expect(view?.querySelector(".transcript-tool")?.textContent).toBe("Bash");
+  });
+
+  it("tells a user turn from an assistant turn", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "hi", tools: [] },
+        { role: "assistant" as const, text: "hello", tools: [] },
+      ]),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    const turns = document.querySelectorAll(".transcript-turn");
+    expect(turns[0]?.className).toContain("transcript-turn--user");
+    expect(turns[1]?.className).toContain("transcript-turn--assistant");
+  });
+
+  // Transcript text is whatever was typed at an agent; it is displayed,
+  // never interpreted.
+  it("renders a turn as text, never as markup", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "<img src=x onerror=alert(1)>", tools: [] },
+      ]),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(document.querySelector("#session-transcript img")).toBeNull();
+    expect(document.getElementById("session-transcript")?.textContent).toContain("<img");
+  });
+
+  // A live session's output really is terminal output and keeps the emulator.
+  it("keeps the terminal for a session with a backlog", async () => {
+    stubJarvis({ getSessionLog: vi.fn(async () => "live output\r\n") });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(document.getElementById("session-transcript")?.hidden).toBe(true);
+    expect(term().text).toBe("live output\r\n");
   });
 
   // The backlog is the live truth for a session Jarvis owns; asking for a
   // transcript it does not have would be a wasted round trip on every open.
   it("does not ask for a transcript when a backlog exists", async () => {
-    const getSessionTranscript = vi.fn(async () => "should not appear");
+    const getSessionTranscript = vi.fn(async () => []);
     stubJarvis({ getSessionLog: vi.fn(async () => "live output\r\n"), getSessionTranscript });
     const { openSession } = await import("./session-view.js");
     await openSession(makeSession());

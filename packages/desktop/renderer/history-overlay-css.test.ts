@@ -93,7 +93,7 @@ describe("session header overflow", () => {
   // must size to its text or print clipped — the same override .api-bar
   // button already needed for the same reason.
   it("sizes the Resume button to its text and never shrinks it", () => {
-    const body = ruleBodyFor("#session-resume", htmlSource);
+    const body = ruleBodyFor("#session-resume,\n  #session-back", htmlSource);
     expect(body).toMatch(/width\s*:\s*auto/);
     expect(body).toMatch(/flex-shrink\s*:\s*0/);
     expect(body).toMatch(/white-space\s*:\s*nowrap/);

@@ -498,26 +498,33 @@ function message(error: unknown): string {
  */
 export const HEAD_BYTES = 64 * 1024;
 
+/** One turn of a recorded conversation, as a view can lay it out. */
+export type TranscriptEntry = {
+  role: "user" | "assistant";
+  /** The words, newlines intact. Empty for a turn that only ran tools. */
+  text: string;
+  /** Which tools the turn used, named in order. */
+  tools: string[];
+};
+
 /**
- * A transcript as a session's terminal can show it.
+ * A transcript as a conversation, not as a wall of terminal text.
  *
- * A session Jarvis spawned has a pty backlog; one started in a terminal has
- * only this file, so without a rendering the view opens blank — which is
- * exactly what it did before this existed.
+ * This used to emit one CRLF-joined string written straight into xterm,
+ * which is the wrong material: a terminal emulator gives monospace, no
+ * wrapping control, and no way to tell the user's words from the agent's.
+ * Returning turns lets the view style them.
  *
- * Only the conversation is kept. A transcript is mostly bookkeeping —
+ * Only the conversation survives. A transcript is mostly bookkeeping —
  * attachments, mode switches, cost state, file snapshots, 103 attachment
- * records against 50 user turns in the one measured here — and rendering
- * that would bury what the reader came for. Tool calls are named but their
- * arguments and results are dropped: a session's shape is which tools ran,
- * while their output is the terminal scrollback nobody kept.
- *
- * Lines end CRLF because this is written straight into an xterm, where a
- * bare LF moves down without returning to column zero and every line after
- * the first starts mid-screen.
+ * records against 50 user turns in the one measured here — and the CLI's own
+ * local-command boilerplate is not something anyone typed. Tool calls are
+ * named but never dumped: which tools ran is the shape of a session, while
+ * an Edit's input is a whole file and a Bash's output is not in this file at
+ * all.
  */
-export function renderTranscript(text: string): string {
-  const out: string[] = [];
+export function parseTranscript(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let record: unknown;
@@ -531,45 +538,58 @@ export function renderTranscript(text: string): string {
     const fields = record as Record<string, unknown>;
     const role = fields["type"];
     if (role !== "user" && role !== "assistant") continue;
+    // The CLI records its own injections as "user" turns — a skill's entire
+    // instruction file, a system reminder — and flags them isMeta. Nobody
+    // typed them, and rendered as the user's words a skill's manual dwarfs
+    // the conversation it was injected into.
+    if (fields["isMeta"] === true) continue;
     const message = fields["message"];
     if (typeof message !== "object" || message === null) continue;
-    const body = transcriptBody((message as Record<string, unknown>)["content"]);
-    if (body === "") continue;
-    out.push(`${role === "user" ? "› " : ""}${body}`);
+    const turn = transcriptTurn((message as Record<string, unknown>)["content"]);
+    if (turn === undefined) continue;
+    if (turn.text === "" && turn.tools.length === 0) continue;
+
+    // An agent's tool calls arrive one record each. Rendered separately they
+    // stack a dozen chips down the page, one block apiece, for what is a
+    // single stretch of work — so a wordless assistant turn folds its tools
+    // into the assistant turn before it. It never folds across the user:
+    // the next thing the user said is the boundary that matters.
+    const previous = entries.at(-1);
+    if (turn.text === "" && role === "assistant" && previous?.role === "assistant") {
+      previous.tools.push(...turn.tools);
+      continue;
+    }
+    entries.push({ role, ...turn });
   }
-  return out.length === 0 ? "" : `${out.join("\r\n\r\n")}\r\n`;
+  return entries;
 }
 
-/** The readable part of one message's content. */
-function transcriptBody(content: unknown): string {
+/** One message's readable text and the tools it used. */
+function transcriptTurn(content: unknown): { text: string; tools: string[] } | undefined {
   if (typeof content === "string") {
-    // The same boilerplate the summary skips: showing it in the body would
-    // put the CLI's note to itself where the reader expects their own words.
-    if (isLocalCommandNoise(content)) return "";
-    return readableCommand(content).replaceAll("\n", "\r\n").trim();
+    if (isLocalCommandNoise(content)) return undefined;
+    return { text: readableCommand(content).trim(), tools: [] };
   }
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) return undefined;
+
   const parts: string[] = [];
+  const tools: string[] = [];
   for (const block of content) {
     if (typeof block !== "object" || block === null) continue;
     const fields = block as Record<string, unknown>;
     const kind = fields["type"];
     if (kind === "text") {
       const text = fields["text"];
-      if (typeof text === "string" && text.trim() !== "") {
-        parts.push(readableCommand(text).replaceAll("\n", "\r\n").trim());
-      }
+      if (typeof text === "string" && text.trim() !== "") parts.push(readableCommand(text).trim());
       continue;
     }
     if (kind === "tool_use") {
       const name = fields["name"];
-      // The name, never the input: an Edit's input is a whole file and a
-      // Bash's is a command whose output is not here anyway.
-      parts.push(`[${typeof name === "string" ? name : "tool"}]`);
+      tools.push(typeof name === "string" ? name : "tool");
     }
     // thinking and tool_result are deliberately dropped — see the doc above.
   }
-  return parts.join("\r\n");
+  return { text: parts.join("\n\n"), tools };
 }
 
 /**

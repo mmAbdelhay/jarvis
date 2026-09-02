@@ -24,8 +24,8 @@ import {
   chatUrl,
   eksUpdateKubeconfigArgs,
   loadWorkflows,
+  parseTranscript,
   profileForContext,
-  renderTranscript,
 } from "@jarvis/platform";
 import type {
   ApiFailure,
@@ -43,6 +43,7 @@ import type {
   BrunoTree,
   ChatConfig,
   ClustersConfig,
+  TranscriptEntry,
   CodeServerManager,
   ContainerFacts,
   DbGateManager,
@@ -340,9 +341,10 @@ export type RendererApi = {
    * before its process has written anything.
    */
   getSessionLog(sessionId: string): Promise<string>;
-  /** The rendered conversation of a session imported from a transcript.
-   *  Empty for a session Jarvis spawned, which has a pty backlog instead. */
-  getSessionTranscript(sessionId: string): Promise<string>;
+  /** The recorded conversation of a session imported from a transcript, as
+   *  turns the view lays out itself. Empty for a session Jarvis spawned,
+   *  which has a pty backlog instead. */
+  getSessionTranscript(sessionId: string): Promise<TranscriptEntry[]>;
   /** Continues a past session in a Workspace Terminal tab, rooted where the
    *  session ran. `selectedProject` is the project the tab hangs on when the
    *  session's own directory belongs to none. Resolves with the project the
@@ -889,16 +891,16 @@ export type TranscriptHandlerDeps = {
  */
 export function createTranscriptHandler(
   deps: TranscriptHandlerDeps,
-): (sessionId: unknown) => Promise<string> {
+): (sessionId: unknown) => Promise<TranscriptEntry[]> {
   return async (sessionId) => {
-    if (!isString(sessionId)) return "";
+    if (!isString(sessionId)) return [];
     const session = deps.history().find((candidate) => candidate.id === sessionId);
     const path = session?.transcriptPath;
-    if (path === undefined || path === "") return "";
+    if (path === undefined || path === "") return [];
     try {
-      return renderTranscript(await deps.readFile(path));
+      return parseTranscript(await deps.readFile(path));
     } catch {
-      return "";
+      return [];
     }
   };
 }

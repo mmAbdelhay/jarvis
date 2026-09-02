@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectLanguage,
+  dominantLanguage,
   formatAgo,
   formatBytes,
   formatDiskUsage,
@@ -165,5 +166,28 @@ describe("projectLabel", () => {
 
   it("falls back to the path itself when it has no base name", () => {
     expect(projectLabel({ project: null, projectPath: "/" })).toBe("/");
+  });
+});
+
+describe("dominantLanguage", () => {
+  // detectLanguage answers "is there any Arabic here", which is right for a
+  // project name or a chip. A paragraph is different: an English reply that
+  // quotes one Arabic string is English, and laying the whole block out
+  // right-to-left moved its full stops to the front of every line.
+  it("calls a mostly-English paragraph English despite an Arabic quotation", () => {
+    expect(
+      dominantLanguage(
+        "Changes (portal-vue, chats list filters only): en/chats.ts From/To, " +
+          "ar/chats.ts \u0645\u0646/\u0625\u0644\u0649 and nothing else",
+      ),
+    ).toBe("en");
+  });
+
+  it("calls a mostly-Arabic paragraph Arabic", () => {
+    expect(dominantLanguage("\u0647\u0630\u0627 \u0646\u0635 \u0639\u0631\u0628\u064a ok")).toBe("ar");
+  });
+
+  it("calls text with no letters at all English, rather than guessing", () => {
+    expect(dominantLanguage("1234 !!")).toBe("en");
   });
 });
