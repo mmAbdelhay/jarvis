@@ -147,6 +147,10 @@ async function switchToProject(project: string): Promise<void> {
   // The menu lists one project's roots; leaving it up over another project
   // would open a root the selector no longer shows.
   closeEditorMenu();
+  // Same reasoning, and the same bug otherwise: the menu's items close over
+  // the OLD project, so a stale one left open would open or activate the
+  // wrong project's cluster tab.
+  closeClusterMenu();
 
   const remembered = lastActiveTabByProject.get(project);
   const target =

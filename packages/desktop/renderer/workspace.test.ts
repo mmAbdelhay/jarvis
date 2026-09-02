@@ -1278,6 +1278,27 @@ describe("the Cluster button", () => {
 
     expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  // A menu left open over a project switch closes over the OLD project: its
+  // items' click handlers still carry the project they were built for, so a
+  // stale menu would open or activate the wrong project's cluster tab. Same
+  // bug class closeEditorMenu already guards against in switchToProject.
+  it("closes the menu when switching to a different project", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
+    initWorkspace(["acme", "storefront"]);
+    await flush();
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+    expect(document.getElementById("workspace-cluster-menu")?.hidden).toBe(false);
+
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+    select.value = "storefront";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(document.getElementById("workspace-cluster-menu")?.hidden).toBe(true);
+  });
 });
 
 // Measured on this machine: click to a painted Editor tab is 1.9-2.3s with
