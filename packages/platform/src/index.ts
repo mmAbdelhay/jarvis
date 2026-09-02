@@ -14,6 +14,7 @@ export * from "./paths.js";
 export * from "./git.js";
 export * from "./code-server.js";
 export * from "./headlamp.js";
+export * from "./aws-session.js";
 export * from "./status-page.js";
 export * from "./capacity.js";
 export * from "./bookmarks.js";

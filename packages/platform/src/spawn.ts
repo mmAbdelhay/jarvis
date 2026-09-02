@@ -4,9 +4,10 @@ import type { AgentConfig, ProcessHandle, Spawner } from "@jarvis/core";
 export function runCommand(
   command: string,
   args: string[],
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
     let stdout = "";
     let stderr = "";
 

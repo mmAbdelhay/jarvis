@@ -23,6 +23,11 @@ describe("runCommand", () => {
   it("rejects for a command that does not exist", async () => {
     await expect(runCommand("jarvis-not-a-real-binary", [])).rejects.toThrow();
   });
+
+  it("runs with a caller-supplied environment instead of the inherited one", async () => {
+    const result = await runCommand("sh", ["-c", "printf %s \"$MARKER\""], { MARKER: "hi" });
+    expect(result.stdout).toBe("hi");
+  });
 });
 
 describe("createSpawner", () => {

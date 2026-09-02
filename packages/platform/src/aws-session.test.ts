@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { awsLoginCommand, eksUpdateKubeconfigArgs, profileForContext } from "./aws-session.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  awsLoginCommand,
+  createAwsSessionChecker,
+  createAwsSessionPoller,
+  eksUpdateKubeconfigArgs,
+  profileForContext,
+} from "./aws-session.js";
+import type { AwsSessionChecker } from "./aws-session.js";
+import * as spawnModule from "./spawn.js";
 
 const KUBECONFIG = `
 apiVersion: v1
@@ -86,5 +94,81 @@ describe("awsLoginCommand", () => {
     expect(awsLoginCommand("app_dev", "eu-west-1", "saml")).toBe(
       "saml2aws login && aws eks update-kubeconfig --name app_dev --region eu-west-1 --profile saml",
     );
+  });
+});
+
+describe("createAwsSessionChecker", () => {
+  it("returns true when aws sts get-caller-identity exits 0", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 0, stdout: "{}", stderr: "" });
+    try {
+      const check = createAwsSessionChecker({ PATH: "/usr/bin" });
+      expect(await check("saml", "eu-west-1")).toBe(true);
+      expect(spy).toHaveBeenCalledWith(
+        "aws",
+        ["sts", "get-caller-identity", "--profile", "saml", "--region", "eu-west-1"],
+        { PATH: "/usr/bin" },
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns false when it exits non-zero", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 1, stdout: "", stderr: "ExpiredToken" });
+    try {
+      expect(await createAwsSessionChecker({})("saml")).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("omits --region when none is given", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    try {
+      await createAwsSessionChecker({})("saml");
+      expect(spy).toHaveBeenCalledWith("aws", ["sts", "get-caller-identity", "--profile", "saml"], {});
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns false rather than throwing when aws is not on PATH", async () => {
+    const spy = vi.spyOn(spawnModule, "runCommand").mockRejectedValue(new Error("ENOENT"));
+    try {
+      expect(await createAwsSessionChecker({})("saml")).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("createAwsSessionPoller", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves true as soon as check succeeds", async () => {
+    const results = [false, false, true];
+    const check: AwsSessionChecker = async () => results.shift() ?? true;
+    const poll = createAwsSessionPoller(check, { intervalMs: 1_000, timeoutMs: 10_000 });
+
+    const done = poll("saml");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await done).toBe(true);
+  });
+
+  it("resolves false once the timeout elapses", async () => {
+    const check: AwsSessionChecker = async () => false;
+    const poll = createAwsSessionPoller(check, { intervalMs: 1_000, timeoutMs: 3_000 });
+
+    const done = poll("saml");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await done).toBe(false);
   });
 });

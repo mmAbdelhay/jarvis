@@ -1,4 +1,5 @@
 import { parse } from "yaml";
+import { runCommand } from "./spawn.js";
 
 /** The AWS_PROFILE a context's exec credential plugin runs with, or
  *  undefined if the context has none — either it isn't in the kubeconfig,
@@ -77,4 +78,46 @@ export function eksUpdateKubeconfigArgs(context: string): { name: string; region
  *  never runs update-kubeconfig against stale credentials. */
 export function awsLoginCommand(name: string, region: string, profile: string): string {
   return `saml2aws login && aws eks update-kubeconfig --name ${name} --region ${region} --profile ${profile}`;
+}
+
+export type AwsSessionChecker = (profile: string, region?: string) => Promise<boolean>;
+
+/** `aws sts get-caller-identity --profile <profile> [--region <region>]`,
+ *  exit 0 -> true. `env` is a parameter, not `process.env`, for the same
+ *  reason headlamp.ts's real spawner takes one: the exec credential plugin
+ *  is resolved on PATH, and a GUI app's PATH is not a login shell's. */
+export function createAwsSessionChecker(env: NodeJS.ProcessEnv): AwsSessionChecker {
+  return async (profile, region) => {
+    const args =
+      region === undefined
+        ? ["sts", "get-caller-identity", "--profile", profile]
+        : ["sts", "get-caller-identity", "--profile", profile, "--region", region];
+    try {
+      const { code } = await runCommand("aws", args, env);
+      return code === 0;
+    } catch {
+      return false;
+    }
+  };
+}
+
+/** Calls `check` every `intervalMs` until it returns true or `timeoutMs`
+ *  elapses. Real timers, like waitUntilReady (code-server.ts) — not
+ *  unit-tested through a real 3-minute clock, only through fake timers in
+ *  this module's own test and through a fake whole-function replacement at
+ *  every call site. */
+export function createAwsSessionPoller(
+  check: AwsSessionChecker,
+  options?: { intervalMs?: number; timeoutMs?: number },
+): AwsSessionChecker {
+  const intervalMs = options?.intervalMs ?? 3_000;
+  const timeoutMs = options?.timeoutMs ?? 180_000;
+  return async (profile, region) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (await check(profile, region)) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  };
 }
