@@ -302,6 +302,7 @@ function reportDevToolsBounds(): void {
     y: Math.round(rect.y),
     width: Math.round(rect.width),
     height: Math.round(rect.height),
+    devicePixelRatio: window.devicePixelRatio,
   });
 }
 
@@ -849,5 +850,6 @@ export function reportWorkspaceBounds(): void {
     y: Math.round(rect.y),
     width: Math.round(rect.width),
     height: Math.round(rect.height),
+    devicePixelRatio: window.devicePixelRatio,
   });
 }

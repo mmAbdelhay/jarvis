@@ -3,7 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain } from "electron";
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from "electron";
 import {
   AgentRegistry,
   ChangeTracker,
@@ -84,6 +84,8 @@ import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
+import { toDeviceIndependent } from "./view-bounds.js";
+import type { ReportedRect } from "./ipc.js";
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -695,13 +697,28 @@ app.whenReady().then(async () => {
     ipcMain.handle("workspace:reload", (_event, id: unknown) => {
       if (typeof id === "string") workspace.reload(id);
     });
-    ipcMain.handle("workspace:bounds", (_event, bounds: Rect) => workspace.setBounds(bounds));
+    // Which display the window is actually on: dragging Jarvis to a second
+    // screen with a different scale changes the conversion below, and
+    // getDisplayMatching answers for the screen the window occupies rather
+    // than assuming the primary one.
+    const displayScale = (): number => screen.getDisplayMatching(window.getBounds()).scaleFactor;
+
+    // The renderer measures in CSS pixels and a hosted view is placed in
+    // device-independent pixels. Those agree only while the display is not
+    // running a scaled resolution; converting against the window's own
+    // content box is what keeps a page filling its slot on a display where
+    // they do not. See view-bounds.ts.
+    ipcMain.handle("workspace:bounds", (_event, bounds: ReportedRect) =>
+      workspace.setBounds(toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale())),
+    );
     ipcMain.handle("workspace:devtools", (_event, tabId: unknown, open: unknown) => {
       if (typeof tabId !== "string" || typeof open !== "boolean") return;
       workspace.setDevTools(tabId, open);
     });
-    ipcMain.handle("workspace:devtoolsBounds", (_event, bounds: Rect) =>
-      workspace.setDevToolsBounds(bounds),
+    ipcMain.handle("workspace:devtoolsBounds", (_event, bounds: ReportedRect) =>
+      workspace.setDevToolsBounds(
+        toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale()),
+      ),
     );
     ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
       workspace.setVisible(visible === true),

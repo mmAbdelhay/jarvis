@@ -543,7 +543,7 @@ describe("workspace chrome", () => {
 
     expect(calls).toContainEqual({
       call: "setWorkspaceBounds",
-      args: [{ x: 12, y: 140, width: 900, height: 600 }],
+      args: [{ x: 12, y: 140, width: 900, height: 600, devicePixelRatio: window.devicePixelRatio }],
     });
   });
 
@@ -556,7 +556,7 @@ describe("workspace chrome", () => {
 
     expect(calls).toContainEqual({
       call: "setWorkspaceBounds",
-      args: [{ x: 12, y: 141, width: 901, height: 600 }],
+      args: [{ x: 12, y: 141, width: 901, height: 600, devicePixelRatio: window.devicePixelRatio }],
     });
   });
 });
@@ -659,7 +659,7 @@ describe("workspace bookmarks", () => {
 
     expect(calls).toContainEqual({
       call: "setWorkspaceBounds",
-      args: [{ x: 0, y: 240, width: 800, height: 500 }],
+      args: [{ x: 0, y: 240, width: 800, height: 500, devicePixelRatio: window.devicePixelRatio }],
     });
   });
 
@@ -1544,7 +1544,7 @@ describe("bookmarks sidebar toggle", () => {
 
     expect(calls).toContainEqual({
       call: "setWorkspaceBounds",
-      args: [{ x: 0, y: 200, width: 800, height: 500 }],
+      args: [{ x: 0, y: 200, width: 800, height: 500, devicePixelRatio: window.devicePixelRatio }],
     });
   });
 });
@@ -1646,7 +1646,7 @@ describe("devtools panel", () => {
 
     expect(calls).toContainEqual({
       call: "setDevToolsBounds",
-      args: [{ x: 10, y: 400, width: 900, height: 300 }],
+      args: [{ x: 10, y: 400, width: 900, height: 300, devicePixelRatio: window.devicePixelRatio }],
     });
   });
 

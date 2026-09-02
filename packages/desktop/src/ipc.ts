@@ -254,6 +254,20 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
   };
 }
 
+/**
+ * A rectangle as the renderer measured it, in CSS pixels, carrying the
+ * device pixel ratio it was measured under. Main converts it to the
+ * device-independent pixels a hosted view is placed in; the two units differ
+ * on a display running a scaled resolution.
+ */
+export type ReportedRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+};
+
 export type RendererApi = {
   send(text: string, language: "ar" | "en"): Promise<void>;
   // Drives the exact same start/stop path as the Alt+Space / Alt+Shift+Space
@@ -346,12 +360,12 @@ export type RendererApi = {
   /** The rectangle the renderer has reserved for the page, in CSS pixels
    *  relative to the window's content area. A hosted view is a native
    *  overlay, so it has to be told; nothing about CSS layout reaches it. */
-  setWorkspaceBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
+  setWorkspaceBounds(bounds: ReportedRect): Promise<void>;
   /** Opens or closes DevTools for one tab. They render into a view the main
    *  process positions from setDevToolsBounds, so the panel is part of the
    *  Workspace layout rather than a detached window. */
   setDevTools(tabId: string, open: boolean): Promise<void>;
-  setDevToolsBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
+  setDevToolsBounds(bounds: ReportedRect): Promise<void>;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;
