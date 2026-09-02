@@ -30,9 +30,17 @@ function layoutDom(): void {
       <button id="session-resume" hidden></button>
       <div id="session-view-agent"></div>
       <button id="session-back" hidden></button>
+      <div id="session-detail" hidden></div>
       <div id="session-terminal"></div>
       <div id="session-empty" hidden></div>
-      <div id="session-table" hidden><div id="session-table-status"></div><table><tbody id="session-table-body"></tbody></table></div>
+      <div id="session-table" hidden>
+        <input id="session-search" />
+        <select id="session-filter-project"></select>
+        <select id="session-filter-agent"></select>
+        <div id="session-count"></div>
+        <div id="session-table-status"></div>
+        <table><thead><tr><th data-sort="project"></th><th data-sort="lastActivityAt"></th></tr></thead><tbody id="session-table-body"></tbody></table>
+      </div>
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
@@ -651,5 +659,76 @@ describe("session table", () => {
     document.getElementById("session-back")?.click();
     await Promise.resolve();
     expect(document.getElementById("session-table")?.hidden).toBe(false);
+  });
+});
+
+describe("session filters", () => {
+  const rows = (): HTMLElement[] =>
+    [...document.querySelectorAll("#session-table-body > tr")] as HTMLElement[];
+
+  async function load(): Promise<void> {
+    stubJarvis({
+      getHistory: vi.fn(async () => [
+        makeSession({ id: "a", summary: "fetch all my bugs", lastActivityAt: 100 }),
+        makeSession({ id: "b", summary: "add a cluster tab", lastActivityAt: 300 }),
+      ]),
+    });
+    const { renderSessionTable, wireSessionView } = await import("./session-view.js");
+    wireSessionView();
+    await renderSessionTable();
+  }
+
+  it("narrows the table as the search box is typed into", async () => {
+    await load();
+    expect(rows()).toHaveLength(2);
+
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "cluster";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]?.textContent).toContain("cluster");
+  });
+
+  it("counts what is shown against the total once filtered", async () => {
+    await load();
+    expect(document.getElementById("session-count")?.textContent).toBe("2 sessions");
+
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "cluster";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(document.getElementById("session-count")?.textContent).toBe("1 of 2");
+  });
+
+  // An empty table has two very different causes and the reader deserves to
+  // know which one they are looking at.
+  it("distinguishes no sessions from no matches", async () => {
+    await load();
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "nothing matches this";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(document.getElementById("session-table")?.textContent).toMatch(/no sessions match/i);
+  });
+
+  it("reverses the order when the sorted column is clicked again", async () => {
+    await load();
+    expect(rows()[0]?.textContent).toContain("cluster");
+
+    (document.querySelector('#session-table th[data-sort="lastActivityAt"]') as HTMLElement).click();
+
+    expect(rows()[0]?.textContent).toContain("bugs");
+  });
+
+  // The header describes an open session; over the table it described
+  // nothing and rendered as an empty chip beside the title.
+  it("hides the open-session header while the table is showing", async () => {
+    await load();
+    expect(document.getElementById("session-detail")?.hidden).toBe(true);
+
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+    expect(document.getElementById("session-detail")?.hidden).toBe(false);
   });
 });

@@ -2,6 +2,14 @@ import type { Session, SessionOutput } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
 import { detectLanguage, projectLabel } from "./format.js";
+import {
+  NO_PROJECT,
+  agentsIn,
+  filterSessions,
+  sortSessions,
+  type SessionSortColumn,
+  type SortDirection,
+} from "./session-filter.js";
 import { enhanceTerminal } from "./terminal-addons.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 
@@ -236,25 +244,107 @@ export async function renderSessionTable(): Promise<void> {
   const body = $("session-table-body");
   if (table === null || body === null) return;
 
-  let sessions: Session[] = [];
   try {
-    sessions = await window.jarvis.getHistory();
+    loaded = await window.jarvis.getHistory();
   } catch (error) {
     console.error(`Failed to load sessions: ${errorMessage(error)}`);
+    loaded = [];
   }
 
   showTable();
-  if (sessions.length === 0) {
-    // An empty table is indistinguishable from a broken one.
+  fillFilterOptions();
+  drawRows();
+}
+
+/** Every session the last load returned, before any filtering. The filters
+ *  work on this rather than re-querying: 96 rows is nothing to scan in the
+ *  renderer, and it keeps typing in the search box instant. */
+let loaded: Session[] = [];
+let sortColumn: SessionSortColumn = "lastActivityAt";
+let sortDirection: SortDirection = "desc";
+
+/** The filters offer what the table actually contains — an agent with no
+ *  sessions behind it would be a dead end. */
+function fillFilterOptions(): void {
+  const projectSelect = $("session-filter-project") as HTMLSelectElement | null;
+  if (projectSelect !== null) {
+    const chosen = projectSelect.value;
+    const names = [...new Set(loaded.map((s) => s.project).filter((p): p is string => p !== null))];
+    names.sort((a, b) => a.localeCompare(b));
+    const options = [option("", "All projects"), ...names.map((n) => option(n, n))];
+    if (loaded.some((s) => s.project === null)) options.push(option(NO_PROJECT, "No project"));
+    projectSelect.replaceChildren(...options);
+    projectSelect.value = chosen;
+  }
+
+  const agentSelect = $("session-filter-agent") as HTMLSelectElement | null;
+  if (agentSelect !== null) {
+    const chosen = agentSelect.value;
+    agentSelect.replaceChildren(
+      option("", "All agents"),
+      ...agentsIn(loaded).map((id) => option(id, id)),
+    );
+    agentSelect.value = chosen;
+  }
+}
+
+function option(value: string, label: string): HTMLOptionElement {
+  const element = document.createElement("option");
+  element.value = value;
+  element.textContent = label;
+  return element;
+}
+
+/** Filter, sort, draw. Every control funnels through here so there is one
+ *  description of what the table shows. */
+function drawRows(): void {
+  const table = $("session-table");
+  const body = $("session-table-body");
+  if (table === null || body === null) return;
+
+  const shown = sortSessions(
+    filterSessions(loaded, {
+      query: ($("session-search") as HTMLInputElement | null)?.value ?? "",
+      project: ($("session-filter-project") as HTMLSelectElement | null)?.value ?? "",
+      agent: ($("session-filter-agent") as HTMLSelectElement | null)?.value ?? "",
+    }),
+    sortColumn,
+    sortDirection,
+  );
+
+  const count = $("session-count");
+  if (count !== null) {
+    // "12 of 96" only while something is narrowing: a bare total is what the
+    // reader wants when nothing is filtered, and the comparison is noise.
+    count.textContent =
+      shown.length === loaded.length
+        ? `${loaded.length} sessions`
+        : `${shown.length} of ${loaded.length}`;
+  }
+
+  markSortedColumn();
+  table.querySelector(".session-table-empty")?.remove();
+  if (shown.length === 0) {
+    // An empty table is indistinguishable from a broken one, and the two
+    // reasons for it are worth telling apart.
     const empty = document.createElement("div");
     empty.className = "session-table-empty";
-    empty.textContent = "No sessions recorded yet.";
+    empty.textContent =
+      loaded.length === 0 ? "No sessions recorded yet." : "No sessions match these filters.";
     body.replaceChildren();
     table.append(empty);
     return;
   }
-  table.querySelector(".session-table-empty")?.remove();
-  body.replaceChildren(...sessions.map(buildSessionTableRow));
+  body.replaceChildren(...shown.map(buildSessionTableRow));
+}
+
+/** An arrow on the column being sorted, so the order is never a mystery. */
+function markSortedColumn(): void {
+  for (const th of document.querySelectorAll<HTMLElement>("#session-table th[data-sort]")) {
+    const active = th.dataset["sort"] === sortColumn;
+    th.classList.toggle("session-th--active", active);
+    th.dataset["direction"] = active ? sortDirection : "";
+  }
 }
 
 function buildSessionTableRow(session: Session): HTMLElement {
@@ -343,6 +433,10 @@ async function resumeInTerminal(id: string): Promise<void> {
 function showTable(): void {
   const table = $("session-table");
   if (table !== null) table.hidden = false;
+  // The header's project chip, path, state and agent describe one open
+  // session. Left on over the table they render as an empty chip and a
+  // stray rule beside the title, describing nothing.
+  setDetailVisible(false);
   const back = $("session-back");
   if (back !== null) back.hidden = true;
   const empty = $("session-empty");
@@ -350,10 +444,20 @@ function showTable(): void {
   showView("session");
 }
 
+function setDetailVisible(visible: boolean): void {
+  const detail = $("session-detail");
+  if (detail !== null) detail.hidden = !visible;
+  for (const id of ["session-view-project", "session-view-path"]) {
+    const element = $(id);
+    if (element !== null) element.hidden = !visible;
+  }
+}
+
 /** The terminal showing, the table put away. */
 function showTerminal(): void {
   const table = $("session-table");
   if (table !== null) table.hidden = true;
+  setDetailVisible(true);
   const back = $("session-back");
   if (back !== null) {
     back.hidden = false;
@@ -460,6 +564,26 @@ export function wireSessionView(): void {
     void renderSessionTable();
     claimVoice();
   });
+
+  $("session-search")?.addEventListener("input", () => drawRows());
+  $("session-filter-project")?.addEventListener("change", () => drawRows());
+  $("session-filter-agent")?.addEventListener("change", () => drawRows());
+
+  for (const th of document.querySelectorAll<HTMLElement>("#session-table th[data-sort]")) {
+    th.addEventListener("click", () => {
+      const column = th.dataset["sort"] as SessionSortColumn | undefined;
+      if (column === undefined) return;
+      // Clicking the sorted column reverses it; clicking another takes it
+      // over, starting from the direction that column is usually read in.
+      if (column === sortColumn) {
+        sortDirection = sortDirection === "asc" ? "desc" : "asc";
+      } else {
+        sortColumn = column;
+        sortDirection = column === "lastActivityAt" ? "desc" : "asc";
+      }
+      drawRows();
+    });
+  }
 
   // Clicking anywhere in the pane focuses the terminal, so typing goes to
   // the agent without hunting for a cursor.

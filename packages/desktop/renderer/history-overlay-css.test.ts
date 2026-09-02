@@ -99,3 +99,22 @@ describe("session header overflow", () => {
     expect(body).toMatch(/white-space\s*:\s*nowrap/);
   });
 });
+
+// Three separate rules in this file have now been written with an
+// unconditional `display` and a `hidden` attribute expected to hide them:
+// .history-overlay, .session-empty and .session-detail. Naming each one in
+// its own test only ever catches the ones already known, so this catches the
+// shape: whenever a selector has a `:not([hidden])` variant — the fixed
+// pattern — its base rule must not set `display`, or the variant is
+// pointless and the element renders while hidden.
+describe("[hidden] cascade, generally", () => {
+  it("no rule gated on :not([hidden]) also sets display unconditionally", () => {
+    const gated = [...htmlSource.matchAll(/([.#][A-Za-z0-9_-]+):not\(\[hidden\]\)\s*\{/g)].map(
+      (match) => match[1] as string,
+    );
+    expect(gated.length).toBeGreaterThan(0);
+    for (const selector of new Set(gated)) {
+      expect(ruleBodyFor(selector, htmlSource), `${selector} base rule`).not.toMatch(/display\s*:/);
+    }
+  });
+});

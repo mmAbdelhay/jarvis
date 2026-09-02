@@ -1996,6 +1996,58 @@
     white-space: nowrap;
   }
 
+  /* Search and filters above the table. They sit inside the scrolling
+     container but stick to its top, so they stay reachable through 96 rows. */
+  .session-filters {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 10px 10px;
+    background: var(--bg);
+  }
+
+  .session-search {
+    flex: 0 1 320px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 5px 10px;
+  }
+
+  .session-search:focus { outline: none; border-color: var(--accent); }
+
+  .session-filter {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 5px 8px;
+  }
+
+  .session-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+  /* A sortable header says so on hover and marks the column in use. */
+  .session-th--sortable { cursor: pointer; user-select: none; }
+  .session-th--sortable:hover { color: var(--text); }
+  .session-th--active { color: var(--accent); }
+  .session-th--active[data-direction="asc"]::after { content: " \2191"; }
+  .session-th--active[data-direction="desc"]::after { content: " \2193"; }
+
+  /* Only shown with an open session: over the table these describe nothing.
+     No `display` in the base rule — an author rule here outranks the UA
+     stylesheet's `[hidden] { display: none }` and would render the group
+     whatever the attribute says. Third time this file has met that trap. */
+  .session-detail { align-items: center; gap: 14px; }
+  .session-detail:not([hidden]) { display: flex; }
+
   /* The Session view's default screen: every recorded session, newest
      first. It scrolls on its own so the header stays put. */
   .session-table {
@@ -2012,7 +2064,7 @@
 
   .session-table thead th {
     position: sticky;
-    top: 0;
+    top: 46px;
     z-index: 1;
     text-align: left;
     font-weight: 600;
