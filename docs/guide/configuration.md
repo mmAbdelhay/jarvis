@@ -57,6 +57,12 @@ clusters:                       # optional; per project, for the Cluster tab
 headlamp:
   binary: /Applications/Headlamp.app/Contents/Resources/headlamp-server
 
+terminal:
+  completion:
+    enabled: true             # the Terminal tab's autocomplete dropdown
+    historyPath: ~/.zsh_history                      # read, never written
+    commandLogPath: ~/.config/jarvis/terminal-commands.log
+
 brain:
   accountId: claude-mm          # which agent answers voice; needs a configDir
   cwd: /Users/you/.config/jarvis/brain
@@ -89,6 +95,19 @@ runs headless sessions that inherit hooks and skills from their working
 directory, which is why `brain.cwd` defaults to a directory with no `.claude`
 config of its own. Pointing it at a repository makes the brain inherit that
 repository's tooling.
+
+**`terminal.completion.enabled` is one switch, not two.** Setting it to `false`
+turns off the dropdown *and* the shell integration behind it, so the Terminal
+tab's shell starts with no `ZDOTDIR` of Jarvis's at all. The whole section is
+optional and every field has a default, so a config written before this feature
+existed keeps loading and gets it.
+
+Your own `~/.zshrc`, `~/.zprofile`, `~/.zshenv` and `~/.zsh_history` are read
+and never modified. `commandLogPath` is Jarvis's own file: it records
+`epoch`, working directory and command for each command run in a Terminal tab,
+which is the only way to rank a command higher in the directory it belongs to —
+zsh's history does not record a directory. Delete it whenever you like; it
+refills.
 
 **`databases` is keyed by project name**, and a key that names no configured
 project is rejected at load. There is deliberately no `password:` field —
