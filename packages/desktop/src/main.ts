@@ -87,6 +87,7 @@ import {
   createDockerHandlers,
   createEditorHandlers,
   createTerminalHandlers,
+  createTranscriptHandler,
   createGitHandlers,
   createSettingsHandlers,
   isDeclaredContainer,
@@ -921,6 +922,17 @@ app.whenReady().then(async () => {
     // Jarvis did not itself start.
     ipcMain.handle("session:log", (_event, sessionId: string) =>
       typeof sessionId === "string" ? sessions.log(sessionId) : "",
+    );
+
+    // A session started in a terminal has no pty backlog — only the
+    // transcript the importer recorded a path to. Without this the session
+    // view opened blank for all 89 imported sessions.
+    ipcMain.handle(
+      "session:transcript",
+      createTranscriptHandler({
+        history: () => sessionStore.history(),
+        readFile: (path) => readFile(path, "utf8"),
+      }),
     );
 
     // Keystrokes into a session's pty. Validated rather than trusted: the

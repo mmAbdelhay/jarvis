@@ -5,6 +5,7 @@ import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
+  renderTranscript,
   summaryOf,
   createFsImportDeps,
   createSessionImporter,
@@ -108,6 +109,76 @@ describe("resolveProject", () => {
 
   it("ignores a trailing separator on a configured path", () => {
     expect(resolveProject("/Users/u/work/site/src", { site: "/Users/u/work/site/" })).toBe("site");
+  });
+});
+
+describe("renderTranscript", () => {
+  const line = (record: unknown): string => JSON.stringify(record);
+
+  it("shows a user prompt and the assistant's reply", () => {
+    const out = renderTranscript(
+      [
+        line({ type: "user", message: { content: "fetch all my bugs" } }),
+        line({ type: "assistant", message: { content: [{ type: "text", text: "On it." }] } }),
+      ].join("\n"),
+    );
+    expect(out).toContain("fetch all my bugs");
+    expect(out).toContain("On it.");
+  });
+
+  // A transcript is mostly bookkeeping — attachments, mode changes, cost
+  // state, file snapshots. Rendering those would bury the conversation the
+  // user opened the session to read.
+  it("ignores records that are not part of the conversation", () => {
+    const out = renderTranscript(
+      [
+        line({ type: "attachment", content: "noise" }),
+        line({ type: "cost-state", total: 12 }),
+        line({ type: "user", message: { content: "hello" } }),
+      ].join("\n"),
+    );
+    expect(out).toContain("hello");
+    expect(out).not.toContain("noise");
+  });
+
+  it("names a tool call instead of dumping its arguments", () => {
+    const out = renderTranscript(
+      line({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls -la" } }] },
+      }),
+    );
+    expect(out).toContain("Bash");
+    expect(out).not.toContain("ls -la");
+  });
+
+  it("leaves out a tool result, which is output and not conversation", () => {
+    const out = renderTranscript(
+      line({
+        type: "user",
+        message: { content: [{ type: "tool_result", content: "total 48\ndrwx" }] },
+      }),
+    );
+    expect(out).not.toContain("drwx");
+  });
+
+  it("skips a malformed line rather than losing the rest", () => {
+    const out = renderTranscript(
+      ["{not json", line({ type: "user", message: { content: "survived" } })].join("\n"),
+    );
+    expect(out).toContain("survived");
+  });
+
+  it("returns an empty string for a transcript with no conversation", () => {
+    expect(renderTranscript(line({ type: "cost-state" }))).toBe("");
+  });
+
+  // The view writes this straight into an xterm, where a bare \n leaves the
+  // cursor in the column it was already in and the next line starts
+  // mid-screen.
+  it("ends every line with a carriage return for the terminal", () => {
+    const out = renderTranscript(line({ type: "user", message: { content: "a\nb" } }));
+    expect(out).not.toMatch(/[^\r]\n/);
   });
 });
 

@@ -389,6 +389,9 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
         lastActivityAt: transcript.lastActivityAt,
         endedAt: transcript.lastActivityAt,
         branch: transcript.branch,
+        // Where this row came from, so showing the session is a file read
+        // rather than a scan of every agent directory for its id.
+        transcriptPath: file.path,
       },
       { owned },
     );
@@ -466,6 +469,75 @@ function message(error: unknown): string {
  * is nothing.
  */
 export const HEAD_BYTES = 64 * 1024;
+
+/**
+ * A transcript as a session's terminal can show it.
+ *
+ * A session Jarvis spawned has a pty backlog; one started in a terminal has
+ * only this file, so without a rendering the view opens blank — which is
+ * exactly what it did before this existed.
+ *
+ * Only the conversation is kept. A transcript is mostly bookkeeping —
+ * attachments, mode switches, cost state, file snapshots, 103 attachment
+ * records against 50 user turns in the one measured here — and rendering
+ * that would bury what the reader came for. Tool calls are named but their
+ * arguments and results are dropped: a session's shape is which tools ran,
+ * while their output is the terminal scrollback nobody kept.
+ *
+ * Lines end CRLF because this is written straight into an xterm, where a
+ * bare LF moves down without returning to column zero and every line after
+ * the first starts mid-screen.
+ */
+export function renderTranscript(text: string): string {
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      // One unreadable line is not a reason to lose the other thousand.
+      continue;
+    }
+    if (typeof record !== "object" || record === null) continue;
+    const fields = record as Record<string, unknown>;
+    const role = fields["type"];
+    if (role !== "user" && role !== "assistant") continue;
+    const message = fields["message"];
+    if (typeof message !== "object" || message === null) continue;
+    const body = transcriptBody((message as Record<string, unknown>)["content"]);
+    if (body === "") continue;
+    out.push(`${role === "user" ? "› " : ""}${body}`);
+  }
+  return out.length === 0 ? "" : `${out.join("\r\n\r\n")}\r\n`;
+}
+
+/** The readable part of one message's content. */
+function transcriptBody(content: unknown): string {
+  if (typeof content === "string") return content.replaceAll("\n", "\r\n").trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const fields = block as Record<string, unknown>;
+    const kind = fields["type"];
+    if (kind === "text") {
+      const text = fields["text"];
+      if (typeof text === "string" && text.trim() !== "") {
+        parts.push(text.replaceAll("\n", "\r\n").trim());
+      }
+      continue;
+    }
+    if (kind === "tool_use") {
+      const name = fields["name"];
+      // The name, never the input: an Edit's input is a whole file and a
+      // Bash's is a command whose output is not here anyway.
+      parts.push(`[${typeof name === "string" ? name : "tool"}]`);
+    }
+    // thinking and tool_result are deliberately dropped — see the doc above.
+  }
+  return parts.join("\r\n");
+}
 
 /**
  * Whether a path relative to an agent's `projects/` directory is a session

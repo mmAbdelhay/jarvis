@@ -25,6 +25,7 @@ import {
   eksUpdateKubeconfigArgs,
   loadWorkflows,
   profileForContext,
+  renderTranscript,
 } from "@jarvis/platform";
 import type {
   ApiFailure,
@@ -339,6 +340,9 @@ export type RendererApi = {
    * before its process has written anything.
    */
   getSessionLog(sessionId: string): Promise<string>;
+  /** The rendered conversation of a session imported from a transcript.
+   *  Empty for a session Jarvis spawned, which has a pty backlog instead. */
+  getSessionTranscript(sessionId: string): Promise<string>;
   /**
    * Raw keystrokes for one session's terminal, written to its pty exactly
    * as given — including control bytes (Ctrl-C, arrows, Escape). This is
@@ -852,6 +856,44 @@ export type ClusterHandlerDeps = {
   sendInput(tabId: string, data: string): void;
   language: "ar" | "en";
 };
+
+/** What a transcript handler needs: the recorded sessions, and a way to
+ *  read a file. Both injected, so the handler is testable without a store
+ *  or a filesystem. */
+export type TranscriptHandlerDeps = {
+  history(): Session[];
+  readFile(path: string): Promise<string>;
+};
+
+/**
+ * The conversation of a session Jarvis did not run.
+ *
+ * A session it did run has a pty backlog, replayed through `session:log`.
+ * One started in a terminal has no backlog at all, so before this the
+ * session view opened blank — the symptom that "clicking a session does
+ * nothing".
+ *
+ * Every failure returns the empty string rather than throwing: an unknown
+ * id, a session with no transcript (which is every session Jarvis spawned,
+ * and not an error), and a file deleted since the import all mean the same
+ * thing to the caller — there is nothing to show — and none of them should
+ * take down the view.
+ */
+export function createTranscriptHandler(
+  deps: TranscriptHandlerDeps,
+): (sessionId: unknown) => Promise<string> {
+  return async (sessionId) => {
+    if (!isString(sessionId)) return "";
+    const session = deps.history().find((candidate) => candidate.id === sessionId);
+    const path = session?.transcriptPath;
+    if (path === undefined || path === "") return "";
+    try {
+      return renderTranscript(await deps.readFile(path));
+    } catch {
+      return "";
+    }
+  };
+}
 
 export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers {
   function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {

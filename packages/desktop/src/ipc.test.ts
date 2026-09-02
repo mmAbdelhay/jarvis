@@ -12,6 +12,7 @@ import {
   createEditorHandlers,
   createApiHandlers,
   createTerminalHandlers,
+  createTranscriptHandler,
   type ApiHandlerDeps,
   type DockerHandlerDeps,
   type DockerHandlers,
@@ -35,7 +36,7 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import type { AgentHealth, Brain, WorkspaceState } from "@jarvis/core";
+import type { AgentHealth, Brain, Session, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
@@ -3107,5 +3108,65 @@ describe("createChatHandlers", () => {
 
   it("refuses a name that is not a string", async () => {
     expect((await chatHandlers().open("acme", 3 as unknown as string)).ok).toBe(false);
+  });
+});
+
+describe("createTranscriptHandler", () => {
+  const session = (over: Partial<Session> = {}): Session => ({
+    id: "s1",
+    project: null,
+    projectPath: "/home/u/app",
+    agentId: "claude-mm",
+    state: "done",
+    summary: "hello",
+    startedAt: 1,
+    lastActivityAt: 2,
+    branch: "",
+    insertions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    ...over,
+  });
+
+  it("renders the transcript of an imported session", async () => {
+    const handler = createTranscriptHandler({
+      history: () => [session({ transcriptPath: "/t/s1.jsonl" })],
+      readFile: async () => JSON.stringify({ type: "user", message: { content: "hi there" } }),
+    });
+    expect(await handler("s1")).toContain("hi there");
+  });
+
+  // A session Jarvis spawned has a pty backlog instead; asking for its
+  // transcript is not an error, there simply is not one.
+  it("returns nothing for a session with no transcript recorded", async () => {
+    const handler = createTranscriptHandler({
+      history: () => [session()],
+      readFile: async () => "should not be read",
+    });
+    expect(await handler("s1")).toBe("");
+  });
+
+  it("returns nothing for an unknown session", async () => {
+    const handler = createTranscriptHandler({ history: () => [], readFile: async () => "x" });
+    expect(await handler("nope")).toBe("");
+  });
+
+  // A transcript deleted since the import must not take down the view.
+  it("returns nothing when the file cannot be read", async () => {
+    const handler = createTranscriptHandler({
+      history: () => [session({ transcriptPath: "/gone.jsonl" })],
+      readFile: async () => {
+        throw new Error("ENOENT");
+      },
+    });
+    expect(await handler("s1")).toBe("");
+  });
+
+  it("ignores a non-string session id", async () => {
+    const handler = createTranscriptHandler({
+      history: () => [session({ transcriptPath: "/t/s1.jsonl" })],
+      readFile: async () => "x",
+    });
+    expect(await handler(undefined)).toBe("");
   });
 });

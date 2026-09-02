@@ -36,6 +36,7 @@ const api: RendererApi = {
     ipcRenderer.on("session:output", (_e, output) => cb(output));
   },
   getSessionLog: (sessionId) => ipcRenderer.invoke("session:log", sessionId),
+  getSessionTranscript: (sessionId) => ipcRenderer.invoke("session:transcript", sessionId),
   sendSessionInput: (sessionId, data) => ipcRenderer.invoke("session:input", sessionId, data),
   resizeSession: (sessionId, cols, rows) =>
     ipcRenderer.invoke("session:resize", sessionId, cols, rows),

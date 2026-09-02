@@ -39,12 +39,17 @@ function layoutDom(): void {
 
 type Jarvis = Pick<
   RendererApi,
-  "getSessionLog" | "sendSessionInput" | "resizeSession" | "setVoiceTarget"
+  | "getSessionLog"
+  | "getSessionTranscript"
+  | "sendSessionInput"
+  | "resizeSession"
+  | "setVoiceTarget"
 >;
 
 function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
+    getSessionTranscript: vi.fn(async () => ""),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -122,6 +127,44 @@ describe("openSession", () => {
     await openSession(makeSession());
 
     expect(term().text).toBe("welcome banner\r\n");
+  });
+
+  // A session started in a terminal has no pty backlog at all — only the
+  // transcript the importer recorded. Before this, clicking one opened a
+  // blank screen, which is what "clicking a session does nothing" was.
+  it("falls back to the transcript when there is no backlog", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => "› fetch all my bugs\r\n"),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(term().text).toContain("fetch all my bugs");
+  });
+
+  // The backlog is the live truth for a session Jarvis owns; asking for a
+  // transcript it does not have would be a wasted round trip on every open.
+  it("does not ask for a transcript when a backlog exists", async () => {
+    const getSessionTranscript = vi.fn(async () => "should not appear");
+    stubJarvis({ getSessionLog: vi.fn(async () => "live output\r\n"), getSessionTranscript });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(getSessionTranscript).not.toHaveBeenCalled();
+    expect(term().text).toBe("live output\r\n");
+  });
+
+  // A transcript read that fails must leave the view usable, not throw.
+  it("survives a transcript that cannot be read", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => {
+        throw new Error("nope");
+      }),
+    });
+    const { openSession } = await import("./session-view.js");
+    await expect(openSession(makeSession())).resolves.toBeUndefined();
   });
 
   // The bytes are a terminal's screen, not text: escape sequences must

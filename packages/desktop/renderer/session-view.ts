@@ -272,6 +272,21 @@ export async function openSession(session: Session): Promise<void> {
   // session's terminal.
   if (currentId !== session.id) return;
 
+  // A session Jarvis spawned replays its pty backlog. One started in a
+  // terminal has no pty and no backlog — only the transcript the importer
+  // recorded a path to — so without this fallback the view opened blank,
+  // which is exactly what "clicking a session shows nothing" was. Asked for
+  // only when the backlog is empty: a live session's backlog is the truth,
+  // and a round trip for a transcript it does not have would be waste.
+  if (backlog === "") {
+    try {
+      backlog = await window.jarvis.getSessionTranscript(session.id);
+    } catch (error) {
+      console.error(`Failed to load session transcript: ${errorMessage(error)}`);
+    }
+    if (currentId !== session.id) return;
+  }
+
   // Through the pane rather than straight to xterm: the backlog can carry
   // the same integration marks the live stream does, and a block whose
   // command finished before the view was opened is still a block.
