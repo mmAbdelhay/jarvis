@@ -36,6 +36,27 @@ export type VoiceConfig = {
   greeting: { en: string; ar: string };
 };
 
+/**
+ * The Terminal tab's own settings.
+ *
+ * `completion.enabled` is the single switch for the autocomplete feature,
+ * and it reaches all the way down: false installs no ZDOTDIR wrapper
+ * either, so the shell is started exactly as it was before the feature
+ * existed. One switch, no half-state.
+ */
+export type TerminalConfig = {
+  completion: {
+    enabled: boolean;
+    /** The shell history the suggestions are ranked from. Read, never
+     *  written — Jarvis does not touch the user's history. */
+    historyPath: string;
+    /** Jarvis's own `<epoch>\t<cwd>\t<command>` log, written by the
+     *  wrapper's preexec hook. It exists because zsh's history records no
+     *  working directory and directory affinity needs one. */
+    commandLogPath: string;
+  };
+};
+
 export type JarvisConfig = {
   registry: RegistryConfig;
   projects: Record<string, string>;
@@ -55,6 +76,7 @@ export type JarvisConfig = {
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
   headlamp: { binary: string };
+  terminal: TerminalConfig;
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -133,6 +155,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const editors = parseEditors(root["editors"], projects);
   const clusters = parseClusters(root["clusters"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
+  const terminal = parseTerminal(root["terminal"]);
   const whisper = parseWhisper(root["whisper"]);
   const voice = parseVoice(root["voice"]);
 
@@ -161,6 +184,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     editors,
     clusters,
     headlamp,
+    terminal,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -518,6 +542,65 @@ function parseClusters(rawClusters: unknown, projects: Record<string, string>): 
     });
   }
   return result;
+}
+
+// The user's history, read and never written. zsh's default HISTFILE, and
+// the file this design's frequency analysis was built from.
+const DEFAULT_HISTORY_PATH = join(homedir(), ".zsh_history");
+// Jarvis's own log lives with Jarvis's own bookkeeping, beside jarvis.yaml
+// — the same reasoning defaultSessionsDbPath() documents.
+const DEFAULT_COMMAND_LOG_PATH = join(homedir(), ".config/jarvis/terminal-commands.log");
+
+/**
+ * The `terminal:` section. Every field has a default and the whole section
+ * is optional, so a jarvis.yaml written before autocomplete existed keeps
+ * loading and gets the feature — this is preference, not configuration the
+ * app cannot run without.
+ */
+function parseTerminal(rawTerminal: unknown): TerminalConfig {
+  const defaults: TerminalConfig = {
+    completion: {
+      enabled: true,
+      historyPath: DEFAULT_HISTORY_PATH,
+      commandLogPath: DEFAULT_COMMAND_LOG_PATH,
+    },
+  };
+  if (rawTerminal === undefined) return defaults;
+  if (typeof rawTerminal !== "object" || rawTerminal === null || Array.isArray(rawTerminal)) {
+    throw new Error("Config `terminal` must be an object");
+  }
+
+  const rawCompletion = (rawTerminal as Record<string, unknown>)["completion"];
+  if (rawCompletion === undefined) return defaults;
+  if (
+    typeof rawCompletion !== "object" ||
+    rawCompletion === null ||
+    Array.isArray(rawCompletion)
+  ) {
+    throw new Error("Config `terminal.completion` must be an object");
+  }
+  const completion = rawCompletion as Record<string, unknown>;
+
+  const enabled = completion["enabled"];
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("Config `terminal.completion.enabled` must be true or false");
+  }
+  const path = (key: "historyPath" | "commandLogPath", fallback: string): string => {
+    const value = completion[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== "string" || value === "") {
+      throw new Error(`Config \`terminal.completion.${key}\` must be a non-empty string`);
+    }
+    return expandTilde(value);
+  };
+
+  return {
+    completion: {
+      enabled: enabled ?? true,
+      historyPath: path("historyPath", DEFAULT_HISTORY_PATH),
+      commandLogPath: path("commandLogPath", DEFAULT_COMMAND_LOG_PATH),
+    },
+  };
 }
 
 /** The `headlamp:` section. One key, with a per-OS default, so an absent

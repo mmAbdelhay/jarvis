@@ -617,3 +617,62 @@ describe("clusters", () => {
     );
   });
 });
+
+describe("terminal completion", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  // On by default: every jarvis.yaml written before this feature existed
+  // gets it, and a user who wants their terminal exactly as zsh gives it
+  // has one line to write.
+  it("defaults completion on, reading the user's own zsh history", () => {
+    const { completion } = parseConfig(base).terminal;
+
+    expect(completion.enabled).toBe(true);
+    expect(completion.historyPath).toBe(join(homedir(), ".zsh_history"));
+    expect(completion.commandLogPath).toBe(join(homedir(), ".config/jarvis/terminal-commands.log"));
+  });
+
+  it("accepts terminal.completion.enabled: false", () => {
+    const raw = { ...base, terminal: { completion: { enabled: false } } };
+
+    expect(parseConfig(raw).terminal.completion.enabled).toBe(false);
+  });
+
+  it("takes a configured history path, expanding a leading tilde", () => {
+    const raw = { ...base, terminal: { completion: { historyPath: "~/.histfile" } } };
+
+    expect(parseConfig(raw).terminal.completion.historyPath).toBe(join(homedir(), ".histfile"));
+  });
+
+  it("takes a configured command-log path", () => {
+    const raw = { ...base, terminal: { completion: { commandLogPath: "/tmp/cmd.log" } } };
+
+    expect(parseConfig(raw).terminal.completion.commandLogPath).toBe("/tmp/cmd.log");
+  });
+
+  it("keeps the defaults for the fields a partial section leaves out", () => {
+    const raw = { ...base, terminal: { completion: { enabled: false } } };
+
+    expect(parseConfig(raw).terminal.completion.historyPath).toBe(join(homedir(), ".zsh_history"));
+  });
+
+  it("refuses a non-boolean terminal.completion.enabled", () => {
+    const raw = { ...base, terminal: { completion: { enabled: "yes" } } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.completion\.enabled/);
+  });
+
+  it("refuses a non-string terminal.completion.historyPath", () => {
+    const raw = { ...base, terminal: { completion: { historyPath: 7 } } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.completion\.historyPath/);
+  });
+
+  it("refuses a terminal section that is not an object", () => {
+    expect(() => parseConfig({ ...base, terminal: "on" })).toThrow(/`terminal`/);
+  });
+});
