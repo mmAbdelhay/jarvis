@@ -14,9 +14,12 @@ pnpm install
 pnpm --filter @jarvis/desktop start
 ```
 
-The first run reads `~/.config/jarvis/jarvis.yaml`. If there is no such file,
-Jarvis starts with defaults and the Settings route is the quickest way to
-write one.
+The first run reads `~/.config/jarvis/jarvis.yaml`. **There must be one**: with
+no config file Jarvis shows "Jarvis failed to start" and quits, because a
+sensible default for "which agent runs your code" does not exist. The smallest
+file that works declares one agent and an empty brain — see
+**[SETUP.md](../../SETUP.md)** for it, and [configuration](configuration.md)
+for everything else.
 
 ## What each optional tool unlocks
 

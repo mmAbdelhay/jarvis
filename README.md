@@ -26,6 +26,8 @@ Settings          everything jarvis.yaml holds, edited in place
 
 ## Getting started
 
+New machine? **[SETUP.md](SETUP.md)** walks the whole thing, start to finish.
+
 ```bash
 pnpm install
 pnpm --filter @jarvis/desktop start      # builds, then opens the app
@@ -41,6 +43,7 @@ tools each Workspace tab needs.
 
 **Using it**
 
+- [Setup](SETUP.md) — a new machine, start to finish
 - [Installation](docs/guide/installation.md) — prerequisites, first run, what each optional tool unlocks
 - [Configuration](docs/guide/configuration.md) — every key of `jarvis.yaml`, with worked examples
 - [The routes](docs/guide/routes.md) — Dashboard, Changes, Session, Workspace, Settings
