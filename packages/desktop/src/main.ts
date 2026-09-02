@@ -39,6 +39,8 @@ import {
   apiFetch,
   apiMultipart,
   createApiStore,
+  createAwsSessionChecker,
+  createAwsSessionPoller,
   createCookieJar,
   createRequest,
   deleteEntry,
@@ -406,10 +408,9 @@ app.whenReady().then(async () => {
     // case the inherited environment stands — right for a Jarvis launched
     // from a terminal.
     const shellPath = await loginShellPath();
+    const env = shellPath === undefined ? process.env : { ...process.env, PATH: shellPath };
     const headlamp = createHeadlampManager({
-      spawn: createRealHeadlampSpawner(
-        shellPath === undefined ? process.env : { ...process.env, PATH: shellPath },
-      ),
+      spawn: createRealHeadlampSpawner(env),
       findFreePort,
       waitUntilReady,
       listContexts: createKubeContextLister(join(homedir(), ".kube/config")),
@@ -417,12 +418,8 @@ app.whenReady().then(async () => {
       binary: config.headlamp.binary,
       kubeconfigPath: join(homedir(), ".kube/config"),
     });
-    const cluster = createClusterHandlers({
-      headlamp,
-      projects: config.projects,
-      clusters: config.clusters,
-      language: PRIMARY_LANGUAGE,
-    });
+    const checkAwsSession = createAwsSessionChecker(env);
+    const awaitAwsSession = createAwsSessionPoller(checkAwsSession);
 
     // Terminal autocomplete's shell integration, installed before the first
     // shell can be started. It writes a Jarvis-owned ZDOTDIR whose files
@@ -628,6 +625,35 @@ app.whenReady().then(async () => {
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
+    });
+
+    // Constructed here, not beside headlamp above, because opening the
+    // AWS login terminal needs a live tab and shell to type the login
+    // command into. terminal.open itself doesn't hand back a tab id (there
+    // is no caller today that needs one), so openTerminal reaches for the
+    // same workspace.openTerminal + shells.start pairing terminal.open uses
+    // internally; sendInput reuses terminal.input as-is, since that already
+    // has the exact right shape.
+    const cluster = createClusterHandlers({
+      headlamp,
+      projects: config.projects,
+      clusters: config.clusters,
+      readKubeconfig: async () => {
+        try {
+          return await readFile(join(homedir(), ".kube/config"), "utf8");
+        } catch {
+          return "";
+        }
+      },
+      checkAwsSession,
+      awaitAwsSession,
+      openTerminal: (project: string, cwd: string) => {
+        const tabId = workspace.openTerminal(project);
+        shells.start(tabId, cwd);
+        return tabId;
+      },
+      sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
+      language: PRIMARY_LANGUAGE,
     });
 
     const bookmarks = createBookmarksHandlers({
