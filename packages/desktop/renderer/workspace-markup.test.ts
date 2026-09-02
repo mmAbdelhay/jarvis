@@ -126,3 +126,62 @@ describe("api bar layout", () => {
     expect(bar).not.toContain("style=\"width: auto");
   });
 });
+
+// The bookmarks list used to be a 200px full-height rail beside the whole
+// browser column — workspace furniture rather than browser chrome. It now
+// sits where every other browser puts it: one horizontal row inside the
+// browser's own chrome, directly under the address bar, hidden by the same
+// rule that hides the address bar for a hosted app.
+describe("bookmarks bar layout", () => {
+  it("puts the bookmarks between the address bar and the page", () => {
+    const bar = html.indexOf('id="workspace-bar"');
+    const bookmarks = html.indexOf('id="workspace-bookmarks"');
+    const page = html.indexOf('id="workspace-page"');
+    expect(bar).toBeGreaterThan(-1);
+    expect(bookmarks).toBeGreaterThan(bar);
+    expect(page).toBeGreaterThan(bookmarks);
+  });
+
+  // The rail's row wrapper existed only to put a sidebar beside the browser
+  // column. With no sidebar there is no second column, and the extra
+  // wrapper div is one more thing between the page slot and its flex
+  // parent.
+  it("stacks the browser as a single column", () => {
+    expect(css).toMatch(/\.workspace-browser \{[^}]*flex-direction:\s*column/);
+    expect(html).not.toContain("workspace-browser-main");
+    expect(css).not.toContain(".workspace-browser-main");
+  });
+
+  it("no longer reserves a fixed rail width for the bookmarks", () => {
+    expect(css).not.toMatch(/\.workspace-bookmarks \{[^}]*width:\s*200px/);
+  });
+
+  // The prior art here is .workspace-nav's fixed 28x28 square, which
+  // squeezed word-labelled buttons until they printed on top of one
+  // another. A bookmark chip in a flex row has the same failure mode: with
+  // flex-shrink left at its default of 1, twenty bookmarks each collapse
+  // to a few pixels instead of overflowing the row.
+  it("keeps a bookmark at its own width rather than squeezing it", () => {
+    expect(css).toMatch(/\.workspace-bookmark \{[^}]*flex-shrink:\s*0/);
+  });
+
+  // A wrapping bar grows in height, and this bar's height is the page
+  // slot's inset — so a wrap would move the hosted view on every added
+  // bookmark. Scroll instead, exactly as the tab strip above it does.
+  it("scrolls the bookmarks rather than wrapping them onto more rows", () => {
+    expect(css).toMatch(/\.workspace-bookmark-list \{[^}]*flex-wrap:\s*nowrap/);
+    expect(css).toMatch(/\.workspace-bookmark-list \{[^}]*overflow-x:\s*auto/);
+  });
+
+  // A one-line strip has no room for a second line of text under the
+  // title, which is what the rail's rows carried.
+  it("drops the rail's stacked domain line", () => {
+    expect(css).not.toContain(".workspace-bookmark-domain");
+  });
+
+  // "BOOKMARKS" was an English-only heading for a column that no longer
+  // exists; a horizontal strip under the address bar needs no label.
+  it("drops the rail's heading", () => {
+    expect(html).not.toContain("BOOKMARKS");
+  });
+});

@@ -247,100 +247,100 @@
       <button id="workspace-open-api" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Send requests from the project's collections">API</button>
       <button id="workspace-toggle-bookmarks" class="workspace-nav" type="button"
-              title="Show or hide the bookmarks sidebar">&#9776;</button>
+              title="Show or hide the bookmarks bar">&#9776;</button>
       <span id="workspace-tool-status" class="mono"></span>
       <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
     </div>
 
     <div id="workspace-browser" class="workspace-browser">
+      <div id="workspace-tabs" class="workspace-tabs"></div>
+      <div id="workspace-bar" class="workspace-bar">
+        <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
+        <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
+        <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
+        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+        <button id="workspace-toggle-devtools" class="workspace-nav" type="button"
+                title="Open DevTools for this page">&#9881;</button>
+        <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
+                title="Bookmark this page">☆</button>
+      </div>
+      <!-- The bookmarks bar. Browser chrome, not workspace chrome: it
+           belongs under the address bar and hides with it, the way every
+           other browser does it. -->
       <div id="workspace-bookmarks" class="workspace-bookmarks">
-        <div class="lbl">BOOKMARKS</div>
         <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
       </div>
-      <div class="workspace-browser-main">
-        <div id="workspace-tabs" class="workspace-tabs"></div>
-        <div id="workspace-bar" class="workspace-bar">
-          <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
-          <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
-          <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
-          <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
-                 autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
-          <button id="workspace-toggle-devtools" class="workspace-nav" type="button"
-                  title="Open DevTools for this page">&#9881;</button>
-          <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
-                  title="Bookmark this page">☆</button>
+      <div id="workspace-error" class="changes-error" hidden></div>
+      <div id="workspace-page" class="workspace-page"></div>
+      <!-- The DevTools panel. Like the page slot it holds no content: a
+           hosted view is positioned over the rectangle it measures. The
+           handle above it drags the split between the two. -->
+      <div id="workspace-devtools-handle" class="workspace-devtools-handle" hidden></div>
+      <div id="workspace-devtools" class="workspace-devtools" hidden></div>
+      <!-- Terminal tabs have no hosted view, so their screen is drawn
+           here, in the renderer's own DOM, over the same region a hosted
+           page would occupy. Hidden unless a terminal tab is active. -->
+      <div id="workspace-terminal" class="workspace-terminal" hidden></div>
+      <!-- The API tab. Like the terminal it has no hosted view; the whole
+           surface is drawn by the renderer over the page slot's region. -->
+      <div id="workspace-api" class="workspace-api" hidden>
+        <div class="workspace-api-sidebar">
+          <select id="api-collection" class="workspace-project mono"></select>
+          <div class="api-sidebar-actions">
+            <button id="api-new-request" class="settings-add" type="button">+ request</button>
+            <button id="api-new-folder" class="settings-add" type="button">+ folder</button>
+            <button id="api-new-collection" class="settings-add" type="button">+ collection</button>
+            <button id="api-import" class="settings-add" type="button">import</button>
+          </div>
+          <div id="api-tree" class="api-tree"></div>
         </div>
-        <div id="workspace-error" class="changes-error" hidden></div>
-        <div id="workspace-page" class="workspace-page"></div>
-        <!-- The DevTools panel. Like the page slot it holds no content: a
-             hosted view is positioned over the rectangle it measures. The
-             handle above it drags the split between the two. -->
-        <div id="workspace-devtools-handle" class="workspace-devtools-handle" hidden></div>
-        <div id="workspace-devtools" class="workspace-devtools" hidden></div>
-        <!-- Terminal tabs have no hosted view, so their screen is drawn
-             here, in the renderer's own DOM, over the same region a hosted
-             page would occupy. Hidden unless a terminal tab is active. -->
-        <div id="workspace-terminal" class="workspace-terminal" hidden></div>
-        <!-- The API tab. Like the terminal it has no hosted view; the whole
-             surface is drawn by the renderer over the page slot's region. -->
-        <div id="workspace-api" class="workspace-api" hidden>
-          <div class="workspace-api-sidebar">
-            <select id="api-collection" class="workspace-project mono"></select>
-            <div class="api-sidebar-actions">
-              <button id="api-new-request" class="settings-add" type="button">+ request</button>
-              <button id="api-new-folder" class="settings-add" type="button">+ folder</button>
-              <button id="api-new-collection" class="settings-add" type="button">+ collection</button>
-              <button id="api-import" class="settings-add" type="button">import</button>
-            </div>
-            <div id="api-tree" class="api-tree"></div>
+        <div class="workspace-api-main">
+          <div class="api-bar">
+            <select id="api-method" class="mono"></select>
+            <input id="api-url" class="workspace-address mono" type="text" dir="ltr"
+                   autocomplete="off" spellcheck="false" placeholder="https://" />
+            <select id="api-environment" class="mono"></select>
+            <button id="api-env-edit" class="workspace-nav" type="button" title="Edit this environment">env</button>
+            <button id="api-send" class="workspace-nav" type="button">Send</button>
+            <button id="api-save" class="workspace-nav" type="button" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
+            <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
+            <button id="api-history-toggle" class="workspace-nav" type="button" title="Request history">hist</button>
+            <button id="api-cookies-toggle" class="workspace-nav" type="button" title="Cookies">cookies</button>
+            <button id="api-settings-toggle" class="workspace-nav" type="button" title="Proxy, TLS and timeout">net</button>
+            <span id="api-status" class="mono api-status-line"></span>
           </div>
-          <div class="workspace-api-main">
-            <div class="api-bar">
-              <select id="api-method" class="mono"></select>
-              <input id="api-url" class="workspace-address mono" type="text" dir="ltr"
-                     autocomplete="off" spellcheck="false" placeholder="https://" />
-              <select id="api-environment" class="mono"></select>
-              <button id="api-env-edit" class="workspace-nav" type="button" title="Edit this environment">env</button>
-              <button id="api-send" class="workspace-nav" type="button">Send</button>
-              <button id="api-save" class="workspace-nav" type="button" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
-              <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
-              <button id="api-history-toggle" class="workspace-nav" type="button" title="Request history">hist</button>
-              <button id="api-cookies-toggle" class="workspace-nav" type="button" title="Cookies">cookies</button>
-              <button id="api-settings-toggle" class="workspace-nav" type="button" title="Proxy, TLS and timeout">net</button>
-              <span id="api-status" class="mono api-status-line"></span>
+          <div id="api-env-panel" class="api-env-panel" hidden>
+            <div class="api-env-head">
+              <span class="lbl">ENVIRONMENT</span>
+              <input id="api-env-name" class="mono" type="text" spellcheck="false" />
+              <button id="api-env-add" class="settings-add" type="button">+ variable</button>
+              <button id="api-env-save" class="workspace-nav" type="button">Save</button>
+              <button id="api-env-close" class="settings-add" type="button">close</button>
             </div>
-            <div id="api-env-panel" class="api-env-panel" hidden>
-              <div class="api-env-head">
-                <span class="lbl">ENVIRONMENT</span>
-                <input id="api-env-name" class="mono" type="text" spellcheck="false" />
-                <button id="api-env-add" class="settings-add" type="button">+ variable</button>
-                <button id="api-env-save" class="workspace-nav" type="button">Save</button>
-                <button id="api-env-close" class="settings-add" type="button">close</button>
-              </div>
-              <div id="api-env-vars" class="api-pairs"></div>
-            </div>
-            <!-- Electron does not implement window.prompt: calling it throws
-                 "prompt() is not supported", which is why every create and
-                 rename in this pane silently did nothing. This is the
-                 replacement. -->
-            <div id="api-ask" class="api-ask" hidden>
-              <span id="api-ask-label" class="lbl"></span>
-              <input id="api-ask-input" class="mono" type="text" spellcheck="false" />
-              <button id="api-ask-ok" class="workspace-nav" type="button">OK</button>
-              <button id="api-ask-cancel" class="settings-add" type="button">cancel</button>
-            </div>
-            <div id="api-side-panel" class="api-side-panel" hidden>
-              <div id="api-side-tabs" class="api-tab-strip"></div>
-              <div id="api-side-body" class="api-side-body"></div>
-            </div>
-            <div id="api-tabs" class="api-tab-strip"></div>
-            <div id="api-panel" class="api-panel"></div>
-            <div class="api-response-bar">
-              <div id="api-response-tabs" class="api-tab-strip"></div>
-              <div id="api-response-head" class="api-response-head"></div>
-            </div>
-            <div id="api-response" class="api-response"></div>
+            <div id="api-env-vars" class="api-pairs"></div>
           </div>
+          <!-- Electron does not implement window.prompt: calling it throws
+               "prompt() is not supported", which is why every create and
+               rename in this pane silently did nothing. This is the
+               replacement. -->
+          <div id="api-ask" class="api-ask" hidden>
+            <span id="api-ask-label" class="lbl"></span>
+            <input id="api-ask-input" class="mono" type="text" spellcheck="false" />
+            <button id="api-ask-ok" class="workspace-nav" type="button">OK</button>
+            <button id="api-ask-cancel" class="settings-add" type="button">cancel</button>
+          </div>
+          <div id="api-side-panel" class="api-side-panel" hidden>
+            <div id="api-side-tabs" class="api-tab-strip"></div>
+            <div id="api-side-body" class="api-side-body"></div>
+          </div>
+          <div id="api-tabs" class="api-tab-strip"></div>
+          <div id="api-panel" class="api-panel"></div>
+          <div class="api-response-bar">
+            <div id="api-response-tabs" class="api-tab-strip"></div>
+            <div id="api-response-head" class="api-response-head"></div>
+          </div>
+          <div id="api-response" class="api-response"></div>
         </div>
       </div>
     </div>

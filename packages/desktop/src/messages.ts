@@ -129,6 +129,14 @@ export const MESSAGES = {
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر حفظ العلامات المرجعية." : "Could not save bookmarks.",
+  // Stands in the bookmarks bar when the selected project has none. An
+  // empty one-line strip under the address bar reads as a rendering glitch
+  // rather than as an empty list, and the star that fills it is two
+  // elements away in the same chrome.
+  noBookmarks: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد علامات مرجعية — احفظ صفحة بالنجمة ★"
+      : "No bookmarks yet — save a page with the ★",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // Settings' save flow. The headline is bilingual per the Global

@@ -12,8 +12,8 @@ to a project, and its kind decides what chrome makes sense around it.
 | `api` | The API client | hidden |
 
 Browser chrome belongs to browser tabs: anything that is not a plain page hides
-the address bar and the bookmarks sidebar, because nobody navigates an editor
-or a shell the way they navigate a website.
+the address bar and the bookmarks bar beneath it, because nobody navigates an
+editor or a shell the way they navigate a website.
 
 ## The browser
 
@@ -21,7 +21,14 @@ An address bar, back/forward/reload, and per-project bookmarks kept in
 `~/.config/jarvis/bookmarks.json`. Clicking a bookmark the project already has
 open activates that tab rather than opening a second copy.
 
-**☰** toggles the bookmarks sidebar. **⚙** opens DevTools for the current
+The bookmarks sit in a horizontal bar directly under the address bar, inside
+the browser's own chrome — where Chrome, Safari and Firefox put theirs — not in
+a rail beside the whole workspace. More bookmarks than fit scroll sideways
+rather than wrapping onto a second row: the bar's height is the inset of the
+hosted page below it, so a taller bar would move the page every time you saved
+something.
+
+**☰** toggles the bookmarks bar. **⚙** opens DevTools for the current
 page — the real DevTools front end, network and application panels included,
 rendered into a panel you can drag to size rather than a detached window.
 
