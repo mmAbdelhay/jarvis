@@ -245,6 +245,23 @@ describe("argsFor", () => {
     expect(argsFor({ ...claude, args: ["--foo"] })).toEqual(["--foo"]);
   });
 
+  // --session-id is not a flag every agent CLI shares a meaning for. The
+  // Copilot CLI takes it as "resume the session with this id", so handing it
+  // the freshly minted id of a session that does not exist yet asks it to
+  // resume nothing. The flag exists only to let the transcript importer
+  // recognise a session Jarvis started, and the importer reads anthropic
+  // agents only — so the flag goes exactly where the importer looks.
+  it("does not pass a session id to a non-anthropic agent", () => {
+    const copilot: AgentConfig = { id: "copilot", command: "copilot", vendor: "github" };
+    expect(argsFor(copilot, "sid-1")).not.toContain("--session-id");
+  });
+
+  it("passes a session id to an agent that declares no vendor", () => {
+    // Unset vendor keeps today's behaviour rather than silently opting an
+    // agent out of the dedup it would otherwise get.
+    expect(argsFor({ id: "x", command: "x" }, "sid-1")).toContain("--session-id");
+  });
+
   // Config-supplied args are the user's explicit choice — the same rule
   // --model already follows.
   it("leaves a configured --session-id alone", () => {

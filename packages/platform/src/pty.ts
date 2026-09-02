@@ -132,6 +132,15 @@ export function argsFor(agent: AgentConfig, sessionId?: string): string[] {
       ? configured
       : [...configured, "--model", agent.model];
   if (sessionId === undefined || withModel.includes("--session-id")) return withModel;
+  // Only where the flag means what we need it to mean. Claude Code reads
+  // --session-id as "use this id for the new session"; the Copilot CLI reads
+  // it as "resume the session with this id", so passing a just-minted id
+  // there asks it to resume something that does not exist. The flag serves
+  // the transcript importer, and the importer reads anthropic agents only,
+  // so the two share one predicate rather than drifting apart. An agent that
+  // declares no vendor keeps the flag: losing dedup is a duplicated row,
+  // while a wrong flag is a session that will not start.
+  if (agent.vendor !== undefined && agent.vendor !== "anthropic") return withModel;
   return [...withModel, "--session-id", sessionId];
 }
 
