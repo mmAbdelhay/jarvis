@@ -10,14 +10,15 @@ DbGate can also fail because it never began listening. Its port is discovered
 by reading its own startup line, so a version that changes that line fails
 loudly here rather than silently.
 
-## The Editor or Database tab takes a long time to open
+## The Editor, Database or Cluster tab takes a long time to open
 
 The wait is the binary's own start-up, not Jarvis's. Measured here:
 code-server about a second warm and nine cold, `dbgate-serve` about a second
-warm and twenty-two cold — "cold" meaning its files are not in the page cache,
-which is the first open after a reboot. The toolbar says which one it is
-waiting for and the button is disabled until it answers, so a slow start looks
-like a slow start rather than a frozen app.
+warm and twenty-two cold, `headlamp-server` about twelve seconds cold —
+"cold" meaning its files are not in the page cache, which is the first open
+after a reboot. The toolbar says which one it is waiting for and the button
+is disabled until it answers, so a slow start looks like a slow start rather
+than a frozen app.
 
 **Hover the button a moment before clicking it.** That begins the spawn early
 and the click joins it; it turns a five-second wait into about a tenth of a
@@ -57,6 +58,28 @@ for why that is deliberate.
 
 By design. DbGate has no way to bind to loopback, so each instance is guarded
 by a credential generated when it starts. It changes when Jarvis restarts.
+
+## The Cluster tab says it cannot open, and it worked yesterday
+
+Jarvis does not manage cluster credentials. A kubeconfig context that
+authenticates through an `exec` plugin — `aws eks get-token`, `gcloud`,
+`kubelogin` — needs a session that is already valid, and a spawned server has
+no terminal to prompt in. Log in the way you normally would (`aws sso login`,
+and check with `kubectl get ns`), then press the button again. Lens behaves
+the same way for the same reason.
+
+## The Cluster tab shows clusters from another project
+
+This should not happen; if it does, the context names in `clusters:` do not
+match the kubeconfig exactly. The filter Jarvis passes to `headlamp-server`
+matches on the exact context name, so a name that is close but not identical
+is treated as a different cluster and left visible rather than hidden.
+
+## The button says "Could not open the cluster browser"
+
+`headlamp.binary` — set explicitly or defaulted per OS (see
+[installation](installation.md)) — names nothing that exists. Install
+Headlamp, or point `headlamp.binary` at the real path.
 
 ## Voice does nothing
 

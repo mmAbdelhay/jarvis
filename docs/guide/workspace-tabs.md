@@ -12,6 +12,7 @@ it.
 | `database` | DbGate, one instance per project | hidden |
 | `terminal` | A login shell under a pty | hidden |
 | `api` | The API client | hidden |
+| `cluster` | A Kubernetes cluster browser | hidden |
 
 Browser chrome belongs to browser tabs: anything that is not a plain page hides
 the address bar and the bookmarks bar beneath it, because nobody navigates an
@@ -61,6 +62,10 @@ on disk**, and everything follows from that:
 - **Editor, Database, Terminal and API are disabled**, with the reason shown
   beside them. There is no folder to edit, no cwd for a shell, and no
   collection tree to read.
+- **Cluster is disabled too, but for a different reason**: Personal has no
+  `clusters:` entry, not because it has no directory. The reason shown beside
+  the button says so — "No clusters configured for this project" — the same
+  message any ordinary project gets when it declares none.
 - **It never appears where "a project" means "a repo".** The Changes view, git
   polling, session routing and the Dashboard's project list all resolve a
   project through `projects:` in `jarvis.yaml`, which it is deliberately absent
@@ -138,6 +143,41 @@ and hovering the button begins the start early.
 when the tab opens. DbGate always listens on `0.0.0.0` and offers no way to
 bind to loopback, unlike code-server; the credential is the mitigation. It is
 a per-spawn random value and changes when Jarvis restarts.
+
+## Cluster
+
+Spawns `headlamp-server` for the project and opens it as a tab — a Kubernetes
+cluster browser in the shape of Lens or OpenLens, scoped to the clusters the
+project declares. One instance per *project*, not per cluster: the same
+server is reused for every cluster you open from it, and `-skipped-kube-contexts`
+is what keeps it from also showing every other cluster your kubeconfig knows
+about.
+
+**Which clusters the button offers comes from `clusters:`** in `jarvis.yaml`
+(see [configuration](configuration.md)). A project with no entry there gets a
+disabled button reading *No clusters configured for this project*. One
+cluster opens straight away; two or more drop a menu under the button listing
+their names, and picking one opens it. Opening a cluster that already has a
+tab activates that tab instead of starting a second one. Each open cluster
+gets its own tab, titled `project — Cluster · cluster-name`.
+
+**Starting is not instant.** `headlamp-server` measures about twelve seconds
+cold, so the button disables itself and the toolbar says so until the tab is
+ready — the same pattern as Editor and Database. **Hovering the button** warms
+the server early, for the same reason hovering warms the Editor: the pointer
+arriving is the first evidence you want it, and the spawn is shared, so a
+click that follows the hover joins a start already in progress instead of
+beginning a second one.
+
+**Jarvis does not manage cluster credentials.** The server reads your real
+kubeconfig and inherits whatever authenticates it — including a context whose
+credentials come from an `exec` plugin such as `aws eks get-token`, `gcloud`,
+or `kubelogin`. Those need a session that is already valid, because a spawned
+server has no terminal to prompt you in; see
+[troubleshooting](troubleshooting.md) for what that looks like when it fails.
+
+Like the Editor tab, the server binds to `127.0.0.1` only — no generated
+login, because loopback is the whole mitigation.
 
 ## Terminal
 

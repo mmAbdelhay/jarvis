@@ -68,3 +68,4 @@ project is ever *acted on*.
 | `undici` | http | used explicitly because Node's global `fetch` cannot express a proxy or relaxed TLS |
 | `systeminformation` | machine metrics | |
 | `code-server`, `dbgate-serve` | Editor and Database tabs | spawned, never linked; installed by the user |
+| `headlamp-server` | Cluster tab | spawned, never linked; installed by the user |

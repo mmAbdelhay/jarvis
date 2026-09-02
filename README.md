@@ -20,7 +20,7 @@ with its own logins and its own bookmarks.
 Dashboard         what every agent is doing, and what the machine is doing
 Changes           the working tree, staged and committed from here
 Session           one agent's real terminal
-Workspace         a browser, an editor, a database client, a shell, an API client
+Workspace         a browser, an editor, a database client, a shell, an API client, a cluster browser
 Settings          everything jarvis.yaml holds, edited in place
 ```
 

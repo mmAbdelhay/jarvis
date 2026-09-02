@@ -47,6 +47,16 @@ editors:                        # optional; per project, for the Editor button
     - name: api
       path: api
 
+clusters:                       # optional; per project, for the Cluster tab
+  opf:
+    - name: dev                 # what the Cluster menu shows
+      context: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
+    - name: chaos
+      context: arn:aws:eks:eu-west-1:123456789012:cluster/app_staging
+
+headlamp:
+  binary: /Applications/Headlamp.app/Contents/Resources/headlamp-server
+
 brain:
   accountId: claude-mm          # which agent answers voice; needs a configDir
   cwd: /Users/you/.config/jarvis/brain
@@ -102,6 +112,17 @@ its terminal, git view and API tab all key off, so a root outside it would be
 an editor onto something none of them can see. Keeping the path relative is
 also what makes the containment rule decidable while reading the file, with no
 filesystem to consult.
+
+**`clusters` is keyed by project name too**, and each entry pairs a display
+`name` with the kubeconfig `context` it opens. Neither is validated at
+startup — Jarvis will not refuse to launch over a cluster you were not going
+to open today, and a stale or misspelled context only fails when its own tab
+is opened, in the same status-line way a missing binary does.
+
+**`headlamp` has one key, `binary`**, and it is optional: absent, it falls
+back to Headlamp's per-OS install path (see
+[installation](installation.md#what-each-optional-tool-unlocks)). Set it only
+when Headlamp is installed somewhere else.
 
 **The greeting is a template.** `{timeOfDay}` becomes morning, afternoon or
 evening — in Arabic it carries the whole phrase, since صباح الخير is not
