@@ -4,6 +4,9 @@ Five, along the top. Only one is visible at a time, and the Workspace's hosted
 pages are native views floating over the window — which is why leaving that
 route explicitly hides them rather than merely covering them up.
 
+Jarvis opens **full screen**: it is the surface you work from, not a panel
+beside something else. Leaving full screen restores it to 1440×900.
+
 ## Dashboard
 
 What every agent is doing, and what the machine is doing.
@@ -16,7 +19,11 @@ What every agent is doing, and what the machine is doing.
   checked are distinct facts.
 - **System** — CPU, memory and disk. Memory and disk are `total - available`,
   which is what `df` and Activity Monitor report; a platform's own `used`
-  counts cached pages and reads near 100% on a healthy machine.
+  counts cached pages and reads near 100% on a healthy machine. Each reading is
+  taken as often as it actually changes rather than every tick: CPU and network
+  every two seconds, memory every six, disk and uptime every minute. Reading
+  all of them every tick cost a tenth of a core permanently, most of it
+  enumerating two dozen mounted volumes to answer a number that had not moved.
 - **Conversation** and **History** — what has been said, and to whom.
 
 ## Changes
@@ -46,7 +53,7 @@ A browser with tabs, per project — and the tabs are not only web pages. See
 ## Settings
 
 Every key of `jarvis.yaml`, edited in place: agents, routing, projects,
-databases, the brain, and Whisper. One **Save** for the whole file, one
+databases, editor roots, the brain, voice and Whisper. One **Save** for the whole file, one
 validation pass, and a **Restart Jarvis** button afterwards — nothing is
 applied live, because a save can change which agent answers and killing a
 running session to apply it would be the wrong kind of helpful.

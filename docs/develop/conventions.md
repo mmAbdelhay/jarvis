@@ -43,6 +43,23 @@ per keystroke would steal focus mid-word.
 is why "one instance per project", "reuse", "kill on quit" and "refuse a path
 outside the project" are all unit tested with no real process, port or file.
 
+## The renderer measures in CSS pixels; a view is placed in DIP
+
+`getBoundingClientRect` answers in CSS pixels. `WebContentsView.setBounds`
+takes device-independent pixels. They are the same size only while the display
+runs unscaled — on a scaled one, `devicePixelRatio` is not the display's
+`scaleFactor` and the two diverge. A rectangle handed straight across left
+every hosted page 9% short of its slot.
+
+So the renderer reports its rectangle *and* the `devicePixelRatio` it measured
+under, and main converts (`view-bounds.ts`). Never call `setBounds` with a
+number that came from the DOM without converting it.
+
+The conversion is deliberately not derived from the window's own geometry:
+`getContentBounds()` reports the whole display in full screen while the web
+contents sits inset below the menu bar, so a ratio computed that way disagrees
+between the two axes and pushes the view past the bottom of the window.
+
 ## Comments say why, not what
 
 The codebase is dense with comments that record a decision and the failure that

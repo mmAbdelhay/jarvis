@@ -107,12 +107,32 @@ A root's path is relative to the project and must stay inside it; the config
 refuses anything else at load, and the manager refuses it again before
 spawning.
 
+**Starting is not instant, and the toolbar says so.** code-server takes about a
+second to boot when its files are warm in the page cache and closer to nine
+when they are not; that is its own start-up and nothing here makes it faster.
+What the button does is stop pretending otherwise: it disables itself and the
+toolbar reads *Starting the editor…* until a tab exists.
+
+**Hovering the button starts it.** The pointer arriving is the first evidence
+you want an editor, a few hundred milliseconds before the click, so the spawn
+begins then. It costs nothing extra if you do click — the manager shares one
+start per (project, root), so the click joins the start already running rather
+than beginning a second — and costs exactly what clicking later would have if
+you do not. Measured on a warm machine: about 5.4s from a cold click, about
+90ms from a click after a hover. Keyboard focus counts as a hover, and a
+project whose editor is already open is not warmed again.
+
 ## Database
 
 Spawns `dbgate-serve` for the project — a full SQL client: schema tree, data
 grid, query editor. Connections come from the `databases:` section of
 `jarvis.yaml` (see [configuration](configuration.md)), and a project that
 declares none gets an instance that manages its own.
+
+DbGate is the slower of the two to start — a second or so warm, and twenty or
+more cold — so the Database button behaves like the Editor one: it disables
+itself, the toolbar reads *Starting the database browser…* for the whole wait,
+and hovering the button begins the start early.
 
 **Every instance is guarded by a generated login**, shown in the status line
 when the tab opens. DbGate always listens on `0.0.0.0` and offers no way to

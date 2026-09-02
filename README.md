@@ -8,7 +8,12 @@ it, and its APIs.
 
 Jarvis is a single Electron app over a pnpm workspace. It speaks Arabic and
 English, and it is built for one person on one machine — there is no server,
-no account, and nothing leaves the laptop that was not already going to.
+no account, and nothing leaves the laptop that was not already going to. It
+opens full screen.
+
+Everything in the Workspace belongs to a project, except the **Personal**
+browser, which belongs to none: somewhere to keep tabs that are not work,
+with its own logins and its own bookmarks.
 
 ```
 ⌥Space            talk to the brain, or to the session you are looking at

@@ -10,6 +10,37 @@ DbGate can also fail because it never began listening. Its port is discovered
 by reading its own startup line, so a version that changes that line fails
 loudly here rather than silently.
 
+## The Editor or Database tab takes a long time to open
+
+The wait is the binary's own start-up, not Jarvis's. Measured here:
+code-server about a second warm and nine cold, `dbgate-serve` about a second
+warm and twenty-two cold — "cold" meaning its files are not in the page cache,
+which is the first open after a reboot. The toolbar says which one it is
+waiting for and the button is disabled until it answers, so a slow start looks
+like a slow start rather than a frozen app.
+
+**Hover the button a moment before clicking it.** That begins the spawn early
+and the click joins it; it turns a five-second wait into about a tenth of a
+second. Nothing is spawned twice — the manager shares one start per project.
+
+If DbGate genuinely never answers, its instance is killed after sixty seconds
+and the status line says so.
+
+## A hosted page does not fill its slot
+
+A browser or editor page leaving a band of empty window down the right, or
+sitting up over the bookmarks bar, means the rectangle main was given is in
+different units from the ones it placed the view with. The renderer measures
+in CSS pixels; a view is placed in device-independent pixels, and those differ
+on a display running a scaled resolution.
+
+Jarvis converts for this (`devicePixelRatio / scaleFactor`, per the display the
+window is actually on) so dragging the window between monitors of different
+scales is handled. If it recurs, it is a bug in that conversion — check
+`view-bounds.ts`, and compare the hosted view's width against the *window* in
+DIP, never against the slot in CSS pixels, which is the comparison that hides
+the fault.
+
 ## A request says "fetch failed — connect ECONNREFUSED ::1:8088"
 
 Nothing is listening. Note the `::1`: `localhost` resolves to IPv6 first on

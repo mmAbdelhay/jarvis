@@ -43,6 +43,19 @@ recorded whatever it was handed. Real servers found it.
 **A green assertion may never have run.** `expect(x).to.be.true` is a *getter*
 in chai. Implemented as a function it is read, never called, and always passes.
 
+**A check can compare two wrong things and pass.** "Does the hosted view fill
+its slot?" was answered by comparing the view's `innerWidth` against the slot's
+CSS width. Both are CSS pixels — but of two differently scaled frames, so the
+numbers matched while the page was visibly 9% short of the window. The check
+that finds it compares the view against the **window in device-independent
+pixels**. When a measurement confirms what you expected, confirm it is
+measuring in the units you think it is.
+
+**A screenshot of the desktop is not a screenshot of the app.** More than one
+Electron instance may be running — a stale one from an earlier build, another
+agent's — and the frontmost window is whichever the OS says. Capture through
+the app's own CDP target, or check geometry numerically.
+
 So: for anything that touches a real boundary, drive the built app or send a
 real request.
 
@@ -55,3 +68,9 @@ npx electron packages/desktop --remote-debugging-port=9222
 
 A short script that clicks through the UI and reads the DOM back has caught
 more real defects here than any amount of additional unit testing would have.
+
+Two practical notes. Match the CDP target on `renderer/index.html`, not
+`index.html` — a page the test itself serves may well be at `/index.html` and
+will be matched instead. And kill only what you started (`pkill -f
+"remote-debugging-port=<yours>"`): a bare `pkill -f electron` takes down every
+other Electron app on the machine.
