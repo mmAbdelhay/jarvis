@@ -1,0 +1,80 @@
+import { parse } from "yaml";
+
+/** The AWS_PROFILE a context's exec credential plugin runs with, or
+ *  undefined if the context has none — either it isn't in the kubeconfig,
+ *  its user has no exec block, or the exec block sets no AWS_PROFILE. A
+ *  context this returns undefined for is not this module's concern: cluster
+ *  open proceeds exactly as it did before this module existed. Tolerant of
+ *  malformed input the same way parseKubeContexts (headlamp.ts) is — a
+ *  kubeconfig this cannot fully understand should cost the user the
+ *  auto-login, not the ability to open the cluster it can't parse. */
+export function profileForContext(kubeconfigYaml: string, context: string): string | undefined {
+  let document: unknown;
+  try {
+    document = parse(kubeconfigYaml);
+  } catch {
+    return undefined;
+  }
+  if (typeof document !== "object" || document === null) return undefined;
+
+  const contexts = (document as Record<string, unknown>)["contexts"];
+  if (!Array.isArray(contexts)) return undefined;
+  const contextEntry = contexts.find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>)["name"] === context,
+  ) as Record<string, unknown> | undefined;
+  const inner = contextEntry?.["context"];
+  const userRef =
+    typeof inner === "object" && inner !== null
+      ? (inner as Record<string, unknown>)["user"]
+      : undefined;
+  if (typeof userRef !== "string") return undefined;
+
+  const users = (document as Record<string, unknown>)["users"];
+  if (!Array.isArray(users)) return undefined;
+  const userEntry = users.find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>)["name"] === userRef,
+  ) as Record<string, unknown> | undefined;
+  const userBlock = userEntry?.["user"];
+  const exec =
+    typeof userBlock === "object" && userBlock !== null
+      ? (userBlock as Record<string, unknown>)["exec"]
+      : undefined;
+  const env =
+    typeof exec === "object" && exec !== null ? (exec as Record<string, unknown>)["env"] : undefined;
+  if (!Array.isArray(env)) return undefined;
+
+  const profileEntry = env.find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>)["name"] === "AWS_PROFILE",
+  ) as Record<string, unknown> | undefined;
+  const value = profileEntry?.["value"];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+const EKS_ARN = /^arn:aws:eks:([^:]+):[^:]*:cluster\/(.+)$/;
+
+/** The cluster name and region `aws eks update-kubeconfig` needs, read off
+ *  the ARN a context already carries. undefined for a context that isn't an
+ *  EKS ARN (a local `kind` context, for instance) — there is no
+ *  update-kubeconfig target for it. */
+export function eksUpdateKubeconfigArgs(context: string): { name: string; region: string } | undefined {
+  const match = EKS_ARN.exec(context);
+  if (match === null) return undefined;
+  const [, region, name] = match;
+  if (region === undefined || name === undefined) return undefined;
+  return { name, region };
+}
+
+/** The exact line typed into the terminal. `&&` so a failed saml2aws login
+ *  never runs update-kubeconfig against stale credentials. */
+export function awsLoginCommand(name: string, region: string, profile: string): string {
+  return `saml2aws login && aws eks update-kubeconfig --name ${name} --region ${region} --profile ${profile}`;
+}
