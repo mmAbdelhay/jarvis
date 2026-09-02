@@ -57,6 +57,10 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // {}` key in a file that never had one is noise in a config that is
     // still hand-edited, and parseConfig treats absent and empty alike.
     ...(Object.keys(config.databases ?? {}).length === 0 ? {} : { databases: config.databases }),
+    // Same rule as `databases:` above — written only when a project
+    // actually has editor roots, so a file that never had the key does not
+    // grow an empty one on the first save.
+    ...(Object.keys(config.editors ?? {}).length === 0 ? {} : { editors: config.editors }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

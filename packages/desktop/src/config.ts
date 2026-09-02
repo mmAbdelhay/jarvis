@@ -1,10 +1,16 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
 import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
-import type { BrainConfig, DatabasesConfig, DbGateConnection, DbGateEngine } from "@jarvis/platform";
+import type {
+  BrainConfig,
+  DatabasesConfig,
+  DbGateConnection,
+  DbGateEngine,
+  EditorsConfig,
+} from "@jarvis/platform";
 import { DB_GATE_ENGINES } from "@jarvis/platform";
 
 /** What Jarvis sounds like, and what it says on opening. */
@@ -35,6 +41,10 @@ export type JarvisConfig = {
    *  `databases:` section parses to {} — a project with no entry spawns a
    *  DbGate that manages its own connections instead. */
   databases: DatabasesConfig;
+  /** Per-project editor roots, keyed by project name. An absent `editors:`
+   *  section parses to {} — a project with no entry opens the editor at the
+   *  project directory, which is what every project did before this existed. */
+  editors: EditorsConfig;
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -110,6 +120,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   });
   const projects = parseProjects(root["projects"]);
   const databases = parseDatabases(root["databases"], projects);
+  const editors = parseEditors(root["editors"], projects);
   const whisper = parseWhisper(root["whisper"]);
   const voice = parseVoice(root["voice"]);
 
@@ -135,6 +146,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
       Object.entries(projects).map(([name, path]) => [name, expandTilde(path)]),
     ),
     databases,
+    editors,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -358,6 +370,84 @@ function parseDatabases(rawDatabases: unknown, projects: Record<string, string>)
       if (port !== undefined) connection.port = port;
       if (readonly !== undefined) connection.readonly = readonly;
       return connection;
+    });
+  }
+  return result;
+}
+
+/**
+ * `editors:` maps a project name to the folders inside it the Editor button
+ * can be rooted at:
+ *
+ *     editors:
+ *       acme:
+ *         - { name: portal-vue, path: portal-vue }
+ *         - { name: api, path: services/api }
+ *
+ * Validated against the already-parsed `projects` for the same reason
+ * parseDatabases is: a section keyed to a project that does not exist can
+ * never be opened.
+ *
+ * `path` is relative to the project and stays that way. Absolute (and
+ * therefore `~`-prefixed) paths are refused rather than expanded, for two
+ * reasons worth stating: an editor root is a *narrowing* of a project — the
+ * project directory is what its terminal, git view and API tab all key off,
+ * and a root outside it would be an editor onto something none of them can
+ * see — and keeping it relative makes "stays inside the project" decidable
+ * here, on the string, with no filesystem to consult. The code-server
+ * manager checks containment again before it spawns; this is the layer that
+ * makes the escape impossible to write down in the first place.
+ *
+ * The section is optional and an absent one is not an error — most projects
+ * will never have an entry, and they keep opening at their own root.
+ */
+function parseEditors(rawEditors: unknown, projects: Record<string, string>): EditorsConfig {
+  if (rawEditors === undefined) return {};
+  if (typeof rawEditors !== "object" || rawEditors === null || Array.isArray(rawEditors)) {
+    throw new Error("Config `editors` must be an object");
+  }
+
+  const result: EditorsConfig = {};
+  for (const [project, rawList] of Object.entries(rawEditors as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`editors\` names no configured project: "${project}"`);
+    }
+    if (!Array.isArray(rawList)) {
+      throw new Error(`Config \`editors.${project}\` must be an array`);
+    }
+
+    const seen = new Set<string>();
+    result[project] = rawList.map((rawEntry, index) => {
+      const where = `editors.${project}[${index}]`;
+      if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        throw new Error(`Config \`${where}\` must be an object`);
+      }
+      const entry = rawEntry as Record<string, unknown>;
+
+      const name = entry["name"];
+      if (typeof name !== "string" || name === "") {
+        throw new Error(`Config \`${where}.name\` must be a non-empty string`);
+      }
+      if (seen.has(name)) {
+        throw new Error(`Config \`${where}.name\` duplicates an earlier root: "${name}"`);
+      }
+      seen.add(name);
+
+      const path = entry["path"];
+      if (typeof path !== "string" || path === "") {
+        throw new Error(`Config \`${where}.path\` must be a non-empty string`);
+      }
+      if (isAbsolute(path) || path.startsWith("~")) {
+        throw new Error(`Config \`${where}.path\` must be relative to the project`);
+      }
+      // normalize collapses "services/../.." to ".." — the only form an
+      // escape can take once absolutes are already out.
+      const normalized = normalize(path);
+      if (normalized === ".." || normalized.startsWith(`..${sep}`)) {
+        throw new Error(`Config \`${where}.path\` must stay inside the project`);
+      }
+
+      return { name, path };
     });
   }
   return result;

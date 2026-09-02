@@ -44,7 +44,8 @@ const api: RendererApi = {
     ipcRenderer.on("providers:update", (_e, statuses) => cb(statuses));
   },
   refreshProviders: () => ipcRenderer.invoke("providers:refresh"),
-  openTab: (project, input, kind) => ipcRenderer.invoke("workspace:open", project, input, kind),
+  openTab: (project, input, kind, detail) =>
+    ipcRenderer.invoke("workspace:open", project, input, kind, detail),
   closeTab: (id) => ipcRenderer.invoke("workspace:close", id),
   activateTab: (id) => ipcRenderer.invoke("workspace:activate", id),
   navigateTab: (id, input) => ipcRenderer.invoke("workspace:navigate", id, input),
@@ -59,7 +60,8 @@ const api: RendererApi = {
   onWorkspace: (cb) => {
     ipcRenderer.on("workspace:update", (_e, state) => cb(state));
   },
-  openEditor: (project) => ipcRenderer.invoke("editor:open", project),
+  openEditor: (project, root) => ipcRenderer.invoke("editor:open", project, root),
+  editorRoots: (project) => ipcRenderer.invoke("editor:roots", project),
   openDatabase: (project) => ipcRenderer.invoke("database:open", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
   openApiTab: (project) => ipcRenderer.invoke("api:open", project),

@@ -6,7 +6,7 @@ to a project, and its kind decides what chrome makes sense around it.
 | Kind | What it is | Address bar & bookmarks |
 |---|---|---|
 | `web` | An ordinary page | shown |
-| `editor` | code-server, one instance per project | hidden |
+| `editor` | code-server, one instance per project *root* | hidden |
 | `database` | DbGate, one instance per project | hidden |
 | `terminal` | A login shell under a pty | hidden |
 | `api` | The API client | hidden |
@@ -31,8 +31,34 @@ process — and terminal and API tabs are exempt, since they are neither.
 
 ## Editor
 
-Spawns `code-server` for the project on a free loopback port and opens it as a
-tab. One instance per project, reused, and killed when Jarvis quits.
+Spawns `code-server` on a free loopback port and opens it as a tab. One
+instance per (project, root), reused, and killed when Jarvis quits.
+
+**A project can name the folders it wants edited.** A large project is usually
+worked on two folders at a time, not thirty, so the `editors:` section of
+`jarvis.yaml` (see [configuration](configuration.md)) lists the roots the
+Editor button offers for a project:
+
+```yaml
+editors:
+  acme:
+    - { name: portal-vue, path: portal-vue }
+    - { name: api, path: api }
+```
+
+With no entry — which is most projects — the button opens the project
+directory, exactly as it always did. With one root it opens straight into that
+folder. With two or more it drops a small menu under the button to pick from;
+picking one opens it, and clicking the button again puts the menu away.
+
+Each root is its own editor: its own code-server instance, its own tab, and a
+title that says which one (`acme — Editor · api`), so two editors of the
+same project are tellable apart in the tab strip. Asking for a root that is
+already open activates its tab instead of starting a second instance.
+
+A root's path is relative to the project and must stay inside it; the config
+refuses anything else at load, and the manager refuses it again before
+spawning.
 
 ## Database
 

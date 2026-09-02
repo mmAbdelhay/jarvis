@@ -54,6 +54,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     setWorkspaceVisible: vi.fn(async () => {}),
     onWorkspace: vi.fn(),
     openEditor: vi.fn(async () => notStubbed),
+    editorRoots: vi.fn(async () => []),
     openDatabase: vi.fn(async () => notStubbed),
     openTerminal: vi.fn(async () => notStubbed),
     setDevTools: vi.fn(async () => {}),

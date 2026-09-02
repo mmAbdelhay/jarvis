@@ -20,6 +20,7 @@ function harness(): Recorded[] {
     <div id="view-workspace">
       <select id="workspace-project"></select>
       <button id="workspace-open-editor"></button>
+      <div id="workspace-editor-menu" hidden></div>
       <button id="workspace-open-database"></button>
       <button id="workspace-open-terminal"></button>
       <button id="workspace-open-api"></button>
@@ -109,6 +110,7 @@ function harness(): Recorded[] {
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
+    editorRoots: () => Promise.resolve([]),
     openDatabase: () =>
       Promise.resolve({
         ok: true,
@@ -748,7 +750,7 @@ describe("open in editor", () => {
 
     expect(calls).toContainEqual({
       call: "openTab",
-      args: ["acme", "http://127.0.0.1:9001/?folder=acme", "editor"],
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme", "editor", undefined],
     });
   });
 
@@ -808,7 +810,7 @@ describe("open in editor", () => {
 
     expect(calls).toContainEqual({
       call: "openTab",
-      args: ["storefront", "http://127.0.0.1:9002/?folder=storefront", "editor"],
+      args: ["storefront", "http://127.0.0.1:9002/?folder=storefront", "editor", undefined],
     });
   });
 
@@ -828,6 +830,189 @@ describe("open in editor", () => {
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "Could not open the editor.",
     );
+  });
+});
+
+// A project that declares `editors:` roots opens straight into one when it
+// has a single root, and offers a choice when it has more than one.
+describe("open in editor, with configured roots", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme"]);
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    jarvis["openEditor"] = (project: string, root: string | undefined) =>
+      Promise.resolve({ ok: true, value: `http://127.0.0.1:9001/?folder=${project}/${root ?? ""}` });
+  });
+
+  function menuItems(): HTMLElement[] {
+    return [...document.querySelectorAll("#workspace-editor-menu button")] as HTMLElement[];
+  }
+
+  it("opens the only configured root directly, without a menu", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue"]);
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme/portal-vue", "editor", "portal-vue"],
+    });
+    expect(document.getElementById("workspace-editor-menu")?.hidden).toBe(true);
+  });
+
+  it("offers a menu of the roots when there is more than one", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(menuItems().map((item) => item.textContent)).toEqual(["portal-vue", "api"]);
+    expect(document.getElementById("workspace-editor-menu")?.hidden).toBe(false);
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("opens the root the user picks and closes the menu", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    menuItems()[1]?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme/api", "editor", "api"],
+    });
+    expect(document.getElementById("workspace-editor-menu")?.hidden).toBe(true);
+  });
+
+  it("closes an open menu when the Editor button is clicked again", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-editor-menu")?.hidden).toBe(true);
+  });
+
+  // Two roots of one project are two editors; only the tab for the root
+  // being asked for is a duplicate.
+  it("activates the existing tab for that root rather than opening a second", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue"]);
+    renderWorkspace({
+      tabs: [
+        {
+          id: "tab-7",
+          project: "acme",
+          url: "http://127.0.0.1:9001/?folder=acme/portal-vue",
+          kind: "editor",
+          title: "acme — Editor · portal-vue",
+          detail: "portal-vue",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          error: undefined,
+        },
+      ],
+      activeTabId: "tab-7",
+    });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-7"] });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("opens a second editor tab for a different root of the same project", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
+    renderWorkspace({
+      tabs: [
+        {
+          id: "tab-7",
+          project: "acme",
+          url: "http://127.0.0.1:9001/?folder=acme/portal-vue",
+          kind: "editor",
+          title: "acme — Editor · portal-vue",
+          detail: "portal-vue",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          error: undefined,
+        },
+      ],
+      activeTabId: "tab-7",
+    });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+    menuItems()[1]?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:9001/?folder=acme/api", "editor", "api"],
+    });
+  });
+
+  // The whole-project editor and a root editor are different tabs, so an
+  // open whole-project one must not swallow a request for a root.
+  it("does not mistake the whole-project editor for a rooted one", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue"]);
+    renderWorkspace({
+      tabs: [
+        {
+          id: "tab-8",
+          project: "acme",
+          url: "http://127.0.0.1:9001/?folder=acme",
+          kind: "editor",
+          title: "acme — Editor",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          error: undefined,
+        },
+      ],
+      activeTabId: "tab-8",
+    });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(true);
+  });
+
+  it("shows a localised error and opens nothing when a picked root fails", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue"]);
+    jarvis["openEditor"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open the editor.", language: "en" });
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Could not open the editor.",
+    );
+  });
+
+  // A root name is config text rendered into the menu — a node with its
+  // textContent set, never markup.
+  it("renders a root name as text, not as markup", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["<img src=x onerror=alert(1)>", "api"]);
+
+    document.getElementById("workspace-open-editor")?.click();
+    await flush();
+
+    expect(document.querySelector("#workspace-editor-menu img")).toBeNull();
+    expect(menuItems()[0]?.textContent).toBe("<img src=x onerror=alert(1)>");
   });
 });
 

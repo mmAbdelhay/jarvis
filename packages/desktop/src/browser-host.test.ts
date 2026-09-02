@@ -376,6 +376,29 @@ describe("BrowserHost", () => {
     expect(host.state().tabs[0]?.title).toBe("acme — Editor");
   });
 
+  // Two editor tabs in one project are two different folders of it, and the
+  // tab strip is the only place that difference is visible.
+  it("names the editor root in the title, and remembers it on the tab", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor", "portal-vue");
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Editor · portal-vue");
+    expect(host.state().tabs[0]?.detail).toBe("portal-vue");
+  });
+
+  it("leaves the title alone when no detail is given", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor");
+
+    expect(host.state().tabs[0]?.detail).toBeUndefined();
+  });
+
+  it("ignores page-title-updated for an editor tab titled by its root", () => {
+    host.open("acme", "http://127.0.0.1:9001", "editor", "portal-vue");
+
+    views[0]?.emit({ kind: "title", title: "Welcome - code-server" });
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Editor · portal-vue");
+  });
+
   it("ignores page-title-updated for an editor tab", () => {
     host.open("acme", "http://127.0.0.1:9001", "editor");
 

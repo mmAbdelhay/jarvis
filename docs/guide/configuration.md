@@ -40,6 +40,13 @@ databases:                      # optional; per project, for the Database tab
       database: store_saas
       passwordEnv: STORE_SAAS_DB_PASSWORD
 
+editors:                        # optional; per project, for the Editor button
+  acme:
+    - name: portal-vue          # what the Editor menu shows
+      path: portal-vue          # relative to the project, and inside it
+    - name: api
+      path: api
+
 brain:
   accountId: claude-mm          # which agent answers voice; needs a configDir
   cwd: /Users/you/.config/jarvis/brain
@@ -79,6 +86,22 @@ project is rejected at load. There is deliberately no `password:` field —
 this file on every save and it should never come to hold a secret. A connection
 with no resolvable password makes DbGate ask for it and keep it in that
 project's own workspace.
+
+**`editors` is keyed by project name too**, and, like `databases`, a key that
+names no configured project is rejected at load. Each entry names a folder
+inside the project that the Editor button can open code-server at: with no
+entry the editor opens at the project directory as it always did, with one
+entry it opens straight into that folder, and with two or more the button
+offers a menu. Every open root is its own code-server instance and its own
+tab, titled `project — Editor · root`.
+
+`path` is relative to the project directory and must stay inside it. An
+absolute path — `~/…` included — is refused at load rather than expanded: an
+editor root is a *narrowing* of a project, and the project directory is what
+its terminal, git view and API tab all key off, so a root outside it would be
+an editor onto something none of them can see. Keeping the path relative is
+also what makes the containment rule decidable while reading the file, with no
+filesystem to consult.
 
 **The greeting is a template.** `{timeOfDay}` becomes morning, afternoon or
 evening — in Arabic it carries the whole phrase, since صباح الخير is not

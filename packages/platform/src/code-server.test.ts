@@ -66,7 +66,7 @@ describe("createCodeServerManager", () => {
         port: 9001,
         userDataDir: "/jarvis/code-server/user-data",
         extensionsDir: "/jarvis/code-server/extensions",
-        projectPath: "/p/acme",
+        folderPath: "/p/acme",
       },
     ]);
   });
@@ -140,5 +140,80 @@ describe("createCodeServerManager", () => {
     const result = await instance.open("/p/acme");
 
     expect(result.ok).toBe(false);
+  });
+});
+
+// An editor root is a *sub-folder* of the project (config `editors:`), so a
+// running instance is identified by the pair, not by the project alone.
+describe("createCodeServerManager rooted at a sub-folder", () => {
+  it("opens code-server at the sub-folder, not at the project", async () => {
+    const { instance, spawnArgs } = manager({ findFreePort: () => Promise.resolve(9001) });
+
+    const result = await instance.open("/p/acme", "/p/acme/portal-vue");
+
+    expect(spawnArgs).toEqual([
+      {
+        port: 9001,
+        userDataDir: "/jarvis/code-server/user-data",
+        extensionsDir: "/jarvis/code-server/extensions",
+        folderPath: "/p/acme/portal-vue",
+      },
+    ]);
+    expect(result.ok && result.url).toContain(encodeURIComponent("/p/acme/portal-vue"));
+  });
+
+  it("reuses the instance already running for the same root", async () => {
+    const { instance, processes } = manager();
+
+    const first = await instance.open("/p/acme", "/p/acme/portal-vue");
+    const second = await instance.open("/p/acme", "/p/acme/portal-vue");
+
+    expect(second).toEqual(first);
+    expect(processes).toHaveLength(1);
+  });
+
+  // Two roots of one project are two editors, and the whole project is a
+  // third — the key is (project, root), not project.
+  it("spawns a separate instance per root of the same project", async () => {
+    let port = 51000;
+    const { instance, processes } = manager({ findFreePort: () => Promise.resolve(++port) });
+
+    await instance.open("/p/acme");
+    await instance.open("/p/acme", "/p/acme/portal-vue");
+    await instance.open("/p/acme", "/p/acme/services/api");
+
+    expect(processes).toHaveLength(3);
+  });
+
+  // The manager is the last line before a real process is started at a real
+  // path, so it refuses an escape itself rather than trusting parseEditors
+  // to have caught it — the same reasoning the API handlers' own
+  // "refuse a path outside the project" check records.
+  it("refuses a root outside the project, without spawning anything", async () => {
+    const { instance, processes } = manager();
+
+    const climbed = await instance.open("/p/acme", "/p/acme/../secrets");
+    const elsewhere = await instance.open("/p/acme", "/etc");
+    const sibling = await instance.open("/p/acme", "/p/acme-evil");
+
+    expect(climbed.ok).toBe(false);
+    expect(elsewhere.ok).toBe(false);
+    expect(sibling.ok).toBe(false);
+    expect(processes).toEqual([]);
+  });
+
+  it("accepts the project directory itself as a root", async () => {
+    const { instance } = manager();
+
+    expect((await instance.open("/p/acme", "/p/acme")).ok).toBe(true);
+  });
+
+  it("kills a sub-folder instance on stopAll", async () => {
+    const { instance, processes } = manager();
+    await instance.open("/p/acme", "/p/acme/portal-vue");
+
+    instance.stopAll();
+
+    expect(processes[0]?.killed).toBe(true);
   });
 });
