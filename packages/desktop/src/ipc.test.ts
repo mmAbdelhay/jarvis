@@ -1337,6 +1337,56 @@ users:
     expect(open).not.toHaveBeenCalled();
   });
 
+  // The renderer pre-warms on hover and on keyboard focus. Warming is a
+  // spawn nobody clicked for, which is fine for a server and emphatically
+  // not fine for `saml2aws login`: that opens a terminal tab and pushes MFA
+  // to the user's phone. A hover may reach headlamp; it may not reach AWS.
+  it("never starts a login for a background call with no AWS session", async () => {
+    const { handlers: h, open, awaitAwsSession, opened, typed } = handlers({
+      checkAwsSession: vi.fn().mockResolvedValue(false),
+    });
+
+    const result = await h.open("opf", "prod", { background: true });
+
+    expect(opened).toEqual([]);
+    expect(typed).toEqual([]);
+    expect(awaitAwsSession).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    // It resolves rather than hanging — a pre-warm that never settles is a
+    // promise the renderer's .catch is left holding forever.
+    expect(result).toEqual({
+      ok: false,
+      text: "Could not open the cluster browser.",
+      language: "en",
+    });
+  });
+
+  it("still warms the cluster browser for a background call when AWS is connected", async () => {
+    const { handlers: h, open, checkAwsSession, opened } = handlers();
+
+    const result = await h.open("opf", "prod", { background: true });
+
+    expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
+    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(opened).toEqual([]);
+    expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+  });
+
+  // Backing off must leave no trace: the click that follows the hover is the
+  // one that has to open the terminal, and it cannot if the hover parked an
+  // entry in the in-flight map that nothing will ever resolve.
+  it("lets the click that follows a backed-off pre-warm log in normally", async () => {
+    const { handlers: h, opened, typed } = handlers({
+      checkAwsSession: vi.fn().mockResolvedValue(false),
+    });
+
+    await h.open("opf", "prod", { background: true });
+    await h.open("opf", "prod");
+
+    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    expect(typed).toHaveLength(1);
+  });
+
   it("shares one in-flight login across two concurrent opens of the same project", async () => {
     let resolveAwait!: (v: boolean) => void;
     const awaitAwsSession = vi.fn().mockReturnValue(

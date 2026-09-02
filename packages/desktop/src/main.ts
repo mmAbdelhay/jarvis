@@ -881,11 +881,17 @@ app.whenReady().then(async () => {
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),
     );
-    ipcMain.handle("cluster:open", (_event, project: unknown, clusterName: unknown) =>
-      cluster.open(
-        typeof project === "string" ? project : "",
-        typeof clusterName === "string" ? clusterName : "",
-      ),
+    ipcMain.handle(
+      "cluster:open",
+      (_event, project: unknown, clusterName: unknown, background: unknown) =>
+        cluster.open(
+          typeof project === "string" ? project : "",
+          typeof clusterName === "string" ? clusterName : "",
+          // Anything that is not the literal true is a click: the flag only
+          // ever removes capability (no login terminal, no MFA push), so the
+          // safe reading of a malformed one is the one that asks for less.
+          { background: background === true },
+        ),
     );
     ipcMain.handle("cluster:names", (_event, project: unknown) =>
       cluster.names(typeof project === "string" ? project : ""),

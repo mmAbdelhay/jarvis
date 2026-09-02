@@ -1386,11 +1386,13 @@ describe("pre-warming a hosted app on hover", () => {
   let calls: Recorded[];
   let jarvis: Record<string, unknown>;
   let warmed: string[];
+  let clusterArgs: unknown[][];
 
   beforeEach(() => {
     calls = harness();
     jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     warmed = [];
+    clusterArgs = [];
     jarvis["openEditor"] = (project: string) => {
       warmed.push(`editor:${project}`);
       return Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" });
@@ -1402,8 +1404,9 @@ describe("pre-warming a hosted app on hover", () => {
         value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
       });
     };
-    jarvis["openCluster"] = (project: string, name: string) => {
+    jarvis["openCluster"] = (project: string, name: string, background?: boolean) => {
       warmed.push(`cluster:${project}:${name}`);
+      clusterArgs.push([project, name, background]);
       return Promise.resolve({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
     };
     initWorkspace(["acme"]);
@@ -1545,6 +1548,30 @@ describe("pre-warming a hosted app on hover", () => {
     await flush();
 
     expect(warmed).toEqual([]);
+  });
+
+  // Warming a cluster is a headlamp-server spawn; logging in to AWS for one
+  // is a terminal tab and an MFA push on the user's phone. The flag is what
+  // tells main which of those a hover is allowed to become — without it, a
+  // pointer crossing the toolbar starts a real login.
+  it("marks a warmed cluster open as a background call so it cannot start a login", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+
+    document
+      .getElementById("workspace-open-cluster")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(clusterArgs).toEqual([["acme", "dev", true]]);
+  });
+
+  it("does not mark a clicked cluster open as background", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+
+    document.getElementById("workspace-open-cluster")?.dispatchEvent(new Event("click"));
+    await flush();
+
+    expect(clusterArgs).toEqual([["acme", "dev", undefined]]);
   });
 });
 

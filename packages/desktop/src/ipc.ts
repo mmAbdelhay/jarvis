@@ -402,8 +402,16 @@ export type RendererApi = {
   openDatabase(project: string): Promise<GitViewResult<DatabaseCredentials>>;
   /** Ensures a headlamp-server instance is running for `project` and returns
    *  the URL of one of its configured clusters — call
-   *  openTab(project, url, "cluster", cluster) with the result. */
-  openCluster(project: string, cluster: string): Promise<GitViewResult<string>>;
+   *  openTab(project, url, "cluster", cluster) with the result.
+   *
+   *  `background` marks a hover pre-warm rather than a click: it warms an
+   *  already-connected cluster the same way, but never starts an AWS login
+   *  (a terminal tab and an MFA push are not things a hover may cause). */
+  openCluster(
+    project: string,
+    cluster: string,
+    background?: boolean,
+  ): Promise<GitViewResult<string>>;
   /** The names of `project`'s configured `clusters:`, in config order. Empty
    *  for a project that declares none, and for Personal. */
   clusterNames(project: string): Promise<string[]>;
@@ -669,8 +677,20 @@ export type ClusterHandlers = {
   /** Ensures a headlamp-server instance is running for `project` and returns
    *  the URL of the cluster named `cluster` within it — call
    *  openTab(project, url, "cluster", cluster) with the result to actually
-   *  show it. */
-  open(project: string, cluster: string): Promise<GitViewResult<string>>;
+   *  show it.
+   *
+   *  `background: true` marks a call nobody clicked for — the renderer's
+   *  hover pre-warm. It warms the server exactly as an ordinary call does,
+   *  but it must never start an AWS login: a login is a real `saml2aws`
+   *  running in a terminal tab the user did not ask to open, and an MFA push
+   *  on their phone. A hover, or a keyboard user tabbing past the button, is
+   *  not consent to either. When the session is not connected, a background
+   *  call gives up instead. */
+  open(
+    project: string,
+    cluster: string,
+    opts?: { background?: boolean },
+  ): Promise<GitViewResult<string>>;
 };
 
 export type ClusterHandlerDeps = {
@@ -703,12 +723,23 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
   // HeadlampManager.open dedupes concurrent starts one layer down.
   const loggingIn = new Map<string, Promise<boolean>>();
 
-  async function ensureAwsSession(project: string, context: string): Promise<boolean> {
+  async function ensureAwsSession(
+    project: string,
+    context: string,
+    background: boolean,
+  ): Promise<boolean> {
     const profile = profileForContext(await deps.readKubeconfig(), context);
     const args = eksUpdateKubeconfigArgs(context);
     if (profile === undefined || args === undefined) return true; // nothing to check
 
     if (await deps.checkAwsSession(profile, args.region)) return true;
+
+    // Checking costs a subprocess and nothing else, so a pre-warm gets that
+    // far — that is what makes warming an already-connected cluster work.
+    // Logging in is where it stops: no terminal tab, no typed command, and
+    // not even an entry in `loggingIn`, so the click that may follow starts
+    // its own login rather than inheriting a promise nobody is driving.
+    if (background) return false;
 
     const inFlight = loggingIn.get(project);
     if (inFlight !== undefined) return inFlight;
@@ -732,7 +763,8 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
       return (deps.clusters[project] ?? []).map((entry) => entry.name);
     },
 
-    async open(project, cluster) {
+    async open(project, cluster, opts) {
+      const background = opts?.background === true;
       if (!isString(project) || deps.projects[project] === undefined) {
         return fail(MESSAGES.unknownProject(deps.language));
       }
@@ -747,8 +779,19 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
       if (declared === undefined) return fail(MESSAGES.clusterUnavailable(deps.language));
 
       try {
-        const connected = await ensureAwsSession(project, declared.context);
-        if (!connected) return fail(MESSAGES.clusterLoginTimedOut(deps.language));
+        const connected = await ensureAwsSession(project, declared.context, background);
+        // A background call that gets here never opened a terminal and never
+        // waited, so the timeout headline — "check the terminal and try
+        // again" — would name a tab that does not exist. The generic
+        // headline is the honest one for "we did not try". Neither is ever
+        // seen: the renderer swallows a pre-warm's failures on purpose.
+        if (!connected) {
+          return fail(
+            background
+              ? MESSAGES.clusterUnavailable(deps.language)
+              : MESSAGES.clusterLoginTimedOut(deps.language),
+          );
+        }
 
         const result = await deps.headlamp.open(project, declared.context);
         return result.ok

@@ -64,7 +64,8 @@ const api: RendererApi = {
   openEditor: (project, root) => ipcRenderer.invoke("editor:open", project, root),
   editorRoots: (project) => ipcRenderer.invoke("editor:roots", project),
   openDatabase: (project) => ipcRenderer.invoke("database:open", project),
-  openCluster: (project, cluster) => ipcRenderer.invoke("cluster:open", project, cluster),
+  openCluster: (project, cluster, background) =>
+    ipcRenderer.invoke("cluster:open", project, cluster, background),
   clusterNames: (project) => ipcRenderer.invoke("cluster:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
   suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),

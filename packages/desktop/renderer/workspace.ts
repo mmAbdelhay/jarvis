@@ -724,9 +724,17 @@ function preWarm(kind: "editor" | "database" | "cluster"): void {
     // opens a menu and starts nothing — but unlike the editor, every
     // cluster of a project shares one server, so warming any of them warms
     // all of them, and the first is as good an answer as any.
+    //
+    // The `true` is what keeps this a warm rather than a login: a cluster
+    // behind an expired AWS session would otherwise have a hover open a
+    // terminal tab, run `saml2aws login`, and push MFA to the user's phone,
+    // all without a click. Main backs off instead, and the click that
+    // follows does the login properly, with the status line to show for it.
     void window.jarvis
       .clusterNames(project)
-      .then((names) => (names[0] === undefined ? undefined : window.jarvis.openCluster(project, names[0])))
+      .then((names) =>
+        names[0] === undefined ? undefined : window.jarvis.openCluster(project, names[0], true),
+      )
       .catch(() => undefined);
     return;
   }
