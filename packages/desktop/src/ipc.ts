@@ -38,6 +38,7 @@ import type {
   InstalledVoice,
   ShellManager,
 } from "@jarvis/platform";
+import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -404,6 +405,10 @@ export type RendererApi = {
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
   openTerminal(project: string): Promise<GitViewResult<void>>;
+  /** Suggestions for what is typed at `tabId`'s prompt, best first. Each
+   *  one is a whole replacement line. An empty array means no dropdown —
+   *  and so zsh's own Tab completion, unchanged. */
+  suggestCompletions(tabId: string, input: string): Promise<string[]>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -717,6 +722,10 @@ export type TerminalHandlers = {
   resize(tabId: string, cols: number, rows: number): void;
   /** Kills the tab's shell. Called when the tab is closed. */
   close(tabId: string): void;
+  /** What to offer for `input` typed at the prompt of `tabId`. Empty is an
+   *  ordinary answer — a closed dropdown, and zsh's own Tab completion
+   *  behaving exactly as it does today. */
+  suggest(tabId: string, input: string): Promise<string[]>;
 };
 
 export type TerminalHandlerDeps = {
@@ -727,9 +736,18 @@ export type TerminalHandlerDeps = {
   /** Name to absolute path, from config. The renderer never sees a path. */
   projects: Readonly<Record<string, string>>;
   language: "ar" | "en";
+  /** Terminal autocomplete. Absent — or present and disabled — means no
+   *  suggestions at all, which is a terminal exactly as it was before the
+   *  feature existed. */
+  completion?: { source: CompletionSource; enabled: boolean } | undefined;
 };
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
+  // Which directory each tab's shell was started in. The renderer knows
+  // only a tab id, and both directory affinity and path completion are
+  // meaningless without the cwd behind it.
+  const directories = new Map<string, string>();
+
   return {
     open(project) {
       const cwd = isString(project) ? deps.projects[project] : undefined;
@@ -738,7 +756,9 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       }
       // The tab first, then the shell: the pty is keyed by the tab id, and
       // a shell with no tab to draw it would be an orphan process.
-      deps.shells.start(deps.openTerminalTab(project), cwd);
+      const tabId = deps.openTerminalTab(project);
+      directories.set(tabId, cwd);
+      deps.shells.start(tabId, cwd);
       return { ok: true, value: undefined };
     },
 
@@ -756,7 +776,23 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
 
     close(tabId) {
       if (!isString(tabId)) return;
+      directories.delete(tabId);
       deps.shells.kill(tabId);
+    },
+
+    async suggest(tabId, input) {
+      const completion = deps.completion;
+      if (completion === undefined || !completion.enabled) return [];
+      if (!isString(tabId) || !isString(input)) return [];
+      const cwd = directories.get(tabId);
+      if (cwd === undefined) return [];
+      try {
+        return await completion.source.suggest(cwd, input);
+      } catch {
+        // A suggestion that failed is a dropdown that does not open. There
+        // is nothing here worth interrupting a terminal for.
+        return [];
+      }
     },
   };
 }

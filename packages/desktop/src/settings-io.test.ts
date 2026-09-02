@@ -20,6 +20,7 @@ const draft: JarvisConfig = {
   editors: {},
   clusters: {},
   headlamp: { binary: "/some/path" },
+  terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",

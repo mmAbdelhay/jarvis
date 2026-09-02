@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from "electron";
 import {
@@ -31,6 +31,7 @@ import {
   createRealCodeServerSpawner,
   createRealShellSpawner,
   createShellManager,
+  installZshIntegration,
   createCollection,
   createFolder,
   apiFetch,
@@ -84,6 +85,11 @@ import {
 import { BrowserHost, type Rect } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { isAllowedNavigation } from "./navigation.js";
+import {
+  createCompletionSource,
+  createDirectoryLister,
+  createFileReader,
+} from "./completion-source.js";
 import { DEFAULT_CONFIG_PATH, loadConfig } from "./config.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -380,10 +386,46 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // Terminal autocomplete's shell integration, installed before the first
+    // shell can be started. It writes a Jarvis-owned ZDOTDIR whose files
+    // chain to the user's real dotfiles; ~/.zshrc and friends are read and
+    // never modified. Undefined means no integration — disabled, not zsh,
+    // or unwritable — and the terminal then behaves exactly as it did
+    // before this feature existed.
+    const completionEnabled = config.terminal.completion.enabled;
+    const zdotdir = join(homedir(), ".config/jarvis/zdotdir");
+    await mkdir(zdotdir, { recursive: true }).catch(() => undefined);
+    await mkdir(dirname(config.terminal.completion.commandLogPath), { recursive: true }).catch(
+      () => undefined,
+    );
+    const installedZdotdir = await installZshIntegration({
+      shell: process.env["SHELL"],
+      enabled: completionEnabled,
+      dir: zdotdir,
+      realZdotdir: process.env["ZDOTDIR"] ?? homedir(),
+      write: (path, contents) => writeFile(path, contents, "utf8"),
+    });
+
     // One login shell per Terminal tab, under a real pty. Unlike the editor
     // and the database this hosts no page and opens no port: the tab has no
     // view at all, and its screen is drawn by the renderer's own xterm.
-    const shells = createShellManager({ spawn: createRealShellSpawner() });
+    const shells = createShellManager({
+      spawn: createRealShellSpawner(process.env, {
+        zdotdir: installedZdotdir,
+        // Only worth writing when the wrapper that reads it is installed.
+        commandLog:
+          installedZdotdir === undefined
+            ? undefined
+            : config.terminal.completion.commandLogPath,
+      }),
+    });
+
+    const completionSource = createCompletionSource({
+      readHistory: createFileReader(config.terminal.completion.historyPath),
+      readCommandLog: createFileReader(config.terminal.completion.commandLogPath),
+      listDirectory: createDirectoryLister(),
+      now: () => Date.now(),
+    });
     // The API tab. Requests are issued from here, in the main process, which
     // is what makes CORS irrelevant — see http-runner.ts.
     const apiStore = createApiStore(join(homedir(), ".config/jarvis/api.json"));
@@ -547,6 +589,7 @@ app.whenReady().then(async () => {
       openTerminalTab: (project) => workspace.openTerminal(project),
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
+      completion: { source: completionSource, enabled: completionEnabled },
     });
 
     const bookmarks = createBookmarksHandlers({
@@ -902,6 +945,9 @@ app.whenReady().then(async () => {
         (code) => window.webContents.send("terminal:exit", { tabId, code }),
       );
     });
+    ipcMain.handle("terminal:suggest", (_event, tabId: unknown, input: unknown) =>
+      terminal.suggest(tabId as string, input as string),
+    );
     ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
       terminal.input(tabId as string, data as string);
     });

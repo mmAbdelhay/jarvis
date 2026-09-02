@@ -10,6 +10,7 @@ import {
   createApiHandlers,
   createTerminalHandlers,
   type ApiHandlerDeps,
+  type TerminalHandlerDeps,
   createGitHandlers,
   createSettingsHandlers,
   type WiringDeps,
@@ -943,6 +944,7 @@ const sampleConfig: JarvisConfig = {
   editors: {},
   clusters: {},
   headlamp: { binary: "/some/path" },
+  terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",
@@ -1371,6 +1373,89 @@ describe("terminal handlers", () => {
     handlers.close("tab-7");
 
     expect(killed).toEqual(["tab-7"]);
+  });
+
+  function completing(
+    completion: TerminalHandlerDeps["completion"],
+  ): ReturnType<typeof createTerminalHandlers> {
+    const { manager } = shells();
+    return createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      completion,
+    });
+  }
+
+  // The renderer knows only a tab id: which directory that tab's shell was
+  // started in lives here, and it is what makes directory affinity and path
+  // completion mean anything.
+  it("suggests against the cwd of the tab the request names", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta")).toEqual(["git status"]);
+    expect(asked).toEqual([["/p/acme", "git sta"]]);
+  });
+
+  it("suggests nothing for a tab it never started", async () => {
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+
+    expect(await handlers.suggest("ghost", "git")).toEqual([]);
+  });
+
+  it("forgets a tab's directory when the tab is closed", async () => {
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+    handlers.open("acme");
+    handlers.close("tab-7");
+
+    expect(await handlers.suggest("tab-7", "git")).toEqual([]);
+  });
+
+  it("suggests nothing when completion is disabled", async () => {
+    const handlers = completing({ enabled: false, source: { suggest: async () => ["git status"] } });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git")).toEqual([]);
+  });
+
+  it("suggests nothing when no completion source is configured at all", async () => {
+    const handlers = completing(undefined);
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git")).toEqual([]);
+  });
+
+  it("suggests nothing rather than throwing when the source fails", async () => {
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    handlers.open("acme");
+
+    await expect(handlers.suggest("tab-7", "git")).resolves.toEqual([]);
+  });
+
+  it("suggests nothing for arguments that are not strings", async () => {
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+    handlers.open("acme");
+
+    expect(await handlers.suggest(7 as unknown as string, "git")).toEqual([]);
+    expect(await handlers.suggest("tab-7", 7 as unknown as string)).toEqual([]);
   });
 });
 
