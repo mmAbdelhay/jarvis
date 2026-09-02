@@ -6,7 +6,7 @@ import type { Session, SessionState, SessionStore } from "@jarvis/core";
 // Bumped whenever the table shape changes. Each bump adds a migration
 // branch below instead of dropping and recreating the table, so an
 // existing db always opens without losing rows.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SESSION_STATES: readonly SessionState[] = [
   "starting",
@@ -215,6 +215,63 @@ function migrate(db: DatabaseSync): void {
       );
     }
 
+    if (version < 3) {
+      // Phase 3: `project` becomes nullable. A session imported from a
+      // transcript is recorded wherever it was actually started, and most
+      // of those directories are not in `projects:` — 95 of the 125
+      // transcripts measured — so "no project" has to be storable.
+      //
+      // Sqlite has no ALTER COLUMN, and node:sqlite refuses the
+      // writable_schema route outright ("table sqlite_master may not be
+      // modified"), so the only supported way to drop a NOT NULL is the
+      // rebuild sqlite's own documentation prescribes: create the new
+      // shape, copy every row across, drop the old table, rename. It runs
+      // inside the transaction migrate() already opened, so a crash
+      // anywhere in it leaves the original table with its rows untouched.
+      //
+      // This is a *copying* rebuild. The rule this file states — never
+      // drop and recreate — is about never losing a row, which a bare
+      // CREATE would; the INSERT…SELECT below is what keeps that promise,
+      // and session-store.test.ts asserts both the copy (from a v2 file
+      // built by hand) and the source-level shape of it.
+      db.exec(`
+        CREATE TABLE sessions_v3 (
+          id TEXT PRIMARY KEY,
+          project TEXT,
+          projectPath TEXT NOT NULL,
+          agentId TEXT NOT NULL,
+          model TEXT,
+          state TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          startedAt INTEGER NOT NULL,
+          lastActivityAt INTEGER NOT NULL,
+          endedAt INTEGER,
+          exitCode INTEGER,
+          branch TEXT NOT NULL DEFAULT '',
+          insertions INTEGER NOT NULL DEFAULT 0,
+          deletions INTEGER NOT NULL DEFAULT 0,
+          changed_files INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      // Columns named explicitly rather than `SELECT *`: the old table's
+      // physical column order depends on which migration created it, and a
+      // positional copy would silently transpose values the day that
+      // changes.
+      db.exec(`
+        INSERT INTO sessions_v3 (
+          id, project, projectPath, agentId, model, state, summary,
+          startedAt, lastActivityAt, endedAt, exitCode,
+          branch, insertions, deletions, changed_files
+        )
+        SELECT id, project, projectPath, agentId, model, state, summary,
+               startedAt, lastActivityAt, endedAt, exitCode,
+               branch, insertions, deletions, changed_files
+        FROM sessions
+      `);
+      db.exec("DROP TABLE sessions");
+      db.exec("ALTER TABLE sessions_v3 RENAME TO sessions");
+    }
+
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     db.exec("COMMIT");
   } catch (error) {
@@ -261,7 +318,10 @@ function rowToSession(raw: unknown): Session {
   const row = raw as Record<string, unknown>;
 
   const id = requireString(row, "id");
-  const project = requireString(row, "project");
+  // Nullable since the v2->v3 migration, and null is an ordinary value
+  // here rather than an absence: a session started in a directory that is
+  // in no configured project still has a row worth keeping.
+  const project = requireNullableString(row, "project");
   const projectPath = requireString(row, "projectPath");
   const agentId = requireString(row, "agentId");
   const model = requireNullableString(row, "model");

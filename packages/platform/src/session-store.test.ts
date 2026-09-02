@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "@jarvis/core";
 import { createSqliteSessionStore } from "./session-store.js";
 
+// The version this build migrates to. Pinned here rather than repeated as a
+// literal in each migration test, so a bump changes one line.
+const SCHEMA_VERSION = 3;
+
 const STORE_SOURCE_PATH = fileURLToPath(new URL("./session-store.ts", import.meta.url));
 
 const agentSession = (overrides: Partial<Session> = {}): Session => ({
@@ -134,7 +138,9 @@ describe("createSqliteSessionStore", () => {
       raw.prepare("UPDATE sessions SET project = ? WHERE id = ?").run(new Uint8Array([1, 2, 3]), "s1");
       raw.close();
 
-      expect(() => store.history()).toThrow(/string `project` column/);
+      // "a string or null" since v3, where null became a legitimate value
+      // — a blob is still neither, and still names the column it came from.
+      expect(() => store.history()).toThrow(/`project` column must be a string or null/);
     });
   });
 
@@ -287,7 +293,7 @@ describe("createSqliteSessionStore", () => {
       const db = new DatabaseSync(dbPath);
       const version = db.prepare("PRAGMA user_version").get();
       db.close();
-      expect(version).toMatchObject({ user_version: 2 });
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
     });
 
     it("recovers a half-migrated database — some git columns already present but user_version still 1", () => {
@@ -345,7 +351,7 @@ describe("createSqliteSessionStore", () => {
       const db = new DatabaseSync(dbPath);
       const version = db.prepare("PRAGMA user_version").get();
       db.close();
-      expect(version).toMatchObject({ user_version: 2 });
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
     });
 
     it("gives a fresh (never-migrated) database the git columns exactly once", () => {
@@ -357,7 +363,7 @@ describe("createSqliteSessionStore", () => {
 
       const db = new DatabaseSync(dbPath);
       const version = db.prepare("PRAGMA user_version").get();
-      expect(version).toMatchObject({ user_version: 2 });
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
       db.close();
     });
 
@@ -368,7 +374,7 @@ describe("createSqliteSessionStore", () => {
       const db = new DatabaseSync(dbPath);
       const version = db.prepare("PRAGMA user_version").get();
       db.close();
-      expect(version).toMatchObject({ user_version: 2 });
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
     });
 
     it("defaults branch/insertions/deletions/changedFiles for a session that ends before any git metadata is recorded", () => {
@@ -480,11 +486,159 @@ describe("createSqliteSessionStore", () => {
       expect(rowStillThere).toMatchObject({ id: "pre-crash" });
     });
 
-    it("never drops the sessions table", () => {
-      // A mutation guard: if someone "fixes" a migration by recreating the
-      // table, this fails. Read the store source and assert on it directly.
+    it("never drops the sessions table without copying every row into its replacement", () => {
+      // A mutation guard: a migration that "fixes" a schema by recreating
+      // the table silently deletes the user's whole session history, and
+      // that is the failure this has always existed to catch.
+      //
+      // It read `expect(source).not.toMatch(/drop table/i)` until the
+      // v2->v3 step, which removes a NOT NULL constraint — something sqlite
+      // cannot do in place at all. Its only supported route is the rebuild
+      // sqlite's own docs prescribe (new table, copy across, drop, rename),
+      // and node:sqlite refuses the writable_schema alternative outright
+      // ("table sqlite_master may not be modified"), so a flat ban on the
+      // words would have banned the migration rather than the mistake.
+      //
+      // So the guard now checks the property it was always about: every
+      // table drop is preceded by an INSERT copying that table's rows into
+      // its replacement. A bare recreate still fails here, and the
+      // row-survival tests in each migration block are the behavioural half
+      // of the same promise.
       const source = readFileSync(STORE_SOURCE_PATH, "utf8");
-      expect(source).not.toMatch(/drop\s+table/i);
+      const drops = [...source.matchAll(/drop\s+table\s+(\w+)/gi)];
+      for (const drop of drops) {
+        const before = source.slice(0, drop.index);
+        expect(before).toMatch(new RegExp(`INSERT INTO \\w+[\\s\\S]*?FROM ${drop[1]}\\b`, "i"));
+      }
+    });
+  });
+
+  describe("nullable project migration (v2 -> v3)", () => {
+    let dir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-v3-"));
+      dbPath = join(dir, "sessions.db");
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    // A v2 database exactly as phase 2 wrote it — built by hand, not
+    // through the current code, so this proves an *existing* file survives
+    // the migration rather than merely proving today's code reads its own
+    // output back.
+    function seedV2(): void {
+      const seed = new DatabaseSync(dbPath);
+      seed.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          project TEXT NOT NULL,
+          projectPath TEXT NOT NULL,
+          agentId TEXT NOT NULL,
+          model TEXT,
+          state TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          startedAt INTEGER NOT NULL,
+          lastActivityAt INTEGER NOT NULL,
+          endedAt INTEGER,
+          exitCode INTEGER,
+          branch TEXT NOT NULL DEFAULT '',
+          insertions INTEGER NOT NULL DEFAULT 0,
+          deletions INTEGER NOT NULL DEFAULT 0,
+          changed_files INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      seed.exec("PRAGMA user_version = 2");
+      seed
+        .prepare(
+          `INSERT INTO sessions (
+             id, project, projectPath, agentId, model, state, summary,
+             startedAt, lastActivityAt, endedAt, exitCode,
+             branch, insertions, deletions, changed_files
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "old-1",
+          "acme",
+          "/projects/acme",
+          "claude-acme",
+          "sonnet",
+          "dead",
+          "fixed the checkout",
+          1000,
+          2000,
+          2000,
+          1,
+          "feat/checkout",
+          12,
+          3,
+          4,
+        );
+      seed.close();
+    }
+
+    it("keeps every existing row, with every column intact", () => {
+      seedV2();
+
+      const store = createSqliteSessionStore(dbPath);
+      const history = store.history();
+
+      expect(history).toHaveLength(1);
+      expect(history[0]).toEqual({
+        id: "old-1",
+        project: "acme",
+        projectPath: "/projects/acme",
+        agentId: "claude-acme",
+        model: "sonnet",
+        state: "dead",
+        summary: "fixed the checkout",
+        startedAt: 1000,
+        lastActivityAt: 2000,
+        endedAt: 2000,
+        exitCode: 1,
+        branch: "feat/checkout",
+        insertions: 12,
+        deletions: 3,
+        changedFiles: 4,
+      });
+    });
+
+    it("leaves the migrated database at the current version", () => {
+      seedV2();
+      createSqliteSessionStore(dbPath);
+
+      const db = new DatabaseSync(dbPath);
+      const version = db.prepare("PRAGMA user_version").get();
+      db.close();
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
+    });
+
+    it("stores a session with no configured project", () => {
+      seedV2();
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession({ id: "no-project", project: null }));
+
+      expect(store.history().find((session) => session.id === "no-project")).toMatchObject({
+        project: null,
+      });
+    });
+
+    it("gives a fresh database a nullable project column too", () => {
+      // The trap this file's migrate() comment warns about, in its v3
+      // spelling: a fresh db is created at the frozen v1 shape and must
+      // then walk 2 and 3 like any other rather than stopping there.
+      const store = createSqliteSessionStore(dbPath);
+      expect(() => store.upsert(agentSession({ id: "fresh", project: null }))).not.toThrow();
+    });
+
+    it("is idempotent — opening an already-migrated database twice is a no-op", () => {
+      seedV2();
+      createSqliteSessionStore(dbPath);
+      expect(() => createSqliteSessionStore(dbPath)).not.toThrow();
+      expect(createSqliteSessionStore(dbPath).history()).toHaveLength(1);
     });
   });
 });
