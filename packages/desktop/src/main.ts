@@ -649,7 +649,16 @@ app.whenReady().then(async () => {
       awaitAwsSession,
       openTerminal: (project: string, cwd: string) => {
         const tabId = workspace.openTerminal(project);
-        shells.start(tabId, cwd);
+        // The tab exists before the shell does. If the pty never starts, the
+        // caller reports a failure and the tab would otherwise be left behind
+        // empty — a terminal with nothing in it and no explanation, next to a
+        // message about the cluster browser.
+        try {
+          shells.start(tabId, cwd);
+        } catch (error) {
+          workspace.close(tabId);
+          throw error;
+        }
         return tabId;
       },
       sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
