@@ -77,3 +77,25 @@ describe("session empty state [hidden] cascade", () => {
     expect(body).toMatch(/display\s*:\s*flex/);
   });
 });
+
+// jsdom cannot lay out a flex row, so the shape is pinned at the source in
+// the same way as the cascade rules above. The session header is a flex row
+// containing an absolute path; with nothing allowed to shrink it overflowed
+// its own padding and clipped the Resume button at the right edge.
+describe("session header overflow", () => {
+  it("lets the path truncate rather than pushing controls off the row", () => {
+    const body = ruleBodyFor("#session-view-path", htmlSource);
+    expect(body).toMatch(/min-width\s*:\s*0/);
+    expect(body).toMatch(/text-overflow\s*:\s*ellipsis/);
+  });
+
+  // .workspace-nav is a 28px icon square; this button carries a word, so it
+  // must size to its text or print clipped — the same override .api-bar
+  // button already needed for the same reason.
+  it("sizes the Resume button to its text and never shrinks it", () => {
+    const body = ruleBodyFor("#session-resume", htmlSource);
+    expect(body).toMatch(/width\s*:\s*auto/);
+    expect(body).toMatch(/flex-shrink\s*:\s*0/);
+    expect(body).toMatch(/white-space\s*:\s*nowrap/);
+  });
+});
