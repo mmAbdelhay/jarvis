@@ -92,7 +92,7 @@ export class SessionManager {
 
     let handle: ProcessHandle;
     try {
-      handle = this.#spawn(input.agent, input.projectPath);
+      handle = this.#spawn(input.agent, input.projectPath, id);
     } catch (error) {
       this.#sessions.delete(id);
       throw error;

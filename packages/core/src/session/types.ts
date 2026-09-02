@@ -115,7 +115,21 @@ export interface ProcessHandle {
   resize?(cols: number, rows: number): void;
 }
 
-export type Spawner = (agent: AgentConfig, projectPath: string) => ProcessHandle;
+/**
+ * Starts one agent process.
+ *
+ * `sessionId` is the id SessionManager minted for this session, passed so a
+ * spawner can hand it to the CLI (`--session-id`) and the transcript that
+ * session writes lands under the id Jarvis already knows it by. Optional
+ * because not every spawner has a flag for it — the piped spawner ignores
+ * it — and because leaving it optional keeps every two-argument spawner,
+ * production and test, satisfying this type unchanged.
+ */
+export type Spawner = (
+  agent: AgentConfig,
+  projectPath: string,
+  sessionId?: string,
+) => ProcessHandle;
 
 /**
  * One chunk of a session's output as it is emitted. `chunk` is exactly what

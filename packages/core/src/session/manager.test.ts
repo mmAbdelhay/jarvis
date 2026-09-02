@@ -67,6 +67,22 @@ describe("SessionManager", () => {
     expect(session.model).toBe("opus");
   });
 
+  // The id has to reach the CLI (as --session-id) so that the transcript
+  // the session writes lands under the id Jarvis already minted. Without
+  // it the importer sees the same conversation as two sessions under two
+  // ids, with no way to tell they are one.
+  it("hands the spawner the session id it minted", () => {
+    const seen: (string | undefined)[] = [];
+    const manager = new SessionManager((_agent, _projectPath, sessionId) => {
+      seen.push(sessionId);
+      return fake;
+    });
+
+    const session = manager.start({ project: "acme", projectPath: "/p/acme", agent });
+
+    expect(seen).toEqual([session.id]);
+  });
+
   it("gives each session a distinct id", () => {
     const manager = new SessionManager(spawner);
     const a = manager.start({ project: "a", projectPath: "/a", agent });
