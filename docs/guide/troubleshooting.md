@@ -86,6 +86,12 @@ but never began listening, the context named in `clusters:` is no longer in
 the kubeconfig, or the cluster credentials have lapsed and the kubeconfig's
 credential plugin cannot refresh them.
 
+**"AWS login did not finish in time."** The Cluster button ran
+`saml2aws login && aws eks update-kubeconfig …` in a Workspace Terminal tab
+and it did not succeed within three minutes — a declined or missed MFA push,
+a wrong password, or `saml2aws` itself erroring. The terminal tab is left
+open; check it, finish or retry the login by hand, then click Cluster again.
+
 ## Voice does nothing
 
 `whisper.binaryPath` and `whisper.modelPath` must both point at files that
