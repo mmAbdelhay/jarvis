@@ -2,7 +2,16 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
-import { isWithin, resolveProject, sessionFromTranscript, transcriptDirs } from "./session-import.js";
+import type { Session, SessionStore } from "@jarvis/core";
+import {
+  createSessionImporter,
+  isWithin,
+  resolveProject,
+  sessionFromTranscript,
+  transcriptDirs,
+  type SessionImporterDeps,
+  type TranscriptFile,
+} from "./session-import.js";
 
 // Record shapes copied from a real transcript (message bodies shortened,
 // every field this parser reads left exactly as Claude Code writes it), so
@@ -226,5 +235,334 @@ describe("sessionFromTranscript", () => {
       '{"type":"user","cwd":"/c","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"user","content":"أصلح صفحة الدفع"}}\n';
 
     expect(sessionFromTranscript(line, PATH, 1)?.summary).toBe("أصلح صفحة الدفع");
+  });
+});
+
+describe("createSessionImporter", () => {
+  const NOW = Date.parse("2026-09-02T12:00:00.000Z");
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const AGENTS = [
+    { id: "claude-mm", command: "claude-mm", vendor: "anthropic" as const, configDir: "/h/.claude-mm" },
+  ];
+  const DIR = "/h/.claude-mm/projects";
+
+  /** One transcript's worth of JSONL, in the shape a real one has. */
+  function transcript(options: {
+    id: string;
+    cwd: string;
+    prompt?: string;
+    branch?: string;
+    model?: string;
+  }): string {
+    const user = {
+      type: "user",
+      sessionId: options.id,
+      cwd: options.cwd,
+      gitBranch: options.branch ?? "main",
+      timestamp: "2026-09-01T10:00:00.000Z",
+      message: { role: "user", content: options.prompt ?? "do the thing" },
+    };
+    const assistant = {
+      type: "assistant",
+      sessionId: options.id,
+      cwd: options.cwd,
+      timestamp: "2026-09-01T10:00:05.000Z",
+      message: { role: "assistant", model: options.model ?? "claude-opus-4-5", content: [] },
+    };
+    return `${JSON.stringify(user)}\n${JSON.stringify(assistant)}\n`;
+  }
+
+  class FakeStore implements SessionStore {
+    rows = new Map<string, Session>();
+    imported: { session: Session; owned: boolean }[] = [];
+    upsert(session: Session): void {
+      this.rows.set(session.id, session);
+    }
+    upsertImported(session: Session, options: { owned: boolean }): void {
+      this.imported.push({ session, owned: options.owned });
+      if (!options.owned) this.rows.set(session.id, session);
+    }
+    history(): Session[] {
+      return [...this.rows.values()];
+    }
+    updateGit(): void {}
+  }
+
+  /**
+   * The fake world. Nothing here touches a real directory, a real file or a
+   * real fs watch — the whole point of every dep being injected.
+   */
+  function world(
+    files: Record<string, { head: string; mtime?: number; dir?: string }>,
+    overrides: Partial<SessionImporterDeps> = {},
+  ): {
+    deps: SessionImporterDeps;
+    store: FakeStore;
+    listed: string[];
+    fire: (file: TranscriptFile) => void;
+    watched: string[];
+    closed: number;
+  } {
+    const store = new FakeStore();
+    const listed: string[] = [];
+    const watched: string[] = [];
+    const watchers: ((file: TranscriptFile) => void)[] = [];
+    const state = { closed: 0 };
+
+    const deps: SessionImporterDeps = {
+      listFiles: async (dir) => {
+        listed.push(dir);
+        return Object.entries(files)
+          .filter(([, file]) => (file.dir ?? DIR) === dir)
+          .map(([path, file]) => ({ path, mtime: file.mtime ?? NOW - DAY }));
+      },
+      readHead: async (path) => {
+        const file = files[path];
+        if (file === undefined) throw new Error(`no such file: ${path}`);
+        return file.head;
+      },
+      watch: (dir, onChange) => {
+        watched.push(dir);
+        watchers.push(onChange);
+        return {
+          close: () => {
+            state.closed += 1;
+          },
+        };
+      },
+      now: () => NOW,
+      store,
+      ownedIds: () => new Set(),
+      agents: AGENTS,
+      projects: { jarvis: "/Users/u/projects/jarvis" },
+      brainCwd: "/h/.config/jarvis/brain",
+      importWindowDays: 30,
+      ...overrides,
+    };
+
+    return {
+      deps,
+      store,
+      listed,
+      watched,
+      fire: (file) => {
+        for (const watcher of watchers) watcher(file);
+      },
+      get closed() {
+        return state.closed;
+      },
+    };
+  }
+
+  it("imports a terminal-started session as done", async () => {
+    const { deps, store } = world({
+      [`${DIR}/-Users-u-work-notes/ext-1.jsonl`]: {
+        head: transcript({ id: "ext-1", cwd: "/Users/u/work/notes", prompt: "rename the file" }),
+        mtime: NOW - DAY,
+      },
+    });
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(1);
+    expect(store.imported).toHaveLength(1);
+    expect(store.imported[0]?.owned).toBe(false);
+    expect(store.imported[0]?.session).toMatchObject({
+      id: "ext-1",
+      // Jarvis cannot see whether a terminal session is alive — no
+      // transcript is held open, and session-env directories outlive their
+      // sessions — so it never claims one is running.
+      state: "done",
+      project: null,
+      projectPath: "/Users/u/work/notes",
+      agentId: "claude-mm",
+      summary: "rename the file",
+      branch: "main",
+      lastActivityAt: NOW - DAY,
+      endedAt: NOW - DAY,
+    });
+  });
+
+  it("resolves a cwd inside a configured project", async () => {
+    const { deps, store } = world({
+      [`${DIR}/-Users-u-projects-jarvis/in-1.jsonl`]: {
+        head: transcript({ id: "in-1", cwd: "/Users/u/projects/jarvis/packages/core" }),
+      },
+    });
+
+    await createSessionImporter(deps).backfill();
+
+    expect(store.imported[0]?.session.project).toBe("jarvis");
+  });
+
+  // By path, not by a directory name: the exclusion is "this is the brain's
+  // own session", and a name rule stops working silently the day brain.cwd
+  // is configured elsewhere.
+  it("skips a transcript whose cwd is under the brain's cwd", async () => {
+    const { deps, store } = world({
+      [`${DIR}/-brain/brain-1.jsonl`]: {
+        head: transcript({ id: "brain-1", cwd: "/h/.config/jarvis/brain" }),
+      },
+      [`${DIR}/-real/real-1.jsonl`]: {
+        head: transcript({ id: "real-1", cwd: "/Users/u/work/notes" }),
+      },
+    });
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(1);
+    expect(store.imported.map((entry) => entry.session.id)).toEqual(["real-1"]);
+  });
+
+  it("keeps the pty authoritative for a session SessionManager owns", async () => {
+    const { deps, store } = world(
+      {
+        [`${DIR}/-p/live-1.jsonl`]: {
+          head: transcript({ id: "live-1", cwd: "/Users/u/projects/jarvis" }),
+        },
+      },
+      { ownedIds: () => new Set(["live-1"]) },
+    );
+
+    await createSessionImporter(deps).backfill();
+
+    expect(store.imported[0]?.owned).toBe(true);
+  });
+
+  it("skips one malformed file and still imports the rest", async () => {
+    const { deps, store } = world({
+      [`${DIR}/-a/a.jsonl`]: { head: transcript({ id: "a", cwd: "/Users/u/a" }) },
+      [`${DIR}/-b/b.jsonl`]: { head: "{not json at all\n" },
+      [`${DIR}/-c/c.jsonl`]: { head: transcript({ id: "c", cwd: "/Users/u/c" }) },
+    });
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(2);
+    expect(store.imported.map((entry) => entry.session.id).sort()).toEqual(["a", "c"]);
+  });
+
+  it("ignores a transcript older than the import window", async () => {
+    const { deps, store } = world({
+      [`${DIR}/-old/old.jsonl`]: {
+        head: transcript({ id: "old", cwd: "/Users/u/a" }),
+        mtime: NOW - 31 * DAY,
+      },
+      [`${DIR}/-new/new.jsonl`]: {
+        head: transcript({ id: "new", cwd: "/Users/u/b" }),
+        mtime: NOW - 29 * DAY,
+      },
+    });
+
+    await createSessionImporter(deps).backfill();
+
+    expect(store.imported.map((entry) => entry.session.id)).toEqual(["new"]);
+  });
+
+  it("never reads a file that is not a transcript", async () => {
+    const read: string[] = [];
+    const { deps, store } = world(
+      {
+        [`${DIR}/-a/notes.json`]: { head: "{}" },
+        [`${DIR}/-a/a.jsonl`]: { head: transcript({ id: "a", cwd: "/Users/u/a" }) },
+      },
+    );
+    const inner = deps.readHead;
+    deps.readHead = async (path) => {
+      read.push(path);
+      return inner(path);
+    };
+
+    await createSessionImporter(deps).backfill();
+
+    expect(read).toEqual([`${DIR}/-a/a.jsonl`]);
+    expect(store.imported).toHaveLength(1);
+  });
+
+  it("imports a transcript the watcher reports after backfill", async () => {
+    const files: Record<string, { head: string; mtime?: number }> = {};
+    const setup = world(files);
+    const importer = createSessionImporter(setup.deps);
+    await importer.start();
+
+    files[`${DIR}/-late/late.jsonl`] = {
+      head: transcript({ id: "late", cwd: "/Users/u/late" }),
+      mtime: NOW,
+    };
+    setup.fire({ path: `${DIR}/-late/late.jsonl`, mtime: NOW });
+    // The watch callback is fire-and-forget; let its promise settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(setup.store.imported.map((entry) => entry.session.id)).toEqual(["late"]);
+    expect(setup.watched).toEqual([DIR]);
+  });
+
+  it("keeps what it backfilled when the watch cannot be established", async () => {
+    const logged: string[] = [];
+    const { deps, store } = world(
+      {
+        [`${DIR}/-a/a.jsonl`]: { head: transcript({ id: "a", cwd: "/Users/u/a" }) },
+      },
+      {
+        watch: () => {
+          throw new Error("too many open files");
+        },
+        log: (message) => logged.push(message),
+      },
+    );
+
+    await expect(createSessionImporter(deps).start()).resolves.toBe(1);
+    expect(store.imported).toHaveLength(1);
+    expect(logged).toHaveLength(1);
+  });
+
+  it("survives a listFiles that rejects for one agent", async () => {
+    const { deps, store } = world(
+      {
+        [`/h/.claude-two/projects/-a/a.jsonl`]: {
+          head: transcript({ id: "a", cwd: "/Users/u/a" }),
+          dir: "/h/.claude-two/projects",
+        },
+      },
+      {
+        agents: [
+          ...AGENTS,
+          { id: "claude-two", command: "claude-two", vendor: "anthropic", configDir: "/h/.claude-two" },
+        ],
+      },
+    );
+    const inner = deps.listFiles;
+    deps.listFiles = async (dir) => {
+      if (dir === DIR) throw new Error("ENOENT");
+      return inner(dir);
+    };
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(1);
+    expect(store.imported[0]?.session.agentId).toBe("claude-two");
+  });
+
+  it("scans nothing for an agent that is not anthropic", async () => {
+    const { deps, listed } = world(
+      {},
+      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+    );
+
+    await createSessionImporter(deps).backfill();
+
+    expect(listed).toEqual([]);
+  });
+
+  it("closes every watcher on stop", async () => {
+    const setup = world({});
+    const importer = createSessionImporter(setup.deps);
+    await importer.start();
+
+    importer.stop();
+
+    expect(setup.closed).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { basename, join, resolve, sep } from "node:path";
-import type { AgentConfig } from "@jarvis/core";
+import type { AgentConfig, SessionStore } from "@jarvis/core";
 
 /**
  * Imports the sessions Jarvis did not start.
@@ -243,4 +243,189 @@ export function resolveProject(
     if (best === null || length > best.length) best = { name, length };
   }
   return best === null ? null : best.name;
+}
+
+/** One transcript file, with the mtime that dates it. `lastActivityAt`
+ *  comes from here rather than from the transcript's last record, which is
+ *  what keeps the cost of a 40MB transcript equal to a 4KB one. */
+export type TranscriptFile = { path: string; mtime: number };
+
+export type ImportWatcher = { close(): void };
+
+/**
+ * Everything the importer touches that is not pure. All of it is injected,
+ * the same way headlamp.ts injects its spawner and its context lister: the
+ * tests then run against a fake filesystem, with no temp directories, no
+ * real watches, and no dependence on what happens to be on the machine.
+ */
+export type SessionImporterDeps = {
+  /** Every `*.jsonl` under one transcripts directory, with mtimes. A
+   *  missing or unreadable directory yields [] rather than throwing —
+   *  though a rejection is survived too. */
+  listFiles: (dir: string) => Promise<TranscriptFile[]>;
+  /** At most the first few KB of a file, as text. Never the whole file. */
+  readHead: (path: string) => Promise<string>;
+  /** Calls back with a transcript that changed. May throw: a watch that
+   *  cannot be established costs the live updates, not the backfill. */
+  watch: (dir: string, onChange: (file: TranscriptFile) => void) => ImportWatcher;
+  now: () => number;
+  store: SessionStore;
+  /** The session ids SessionManager is currently running. Called per file
+   *  rather than captured once: a session can start between two files, and
+   *  the importer must never write live state for one of them. */
+  ownedIds: () => ReadonlySet<string>;
+  agents: readonly AgentConfig[];
+  projects: Readonly<Record<string, string>>;
+  /** Sessions at or under this path are the brain talking to itself. */
+  brainCwd: string;
+  importWindowDays: number;
+  log?: (message: string) => void;
+};
+
+export type SessionImporter = {
+  /** One bounded scan of every transcript directory. Resolves to the number
+   *  of rows written. */
+  backfill(): Promise<number>;
+  /** backfill(), then watch each directory for later transcripts. Resolves
+   *  to the backfilled count. */
+  start(): Promise<number>;
+  /** Closes every watcher — called on app quit. */
+  stop(): void;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reads transcripts into the sessions table, beside the SessionManager that
+ * keeps writing the sessions Jarvis itself spawns.
+ *
+ * The two writers converge on one row per session rather than fighting,
+ * because a Jarvis-spawned agent is launched with `--session-id` (pty.ts)
+ * and so writes its transcript under the id SessionManager already minted.
+ * Which of them owns which columns is the store's `upsertImported`
+ * contract, decided here by `ownedIds()`.
+ *
+ * The scan is bounded three ways: by the import window (file mtime), by
+ * reading only each file's head, and by looking only in the directories
+ * `transcriptDirs` names. Nothing here polls.
+ */
+export function createSessionImporter(deps: SessionImporterDeps): SessionImporter {
+  const dirs = transcriptDirs(deps.agents);
+  const watchers: ImportWatcher[] = [];
+
+  async function importFile(agentId: string, file: TranscriptFile): Promise<boolean> {
+    // Cheapest check first, and it is also what keeps the importer from
+    // reading the other things that live in these directories.
+    if (!file.path.endsWith(".jsonl")) return false;
+
+    let head: string;
+    try {
+      head = await deps.readHead(file.path);
+    } catch {
+      // A file listed a moment ago and gone now — a session cleaning up
+      // after itself. Not an error worth a line in anyone's log.
+      return false;
+    }
+
+    const transcript = sessionFromTranscript(head, file.path, file.mtime);
+    if (transcript === null) return false;
+
+    // By path, never by a directory name: the exclusion is "this is one of
+    // the brain's own sessions", and a hardcoded name silently stops
+    // working the day brain.cwd is configured elsewhere. Left in, the
+    // brain's monologue outnumbers real sessions two to one and makes
+    // history useless.
+    if (isWithin(transcript.cwd, deps.brainCwd)) return false;
+
+    const owned = deps.ownedIds().has(transcript.id);
+
+    deps.store.upsertImported(
+      {
+        id: transcript.id,
+        project: resolveProject(transcript.cwd, deps.projects),
+        projectPath: transcript.cwd,
+        agentId,
+        ...(transcript.model === null ? {} : { model: transcript.model }),
+        // Never "running". Jarvis cannot see whether a terminal session is
+        // alive: Claude Code closes the transcript between writes (lsof
+        // shows none held open while sessions run) and session-env
+        // directories outlive their sessions, so all that is left is a
+        // recency guess — and a guess does not belong in a column that
+        // reads as fact. lastActivityAt already carries the recency, so the
+        // UI can say "active 4 minutes ago" without Jarvis claiming to know
+        // a state it cannot observe.
+        state: "done",
+        summary: transcript.summary,
+        startedAt: transcript.startedAt,
+        lastActivityAt: transcript.lastActivityAt,
+        endedAt: transcript.lastActivityAt,
+        branch: transcript.branch,
+      },
+      { owned },
+    );
+    return true;
+  }
+
+  async function backfill(): Promise<number> {
+    const oldest = deps.now() - deps.importWindowDays * DAY_MS;
+    let imported = 0;
+
+    for (const { agentId, dir } of dirs) {
+      let files: TranscriptFile[];
+      try {
+        files = await deps.listFiles(dir);
+      } catch (error) {
+        // An unreadable configDir means that agent contributes nothing —
+        // never that the other agents' sessions are lost too.
+        deps.log?.(`Session import: cannot read ${dir} (${message(error)})`);
+        continue;
+      }
+
+      for (const file of files) {
+        if (file.mtime < oldest) continue;
+        if (await importFile(agentId, file)) imported += 1;
+      }
+    }
+
+    return imported;
+  }
+
+  return {
+    backfill,
+
+    async start() {
+      const imported = await backfill();
+
+      for (const { agentId, dir } of dirs) {
+        try {
+          watchers.push(
+            deps.watch(dir, (file) => {
+              // Fire and forget: a watch callback has nobody to return a
+              // promise to, and a transcript that fails to import is one
+              // row missing until the next launch, not a crash.
+              void importFile(agentId, file).catch((error) => {
+                deps.log?.(`Session import: ${file.path} failed (${message(error)})`);
+              });
+            }),
+          );
+        } catch (error) {
+          // Logged once, not thrown: what was backfilled is kept and the
+          // importer degrades to it. A failed watch must not take down a
+          // startup path.
+          deps.log?.(`Session import: cannot watch ${dir} (${message(error)})`);
+        }
+      }
+
+      return imported;
+    },
+
+    stop() {
+      for (const watcher of watchers) watcher.close();
+      watchers.length = 0;
+    },
+  };
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
