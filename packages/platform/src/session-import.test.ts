@@ -5,6 +5,7 @@ import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
+  summaryOf,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
@@ -107,6 +108,37 @@ describe("resolveProject", () => {
 
   it("ignores a trailing separator on a configured path", () => {
     expect(resolveProject("/Users/u/work/site/src", { site: "/Users/u/work/site/" })).toBe("site");
+  });
+});
+
+describe("summaryOf", () => {
+  // A slash command's prompt reaches the transcript as the CLI's own
+  // markup, not as what the user typed. Left raw it fills a quarter of the
+  // history rows with <command-name> tags — 22 of 89 on real data — and a
+  // row nobody can read is a row that does not do its job.
+  it("reads a slash command as the command and its arguments", () => {
+    expect(
+      summaryOf(
+        "<command-name>/plan</command-name> <command-message>plan</command-message>" +
+          " <command-args>add a cluster tab</command-args>",
+      ),
+    ).toBe("/plan add a cluster tab");
+  });
+
+  it("keeps the command alone when it was invoked with no arguments", () => {
+    expect(
+      summaryOf("<command-name>/init</command-name> <command-message>init</command-message>"),
+    ).toBe("/init");
+  });
+
+  it("leaves an ordinary prompt untouched", () => {
+    expect(summaryOf("read the docs and tell me what you find")).toBe(
+      "read the docs and tell me what you find",
+    );
+  });
+
+  it("strips markup it does not recognise rather than showing tags", () => {
+    expect(summaryOf("<local-command-stdout>done</local-command-stdout>")).toBe("done");
   });
 });
 

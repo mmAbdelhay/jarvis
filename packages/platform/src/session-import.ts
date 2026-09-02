@@ -191,7 +191,7 @@ function stringField(fields: Record<string, unknown>, key: string): string | und
  * text blocks count.
  */
 function promptText(content: unknown): string | undefined {
-  if (typeof content === "string") return trimSummary(content);
+  if (typeof content === "string") return summaryOf(content);
   if (!Array.isArray(content)) return undefined;
   for (const block of content) {
     if (typeof block !== "object" || block === null) continue;
@@ -199,10 +199,37 @@ function promptText(content: unknown): string | undefined {
     if (fields["type"] !== "text") continue;
     const text = fields["text"];
     if (typeof text !== "string") continue;
-    const trimmed = trimSummary(text);
+    const trimmed = summaryOf(text);
     if (trimmed !== undefined) return trimmed;
   }
   return undefined;
+}
+
+/**
+ * A first prompt as a history row should show it.
+ *
+ * A slash command does not reach the transcript as the user typed it. The
+ * CLI records its own markup —
+ * `<command-name>/plan</command-name> <command-message>plan</command-message>
+ * <command-args>…</command-args>` — and printed raw that fills the row with
+ * tags instead of words. On this machine's real history it was 22 of 89
+ * imported rows, so a quarter of the feature's output was unreadable.
+ *
+ * The command and its arguments are recovered as the line the user
+ * effectively typed (`/plan add a cluster tab`). Any other markup is
+ * stripped to its text rather than shown, because a tag in a summary is
+ * never what the reader wants, and an unknown tag is not a reason to give
+ * up on the words inside it.
+ */
+export function summaryOf(text: string): string | undefined {
+  const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text);
+  if (name !== null) {
+    const args = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/.exec(text);
+    const argText = args?.[1]?.trim() ?? "";
+    const command = name[1] ?? "";
+    return trimSummary(argText === "" ? command : `${command} ${argText}`);
+  }
+  return trimSummary(text.replaceAll(/<[^>]*>/g, " "));
 }
 
 /** One line, bounded: a history row shows a line, and a prompt can be an
