@@ -13,7 +13,7 @@
  * Jarvis's command log does (see parseCommandLog). An entry without one is
  * ordinary, not broken: it simply misses the directory-affinity boost.
  */
-export type HistoryEntry = { command: string; at?: number; cwd?: string };
+export type CommandHistoryEntry = { command: string; at?: number; cwd?: string };
 
 /** `: <epoch>:<elapsed>;<command>` — zsh's EXTENDED_HISTORY line. */
 const EXTENDED_LINE = /^: (\d+):\d+;([\s\S]*)$/;
@@ -33,8 +33,8 @@ const EXTENDED_LINE = /^: (\d+):\d+;([\s\S]*)$/;
  * Such an entry keeps its newlines and is filtered out later by rank(),
  * which will not offer a suggestion that would submit itself.
  */
-export function parseZshHistory(text: string): HistoryEntry[] {
-  const entries: HistoryEntry[] = [];
+export function parseZshHistory(text: string): CommandHistoryEntry[] {
+  const entries: CommandHistoryEntry[] = [];
   let continued: string | undefined;
 
   for (const raw of text.split("\n")) {
@@ -74,8 +74,8 @@ export function parseZshHistory(text: string): HistoryEntry[] {
  * Only the first two tabs separate fields: a command may contain tabs of
  * its own, and splitting on all of them would corrupt it.
  */
-export function parseCommandLog(text: string): HistoryEntry[] {
-  const entries: HistoryEntry[] = [];
+export function parseCommandLog(text: string): CommandHistoryEntry[] {
+  const entries: CommandHistoryEntry[] = [];
   for (const line of text.split("\n")) {
     if (line === "") continue;
     const firstTab = line.indexOf("\t");
@@ -152,7 +152,7 @@ function recencyWeight(at: number | undefined, now: number): number {
  */
 export function rank(
   input: string,
-  entries: readonly HistoryEntry[],
+  entries: readonly CommandHistoryEntry[],
   cwd: string,
   now: number,
 ): Suggestion[] {
@@ -338,7 +338,7 @@ const DEFAULT_LIMIT = 8;
 export function suggest(
   input: string,
   context: {
-    history: readonly HistoryEntry[];
+    history: readonly CommandHistoryEntry[];
     specs: readonly CommandSpec[];
     listing: readonly string[];
     cwd: string;
