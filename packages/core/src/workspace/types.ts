@@ -9,14 +9,17 @@ export type TabId = string;
  *  them (nobody navigates a code editor or a SQL client like a webpage)
  *  and their titles must stay stable — both change their own document.title
  *  with whatever file, panel or table has focus, which would otherwise make
- *  the tab strip unreadable.
+ *  the tab strip unreadable. "cluster" is a hosted app too: a headlamp-server
+ *  instance for the project, showing one of its Kubernetes contexts. Like the
+ *  others it renames its own document.title as you move through resources,
+ *  which is exactly why a hosted app's title is fixed at open.
  *
  *  "terminal" and "api" are the odd ones: tabs with no hosted page at all.
  *  A terminal's pty and an api tab's requests live in the main process while
  *  their surfaces are drawn by the renderer itself, so they have no URL, no
  *  view, and nothing for the address bar or the history controls to act
  *  on. */
-export type TabKind = "web" | "editor" | "database" | "terminal" | "api";
+export type TabKind = "web" | "editor" | "database" | "terminal" | "api" | "cluster";
 
 export type WorkspaceTab = {
   id: TabId;

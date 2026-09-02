@@ -68,6 +68,7 @@ const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
   database: "Database",
   terminal: "Terminal",
   api: "API",
+  cluster: "Cluster",
 };
 
 export class BrowserHost {

@@ -418,6 +418,19 @@ describe("BrowserHost", () => {
     expect(host.state().tabs[0]?.title).toBe("acme — Editor");
   });
 
+  it("gives a cluster tab a stable title naming its project", () => {
+    host.open("opf", "http://127.0.0.1:5000/c/ctx-a", "cluster");
+
+    expect(host.state().tabs[0]?.title).toBe("opf — Cluster");
+  });
+
+  it("names the cluster in the title, and remembers it on the tab", () => {
+    host.open("opf", "http://127.0.0.1:5000/c/ctx-a", "cluster", "dev");
+
+    expect(host.state().tabs[0]?.title).toBe("opf — Cluster · dev");
+    expect(host.state().tabs[0]?.detail).toBe("dev");
+  });
+
   it("still applies page-title-updated for an ordinary web tab", () => {
     host.open("acme", "one.example");
 
