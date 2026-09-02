@@ -30,6 +30,7 @@ const draft: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
+  sessions: { importWindowDays: 30 },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
 

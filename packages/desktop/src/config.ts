@@ -58,6 +58,10 @@ export type JarvisConfig = {
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
+  /** How the transcript importer behaves. Absent from jarvis.yaml for
+   *  everyone until they want to change it — the defaults are the whole
+   *  point of the section. */
+  sessions: { importWindowDays: number };
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
   sessionsDbPath: string;
@@ -100,6 +104,15 @@ const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-lo
 // default to the repo or to `process.cwd()`.
 const DEFAULT_BRAIN_CWD = join(homedir(), ".config/jarvis/brain");
 
+/**
+ * How far back the transcript backfill reaches, by file mtime.
+ *
+ * 30 days was 90 of the 125 transcripts on the machine this was designed
+ * against, and 90 days was all of them — generous without being unbounded
+ * on a machine with years of history.
+ */
+const DEFAULT_IMPORT_WINDOW_DAYS = 30;
+
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
 // large-v3-turbo, not base: synthesised-speech testing of the spec's own
 // acceptance sentence showed base corrupting the Arabic project name
@@ -134,6 +147,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const clusters = parseClusters(root["clusters"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const whisper = parseWhisper(root["whisper"]);
+  const sessions = parseSessions(root["sessions"]);
   const voice = parseVoice(root["voice"]);
 
   const accountId = brainConfig.accountId;
@@ -171,6 +185,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     },
     voice,
     whisper,
+    sessions,
     sessionsDbPath: defaultSessionsDbPath(),
   };
 }
@@ -279,6 +294,27 @@ function parseRouting(rawRouting: unknown): RoutingRule[] {
       },
     };
   });
+}
+
+function parseSessions(rawSessions: unknown): { importWindowDays: number } {
+  if (rawSessions === undefined) {
+    return { importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS };
+  }
+  if (typeof rawSessions !== "object" || rawSessions === null || Array.isArray(rawSessions)) {
+    throw new Error("Config `sessions` must be an object");
+  }
+  const sessions = rawSessions as Record<string, unknown>;
+  const window = sessions["importWindowDays"];
+  if (window === undefined) {
+    return { importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS };
+  }
+  // Rejected rather than clamped: a window of zero or a string imports
+  // nothing, and silently reads as a bug in the importer rather than in
+  // the config line that caused it.
+  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) {
+    throw new Error("Config `sessions.importWindowDays` must be a positive number");
+  }
+  return { importWindowDays: window };
 }
 
 function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: string } {

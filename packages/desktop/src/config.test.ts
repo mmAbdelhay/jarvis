@@ -98,6 +98,37 @@ describe("parseConfig", () => {
     expect(() => parseConfig({ ...valid, agents: [] })).toThrow(/agents/);
   });
 
+  // 30 days is 90 of the 125 transcripts on the machine this was measured
+  // against, and 90 days is all of them — generous without being unbounded
+  // on a machine with years of history.
+  it("defaults the session import window to 30 days", () => {
+    expect(parseConfig(valid).sessions.importWindowDays).toBe(30);
+  });
+
+  it("uses a configured session import window", () => {
+    expect(
+      parseConfig({ ...valid, sessions: { importWindowDays: 90 } }).sessions.importWindowDays,
+    ).toBe(90);
+  });
+
+  it("throws when sessions.importWindowDays is not a number", () => {
+    expect(() => parseConfig({ ...valid, sessions: { importWindowDays: "90" } })).toThrow(
+      /sessions\.importWindowDays/,
+    );
+  });
+
+  it("throws when sessions.importWindowDays is not positive", () => {
+    // A window of zero would import nothing and read as a bug in the
+    // importer rather than in the config that caused it.
+    expect(() => parseConfig({ ...valid, sessions: { importWindowDays: 0 } })).toThrow(
+      /sessions\.importWindowDays/,
+    );
+  });
+
+  it("throws when sessions is not an object", () => {
+    expect(() => parseConfig({ ...valid, sessions: [] })).toThrow(/sessions/);
+  });
+
   it("defaults the whisper paths when the section is absent", () => {
     const config = parseConfig(valid);
     expect(config.whisper.binaryPath).toContain("whisper-cli");

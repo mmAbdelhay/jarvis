@@ -953,6 +953,7 @@ const sampleConfig: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
+  sessions: { importWindowDays: 30 },
   sessionsDbPath: "/tmp/sessions.db",
 };
 
