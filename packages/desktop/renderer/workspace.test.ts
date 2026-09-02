@@ -24,6 +24,8 @@ function harness(): Recorded[] {
       <button id="workspace-open-database" title="Browse the project's databases"></button>
       <button id="workspace-open-terminal" title="Open a shell in the project's directory"></button>
       <button id="workspace-open-api" title="Send requests from the project's collections"></button>
+      <button id="workspace-open-cluster" title="Browse the project's Kubernetes clusters"></button>
+      <div id="workspace-cluster-menu" hidden></div>
       <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
@@ -124,6 +126,11 @@ function harness(): Recorded[] {
     requestPictureInPicture: record("requestPictureInPicture"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
     editorRoots: () => Promise.resolve([]),
+    clusterNames: () => Promise.resolve([]),
+    openCluster: (...args: unknown[]) => {
+      calls.push({ call: "openCluster", args });
+      return Promise.resolve({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+    },
     openDatabase: () =>
       Promise.resolve({
         ok: true,
@@ -1115,6 +1122,164 @@ describe("open in editor, with configured roots", () => {
   });
 });
 
+// The Cluster button mirrors the Editor's: no clusters disables it, one
+// opens it straight away, two or more offer a menu.
+describe("the Cluster button", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  });
+
+  function menuItems(): HTMLElement[] {
+    return [...document.querySelectorAll("#workspace-cluster-menu button")] as HTMLElement[];
+  }
+
+  it("opens straight away when the project has one cluster", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openCluster", args: ["acme", "dev"] });
+  });
+
+  it("offers a menu when the project has two or more", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-cluster-menu")?.hidden).toBe(false);
+    expect(menuItems().map((item) => item.textContent)).toEqual(["dev", "chaos"]);
+    expect(calls.some((entry) => entry.call === "openCluster")).toBe(false);
+  });
+
+  it("closes the menu on a second press instead of reopening it", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
+    initWorkspace(["acme"]);
+    await flush();
+    const button = document.getElementById("workspace-open-cluster");
+
+    button?.click();
+    await flush();
+    button?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-cluster-menu")?.hidden).toBe(true);
+  });
+
+  it("activates an open tab rather than opening a second", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ id: "t1", project: "acme", kind: "cluster", detail: "dev" })],
+      activeTabId: "t1",
+    });
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["t1"] });
+    expect(calls.some((entry) => entry.call === "openCluster")).toBe(false);
+  });
+
+  // Two clusters of one project are two tabs against one server, so the
+  // tab's own `detail` — not the project — decides which is already open.
+  it("tells two clusters of one project apart by detail", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ id: "t1", project: "acme", kind: "cluster", detail: "dev" })],
+      activeTabId: "t1",
+    });
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+    menuItems()[1]?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openCluster", args: ["acme", "chaos"] });
+  });
+
+  it("shows the failure text and re-enables the button", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+    jarvis["openCluster"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open the cluster browser.", language: "en" });
+    initWorkspace(["acme"]);
+    await flush();
+    // No cluster tab open yet — renderWorkspace's own module state does not
+    // reset between tests, and a leftover tab from an earlier test in this
+    // block would make this a tab switch instead of a fresh open.
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Could not open the cluster browser.",
+    );
+    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // A cluster name is config text rendered into the menu — a node with its
+  // textContent set, never markup, same discipline as the editor's roots.
+  it("renders a cluster name as text, not as markup", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["<img src=x onerror=alert(1)>", "chaos"]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.getElementById("workspace-open-cluster")?.click();
+    await flush();
+
+    expect(document.querySelector("#workspace-cluster-menu img")).toBeNull();
+    expect(menuItems()[0]?.textContent).toBe("<img src=x onerror=alert(1)>");
+  });
+
+  it("disables the button for a project with no clusters, with the reason shown", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve([]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    const button = document.getElementById("workspace-open-cluster") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("No clusters configured for this project.");
+  });
+
+  it("enables the button for a project with clusters configured", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    const button = document.getElementById("workspace-open-cluster") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe("Browse the project's Kubernetes clusters");
+  });
+
+  // The personal browser declares no clusters, so it falls out of the same
+  // per-project check rather than needing a rule of its own.
+  it("disables the button for the personal browser", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve([]);
+    initWorkspace(["acme"]);
+    await flush();
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+
+    select.value = "__personal__";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 // Measured on this machine: click to a painted Editor tab is 1.9-2.3s with
 // the binaries warm and 9-13s cold, and every millisecond of it used to be
 // spent with an empty toolbar and a live-looking button — the app read as
@@ -1215,6 +1380,10 @@ describe("pre-warming a hosted app on hover", () => {
         ok: true,
         value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
       });
+    };
+    jarvis["openCluster"] = (project: string, name: string) => {
+      warmed.push(`cluster:${project}:${name}`);
+      return Promise.resolve({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
     };
     initWorkspace(["acme"]);
     renderWorkspace({ tabs: [], activeTabId: undefined });
@@ -1319,6 +1488,42 @@ describe("pre-warming a hosted app on hover", () => {
     await flush();
 
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+
+  it("starts headlamp-server when the pointer reaches the Cluster button", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
+
+    document
+      .getElementById("workspace-open-cluster")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["cluster:acme:dev"]);
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  // Unlike the editor, every cluster of a project shares one server, so
+  // warming any one of them — even with a menu pending — warms them all.
+  it("warms the first cluster even when the click would offer a menu", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
+
+    document
+      .getElementById("workspace-open-cluster")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["cluster:acme:dev"]);
+  });
+
+  it("does not pre-warm the cluster browser for a project with none configured", async () => {
+    jarvis["clusterNames"] = () => Promise.resolve([]);
+
+    document
+      .getElementById("workspace-open-cluster")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual([]);
   });
 });
 

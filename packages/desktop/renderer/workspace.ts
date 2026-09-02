@@ -58,6 +58,12 @@ const PROJECT_TOOL_BUTTONS = [
 ] as const;
 const toolTitles = new Map<string, string>();
 
+/** The Cluster button's own tooltip, captured before a project with no
+ *  `clusters:` overwrites it — same reason toolTitles exists for the four
+ *  buttons above, kept separate because the button itself is not one of
+ *  them (see renderClusterButton). */
+let clusterButtonTitle = "";
+
 /**
  * The personal browser has no directory on disk, so there is no folder to
  * edit, no database to spawn against, no cwd for a shell and no collection
@@ -86,6 +92,29 @@ function renderProjectTools(): void {
     // login the user still has to type.
     status.textContent = "";
   }
+}
+
+/**
+ * The Cluster button is disabled whenever the selected project has nothing
+ * for it to open — not just the personal browser, but any ordinary project
+ * that declares no `clusters:` entry, which is most of them. It is deliberately
+ * left out of PROJECT_TOOL_BUTTONS/renderProjectTools: "no directory on
+ * disk" is the true reason the other four are dead for the personal
+ * browser, but a false one for this button — a cluster is not rooted in a
+ * directory — and that function has no notion of "disabled for this
+ * particular project" at all, which is the ordinary case here.
+ */
+async function renderClusterButton(): Promise<void> {
+  const project = selectedProject();
+  const names = project === "" ? [] : await window.jarvis.clusterNames(project);
+  // The user may have switched projects while that request was in flight;
+  // a stale answer must not clobber whatever project is selected now.
+  if (selectedProject() !== project) return;
+
+  const button = $("workspace-open-cluster") as HTMLButtonElement;
+  const disabled = names.length === 0;
+  button.disabled = disabled;
+  button.title = disabled ? MESSAGES.noClustersConfigured(PRIMARY_LANGUAGE) : clusterButtonTitle;
 }
 
 // A small fixed palette, none of it reused from the app's semantic colors
@@ -127,6 +156,7 @@ async function switchToProject(project: string): Promise<void> {
   else void window.jarvis.hideAllTabs();
 
   renderProjectTools();
+  void renderClusterButton();
   await refreshBookmarks();
 }
 
@@ -386,6 +416,7 @@ export function initWorkspace(projects: string[]): void {
   select.addEventListener("change", () => void switchToProject(select.value));
 
   for (const id of PROJECT_TOOL_BUTTONS) toolTitles.set(id, ($(id) as HTMLButtonElement).title);
+  clusterButtonTitle = ($("workspace-open-cluster") as HTMLButtonElement).title;
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -424,12 +455,14 @@ export function initWorkspace(projects: string[]): void {
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
+  $("workspace-open-cluster").addEventListener("click", () => void openCluster());
   // See preWarm: the pointer arriving is a few hundred milliseconds of a
   // ~2s start that the click no longer has to pay for. "focus" is the same
   // signal for a keyboard user, who never emits a pointerenter.
   for (const [id, kind] of [
     ["workspace-open-editor", "editor"],
     ["workspace-open-database", "database"],
+    ["workspace-open-cluster", "cluster"],
   ] as const) {
     $(id).addEventListener("pointerenter", () => preWarm(kind));
     $(id).addEventListener("focus", () => preWarm(kind));
@@ -451,6 +484,7 @@ export function initWorkspace(projects: string[]): void {
   wireDevToolsHandle();
   renderBookmarksVisibility(false);
   renderProjectTools();
+  void renderClusterButton();
   void refreshBookmarks();
 }
 
@@ -561,6 +595,87 @@ async function openEditorRoot(project: string, root: string | undefined): Promis
   void window.jarvis.openTab(project, result.value, "editor", root);
 }
 
+/** The Cluster button. Mirrors the Editor's, because both pick from a
+ *  configured list: no clusters disables the button (see
+ *  renderClusterButton), one opens it, two or more offer a menu. Names are
+ *  re-read on every click rather than cached, so a config change needs no
+ *  more than the Settings restart. */
+async function openCluster(): Promise<void> {
+  // A second click on the button is "put that menu away", not "open it
+  // again" — the only other way out would be clicking a name.
+  if (!clusterMenu().hidden) {
+    closeClusterMenu();
+    return;
+  }
+
+  const project = selectedProject();
+  const names = await window.jarvis.clusterNames(project);
+  if (names.length === 0) return;
+  if (names.length > 1) {
+    showClusterMenu(project, names);
+    return;
+  }
+  await openClusterNamed(project, names[0] as string);
+}
+
+function clusterMenu(): HTMLElement {
+  return $("workspace-cluster-menu");
+}
+
+function closeClusterMenu(): void {
+  const menu = clusterMenu();
+  menu.hidden = true;
+  menu.replaceChildren();
+}
+
+/** The name picker. A cluster name is config text like a project name, so
+ *  it is a node with its textContent set — no innerHTML here either. */
+function showClusterMenu(project: string, names: string[]): void {
+  const menu = clusterMenu();
+  menu.replaceChildren();
+  for (const name of names) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "workspace-menu-item";
+    item.textContent = name;
+    item.addEventListener("click", () => {
+      closeClusterMenu();
+      void openClusterNamed(project, name);
+    });
+    menu.append(item);
+  }
+  menu.hidden = false;
+}
+
+/** Ensures a headlamp-server instance is running for `project` and opens
+ *  one of its clusters as an ordinary browser tab — the cluster browser is
+ *  not a separate surface, just a hosted page like the editor. */
+async function openClusterNamed(project: string, name: string): Promise<void> {
+  // Two clusters of one project are two tabs against one server, so the
+  // tab's own `detail` decides this and the project alone cannot — the
+  // same reason openEditorRoot matches on detail rather than project.
+  const existing = latest.tabs.find(
+    (tab) => tab.kind === "cluster" && tab.project === project && tab.detail === name,
+  );
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    return;
+  }
+
+  const status = $("workspace-tool-status");
+  const done = beginStarting("workspace-open-cluster", MESSAGES.clusterStarting(PRIMARY_LANGUAGE));
+
+  const result = await window.jarvis.openCluster(project, name);
+  done();
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+    return;
+  }
+  status.textContent = "";
+  void window.jarvis.openTab(project, result.value, "cluster", name);
+}
+
 /**
  * Which project has already been asked to start which hosted app, so that a
  * pointer wandering across the toolbar asks once rather than on every
@@ -585,7 +700,7 @@ const preWarmed = new Set<string>();
  * may appear in the status line; the click makes the same call and reports
  * the failure then.
  */
-function preWarm(kind: "editor" | "database"): void {
+function preWarm(kind: "editor" | "database" | "cluster"): void {
   const project = selectedProject();
   if (project === "") return;
   const key = `${kind}:${project}`;
@@ -596,6 +711,19 @@ function preWarm(kind: "editor" | "database"): void {
 
   if (kind === "database") {
     void window.jarvis.openDatabase(project).catch(() => undefined);
+    return;
+  }
+
+  if (kind === "cluster") {
+    // Same reasoning as the editor's: warming is only worth anything if it
+    // warms what the click will open. With two or more clusters the click
+    // opens a menu and starts nothing — but unlike the editor, every
+    // cluster of a project shares one server, so warming any of them warms
+    // all of them, and the first is as good an answer as any.
+    void window.jarvis
+      .clusterNames(project)
+      .then((names) => (names[0] === undefined ? undefined : window.jarvis.openCluster(project, names[0])))
+      .catch(() => undefined);
     return;
   }
 

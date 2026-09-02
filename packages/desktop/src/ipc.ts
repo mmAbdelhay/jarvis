@@ -347,7 +347,7 @@ export type RendererApi = {
   openTab(
     project: string,
     input: string,
-    kind?: "web" | "editor" | "database",
+    kind?: "web" | "editor" | "database" | "cluster",
     /** Which one, for a kind a project can have more than one of — the
      *  editor root a code-server tab is rooted at. Becomes part of the
      *  tab's stable title. */

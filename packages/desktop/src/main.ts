@@ -700,7 +700,7 @@ app.whenReady().then(async () => {
         workspace.open(
           project,
           input,
-          kind === "editor" || kind === "database" ? kind : "web",
+          kind === "editor" || kind === "database" || kind === "cluster" ? kind : "web",
           typeof detail === "string" ? detail : undefined,
         );
       },
