@@ -119,3 +119,249 @@ export function currentInput(buffer: ReadableBuffer, mark: PromptMark): string |
     return undefined;
   }
 }
+
+export type Dropdown = {
+  /** Opens under the cell at `at`. An empty list does not open — that is
+   *  what lets Tab fall through to zsh when there is nothing to offer. */
+  show(items: readonly string[], at: PromptMark, cellWidth: number, cellHeight: number): void;
+  hide(): void;
+  isOpen(): boolean;
+  /** Moves the selection, wrapping at both ends. */
+  move(delta: number): void;
+  selected(): string | undefined;
+  element: HTMLElement;
+};
+
+/**
+ * The suggestion list, built as nodes and appended to the terminal's own
+ * host so it travels with the pane it belongs to.
+ *
+ * Every suggestion goes in through `textContent`, never `innerHTML`. Shell
+ * history is untrusted text — it holds whatever the user, or anything that
+ * appended to their history, put there — and a dropdown that parsed it as
+ * markup would be executing it.
+ */
+export function createDropdown(host: HTMLElement): Dropdown {
+  const element = document.createElement("div");
+  element.className = "terminal-completion";
+  element.hidden = true;
+  host.append(element);
+
+  let items: readonly string[] = [];
+  let index = 0;
+
+  function paint(): void {
+    element.replaceChildren();
+    items.forEach((value, position) => {
+      const row = document.createElement("div");
+      row.className =
+        position === index ? "terminal-completion-item selected" : "terminal-completion-item";
+      // textContent, deliberately. See the note above.
+      row.textContent = value;
+      element.append(row);
+    });
+  }
+
+  return {
+    element,
+
+    show(next, at, cellWidth, cellHeight) {
+      items = next;
+      index = 0;
+      if (items.length === 0) {
+        element.hidden = true;
+        return;
+      }
+      element.style.left = `${at.x * cellWidth}px`;
+      // One row below the line being typed, so the dropdown never covers it.
+      element.style.top = `${(at.y + 1) * cellHeight}px`;
+      element.hidden = false;
+      paint();
+    },
+
+    hide() {
+      items = [];
+      index = 0;
+      element.hidden = true;
+      element.replaceChildren();
+    },
+
+    isOpen: () => !element.hidden,
+
+    move(delta) {
+      if (items.length === 0) return;
+      index = (index + delta + items.length) % items.length;
+      paint();
+    },
+
+    selected: () => items[index],
+  };
+}
+
+export type CompletionHooks = {
+  /** What to offer for the line as it now stands. */
+  suggest: (input: string) => Promise<string[]>;
+  /** Sends bytes to this terminal's pty. */
+  sendInput: (data: string) => void;
+};
+
+/** DEL, the byte a terminal sends for Backspace and the one zsh's line
+ *  editor binds to backward-delete-char. Accepting a suggestion erases what
+ *  was typed this way rather than with ^U, which kills the whole line and
+ *  would take a prefix the user had recalled with it. */
+const BACKSPACE = "\u007f";
+
+/** Anything the terminal draws is measured in cells, and xterm exposes no
+ *  cell size. The host's measured box divided by the grid is the same
+ *  number, and it stays right through a resize. */
+function cellSize(host: HTMLElement, cols: number, rows: number): { x: number; y: number } {
+  const width = host.clientWidth > 0 && cols > 0 ? host.clientWidth / cols : 8;
+  const height = host.clientHeight > 0 && rows > 0 ? host.clientHeight / rows : 17;
+  return { x: width, y: height };
+}
+
+type CompletableTerminal = {
+  cols: number;
+  rows: number;
+  buffer: { active: ReadableBuffer };
+  parser: { registerOscHandler(ident: number, callback: (data: string) => boolean): unknown };
+  onData(listener: (data: string) => void): void;
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
+};
+
+/** The OSC identifier FinalTerm defined and iTerm2, VS Code, WezTerm and
+ *  Warp all speak. */
+const OSC_SHELL_INTEGRATION = 133;
+
+/**
+ * Wires the dropdown to a terminal.
+ *
+ * Two rules hold the whole thing together.
+ *
+ * Keys are claimed *only while the dropdown is open*. Closed, the handler
+ * returns true for everything and zsh's own Tab completion, history search
+ * and arrows behave exactly as they do today — which is what keeps this
+ * from making the terminal feel broken.
+ *
+ * Nothing here can throw into the terminal. A parser that will not take a
+ * handler, a buffer read that fails on a disposed terminal, a suggestion
+ * call that rejects: each one leaves a terminal with no autocomplete, which
+ * is the terminal the user already had.
+ */
+export function attachCompletion(
+  terminal: CompletableTerminal,
+  host: HTMLElement,
+  hooks: CompletionHooks,
+): void {
+  const tracker = createPromptTracker();
+  const dropdown = createDropdown(host);
+  /** The line the open dropdown was computed for — what accepting has to
+   *  erase, and what a late response is checked against. */
+  let openFor: string | undefined;
+
+  try {
+    terminal.parser.registerOscHandler(OSC_SHELL_INTEGRATION, (data) => {
+      const active = terminal.buffer.active;
+      tracker.handle(data, { x: active.cursorX, y: active.baseY + active.cursorY });
+      if (tracker.mark() === undefined) {
+        dropdown.hide();
+        openFor = undefined;
+      }
+      // False: this is a mark, not something to render, and xterm should go
+      // on with its own handling of the sequence.
+      return false;
+    });
+  } catch {
+    // No marks means no dropdown, and that is the whole failure.
+    return;
+  }
+
+  async function refresh(): Promise<void> {
+    const mark = tracker.mark();
+    if (mark === undefined) {
+      dropdown.hide();
+      openFor = undefined;
+      return;
+    }
+
+    let input: string | undefined;
+    try {
+      input = currentInput(terminal.buffer.active, mark);
+    } catch {
+      input = undefined;
+    }
+    if (input === undefined || input.trim() === "") {
+      dropdown.hide();
+      openFor = undefined;
+      return;
+    }
+
+    let items: string[];
+    try {
+      items = await hooks.suggest(input);
+    } catch {
+      items = [];
+    }
+
+    // The user has typed on since this was asked for; the answer is stale.
+    const latest = tracker.mark();
+    if (latest === undefined) return;
+    let stillTyped: string | undefined;
+    try {
+      stillTyped = currentInput(terminal.buffer.active, latest);
+    } catch {
+      stillTyped = undefined;
+    }
+    if (stillTyped !== input) return;
+
+    const cell = cellSize(host, terminal.cols, terminal.rows);
+    dropdown.show(items, mark, cell.x, cell.y);
+    openFor = dropdown.isOpen() ? input : undefined;
+  }
+
+  // A keystroke is only in the buffer after xterm has processed it, so the
+  // read is deferred by a turn rather than done inline.
+  terminal.onData(() => {
+    setTimeout(() => void refresh(), 0);
+  });
+
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown") return true;
+    // Closed: every key is zsh's, unchanged. This is the line that keeps
+    // the terminal behaving exactly as it does today.
+    if (!dropdown.isOpen()) return true;
+    // A chord is the app's or the shell's — Ctrl-C must still interrupt,
+    // Cmd-F must still open the find bar.
+    if (event.ctrlKey || event.metaKey || event.altKey) return true;
+
+    if (event.key === "Escape") {
+      dropdown.hide();
+      openFor = undefined;
+      event.preventDefault();
+      return false;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      dropdown.move(event.key === "ArrowDown" ? 1 : -1);
+      event.preventDefault();
+      return false;
+    }
+
+    if (event.key === "Tab" || event.key === "Enter") {
+      const value = dropdown.selected();
+      const typed = openFor;
+      dropdown.hide();
+      openFor = undefined;
+      event.preventDefault();
+      if (value !== undefined && typed !== undefined) {
+        // Erase what is typed, then write the whole line. No newline: the
+        // user still presses Enter themselves, so accepting a suggestion
+        // can never run a command they did not read.
+        hooks.sendInput(BACKSPACE.repeat(typed.length) + value);
+      }
+      return false;
+    }
+
+    return true;
+  });
+}

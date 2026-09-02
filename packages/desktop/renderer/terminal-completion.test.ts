@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { createPromptTracker, currentInput, type ReadableBuffer } from "./terminal-completion.js";
+import { FakeTerminal } from "./terminal-double.js";
+import {
+  attachCompletion,
+  createDropdown,
+  createPromptTracker,
+  currentInput,
+  type CompletionHooks,
+  type ReadableBuffer,
+} from "./terminal-completion.js";
 
 /** A fake xterm buffer: the rows of the screen, and where the cursor is.
  *  xterm renders to a canvas jsdom does not have, so the tests talk to the
@@ -124,5 +132,228 @@ describe("currentInput", () => {
     };
 
     expect(currentInput(hostile, { x: 0, y: 0 })).toBeUndefined();
+  });
+});
+
+describe("createDropdown", () => {
+  // Shell history is untrusted text: it holds whatever the user, or
+  // anything that wrote to their history, put there.
+  it("renders a suggestion containing HTML as text, never as markup", () => {
+    const host = document.createElement("div");
+    const dropdown = createDropdown(host);
+
+    dropdown.show(["echo <img src=x onerror=alert(1)>"], { x: 0, y: 0 }, 8, 16);
+
+    expect(host.querySelectorAll("img")).toHaveLength(0);
+    expect(host.textContent).toContain("echo <img src=x onerror=alert(1)>");
+  });
+
+  it("selects the first suggestion when it opens", () => {
+    const dropdown = createDropdown(document.createElement("div"));
+
+    dropdown.show(["a", "b"], { x: 0, y: 0 }, 8, 16);
+
+    expect(dropdown.selected()).toBe("a");
+  });
+
+  it("moves the selection and wraps at both ends", () => {
+    const dropdown = createDropdown(document.createElement("div"));
+    dropdown.show(["a", "b", "c"], { x: 0, y: 0 }, 8, 16);
+
+    dropdown.move(1);
+    expect(dropdown.selected()).toBe("b");
+
+    dropdown.move(-1);
+    dropdown.move(-1);
+    expect(dropdown.selected()).toBe("c");
+
+    dropdown.move(1);
+    expect(dropdown.selected()).toBe("a");
+  });
+
+  it("is closed, with nothing selected, after hide()", () => {
+    const dropdown = createDropdown(document.createElement("div"));
+    dropdown.show(["a"], { x: 0, y: 0 }, 8, 16);
+
+    dropdown.hide();
+
+    expect(dropdown.isOpen()).toBe(false);
+    expect(dropdown.selected()).toBeUndefined();
+  });
+
+  it("does not open on an empty list", () => {
+    const dropdown = createDropdown(document.createElement("div"));
+
+    dropdown.show([], { x: 0, y: 0 }, 8, 16);
+
+    expect(dropdown.isOpen()).toBe(false);
+  });
+
+  it("positions itself under the cell the input starts at", () => {
+    const host = document.createElement("div");
+    const dropdown = createDropdown(host);
+
+    dropdown.show(["a"], { x: 6, y: 2 }, 8, 16);
+
+    expect(dropdown.element.style.left).toBe("48px");
+    expect(dropdown.element.style.top).toBe("48px");
+  });
+});
+
+describe("attachCompletion", () => {
+  function attached(suggestions: string[] = ["git status"]) {
+    const terminal = new FakeTerminal();
+    const host = document.createElement("div");
+    const sent: string[] = [];
+    const asked: string[] = [];
+    const hooks: CompletionHooks = {
+      suggest: async (input) => {
+        asked.push(input);
+        return suggestions;
+      },
+      sendInput: (data) => sent.push(data),
+    };
+    attachCompletion(terminal as never, host, hooks);
+    return { terminal, host, sent, asked };
+  }
+
+  /** Puts the shell at a prompt with `typed` after it, and lets the
+   *  refresh settle. */
+  async function typeAt(terminal: FakeTerminal, prompt: string, typed: string): Promise<void> {
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine(prompt);
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine(prompt + typed);
+    terminal.emitData(typed.slice(-1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  // The single rule that keeps the terminal feeling like a terminal: with
+  // the dropdown shut, zsh receives every key exactly as it does today.
+  it("passes every key to zsh while the dropdown is closed", () => {
+    const { terminal } = attached();
+
+    for (const key of ["Tab", "ArrowUp", "ArrowDown", "Enter", "Escape", "a", "c"]) {
+      expect(terminal.pressKey({ key })).toBe(true);
+    }
+  });
+
+  it("opens on typing and lists what the source returned", async () => {
+    const { terminal, host, asked } = attached();
+
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    expect(asked).toEqual(["git sta"]);
+    expect(host.textContent).toContain("git status");
+  });
+
+  it("does not open at a bare prompt, and does not even ask", async () => {
+    const { terminal, host, asked } = attached();
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.emitData("\r");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual([]);
+    expect(host.textContent).toBe("");
+  });
+
+  it("does not open while a command is running", async () => {
+    const { terminal, asked } = attached();
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    terminal.parser.emitOsc(133, "C");
+    terminal.emitData("x");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual(["git sta"]);
+    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+  });
+
+  it("does not open when there is nothing to suggest, so Tab falls through to zsh", async () => {
+    const { terminal } = attached([]);
+
+    await typeAt(terminal, "~/p > ", "globex-dep");
+
+    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+  });
+
+  it("claims Tab, the arrows, Enter and Escape only while it is open", async () => {
+    const { terminal } = attached(["git status", "git stash"]);
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      expect(terminal.pressKey({ key })).toBe(false);
+    }
+    expect(terminal.pressKey({ key: "Enter" })).toBe(false);
+  });
+
+  it("leaves a Ctrl or Cmd chord to the terminal even while open", async () => {
+    const { terminal } = attached();
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    expect(terminal.pressKey({ key: "c", ctrlKey: true })).toBe(true);
+    expect(terminal.pressKey({ key: "f", metaKey: true })).toBe(true);
+  });
+
+  it("replaces the typed line with the accepted suggestion, without running it", async () => {
+    const { terminal, sent } = attached();
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    terminal.pressKey({ key: "Tab" });
+
+    expect(sent).toEqual(["\u007f".repeat(7) + "git status"]);
+  });
+
+  it("closes after accepting, so the next Tab is zsh's again", async () => {
+    const { terminal } = attached();
+    await typeAt(terminal, "~/p > ", "git sta");
+    terminal.pressKey({ key: "Tab" });
+
+    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+  });
+
+  it("closes on Escape without sending anything to the shell", async () => {
+    const { terminal, sent } = attached();
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    expect(terminal.pressKey({ key: "Escape" })).toBe(false);
+    expect(sent).toEqual([]);
+    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+  });
+
+  it("stays closed when the buffer read throws", async () => {
+    const { terminal } = attached();
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    Object.defineProperty(terminal, "buffer", {
+      get() {
+        throw new Error("disposed");
+      },
+    });
+
+    terminal.emitData("g");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+  });
+
+  it("survives a terminal whose parser refuses an OSC handler", () => {
+    const terminal = new FakeTerminal();
+    Object.defineProperty(terminal, "parser", {
+      get() {
+        throw new Error("no parser");
+      },
+    });
+
+    expect(() =>
+      attachCompletion(terminal as never, document.createElement("div"), {
+        suggest: async () => [],
+        sendInput: () => {},
+      }),
+    ).not.toThrow();
   });
 });
