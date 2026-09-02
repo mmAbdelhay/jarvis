@@ -139,6 +139,7 @@ export type Spawner = (
   agent: AgentConfig,
   projectPath: string,
   sessionId?: string,
+  options?: { resume?: boolean },
 ) => ProcessHandle;
 
 /**
@@ -154,6 +155,22 @@ export type SessionOutput = {
 
 export type StartInput = {
   project: string;
+  projectPath: string;
+  agent: AgentConfig;
+};
+
+/**
+ * A past session being picked up again.
+ *
+ * Unlike StartInput this carries an `id`: resuming continues a conversation
+ * that already exists, so the session keeps the id its transcript is named
+ * after and its history row is updated rather than duplicated. `project` is
+ * nullable for the same reason it is on Session — most resumable sessions
+ * were started in directories that are not configured projects.
+ */
+export type ResumeInput = {
+  id: string;
+  project: string | null;
   projectPath: string;
   agent: AgentConfig;
 };

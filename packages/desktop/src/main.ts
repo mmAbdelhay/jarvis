@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -88,6 +88,7 @@ import {
   createEditorHandlers,
   createTerminalHandlers,
   createTranscriptHandler,
+  createResumeHandler,
   createGitHandlers,
   createSettingsHandlers,
   isDeclaredContainer,
@@ -932,6 +933,26 @@ app.whenReady().then(async () => {
       createTranscriptHandler({
         history: () => sessionStore.history(),
         readFile: (path) => readFile(path, "utf8"),
+      }),
+    );
+
+    // Continuing a terminal-started conversation inside Jarvis. Keeps the
+    // session's own id, so it resumes into the row and transcript it
+    // already has instead of forking a second one.
+    ipcMain.handle(
+      "session:resume",
+      createResumeHandler({
+        history: () => sessionStore.history(),
+        agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
+        directoryExists: async (path) => {
+          try {
+            return (await stat(path)).isDirectory();
+          } catch {
+            return false;
+          }
+        },
+        resume: (input) => sessions.resume(input),
+        language: PRIMARY_LANGUAGE,
       }),
     );
 

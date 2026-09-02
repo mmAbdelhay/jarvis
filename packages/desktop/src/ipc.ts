@@ -11,6 +11,7 @@ import {
   type GitOutcome,
   type GitProvider,
   type ProviderStatus,
+  type ResumeInput,
   type Session,
   type SessionChanges,
   type SessionOutput,
@@ -343,6 +344,8 @@ export type RendererApi = {
   /** The rendered conversation of a session imported from a transcript.
    *  Empty for a session Jarvis spawned, which has a pty backlog instead. */
   getSessionTranscript(sessionId: string): Promise<string>;
+  /** Picks a past session back up as a live one, keeping its id. */
+  resumeSession(sessionId: string): Promise<{ ok: boolean; text?: string; language: "ar" | "en" }>;
   /**
    * Raw keystrokes for one session's terminal, written to its pty exactly
    * as given — including control bytes (Ctrl-C, arrows, Escape). This is
@@ -892,6 +895,57 @@ export function createTranscriptHandler(
     } catch {
       return "";
     }
+  };
+}
+
+/** What resuming needs: the recorded sessions, the configured agents, a
+ *  way to check a directory still exists, and the manager that spawns. */
+export type ResumeHandlerDeps = {
+  history(): Session[];
+  agents: Record<string, AgentConfig>;
+  directoryExists(path: string): Promise<boolean>;
+  resume(input: ResumeInput): Session;
+  language: "ar" | "en";
+};
+
+/**
+ * Picks a past session back up as a live one.
+ *
+ * Both preconditions are checked before spawning rather than after: an
+ * agent removed from the config would spawn a command that no longer
+ * exists, and a recorded directory since deleted would spawn in nowhere.
+ * Refusing first means the failure is a message, not a dead session in the
+ * list.
+ */
+export function createResumeHandler(
+  deps: ResumeHandlerDeps,
+): (sessionId: unknown) => Promise<{ ok: boolean; text?: string; language: "ar" | "en" }> {
+  const refuse = (): { ok: false; text: string; language: "ar" | "en" } => ({
+    ok: false,
+    text: MESSAGES.cannotResumeSession(deps.language),
+    language: deps.language,
+  });
+
+  return async (sessionId) => {
+    if (!isString(sessionId)) return refuse();
+    const session = deps.history().find((candidate) => candidate.id === sessionId);
+    if (session === undefined) return refuse();
+    const agent = deps.agents[session.agentId];
+    if (agent === undefined) return refuse();
+    if (!(await deps.directoryExists(session.projectPath))) return refuse();
+    try {
+      deps.resume({
+        id: session.id,
+        project: session.project,
+        projectPath: session.projectPath,
+        agent,
+      });
+    } catch {
+      // A spawn that throws is a refusal, not an unhandled rejection that
+      // leaves the button waiting forever.
+      return refuse();
+    }
+    return { ok: true, language: deps.language };
   };
 }
 

@@ -264,6 +264,15 @@ export const MESSAGES = {
   /** The ☰ button beside the address bar: the sidebar's own toggle. */
   toggleBookmarksSidebar: (language: "ar" | "en"): string =>
     language === "ar" ? "إظهار أو إخفاء شريط العلامات الجانبي" : "Show or hide the bookmarks sidebar",
+  // Why a Resume button refused. One message for every reason — the agent
+  // gone from the config, the recorded directory deleted, the spawn itself
+  // failing — because to the reader they are the same fact: this
+  // conversation cannot be picked back up, and the transcript above is
+  // still readable either way.
+  cannotResumeSession: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر استئناف هذه الجلسة."
+      : "This session cannot be resumed.",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // The personal browser's name in the project selector. Its *key* is the

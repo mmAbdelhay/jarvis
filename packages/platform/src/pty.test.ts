@@ -251,6 +251,20 @@ describe("argsFor", () => {
   // resume nothing. The flag exists only to let the transcript importer
   // recognise a session Jarvis started, and the importer reads anthropic
   // agents only — so the flag goes exactly where the importer looks.
+  // Resuming names an id that already exists; --session-id names one being
+  // created. Passing both asks the CLI to do two contradictory things with
+  // the same uuid, so resume replaces it rather than joining it.
+  it("resumes by id instead of claiming a new session id", () => {
+    const args = argsFor(claude, "sid-1", { resume: true });
+    expect(args).toEqual(["--resume", "sid-1"]);
+    expect(args).not.toContain("--session-id");
+  });
+
+  it("keeps the configured args and model when resuming", () => {
+    const args = argsFor({ ...claude, model: "opus", args: ["--foo"] }, "sid-1", { resume: true });
+    expect(args).toEqual(["--foo", "--model", "opus", "--resume", "sid-1"]);
+  });
+
   it("does not pass a session id to a non-anthropic agent", () => {
     const copilot: AgentConfig = { id: "copilot", command: "copilot", vendor: "github" };
     expect(argsFor(copilot, "sid-1")).not.toContain("--session-id");

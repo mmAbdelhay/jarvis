@@ -340,6 +340,41 @@ function renderHeader(session: Session): void {
   }
   const empty = $("session-empty");
   if (empty !== null) empty.hidden = true;
+  renderResume(session);
+}
+
+/**
+ * The Resume button, offered only for a session that has ended.
+ *
+ * A session Jarvis is already running has a live process behind it, and
+ * resuming that would put a second agent on the same conversation. A past
+ * one — every session imported from a terminal is past, since the importer
+ * never claims a state it cannot observe — is exactly what resume is for.
+ */
+function renderResume(session: Session): void {
+  const button = $("session-resume");
+  if (button === null) return;
+  const ended = session.state === "done" || session.state === "dead";
+  button.hidden = !ended;
+  if (!ended) return;
+  button.onclick = () => {
+    void resumeCurrent(session.id);
+  };
+}
+
+async function resumeCurrent(id: string): Promise<void> {
+  let result: { ok: boolean; text?: string };
+  try {
+    result = await window.jarvis.resumeSession(id);
+  } catch (error) {
+    result = { ok: false, text: errorMessage(error) };
+  }
+  // A refusal has to be visible. A button that silently does nothing is the
+  // exact failure this whole feature was built to fix.
+  if (!result.ok) {
+    const state = $("session-view-state");
+    if (state !== null && result.text !== undefined) state.textContent = result.text;
+  }
 }
 
 /** Sets text and direction together — an Arabic project name must not be

@@ -125,13 +125,26 @@ const BILLING_OVERRIDE = "ANTHROPIC_API_KEY";
  * an explicit `--model` in `args` leaves this one as a later duplicate,
  * and every CLI here takes the first occurrence.
  */
-export function argsFor(agent: AgentConfig, sessionId?: string): string[] {
+export function argsFor(
+  agent: AgentConfig,
+  sessionId?: string,
+  options?: { resume?: boolean },
+): string[] {
   const configured = agent.args ?? [];
   const withModel =
     agent.model === undefined || configured.includes("--model") || configured.includes("-m")
       ? configured
       : [...configured, "--model", agent.model];
-  if (sessionId === undefined || withModel.includes("--session-id")) return withModel;
+  if (sessionId === undefined) return withModel;
+  // Resuming names a session that already exists; --session-id names one
+  // being created. Both at once asks the CLI to do two contradictory things
+  // with the same uuid, so resume replaces it rather than joining it.
+  // --fork-session stays off, so the resumed conversation keeps its id and
+  // appends to its own transcript: one session, one row, still.
+  if (options?.resume === true) {
+    return withModel.includes("--resume") ? withModel : [...withModel, "--resume", sessionId];
+  }
+  if (withModel.includes("--session-id")) return withModel;
   // Only where the flag means what we need it to mean. Claude Code reads
   // --session-id as "use this id for the new session"; the Copilot CLI reads
   // it as "resume the session with this id", so passing a just-minted id
@@ -206,10 +219,15 @@ export function createPtySpawner(env: NodeJS.ProcessEnv = process.env): Spawner 
   ensureSpawnHelperExecutable();
   const pty = require("node-pty") as PtyModule;
 
-  return (agent: AgentConfig, projectPath: string, sessionId?: string): ProcessHandle => {
+  return (
+    agent: AgentConfig,
+    projectPath: string,
+    sessionId?: string,
+    options?: { resume?: boolean },
+  ): ProcessHandle => {
     const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(env), TERM };
 
-    const child = pty.spawn(agent.command, argsFor(agent, sessionId), {
+    const child = pty.spawn(agent.command, argsFor(agent, sessionId, options), {
       name: TERM,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,

@@ -27,6 +27,7 @@ function layoutDom(): void {
       <div id="session-view-path"></div>
       <div id="session-voice" hidden></div>
       <div id="session-view-state"></div>
+      <button id="session-resume" hidden></button>
       <div id="session-view-agent"></div>
       <div id="session-terminal"></div>
       <div id="session-empty" hidden></div>
@@ -41,6 +42,7 @@ type Jarvis = Pick<
   RendererApi,
   | "getSessionLog"
   | "getSessionTranscript"
+  | "resumeSession"
   | "sendSessionInput"
   | "resizeSession"
   | "setVoiceTarget"
@@ -50,6 +52,7 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
     getSessionTranscript: vi.fn(async () => ""),
+    resumeSession: vi.fn(async () => ({ ok: true, language: "en" as const })),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -511,5 +514,54 @@ describe("empty state", () => {
     const { wireSessionView, renderEmptyState } = await import("./session-view.js");
     expect(() => wireSessionView()).not.toThrow();
     expect(() => renderEmptyState()).not.toThrow();
+  });
+});
+
+describe("resume", () => {
+  // A session Jarvis is already running has a live process; resuming it
+  // would spawn a second agent against the same conversation.
+  it("offers resume only for a session that has ended", async () => {
+    stubJarvis();
+    const { openSession } = await import("./session-view.js");
+
+    await openSession(makeSession({ state: "done" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(false);
+
+    await openSession(makeSession({ state: "running" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(true);
+  });
+
+  it("resumes the session that is on screen", async () => {
+    const resumeSession = vi.fn(async () => ({ ok: true, language: "en" as const }));
+    stubJarvis({ resumeSession });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "past-1", state: "done" }));
+
+    document.getElementById("session-resume")?.click();
+    await Promise.resolve();
+
+    expect(resumeSession).toHaveBeenCalledWith("past-1");
+  });
+
+  // A refusal has to be visible: a button that silently does nothing is the
+  // bug this whole feature exists to fix.
+  it("says why when a resume is refused", async () => {
+    stubJarvis({
+      resumeSession: vi.fn(async () => ({
+        ok: false,
+        text: "This session cannot be resumed.",
+        language: "en" as const,
+      })),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ state: "done" }));
+
+    document.getElementById("session-resume")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("session-view-state")?.textContent).toContain(
+      "cannot be resumed",
+    );
   });
 });

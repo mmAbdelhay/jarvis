@@ -13,6 +13,7 @@ import {
   createApiHandlers,
   createTerminalHandlers,
   createTranscriptHandler,
+  createResumeHandler,
   type ApiHandlerDeps,
   type DockerHandlerDeps,
   type DockerHandlers,
@@ -36,7 +37,7 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import type { AgentHealth, Brain, Session, WorkspaceState } from "@jarvis/core";
+import type { AgentConfig, AgentHealth, Brain, Session, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
@@ -3168,5 +3169,100 @@ describe("createTranscriptHandler", () => {
       readFile: async () => "x",
     });
     expect(await handler(undefined)).toBe("");
+  });
+});
+
+describe("createResumeHandler", () => {
+  const past = (over: Partial<Session> = {}): Session => ({
+    id: "s1",
+    project: null,
+    projectPath: "/home/u/app",
+    agentId: "claude-mm",
+    state: "done",
+    summary: "hello",
+    startedAt: 1,
+    lastActivityAt: 2,
+    branch: "",
+    insertions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    ...over,
+  });
+
+  const agents: Record<string, AgentConfig> = {
+    "claude-mm": { id: "claude-mm", command: "claude-mm" },
+  };
+
+  it("resumes the session in the directory it was recorded in", async () => {
+    const calls: { id: string; path: string }[] = [];
+    const handler = createResumeHandler({
+      history: () => [past()],
+      agents,
+      directoryExists: async () => true,
+      resume: (input) => {
+        calls.push({ id: input.id, path: input.projectPath });
+        return past({ state: "starting" });
+      },
+      language: "en",
+    });
+    const result = await handler("s1");
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([{ id: "s1", path: "/home/u/app" }]);
+  });
+
+  // Resuming a session whose agent was removed from the config would spawn
+  // a command that no longer exists; refused before spawning, not after.
+  it("refuses when the session's agent is no longer configured", async () => {
+    const resume = vi.fn();
+    const handler = createResumeHandler({
+      history: () => [past({ agentId: "gone" })],
+      agents,
+      directoryExists: async () => true,
+      resume,
+      language: "en",
+    });
+    expect((await handler("s1")).ok).toBe(false);
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the recorded directory no longer exists", async () => {
+    const resume = vi.fn();
+    const handler = createResumeHandler({
+      history: () => [past()],
+      agents,
+      directoryExists: async () => false,
+      resume,
+      language: "en",
+    });
+    expect((await handler("s1")).ok).toBe(false);
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown session", async () => {
+    const resume = vi.fn();
+    const handler = createResumeHandler({
+      history: () => [],
+      agents,
+      directoryExists: async () => true,
+      resume,
+      language: "en",
+    });
+    expect((await handler("nope")).ok).toBe(false);
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  // A spawn that throws must come back as a refusal, not an unhandled
+  // rejection that leaves the button spinning.
+  it("reports a failed spawn instead of throwing", async () => {
+    const handler = createResumeHandler({
+      history: () => [past()],
+      agents,
+      directoryExists: async () => true,
+      resume: () => {
+        throw new Error("no binary");
+      },
+      language: "en",
+    });
+    expect((await handler("s1")).ok).toBe(false);
   });
 });
