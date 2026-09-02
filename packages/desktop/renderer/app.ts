@@ -11,7 +11,14 @@ import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./
 import { showView } from "./views.js";
 import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
 import { initSettings, openSettings } from "./settings.js";
-import { detectLanguage, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
+import {
+  detectLanguage,
+  formatBytes,
+  formatDiskUsage,
+  formatEndedAt,
+  formatUptime,
+  projectLabel,
+} from "./format.js";
 import { renderProviders, wireProvidersPanel } from "./providers.js";
 import {
   appendSessionOutput,
@@ -371,10 +378,11 @@ function buildSessionRow(session: Session): HTMLElement {
 
   const project = document.createElement("span");
   project.className = "session__project";
-  const projectLanguage = detectLanguage(session.project);
+  const label = projectLabel(session);
+  const projectLanguage = detectLanguage(label);
   project.dir = projectLanguage === "ar" ? "rtl" : "ltr";
   if (projectLanguage === "ar") project.classList.add("arabic");
-  project.textContent = session.project;
+  project.textContent = label;
   head.append(project);
 
   const spacer = document.createElement("div");

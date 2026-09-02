@@ -29,6 +29,24 @@ export function formatDiskUsage(
   return { used: usedValue.toFixed(1), total: `/ ${totalFormatted}` };
 }
 
+/**
+ * What to call a session in the UI when its `project` is null — the
+ * ordinary case for a session imported from a transcript, started in a
+ * directory nobody declared in `projects:`.
+ *
+ * A deliberate second spelling of `@jarvis/core`'s `sessionLabel`, not an
+ * oversight: a renderer module may import *types* from a workspace package
+ * but never a value (see no-value-imports.test.ts — a bare specifier
+ * survives into the bundle and is fatal in the browser context), and core's
+ * version reaches for `node:path`, which does not exist here. The rule is
+ * three lines; the alternative is a crash on module load.
+ */
+export function projectLabel(session: { project: string | null; projectPath: string }): string {
+  if (session.project !== null && session.project !== "") return session.project;
+  const segments = session.projectPath.split("/").filter((segment) => segment !== "");
+  return segments.at(-1) ?? session.projectPath;
+}
+
 export function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3_600);

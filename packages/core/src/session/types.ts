@@ -4,7 +4,19 @@ export type SessionState = "starting" | "running" | "waiting" | "done" | "dead";
 
 export type Session = {
   id: string;
-  project: string;
+  /**
+   * The configured project this session's cwd belongs to, or null when it
+   * belongs to none.
+   *
+   * Null is ordinary rather than exceptional: a session imported from a
+   * transcript is recorded wherever it was actually started, and most work
+   * on a machine happens in directories the user never declared in
+   * `projects:` — 95 of 125 on the machine this was measured against. Such
+   * a row is still worth having, because projectPath, summary and resume
+   * all work without a project name. `sessionLabel()` is the single place
+   * that turns a null into something displayable.
+   */
+  project: string | null;
   projectPath: string;
   agentId: string;
   model?: string;

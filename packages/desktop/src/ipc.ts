@@ -1,6 +1,7 @@
 import {
   checkAgent,
   gitFailureText,
+  sessionLabel,
   type AgentConfig,
   type AgentHealth,
   type CommandRunner,
@@ -203,7 +204,10 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
         value: {
           session: {
             id: session.id,
-            project: session.project,
+            // Already resolved to something displayable here rather than
+            // in the renderer: this view names one repository, and a
+            // session with no configured project still has a directory.
+            project: sessionLabel(session),
             projectPath: session.projectPath,
             agentId: session.agentId,
             lastActivityAt: session.lastActivityAt,

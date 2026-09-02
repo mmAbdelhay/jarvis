@@ -1,3 +1,4 @@
+import { sessionLabel } from "../session/label.js";
 import type { Session } from "../session/types.js";
 
 type Language = "ar" | "en";
@@ -115,7 +116,7 @@ function when(at: number, now: number): string {
 
 function lastSessionLine(session: Session, now: number, language: Language): string {
   const label = language === "ar" ? "آخر جلسة" : "Last session";
-  return `${label}: ${session.project} · ${session.agentId} · ${when(session.lastActivityAt, now)}`;
+  return `${label}: ${sessionLabel(session)} · ${session.agentId} · ${when(session.lastActivityAt, now)}`;
 }
 
 function uncommittedLine(projects: readonly DirtyProject[], language: Language): string {

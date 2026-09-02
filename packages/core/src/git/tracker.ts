@@ -1,3 +1,4 @@
+import { sessionLabel } from "../session/label.js";
 import type { Session } from "../session/types.js";
 import type { GitChanges, GitProvider } from "./types.js";
 
@@ -60,7 +61,7 @@ export class ChangeTracker {
       if (changes === undefined) continue;
       result.push({
         sessionId: session.id,
-        project: session.project,
+        project: sessionLabel(session),
         repoPath: session.projectPath,
         branch: changes.branch,
         detached: changes.detached,

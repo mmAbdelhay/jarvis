@@ -94,6 +94,23 @@ describe("greetingText", () => {
     expect(text).toContain("Last session: acme · claude-acme · 28/08 14:32");
   });
 
+  // Most sessions on a machine happen in directories nobody declared in
+  // `projects:`, so the imported ones arrive with a null project. The line
+  // still has to name where the work was.
+  it("names a project-less session by its directory", () => {
+    const text = greetingText(
+      {
+        now: EVENING,
+        history: [session({ project: null, projectPath: "/Users/x/work/notes" })],
+        dirtyProjects: [],
+        template: REPORTING,
+      },
+      "en",
+    );
+
+    expect(text).toContain("Last session: notes · claude-acme · 14:32");
+  });
+
   it("omits the last-session line when there is no history", () => {
     const text = greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "en");
 

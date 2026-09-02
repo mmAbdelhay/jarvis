@@ -1,7 +1,7 @@
 import type { Session, SessionOutput } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
-import { detectLanguage } from "./format.js";
+import { detectLanguage, projectLabel } from "./format.js";
 import { enhanceTerminal } from "./terminal-addons.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
@@ -188,7 +188,10 @@ function refit(): void {
  */
 export async function openSession(session: Session): Promise<void> {
   currentId = session.id;
-  currentProject = session.project;
+  // The *configured* project, not the display label: this drives
+  // openTab(), and there is no workspace to open for a directory that is
+  // not a project.
+  currentProject = session.project ?? undefined;
   renderHeader(session);
   showView("session");
   setVoiceTarget(session.id);
@@ -254,7 +257,7 @@ export function wireSessionView(): void {
 }
 
 function renderHeader(session: Session): void {
-  setText($("session-view-project"), session.project);
+  setText($("session-view-project"), projectLabel(session));
   setText($("session-view-path"), session.projectPath);
   const state = $("session-view-state");
   if (state !== null) state.textContent = session.state;
