@@ -85,3 +85,57 @@ and begin the spawn on hover. The same treatment applies unchanged.
 A `kind` cluster was created to prove the pipeline and then deleted; the EKS
 run had already proved it against something real. Nothing from this spike is
 kept — no app installed, no cluster left, no file in `~/.kube` touched.
+
+## `-skipped-kube-contexts`, verified (Task 1)
+
+Re-extracted the same 0.45.0 arm64 binary into a fresh temp dir and ran it
+against the real 4-context kubeconfig (three EKS ARNs, one `kind-kind`),
+skipping different subsets each run, then reading `/config` and the startup
+log's `Proxy setup` lines. AWS SAML credentials were expired throughout; that
+does not matter here because the filtering happens at startup from the
+kubeconfig file, before any cluster is contacted.
+
+**It works, but only against the URL-rewritten context name, not the raw
+kubeconfig name.** Passing an EKS context exactly as `kubectl config
+get-contexts -o name` prints it —
+`arn:aws:eks:eu-west-1:210987654321:cluster/Cast_AI` — has **no effect**: the
+context still appears in `/config` and still gets a `Proxy setup` log line.
+Passing the same context with its `/` rewritten to `--` (the identical rule
+already noted above, that Headlamp applies when building cluster URLs) —
+`arn:aws:eks:eu-west-1:210987654321:cluster--Cast_AI` — filters it out of
+`/config` correctly. `kind-kind` contains neither character and worked
+unmodified either way. Colons needed no escaping in either form; the shell
+only needed the value quoted as a whole because of the commas.
+
+Three-part answer:
+
+1. **Comma-separated list of multiple contexts: yes.** A single flag value
+   `"arn:aws:eks:eu-west-1:210987654321:cluster--Cast_AI,arn:aws:eks:eu-west-1:123456789012:cluster--app_staging"`
+   filtered both out of `/config` in one run, leaving the other two
+   (`app_dev`, `kind-kind`) — using the rewritten (`--`) form for each ARN. A
+   mixed list of one rewritten ARN plus `kind-kind` also filtered both
+   correctly.
+2. **Skipped contexts disappear from `/config`: yes** — provided the value
+   passed uses the rewritten name for any context whose kubeconfig name
+   contains `/`. The raw name is silently ignored (not an error, not a
+   partial match — just never removed).
+3. **Skipped contexts disappear from the startup log's `Proxy setup` lines:
+   no, never, regardless of format.** Every run — 4 skipped 0, 2 skipped,
+   1 skipped, in every naming form tried — logged exactly 4 `Proxy setup`
+   lines, one per kubeconfig context. The flag filters what `/config` exposes
+   to the front end; it does not stop the server from building a proxy for
+   every context at startup. A manager that keys "how many clusters did the
+   server actually see" off `Proxy setup` line counts will be wrong; `/config`
+   is the correct source of truth for what a project's tab shows.
+
+**Consequence for Task 4.** `HeadlampManagerDeps`/the spawn code must rewrite
+any context name containing `/` to use `--` in place of `/` before it goes
+into `-skipped-kube-contexts` — the same transform already required for
+building per-cluster URLs. With that transform applied, `-skipped-kube-contexts`
+is sound as the filtering mechanism and the kubeconfig-rewrite fallback
+described in the task brief is not needed.
+
+Binary and frontend were extracted to a `mktemp -d` directory and the
+directory removed at the end; `~/.kube/config` was read-only throughout and
+was not modified; no `headlamp-server` process was left running
+(`pgrep -fl headlamp-server` returned nothing).
