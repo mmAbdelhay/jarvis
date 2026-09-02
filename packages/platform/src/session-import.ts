@@ -1,4 +1,4 @@
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
 
 /**
@@ -56,6 +56,159 @@ export function transcriptDirs(
       ? [{ agentId: agent.id, dir: join(agent.configDir, "projects") }]
       : [],
   );
+}
+
+/** What one transcript says about its session. Everything else a session
+ *  row needs — which agent's directory it was found under, which project
+ *  its cwd resolves to — is the importer's to supply. */
+export type TranscriptSession = {
+  id: string;
+  /** Read from the `cwd` field, never from the escaped directory name. */
+  cwd: string;
+  model: string | null;
+  branch: string;
+  startedAt: number;
+  lastActivityAt: number;
+  summary: string;
+};
+
+/** How much of a first prompt is kept as the row's one-line summary. */
+const SUMMARY_MAX = 200;
+
+/**
+ * A session row from the *head* of its transcript plus the file's mtime.
+ *
+ * Bounded by construction. Only the head is parsed, and the loop stops as
+ * soon as it has everything it needs — at the first user prompt in
+ * practice; `lastActivityAt` is the mtime rather than the last record's
+ * timestamp, so nothing ever seeks to the end. A 40MB transcript costs what
+ * a 4KB one costs.
+ *
+ * The escaped directory name in `path` (`-Users-u-projects-jarvis`) is
+ * never parsed: a dash in it could be a path separator or a literal dash,
+ * and there is no way to tell. `cwd` inside the file is unambiguous and is
+ * the only source. `path` is used for exactly one thing — the file's own
+ * name *is* the session id, which is precisely what `--session-id`
+ * determines — as the fallback for records that carry no `sessionId`.
+ *
+ * Returns null when the file is not a session transcript Jarvis can record:
+ *
+ *  - a malformed or truncated record — the whole file is skipped, because a
+ *    partially-parsed transcript would be a quietly wrong row, and one bad
+ *    file must not cost the other 124;
+ *  - no `cwd` anywhere in the head (an older CLI) — the one field with no
+ *    fallback.
+ *
+ * Every field is `typeof`-checked before use: this is a file written by
+ * another program, and the same reasoning applies as to a database row.
+ */
+export function sessionFromTranscript(
+  head: string,
+  path: string,
+  mtime: number,
+): TranscriptSession | null {
+  const lines = head.split("\n");
+  // A head read is cut mid-line by definition, so an unterminated final
+  // line is a fragment rather than a malformed record.
+  if (!head.endsWith("\n")) lines.pop();
+
+  let id: string | undefined;
+  let cwd: string | undefined;
+  let branch: string | undefined;
+  let timestamp: string | undefined;
+  let model: string | undefined;
+  let summary: string | undefined;
+
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (typeof record !== "object" || record === null) return null;
+    const fields = record as Record<string, unknown>;
+
+    id ??= stringField(fields, "sessionId");
+    cwd ??= stringField(fields, "cwd");
+    branch ??= stringField(fields, "gitBranch");
+    timestamp ??= stringField(fields, "timestamp");
+
+    const message = fields["message"];
+    if (typeof message === "object" && message !== null) {
+      const body = message as Record<string, unknown>;
+      model ??= stringField(body, "model");
+      // Never replaced once found: the *first* prompt is what a history row
+      // is about, and it is also where the scan is allowed to stop.
+      if (summary === undefined && fields["type"] === "user") {
+        summary = promptText(body["content"]);
+      }
+    }
+
+    if (
+      id !== undefined &&
+      cwd !== undefined &&
+      branch !== undefined &&
+      timestamp !== undefined &&
+      model !== undefined &&
+      summary !== undefined
+    ) {
+      break;
+    }
+  }
+
+  if (cwd === undefined) return null;
+
+  const startedAt = timestamp === undefined ? NaN : Date.parse(timestamp);
+
+  return {
+    id: id ?? basename(path, ".jsonl"),
+    cwd,
+    model: model ?? null,
+    branch: branch ?? "",
+    // A transcript whose first timestamp is unreadable still happened, and
+    // the file's own mtime is the honest lower bound on when.
+    startedAt: Number.isNaN(startedAt) ? mtime : startedAt,
+    lastActivityAt: mtime,
+    summary: summary ?? "",
+  };
+}
+
+function stringField(fields: Record<string, unknown>, key: string): string | undefined {
+  const value = fields[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * The text of a user turn, or undefined when the turn carries none.
+ *
+ * A `content` array is not always a prompt: a tool result comes back
+ * through the *user* role, and "ok" is not what a session was about. Only
+ * text blocks count.
+ */
+function promptText(content: unknown): string | undefined {
+  if (typeof content === "string") return trimSummary(content);
+  if (!Array.isArray(content)) return undefined;
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const fields = block as Record<string, unknown>;
+    if (fields["type"] !== "text") continue;
+    const text = fields["text"];
+    if (typeof text !== "string") continue;
+    const trimmed = trimSummary(text);
+    if (trimmed !== undefined) return trimmed;
+  }
+  return undefined;
+}
+
+/** One line, bounded: a history row shows a line, and a prompt can be an
+ *  essay. Whitespace is collapsed so a multi-line prompt does not arrive as
+ *  a row full of newlines. */
+function trimSummary(text: string): string | undefined {
+  const collapsed = text.replaceAll(/\s+/g, " ").trim();
+  return collapsed === "" ? undefined : collapsed.slice(0, SUMMARY_MAX);
 }
 
 /**
