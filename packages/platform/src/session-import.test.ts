@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
+  createFsImportDeps,
   createSessionImporter,
+  HEAD_BYTES,
   isWithin,
   resolveProject,
   sessionFromTranscript,
@@ -564,5 +566,31 @@ describe("createSessionImporter", () => {
     importer.stop();
 
     expect(setup.closed).toBe(1);
+  });
+});
+
+describe("createFsImportDeps", () => {
+  // The importer's own tests inject fakes; these cover the two properties
+  // of the real implementation that can be asserted without reading
+  // anything of the user's — never their real ~/.claude* directories.
+  it("bounds a head read", () => {
+    // The whole reason a 40MB transcript costs what a 4KB one costs.
+    expect(HEAD_BYTES).toBeLessThanOrEqual(64 * 1024);
+    expect(HEAD_BYTES).toBeGreaterThan(0);
+  });
+
+  it("yields nothing for a directory that does not exist", async () => {
+    // A configured configDir that was never created is the ordinary case
+    // for a freshly configured agent; it must contribute nothing rather
+    // than take the scan down. This path is never created by this test.
+    const { listFiles } = createFsImportDeps();
+
+    await expect(listFiles("/nonexistent-jarvis-session-import-test")).resolves.toEqual([]);
+  });
+
+  it("reads nothing from a file that does not exist", async () => {
+    const { readHead } = createFsImportDeps();
+
+    await expect(readHead("/nonexistent-jarvis-session-import-test/a.jsonl")).rejects.toThrow();
   });
 });

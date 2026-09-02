@@ -1,3 +1,5 @@
+import { watch as watchDir } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import type { AgentConfig, SessionStore } from "@jarvis/core";
 
@@ -428,4 +430,85 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * How much of a transcript is read. A head, never the file: this is the
+ * whole reason a 40MB transcript costs what a 4KB one costs. 64KB is many
+ * times the size of an opening exchange, and small enough that 125 of them
+ * is nothing.
+ */
+export const HEAD_BYTES = 64 * 1024;
+
+/**
+ * The real filesystem behind `listFiles`, `readHead` and `watch`.
+ *
+ * Kept to the three functions and nothing else, so that what the importer's
+ * own tests cannot cover is only the syscalls themselves. Every failure
+ * here is "some directory on this machine is not what we expected", and
+ * none of them is worth taking a startup path down over.
+ */
+export function createFsImportDeps(): Pick<
+  SessionImporterDeps,
+  "listFiles" | "readHead" | "watch"
+> {
+  return {
+    async listFiles(dir) {
+      let entries: string[];
+      try {
+        // Recursive because transcripts sit one level down, in a directory
+        // per escaped cwd — a name this code never parses.
+        entries = await readdir(dir, { recursive: true });
+      } catch {
+        // A configDir that does not exist yet is the ordinary case for a
+        // freshly configured agent, not an error: it contributes nothing.
+        return [];
+      }
+
+      const files: TranscriptFile[] = [];
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const path = join(dir, entry);
+        try {
+          const info = await stat(path);
+          if (!info.isFile()) continue;
+          files.push({ path, mtime: info.mtimeMs });
+        } catch {
+          // Listed a moment ago, gone now.
+        }
+      }
+      return files;
+    },
+
+    async readHead(path) {
+      const handle = await open(path, "r");
+      try {
+        const buffer = Buffer.alloc(HEAD_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+        return buffer.subarray(0, bytesRead).toString("utf8");
+      } finally {
+        await handle.close();
+      }
+    },
+
+    watch(dir, onChange) {
+      const watcher = watchDir(dir, { recursive: true }, (_event, filename) => {
+        if (filename === null || !filename.toString().endsWith(".jsonl")) return;
+        const path = join(dir, filename.toString());
+        // The stat is what dates the change; a watch event carries no
+        // mtime of its own, and mtime is where lastActivityAt comes from.
+        void stat(path)
+          .then((info) => {
+            if (info.isFile()) onChange({ path, mtime: info.mtimeMs });
+          })
+          .catch(() => {
+            // A transcript that vanished between the event and the stat.
+          });
+      });
+      // An error on the watcher (the directory removed under it) must not
+      // reach the process as an unhandled 'error' event.
+      watcher.on("error", () => watcher.close());
+      return { close: () => watcher.close() };
+    },
+  };
 }
