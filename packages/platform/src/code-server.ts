@@ -46,37 +46,61 @@ export type CodeServerManagerDeps = {
  */
 export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServerManager {
   const running = new Map<string, { url: string; process: CodeServerProcess }>();
+  // Projects whose process has been spawned but has not answered yet.
+  // `running` is only populated once readiness is confirmed, and readiness
+  // was measured at ~1.2s warm and ~9s cold — a long window in which a
+  // second open() (an impatient second click, or the pre-warm on hover
+  // followed by the click it exists to serve) used to spawn a *second*
+  // code-server and orphan one of them until quit. Sharing the in-flight
+  // promise is also what makes pre-warming free: the click costs nothing
+  // beyond whatever is left of a start already under way.
+  const starting = new Map<string, Promise<CodeServerResult>>();
+
+  async function start(projectPath: string): Promise<CodeServerResult> {
+    let port: number;
+    let process: CodeServerProcess;
+    try {
+      port = await deps.findFreePort();
+      process = deps.spawn({
+        port,
+        userDataDir: deps.userDataDir,
+        extensionsDir: deps.extensionsDir,
+        projectPath,
+      });
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+
+    const url = `http://127.0.0.1:${port}/?folder=${encodeURIComponent(projectPath)}`;
+
+    const ready = await deps.waitUntilReady(url);
+    if (!ready) {
+      process.kill();
+      return { ok: false, detail: "code-server did not become ready in time" };
+    }
+
+    running.set(projectPath, { url, process });
+    process.onExit(() => running.delete(projectPath));
+    return { ok: true, url };
+  }
 
   return {
-    async open(projectPath) {
+    open(projectPath) {
       const existing = running.get(projectPath);
-      if (existing !== undefined) return { ok: true, url: existing.url };
+      if (existing !== undefined) return Promise.resolve({ ok: true, url: existing.url });
 
-      let port: number;
-      let process: CodeServerProcess;
-      try {
-        port = await deps.findFreePort();
-        process = deps.spawn({
-          port,
-          userDataDir: deps.userDataDir,
-          extensionsDir: deps.extensionsDir,
-          projectPath,
-        });
-      } catch (error) {
-        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
-      }
+      const inFlight = starting.get(projectPath);
+      if (inFlight !== undefined) return inFlight;
 
-      const url = `http://127.0.0.1:${port}/?folder=${encodeURIComponent(projectPath)}`;
-
-      const ready = await deps.waitUntilReady(url);
-      if (!ready) {
-        process.kill();
-        return { ok: false, detail: "code-server did not become ready in time" };
-      }
-
-      running.set(projectPath, { url, process });
-      process.onExit(() => running.delete(projectPath));
-      return { ok: true, url };
+      const attempt = start(projectPath);
+      starting.set(projectPath, attempt);
+      // Cleared on failure as well as success, or a project that failed to
+      // start once could never be retried without restarting Jarvis.
+      void attempt.then(
+        () => starting.delete(projectPath),
+        () => starting.delete(projectPath),
+      );
+      return attempt;
     },
 
     stopAll() {
@@ -109,6 +133,15 @@ export function findFreePort(): Promise<number> {
   });
 }
 
+/** How long to wait between readiness probes. Measured against a real
+ *  code-server: the earliest instant it answered was 1087ms, and the old
+ *  300ms grid resolved at 1261ms — up to a fifth of a second of a warm open
+ *  spent asleep on a server that was already up. A loopback GET that is
+ *  refused costs microseconds, so the grid can be much finer; 25ms bounds
+ *  the waste at roughly the cost of one refused connection. It is not the
+ *  bulk of the wait (process boot is), but it is the part that was ours. */
+const READY_POLL_INTERVAL_MS = 25;
+
 /** Polls `url` with plain GET requests until code-server answers with any
  *  HTTP response (even an auth challenge counts — the process is up) or
  *  `timeoutMs` elapses. */
@@ -124,7 +157,7 @@ export function waitUntilReady(url: string, timeoutMs = 15_000): Promise<boolean
             resolve(false);
             return;
           }
-          setTimeout(attempt, 300);
+          setTimeout(attempt, READY_POLL_INTERVAL_MS);
         });
     };
     attempt();

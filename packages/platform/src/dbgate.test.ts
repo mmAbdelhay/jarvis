@@ -295,6 +295,45 @@ describe("createDbGateManager", () => {
     expect(processes.map((process) => process.killed)).toEqual([true, true]);
   });
 
+  // Same defect, and the same measurement, as createCodeServerManager's:
+  // `running` is only written once the instance has answered (~1.2s warm,
+  // ~22s cold), so a second open() inside that window used to spawn a
+  // second dbgate-serve — and with it a second random password, so the
+  // credential the user was shown could belong to the instance that got
+  // orphaned rather than the one behind the tab.
+  it("shares one spawn between callers that open the same project while it is starting", async () => {
+    let release: (ready: boolean) => void = () => undefined;
+    const { instance, processes } = manager({
+      waitUntilReady: () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    });
+
+    const first = instance.open("acme");
+    const second = instance.open("acme");
+    // ensureDir, findFreePort and the port line are all awaited before the
+    // readiness probe exists.
+    for (let tick = 0; tick < 8; tick++) await Promise.resolve();
+    release(true);
+
+    expect(await second).toEqual(await first);
+    expect(processes).toHaveLength(1);
+  });
+
+  it("retries after a start that failed, rather than handing back the failure forever", async () => {
+    let ready = false;
+    const { instance, processes } = manager({ waitUntilReady: () => Promise.resolve(ready) });
+
+    const failed = await instance.open("acme");
+    ready = true;
+    const second = await instance.open("acme");
+
+    expect(failed.ok).toBe(false);
+    expect(second.ok).toBe(true);
+    expect(processes).toHaveLength(2);
+  });
+
   it("spawns again after stopAll", async () => {
     const { instance, processes } = manager();
 

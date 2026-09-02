@@ -57,6 +57,16 @@ export const MESSAGES = {
   // the bad value back, since its shape/type is exactly what's untrusted.
   invalidArgument: (language: "ar" | "en"): string =>
     language === "ar" ? "طلب غير صالح." : "Invalid request.",
+  // Shown for the whole time an Editor tab is waiting on code-server to
+  // boot. Measured at 1.9-2.3s with the binaries warm and 9-13s cold, and
+  // it used to be spent with an empty toolbar — the app looked frozen. The
+  // wait belongs to code-server and cannot be removed, so it is stated.
+  editorStarting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ تشغيل المحرر…" : "Starting the editor…",
+  // The same, for DbGate. Its cold start was measured at 21.6s, so this is
+  // the message a user is most likely to sit and read.
+  databaseStarting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ تشغيل متصفح قواعد البيانات…" : "Starting the database browser…",
   // Shown when a code-server instance fails to start or become ready for
   // an Editor tab — the one caller left of what used to be the doc
   // viewer's shared failure text.
