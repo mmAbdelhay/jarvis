@@ -277,6 +277,11 @@ app.whenReady().then(async () => {
     });
 
     const window = new BrowserWindow({
+      // Jarvis is the surface you work from, not a panel beside something
+      // else: it opens full screen. The width and height are still worth
+      // stating — they are the size the window restores to the moment
+      // anyone leaves full screen.
+      fullscreen: true,
       width: 1440,
       height: 900,
       backgroundColor: "#060a0f",
