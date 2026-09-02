@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createCodeServerManager,
+  createRealCodeServerSpawner,
   type CodeServerProcess,
   type CodeServerSpawner,
 } from "./code-server.js";
@@ -266,5 +267,31 @@ describe("createCodeServerManager rooted at a sub-folder", () => {
     instance.stopAll();
 
     expect(processes[0]?.killed).toBe(true);
+  });
+});
+
+describe("createRealCodeServerSpawner", () => {
+  it("reports a missing binary as an exit rather than crashing the process", async () => {
+    // code-server is resolved on PATH, and a binary that is not there
+    // arrives as an async "error" event, not a throw. Unhandled, it takes
+    // the whole app down rather than disabling one button. PATH is emptied
+    // so the lookup fails on a machine that does have code-server too.
+    const path = process.env["PATH"];
+    process.env["PATH"] = "";
+    try {
+      const spawned = createRealCodeServerSpawner()({
+        port: 4455,
+        userDataDir: "/tmp/jarvis-test/user-data",
+        extensionsDir: "/tmp/jarvis-test/extensions",
+        folderPath: "/tmp/jarvis-test",
+      });
+
+      const code = await new Promise<number | null>((resolve) => {
+        spawned.onExit(resolve);
+      });
+      expect(code).toBeNull();
+    } finally {
+      process.env["PATH"] = path;
+    }
   });
 });

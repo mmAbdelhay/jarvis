@@ -240,9 +240,21 @@ export function createRealCodeServerSpawner(): CodeServerSpawner {
       { stdio: "ignore" },
     );
 
+    const exitListeners: ((code: number | null) => void)[] = [];
+    // A code-server that is not installed arrives as an async "error"
+    // event, not a throw. Left unhandled it takes the process down; treated
+    // as an exit it becomes an ordinary "never reported a port" failure the
+    // caller already handles. Same as dbgate.ts and headlamp.ts.
+    child.on("error", () => {
+      for (const listener of exitListeners) listener(null);
+    });
+
     return {
       kill: () => child.kill(),
-      onExit: (listener) => child.on("exit", (code) => listener(code)),
+      onExit: (listener) => {
+        exitListeners.push(listener);
+        child.on("exit", (code) => listener(code));
+      },
     };
   };
 }
