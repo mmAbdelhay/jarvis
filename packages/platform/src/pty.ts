@@ -102,7 +102,22 @@ const BILLING_OVERRIDE = "ANTHROPIC_API_KEY";
 
 /**
  * The args an agent is launched with: whatever the config specifies, plus
- * `--model` when the config names one. Without this, `model:` in
+ * `--model` when the config names one and `--session-id` with the id
+ * SessionManager already minted for this session.
+ *
+ * `--session-id` is what makes a Jarvis session and its transcript one
+ * record rather than two. SessionManager mints its own uuid, unrelated to
+ * the id Claude Code would choose for itself, so without this flag the
+ * transcript importer finds a session it has no way to recognise as one
+ * Jarvis started and files it a second time under a second id. Verified
+ * against the real CLI rather than taken from --help: the transcript is
+ * written under the supplied id even when the run itself fails.
+ *
+ * Exported and pinned by its own test, the same as headlampArgs, because
+ * the flag list is the whole contract with the CLI and a real-pty test
+ * proves the pty rather than the arguments.
+ *
+ * Without the model half of this, `model:` in
  * jarvis.yaml is decorative — it is recorded on the session row and shown
  * in the UI, but the agent is launched with no model flag and quietly uses
  * whatever its own account default is, so the dashboard says "sonnet"
@@ -110,11 +125,23 @@ const BILLING_OVERRIDE = "ANTHROPIC_API_KEY";
  * an explicit `--model` in `args` leaves this one as a later duplicate,
  * and every CLI here takes the first occurrence.
  */
-function argsFor(agent: AgentConfig): string[] {
+export function argsFor(agent: AgentConfig, sessionId?: string): string[] {
   const configured = agent.args ?? [];
-  if (agent.model === undefined) return configured;
-  if (configured.includes("--model") || configured.includes("-m")) return configured;
-  return [...configured, "--model", agent.model];
+  const withModel =
+    agent.model === undefined || configured.includes("--model") || configured.includes("-m")
+      ? configured
+      : [...configured, "--model", agent.model];
+  if (sessionId === undefined || withModel.includes("--session-id")) return withModel;
+  // Only where the flag means what we need it to mean. Claude Code reads
+  // --session-id as "use this id for the new session"; the Copilot CLI reads
+  // it as "resume the session with this id", so passing a just-minted id
+  // there asks it to resume something that does not exist. The flag serves
+  // the transcript importer, and the importer reads anthropic agents only,
+  // so the two share one predicate rather than drifting apart. An agent that
+  // declares no vendor keeps the flag: losing dedup is a duplicated row,
+  // while a wrong flag is a session that will not start.
+  if (agent.vendor !== undefined && agent.vendor !== "anthropic") return withModel;
+  return [...withModel, "--session-id", sessionId];
 }
 
 /**
@@ -179,10 +206,10 @@ export function createPtySpawner(env: NodeJS.ProcessEnv = process.env): Spawner 
   ensureSpawnHelperExecutable();
   const pty = require("node-pty") as PtyModule;
 
-  return (agent: AgentConfig, projectPath: string): ProcessHandle => {
+  return (agent: AgentConfig, projectPath: string, sessionId?: string): ProcessHandle => {
     const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(env), TERM };
 
-    const child = pty.spawn(agent.command, argsFor(agent), {
+    const child = pty.spawn(agent.command, argsFor(agent, sessionId), {
       name: TERM,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,

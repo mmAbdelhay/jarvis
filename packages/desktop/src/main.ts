@@ -23,6 +23,7 @@ import {
   createCapacityReader,
   createCodeServerManager,
   createDbGateManager,
+  createFsImportDeps,
   createGitProvider,
   createHeadlampManager,
   createKubeContextLister,
@@ -30,6 +31,7 @@ import {
   createPtySpawner,
   createRealCodeServerSpawner,
   createRealShellSpawner,
+  createSessionImporter,
   createShellManager,
   createCollection,
   createFolder,
@@ -172,6 +174,42 @@ app.whenReady().then(async () => {
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
     const sessions = new SessionManager(createPtySpawner(), sessionStore);
+
+    // Sessions Jarvis did not spawn — the ones started by typing an agent
+    // into a terminal, which on this machine outnumber the recorded ones
+    // twenty to one — exist only as JSONL transcripts on disk. The importer
+    // reads them into the same table. The two writers converge on one row
+    // per session rather than fighting, because agents are now spawned with
+    // --session-id (pty.ts) and so write their transcripts under the id
+    // SessionManager already minted.
+    const sessionImporter = createSessionImporter({
+      ...createFsImportDeps(),
+      now: () => Date.now(),
+      store: sessionStore,
+      // Read per file rather than captured once: a session can start
+      // between two files, and the importer must never write live state
+      // for one SessionManager is running.
+      ownedIds: () => new Set(sessions.list().map((session) => session.id)),
+      agents: registry.list(),
+      projects: config.projects,
+      // Excluded by path: these are the brain talking to itself, and
+      // imported they would outnumber real sessions two to one.
+      brainCwd: config.brain.cwd,
+      importWindowDays: config.sessions.importWindowDays,
+      log: (message) => console.log(message),
+    });
+    // Started, not awaited — the same reasoning as the health probe above:
+    // a scan of the transcript directories must never hold up the window
+    // appearing, and the .catch is attached immediately so a late failure
+    // cannot surface as an unhandled rejection.
+    void sessionImporter
+      .start()
+      .then((imported) => {
+        if (imported > 0) console.log(`Imported ${imported} session transcripts.`);
+      })
+      .catch((error) => {
+        console.error(`Session import failed: ${errorMessage(error)}`);
+      });
     // macOS's own voices, always — Arabic goes through these whichever engine
     // English uses, because a Piper model speaks one language.
     const macSpeech = new MacSpeech(
@@ -619,6 +657,8 @@ app.whenReady().then(async () => {
       headlamp.stopAll();
       // And each open Terminal tab is a live shell.
       shells.stopAll();
+      // And the importer holds an fs watch per transcript directory.
+      sessionImporter.stop();
     });
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {

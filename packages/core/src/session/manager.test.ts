@@ -8,6 +8,15 @@ class FakeStore implements SessionStore {
   upsert(session: Session): void {
     this.rows.set(session.id, session);
   }
+  // SessionManager never calls this — the transcript importer does — but a
+  // fake that only implements the parts the caller happens to use stops
+  // being a stand-in for the real store.
+  imported: { session: Session; owned: boolean }[] = [];
+  upsertImported(session: Session, options: { owned: boolean }): void {
+    this.imported.push({ session, owned: options.owned });
+    if (options.owned) return;
+    this.rows.set(session.id, session);
+  }
   history(): Session[] {
     return [...this.rows.values()];
   }
@@ -56,6 +65,22 @@ describe("SessionManager", () => {
     expect(session.project).toBe("acme");
     expect(session.agentId).toBe("claude-mm");
     expect(session.model).toBe("opus");
+  });
+
+  // The id has to reach the CLI (as --session-id) so that the transcript
+  // the session writes lands under the id Jarvis already minted. Without
+  // it the importer sees the same conversation as two sessions under two
+  // ids, with no way to tell they are one.
+  it("hands the spawner the session id it minted", () => {
+    const seen: (string | undefined)[] = [];
+    const manager = new SessionManager((_agent, _projectPath, sessionId) => {
+      seen.push(sessionId);
+      return fake;
+    });
+
+    const session = manager.start({ project: "acme", projectPath: "/p/acme", agent });
+
+    expect(seen).toEqual([session.id]);
   });
 
   it("gives each session a distinct id", () => {

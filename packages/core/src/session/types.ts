@@ -4,7 +4,19 @@ export type SessionState = "starting" | "running" | "waiting" | "done" | "dead";
 
 export type Session = {
   id: string;
-  project: string;
+  /**
+   * The configured project this session's cwd belongs to, or null when it
+   * belongs to none.
+   *
+   * Null is ordinary rather than exceptional: a session imported from a
+   * transcript is recorded wherever it was actually started, and most work
+   * on a machine happens in directories the user never declared in
+   * `projects:` — 95 of 125 on the machine this was measured against. Such
+   * a row is still worth having, because projectPath, summary and resume
+   * all work without a project name. `sessionLabel()` is the single place
+   * that turns a null into something displayable.
+   */
+  project: string | null;
   projectPath: string;
   agentId: string;
   model?: string;
@@ -48,6 +60,29 @@ export interface SessionStore {
   // "starting" row) — upserts by `session.id`, so a session's history is
   // exactly one row that gets updated in place as it progresses.
   upsert(session: Session): void;
+  /**
+   * Records a session read back from a transcript on disk, rather than one
+   * this process is running.
+   *
+   * Two writers touch one row — `SessionManager` through `upsert` above and
+   * the transcript importer through this — so the boundary between them is
+   * explicit rather than implied.
+   *
+   * `owned` is true when `SessionManager` is currently running this id. For
+   * such a session the pty observes `state`, `endedAt` and `exitCode`
+   * directly and the importer can only infer them, so an implementation
+   * must not write those three columns at all — and must not create a row
+   * that does not exist yet, which would mean inventing a state for a live
+   * session. Only the descriptive columns (project, projectPath, agentId,
+   * model, summary, startedAt, lastActivityAt, branch) are the importer's
+   * to write there.
+   *
+   * For an unowned id the importer is authoritative and the row is inserted
+   * whole — but a row that already exists keeps its recorded state,
+   * endedAt, exitCode and git counts, because those came from watching a
+   * process a transcript knows nothing about.
+   */
+  upsertImported(session: Session, options: { owned: boolean }): void;
   // All recorded sessions, most recently active first.
   history(): Session[];
   // Records the git change counts for one already-persisted session —
@@ -80,7 +115,21 @@ export interface ProcessHandle {
   resize?(cols: number, rows: number): void;
 }
 
-export type Spawner = (agent: AgentConfig, projectPath: string) => ProcessHandle;
+/**
+ * Starts one agent process.
+ *
+ * `sessionId` is the id SessionManager minted for this session, passed so a
+ * spawner can hand it to the CLI (`--session-id`) and the transcript that
+ * session writes lands under the id Jarvis already knows it by. Optional
+ * because not every spawner has a flag for it — the piped spawner ignores
+ * it — and because leaving it optional keeps every two-argument spawner,
+ * production and test, satisfying this type unchanged.
+ */
+export type Spawner = (
+  agent: AgentConfig,
+  projectPath: string,
+  sessionId?: string,
+) => ProcessHandle;
 
 /**
  * One chunk of a session's output as it is emitted. `chunk` is exactly what

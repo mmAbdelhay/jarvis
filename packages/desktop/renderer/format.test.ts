@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { detectLanguage, formatAgo, formatBytes, formatDiskUsage, formatEndedAt, formatUptime } from "./format.js";
+import {
+  detectLanguage,
+  formatAgo,
+  formatBytes,
+  formatDiskUsage,
+  formatEndedAt,
+  formatUptime,
+  projectLabel,
+} from "./format.js";
 
 describe("formatBytes", () => {
   it("formats gigabytes with one decimal", () => {
@@ -131,5 +139,31 @@ describe("formatEndedAt", () => {
     expect(formatEndedAt(Date.UTC(2026, 7, 30, 18, 42))).toMatch(
       /^\d{2} \w{3} · \d{2}:\d{2}$/,
     );
+  });
+});
+
+// The renderer cannot import @jarvis/core's sessionLabel: a value import
+// from a workspace package survives into the bundle and is fatal in the
+// browser context (no-value-imports.test.ts guards that), and core's
+// version reaches for node:path. Same rule, spelled for a browser.
+describe("projectLabel", () => {
+  it("uses the configured project name when there is one", () => {
+    expect(projectLabel({ project: "acme", projectPath: "/Users/x/projects/store" })).toBe(
+      "acme",
+    );
+  });
+
+  it("falls back to the directory's base name when no project matched", () => {
+    expect(projectLabel({ project: null, projectPath: "/Users/x/projects/storefront" })).toBe(
+      "storefront",
+    );
+  });
+
+  it("survives a trailing separator", () => {
+    expect(projectLabel({ project: null, projectPath: "/Users/x/projects/store/" })).toBe("store");
+  });
+
+  it("falls back to the path itself when it has no base name", () => {
+    expect(projectLabel({ project: null, projectPath: "/" })).toBe("/");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
-import { createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS } from "./pty.js";
+import { argsFor, createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS } from "./pty.js";
 
 // These run a real pty against real programs. That is the point: the bug
 // this module exists to fix (an agent seeing a pipe instead of a terminal,
@@ -134,6 +134,14 @@ describe("createPtySpawner", () => {
     expect(output).not.toContain("--model");
   });
 
+  it("passes the session id it was spawned with through to the child", async () => {
+    const spawn = createPtySpawner();
+    const handle = spawn(agent({ command: "/bin/echo" }), process.cwd(), "sid-through");
+    const { output } = await collect(handle);
+
+    expect(output).toContain("--session-id sid-through");
+  });
+
   it("starts at the default terminal size and accepts a resize", async () => {
     const spawn = createPtySpawner();
     // `stty size` prints "rows cols" as the terminal reports them.
@@ -215,5 +223,68 @@ describe("createPtySpawner", () => {
     const { output } = await exited;
 
     expect(output).toContain("got:hello");
+  });
+});
+
+// Exported and pinned by its own test for the same reason headlampArgs is:
+// the flags a spawned agent is launched with are the whole contract with
+// the CLI, and asserting them through a real pty proves the pty rather than
+// the argument list.
+describe("argsFor", () => {
+  const claude: AgentConfig = { id: "claude-mm", command: "claude-mm" };
+
+  // Without this, a Jarvis-spawned session's transcript lands under an id
+  // the CLI minted for itself, and the importer records the same
+  // conversation twice — once from SessionManager, once from a transcript
+  // it cannot tell is the same session.
+  it("passes the session id Jarvis minted", () => {
+    expect(argsFor(claude, "sid-1")).toEqual(["--session-id", "sid-1"]);
+  });
+
+  it("adds nothing when no session id is given", () => {
+    expect(argsFor({ ...claude, args: ["--foo"] })).toEqual(["--foo"]);
+  });
+
+  // --session-id is not a flag every agent CLI shares a meaning for. The
+  // Copilot CLI takes it as "resume the session with this id", so handing it
+  // the freshly minted id of a session that does not exist yet asks it to
+  // resume nothing. The flag exists only to let the transcript importer
+  // recognise a session Jarvis started, and the importer reads anthropic
+  // agents only — so the flag goes exactly where the importer looks.
+  it("does not pass a session id to a non-anthropic agent", () => {
+    const copilot: AgentConfig = { id: "copilot", command: "copilot", vendor: "github" };
+    expect(argsFor(copilot, "sid-1")).not.toContain("--session-id");
+  });
+
+  it("passes a session id to an agent that declares no vendor", () => {
+    // Unset vendor keeps today's behaviour rather than silently opting an
+    // agent out of the dedup it would otherwise get.
+    expect(argsFor({ id: "x", command: "x" }, "sid-1")).toContain("--session-id");
+  });
+
+  // Config-supplied args are the user's explicit choice — the same rule
+  // --model already follows.
+  it("leaves a configured --session-id alone", () => {
+    expect(argsFor({ ...claude, args: ["--session-id", "theirs"] }, "sid-1")).toEqual([
+      "--session-id",
+      "theirs",
+    ]);
+  });
+
+  it("keeps the model flag alongside the session id", () => {
+    expect(argsFor({ ...claude, model: "opus" }, "sid-1")).toEqual([
+      "--model",
+      "opus",
+      "--session-id",
+      "sid-1",
+    ]);
+  });
+
+  it("appends after the configured args, which come first", () => {
+    expect(argsFor({ ...claude, args: ["--dangerously-skip-permissions"] }, "sid-1")).toEqual([
+      "--dangerously-skip-permissions",
+      "--session-id",
+      "sid-1",
+    ]);
   });
 });

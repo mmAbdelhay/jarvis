@@ -1,6 +1,7 @@
 import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
+import { sessionLabel } from "../session/label.js";
 import type { GitProvider } from "../git/types.js";
 import type { SessionChanges } from "../git/tracker.js";
 import {
@@ -197,7 +198,7 @@ export class Orchestrator {
       projects: Object.keys(this.#options.projects),
       sessions: this.#options.sessions.list().map((session) => ({
         id: session.id,
-        project: session.project,
+        project: sessionLabel(session),
         agentId: session.agentId,
         state: session.state,
         summary: session.summary,
@@ -320,7 +321,7 @@ export class Orchestrator {
     if (session === undefined) {
       return { error: MESSAGES.unknownSession(sessionId, language) };
     }
-    return { sessionId, repoPath: session.projectPath, project: session.project };
+    return { sessionId, repoPath: session.projectPath, project: sessionLabel(session) };
   }
 
   async #gitStatus(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {

@@ -76,6 +76,9 @@ voice:
 whisper:
   binaryPath: /Users/you/.voicemode/services/whisper/build/bin/whisper-cli
   modelPath: /Users/you/.whisper-models/ggml-large-v3-turbo.bin
+
+sessions:                       # optional; the whole section defaults
+  importWindowDays: 30          # how far back the transcript import reaches
 ```
 
 ## Notes that are easy to get wrong
@@ -118,6 +121,37 @@ filesystem to consult.
 startup — Jarvis will not refuse to launch over a cluster you were not going
 to open today, and a stale or misspelled context only fails when its own tab
 is opened, in the same status-line way a missing binary does.
+
+**Sessions you started in a terminal show up in History too.** Every Claude
+Code session writes a JSONL transcript under its account's
+`configDir/projects/`, whether Jarvis launched it or you typed the agent into
+a terminal yourself. Jarvis reads those transcripts at startup and then
+watches for new ones, so History describes the work on the machine rather than
+only the part that went through the app.
+
+Three things follow from that, and are worth knowing:
+
+- **An imported session is recorded as `done`.** Jarvis cannot see whether a
+  terminal session is still alive — the transcript is not held open between
+  writes, and a session's `session-env` directory outlives it — so rather than
+  guess, it records when the session was last active and leaves state alone.
+- **A session started outside any configured project keeps its directory.**
+  Most work happens in directories that are in no `projects:` entry; such a
+  session is still recorded, and History shows the directory's name where a
+  project name would go. A session inside a project directory (or any
+  subdirectory of one) is filed under that project.
+- **The brain's own sessions are excluded**, by path: anything at or under
+  `brain.cwd`. They are Jarvis talking to itself and would swamp everything
+  else.
+
+Only agents with `vendor: anthropic` and a `configDir` are scanned. Copilot
+stores its sessions in a different format and is not imported.
+
+**`sessions.importWindowDays` bounds the startup scan**, by file modification
+time; it defaults to 30. Sessions older than the window are not imported —
+raise it once if you want more history back, and note that anything already
+imported stays imported. Everything newer arrives through the watch regardless
+of this setting.
 
 **`headlamp` has one key, `binary`**, and it is optional: absent, it falls
 back to Headlamp's per-OS install path (see
