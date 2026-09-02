@@ -1,6 +1,7 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
+import { detectLanguage } from "./format.js";
 import { initApi, renderApi } from "./api.js";
 import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
 
@@ -131,8 +132,8 @@ async function switchToProject(project: string): Promise<void> {
 
 let bookmarks: Bookmark[] = [];
 
-/** Whether the user wants the bookmarks sidebar at all. Their preference for
- *  browser tabs only — a hosted app has no sidebar to show either way, so
+/** Whether the user wants the bookmarks bar at all. Their preference for
+ *  browser tabs only — a hosted app has no bar to show either way, so
  *  this is ANDed with the chrome rule rather than replacing it. Session-local
  *  on purpose: it is a glance-level choice, not a setting. */
 let bookmarksVisible = true;
@@ -153,7 +154,7 @@ let devToolsFraction = 0.4;
 const MIN_DEVTOOLS_FRACTION = 0.15;
 const MAX_DEVTOOLS_FRACTION = 0.85;
 
-/** Refetches the *selected* project's bookmarks and redraws the sidebar —
+/** Refetches the *selected* project's bookmarks and redraws the bar —
  *  called on init and every project switch, never kept in sync with tabs
  *  (a different project's tabs collapsing into a pill does not touch it). */
 async function refreshBookmarks(): Promise<void> {
@@ -161,14 +162,6 @@ async function refreshBookmarks(): Promise<void> {
   const result = project === "" ? { ok: true as const, value: [] } : await window.jarvis.listBookmarks(project);
   bookmarks = result.ok ? result.value : [];
   renderBookmarks();
-}
-
-function domainFor(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
 }
 
 /** Clicking a bookmark the selected project already has open is a tab
@@ -181,41 +174,60 @@ function openBookmark(url: string): void {
   else void window.jarvis.openTab(project, url);
 }
 
-function renderBookmarkRow(bookmark: Bookmark): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "workspace-bookmark";
-  row.addEventListener("click", () => openBookmark(bookmark.url));
+/** One chip in the bar. The rail stacked the title over the host; a row
+ *  one line tall has space for the title alone, so the address moves to the
+ *  tooltip — where it is the more useful half anyway. */
+function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
+  const chip = document.createElement("div");
+  chip.className = "workspace-bookmark";
+  // Both the title and the URL are page-supplied text; the attribute takes
+  // it as text and nothing else, same discipline as the tab strip.
+  chip.title = bookmark.url;
+  chip.addEventListener("click", () => openBookmark(bookmark.url));
 
-  const text = document.createElement("div");
-  text.className = "workspace-bookmark-text";
-  const title = document.createElement("div");
+  const title = document.createElement("span");
   title.className = "workspace-bookmark-title";
-  // A saved page title is text here, same discipline as a tab's title.
-  title.textContent = bookmark.title === "" ? bookmark.url : bookmark.title;
-  const domain = document.createElement("div");
-  domain.className = "workspace-bookmark-domain";
-  domain.textContent = domainFor(bookmark.url);
-  text.append(title, domain);
+  const label = bookmark.title === "" ? bookmark.url : bookmark.title;
+  title.textContent = label;
+  // An Arabic title left at the document's LTR direction puts its
+  // punctuation and its ellipsis on the wrong edge — visible immediately in
+  // a strip of short chips, which is the whole bar.
+  title.dir = detectLanguage(label) === "ar" ? "rtl" : "ltr";
 
   const remove = document.createElement("span");
   remove.className = "workspace-bookmark-remove";
   remove.textContent = "×";
   remove.addEventListener("click", (event) => {
-    // Without this the row underneath also receives the click and opens
+    // Without this the chip underneath also receives the click and opens
     // the bookmark it was just removed from.
     event.stopPropagation();
     void removeBookmark(bookmark.url);
   });
 
-  row.append(text, remove);
-  return row;
+  chip.append(title, remove);
+  return chip;
 }
 
 function renderBookmarks(): void {
   const list = $("workspace-bookmark-list");
   list.replaceChildren();
-  for (const bookmark of bookmarks) list.append(renderBookmarkRow(bookmark));
+  if (bookmarks.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "workspace-bookmarks-empty";
+    const note = MESSAGES.noBookmarks(PRIMARY_LANGUAGE);
+    empty.textContent = note;
+    // Read off the text rather than off PRIMARY_LANGUAGE: the constant is a
+    // literal type, so comparing it narrows to never and tsc rejects it.
+    empty.dir = detectLanguage(note) === "ar" ? "rtl" : "ltr";
+    list.append(empty);
+  }
+  for (const bookmark of bookmarks) list.append(renderBookmarkChip(bookmark));
   updateBookmarkToggle();
+  // The bar's height depends on what is in it (a row of chips is taller
+  // than the empty note), and its height is the page slot's top inset. A
+  // DOM change the renderer made itself fires no reflow event, so the
+  // hosted view would stay pinned over the old rectangle.
+  reportWorkspaceBounds();
 }
 
 async function removeBookmark(url: string): Promise<void> {
@@ -241,7 +253,7 @@ async function toggleBookmark(): Promise<void> {
   renderBookmarks();
 }
 
-/** The sidebar shows only when both the chrome rule and the user's own
+/** The bar shows only when both the chrome rule and the user's own
  *  toggle allow it. Kept in one function because those two reasons to be
  *  hidden are decided in different places and must not drift. */
 function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && activeTab()?.kind !== "web"): void {
@@ -249,11 +261,12 @@ function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && acti
   $("workspace-toggle-bookmarks").classList.toggle("workspace-nav--on", bookmarksVisible);
 }
 
-function toggleBookmarksSidebar(): void {
+function toggleBookmarksBar(): void {
   bookmarksVisible = !bookmarksVisible;
   renderBookmarksVisibility();
-  // The sidebar is 200px of the page slot's width; a hosted view pinned to
-  // the old rectangle would be left overlapping or short.
+  // The bar is a row above the page slot; showing or hiding it moves the
+  // slot's top edge, and a hosted view pinned to the old rectangle would be
+  // left overlapping the bar or short of the bottom.
   reportWorkspaceBounds();
 }
 
@@ -418,7 +431,7 @@ export function initWorkspace(projects: string[]): void {
   ($("workspace-pip") as HTMLButtonElement).title = MESSAGES.pictureInPicture(PRIMARY_LANGUAGE);
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
-  $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksSidebar());
+  $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksBar());
   $("workspace-toggle-devtools").addEventListener("click", () => toggleDevTools());
   wireDevToolsHandle();
   renderBookmarksVisibility(false);
@@ -667,11 +680,11 @@ export function renderWorkspace(state: WorkspaceState): void {
 
   // Back/forward/reload/address mean nothing for a hosted app — nobody
   // navigates a code editor or a SQL client like a webpage — and neither do
-  // bookmarks: the sidebar belongs to the browser, so it goes away with the
-  // rest of the browser chrome. Stated as "not a web tab" rather than as a
-  // list of kinds, so a fourth hosted app inherits the rule for free. With
-  // no tab open at all the chrome stays: that is the state where the
-  // sidebar is the quickest way to open something.
+  // bookmarks: the bar sits inside the browser's own chrome, directly under
+  // the address bar, so it goes away with the rest of it. Stated as "not a
+  // web tab" rather than as a list of kinds, so a fourth hosted app
+  // inherits the rule for free. With no tab open at all the chrome stays:
+  // that is the state where the bar is the quickest way to open something.
   const hostedApp = tab !== undefined && tab.kind !== "web";
   ($("workspace-bar") as HTMLElement).hidden = hostedApp;
   renderBookmarksVisibility(hostedApp);
@@ -718,9 +731,9 @@ export function renderWorkspace(state: WorkspaceState): void {
   for (const id of devToolsByTab) if (!liveTabs.has(id)) devToolsByTab.delete(id);
   renderDevTools();
 
-  // Hiding the bar and the sidebar resizes the page slot the hosted view
-  // is pinned to, and nothing else re-measures it — a resize is the only
-  // reflow the window itself reports.
+  // Hiding the address bar or the bookmarks bar under it resizes the page
+  // slot the hosted view is pinned to, and nothing else re-measures it — a
+  // resize is the only reflow the window itself reports.
   reportWorkspaceBounds();
 }
 

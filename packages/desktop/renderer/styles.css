@@ -762,33 +762,62 @@
     padding: 4px 8px;
   }
 
-  /* Row: the bookmarks sidebar beside the tabs/address/page column. */
-  .workspace-browser { display: flex; flex-direction: row; flex-grow: 1; min-height: 0; }
+  /* Column: tab strip, address bar, bookmarks bar, then the page slot. The
+     bookmarks used to be a fixed rail in a second column beside all of
+     that, which put a browser feature at the same level as the workspace
+     itself. */
+  .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
   .workspace-browser[hidden] { display: none; }
 
-  .workspace-browser-main { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
-
+  /* The bookmarks bar: one row of chips under the address bar, hidden by
+     the same rule (an unconditional display here would beat the UA's
+     [hidden] rule — see view-display-css.test.ts). */
   .workspace-bookmarks {
-    width: 200px;
+    display: flex;
     flex-shrink: 0;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-    padding: 14px;
+    padding: 4px 10px 5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .workspace-bookmarks[hidden] { display: none; }
+
+  /* Overflow is a horizontal scroll rather than a wrap or a "»" menu, for
+     two reasons the layout leaves no way around. A wrap grows the bar's
+     height, and this bar's height *is* the page slot's inset: every extra
+     row would shove the hosted view down a notch, or leave it painted over
+     the bar until the next re-measure. And a "»" menu has to open a popup
+     below the bar — which is precisely where the hosted WebContentsView
+     sits, an OS-level overlay above the renderer's DOM, so the menu would
+     be drawn behind the page and be unclickable. A scroll keeps the bar
+     exactly one row tall for any number of bookmarks, and picks up the
+     writing direction on its own in RTL. The tab strip above already
+     solves the same problem the same way. */
+  .workspace-bookmark-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-grow: 1;
+    min-width: 0;
   }
 
-  .workspace-bookmark-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
-
+  /* flex-shrink: 0 is the whole point of the scroll: left at its default
+     the chips would divide the bar's width between them and every title
+     would collapse to an ellipsis instead of overflowing. */
   .workspace-bookmark {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 6px;
-    border-radius: 4px;
+    gap: 4px;
+    flex-shrink: 0;
+    max-width: 180px;
+    padding: 3px 7px;
+    border-radius: var(--r-control);
     cursor: pointer;
   }
   .workspace-bookmark:hover { background: var(--panel); }
 
-  .workspace-bookmark-text { flex-grow: 1; min-width: 0; }
   .workspace-bookmark-title {
     font-size: 11px;
     color: var(--text);
@@ -796,16 +825,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .workspace-bookmark-domain {
-    font-size: 10px;
+
+  .workspace-bookmarks-empty {
+    font-size: 11px;
     color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    padding: 3px 7px;
   }
 
-  .workspace-bookmark-remove { opacity: 0; flex-shrink: 0; color: var(--text-muted); }
-  .workspace-bookmark:hover .workspace-bookmark-remove { opacity: 0.6; }
+  /* No hover-reveal: on a chip this narrow the "x" appearing under the
+     pointer is the thing you are about to click. It stays dim and present
+     so its width is part of the chip at rest. */
+  .workspace-bookmark-remove { flex-shrink: 0; opacity: 0.35; color: var(--text-muted); }
+  .workspace-bookmark:hover .workspace-bookmark-remove { opacity: 0.7; }
   .workspace-bookmark-remove:hover { opacity: 1; color: var(--del); }
 
   .workspace-bookmark-toggle--on { color: var(--accent); border-color: var(--accent); }

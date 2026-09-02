@@ -28,9 +28,6 @@ function harness(): Recorded[] {
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
-        <div id="workspace-bookmarks">
-          <div id="workspace-bookmark-list"></div>
-        </div>
         <div id="workspace-tabs"></div>
         <div id="workspace-bar">
           <button id="workspace-back"></button>
@@ -40,6 +37,9 @@ function harness(): Recorded[] {
           <button id="workspace-toggle-devtools"></button>
           <button id="workspace-bookmark-toggle"></button>
           <button id="workspace-pip" hidden></button>
+        </div>
+        <div id="workspace-bookmarks">
+          <div id="workspace-bookmark-list"></div>
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
@@ -583,14 +583,94 @@ describe("workspace bookmarks", () => {
     expect(document.querySelector(".workspace-bookmark")?.textContent).toContain("GitHub");
   });
 
-  it("shows the bookmark's bare domain under its title", async () => {
+  // The rail had two lines per bookmark, title over host. One horizontal
+  // row has space for the title alone, so the address moves into the
+  // tooltip — where it is also more use, since the host was never the part
+  // you needed to see.
+  it("shows the title alone, with the full URL as its tooltip", async () => {
     jarvis["listBookmarks"] = () =>
       Promise.resolve({ ok: true, value: [{ url: "https://github.com/a/b", title: "GitHub" }] });
 
     initWorkspace(["acme"]);
     await flush();
 
-    expect(document.querySelector(".workspace-bookmark-domain")?.textContent).toBe("github.com");
+    const chip = document.querySelector(".workspace-bookmark");
+    expect(chip?.textContent).toContain("GitHub");
+    expect(chip?.textContent).not.toContain("github.com/a/b");
+    expect(chip?.getAttribute("title")).toBe("https://github.com/a/b");
+  });
+
+  // Arabic is the user's primary language, and a strip of chips is exactly
+  // where a mixed-direction title goes wrong: an Arabic title left at the
+  // document's LTR direction renders its trailing punctuation on the wrong
+  // side. Same per-element treatment app.ts and changes.ts already give
+  // every other piece of user text.
+  it("renders an Arabic bookmark title right-to-left", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://example.com", title: "لوحة التحكم" }] });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector<HTMLElement>(".workspace-bookmark-title")?.dir).toBe("rtl");
+  });
+
+  it("leaves an English bookmark title left-to-right", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://example.com", title: "Dashboard" }] });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector<HTMLElement>(".workspace-bookmark-title")?.dir).toBe("ltr");
+  });
+
+  // An empty strip under the address bar reads as a rendering glitch, and
+  // the star that fills it is two elements away.
+  it("explains itself when the project has no bookmarks", async () => {
+    jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector(".workspace-bookmarks-empty")?.textContent).toMatch(/\S/);
+    expect(document.querySelector(".workspace-bookmark")).toBeNull();
+  });
+
+  // A row of chips and the empty note are not the same height, so the bar
+  // — and with it the page slot's top edge — moves the moment the first
+  // bookmark lands. Nothing else re-measures for a DOM change the renderer
+  // made itself, so the hosted view would stay pinned to the old rectangle
+  // and overlap the bar.
+  it("re-measures the page slot when the bookmarks change", async () => {
+    jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
+    initWorkspace(["acme"]);
+    await flush();
+    renderWorkspace({ tabs: [tab({ url: "https://github.com", title: "GitHub" })], activeTabId: "tab-1" });
+
+    const page = document.getElementById("workspace-page") as HTMLElement;
+    page.getBoundingClientRect = () => ({ x: 0, y: 240, width: 800, height: 500 }) as DOMRect;
+    jarvis["addBookmark"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+    calls.length = 0;
+
+    document.getElementById("workspace-bookmark-toggle")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "setWorkspaceBounds",
+      args: [{ x: 0, y: 240, width: 800, height: 500 }],
+    });
+  });
+
+  it("drops the empty note once a bookmark exists", async () => {
+    jarvis["listBookmarks"] = () =>
+      Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector(".workspace-bookmarks-empty")).toBeNull();
   });
 
   it("opens a bookmark as a tab in the current project when clicked", async () => {
@@ -1236,6 +1316,26 @@ describe("bookmarks sidebar toggle", () => {
     toggle.click();
 
     expect(toggle.classList.contains("workspace-nav--on")).toBe(false);
+
+    // Module state outlives a test; leave the preference as it was found.
+    toggle.click();
+  });
+
+  // The bar sits above the page slot now, so showing or hiding it moves the
+  // hosted view's top edge. Nothing else re-measures: the window fires no
+  // reflow event for a DOM change the renderer made itself.
+  it("re-measures the page slot when the bar is toggled", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const page = document.getElementById("workspace-page") as HTMLElement;
+    page.getBoundingClientRect = () => ({ x: 0, y: 200, width: 800, height: 500 }) as DOMRect;
+    calls.length = 0;
+
+    document.getElementById("workspace-toggle-bookmarks")?.click();
+
+    expect(calls).toContainEqual({
+      call: "setWorkspaceBounds",
+      args: [{ x: 0, y: 200, width: 800, height: 500 }],
+    });
   });
 });
 
