@@ -167,7 +167,9 @@ ready — the same pattern as Editor and Database. **Hovering the button** warms
 the server early, for the same reason hovering warms the Editor: the pointer
 arriving is the first evidence you want it, and the spawn is shared, so a
 click that follows the hover joins a start already in progress instead of
-beginning a second one.
+beginning a second one. Hovering only warms the server, though — it never
+logs you in to AWS, so a pointer crossing the button cannot open a terminal
+or send an MFA push to your phone. That happens on the click.
 
 **Jarvis does not manage cluster credentials.** The server reads your real
 kubeconfig and inherits whatever authenticates it — including a context whose
@@ -175,6 +177,14 @@ credentials come from an `exec` plugin such as `aws eks get-token`, `gcloud`,
 or `kubelogin`. Those need a session that is already valid, because a spawned
 server has no terminal to prompt you in; see
 [troubleshooting](troubleshooting.md) for what that looks like when it fails.
+
+**The exception is AWS.** For a context whose credential plugin is
+`aws eks get-token`, Jarvis logs you in itself rather than asking you to have
+done it first: it opens a Terminal tab, runs
+`saml2aws login && aws eks update-kubeconfig …` there, and opens the cluster
+once that succeeds. Approve the MFA push when it arrives; the cluster tab
+follows. If it does not, see
+[troubleshooting](troubleshooting.md) for the timeout.
 
 Like the Editor tab, the server binds to `127.0.0.1` only — no generated
 login, because loopback is the whole mitigation.

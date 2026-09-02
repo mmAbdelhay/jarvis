@@ -62,11 +62,17 @@ by a credential generated when it starts. It changes when Jarvis restarts.
 ## The Cluster tab says it cannot open, and it worked yesterday
 
 Jarvis does not manage cluster credentials. A kubeconfig context that
-authenticates through an `exec` plugin — `aws eks get-token`, `gcloud`,
-`kubelogin` — needs a session that is already valid, and a spawned server has
-no terminal to prompt in. Log in the way you normally would (`aws sso login`,
-and check with `kubectl get ns`), then press the button again. Lens behaves
-the same way for the same reason.
+authenticates through an `exec` plugin — `gcloud`, `kubelogin` — needs a
+session that is already valid, and a spawned server has no terminal to prompt
+in. Log in the way you normally would (`aws sso login`, and check with
+`kubectl get ns`), then press the button again. Lens behaves the same way for
+the same reason.
+
+AWS is the exception. For a context whose plugin is `aws eks get-token`,
+the button logs you in itself: it opens a Terminal tab, runs
+`saml2aws login && aws eks update-kubeconfig …`, and carries on to the
+cluster once that succeeds. Approve the MFA push when it arrives. If it does
+not finish, see below.
 
 ## The Cluster tab shows clusters from another project
 
