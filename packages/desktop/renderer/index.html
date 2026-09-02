@@ -238,8 +238,13 @@
 
     <div class="workspace-head">
       <select id="workspace-project" class="workspace-project mono"></select>
-      <button id="workspace-open-editor" class="workspace-nav" type="button"
-              style="width: auto; padding: 0 12px;" title="Open the project's files in a full code editor">Editor</button>
+      <div class="workspace-menu-anchor">
+        <button id="workspace-open-editor" class="workspace-nav" type="button"
+                style="width: auto; padding: 0 12px;" title="Open the project's files in a full code editor">Editor</button>
+        <!-- Filled in by workspace.ts when the selected project declares more
+             than one `editors:` root; empty and hidden otherwise. -->
+        <div id="workspace-editor-menu" class="workspace-menu" hidden></div>
+      </div>
       <button id="workspace-open-database" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Browse the project's databases">Database</button>
       <button id="workspace-open-terminal" class="workspace-nav" type="button"
@@ -394,6 +399,14 @@
           <button id="settings-database-add" class="settings-add" type="button">+ Add connection</button>
         </div>
         <div id="settings-databases" class="settings-rows"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <div class="lbl">EDITOR ROOTS</div>
+          <button id="settings-editor-add" class="settings-add" type="button">+ Add root</button>
+        </div>
+        <div id="settings-editors" class="settings-rows"></div>
       </section>
 
       <section class="settings-section">

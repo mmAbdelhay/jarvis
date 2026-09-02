@@ -688,6 +688,7 @@ describe("editor handlers", () => {
         open: (path) => Promise.resolve({ ok: true, url: `http://127.0.0.1:9001/?folder=${path}` }),
       }),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
@@ -707,6 +708,7 @@ describe("editor handlers", () => {
         },
       }),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
@@ -725,6 +727,7 @@ describe("editor handlers", () => {
         },
       }),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
@@ -738,6 +741,7 @@ describe("editor handlers", () => {
     const handlers = createEditorHandlers({
       codeServer: codeServer(),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
@@ -752,6 +756,7 @@ describe("editor handlers", () => {
         open: () => Promise.resolve({ ok: false, detail: "did not become ready in time" }),
       }),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
@@ -765,12 +770,86 @@ describe("editor handlers", () => {
     const handlers = createEditorHandlers({
       codeServer: codeServer({ open: () => Promise.reject(new Error("boom")) }),
       projects: { acme: "/p/acme" },
+      editors: {},
       language: "en",
     });
 
     const result = await handlers.open("acme");
 
     expect(result.ok).toBe(false);
+  });
+
+  // A project with configured roots: the Editor button asks for one by
+  // name, and main is the only side that ever sees a path.
+  describe("editor roots", () => {
+    const editors = {
+      acme: [
+        { name: "portal-vue", path: "portal-vue" },
+        { name: "api", path: "services/api" },
+      ],
+    };
+
+    function withRoots(opened: { project: string; folder: string | undefined }[]) {
+      return createEditorHandlers({
+        codeServer: codeServer({
+          open: (project, folder) => {
+            opened.push({ project, folder });
+            return Promise.resolve({ ok: true, url: "http://127.0.0.1:9001" });
+          },
+        }),
+        projects: { acme: "/p/acme" },
+        editors,
+        language: "en",
+      });
+    }
+
+    it("lists a project's root names", async () => {
+      const handlers = withRoots([]);
+
+      expect(await handlers.roots("acme")).toEqual(["portal-vue", "api"]);
+    });
+
+    it("lists nothing for a project with no configured root", async () => {
+      const handlers = withRoots([]);
+
+      expect(await handlers.roots("storefront")).toEqual([]);
+    });
+
+    it("resolves a named root against the project directory", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+
+      await withRoots(opened).open("acme", "api");
+
+      expect(opened).toEqual([{ project: "/p/acme", folder: "/p/acme/services/api" }]);
+    });
+
+    it("opens the project itself when no root is named", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+
+      await withRoots(opened).open("acme");
+
+      expect(opened).toEqual([{ project: "/p/acme", folder: "/p/acme" }]);
+    });
+
+    // The renderer names a root; a name that is not in this project's
+    // config resolves to nothing, and nothing is what gets opened.
+    it("refuses a root the project does not declare, without opening anything", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+
+      const result = await withRoots(opened).open("acme", "../../etc");
+
+      expect(result.ok).toBe(false);
+      expect(opened).toEqual([]);
+    });
+
+    it("refuses a non-string root", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+
+      const result = await withRoots(opened).open("acme", 7 as unknown as string);
+
+      expect(result.ok).toBe(false);
+      expect(opened).toEqual([]);
+    });
   });
 });
 
@@ -860,6 +939,7 @@ const sampleConfig: JarvisConfig = {
   registry: { agents: { "claude-mm": { command: "claude-mm" } }, routing: [] },
   projects: { acme: "/p/acme" },
   databases: {},
+  editors: {},
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",

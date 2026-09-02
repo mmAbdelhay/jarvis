@@ -31,6 +31,21 @@ projects:
   atlas: ~/projects/atlas
   globex: ~/projects/globex
 
+# Which folders inside a project the Editor button can open code-server at.
+# Optional, and most projects have no entry: without one the editor opens at
+# the project directory, as it always did. With one root the button opens
+# straight into it; with two or more it offers a menu.
+#
+# `path` is relative to the project directory and must stay inside it — an
+# absolute (or ~) path is refused at load time. An editor root is a
+# *narrowing* of a project, and the project directory is what its terminal,
+# git view and API tab all key off; a root outside it would be an editor onto
+# something none of them can see.
+editors:
+  acme:
+    - { name: portal-vue, path: portal-vue }
+    - { name: api, path: api }
+
 brain:
   cwd: ~/.config/jarvis/brain
   # Which account Jarvis's own reasoning runs under. Setting it makes the

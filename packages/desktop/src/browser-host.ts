@@ -85,7 +85,7 @@ export class BrowserHost {
     return this.#store.onChange(listener);
   }
 
-  open(project: string, input: string, kind: TabKind = "web"): void {
+  open(project: string, input: string, kind: TabKind = "web", detail?: string): void {
     const target = normalizeInput(input);
     if (target.kind === "rejected") return;
 
@@ -98,7 +98,15 @@ export class BrowserHost {
       // table has focus inside it; the tab strip would be unreadable if that
       // leaked through, so this label is fixed once, here, and #onViewEvent's
       // "title" case never overwrites it for a tab of this kind.
-      this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS[kind]}` });
+      // `detail` names which one, for the kinds that can have more than one
+      // per project (an editor rooted at a configured sub-folder). It rides
+      // in the title so the tab strip is readable, and stays on the tab so
+      // the renderer can match on it.
+      const label = HOSTED_APP_LABELS[kind];
+      this.#store.update(tab.id, {
+        title: detail === undefined ? `${project} — ${label}` : `${project} — ${label} · ${detail}`,
+        ...(detail === undefined ? {} : { detail }),
+      });
     }
     // The partition is what makes a project's logins its own.
     // encodeURIComponent because a project name is user-supplied config and

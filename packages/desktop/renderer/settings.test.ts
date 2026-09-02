@@ -16,6 +16,7 @@ function sample(): JarvisConfig {
     },
     projects: { acme: "/x/projects/acme" },
     databases: {},
+    editors: {},
     voice: {
       engine: "say" as const,
     piperBinary: "/opt/piper",
@@ -43,6 +44,8 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <div id="settings-projects"></div>
     <button id="settings-database-add"></button>
     <div id="settings-databases"></div>
+    <button id="settings-editor-add"></button>
+    <div id="settings-editors"></div>
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
@@ -512,6 +515,141 @@ describe("databases section", () => {
     const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]).toBeUndefined();
     expect(saved.databases["acme-2"]?.[0]?.id).toBe("main");
+  });
+});
+
+describe("editor roots section", () => {
+  function withRoots(): JarvisConfig {
+    return {
+      ...sample(),
+      editors: { acme: [{ name: "portal-vue", path: "portal-vue" }] },
+    };
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+  }
+
+  it("renders one row per root", async () => {
+    harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    expect(document.querySelectorAll("#settings-editors .settings-row")).toHaveLength(1);
+  });
+
+  it("edits a root's path into the draft", async () => {
+    const { calls } = harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    const path = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="path"]')!;
+    path.value = "services/api";
+    change(path);
+
+    expect((await saved(calls)).editors["acme"]?.[0]?.path).toBe("services/api");
+  });
+
+  it("renames a root", async () => {
+    const { calls } = harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    const name = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="name"]')!;
+    name.value = "portal";
+    change(name);
+
+    expect((await saved(calls)).editors["acme"]?.[0]?.name).toBe("portal");
+  });
+
+  // The rule the whole Settings route is built on: a re-render per keystroke
+  // takes the focus out of the field mid-word.
+  it("commits on change, never on input", async () => {
+    const { calls } = harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    const path = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="path"]')!;
+    path.value = "half-typ";
+    path.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect((await saved(calls)).editors["acme"]?.[0]?.path).toBe("portal-vue");
+  });
+
+  it("removes a root from its own remove control", async () => {
+    harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-editors .settings-row-remove")?.click();
+
+    expect(document.querySelectorAll("#settings-editors .settings-row")).toHaveLength(0);
+  });
+
+  it("adds a root with a name that does not collide", async () => {
+    harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-editor-add")?.click();
+
+    const names = [
+      ...document.querySelectorAll<HTMLInputElement>('#settings-editors input[data-field="name"]'),
+    ].map((input) => input.value);
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+  });
+
+  it("disables + Add root when no project is configured", async () => {
+    harness({ ...sample(), projects: {}, editors: {}, registry: sample().registry });
+    initSettings();
+    await openSettings();
+
+    expect((document.getElementById("settings-editor-add") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("moves a root between projects through its project select", async () => {
+    const config = withRoots();
+    config.projects = { acme: "/x/a", "storefront": "/x/b" };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    const select = document.querySelector<HTMLSelectElement>("#settings-editors select")!;
+    select.value = "storefront";
+    change(select);
+
+    const config2 = await saved(calls);
+    expect(config2.editors["acme"]).toBeUndefined();
+    expect(config2.editors["storefront"]?.[0]?.name).toBe("portal-vue");
+  });
+
+  // Same reasoning as the databases section: a root keyed to a project that
+  // no longer exists is a config parseConfig would refuse to load.
+  it("drops a deleted project's roots in the same mutation", async () => {
+    const { calls } = harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-projects .settings-row-remove")?.click();
+
+    expect((await saved(calls)).editors["acme"]).toBeUndefined();
+  });
+
+  it("follows a project rename", async () => {
+    const { calls } = harness(withRoots());
+    initSettings();
+    await openSettings();
+
+    const nameInput = document.querySelector<HTMLInputElement>("#settings-projects input")!;
+    nameInput.value = "acme-2";
+    change(nameInput);
+
+    const config = await saved(calls);
+    expect(config.editors["acme"]).toBeUndefined();
+    expect(config.editors["acme-2"]?.[0]?.name).toBe("portal-vue");
   });
 });
 

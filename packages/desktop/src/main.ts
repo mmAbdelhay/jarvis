@@ -317,6 +317,7 @@ app.whenReady().then(async () => {
     const editor = createEditorHandlers({
       codeServer,
       projects: config.projects,
+      editors: config.editors,
       language: PRIMARY_LANGUAGE,
     });
 
@@ -654,10 +655,18 @@ app.whenReady().then(async () => {
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one.
-    ipcMain.handle("workspace:open", (_event, project: unknown, input: unknown, kind: unknown) => {
-      if (typeof project !== "string" || typeof input !== "string") return;
-      workspace.open(project, input, kind === "editor" || kind === "database" ? kind : "web");
-    });
+    ipcMain.handle(
+      "workspace:open",
+      (_event, project: unknown, input: unknown, kind: unknown, detail: unknown) => {
+        if (typeof project !== "string" || typeof input !== "string") return;
+        workspace.open(
+          project,
+          input,
+          kind === "editor" || kind === "database" ? kind : "web",
+          typeof detail === "string" ? detail : undefined,
+        );
+      },
+    );
     ipcMain.handle("workspace:close", (_event, id: unknown) => {
       if (typeof id !== "string") return;
       // A terminal tab's shell is a child process of its own; closing the
@@ -693,8 +702,16 @@ app.whenReady().then(async () => {
       workspace.setVisible(visible === true),
     );
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
-    ipcMain.handle("editor:open", (_event, project: unknown) =>
-      editor.open(typeof project === "string" ? project : ""),
+    ipcMain.handle("editor:open", (_event, project: unknown, root: unknown) =>
+      editor.open(
+        typeof project === "string" ? project : "",
+        // Absent means the project directory itself; anything that is not a
+        // string is not a root name and must not be treated as one.
+        typeof root === "string" ? root : undefined,
+      ),
+    );
+    ipcMain.handle("editor:roots", (_event, project: unknown) =>
+      editor.roots(typeof project === "string" ? project : ""),
     );
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),

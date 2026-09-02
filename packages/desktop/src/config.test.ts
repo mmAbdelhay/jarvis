@@ -429,3 +429,115 @@ describe("voice", () => {
     );
   });
 });
+
+describe("editors", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  it("defaults to an empty record when the section is absent", () => {
+    expect(parseConfig(base).editors).toEqual({});
+  });
+
+  it("parses a project's editor roots", () => {
+    const config = parseConfig({
+      ...base,
+      editors: {
+        acme: [
+          { name: "portal-vue", path: "portal-vue" },
+          { name: "api", path: "services/api" },
+        ],
+      },
+    });
+
+    expect(config.editors["acme"]).toEqual([
+      { name: "portal-vue", path: "portal-vue" },
+      { name: "api", path: "services/api" },
+    ]);
+  });
+
+  // The path is kept exactly as written: it is relative to the project, and
+  // resolving it here would make Settings write an absolute path back into
+  // a file the user still edits by hand.
+  it("keeps the path relative rather than resolving it against the project", () => {
+    const config = parseConfig({ ...base, editors: { acme: [{ name: "a", path: "./portal-vue/" }] } });
+
+    expect(config.editors["acme"]).toEqual([{ name: "a", path: "./portal-vue/" }]);
+  });
+
+  it("rejects a key naming no configured project", () => {
+    expect(() => parseConfig({ ...base, editors: { nope: [] } })).toThrow(
+      'Config `editors` names no configured project: "nope"',
+    );
+  });
+
+  it("rejects a list that is not an array", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: {} } })).toThrow(
+      "Config `editors.acme` must be an array",
+    );
+  });
+
+  it("rejects an entry with no name", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: [{ path: "portal-vue" }] } })).toThrow(
+      "Config `editors.acme[0].name` must be a non-empty string",
+    );
+  });
+
+  it("rejects an entry with no path", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "a" }] } })).toThrow(
+      "Config `editors.acme[0].path` must be a non-empty string",
+    );
+  });
+
+  it("rejects a duplicate name within one project", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        editors: {
+          acme: [
+            { name: "api", path: "services/api" },
+            { name: "api", path: "other" },
+          ],
+        },
+      }),
+    ).toThrow('Config `editors.acme[1].name` duplicates an earlier root: "api"');
+  });
+
+  // A root that escapes its project can never be opened — the code-server
+  // manager refuses it — so it is refused here, where the user is looking
+  // at the config, rather than as a dead Editor menu entry later.
+  it("rejects a path that climbs out of the project", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "up", path: "../secrets" }] } })).toThrow(
+      "Config `editors.acme[0].path` must stay inside the project",
+    );
+  });
+
+  it("rejects a path that climbs out through a subdirectory", () => {
+    expect(() =>
+      parseConfig({ ...base, editors: { acme: [{ name: "up", path: "services/../../etc" }] } }),
+    ).toThrow("Config `editors.acme[0].path` must stay inside the project");
+  });
+
+  it("rejects an absolute path", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "etc", path: "/etc" }] } })).toThrow(
+      "Config `editors.acme[0].path` must be relative to the project",
+    );
+  });
+
+  // `~` is expanded everywhere else in this file, and would be a home-
+  // relative — that is, absolute — path here. Refused with the message that
+  // names the actual rule rather than being silently expanded.
+  it("rejects a home-relative path", () => {
+    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "home", path: "~/x" }] } })).toThrow(
+      "Config `editors.acme[0].path` must be relative to the project",
+    );
+  });
+
+  it("accepts the project directory itself, written as .", () => {
+    const config = parseConfig({ ...base, editors: { acme: [{ name: "all", path: "." }] } });
+
+    expect(config.editors["acme"]).toEqual([{ name: "all", path: "." }]);
+  });
+});

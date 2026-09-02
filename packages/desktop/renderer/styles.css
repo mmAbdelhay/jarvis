@@ -1207,6 +1207,38 @@
      hosted view is a native overlay, not a DOM child (see views.ts). */
   .workspace-page { flex-grow: 1; min-height: 0; }
 
+  /* The Editor button's root picker. Anchored to the button rather than
+     placed in the head's flex row, so opening it moves nothing. */
+  .workspace-menu-anchor { position: relative; display: flex; }
+
+  .workspace-menu {
+    position: absolute;
+    top: calc(100% + var(--s1));
+    left: 0;
+    z-index: 5;
+    min-width: 160px;
+    padding: var(--s1);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-panel);
+  }
+  .workspace-menu[hidden] { display: none; }
+
+  .workspace-menu-item {
+    text-align: start;
+    padding: var(--s2) var(--s3);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: none;
+    border: 0;
+    border-radius: var(--r-control);
+    cursor: pointer;
+  }
+  .workspace-menu-item:hover { color: var(--text); background: var(--surface); }
+
   #workspace-tool-status { font-size: 11px; color: var(--text-muted); }
   #workspace-tool-status.workspace-tool-status--error { color: var(--del); }
 

@@ -15,7 +15,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { WorkspaceState } from "@jarvis/core";
 import type {
   ApiFailure,
@@ -32,6 +32,7 @@ import type {
   BrunoTree,
   CodeServerManager,
   DbGateManager,
+  EditorsConfig,
   InstalledVoice,
   ShellManager,
 } from "@jarvis/platform";
@@ -327,7 +328,15 @@ export type RendererApi = {
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.
-  openTab(project: string, input: string, kind?: "web" | "editor" | "database"): Promise<void>;
+  openTab(
+    project: string,
+    input: string,
+    kind?: "web" | "editor" | "database",
+    /** Which one, for a kind a project can have more than one of — the
+     *  editor root a code-server tab is rooted at. Becomes part of the
+     *  tab's stable title. */
+    detail?: string,
+  ): Promise<void>;
   closeTab(id: string): Promise<void>;
   activateTab(id: string): Promise<void>;
   navigateTab(id: string, input: string): Promise<void>;
@@ -350,10 +359,15 @@ export type RendererApi = {
    *  switching to a project with no open tab. */
   hideAllTabs(): Promise<void>;
   onWorkspace(cb: (state: WorkspaceState) => void): void;
-  /** Ensures a code-server instance is running for `project` and returns
-   *  its URL — call openTab(project, url) with the result to actually show
-   *  it; this call alone does not open a tab. */
-  openEditor(project: string): Promise<GitViewResult<string>>;
+  /** Ensures a code-server instance is running for `project`, rooted at the
+   *  configured editor root named `root` (the project directory itself when
+   *  omitted), and returns its URL — call openTab(project, url, "editor",
+   *  root) with the result to actually show it; this call alone does not
+   *  open a tab. */
+  openEditor(project: string, root?: string): Promise<GitViewResult<string>>;
+  /** The names of `project`'s configured `editors:` roots, in config order.
+   *  Empty for a project that declares none, which is most of them. */
+  editorRoots(project: string): Promise<string[]>;
   /** Ensures a DbGate instance is running for `project` and returns its URL
    *  plus the credential it is guarded with — call openTab(project, url,
    *  "database") with the result to actually show it. */
@@ -504,16 +518,23 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
 }
 
 export type EditorHandlers = {
-  /** Ensures a code-server instance is running for `project` and returns
-   *  its URL — the renderer then opens that URL as an ordinary Workspace
-   *  browser tab (openTab), same as any other page. */
-  open(project: string): Promise<GitViewResult<string>>;
+  /** Ensures a code-server instance is running for `project`, rooted at the
+   *  configured editor root named `root` (the project directory itself when
+   *  omitted), and returns its URL — the renderer then opens that URL as an
+   *  ordinary Workspace browser tab (openTab), same as any other page. */
+  open(project: string, root?: string): Promise<GitViewResult<string>>;
+  /** The names of `project`'s configured editor roots, in config order. The
+   *  renderer needs them to decide whether the Editor button opens straight
+   *  away or offers a choice; it gets names only, never paths. */
+  roots(project: string): Promise<string[]>;
 };
 
 export type EditorHandlerDeps = {
   codeServer: CodeServerManager;
   /** Name to absolute path, from config. The renderer never sees a path. */
   projects: Readonly<Record<string, string>>;
+  /** Per-project editor roots, from config. Empty for most projects. */
+  editors: Readonly<EditorsConfig>;
   language: "ar" | "en";
 };
 
@@ -523,11 +544,30 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
   }
 
   return {
-    async open(project) {
-      const root = isString(project) ? deps.projects[project] : undefined;
-      if (root === undefined) return fail(MESSAGES.unknownProject(deps.language));
+    async roots(project) {
+      if (!isString(project)) return [];
+      return (deps.editors[project] ?? []).map((entry) => entry.name);
+    },
+
+    async open(project, rootName) {
+      const projectPath = isString(project) ? deps.projects[project] : undefined;
+      if (projectPath === undefined) return fail(MESSAGES.unknownProject(deps.language));
+
+      // The renderer names a root; main resolves it. A name this project
+      // does not declare is refused here rather than joined onto the
+      // project path — that is what keeps a renderer-supplied string from
+      // ever becoming a directory code-server is rooted at.
+      let folder = projectPath;
+      if (rootName !== undefined) {
+        const declared = isString(rootName)
+          ? deps.editors[project]?.find((entry) => entry.name === rootName)
+          : undefined;
+        if (declared === undefined) return fail(MESSAGES.editorUnavailable(deps.language));
+        folder = join(projectPath, declared.path);
+      }
+
       try {
-        const result = await deps.codeServer.open(root);
+        const result = await deps.codeServer.open(projectPath, folder);
         // The manager's own failure detail is developer-facing (e.g. "did
         // not become ready in time") — same discipline as docFailureText:
         // wrap it behind one bilingual headline rather than surface it raw.

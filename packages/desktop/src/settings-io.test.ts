@@ -17,6 +17,7 @@ const draft: JarvisConfig = {
   },
   projects: { acme: "/Users/x/projects/acme" },
   databases: {},
+  editors: {},
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",
@@ -210,5 +211,54 @@ describe("databases round-trip", () => {
     });
 
     expect(await readFile(path, "utf8")).toContain("databases:");
+  });
+});
+
+describe("editor roots round-trip", () => {
+  it("keeps a project's roots through validateDraft", () => {
+    const withEditors: JarvisConfig = {
+      ...draft,
+      editors: { acme: [{ name: "portal-vue", path: "portal-vue" }] },
+    };
+
+    const validated = validateDraft(withEditors);
+
+    expect(validated.ok).toBe(true);
+    expect(validated.ok && validated.value.editors["acme"]).toEqual([
+      { name: "portal-vue", path: "portal-vue" },
+    ]);
+  });
+
+  it("omits the editors key entirely when no project has a root", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect("editors" in raw).toBe(false);
+  });
+
+  it("writes the section to the file when there is one", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+
+    await writeSettingsFile(path, {
+      ...draft,
+      editors: { acme: [{ name: "portal-vue", path: "portal-vue" }] },
+    });
+
+    expect(await readFile(path, "utf8")).toContain("editors:");
+  });
+
+  // A draft the UI could not produce but a hand-edited file could: the write
+  // must be refused whole, not written and rejected at the next startup.
+  it("refuses a draft whose root escapes the project", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+
+    const result = await writeSettingsFile(path, {
+      ...draft,
+      editors: { acme: [{ name: "up", path: "../secrets" }] },
+    });
+
+    expect(result.ok).toBe(false);
+    await expect(readFile(path, "utf8")).rejects.toThrow();
   });
 });

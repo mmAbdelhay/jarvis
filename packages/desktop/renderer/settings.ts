@@ -1,5 +1,5 @@
 import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
-import type { DbGateConnection, DbGateEngine } from "@jarvis/platform";
+import type { DbGateConnection, DbGateEngine, EditorRoot } from "@jarvis/platform";
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
@@ -44,6 +44,7 @@ function renderSettings(): void {
   renderRouting();
   renderProjects();
   renderDatabases();
+  renderEditors();
   renderBrain();
   renderVoice();
   renderWhisper();
@@ -384,15 +385,25 @@ function renameProject(oldName: string, newName: string): void {
     delete draft.databases[oldName];
     draft.databases[newName] = connections;
   }
+  // `editors` is keyed by project name too, and parseConfig rejects a key
+  // naming no configured project — so the roots move with the rename for
+  // the same reason the connections above do.
+  const roots = draft.editors[oldName];
+  if (roots !== undefined) {
+    delete draft.editors[oldName];
+    draft.editors[newName] = roots;
+  }
   renderSettings();
 }
 
 function removeProject(name: string): void {
   if (draft === undefined) return;
   delete draft.projects[name];
-  // Same reason as the rename above: a connection list keyed to a project
-  // that no longer exists is a config parseConfig would refuse to load.
+  // Same reason as the rename above: a connection list — or a root list —
+  // keyed to a project that no longer exists is a config parseConfig would
+  // refuse to load.
   delete draft.databases[name];
+  delete draft.editors[name];
 }
 
 function addProject(): void {
@@ -539,6 +550,92 @@ function addConnection(): void {
   let n = 1;
   while (existing.some((connection) => connection.id === `connection_${n}`)) n += 1;
   draft.databases[project] = [...existing, { id: `connection_${n}`, engine: "mysql" }];
+  renderSettings();
+}
+
+// ----------------------------------------------------------- Editor roots
+
+/** Every editor root across every project, flattened into rows — the same
+ *  shape the databases section above uses, and for the same reason: a row
+ *  names its own project, so moving a root is a select change rather than a
+ *  delete and a re-add. */
+function renderEditors(): void {
+  if (draft === undefined) return;
+  const container = $("settings-editors");
+  container.replaceChildren();
+  for (const [project, roots] of Object.entries(draft.editors)) {
+    roots.forEach((root, index) => {
+      container.append(renderEditorRootRow(project, index, root));
+    });
+  }
+  // parseConfig rejects a root keyed to a project that does not exist, so
+  // with no projects there is no valid row to add.
+  ($("settings-editor-add") as HTMLButtonElement).disabled =
+    Object.keys(draft.projects).length === 0;
+}
+
+function renderEditorRootRow(project: string, index: number, root: EditorRoot): HTMLElement {
+  if (draft === undefined) return document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "settings-row";
+
+  const projectField = fieldSelect("project", project, Object.keys(draft.projects), (value) =>
+    moveEditorRoot(project, index, value),
+  );
+  const nameField = fieldInput("name", root.name, (value) => {
+    if (value !== "") updateEditorRoot(project, index, { name: value });
+  });
+  // Relative to the project directory, always — parseConfig refuses an
+  // absolute or climbing path, so a draft with one cannot be saved.
+  const pathField = fieldInput("path", root.path, (value) => {
+    if (value !== "") updateEditorRoot(project, index, { path: value });
+  });
+
+  row.append(projectField, nameField, pathField, spacer(), removeControl(() => removeEditorRoot(project, index)));
+  return row;
+}
+
+function updateEditorRoot(project: string, index: number, patch: Partial<EditorRoot>): void {
+  if (draft === undefined) return;
+  const root = draft.editors[project]?.[index];
+  if (root === undefined) return;
+  Object.assign(root, patch);
+}
+
+function moveEditorRoot(project: string, index: number, toProject: string): void {
+  if (draft === undefined || toProject === project) return;
+  const roots = draft.editors[project];
+  const root = roots?.[index];
+  if (roots === undefined || root === undefined) return;
+  if (draft.projects[toProject] === undefined) return;
+
+  const remaining = roots.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.editors[project];
+  else draft.editors[project] = remaining;
+  draft.editors[toProject] = [...(draft.editors[toProject] ?? []), root];
+  renderSettings();
+}
+
+function removeEditorRoot(project: string, index: number): void {
+  if (draft === undefined) return;
+  const roots = draft.editors[project];
+  if (roots === undefined) return;
+  const remaining = roots.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.editors[project];
+  else draft.editors[project] = remaining;
+}
+
+function addEditorRoot(): void {
+  if (draft === undefined) return;
+  const project = Object.keys(draft.projects)[0];
+  if (project === undefined) return;
+  const existing = draft.editors[project] ?? [];
+  // Names are unique within a project (parseConfig enforces it), and the
+  // generated path is "." — the project itself, which is always valid, so a
+  // freshly added row can be saved before it is filled in.
+  let n = 1;
+  while (existing.some((root) => root.name === `root-${n}`)) n += 1;
+  draft.editors[project] = [...existing, { name: `root-${n}`, path: "." }];
   renderSettings();
 }
 
@@ -758,6 +855,10 @@ function wireStaticFields(): void {
   });
   $("settings-database-add").addEventListener("click", () => {
     addConnection();
+    clearSaveStatus();
+  });
+  $("settings-editor-add").addEventListener("click", () => {
+    addEditorRoot();
     clearSaveStatus();
   });
 

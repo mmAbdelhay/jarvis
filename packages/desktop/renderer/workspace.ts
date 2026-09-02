@@ -65,6 +65,9 @@ const lastActiveTabByProject = new Map<string, string>();
  *  <select> and by clicking a collapsed project pill in the tab strip. */
 async function switchToProject(project: string): Promise<void> {
   ($("workspace-project") as HTMLSelectElement).value = project;
+  // The menu lists one project's roots; leaving it up over another project
+  // would open a root the selector no longer shows.
+  closeEditorMenu();
 
   const remembered = lastActiveTabByProject.get(project);
   const target =
@@ -360,17 +363,70 @@ export function initWorkspace(projects: string[]): void {
   void refreshBookmarks();
 }
 
-/** Ensures a code-server instance is running for the selected project and
+/** The Editor button. A project that configures no `editors:` roots opens
+ *  at its own directory, exactly as it always did; one root opens straight
+ *  into it; two or more offer a menu, since picking is the whole point of
+ *  having configured them. The roots are re-read on every click rather than
+ *  cached, so a config change needs no more than the Settings restart. */
+async function openEditor(): Promise<void> {
+  // A second click on the button is "put that menu away", not "open it
+  // again" — the only other way out would be clicking a root.
+  if (!editorMenu().hidden) {
+    closeEditorMenu();
+    return;
+  }
+
+  const project = selectedProject();
+  const roots = await window.jarvis.editorRoots(project);
+  if (roots.length > 1) {
+    showEditorMenu(project, roots);
+    return;
+  }
+  await openEditorRoot(project, roots[0]);
+}
+
+function editorMenu(): HTMLElement {
+  return $("workspace-editor-menu");
+}
+
+function closeEditorMenu(): void {
+  const menu = editorMenu();
+  menu.hidden = true;
+  menu.replaceChildren();
+}
+
+/** The root picker. A root name is config text like a project name, so it
+ *  is a node with its textContent set — no innerHTML here either. */
+function showEditorMenu(project: string, roots: string[]): void {
+  const menu = editorMenu();
+  menu.replaceChildren();
+  for (const root of roots) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "workspace-menu-item";
+    item.textContent = root;
+    item.addEventListener("click", () => {
+      closeEditorMenu();
+      void openEditorRoot(project, root);
+    });
+    menu.append(item);
+  }
+  menu.hidden = false;
+}
+
+/** Ensures a code-server instance is running for one root of `project` and
  *  opens it as an ordinary browser tab — the editor is not a separate
  *  surface, just a page like any other, reusing openTab exactly as the
- *  address bar or a "+" click would. */
-async function openEditor(): Promise<void> {
-  const project = selectedProject();
-
+ *  address bar or a "+" click would. `root` undefined means the project
+ *  directory itself. */
+async function openEditorRoot(project: string, root: string | undefined): Promise<void> {
   // code-server is already running and the tab already exists for this
-  // project — this is a tab switch, not a reason to spin up a second
-  // instance or open a duplicate tab.
-  const existing = latest.tabs.find((tab) => tab.kind === "editor" && tab.project === project);
+  // project *and this root* — a tab switch, not a reason to spin up a
+  // second instance. Two roots of one project are two editors, which is
+  // why the tab's own `detail` decides this and the project alone cannot.
+  const existing = latest.tabs.find(
+    (tab) => tab.kind === "editor" && tab.project === project && tab.detail === root,
+  );
   if (existing !== undefined) {
     void window.jarvis.activateTab(existing.id);
     return;
@@ -380,13 +436,13 @@ async function openEditor(): Promise<void> {
   status.textContent = "";
   status.classList.remove("workspace-tool-status--error");
 
-  const result = await window.jarvis.openEditor(project);
+  const result = await window.jarvis.openEditor(project, root);
   if (!result.ok) {
     status.textContent = result.text;
     status.classList.add("workspace-tool-status--error");
     return;
   }
-  void window.jarvis.openTab(project, result.value, "editor");
+  void window.jarvis.openTab(project, result.value, "editor", root);
 }
 
 /** Ensures a DbGate instance is running for the selected project and opens
