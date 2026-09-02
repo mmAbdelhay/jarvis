@@ -18,7 +18,8 @@
     "node-pty": "^1.1.0",
     "simple-git": "^3.36.0",
     "systeminformation": "^5.33.6",
-    "undici": "8.10.1"
+    "undici": "8.10.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2"

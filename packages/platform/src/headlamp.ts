@@ -1,4 +1,8 @@
+import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { parse } from "yaml";
+import { runCommand } from "./spawn.js";
 
 /** One entry of a project's `clusters:` list in jarvis.yaml: a kubeconfig
  *  context the Cluster button may open, and the name shown for it. */
@@ -203,4 +207,99 @@ export function createHeadlampManager(deps: HeadlampManagerDeps): HeadlampManage
       running.clear();
     },
   };
+}
+
+/**
+ * Every context name in a kubeconfig, in file order.
+ *
+ * Tolerant on purpose: a malformed or nameless entry is skipped rather than
+ * thrown over. This list only decides what an instance *hides*, so a
+ * kubeconfig Jarvis cannot fully understand should cost the user a cluster
+ * they did not ask about, not the ability to open the one they did.
+ */
+export function parseKubeContexts(yamlText: string): string[] {
+  const document: unknown = parse(yamlText);
+  if (typeof document !== "object" || document === null) return [];
+  const contexts = (document as Record<string, unknown>)["contexts"];
+  if (!Array.isArray(contexts)) return [];
+  return contexts.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const name = (entry as Record<string, unknown>)["name"];
+    return typeof name === "string" && name !== "" ? [name] : [];
+  });
+}
+
+/** Reads the kubeconfig on every call rather than caching it: a context
+ *  added while Jarvis is running should be openable without a restart, and
+ *  this runs once per instance start, not per request. An unreadable
+ *  kubeconfig yields no contexts, which skips nothing — the instance then
+ *  shows everything, which is wrong but harmless, rather than failing. */
+export function createKubeContextLister(path: string): () => Promise<string[]> {
+  return async () => {
+    try {
+      return parseKubeContexts(await readFile(path, "utf8"));
+    } catch {
+      return [];
+    }
+  };
+}
+
+/**
+ * The real spawner: headlamp-server on loopback, serving the front end from
+ * beside its own binary.
+ *
+ * `-listen-addr 127.0.0.1` is why this needs no generated login the way
+ * DbGate does — the spike confirmed the flag is honoured, so nothing off
+ * this machine can reach the port. Anything already running as this user
+ * could, which is the same trade-off code-server.ts documents.
+ *
+ * `env` is passed explicitly rather than inherited. Authentication runs the
+ * kubeconfig's `exec` credential plugin — for EKS, `aws eks get-token` —
+ * which client-go resolves on PATH, and a GUI app's PATH is not the user's
+ * (see the note in shell.ts). Handing it a login shell's PATH is what makes
+ * cluster auth work when Jarvis was not launched from a terminal.
+ */
+export function createRealHeadlampSpawner(env: NodeJS.ProcessEnv = process.env): HeadlampSpawner {
+  return ({ binary, frontendDir, kubeconfigPath, port, skippedContexts: skipped }) => {
+    const args = [
+      "-html-static-dir", frontendDir,
+      "-kubeconfig", kubeconfigPath,
+      "-listen-addr", "127.0.0.1",
+      "-port", String(port),
+    ];
+    // Omitted entirely when nothing is skipped: an empty string argument
+    // is not obviously the same thing as "skip nothing" to a Go flag
+    // parser, and there is no reason to find out.
+    if (skipped.length > 0) args.push("-skipped-kube-contexts", skipped.join(","));
+
+    const child = spawn(binary, args, { stdio: "ignore", env });
+
+    return {
+      kill: () => child.kill(),
+      onExit: (listener) => child.on("exit", (code) => listener(code)),
+    };
+  };
+}
+
+/**
+ * The PATH a login shell would give, or undefined if asking failed.
+ *
+ * Asked once at startup and reused, because it costs a shell start: the
+ * point is the user's own .zprofile/.zshrc PATH, which is where `aws`,
+ * `gcloud` or whatever else a kubeconfig's exec plugin names actually
+ * lives. Failure is not fatal — the caller falls back to the inherited
+ * environment, which is right for a Jarvis launched from a terminal.
+ */
+export async function loginShellPath(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> {
+  const shell = env["SHELL"];
+  if (shell === undefined || shell === "") return undefined;
+  try {
+    const { code, stdout } = await runCommand(shell, ["-lc", "printf %s \"$PATH\""]);
+    const path = stdout.trim();
+    return code === 0 && path !== "" ? path : undefined;
+  } catch {
+    return undefined;
+  }
 }

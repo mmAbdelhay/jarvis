@@ -1,14 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import {
   clusterUrlSegment,
   createHeadlampManager,
   defaultHeadlampBinary,
   frontendDirFor,
+  loginShellPath,
+  parseKubeContexts,
   skippedContexts,
   type HeadlampProcess,
   type HeadlampSpawner,
 } from "./headlamp.js";
+import * as spawnModule from "./spawn.js";
 
 describe("clusterUrlSegment", () => {
   it("replaces slashes with double hyphens and leaves colons alone", () => {
@@ -244,5 +247,82 @@ describe("createHeadlampManager", () => {
     await manager.open("other", "ctx-b");
     manager.stopAll();
     expect(processes.every((process) => process.killed)).toBe(true);
+  });
+});
+
+describe("parseKubeContexts", () => {
+  it("reads every context name in order", () => {
+    expect(
+      parseKubeContexts(`
+apiVersion: v1
+contexts:
+  - name: kind-kind
+    context: { cluster: kind-kind, user: kind-kind }
+  - name: "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev"
+    context: { cluster: x, user: y }
+current-context: kind-kind
+`),
+    ).toEqual(["kind-kind", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev"]);
+  });
+
+  it("is empty for a kubeconfig with no contexts", () => {
+    expect(parseKubeContexts("apiVersion: v1\n")).toEqual([]);
+  });
+
+  it("ignores an entry with no name rather than throwing", () => {
+    expect(parseKubeContexts("contexts:\n  - context: {}\n  - name: ok\n")).toEqual(["ok"]);
+  });
+});
+
+describe("loginShellPath", () => {
+  it("returns undefined when SHELL is unset", async () => {
+    expect(await loginShellPath({})).toBeUndefined();
+  });
+
+  it("returns undefined when SHELL is empty", async () => {
+    expect(await loginShellPath({ SHELL: "" })).toBeUndefined();
+  });
+
+  it("asks the shell named by SHELL for a login PATH and trims it", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 0, stdout: "/usr/local/bin:/usr/bin\n", stderr: "" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBe("/usr/local/bin:/usr/bin");
+      expect(spy).toHaveBeenCalledWith("/bin/zsh", ["-lc", 'printf %s "$PATH"']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns undefined when the shell exits non-zero", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 1, stdout: "/usr/bin\n", stderr: "no such file" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns undefined when the shell prints an empty PATH", async () => {
+    const spy = vi
+      .spyOn(spawnModule, "runCommand")
+      .mockResolvedValue({ code: 0, stdout: "\n", stderr: "" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns undefined rather than throwing when the shell cannot be spawned", async () => {
+    const spy = vi.spyOn(spawnModule, "runCommand").mockRejectedValue(new Error("ENOENT"));
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/does-not-exist" })).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
