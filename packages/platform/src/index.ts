@@ -7,6 +7,7 @@ export * from "./piper.js";
 export * from "./stt.js";
 export * from "./brain.js";
 export * from "./session-store.js";
+export * from "./session-import.js";
 export * from "./paths.js";
 export * from "./git.js";
 export * from "./code-server.js";
