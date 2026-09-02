@@ -86,6 +86,13 @@ export const MESSAGES = {
   // editorUnavailable and databaseUnavailable.
   clusterUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر فتح متصفّح العنقود." : "Could not open the cluster browser.",
+  // Shown when ensureAwsSession's wait for saml2aws login to finish (typed
+  // into a Workspace Terminal tab) runs out the clock — the terminal is left
+  // open rather than closed out from under the user mid-login.
+  clusterLoginTimedOut: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم تكتمل عملية الدخول إلى AWS في الوقت المحدد. تحقّق من الطرفية وحاول مرة أخرى."
+      : "AWS login did not finish in time. Check the terminal and try again.",
   // headlamp-server was measured at roughly twelve seconds cold — longer
   // than code-server, shorter than DbGate — so the toolbar says so for the
   // whole wait rather than leaving the app looking frozen.

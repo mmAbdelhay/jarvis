@@ -16,10 +16,12 @@ import {
   type WiringDeps,
 } from "./ipc.js";
 import type {
+  AwsSessionChecker,
   Bookmark,
   BookmarkStore,
   CodeServerManager,
   DbGateManager,
+  HeadlampManager,
   ShellManager,
 } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
@@ -1178,23 +1180,70 @@ describe("database handlers", () => {
 });
 
 describe("createClusterHandlers", () => {
-  const clusters = { opf: [{ name: "dev", context: "ctx-a" }] };
+  const clusters = {
+    opf: [
+      { name: "dev", context: "ctx-a" }, // unchanged — the six existing tests below still target this
+      { name: "prod", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev" }, // new
+    ],
+  };
   const projects = { opf: "/tmp/opf" };
 
-  function handlers(open = vi.fn().mockResolvedValue({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" })) {
+  // A real kubeconfig: ctx-a isn't in it (so the six existing tests still
+  // resolve no profile), the ARN context is, with AWS_PROFILE=saml.
+  const KUBECONFIG = `
+contexts:
+  - name: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
+    context:
+      cluster: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
+      user: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
+users:
+  - name: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
+    user:
+      exec:
+        command: aws
+        args: [eks, get-token]
+        env:
+          - name: AWS_PROFILE
+            value: saml
+`;
+
+  function handlers(
+    over: {
+      open?: HeadlampManager["open"];
+      checkAwsSession?: AwsSessionChecker;
+      awaitAwsSession?: AwsSessionChecker;
+    } = {},
+  ) {
+    const open = over.open ?? vi.fn().mockResolvedValue({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" });
+    const checkAwsSession = over.checkAwsSession ?? vi.fn().mockResolvedValue(true);
+    const awaitAwsSession = over.awaitAwsSession ?? vi.fn().mockResolvedValue(true);
+    const opened: { project: string; cwd: string }[] = [];
+    const typed: { tabId: string; data: string }[] = [];
     return {
       open,
+      checkAwsSession,
+      awaitAwsSession,
+      opened,
+      typed,
       handlers: createClusterHandlers({
         headlamp: { open, stopAll: vi.fn() },
         projects,
         clusters,
+        readKubeconfig: async () => KUBECONFIG,
+        checkAwsSession,
+        awaitAwsSession,
+        openTerminal: (project, cwd) => {
+          opened.push({ project, cwd });
+          return "tab-1";
+        },
+        sendInput: (tabId, data) => typed.push({ tabId, data }),
         language: "en",
       }),
     };
   }
 
   it("lists a project's cluster names in config order", async () => {
-    expect(await handlers().handlers.names("opf")).toEqual(["dev"]);
+    expect(await handlers().handlers.names("opf")).toEqual(["dev", "prod"]);
   });
 
   it("lists nothing for a project with no clusters", async () => {
@@ -1222,9 +1271,9 @@ describe("createClusterHandlers", () => {
   });
 
   it("wraps the manager's own detail behind one bilingual headline", async () => {
-    const { handlers: h } = handlers(
-      vi.fn().mockResolvedValue({ ok: false, detail: "did not become ready in time" }),
-    );
+    const { handlers: h } = handlers({
+      open: vi.fn().mockResolvedValue({ ok: false, detail: "did not become ready in time" }),
+    });
     const result = await h.open("opf", "dev");
     expect(result).toEqual({
       ok: false,
@@ -1234,8 +1283,77 @@ describe("createClusterHandlers", () => {
   });
 
   it("survives a manager that throws", async () => {
-    const { handlers: h } = handlers(vi.fn().mockRejectedValue(new Error("boom")));
+    const { handlers: h } = handlers({ open: vi.fn().mockRejectedValue(new Error("boom")) });
     expect((await h.open("opf", "dev")).ok).toBe(false);
+  });
+
+  it("opens straight away when the context has no AWS profile (unchanged path, e.g. ctx-a)", async () => {
+    // This is the same behavior the six tests above already pin; stated here
+    // once more explicitly against the new deps so a future change to
+    // ensureAwsSession's "nothing to check" branch fails a test that names it.
+    const { handlers: h, checkAwsSession, opened } = handlers();
+    await h.open("opf", "dev");
+    expect(checkAwsSession).not.toHaveBeenCalled();
+    expect(opened).toEqual([]);
+  });
+
+  it("opens straight away when the AWS session is already connected", async () => {
+    const { handlers: h, open, checkAwsSession, opened } = handlers();
+    const result = await h.open("opf", "prod");
+    expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+    expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
+    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(opened).toEqual([]);
+  });
+
+  it("runs the login in a terminal tab, waits for it, then opens the cluster", async () => {
+    const { handlers: h, open, awaitAwsSession, opened, typed } = handlers({
+      checkAwsSession: vi.fn().mockResolvedValue(false),
+    });
+    const result = await h.open("opf", "prod");
+    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    expect(typed).toEqual([
+      {
+        tabId: "tab-1",
+        data: "saml2aws login && aws eks update-kubeconfig --name app_dev --region eu-west-1 --profile saml\r",
+      },
+    ]);
+    expect(awaitAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
+    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+  });
+
+  it("reports a timeout without opening the cluster, leaving the terminal tab open", async () => {
+    const { handlers: h, open } = handlers({
+      checkAwsSession: vi.fn().mockResolvedValue(false),
+      awaitAwsSession: vi.fn().mockResolvedValue(false),
+    });
+    const result = await h.open("opf", "prod");
+    expect(result).toEqual({
+      ok: false,
+      text: "AWS login did not finish in time. Check the terminal and try again.",
+      language: "en",
+    });
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("shares one in-flight login across two concurrent opens of the same project", async () => {
+    let resolveAwait!: (v: boolean) => void;
+    const awaitAwsSession = vi.fn().mockReturnValue(
+      new Promise<boolean>((r) => {
+        resolveAwait = r;
+      }),
+    );
+    const { handlers: h, opened } = handlers({
+      checkAwsSession: vi.fn().mockResolvedValue(false),
+      awaitAwsSession,
+    });
+    const first = h.open("opf", "prod");
+    const second = h.open("opf", "prod");
+    resolveAwait(true);
+    await Promise.all([first, second]);
+    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    expect(awaitAwsSession).toHaveBeenCalledTimes(1);
   });
 });
 

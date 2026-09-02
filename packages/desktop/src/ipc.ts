@@ -18,11 +18,13 @@ import {
 } from "@jarvis/core";
 import { join, resolve, sep } from "node:path";
 import type { WorkspaceState } from "@jarvis/core";
+import { awsLoginCommand, eksUpdateKubeconfigArgs, profileForContext } from "@jarvis/platform";
 import type {
   ApiFailure,
   ApiResponse,
   ApiSettings,
   AssertionResult,
+  AwsSessionChecker,
   BrunoVariable,
   Cookie,
   HistoryEntry,
@@ -673,16 +675,55 @@ export type ClusterHandlers = {
 
 export type ClusterHandlerDeps = {
   headlamp: HeadlampManager;
-  /** Only used to reject a project name that is not configured — Personal
-   *  above all, which has no entry and therefore no clusters. */
+  /** Only used to reject a project name that is not configured, and as the
+   *  cwd for the login terminal — Personal above all, which has no entry
+   *  and therefore no clusters. */
   projects: Readonly<Record<string, string>>;
   clusters: Readonly<ClustersConfig>;
+  /** The raw kubeconfig text profileForContext reads. A function, not a
+   *  path, so the handler never touches the filesystem directly — same
+   *  reasoning as every other injected side effect in this file. */
+  readKubeconfig(): Promise<string>;
+  checkAwsSession: AwsSessionChecker;
+  awaitAwsSession: AwsSessionChecker;
+  /** Opens a Terminal tab under `project`, with its shell rooted at `cwd`.
+   *  Returns the tab id so the login command can be typed into it. */
+  openTerminal(project: string, cwd: string): string;
+  sendInput(tabId: string, data: string): void;
   language: "ar" | "en";
 };
 
 export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers {
   function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
     return { ok: false, text, language: deps.language };
+  }
+
+  // A project already mid-login shares this promise rather than opening a
+  // second terminal tab and retyping the command — the same reason
+  // HeadlampManager.open dedupes concurrent starts one layer down.
+  const loggingIn = new Map<string, Promise<boolean>>();
+
+  async function ensureAwsSession(project: string, context: string): Promise<boolean> {
+    const profile = profileForContext(await deps.readKubeconfig(), context);
+    const args = eksUpdateKubeconfigArgs(context);
+    if (profile === undefined || args === undefined) return true; // nothing to check
+
+    if (await deps.checkAwsSession(profile, args.region)) return true;
+
+    const inFlight = loggingIn.get(project);
+    if (inFlight !== undefined) return inFlight;
+
+    const attempt = (async () => {
+      const tabId = deps.openTerminal(project, deps.projects[project] ?? "");
+      deps.sendInput(tabId, `${awsLoginCommand(args.name, args.region, profile)}\r`);
+      return deps.awaitAwsSession(profile, args.region);
+    })();
+    loggingIn.set(project, attempt);
+    try {
+      return await attempt;
+    } finally {
+      loggingIn.delete(project);
+    }
   }
 
   return {
@@ -706,6 +747,9 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
       if (declared === undefined) return fail(MESSAGES.clusterUnavailable(deps.language));
 
       try {
+        const connected = await ensureAwsSession(project, declared.context);
+        if (!connected) return fail(MESSAGES.clusterLoginTimedOut(deps.language));
+
         const result = await deps.headlamp.open(project, declared.context);
         return result.ok
           ? { ok: true, value: result.url }

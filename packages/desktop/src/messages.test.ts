@@ -238,4 +238,9 @@ describe("cluster strings", () => {
     expect(MESSAGES.noClustersConfigured("en")).toBe("No clusters configured for this project.");
     expect(MESSAGES.noClustersConfigured("ar")).toContain("عناقيد");
   });
+
+  it("names AWS login timing out, in both languages", () => {
+    expect(MESSAGES.clusterLoginTimedOut("en")).toContain("did not finish in time");
+    expect(MESSAGES.clusterLoginTimedOut("ar")).toContain("لم تكتمل");
+  });
 });
