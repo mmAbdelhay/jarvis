@@ -226,7 +226,19 @@ type CompletableTerminal = {
   buffer: { active: ReadableBuffer };
   parser: { registerOscHandler(ident: number, callback: (data: string) => boolean): unknown };
   onData(listener: (data: string) => void): void;
-  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
+};
+
+export type Completion = {
+  /** Run before the terminal's own key handling. Returns false when the
+   *  dropdown claimed the key, true to let it through — the shape
+   *  attachCustomKeyEventHandler expects.
+   *
+   *  This is deliberately not registered here. xterm keeps exactly one
+   *  custom key handler, so a second attachCustomKeyEventHandler would
+   *  silently replace the addon stack's and take Cmd+F, Cmd+V and
+   *  Shift+Enter with it. terminal-addons.ts owns the one handler and
+   *  consults this first. */
+  handleKey(event: KeyboardEvent): boolean;
 };
 
 /** The OSC identifier FinalTerm defined and iTerm2, VS Code, WezTerm and
@@ -252,7 +264,7 @@ export function attachCompletion(
   terminal: CompletableTerminal,
   host: HTMLElement,
   hooks: CompletionHooks,
-): void {
+): Completion {
   const tracker = createPromptTracker();
   const dropdown = createDropdown(host);
   /** The line the open dropdown was computed for — what accepting has to
@@ -272,8 +284,9 @@ export function attachCompletion(
       return false;
     });
   } catch {
-    // No marks means no dropdown, and that is the whole failure.
-    return;
+    // No marks means no dropdown, and that is the whole failure. Every key
+    // goes straight through.
+    return { handleKey: () => true };
   }
 
   async function refresh(): Promise<void> {
@@ -325,7 +338,7 @@ export function attachCompletion(
     setTimeout(() => void refresh(), 0);
   });
 
-  terminal.attachCustomKeyEventHandler((event) => {
+  function handleKey(event: KeyboardEvent): boolean {
     if (event.type !== "keydown") return true;
     // Closed: every key is zsh's, unchanged. This is the line that keeps
     // the terminal behaving exactly as it does today.
@@ -363,5 +376,7 @@ export function attachCompletion(
     }
 
     return true;
-  });
+  }
+
+  return { handleKey };
 }

@@ -22,6 +22,12 @@ export type TerminalHooks = {
    *  to — and links open as ordinary Workspace tabs, never in an external
    *  browser, so the app's own navigation rules still apply. */
   openLink: (url: string) => void;
+  /** Consulted before anything else on every key, and the reason it lives
+   *  here at all: xterm keeps exactly one custom key handler, so a caller
+   *  that attached its own would silently replace this module's and take
+   *  Cmd+F, Cmd+V and Shift+Enter with it. Returning false means the key
+   *  was claimed. Absent for a terminal with no autocomplete. */
+  interceptKey?: ((event: KeyboardEvent) => boolean) | undefined;
 };
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
@@ -172,6 +178,11 @@ function claim(event: KeyboardEvent): false {
 
 function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): void {
   terminal.attachCustomKeyEventHandler((event) => {
+    // First, and only ever while it has something open: an autocomplete
+    // dropdown owns Tab and the arrows for as long as it is showing, and
+    // hands every key straight back the moment it is not.
+    if (hooks.interceptKey !== undefined && !hooks.interceptKey(event)) return false;
+
     if (event.type !== "keydown") return true;
 
     // Shift+Enter, and Option+Enter as its Mac alias.

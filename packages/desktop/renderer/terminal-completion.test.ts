@@ -213,8 +213,13 @@ describe("attachCompletion", () => {
       },
       sendInput: (data) => sent.push(data),
     };
-    attachCompletion(terminal as never, host, hooks);
-    return { terminal, host, sent, asked };
+    const completion = attachCompletion(terminal as never, host, hooks);
+    // The dropdown never attaches a key handler of its own — xterm keeps
+    // only one, and terminal-addons.ts owns it. So the tests drive the
+    // handler the same way that module does.
+    const press = (init: { key: string; ctrlKey?: boolean; metaKey?: boolean }): boolean =>
+      completion.handleKey({ type: "keydown", preventDefault: () => {}, ...init } as never);
+    return { terminal, host, sent, asked, press };
   }
 
   /** Puts the shell at a prompt with `typed` after it, and lets the
@@ -231,15 +236,15 @@ describe("attachCompletion", () => {
   // The single rule that keeps the terminal feeling like a terminal: with
   // the dropdown shut, zsh receives every key exactly as it does today.
   it("passes every key to zsh while the dropdown is closed", () => {
-    const { terminal } = attached();
+    const { terminal, press } = attached();
 
     for (const key of ["Tab", "ArrowUp", "ArrowDown", "Enter", "Escape", "a", "c"]) {
-      expect(terminal.pressKey({ key })).toBe(true);
+      expect(press({ key })).toBe(true);
     }
   });
 
   it("opens on typing and lists what the source returned", async () => {
-    const { terminal, host, asked } = attached();
+    const { terminal, host, asked, press } = attached();
 
     await typeAt(terminal, "~/p > ", "git sta");
 
@@ -248,7 +253,7 @@ describe("attachCompletion", () => {
   });
 
   it("does not open at a bare prompt, and does not even ask", async () => {
-    const { terminal, host, asked } = attached();
+    const { terminal, host, asked, press } = attached();
 
     terminal.parser.emitOsc(133, "A");
     terminal.typeLine("~/p > ");
@@ -261,7 +266,7 @@ describe("attachCompletion", () => {
   });
 
   it("does not open while a command is running", async () => {
-    const { terminal, asked } = attached();
+    const { terminal, asked, press } = attached();
     await typeAt(terminal, "~/p > ", "git sta");
 
     terminal.parser.emitOsc(133, "C");
@@ -269,63 +274,63 @@ describe("attachCompletion", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(asked).toEqual(["git sta"]);
-    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+    expect(press({ key: "Tab" })).toBe(true);
   });
 
   it("does not open when there is nothing to suggest, so Tab falls through to zsh", async () => {
-    const { terminal } = attached([]);
+    const { terminal, press } = attached([]);
 
     await typeAt(terminal, "~/p > ", "globex-dep");
 
-    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+    expect(press({ key: "Tab" })).toBe(true);
   });
 
   it("claims Tab, the arrows, Enter and Escape only while it is open", async () => {
-    const { terminal } = attached(["git status", "git stash"]);
+    const { terminal, press } = attached(["git status", "git stash"]);
     await typeAt(terminal, "~/p > ", "git sta");
 
     for (const key of ["ArrowDown", "ArrowUp"]) {
-      expect(terminal.pressKey({ key })).toBe(false);
+      expect(press({ key })).toBe(false);
     }
-    expect(terminal.pressKey({ key: "Enter" })).toBe(false);
+    expect(press({ key: "Enter" })).toBe(false);
   });
 
   it("leaves a Ctrl or Cmd chord to the terminal even while open", async () => {
-    const { terminal } = attached();
+    const { terminal, press } = attached();
     await typeAt(terminal, "~/p > ", "git sta");
 
-    expect(terminal.pressKey({ key: "c", ctrlKey: true })).toBe(true);
-    expect(terminal.pressKey({ key: "f", metaKey: true })).toBe(true);
+    expect(press({ key: "c", ctrlKey: true })).toBe(true);
+    expect(press({ key: "f", metaKey: true })).toBe(true);
   });
 
   it("replaces the typed line with the accepted suggestion, without running it", async () => {
-    const { terminal, sent } = attached();
+    const { terminal, sent, press } = attached();
     await typeAt(terminal, "~/p > ", "git sta");
 
-    terminal.pressKey({ key: "Tab" });
+    press({ key: "Tab" });
 
     expect(sent).toEqual(["\u007f".repeat(7) + "git status"]);
   });
 
   it("closes after accepting, so the next Tab is zsh's again", async () => {
-    const { terminal } = attached();
+    const { terminal, press } = attached();
     await typeAt(terminal, "~/p > ", "git sta");
-    terminal.pressKey({ key: "Tab" });
+    press({ key: "Tab" });
 
-    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+    expect(press({ key: "Tab" })).toBe(true);
   });
 
   it("closes on Escape without sending anything to the shell", async () => {
-    const { terminal, sent } = attached();
+    const { terminal, sent, press } = attached();
     await typeAt(terminal, "~/p > ", "git sta");
 
-    expect(terminal.pressKey({ key: "Escape" })).toBe(false);
+    expect(press({ key: "Escape" })).toBe(false);
     expect(sent).toEqual([]);
-    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+    expect(press({ key: "Tab" })).toBe(true);
   });
 
   it("stays closed when the buffer read throws", async () => {
-    const { terminal } = attached();
+    const { terminal, press } = attached();
     terminal.parser.emitOsc(133, "A");
     terminal.typeLine("~/p > ");
     terminal.parser.emitOsc(133, "B");
@@ -338,7 +343,7 @@ describe("attachCompletion", () => {
     terminal.emitData("g");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(terminal.pressKey({ key: "Tab" })).toBe(true);
+    expect(press({ key: "Tab" })).toBe(true);
   });
 
   it("survives a terminal whose parser refuses an OSC handler", () => {
