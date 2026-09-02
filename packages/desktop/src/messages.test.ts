@@ -228,3 +228,14 @@ describe("hosted-app starting strings", () => {
     expect(MESSAGES.databaseStarting("en")).toBe("Starting the database browser…");
   });
 });
+
+describe("cluster strings", () => {
+  it("has both lanes for the cluster messages", () => {
+    expect(MESSAGES.clusterUnavailable("en")).toBe("Could not open the cluster browser.");
+    expect(MESSAGES.clusterUnavailable("ar")).toContain("عنقود");
+    expect(MESSAGES.clusterStarting("en")).toBe("Starting the cluster browser…");
+    expect(MESSAGES.clusterStarting("ar")).toContain("عنقود");
+    expect(MESSAGES.noClustersConfigured("en")).toBe("No clusters configured for this project.");
+    expect(MESSAGES.noClustersConfigured("ar")).toContain("عناقيد");
+  });
+});

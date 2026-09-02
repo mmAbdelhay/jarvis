@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiring,
   createBookmarksHandlers,
+  createClusterHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
   createApiHandlers,
@@ -1170,6 +1171,68 @@ describe("database handlers", () => {
     });
 
     expect((await handlers.open("acme")).ok).toBe(false);
+  });
+});
+
+describe("createClusterHandlers", () => {
+  const clusters = { opf: [{ name: "dev", context: "ctx-a" }] };
+  const projects = { opf: "/tmp/opf" };
+
+  function handlers(open = vi.fn().mockResolvedValue({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" })) {
+    return {
+      open,
+      handlers: createClusterHandlers({
+        headlamp: { open, stopAll: vi.fn() },
+        projects,
+        clusters,
+        language: "en",
+      }),
+    };
+  }
+
+  it("lists a project's cluster names in config order", async () => {
+    expect(await handlers().handlers.names("opf")).toEqual(["dev"]);
+  });
+
+  it("lists nothing for a project with no clusters", async () => {
+    expect(await handlers().handlers.names("nope")).toEqual([]);
+  });
+
+  it("resolves a cluster name to its context and returns the URL", async () => {
+    const { handlers: h, open } = handlers();
+    expect(await h.open("opf", "dev")).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+    expect(open).toHaveBeenCalledWith("opf", "ctx-a");
+  });
+
+  it("refuses a project it does not know", async () => {
+    const { handlers: h, open } = handlers();
+    const result = await h.open("personal", "dev");
+    expect(result.ok).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cluster name the project does not declare", async () => {
+    const { handlers: h, open } = handlers();
+    const result = await h.open("opf", "made-up");
+    expect(result.ok).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("wraps the manager's own detail behind one bilingual headline", async () => {
+    const { handlers: h } = handlers(
+      vi.fn().mockResolvedValue({ ok: false, detail: "did not become ready in time" }),
+    );
+    const result = await h.open("opf", "dev");
+    expect(result).toEqual({
+      ok: false,
+      text: "Could not open the cluster browser.",
+      language: "en",
+    });
+  });
+
+  it("survives a manager that throws", async () => {
+    const { handlers: h } = handlers(vi.fn().mockRejectedValue(new Error("boom")));
+    expect((await h.open("opf", "dev")).ok).toBe(false);
   });
 });
 

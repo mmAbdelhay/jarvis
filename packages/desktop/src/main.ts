@@ -24,6 +24,8 @@ import {
   createCodeServerManager,
   createDbGateManager,
   createGitProvider,
+  createHeadlampManager,
+  createKubeContextLister,
   createMetricsReader,
   createPtySpawner,
   createRealCodeServerSpawner,
@@ -54,10 +56,12 @@ import {
   writeImported,
   writeRequest,
   createRealDbGateSpawner,
+  createRealHeadlampSpawner,
   createSqliteSessionStore,
   defaultSpeechRunner,
   listInstalledVoices,
   defaultVoiceLister,
+  loginShellPath,
   randomPassword,
   findFreePort,
   readStatusPage,
@@ -69,6 +73,7 @@ import {
   buildWiring,
   createApiHandlers,
   createBookmarksHandlers,
+  createClusterHandlers,
   createDatabaseHandlers,
   createEditorHandlers,
   createTerminalHandlers,
@@ -351,6 +356,30 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // Asked once, at startup: the exec credential plugin a kubeconfig names
+    // (aws, gcloud, kubelogin) is resolved on PATH, and a GUI app's PATH is
+    // not the user's. Undefined when the shell could not be asked, in which
+    // case the inherited environment stands — right for a Jarvis launched
+    // from a terminal.
+    const shellPath = await loginShellPath();
+    const headlamp = createHeadlampManager({
+      spawn: createRealHeadlampSpawner(
+        shellPath === undefined ? process.env : { ...process.env, PATH: shellPath },
+      ),
+      findFreePort,
+      waitUntilReady,
+      listContexts: createKubeContextLister(join(homedir(), ".kube/config")),
+      clusters: config.clusters,
+      binary: config.headlamp.binary,
+      kubeconfigPath: join(homedir(), ".kube/config"),
+    });
+    const cluster = createClusterHandlers({
+      headlamp,
+      projects: config.projects,
+      clusters: config.clusters,
+      language: PRIMARY_LANGUAGE,
+    });
+
     // One login shell per Terminal tab, under a real pty. Unlike the editor
     // and the database this hosts no page and opens no port: the tab has no
     // view at all, and its screen is drawn by the renderer's own xterm.
@@ -586,6 +615,8 @@ app.whenReady().then(async () => {
       codeServer.stopAll();
       // And each open Database tab is a live dbgate-serve child process.
       dbgate.stopAll();
+      // And each open Cluster tab is a live headlamp-server child process.
+      headlamp.stopAll();
       // And each open Terminal tab is a live shell.
       shells.stopAll();
     });
@@ -740,6 +771,15 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("cluster:open", (_event, project: unknown, clusterName: unknown) =>
+      cluster.open(
+        typeof project === "string" ? project : "",
+        typeof clusterName === "string" ? clusterName : "",
+      ),
+    );
+    ipcMain.handle("cluster:names", (_event, project: unknown) =>
+      cluster.names(typeof project === "string" ? project : ""),
     );
     // Opening the tab is main's job (only it holds the BrowserHost); deciding
     // whether one already exists is the renderer's, exactly as it is for the

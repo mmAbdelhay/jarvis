@@ -79,6 +79,24 @@ export const MESSAGES = {
   // same split as editorUnavailable above.
   databaseUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر فتح قاعدة البيانات." : "Could not open the database browser.",
+  // Shown when a headlamp-server instance fails to start or become ready
+  // for a Cluster tab. Covers "the binary is not installed", "it never
+  // began listening" and "the context is gone from the kubeconfig" alike:
+  // the manager's own detail rides underneath, same split as
+  // editorUnavailable and databaseUnavailable.
+  clusterUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر فتح متصفّح العنقود." : "Could not open the cluster browser.",
+  // headlamp-server was measured at roughly twelve seconds cold — longer
+  // than code-server, shorter than DbGate — so the toolbar says so for the
+  // whole wait rather than leaving the app looking frozen.
+  clusterStarting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ تشغيل متصفّح العنقود…" : "Starting the cluster browser…",
+  // A project that declares no `clusters:` has nothing for the button to
+  // open, which is most projects and always the personal browser. Its own
+  // reason rather than personalHasNoDirectory: a cluster is not rooted in a
+  // directory, so "no directory on disk" would be a false explanation.
+  noClustersConfigured: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد عناقيد مُعرَّفة لهذا المشروع." : "No clusters configured for this project.",
   // DbGate has no bind-address option and always listens on 0.0.0.0, so
   // every instance is guarded by a login generated at spawn. This is how
   // the user learns it; both halves are opaque technical tokens and stay

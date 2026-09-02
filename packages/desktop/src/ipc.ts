@@ -30,9 +30,11 @@ import type {
   BookmarkStore,
   BrunoCollection,
   BrunoTree,
+  ClustersConfig,
   CodeServerManager,
   DbGateManager,
   EditorsConfig,
+  HeadlampManager,
   InstalledVoice,
   ShellManager,
 } from "@jarvis/platform";
@@ -391,6 +393,13 @@ export type RendererApi = {
    *  plus the credential it is guarded with — call openTab(project, url,
    *  "database") with the result to actually show it. */
   openDatabase(project: string): Promise<GitViewResult<DatabaseCredentials>>;
+  /** Ensures a headlamp-server instance is running for `project` and returns
+   *  the URL of one of its configured clusters — call
+   *  openTab(project, url, "cluster", cluster) with the result. */
+  openCluster(project: string, cluster: string): Promise<GitViewResult<string>>;
+  /** The names of `project`'s configured `clusters:`, in config order. Empty
+   *  for a project that declares none, and for Personal. */
+  clusterNames(project: string): Promise<string[]>;
   /** Opens a terminal tab for `project` and starts its shell. The new tab
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
@@ -636,6 +645,64 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
           : fail(MESSAGES.databaseUnavailable(deps.language));
       } catch {
         return fail(MESSAGES.databaseUnavailable(deps.language));
+      }
+    },
+  };
+}
+
+export type ClusterHandlers = {
+  /** The names of `project`'s configured `clusters:`, in config order. The
+   *  renderer needs them to decide whether the Cluster button opens straight
+   *  away or offers a choice; it gets names only, never contexts. */
+  names(project: string): Promise<string[]>;
+  /** Ensures a headlamp-server instance is running for `project` and returns
+   *  the URL of the cluster named `cluster` within it — call
+   *  openTab(project, url, "cluster", cluster) with the result to actually
+   *  show it. */
+  open(project: string, cluster: string): Promise<GitViewResult<string>>;
+};
+
+export type ClusterHandlerDeps = {
+  headlamp: HeadlampManager;
+  /** Only used to reject a project name that is not configured — Personal
+   *  above all, which has no entry and therefore no clusters. */
+  projects: Readonly<Record<string, string>>;
+  clusters: Readonly<ClustersConfig>;
+  language: "ar" | "en";
+};
+
+export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  return {
+    async names(project) {
+      if (!isString(project)) return [];
+      return (deps.clusters[project] ?? []).map((entry) => entry.name);
+    },
+
+    async open(project, cluster) {
+      if (!isString(project) || deps.projects[project] === undefined) {
+        return fail(MESSAGES.unknownProject(deps.language));
+      }
+
+      // The renderer names a cluster; main resolves it to a context. A name
+      // this project does not declare is refused here rather than passed
+      // through — same discipline as the editor's roots, and the reason a
+      // renderer-supplied string never reaches the kubeconfig.
+      const declared = isString(cluster)
+        ? deps.clusters[project]?.find((entry) => entry.name === cluster)
+        : undefined;
+      if (declared === undefined) return fail(MESSAGES.clusterUnavailable(deps.language));
+
+      try {
+        const result = await deps.headlamp.open(project, declared.context);
+        return result.ok
+          ? { ok: true, value: result.url }
+          : fail(MESSAGES.clusterUnavailable(deps.language));
+      } catch {
+        return fail(MESSAGES.clusterUnavailable(deps.language));
       }
     },
   };
