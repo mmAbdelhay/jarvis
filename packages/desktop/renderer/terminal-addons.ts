@@ -153,6 +153,23 @@ function attachSearch(terminal: Terminal, host: HTMLElement): Search {
   };
 }
 
+/**
+ * Claims a key for the app: stops the browser acting on it as well, and
+ * tells xterm not to encode it.
+ *
+ * Returning false alone is not enough. It only means "xterm, do not encode
+ * this" — the keystroke still has its own default, and for Enter that
+ * default delivers a carriage return to the textarea xterm listens on. So
+ * Shift+Enter sent the ESC+CR it meant *and then* a bare CR behind it, and
+ * Claude Code read the pair as "newline, then submit": every multi-line
+ * message went off half-written. The same doubling would hit Cmd+V, which
+ * reads the clipboard here and would have had the browser paste it again.
+ */
+function claim(event: KeyboardEvent): false {
+  event.preventDefault();
+  return false;
+}
+
 function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): void {
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== "keydown") return true;
@@ -160,7 +177,7 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
     // Shift+Enter, and Option+Enter as its Mac alias.
     if (event.key === "Enter" && (event.shiftKey || event.altKey)) {
       hooks.sendInput(SHIFT_ENTER);
-      return false;
+      return claim(event);
     }
 
     // Everything below is a Cmd chord the app owns rather than the shell. On
@@ -171,7 +188,7 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
 
     if (event.key === "f") {
       search.open();
-      return false;
+      return claim(event);
     }
 
     // Copy. xterm draws to a canvas and owns its own selection, so the
@@ -181,7 +198,7 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
       const selection = terminal.getSelection();
       if (selection === "") return true;
       void navigator.clipboard?.writeText(selection);
-      return false;
+      return claim(event);
     }
 
     // Paste goes in as bytes, exactly as if typed.
@@ -189,12 +206,12 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
       void navigator.clipboard?.readText().then((text) => {
         if (text !== "") hooks.sendInput(text);
       });
-      return false;
+      return claim(event);
     }
 
     if (event.key === "k") {
       terminal.clear();
-      return false;
+      return claim(event);
     }
 
     return true;

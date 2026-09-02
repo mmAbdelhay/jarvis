@@ -99,8 +99,23 @@ export class FakeTerminal {
     metaKey?: boolean;
     ctrlKey?: boolean;
   }): boolean {
-    return this.keyHandler?.({ type: "keydown", ...init } as unknown as KeyboardEvent) ?? true;
+    this.defaultPrevented = false;
+    const event = {
+      type: "keydown",
+      ...init,
+      preventDefault: () => {
+        this.defaultPrevented = true;
+      },
+    };
+    return this.keyHandler?.(event as unknown as KeyboardEvent) ?? true;
   }
+
+  /** Whether the last pressKey's handler called preventDefault. Returning
+   *  false from the handler only tells xterm not to encode the key; the
+   *  browser still delivers its text to the textarea unless the default is
+   *  prevented, which is how Shift+Enter came to send a second carriage
+   *  return after the one it meant. */
+  defaultPrevented = false;
 
   /** Simulates the user typing. */
   emitData(data: string): void {

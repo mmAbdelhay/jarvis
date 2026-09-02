@@ -196,6 +196,24 @@ describe("workspace terminals", () => {
     expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", ESC_CR] });
   });
 
+  // Returning false only tells xterm not to encode the key. The browser
+  // still delivers Enter's own carriage return to the textarea, and xterm
+  // sends that too — so the pty saw ESC CR *and then* a second CR, which
+  // Claude Code read as "newline, then submit". The message went off
+  // half-written every time.
+  it("prevents the browser's own carriage return from following it", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    FakeTerminal.instances[0]?.pressKey({ key: "Enter", shiftKey: true });
+
+    expect(FakeTerminal.instances[0]?.defaultPrevented).toBe(true);
+    // Exactly one thing was sent: the sequence we meant, and nothing after.
+    expect(calls.filter((entry) => entry.call === "sendTerminalInput")).toEqual([
+      { call: "sendTerminalInput", args: ["tab-1", ESC_CR] },
+    ]);
+  });
+
   // Option+Enter is the same gesture on a Mac keyboard and the alias every
   // terminal that supports one supports too.
   it("treats option+enter the same way", async () => {
