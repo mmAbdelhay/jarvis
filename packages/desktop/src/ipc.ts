@@ -358,6 +358,11 @@ export type RendererApi = {
   /** Hides every tab's page without changing which tab is active — for
    *  switching to a project with no open tab. */
   hideAllTabs(): Promise<void>;
+  /** Floats this tab's playing video in Chromium's own Picture-in-Picture
+   *  window — an always-on-top OS window, so it keeps playing over other
+   *  tabs, other routes and other applications. Offered only while the
+   *  tab's `hasPlayingVideo` is set; a second call puts the video back. */
+  requestPictureInPicture(tabId: string): Promise<void>;
   onWorkspace(cb: (state: WorkspaceState) => void): void;
   /** Ensures a code-server instance is running for `project`, rooted at the
    *  configured editor root named `root` (the project directory itself when

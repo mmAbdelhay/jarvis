@@ -20,6 +20,21 @@ import {
  * their own process precisely so that a compromise reaches nothing holding
  * window.jarvis.
  */
+/**
+ * Run in the page to find the video worth acting on. "Playing" is spelled
+ * out rather than left to `!paused`: a <video> that has never decoded a
+ * frame reports videoWidth 0, and an <audio>-only stream in a <video> tag
+ * reports the same — neither has anything to float, and offering to float
+ * them is exactly the dead button this check exists to prevent.
+ *
+ * Only the top document. A cross-origin iframe cannot be reached from here
+ * at all, and the sites this is for (YouTube, and any page with its own
+ * player) put the element in the top document.
+ */
+const FIND_PLAYING_VIDEO =
+  "Array.from(document.querySelectorAll('video')).find(" +
+  "(v) => !v.paused && !v.ended && v.readyState >= 2 && v.videoWidth > 0)";
+
 export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
   return (partition) => {
     const view = new WebContentsView({
@@ -115,6 +130,44 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
       setDevToolsBounds: (bounds) => {
         devToolsBounds = bounds;
         devTools?.setBounds(bounds);
+      },
+      hasPlayingVideo: () =>
+        contents
+          .executeJavaScript(`!!(${FIND_PLAYING_VIDEO})`)
+          // A page that is navigating away, or one whose frame has already
+          // gone, rejects instead of answering. That is "no video", not a
+          // reason to take the main process down with an unhandled
+          // rejection.
+          .then((result: unknown) => result === true)
+          .catch(() => false),
+      requestPictureInPicture: () => {
+        // The page's own API, not a window of ours: Chromium's PiP window
+        // is a real always-on-top OS window that outlives switching tabs,
+        // routes and applications, which a WebContentsView could never be
+        // (it is a child of our window and is painted inside it). Verified
+        // to work in a WebContentsView — see spikes/pip/FINDINGS.md.
+        //
+        // A second press puts it back, which is what every browser's PiP
+        // button does.
+        //
+        // userGesture: true because requestPictureInPicture() is gated on
+        // one, and the user's click landed on our chrome rather than in
+        // the page.
+        void contents
+          .executeJavaScript(
+            `(async () => {
+               const video = ${FIND_PLAYING_VIDEO};
+               if (video === undefined) return false;
+               if (document.pictureInPictureElement !== null) {
+                 await document.exitPictureInPicture();
+                 return false;
+               }
+               await video.requestPictureInPicture();
+               return true;
+             })()`,
+            true,
+          )
+          .catch(() => undefined);
       },
       onEvent: (listener) => {
         bridgeEvents(

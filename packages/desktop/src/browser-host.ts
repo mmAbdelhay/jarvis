@@ -16,7 +16,11 @@ export type HostedViewEvent =
   | { kind: "title"; title: string }
   | { kind: "loading"; loading: boolean }
   | { kind: "failed"; detail: string }
-  | { kind: "popup"; url: string };
+  | { kind: "popup"; url: string }
+  /** Chromium noticed media start or stop in this page. Only a prompt to
+   *  ask the page what it actually has — it fires for audio as readily as
+   *  for video. See BrowserHost's "media" case. */
+  | { kind: "media"; playing: boolean };
 
 /**
  * One page's worth of browser, as this host needs it. Electron is behind
@@ -40,6 +44,14 @@ export type HostedView = {
   /** Where the DevTools view sits, in window pixels — measured by the
    *  renderer exactly as the page slot is. */
   setDevToolsBounds(bounds: Rect): void;
+  /** Asks the page whether it has a <video> element that is genuinely
+   *  playing — decoding frames, not merely present or merely audible.
+   *  Answered by the page, because nothing outside it can tell. */
+  hasPlayingVideo(): Promise<boolean>;
+  /** Puts the page's playing video into Chromium's own Picture-in-Picture
+   *  window: a small always-on-top window outside the app entirely, which
+   *  is what makes the video survive switching tabs, routes and apps. */
+  requestPictureInPicture(): void;
 };
 
 export type ViewFactory = (partition: string) => HostedView;
@@ -250,6 +262,16 @@ export class BrowserHost {
     this.#views.get(id)?.reload();
   }
 
+  /**
+   * Floats this tab's playing video in Chromium's Picture-in-Picture
+   * window. Routed rather than decided here: whether the page has anything
+   * to float is already recorded on the tab, and a tab with no view (a
+   * terminal, an API tab, one just closed) simply has nothing to ask.
+   */
+  requestPictureInPicture(id: TabId): void {
+    this.#views.get(id)?.requestPictureInPicture();
+  }
+
   setBounds(bounds: Rect): void {
     this.#bounds = bounds;
     for (const view of this.#views.values()) view.setBounds(bounds);
@@ -310,6 +332,9 @@ export class BrowserHost {
           canGoBack: event.canGoBack,
           canGoForward: event.canGoForward,
           error: undefined,
+          // The old page's video left with the old page. A flag carried
+          // over would offer to float something that no longer exists.
+          hasPlayingVideo: false,
         });
         break;
       case "title":
@@ -322,6 +347,27 @@ export class BrowserHost {
         break;
       case "failed":
         this.#store.update(id, { loading: false, error: event.detail });
+        break;
+      case "media":
+        // "Something started" is not "a video is playing": Chromium fires
+        // this for audio, and for a <video> that has not decoded a frame.
+        // The page is the only thing that knows, so it is asked — and only
+        // when something started, since on a stop there is by definition
+        // nothing to find and the answer would race the page.
+        if (!event.playing) {
+          this.#store.update(id, { hasPlayingVideo: false });
+          break;
+        }
+        void this.#views
+          .get(id)
+          ?.hasPlayingVideo()
+          .then((playing) => {
+            // The tab may have closed while the page was answering.
+            if (this.#store.get(id) !== undefined) {
+              this.#store.update(id, { hasPlayingVideo: playing });
+            }
+          })
+          .catch(() => undefined);
         break;
       case "popup":
         // What target=_blank means in a browser. The scheme gate inside
@@ -396,6 +442,16 @@ export function bridgeEvents(
 
   on("page-title-updated", ((_event: unknown, title: string) => {
     emit({ kind: "title", title });
+  }) as (...args: never[]) => void);
+
+  on("media-started-playing", (() => {
+    emit({ kind: "media", playing: true });
+  }) as (...args: never[]) => void);
+
+  // media-paused covers ending as well as pausing: Chromium fires it when
+  // playback stops for any reason.
+  on("media-paused", (() => {
+    emit({ kind: "media", playing: false });
   }) as (...args: never[]) => void);
 
   on("did-start-loading", (() => {

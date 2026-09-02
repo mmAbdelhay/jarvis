@@ -702,6 +702,9 @@ app.whenReady().then(async () => {
       workspace.setVisible(visible === true),
     );
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
+    ipcMain.handle("workspace:pip", (_event, tabId: unknown) => {
+      if (typeof tabId === "string") workspace.requestPictureInPicture(tabId);
+    });
     ipcMain.handle("editor:open", (_event, project: unknown, root: unknown) =>
       editor.open(
         typeof project === "string" ? project : "",
@@ -711,7 +714,7 @@ app.whenReady().then(async () => {
       ),
     );
     ipcMain.handle("editor:roots", (_event, project: unknown) =>
-      editor.roots(typeof project === "string" ? project : ""),
+      editor.roots(typeof project === "string" ? project : "")
     );
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),

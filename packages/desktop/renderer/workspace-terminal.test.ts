@@ -31,6 +31,7 @@ function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
     canGoBack: false,
     canGoForward: false,
     error: undefined,
+    hasPlayingVideo: false,
     ...overrides,
   };
 }

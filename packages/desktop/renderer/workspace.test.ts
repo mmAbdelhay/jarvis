@@ -19,11 +19,11 @@ function harness(): Recorded[] {
     <button id="nav-workspace"></button>
     <div id="view-workspace">
       <select id="workspace-project"></select>
-      <button id="workspace-open-editor"></button>
+      <button id="workspace-open-editor" title="Open the project's files in a full code editor"></button>
       <div id="workspace-editor-menu" hidden></div>
-      <button id="workspace-open-database"></button>
-      <button id="workspace-open-terminal"></button>
-      <button id="workspace-open-api"></button>
+      <button id="workspace-open-database" title="Browse the project's databases"></button>
+      <button id="workspace-open-terminal" title="Open a shell in the project's directory"></button>
+      <button id="workspace-open-api" title="Send requests from the project's collections"></button>
       <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
@@ -39,6 +39,7 @@ function harness(): Recorded[] {
           <input id="workspace-address" />
           <button id="workspace-toggle-devtools"></button>
           <button id="workspace-bookmark-toggle"></button>
+          <button id="workspace-pip" hidden></button>
         </div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-page"></div>
@@ -96,6 +97,17 @@ function harness(): Recorded[] {
       calls.push({ call, args });
       return Promise.resolve();
     };
+  // For the handlers whose result the code under test actually reads
+  // (`if (!result.ok)`). A double resolving `undefined` there threw an
+  // unhandled rejection out of a floating promise, which Vitest attributes
+  // to whatever test happened to be running — the whole file went red at
+  // random.
+  const recordOk =
+    (call: string) =>
+    (...args: unknown[]) => {
+      calls.push({ call, args });
+      return Promise.resolve({ ok: true as const, value: undefined });
+    };
   (window as unknown as { jarvis: unknown }).jarvis = {
     openTab: record("openTab"),
     closeTab: record("closeTab"),
@@ -109,6 +121,7 @@ function harness(): Recorded[] {
     setDevToolsBounds: record("setDevToolsBounds"),
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
+    requestPictureInPicture: record("requestPictureInPicture"),
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
     editorRoots: () => Promise.resolve([]),
     openDatabase: () =>
@@ -116,8 +129,8 @@ function harness(): Recorded[] {
         ok: true,
         value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw-fixed" },
       }),
-    openTerminal: record("openTerminal"),
-    openApiTab: record("openApiTab"),
+    openTerminal: recordOk("openTerminal"),
+    openApiTab: recordOk("openApiTab"),
     listApiCollections: () => Promise.resolve({ ok: true, value: [] }),
     readApiTree: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     readApiRequest: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
@@ -169,6 +182,7 @@ function tab(overrides: Partial<WorkspaceState["tabs"][number]> = {}) {
     canGoBack: false,
     canGoForward: false,
     error: undefined,
+    hasPlayingVideo: false,
     ...overrides,
   };
 }
@@ -185,11 +199,11 @@ describe("workspace chrome", () => {
     initWorkspace(["acme", "storefront"]);
   });
 
-  it("fills the project selector from the configured projects", () => {
+  it("fills the project selector from the configured projects, then the personal browser", () => {
     const options = [...document.querySelectorAll("#workspace-project option")].map(
       (option) => option.textContent,
     );
-    expect(options).toEqual(["acme", "storefront"]);
+    expect(options).toEqual(["acme", "storefront", "Personal"]);
   });
 
   it("draws one element per tab", () => {
@@ -770,6 +784,7 @@ describe("open in editor", () => {
           canGoBack: false,
           canGoForward: false,
           error: undefined,
+          hasPlayingVideo: false,
         },
       ],
       activeTabId: "tab-9",
@@ -798,6 +813,7 @@ describe("open in editor", () => {
           canGoBack: false,
           canGoForward: false,
           error: undefined,
+          hasPlayingVideo: false,
         },
       ],
       activeTabId: "tab-9",
@@ -1396,5 +1412,166 @@ describe("open the API tab", () => {
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "I don't know a project by that name.",
     );
+  });
+});
+
+// The project-independent browser. It is a project as far as every other
+// part of the Workspace is concerned — the tab store, the partition, the
+// bookmark file, the tab strip's grouping — and the only thing that makes
+// it different is that it has no directory behind it. See src/personal.ts.
+describe("the personal browser", () => {
+  let calls: Recorded[];
+  const select = (): HTMLSelectElement =>
+    document.getElementById("workspace-project") as HTMLSelectElement;
+
+  const chooseProject = (value: string): void => {
+    select().value = value;
+    select().dispatchEvent(new Event("change"));
+  };
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  it("offers it under a name, never under its key", () => {
+    const personal = [...select().options].at(-1);
+
+    expect(personal?.value).toBe("__personal__");
+    expect(personal?.textContent).toBe("Personal");
+  });
+
+  // The whole point: a tab opened here is not a project's tab, so changing
+  // project must not disturb it.
+  it("keeps its tabs when the project selection changes and comes back", async () => {
+    chooseProject("__personal__");
+    await flush();
+    const tabs = [tab({ id: "tab-p", project: "__personal__", title: "YouTube" })];
+    renderWorkspace({ tabs, activeTabId: "tab-p" });
+
+    expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(1);
+
+    chooseProject("acme");
+    await flush();
+    renderWorkspace({ tabs, activeTabId: "tab-p" });
+    // Another project's tabs collapse into a pill; they are not closed.
+    expect(document.querySelectorAll("#workspace-tabs .workspace-tab-group")).toHaveLength(1);
+
+    chooseProject("__personal__");
+    await flush();
+    renderWorkspace({ tabs, activeTabId: "tab-p" });
+
+    expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(1);
+    expect(calls.filter((c) => c.call === "closeTab")).toEqual([]);
+  });
+
+  // A collapsed pill is the one place a project's name is drawn in the tab
+  // strip, so the key must not surface there either.
+  it("labels its collapsed pill with the name, not the key", () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-p", project: "__personal__" })],
+      activeTabId: "tab-p",
+    });
+
+    expect(document.querySelector("#workspace-tab-group, .workspace-tab-group")?.textContent).toContain(
+      "Personal",
+    );
+  });
+
+  it.each(["editor", "database", "terminal", "api"])(
+    "disables the %s button, which needs a directory it does not have",
+    async (tool) => {
+      chooseProject("__personal__");
+      await flush();
+
+      const button = document.getElementById(`workspace-open-${tool}`) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(button.title).toContain("no folder on disk");
+    },
+  );
+
+  it("says why they are disabled, rather than leaving four dead controls", async () => {
+    chooseProject("__personal__");
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toContain(
+      "no folder on disk",
+    );
+  });
+
+  it("gives the buttons back, and their own tooltips, on returning to a project", async () => {
+    chooseProject("__personal__");
+    await flush();
+    chooseProject("acme");
+    await flush();
+
+    const button = document.getElementById("workspace-open-editor") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe("Open the project's files in a full code editor");
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+
+  // Bookmarks are keyed by project string in one file, so the personal
+  // browser gets its own list for free — but only if the key is what goes
+  // over the wire.
+  it("reads and writes its bookmarks under its own key", async () => {
+    chooseProject("__personal__");
+    await flush();
+    renderWorkspace({
+      tabs: [tab({ id: "tab-p", project: "__personal__", url: "https://news.example" })],
+      activeTabId: "tab-p",
+    });
+    (document.getElementById("workspace-bookmark-toggle") as HTMLButtonElement).click();
+    await flush();
+
+    expect(calls.find((c) => c.call === "addBookmark")?.args[0]).toBe("__personal__");
+  });
+});
+
+// The "play popup": Chromium's Picture-in-Picture window, offered only
+// where there is something to float.
+describe("the picture-in-picture button", () => {
+  let calls: Recorded[];
+  const pip = (): HTMLButtonElement =>
+    document.getElementById("workspace-pip") as HTMLButtonElement;
+
+  beforeEach(() => {
+    calls = harness();
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  it("stays hidden on a page with no video playing", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    expect(pip().hidden).toBe(true);
+  });
+
+  it("stays hidden with no tab open at all", () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    expect(pip().hidden).toBe(true);
+  });
+
+  it("appears once the page reports a video playing", () => {
+    renderWorkspace({ tabs: [tab({ hasPlayingVideo: true })], activeTabId: "tab-1" });
+
+    expect(pip().hidden).toBe(false);
+    expect(pip().title).toContain("Float this video");
+  });
+
+  it("asks the main process to float the active tab's video", () => {
+    renderWorkspace({ tabs: [tab({ hasPlayingVideo: true })], activeTabId: "tab-1" });
+    pip().click();
+
+    expect(calls.filter((c) => c.call === "requestPictureInPicture")).toEqual([
+      { call: "requestPictureInPicture", args: ["tab-1"] },
+    ]);
+  });
+
+  it("goes away again when the video stops", () => {
+    renderWorkspace({ tabs: [tab({ hasPlayingVideo: true })], activeTabId: "tab-1" });
+    renderWorkspace({ tabs: [tab({ hasPlayingVideo: false })], activeTabId: "tab-1" });
+
+    expect(pip().hidden).toBe(true);
   });
 });
