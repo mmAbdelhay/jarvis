@@ -441,6 +441,25 @@ function message(error: unknown): string {
 export const HEAD_BYTES = 64 * 1024;
 
 /**
+ * Whether a path relative to an agent's `projects/` directory is a session
+ * transcript.
+ *
+ * Sessions live exactly one level down — `<escaped-cwd>/<session-id>.jsonl` —
+ * and a recursive listing reaches further than that. Two levels deeper sit
+ * the subagent transcripts, which carry their PARENT's `sessionId` and `cwd`:
+ * import one and it upserts onto the parent's row, replacing the user's own
+ * summary, start time and model with a subagent's. Seen on real data before
+ * this guard existed — one session's summary became "You are implementing
+ * Task 5 of a plan…", its startedAt an hour late and its model the
+ * subagent's — and there were 810 such files against 369 real sessions, so
+ * the wrong value won far more often than the right one.
+ */
+export function isSessionTranscriptEntry(entry: string): boolean {
+  if (!entry.endsWith(".jsonl")) return false;
+  return entry.split(sep).length === 2;
+}
+
+/**
  * The real filesystem behind `listFiles`, `readHead` and `watch`.
  *
  * Kept to the three functions and nothing else, so that what the importer's
@@ -457,7 +476,9 @@ export function createFsImportDeps(): Pick<
       let entries: string[];
       try {
         // Recursive because transcripts sit one level down, in a directory
-        // per escaped cwd — a name this code never parses.
+        // per escaped cwd — a name this code never parses. Recursion goes
+        // deeper than that, though, so isSessionTranscriptEntry keeps only
+        // the one level that holds sessions.
         entries = await readdir(dir, { recursive: true });
       } catch {
         // A configDir that does not exist yet is the ordinary case for a
@@ -467,7 +488,7 @@ export function createFsImportDeps(): Pick<
 
       const files: TranscriptFile[] = [];
       for (const entry of entries) {
-        if (!entry.endsWith(".jsonl")) continue;
+        if (!isSessionTranscriptEntry(entry)) continue;
         const path = join(dir, entry);
         try {
           const info = await stat(path);

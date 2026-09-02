@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
+  isSessionTranscriptEntry,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
@@ -106,6 +107,33 @@ describe("resolveProject", () => {
 
   it("ignores a trailing separator on a configured path", () => {
     expect(resolveProject("/Users/u/work/site/src", { site: "/Users/u/work/site/" })).toBe("site");
+  });
+});
+
+describe("isSessionTranscriptEntry", () => {
+  // A session transcript is projects/<escaped-cwd>/<session-id>.jsonl and
+  // nothing deeper. Subagent transcripts live another two levels down and
+  // carry their PARENT's sessionId and cwd, so importing one upserts onto
+  // the parent's row and overwrites the user's own summary, start time and
+  // model with a subagent's. Observed on real data before this guard: a
+  // session's summary read "You are implementing Task 5 of a plan..." and
+  // its startedAt was an hour late.
+  it("accepts a transcript one level below the projects directory", () => {
+    expect(isSessionTranscriptEntry("-Users-me-projects-app/abc.jsonl")).toBe(true);
+  });
+
+  it("rejects a subagent transcript nested under a session directory", () => {
+    expect(
+      isSessionTranscriptEntry("-Users-me-projects-app/abc/subagents/agent-x.jsonl"),
+    ).toBe(false);
+  });
+
+  it("rejects a file sitting directly in the projects directory", () => {
+    expect(isSessionTranscriptEntry("stray.jsonl")).toBe(false);
+  });
+
+  it("rejects anything that is not a .jsonl", () => {
+    expect(isSessionTranscriptEntry("-Users-me-projects-app/notes.md")).toBe(false);
   });
 });
 
