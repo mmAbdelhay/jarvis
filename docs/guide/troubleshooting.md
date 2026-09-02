@@ -77,9 +77,14 @@ is treated as a different cluster and left visible rather than hidden.
 
 ## The button says "Could not open the cluster browser"
 
-`headlamp.binary` — set explicitly or defaulted per OS (see
+Most often `headlamp.binary` — set explicitly or defaulted per OS (see
 [installation](installation.md)) — names nothing that exists. Install
 Headlamp, or point `headlamp.binary` at the real path.
+
+The same message covers every other way an open can fail: the server started
+but never began listening, the context named in `clusters:` is no longer in
+the kubeconfig, or the cluster credentials have lapsed and the kubeconfig's
+credential plugin cannot refresh them.
 
 ## Voice does nothing
 

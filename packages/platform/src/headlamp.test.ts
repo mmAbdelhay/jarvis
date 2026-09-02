@@ -3,8 +3,10 @@ import { join } from "node:path";
 import {
   clusterUrlSegment,
   createHeadlampManager,
+  createRealHeadlampSpawner,
   defaultHeadlampBinary,
   frontendDirFor,
+  headlampArgs,
   loginShellPath,
   parseKubeContexts,
   skippedContexts,
@@ -324,5 +326,61 @@ describe("loginShellPath", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("headlampArgs", () => {
+  const base = {
+    frontendDir: "/Applications/Headlamp.app/Contents/Resources/frontend",
+    kubeconfigPath: "/home/u/.kube/config",
+    port: 4466,
+    skippedContexts: [],
+  };
+
+  it("binds loopback", () => {
+    // The whole reason Headlamp ships without a generated login: if this
+    // flag is ever dropped, headlamp-server binds every interface with no
+    // authentication at all. Pinned here so that cannot happen silently.
+    const args = headlampArgs(base);
+    expect(args[args.indexOf("-listen-addr") + 1]).toBe("127.0.0.1");
+  });
+
+  it("passes the frontend dir, the kubeconfig and the port", () => {
+    expect(headlampArgs(base)).toEqual([
+      "-html-static-dir", "/Applications/Headlamp.app/Contents/Resources/frontend",
+      "-kubeconfig", "/home/u/.kube/config",
+      "-listen-addr", "127.0.0.1",
+      "-port", "4466",
+    ]);
+  });
+
+  it("comma-joins the skipped contexts", () => {
+    const args = headlampArgs({ ...base, skippedContexts: ["ctx-b", "ctx-c"] });
+    expect(args[args.indexOf("-skipped-kube-contexts") + 1]).toBe("ctx-b,ctx-c");
+  });
+
+  it("omits the skip flag entirely when nothing is skipped", () => {
+    expect(headlampArgs(base)).not.toContain("-skipped-kube-contexts");
+  });
+});
+
+describe("createRealHeadlampSpawner", () => {
+  it("reports a missing binary as an exit rather than crashing the process", async () => {
+    // A binary that is not there arrives as an async "error" event, not a
+    // throw. Unhandled, it takes the whole app down — and the default
+    // binary path is missing for anyone who has not installed Headlamp,
+    // which the hover pre-warm would reach without a single click.
+    const process = createRealHeadlampSpawner({})({
+      binary: "/definitely/not/here/headlamp-server",
+      frontendDir: "/definitely/not/here/frontend",
+      kubeconfigPath: "/home/u/.kube/config",
+      port: 4466,
+      skippedContexts: [],
+    });
+
+    const code = await new Promise<number | null>((resolve) => {
+      process.onExit(resolve);
+    });
+    expect(code).toBeNull();
   });
 });

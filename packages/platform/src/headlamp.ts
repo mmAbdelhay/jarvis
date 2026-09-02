@@ -260,25 +260,55 @@ export function createKubeContextLister(path: string): () => Promise<string[]> {
  * cluster auth work when Jarvis was not launched from a terminal.
  */
 export function createRealHeadlampSpawner(env: NodeJS.ProcessEnv = process.env): HeadlampSpawner {
-  return ({ binary, frontendDir, kubeconfigPath, port, skippedContexts: skipped }) => {
-    const args = [
-      "-html-static-dir", frontendDir,
-      "-kubeconfig", kubeconfigPath,
-      "-listen-addr", "127.0.0.1",
-      "-port", String(port),
-    ];
-    // Omitted entirely when nothing is skipped: an empty string argument
-    // is not obviously the same thing as "skip nothing" to a Go flag
-    // parser, and there is no reason to find out.
-    if (skipped.length > 0) args.push("-skipped-kube-contexts", skipped.join(","));
+  return ({ binary, ...rest }) => {
+    const child = spawn(binary, headlampArgs(rest), { stdio: "ignore", env });
 
-    const child = spawn(binary, args, { stdio: "ignore", env });
+    const exitListeners: ((code: number | null) => void)[] = [];
+    // A missing binary arrives as an async "error" event, not a throw. Left
+    // unhandled it takes the process down — and the default binary path is
+    // missing for anyone who has not installed Headlamp, which the hover
+    // pre-warm reaches without a click. Treated as an exit it becomes an
+    // ordinary "never became ready" failure the caller already handles.
+    // Same shape, and the same reasoning, as dbgate.ts.
+    child.on("error", () => {
+      for (const listener of exitListeners) listener(null);
+    });
 
     return {
       kill: () => child.kill(),
-      onExit: (listener) => child.on("exit", (code) => listener(code)),
+      onExit: (listener) => {
+        exitListeners.push(listener);
+        child.on("exit", (code) => listener(code));
+      },
     };
   };
+}
+
+/**
+ * headlamp-server's command line, without the binary itself.
+ *
+ * Its own function so the flags are pinned by a test rather than only by
+ * whatever the spawner happens to pass: `-listen-addr 127.0.0.1` is the
+ * entire argument for shipping without a generated login, and dropping it
+ * would bind every interface with nothing to notice.
+ */
+export function headlampArgs({
+  frontendDir,
+  kubeconfigPath,
+  port,
+  skippedContexts: skipped,
+}: Omit<Parameters<HeadlampSpawner>[0], "binary">): string[] {
+  const args = [
+    "-html-static-dir", frontendDir,
+    "-kubeconfig", kubeconfigPath,
+    "-listen-addr", "127.0.0.1",
+    "-port", String(port),
+  ];
+  // Omitted entirely when nothing is skipped: an empty string argument
+  // is not obviously the same thing as "skip nothing" to a Go flag
+  // parser, and there is no reason to find out.
+  if (skipped.length > 0) args.push("-skipped-kube-contexts", skipped.join(","));
+  return args;
 }
 
 /**
