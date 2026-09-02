@@ -365,6 +365,10 @@ function updateBookmarkToggle(): void {
 }
 
 export function initWorkspace(projects: string[]): void {
+  // The pre-warm record belongs to one run of the Workspace over one
+  // project list; a fresh init means fresh main-process managers, so the
+  // "already asked" answers from before are no longer true.
+  preWarmed.clear();
   const select = $("workspace-project") as HTMLSelectElement;
   select.replaceChildren();
   // The personal browser sits last, after the projects the user configured
@@ -419,6 +423,16 @@ export function initWorkspace(projects: string[]): void {
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
+  // See preWarm: the pointer arriving is a few hundred milliseconds of a
+  // ~2s start that the click no longer has to pay for. "focus" is the same
+  // signal for a keyboard user, who never emits a pointerenter.
+  for (const [id, kind] of [
+    ["workspace-open-editor", "editor"],
+    ["workspace-open-database", "database"],
+  ] as const) {
+    $(id).addEventListener("pointerenter", () => preWarm(kind));
+    $(id).addEventListener("focus", () => preWarm(kind));
+  }
   $("workspace-open-terminal").addEventListener("click", () => void openTerminal());
   $("workspace-open-api").addEventListener("click", () => void openApi());
   initApi();
@@ -490,6 +504,28 @@ function showEditorMenu(project: string, roots: string[]): void {
   menu.hidden = false;
 }
 
+/**
+ * Says out loud that a hosted app is starting, and stops the button being
+ * clicked again while it is.
+ *
+ * The wait is code-server's or DbGate's own boot — measured at 1.9-2.3s
+ * with the binaries warm and 9-21s cold — and no amount of work here makes
+ * a node process start faster. What was fixable is that the whole wait used
+ * to happen behind an empty toolbar and a button that still looked live, so
+ * the app read as frozen and invited the second click that (before the
+ * managers learned to share an in-flight start) spawned a second server.
+ */
+function beginStarting(buttonId: string, text: string): () => void {
+  const button = $(buttonId) as HTMLButtonElement;
+  const status = $("workspace-tool-status");
+  status.classList.remove("workspace-tool-status--error");
+  status.textContent = text;
+  button.disabled = true;
+  return () => {
+    button.disabled = false;
+  };
+}
+
 /** Ensures a code-server instance is running for one root of `project` and
  *  opens it as an ordinary browser tab — the editor is not a separate
  *  surface, just a page like any other, reusing openTab exactly as the
@@ -509,16 +545,69 @@ async function openEditorRoot(project: string, root: string | undefined): Promis
   }
 
   const status = $("workspace-tool-status");
-  status.textContent = "";
-  status.classList.remove("workspace-tool-status--error");
+  const done = beginStarting("workspace-open-editor", MESSAGES.editorStarting(PRIMARY_LANGUAGE));
 
   const result = await window.jarvis.openEditor(project, root);
+  done();
   if (!result.ok) {
     status.textContent = result.text;
     status.classList.add("workspace-tool-status--error");
     return;
   }
+  // The tab is about to carry the news itself; the "starting…" line has
+  // said all it had to say.
+  status.textContent = "";
   void window.jarvis.openTab(project, result.value, "editor", root);
+}
+
+/**
+ * Which project has already been asked to start which hosted app, so that a
+ * pointer wandering across the toolbar asks once rather than on every
+ * crossing. Keyed by kind and project, never cleared: the managers reuse a
+ * running instance anyway, so a second ask would be harmless but pointless.
+ */
+const preWarmed = new Set<string>();
+
+/**
+ * Starts the hosted app for the selected project *before* the click.
+ *
+ * A pointer landing on the button, or the button taking keyboard focus, is
+ * the earliest honest signal that this user wants this app — measured a few
+ * hundred milliseconds ahead of the click, against a 1.9-2.3s warm start.
+ * It is free when unused in the only sense that matters: it starts exactly
+ * the process the click would have started, for exactly the project the
+ * click would have started it for, and the managers share one in-flight
+ * start per project, so the click that follows costs only whatever is left
+ * of it. Nothing is spawned for a project the pointer never visits.
+ *
+ * Failures are swallowed on purpose. Nothing was asked for yet, so nothing
+ * may appear in the status line; the click makes the same call and reports
+ * the failure then.
+ */
+function preWarm(kind: "editor" | "database"): void {
+  const project = selectedProject();
+  if (project === "") return;
+  const key = `${kind}:${project}`;
+  if (preWarmed.has(key)) return;
+  // Already open means already running: there is nothing to warm.
+  if (latest.tabs.some((tab) => tab.kind === kind && tab.project === project)) return;
+  preWarmed.add(key);
+
+  if (kind === "database") {
+    void window.jarvis.openDatabase(project).catch(() => undefined);
+    return;
+  }
+
+  // A warm start is only worth anything if it warms what the click will
+  // open. A project with one configured root wants its editor *there*, so
+  // warming the project directory would spawn a code-server nobody asked
+  // for and leave the click to spawn a second at the right place. With two
+  // or more roots the click opens a menu and starts nothing, so there is no
+  // single answer to warm and guessing one has the same cost.
+  void window.jarvis
+    .editorRoots(project)
+    .then((roots) => (roots.length > 1 ? undefined : window.jarvis.openEditor(project, roots[0])))
+    .catch(() => undefined);
 }
 
 /** Ensures a DbGate instance is running for the selected project and opens
@@ -539,10 +628,13 @@ async function openDatabase(): Promise<void> {
   }
 
   const status = $("workspace-tool-status");
-  status.textContent = "";
-  status.classList.remove("workspace-tool-status--error");
+  const done = beginStarting(
+    "workspace-open-database",
+    MESSAGES.databaseStarting(PRIMARY_LANGUAGE),
+  );
 
   const result = await window.jarvis.openDatabase(project);
+  done();
   if (!result.ok) {
     status.textContent = result.text;
     status.classList.add("workspace-tool-status--error");

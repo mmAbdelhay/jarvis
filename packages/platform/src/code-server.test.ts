@@ -130,6 +130,57 @@ describe("createCodeServerManager", () => {
     expect(result.ok && result.url).toContain(encodeURIComponent("/p/my project & co"));
   });
 
+  // Measured: a warm code-server takes ~1.2s to answer, a cold one ~9s.
+  // `running` was only populated *after* readiness, so every open() during
+  // that window spawned another process — a second click on Editor, or the
+  // pre-warm on hover followed by the click it exists to serve, both did.
+  // The extra process was then orphaned until quit, since the map only ever
+  // remembers the last one.
+  it("shares one spawn between callers that open the same project while it is starting", async () => {
+    let release: (ready: boolean) => void = () => undefined;
+    const { instance, processes } = manager({
+      waitUntilReady: () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    });
+
+    const first = instance.open("/p/acme");
+    const second = instance.open("/p/acme");
+    // findFreePort is awaited before the spawn, so the readiness probe only
+    // exists after the microtask queue has drained once.
+    await Promise.resolve();
+    await Promise.resolve();
+    release(true);
+
+    expect(await second).toEqual(await first);
+    expect(processes).toHaveLength(1);
+  });
+
+  it("still spawns per project when two projects are starting at once", async () => {
+    let port = 51000;
+    const { instance, processes } = manager({ findFreePort: () => Promise.resolve(++port) });
+
+    await Promise.all([instance.open("/p/acme"), instance.open("/p/storefront")]);
+
+    expect(processes).toHaveLength(2);
+  });
+
+  // The in-flight entry must be dropped on failure too, or a project that
+  // failed once could never be retried without restarting Jarvis.
+  it("retries after a start that failed, rather than handing back the failure forever", async () => {
+    let ready = false;
+    const { instance, processes } = manager({ waitUntilReady: () => Promise.resolve(ready) });
+
+    const failed = await instance.open("/p/acme");
+    ready = true;
+    const second = await instance.open("/p/acme");
+
+    expect(failed.ok).toBe(false);
+    expect(second.ok).toBe(true);
+    expect(processes).toHaveLength(2);
+  });
+
   it("survives a spawner that throws", async () => {
     const { instance } = manager({
       spawn: () => {

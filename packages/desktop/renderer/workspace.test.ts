@@ -1115,6 +1115,213 @@ describe("open in editor, with configured roots", () => {
   });
 });
 
+// Measured on this machine: click to a painted Editor tab is 1.9-2.3s with
+// the binaries warm and 9-13s cold, and every millisecond of it used to be
+// spent with an empty toolbar and a live-looking button — the app read as
+// frozen. The wait is code-server's own boot and cannot be removed, so it
+// has to be visible.
+describe("starting a hosted app says so", () => {
+  let jarvis: Record<string, unknown>;
+
+  beforeEach(() => {
+    harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    initWorkspace(["acme"]);
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+  });
+
+  it("announces the editor start and disables the button until it answers", async () => {
+    let release = (): void => undefined;
+    jarvis["openEditor"] = () =>
+      new Promise((resolve) => {
+        release = () => resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" });
+      });
+    const button = document.getElementById("workspace-open-editor") as HTMLButtonElement;
+
+    button.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Starting the editor…",
+    );
+    expect(button.disabled).toBe(true);
+
+    release();
+    await flush();
+
+    expect(button.disabled).toBe(false);
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+
+  it("announces the database start and disables the button until it answers", async () => {
+    let release = (): void => undefined;
+    jarvis["openDatabase"] = () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ ok: true, value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" } });
+      });
+    const button = document.getElementById("workspace-open-database") as HTMLButtonElement;
+
+    button.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Starting the database browser…",
+    );
+    expect(button.disabled).toBe(true);
+
+    release();
+    await flush();
+
+    expect(button.disabled).toBe(false);
+  });
+
+  it("re-enables the button and shows the error when the start fails", async () => {
+    jarvis["openEditor"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open the editor.", language: "en" });
+    const button = document.getElementById("workspace-open-editor") as HTMLButtonElement;
+
+    button.click();
+    await flush();
+
+    expect(button.disabled).toBe(false);
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "Could not open the editor.",
+    );
+  });
+});
+
+// The click is not the first thing that says "this user wants the editor" —
+// the pointer arriving on the button is, and it arrives a few hundred
+// milliseconds earlier. The managers share one spawn per project, so a
+// pre-warm the user goes on to click costs nothing extra, and one they do
+// not click costs exactly what clicking it later would have.
+describe("pre-warming a hosted app on hover", () => {
+  let calls: Recorded[];
+  let jarvis: Record<string, unknown>;
+  let warmed: string[];
+
+  beforeEach(() => {
+    calls = harness();
+    jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    warmed = [];
+    jarvis["openEditor"] = (project: string) => {
+      warmed.push(`editor:${project}`);
+      return Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" });
+    };
+    jarvis["openDatabase"] = (project: string) => {
+      warmed.push(`database:${project}`);
+      return Promise.resolve({
+        ok: true,
+        value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
+      });
+    };
+    initWorkspace(["acme"]);
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+  });
+
+  it("starts code-server when the pointer reaches the Editor button, without opening a tab", async () => {
+    document
+      .getElementById("workspace-open-editor")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["editor:acme"]);
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+    // Nothing is being asked for yet, so nothing is announced.
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+
+  it("starts DbGate when the pointer reaches the Database button", async () => {
+    document
+      .getElementById("workspace-open-database")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["database:acme"]);
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  // A pointer wandering back and forth over a toolbar is not new intent.
+  it("asks only once per project, however often the pointer crosses the button", async () => {
+    const button = document.getElementById("workspace-open-editor");
+    button?.dispatchEvent(new Event("pointerenter"));
+    button?.dispatchEvent(new Event("pointerenter"));
+    button?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["editor:acme"]);
+  });
+
+  it("does not pre-warm a project whose tab is already open", async () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-9", kind: "editor", url: "http://127.0.0.1:9001/" })],
+      activeTabId: "tab-9",
+    });
+
+    document
+      .getElementById("workspace-open-editor")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual([]);
+  });
+
+  // Keyboard users never generate a pointerenter; tabbing to the button is
+  // the same signal.
+  it("pre-warms when the button takes keyboard focus", async () => {
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("focus"));
+    await flush();
+
+    expect(warmed).toEqual(["editor:acme"]);
+  });
+
+  // Pre-warming has to warm the thing the click would actually open. A
+  // project with a configured root does not want an editor at its own
+  // directory, so warming one there spawns a code-server nobody asked for
+  // and leaves the click to spawn a second at the right place.
+  it("warms the configured root, not the project directory", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue"]);
+    jarvis["openEditor"] = (project: string, root: string | undefined) => {
+      warmed.push(`editor:${project}:${root ?? "-"}`);
+      return Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" });
+    };
+
+    document
+      .getElementById("workspace-open-editor")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual(["editor:acme:portal-vue"]);
+  });
+
+  // With two roots the click opens a menu and nothing is started, so there
+  // is no single answer to warm — guessing one would spawn a server for a
+  // root the user may never pick.
+  it("warms nothing when the button would offer a menu", async () => {
+    jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
+
+    document
+      .getElementById("workspace-open-editor")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(warmed).toEqual([]);
+  });
+
+  it("does not let a failed pre-warm reach the status line", async () => {
+    jarvis["openEditor"] = () =>
+      Promise.resolve({ ok: false, text: "Could not open the editor.", language: "en" });
+
+    document
+      .getElementById("workspace-open-editor")
+      ?.dispatchEvent(new Event("pointerenter"));
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+});
+
 describe("open in database", () => {
   let calls: Recorded[];
   let jarvis: Record<string, unknown>;

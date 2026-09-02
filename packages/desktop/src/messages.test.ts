@@ -213,3 +213,18 @@ describe("provider panel strings", () => {
     expect(MESSAGES.capacityResetsAt("14:30", "en")).toContain("14:30");
   });
 });
+
+// A hosted app's start is a real wait (measured: 1.9-2.3s warm, up to 21.6s
+// for a cold DbGate), so it gets said out loud — in both languages, like
+// every other string a person can see.
+describe("hosted-app starting strings", () => {
+  it("has an Arabic and an English form for each", () => {
+    for (const key of ["editorStarting", "databaseStarting"] as const) {
+      expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
+      expect(MESSAGES[key]("ar")).not.toBe("");
+      expect(MESSAGES[key]("en")).not.toBe("");
+    }
+    expect(MESSAGES.editorStarting("en")).toBe("Starting the editor…");
+    expect(MESSAGES.databaseStarting("en")).toBe("Starting the database browser…");
+  });
+});

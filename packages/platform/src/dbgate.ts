@@ -111,7 +111,16 @@ export type DbGateManagerDeps = {
  *  databaseUnavailable), never silently. */
 const PORT_LINE = /DbGate API listening on port (\d+)/;
 
-const DEFAULT_PORT_TIMEOUT_MS = 20_000;
+/** How long to wait for that line. Measured on this machine: a warm
+ *  dbgate-serve prints it after ~1.0-1.2s, but the first start after a boot
+ *  — cold page cache, npm-installed JS read off disk for the first time —
+ *  took 21.6s. The old 20s budget therefore turned the very first Database
+ *  open of a session into a flat failure ("Could not open the database
+ *  browser."), reproduced in the app. 60s is a timeout for a process that
+ *  is genuinely not coming, not a normal cold start; the Workspace now
+ *  shows a running "starting…" state for the whole wait, so a long one
+ *  reads as slow rather than as frozen. */
+const DEFAULT_PORT_TIMEOUT_MS = 60_000;
 
 /**
  * One DbGate process per project, started lazily on first use and reused
@@ -125,53 +134,75 @@ const DEFAULT_PORT_TIMEOUT_MS = 20_000;
  */
 export function createDbGateManager(deps: DbGateManagerDeps): DbGateManager {
   const running = new Map<string, { result: DbGateResult; process: DbGateProcess }>();
+  // Projects whose process is spawned but has not answered yet — the same
+  // in-flight guard createCodeServerManager carries, for the same measured
+  // reason. It matters more here: a second spawn would also mint a second
+  // random password, so the credential shown to the user could belong to
+  // the instance that ended up orphaned rather than to the one behind the
+  // tab. It is also what makes pre-warming free.
+  const starting = new Map<string, Promise<DbGateResult>>();
+
+  async function start(project: string): Promise<DbGateResult> {
+    const workspaceDir = `${deps.workspaceRoot}/${project}`;
+    const password = deps.randomPassword();
+
+    let child: DbGateProcess;
+    try {
+      await deps.ensureDir(workspaceDir);
+      const hint = await deps.findFreePort();
+      child = deps.spawn({
+        workspaceDir,
+        env: {
+          PORT: String(hint),
+          WORKSPACE_DIR: workspaceDir,
+          // DbGate listens on 0.0.0.0 with no way to ask for loopback, so
+          // an unguarded instance is reachable from the local network for
+          // as long as it runs. This credential is generated per spawn and
+          // lives only in the child's environment.
+          LOGIN: "jarvis",
+          PASSWORD: password,
+          ...connectionEnv(deps.connectionsFor(project), deps.env),
+        },
+      });
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+
+    const port = await waitForPort(child, deps.portTimeoutMs ?? DEFAULT_PORT_TIMEOUT_MS);
+    if (!port.ok) {
+      child.kill();
+      return port;
+    }
+
+    const url = `http://127.0.0.1:${port.port}/`;
+    if (!(await deps.waitUntilReady(url))) {
+      child.kill();
+      return { ok: false, detail: "dbgate-serve did not become ready in time" };
+    }
+
+    const result: DbGateResult = { ok: true, url, login: "jarvis", password };
+    running.set(project, { result, process: child });
+    child.onExit(() => running.delete(project));
+    return result;
+  }
 
   return {
-    async open(project) {
+    open(project) {
       const existing = running.get(project);
-      if (existing !== undefined) return existing.result;
+      if (existing !== undefined) return Promise.resolve(existing.result);
 
-      const workspaceDir = `${deps.workspaceRoot}/${project}`;
-      const password = deps.randomPassword();
+      const inFlight = starting.get(project);
+      if (inFlight !== undefined) return inFlight;
 
-      let child: DbGateProcess;
-      try {
-        await deps.ensureDir(workspaceDir);
-        const hint = await deps.findFreePort();
-        child = deps.spawn({
-          workspaceDir,
-          env: {
-            PORT: String(hint),
-            WORKSPACE_DIR: workspaceDir,
-            // DbGate listens on 0.0.0.0 with no way to ask for loopback, so
-            // an unguarded instance is reachable from the local network for
-            // as long as it runs. This credential is generated per spawn and
-            // lives only in the child's environment.
-            LOGIN: "jarvis",
-            PASSWORD: password,
-            ...connectionEnv(deps.connectionsFor(project), deps.env),
-          },
-        });
-      } catch (error) {
-        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
-      }
-
-      const port = await waitForPort(child, deps.portTimeoutMs ?? DEFAULT_PORT_TIMEOUT_MS);
-      if (!port.ok) {
-        child.kill();
-        return port;
-      }
-
-      const url = `http://127.0.0.1:${port.port}/`;
-      if (!(await deps.waitUntilReady(url))) {
-        child.kill();
-        return { ok: false, detail: "dbgate-serve did not become ready in time" };
-      }
-
-      const result: DbGateResult = { ok: true, url, login: "jarvis", password };
-      running.set(project, { result, process: child });
-      child.onExit(() => running.delete(project));
-      return result;
+      const attempt = start(project);
+      starting.set(project, attempt);
+      // Cleared on failure too, or a project that failed once could never
+      // be retried without restarting Jarvis.
+      void attempt.then(
+        () => starting.delete(project),
+        () => starting.delete(project),
+      );
+      return attempt;
     },
 
     stopAll() {
