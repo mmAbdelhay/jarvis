@@ -173,3 +173,194 @@ export function rank(
     .map(([value, score]) => ({ value, kind: "history" as const, score }))
     .sort((a, b) => b.score - a.score || a.value.length - b.value.length);
 }
+
+/** What Jarvis knows about one generic command, by hand. */
+export type CommandSpec = {
+  command: string;
+  subcommands: readonly string[];
+  flags: readonly string[];
+};
+
+/**
+ * The whole spec table — six commands, written out here.
+ *
+ * Fig's corpus is deliberately not vendored. It is hundreds of files that
+ * must be kept current, and it would not contain `globex-dependabot`,
+ * `saml2aws`, `./docker-entrypoint.sh` or `./scripts/port-forward-dev2.sh`
+ * — four of the five most-run commands on this machine, and the ones a
+ * completion engine is most worth having. History covers those; this table
+ * only supplements the generic tools where knowing the flags genuinely
+ * helps, and a command missing from it loses nothing that history had.
+ *
+ * The subcommands and flags are the ones that appear in this user's own
+ * history, not the full surface of each tool: a list nobody uses is a list
+ * that pushes the useful entry off the end of the dropdown.
+ */
+export const COMMAND_SPECS: readonly CommandSpec[] = [
+  {
+    command: "git",
+    subcommands: [
+      "add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge",
+      "pull", "push", "rebase", "reset", "restore", "stash", "status", "switch", "worktree",
+    ],
+    flags: ["--amend", "--force-with-lease", "--no-verify", "--staged", "-b"],
+  },
+  {
+    command: "docker",
+    subcommands: ["build", "compose", "exec", "images", "logs", "ps", "pull", "push", "run"],
+    flags: ["--build", "--rm", "-d", "-f", "-it"],
+  },
+  {
+    command: "npm",
+    subcommands: ["ci", "install", "publish", "run", "test", "version"],
+    flags: ["--legacy-peer-deps", "--save-dev", "--workspaces"],
+  },
+  {
+    command: "pnpm",
+    subcommands: ["add", "build", "dlx", "install", "remove", "run", "test", "typecheck"],
+    flags: ["--filter", "--frozen-lockfile", "-r", "-w"],
+  },
+  {
+    command: "gh",
+    subcommands: ["auth", "issue", "pr", "release", "repo", "run", "workflow"],
+    flags: ["--json", "--web"],
+  },
+  {
+    command: "go",
+    subcommands: ["build", "fmt", "get", "install", "mod", "run", "test", "vet"],
+    flags: ["-race", "-v", "./..."],
+  },
+];
+
+/** The whitespace-separated tokens of a line, plus whether the line ends in
+ *  a space — which is the difference between "completing this token" and
+ *  "starting the next one". */
+function tokenize(input: string): { tokens: string[]; atNewToken: boolean } {
+  const tokens = input.split(/\s+/).filter((token) => token !== "");
+  return { tokens, atNewToken: input === "" || /\s$/.test(input) };
+}
+
+/**
+ * Subcommands and flags for the command the line starts with.
+ *
+ * Only offers once the command name is complete and followed by a space:
+ * `gi` is a prefix of `git` but not yet a command, and offering `git
+ * status` there would be history's job, not this table's.
+ *
+ * Subcommands are offered only in the first argument position. `git commit
+ * sta` is a path or a message fragment, not a second subcommand, and
+ * suggesting one there would be noise on every commit.
+ */
+export function specSuggestions(input: string, specs: readonly CommandSpec[]): Suggestion[] {
+  const { tokens, atNewToken } = tokenize(input);
+  if (tokens.length === 0) return [];
+  const spec = specs.find((candidate) => candidate.command === tokens[0]);
+  if (spec === undefined) return [];
+  if (tokens.length === 1 && !atNewToken) return [];
+
+  const fragment = atNewToken ? "" : (tokens[tokens.length - 1] ?? "");
+  const argumentIndex = atNewToken ? tokens.length : tokens.length - 1;
+
+  const candidates = fragment.startsWith("-")
+    ? spec.flags
+    : argumentIndex === 1
+      ? spec.subcommands
+      : [];
+
+  const head = input.slice(0, input.length - fragment.length);
+  return candidates
+    .filter((candidate) => candidate.startsWith(fragment) && candidate !== fragment)
+    .sort()
+    .map((candidate) => ({ value: `${head}${candidate}`, kind: "spec" as const, score: 0 }));
+}
+
+/**
+ * The directory part of the last token, when that token looks like a path —
+ * and undefined when it does not.
+ *
+ * This is what the caller needs *before* it can complete a path: it says
+ * which single directory to list, so a keystroke costs one readdir of the
+ * directory being typed rather than a walk of anything.
+ *
+ * "Looks like a path" means it contains a slash or starts with `~`. A bare
+ * word is left alone: it is far more often a subcommand than a filename,
+ * and history already completes it.
+ */
+export function pathPrefix(input: string): string | undefined {
+  const { tokens, atNewToken } = tokenize(input);
+  const token = atNewToken ? "" : (tokens[tokens.length - 1] ?? "");
+  if (token === "") return undefined;
+  if (!token.includes("/") && !token.startsWith("~")) return undefined;
+  const cut = token.lastIndexOf("/");
+  return cut < 0 ? undefined : token.slice(0, cut + 1);
+}
+
+/**
+ * The last token completed against `listing` — the entries of the directory
+ * `pathPrefix` named, with a trailing `/` on the directories.
+ *
+ * The listing is passed in rather than read: this stays pure, and the
+ * caller is the only one that knows what "this terminal's cwd" means.
+ */
+export function completePath(input: string, listing: readonly string[]): Suggestion[] {
+  const prefix = pathPrefix(input);
+  if (prefix === undefined) return [];
+
+  const { tokens } = tokenize(input);
+  const token = tokens[tokens.length - 1] ?? "";
+  const fragment = token.slice(prefix.length);
+  const head = input.slice(0, input.length - token.length);
+
+  return listing
+    .filter((entry) => entry.toLowerCase().startsWith(fragment.toLowerCase()) && entry !== fragment)
+    .sort()
+    .map((entry) => ({ value: `${head}${prefix}${entry}`, kind: "path" as const, score: 0 }));
+}
+
+/** How many suggestions the dropdown may show. Eight is roughly a third of
+ *  a terminal's height — enough to hold the answer, small enough that the
+ *  list never becomes the screen. */
+const DEFAULT_LIMIT = 8;
+
+/**
+ * The composed engine: history first, then specs, then paths.
+ *
+ * The order is the priority the design argues for. History is what this
+ * user actually runs, arguments included; the spec table is a supplement
+ * for the generic tools; paths complete what neither can know. A value
+ * offered by an earlier source is not repeated by a later one, so the
+ * sources degrade into each other rather than leaving a hole when one has
+ * nothing to say.
+ *
+ * Blank input returns nothing, which is what keeps the dropdown shut at a
+ * bare prompt.
+ */
+export function suggest(
+  input: string,
+  context: {
+    history: readonly HistoryEntry[];
+    specs: readonly CommandSpec[];
+    listing: readonly string[];
+    cwd: string;
+    now: number;
+    limit?: number;
+  },
+): Suggestion[] {
+  if (input.trim() === "") return [];
+
+  const all = [
+    ...rank(input, context.history, context.cwd, context.now),
+    ...specSuggestions(input, context.specs),
+    ...completePath(input, context.listing),
+  ];
+
+  const seen = new Set<string>();
+  const unique: Suggestion[] = [];
+  for (const suggestion of all) {
+    if (suggestion.value === input) continue;
+    if (seen.has(suggestion.value)) continue;
+    seen.add(suggestion.value);
+    unique.push(suggestion);
+  }
+  return unique.slice(0, context.limit ?? DEFAULT_LIMIT);
+}

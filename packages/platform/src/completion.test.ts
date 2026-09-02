@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseCommandLog, parseZshHistory, rank } from "./completion.js";
+import {
+  COMMAND_SPECS,
+  completePath,
+  parseCommandLog,
+  parseZshHistory,
+  pathPrefix,
+  rank,
+  specSuggestions,
+  suggest,
+} from "./completion.js";
 
 describe("parseZshHistory", () => {
   it("reads the extended `: epoch:elapsed;command` format", () => {
@@ -137,5 +146,136 @@ describe("rank", () => {
 
   it("labels what it returns as coming from history", () => {
     expect(rank("gh", [{ command: "gh pr list", at: now }], "/p", now)[0]?.kind).toBe("history");
+  });
+});
+
+describe("specSuggestions", () => {
+  const specs = [
+    { command: "git", subcommands: ["status", "stash"], flags: ["--no-verify", "--amend"] },
+  ];
+
+  it("offers a subcommand for a partially typed one", () => {
+    expect(specSuggestions("git sta", specs).map((s) => s.value)).toEqual([
+      "git stash",
+      "git status",
+    ]);
+  });
+
+  it("offers every subcommand once the command name and a space are typed", () => {
+    expect(specSuggestions("git ", specs).map((s) => s.value)).toEqual(["git stash", "git status"]);
+  });
+
+  it("offers flags once a dash is typed, wherever in the line it is", () => {
+    expect(specSuggestions("git commit --no", specs).map((s) => s.value)).toEqual([
+      "git commit --no-verify",
+    ]);
+  });
+
+  it("offers nothing for a command it has no spec for", () => {
+    expect(specSuggestions("globex-dependabot u", specs)).toEqual([]);
+  });
+
+  it("offers nothing before the command name is complete", () => {
+    expect(specSuggestions("gi", specs)).toEqual([]);
+  });
+
+  it("offers no subcommand beyond the first argument", () => {
+    expect(specSuggestions("git commit sta", specs)).toEqual([]);
+  });
+
+  it("labels what it returns as coming from a spec", () => {
+    expect(specSuggestions("git sta", specs)[0]?.kind).toBe("spec");
+  });
+});
+
+describe("pathPrefix", () => {
+  it("is the directory part of the last token when the token looks like a path", () => {
+    expect(pathPrefix("cat ./scripts/po")).toBe("./scripts/");
+    expect(pathPrefix("cat ./")).toBe("./");
+    expect(pathPrefix("cat /etc/ho")).toBe("/etc/");
+  });
+
+  it("is the home directory for a bare tilde token", () => {
+    expect(pathPrefix("cat ~/.conf")).toBe("~/");
+  });
+
+  it("is undefined for a token that is not a path", () => {
+    expect(pathPrefix("git stat")).toBeUndefined();
+    expect(pathPrefix("")).toBeUndefined();
+  });
+});
+
+describe("completePath", () => {
+  it("completes the last token against the listing, keeping the rest of the line", () => {
+    expect(
+      completePath("cat ./scripts/po", ["port-forward-dev2.sh", "build/"]).map((s) => s.value),
+    ).toEqual(["cat ./scripts/port-forward-dev2.sh"]);
+  });
+
+  it("offers everything in the directory when the token ends at a slash", () => {
+    expect(completePath("cat ./", ["a.txt", "b/"]).map((s) => s.value)).toEqual([
+      "cat ./a.txt",
+      "cat ./b/",
+    ]);
+  });
+
+  it("offers nothing when the token is not a path", () => {
+    expect(completePath("git stat", ["status"])).toEqual([]);
+  });
+
+  it("labels what it returns as a path", () => {
+    expect(completePath("cat ./", ["a.txt"])[0]?.kind).toBe("path");
+  });
+});
+
+describe("suggest", () => {
+  const now = 1_756_000_000;
+  const base = {
+    history: [] as { command: string; at?: number; cwd?: string }[],
+    specs: COMMAND_SPECS,
+    listing: [] as string[],
+    cwd: "/p",
+    now,
+  };
+
+  it("returns nothing for empty input — the dropdown must not open at a bare prompt", () => {
+    expect(suggest("", base)).toEqual([]);
+    expect(suggest("   ", base)).toEqual([]);
+  });
+
+  it("puts history above specs for the same input", () => {
+    const result = suggest("git sta", { ...base, history: [{ command: "git stash pop", at: now }] });
+    expect(result[0]).toMatchObject({ value: "git stash pop", kind: "history" });
+    expect(result.some((s) => s.kind === "spec")).toBe(true);
+  });
+
+  it("never repeats a value another source already offered", () => {
+    const result = suggest("git sta", { ...base, history: [{ command: "git status", at: now }] });
+    expect(result.filter((s) => s.value === "git status")).toHaveLength(1);
+  });
+
+  it("caps the list so the dropdown cannot cover the screen", () => {
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      command: `npm run task-${index}`,
+      at: now - index,
+    }));
+    expect(suggest("npm", { ...base, history }).length).toBeLessThanOrEqual(8);
+  });
+
+  it("includes path completions for a path-shaped token", () => {
+    expect(
+      suggest("cat ./", { ...base, listing: ["notes.md"] }).map((s) => s.value),
+    ).toContain("cat ./notes.md");
+  });
+
+  it("has specs for exactly the generic tools the design named", () => {
+    expect([...COMMAND_SPECS.map((spec) => spec.command)].sort()).toEqual([
+      "docker",
+      "gh",
+      "git",
+      "go",
+      "npm",
+      "pnpm",
+    ]);
   });
 });
