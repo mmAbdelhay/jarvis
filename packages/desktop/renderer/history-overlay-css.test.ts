@@ -58,3 +58,22 @@ describe("history overlay [hidden] cascade", () => {
     expect(body).toMatch(/display\s*:\s*flex/);
   });
 });
+
+// The same cascade trap, found again in `.session-empty` — and this time by
+// looking at the running app rather than at the CSS. The session view's
+// empty state set `display: flex` unconditionally, so `renderHeader`'s
+// `empty.hidden = true` never hid it: the panel sat on top of the terminal
+// and a session opened from history read "No session open." over its own
+// transcript. Measured in a real Chromium window, the element reported
+// `hidden: true` and `offsetParent !== null` at the same time.
+describe("session empty state [hidden] cascade", () => {
+  it("the base .session-empty rule does not set display", () => {
+    const body = ruleBodyFor(".session-empty", htmlSource);
+    expect(body).not.toMatch(/display\s*:/);
+  });
+
+  it("display: flex is gated on :not([hidden])", () => {
+    const body = ruleBodyFor(".session-empty:not([hidden])", htmlSource);
+    expect(body).toMatch(/display\s*:\s*flex/);
+  });
+});

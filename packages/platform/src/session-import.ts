@@ -222,14 +222,27 @@ function promptText(content: unknown): string | undefined {
  * up on the words inside it.
  */
 export function summaryOf(text: string): string | undefined {
+  return trimSummary(readableCommand(text));
+}
+
+/**
+ * CLI markup turned back into the line the user effectively typed.
+ *
+ * Shared by the history summary and the transcript body: it is one rule
+ * about how a slash command is recorded, so fixing it only where it was
+ * first noticed would leave the other half wrong. Unlike `summaryOf` this
+ * does not truncate — a transcript body is what the reader opened the
+ * session for.
+ */
+export function readableCommand(text: string): string {
   const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text);
   if (name !== null) {
     const args = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/.exec(text);
     const argText = args?.[1]?.trim() ?? "";
     const command = name[1] ?? "";
-    return trimSummary(argText === "" ? command : `${command} ${argText}`);
+    return argText === "" ? command : `${command} ${argText}`;
   }
-  return trimSummary(text.replaceAll(/<[^>]*>/g, " "));
+  return text.replaceAll(/<[^>]*>/g, " ");
 }
 
 /** One line, bounded: a history row shows a line, and a prompt can be an
@@ -514,7 +527,7 @@ export function renderTranscript(text: string): string {
 
 /** The readable part of one message's content. */
 function transcriptBody(content: unknown): string {
-  if (typeof content === "string") return content.replaceAll("\n", "\r\n").trim();
+  if (typeof content === "string") return readableCommand(content).replaceAll("\n", "\r\n").trim();
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
   for (const block of content) {
@@ -524,7 +537,7 @@ function transcriptBody(content: unknown): string {
     if (kind === "text") {
       const text = fields["text"];
       if (typeof text === "string" && text.trim() !== "") {
-        parts.push(text.replaceAll("\n", "\r\n").trim());
+        parts.push(readableCommand(text).replaceAll("\n", "\r\n").trim());
       }
       continue;
     }

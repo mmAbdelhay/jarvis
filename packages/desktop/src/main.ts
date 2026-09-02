@@ -928,33 +928,35 @@ app.whenReady().then(async () => {
     // A session started in a terminal has no pty backlog — only the
     // transcript the importer recorded a path to. Without this the session
     // view opened blank for all 89 imported sessions.
-    ipcMain.handle(
-      "session:transcript",
-      createTranscriptHandler({
-        history: () => sessionStore.history(),
-        readFile: (path) => readFile(path, "utf8"),
-      }),
+    const sessionTranscript = createTranscriptHandler({
+      history: () => sessionStore.history(),
+      readFile: (path) => readFile(path, "utf8"),
+    });
+    // (_event, id), never the bare handler: ipcMain.handle calls its
+    // listener with the invoke event first, so a handler taking the id as
+    // its first parameter silently receives the event instead and refuses
+    // every session.
+    ipcMain.handle("session:transcript", (_event, sessionId: unknown) =>
+      sessionTranscript(sessionId),
     );
 
     // Continuing a terminal-started conversation inside Jarvis. Keeps the
     // session's own id, so it resumes into the row and transcript it
     // already has instead of forking a second one.
-    ipcMain.handle(
-      "session:resume",
-      createResumeHandler({
-        history: () => sessionStore.history(),
-        agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
-        directoryExists: async (path) => {
-          try {
-            return (await stat(path)).isDirectory();
-          } catch {
-            return false;
-          }
-        },
-        resume: (input) => sessions.resume(input),
-        language: PRIMARY_LANGUAGE,
-      }),
-    );
+    const sessionResume = createResumeHandler({
+      history: () => sessionStore.history(),
+      agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
+      directoryExists: async (path) => {
+        try {
+          return (await stat(path)).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      resume: (input) => sessions.resume(input),
+      language: PRIMARY_LANGUAGE,
+    });
+    ipcMain.handle("session:resume", (_event, sessionId: unknown) => sessionResume(sessionId));
 
     // Keystrokes into a session's pty. Validated rather than trusted: the
     // renderer names a session id, never a process — the main process owns

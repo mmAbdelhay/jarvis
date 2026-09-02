@@ -2019,12 +2019,21 @@
   .session-empty {
     position: absolute;
     inset: 0;
-    display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
     color: var(--text-muted);
     pointer-events: none;
+  }
+
+  /* No `display` above: an author rule on `.session-empty` itself outranks
+     the UA stylesheet's `[hidden] { display: none }` whatever the cascade
+     order, so an unconditional `display: flex` there renders the panel
+     even while `hidden` is set — which is exactly what happened, and why a
+     session opened from history read "No session open." on top of its own
+     transcript. Same trap, same fix, as `.history-overlay` above. */
+  .session-empty:not([hidden]) {
+    display: flex;
   }
 
   /* Says where a spoken utterance will land while this view is open. It is

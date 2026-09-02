@@ -162,6 +162,31 @@ describe("renderTranscript", () => {
     expect(out).not.toContain("drwx");
   });
 
+  // The same CLI markup that made a quarter of the history rows
+  // unreadable also appears in the transcript body. It is one rule, so it
+  // lives in one place rather than being fixed only where it was noticed.
+  it("reads a slash command in the body the way the user typed it", () => {
+    const out = renderTranscript(
+      line({
+        type: "user",
+        message: {
+          content:
+            "<command-name>/plan</command-name> <command-message>plan</command-message>" +
+            " <command-args>add a cluster tab</command-args>",
+        },
+      }),
+    );
+    expect(out).toContain("/plan add a cluster tab");
+    expect(out).not.toContain("<command-name>");
+  });
+
+  // Unlike a summary, a transcript body is not truncated: the reader opened
+  // the session to read it.
+  it("does not truncate a long prompt in the body", () => {
+    const long = "x".repeat(500);
+    expect(renderTranscript(line({ type: "user", message: { content: long } }))).toContain(long);
+  });
+
   it("skips a malformed line rather than losing the rest", () => {
     const out = renderTranscript(
       ["{not json", line({ type: "user", message: { content: "survived" } })].join("\n"),

@@ -3266,3 +3266,29 @@ describe("createResumeHandler", () => {
     expect((await handler("s1")).ok).toBe(false);
   });
 });
+
+// ipcMain.handle calls its listener as (event, ...args). A handler that
+// takes the id as its FIRST parameter therefore receives the event object
+// instead, and every guard on that id fails silently — the transcript
+// handler returned "" for every session and resume refused every one,
+// while their unit tests passed because they call the handler directly.
+// Caught by running the app, so the shape is pinned at the source here.
+describe("main.ts ipc registrations", () => {
+  const mainSource = readFileSync(
+    fileURLToPath(new URL("./main.ts", import.meta.url)),
+    "utf8",
+  );
+
+  for (const channel of ["session:transcript", "session:resume"]) {
+    it(`passes the argument, not the event, to the ${channel} handler`, () => {
+      const escaped = channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = new RegExp(`ipcMain\\.handle\\(\\s*"${escaped}",\\s*([^\\n]*)`).exec(
+        mainSource,
+      );
+      expect(match, `no ipcMain.handle for ${channel}`).not.toBeNull();
+      // Either an inline arrow that names the event first, or nothing —
+      // handing the factory's function straight to ipcMain is the bug.
+      expect(match?.[1]).toMatch(/\(\s*_?event/);
+    });
+  }
+});
