@@ -59,6 +59,44 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       exitCode = excluded.exitCode
   `);
 
+  // The importer's write for a session SessionManager is currently
+  // running. `state`, `endedAt` and `exitCode` are absent from this
+  // statement by construction rather than by discipline: the pty observes
+  // those directly and a transcript can only guess at them.
+  //
+  // An UPDATE, not an upsert: an owned id with no row is a race against
+  // SessionManager's own insert, and zero rows matched is exactly the
+  // wanted no-op there (node:sqlite does not throw for it — the same
+  // property updateGit below relies on). Inserting instead would mean
+  // choosing a state for a session that is alive.
+  const importOwnedStmt = db.prepare(`
+    UPDATE sessions
+    SET project = ?, projectPath = ?, agentId = ?, model = ?, summary = ?,
+        startedAt = ?, lastActivityAt = ?, branch = ?
+    WHERE id = ?
+  `);
+
+  // The importer's write for every other session — the terminal-started
+  // ones, which are the point of importing at all. Inserted whole; but the
+  // conflict branch is descriptive-only, so re-importing a session Jarvis
+  // ran in some earlier run does not overwrite the exit code and git counts
+  // that only a live process ever saw with a transcript's guesses.
+  const importUnownedStmt = db.prepare(`
+    INSERT INTO sessions (
+      id, project, projectPath, agentId, model, state, summary,
+      startedAt, lastActivityAt, endedAt, exitCode, branch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      project = excluded.project,
+      projectPath = excluded.projectPath,
+      agentId = excluded.agentId,
+      model = excluded.model,
+      summary = excluded.summary,
+      startedAt = excluded.startedAt,
+      lastActivityAt = excluded.lastActivityAt,
+      branch = excluded.branch
+  `);
+
   const historyStmt = db.prepare(`
     SELECT id, project, projectPath, agentId, model, state, summary,
            startedAt, lastActivityAt, endedAt, exitCode,
@@ -87,6 +125,36 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
         session.lastActivityAt,
         session.endedAt ?? null,
         session.exitCode ?? null,
+      );
+    },
+    upsertImported(session: Session, options: { owned: boolean }): void {
+      if (options.owned) {
+        importOwnedStmt.run(
+          session.project,
+          session.projectPath,
+          session.agentId,
+          session.model ?? null,
+          session.summary,
+          session.startedAt,
+          session.lastActivityAt,
+          session.branch ?? "",
+          session.id,
+        );
+        return;
+      }
+      importUnownedStmt.run(
+        session.id,
+        session.project,
+        session.projectPath,
+        session.agentId,
+        session.model ?? null,
+        session.state,
+        session.summary,
+        session.startedAt,
+        session.lastActivityAt,
+        session.endedAt ?? null,
+        session.exitCode ?? null,
+        session.branch ?? "",
       );
     },
     history(): Session[] {

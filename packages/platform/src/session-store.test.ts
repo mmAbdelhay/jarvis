@@ -641,4 +641,111 @@ describe("createSqliteSessionStore", () => {
       expect(createSqliteSessionStore(dbPath).history()).toHaveLength(1);
     });
   });
+
+  describe("upsertImported — the importer's narrower write", () => {
+    let dir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-import-"));
+      dbPath = join(dir, "sessions.db");
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    // The ownership boundary the design turns on: for a session id
+    // SessionManager is currently running, the pty observes state and exit
+    // code directly and the importer can only infer them, so the importer's
+    // statement does not contain those columns at all.
+    it("keeps the pty's state, endedAt and exitCode for a session SessionManager owns", () => {
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession({ id: "live", state: "running", summary: "typing" }));
+
+      store.upsertImported(
+        agentSession({
+          id: "live",
+          state: "done",
+          summary: "imported summary",
+          exitCode: 7,
+          endedAt: 9999,
+          lastActivityAt: 5000,
+        }),
+        { owned: true },
+      );
+
+      const row = store.history()[0];
+      expect(row?.state).toBe("running");
+      expect(row?.exitCode).toBeUndefined();
+      expect(row?.endedAt).toBeUndefined();
+      // The descriptive columns do land — the importer is authoritative for
+      // those even while the session is live.
+      expect(row?.summary).toBe("imported summary");
+      expect(row?.lastActivityAt).toBe(5000);
+    });
+
+    it("does not invent a row for an owned session that has none yet", () => {
+      const store = createSqliteSessionStore(dbPath);
+
+      store.upsertImported(agentSession({ id: "ghost" }), { owned: true });
+
+      // A live session with no row is a race against SessionManager's own
+      // insert, and inserting a "done" row for a session that is running
+      // would be a lie the next history() read would repeat.
+      expect(store.history()).toEqual([]);
+    });
+
+    it("inserts an unowned session whole, with its own state", () => {
+      const store = createSqliteSessionStore(dbPath);
+
+      store.upsertImported(
+        agentSession({ id: "ext", project: null, state: "done", endedAt: 5000 }),
+        { owned: false },
+      );
+
+      expect(store.history()[0]).toMatchObject({
+        id: "ext",
+        project: null,
+        state: "done",
+        endedAt: 5000,
+      });
+    });
+
+    it("re-importing an unowned session keeps the exit code already recorded", () => {
+      // A Jarvis session from a previous run is unowned now, but its row
+      // carries an exit code only the pty ever saw. A later import pass
+      // must not null it out.
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession({ id: "past", state: "dead", exitCode: 1, endedAt: 4000 }));
+
+      store.upsertImported(
+        agentSession({ id: "past", state: "done", summary: "from the transcript" }),
+        { owned: false },
+      );
+
+      const row = store.history()[0];
+      expect(row?.state).toBe("dead");
+      expect(row?.exitCode).toBe(1);
+      expect(row?.endedAt).toBe(4000);
+      expect(row?.summary).toBe("from the transcript");
+    });
+
+    it("keeps the git counts a session already recorded", () => {
+      // updateGit's numbers come from watching the repo while the session
+      // ran; a transcript knows nothing about them and must not zero them.
+      const store = createSqliteSessionStore(dbPath);
+      store.upsert(agentSession({ id: "counted" }));
+      store.updateGit("counted", {
+        branch: "feat/x",
+        insertions: 9,
+        deletions: 2,
+        changedFiles: 3,
+      });
+
+      store.upsertImported(agentSession({ id: "counted", branch: "feat/x" }), { owned: false });
+
+      expect(store.history()[0]).toMatchObject({ insertions: 9, deletions: 2, changedFiles: 3 });
+    });
+  });
 });

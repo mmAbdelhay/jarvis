@@ -8,6 +8,15 @@ class FakeStore implements SessionStore {
   upsert(session: Session): void {
     this.rows.set(session.id, session);
   }
+  // SessionManager never calls this — the transcript importer does — but a
+  // fake that only implements the parts the caller happens to use stops
+  // being a stand-in for the real store.
+  imported: { session: Session; owned: boolean }[] = [];
+  upsertImported(session: Session, options: { owned: boolean }): void {
+    this.imported.push({ session, owned: options.owned });
+    if (options.owned) return;
+    this.rows.set(session.id, session);
+  }
   history(): Session[] {
     return [...this.rows.values()];
   }

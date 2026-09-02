@@ -60,6 +60,29 @@ export interface SessionStore {
   // "starting" row) — upserts by `session.id`, so a session's history is
   // exactly one row that gets updated in place as it progresses.
   upsert(session: Session): void;
+  /**
+   * Records a session read back from a transcript on disk, rather than one
+   * this process is running.
+   *
+   * Two writers touch one row — `SessionManager` through `upsert` above and
+   * the transcript importer through this — so the boundary between them is
+   * explicit rather than implied.
+   *
+   * `owned` is true when `SessionManager` is currently running this id. For
+   * such a session the pty observes `state`, `endedAt` and `exitCode`
+   * directly and the importer can only infer them, so an implementation
+   * must not write those three columns at all — and must not create a row
+   * that does not exist yet, which would mean inventing a state for a live
+   * session. Only the descriptive columns (project, projectPath, agentId,
+   * model, summary, startedAt, lastActivityAt, branch) are the importer's
+   * to write there.
+   *
+   * For an unowned id the importer is authoritative and the row is inserted
+   * whole — but a row that already exists keeps its recorded state,
+   * endedAt, exitCode and git counts, because those came from watching a
+   * process a transcript knows nothing about.
+   */
+  upsertImported(session: Session, options: { owned: boolean }): void;
   // All recorded sessions, most recently active first.
   history(): Session[];
   // Records the git change counts for one already-persisted session —
