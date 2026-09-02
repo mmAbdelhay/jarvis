@@ -4,3 +4,6 @@ dist/
 design/jarvis-voice-orchestrator.html
 .superpowers/
 *.tsbuildinfo
+
+# Agent worktrees — transient, one per background agent
+.claude/worktrees/
