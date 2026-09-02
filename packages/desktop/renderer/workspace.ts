@@ -1,5 +1,6 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
 import { initApi, renderApi } from "./api.js";
 import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
 
@@ -38,6 +39,54 @@ function selectedProject(): string {
   return ($("workspace-project") as HTMLSelectElement).value;
 }
 
+/** What a project is called on screen. Every project but one is called
+ *  what the user named it in jarvis.yaml; the personal browser's key is
+ *  internal (a partition name, a bookmark-file key) and never shown. */
+function projectLabel(project: string): string {
+  return isPersonalProject(project) ? MESSAGES.personalProject(PRIMARY_LANGUAGE) : project;
+}
+
+/** The four buttons that open something rooted in the project's directory.
+ *  Their own tooltips, captured before the personal browser overwrites
+ *  them with its reason, so returning to a project restores each one's. */
+const PROJECT_TOOL_BUTTONS = [
+  "workspace-open-editor",
+  "workspace-open-database",
+  "workspace-open-terminal",
+  "workspace-open-api",
+] as const;
+const toolTitles = new Map<string, string>();
+
+/**
+ * The personal browser has no directory on disk, so there is no folder to
+ * edit, no database to spawn against, no cwd for a shell and no collection
+ * tree to read — see src/personal.ts. The main process already refuses all
+ * four (each handler resolves the project through `config.projects`, which
+ * never contains this key), but a button that silently does nothing is a
+ * bug as far as the user is concerned. So they are visibly disabled, and
+ * the reason goes where the failure text would have gone.
+ */
+function renderProjectTools(): void {
+  const personal = isPersonalProject(selectedProject());
+  const reason = MESSAGES.personalHasNoDirectory(PRIMARY_LANGUAGE);
+
+  for (const id of PROJECT_TOOL_BUTTONS) {
+    const button = $(id) as HTMLButtonElement;
+    button.disabled = personal;
+    button.title = personal ? reason : (toolTitles.get(id) ?? "");
+  }
+
+  const status = $("workspace-tool-status");
+  if (personal) {
+    status.textContent = reason;
+    status.classList.remove("workspace-tool-status--error");
+  } else if (status.textContent === reason) {
+    // Only our own text is cleared: the status line also carries a DbGate
+    // login the user still has to type.
+    status.textContent = "";
+  }
+}
+
 // A small fixed palette, none of it reused from the app's semantic colors
 // (--good/--bad/--accent/etc). Assigned to a project the first time it is
 // seen and never reassigned — the same project keeps the same color for as
@@ -73,6 +122,7 @@ async function switchToProject(project: string): Promise<void> {
   if (target !== undefined) void window.jarvis.activateTab(target.id);
   else void window.jarvis.hideAllTabs();
 
+  renderProjectTools();
   await refreshBookmarks();
 }
 
@@ -301,14 +351,20 @@ function updateBookmarkToggle(): void {
 export function initWorkspace(projects: string[]): void {
   const select = $("workspace-project") as HTMLSelectElement;
   select.replaceChildren();
-  for (const project of projects) {
+  // The personal browser sits last, after the projects the user configured
+  // — it belongs to the same selector because it is the same kind of
+  // choice ("whose tabs am I looking at"), but it is not one of their
+  // projects and must not be the one selected by default.
+  for (const project of [...projects, PERSONAL_PROJECT]) {
     colorFor(project);
     const option = document.createElement("option");
     option.value = project;
-    option.textContent = project;
+    option.textContent = projectLabel(project);
     select.append(option);
   }
   select.addEventListener("change", () => void switchToProject(select.value));
+
+  for (const id of PROJECT_TOOL_BUTTONS) toolTitles.set(id, ($(id) as HTMLButtonElement).title);
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -352,11 +408,18 @@ export function initWorkspace(projects: string[]): void {
   initApi();
   initWorkspaceTerminals();
 
+  $("workspace-pip").addEventListener("click", () => {
+    const tab = activeTab();
+    if (tab !== undefined) void window.jarvis.requestPictureInPicture(tab.id);
+  });
+  ($("workspace-pip") as HTMLButtonElement).title = MESSAGES.pictureInPicture(PRIMARY_LANGUAGE);
+
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
   $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksSidebar());
   $("workspace-toggle-devtools").addEventListener("click", () => toggleDevTools());
   wireDevToolsHandle();
   renderBookmarksVisibility(false);
+  renderProjectTools();
   void refreshBookmarks();
 }
 
@@ -502,7 +565,7 @@ function renderCollapsedGroup(project: string, count: number): HTMLElement {
   const label = document.createElement("span");
   // A project name comes from config, but it is still text, same
   // discipline as everything else this file builds.
-  label.textContent = `${project} (${count})`;
+  label.textContent = `${projectLabel(project)} (${count})`;
 
   element.append(dot, label);
   return element;
@@ -574,6 +637,12 @@ export function renderWorkspace(state: WorkspaceState): void {
   }
 
   updateBookmarkToggle();
+
+  // Picture-in-Picture is offered only where there is something to float:
+  // an ordinary page that has told us it has a video actually playing. A
+  // button on every page would be a control that does nothing almost all
+  // of the time, which is the thing this deliberately avoids.
+  ($("workspace-pip") as HTMLElement).hidden = !(tab?.hasPlayingVideo ?? false) || tab?.kind !== "web";
 
   // The page slot and the terminal host are flex siblings that both grow, so
   // exactly one of them may be in the layout at a time — with both showing

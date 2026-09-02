@@ -6,6 +6,7 @@ import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type { BrainConfig, DatabasesConfig, DbGateConnection, DbGateEngine } from "@jarvis/platform";
 import { DB_GATE_ENGINES } from "@jarvis/platform";
+import { PERSONAL_PROJECT } from "./personal.js";
 
 /** What Jarvis sounds like, and what it says on opening. */
 export type VoiceConfig = {
@@ -433,6 +434,14 @@ function parseProjects(rawProjects: unknown): Record<string, string> {
 
   const projects: Record<string, string> = {};
   for (const [name, path] of Object.entries(rawProjects)) {
+    // The personal browser is this key with no path behind it, and the
+    // whole of its isolation is that `projects` never contains it: every
+    // consumer that needs a directory (Editor, Database, Terminal, API,
+    // git polling, the Changes view, session routing) resolves a project
+    // through this map and refuses what is missing. See personal.ts.
+    if (name === PERSONAL_PROJECT) {
+      throw new Error(`Config \`projects.${name}\` uses a name reserved for the personal browser`);
+    }
     if (typeof path !== "string") {
       throw new Error(`Config \`projects.${name}\` must be a string`);
     }

@@ -46,6 +46,7 @@ export class TabStore {
       canGoBack: false,
       canGoForward: false,
       error: undefined,
+      hasPlayingVideo: false,
     };
     this.#tabs.push(tab);
     this.#activity.push(tab.id);

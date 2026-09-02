@@ -56,6 +56,7 @@ const api: RendererApi = {
   setDevToolsBounds: (bounds) => ipcRenderer.invoke("workspace:devtoolsBounds", bounds),
   setWorkspaceVisible: (visible) => ipcRenderer.invoke("workspace:visible", visible),
   hideAllTabs: () => ipcRenderer.invoke("workspace:hideAll"),
+  requestPictureInPicture: (tabId) => ipcRenderer.invoke("workspace:pip", tabId),
   onWorkspace: (cb) => {
     ipcRenderer.on("workspace:update", (_e, state) => cb(state));
   },

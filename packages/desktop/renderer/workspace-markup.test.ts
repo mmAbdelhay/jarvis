@@ -79,6 +79,7 @@ describe("workspace markup", () => {
     "workspace-terminal",
     "workspace-tool-status",
     "workspace-bar",
+    "workspace-pip",
   ])("has #%s", (id) => {
     expect(html).toContain(`id="${id}"`);
   });
@@ -100,6 +101,21 @@ describe("workspace markup", () => {
 // the API bar carries a word instead, and without a width of their own the
 // labels overflow the square and print on top of one another — which is
 // exactly what happened on screen.
+// .workspace-nav declares no `display`, so the UA stylesheet's
+// `[hidden] { display: none }` is free to hide the button — the reason it
+// needs no rule of its own. A `display` added to .workspace-nav later would
+// out-cascade that and put a dead PiP button on every page.
+describe("the picture-in-picture button", () => {
+  it("is hidden by default in the markup", () => {
+    expect(html).toMatch(/id="workspace-pip"[^>]*hidden/);
+  });
+
+  it("relies on the UA hidden rule, so .workspace-nav must set no display", () => {
+    const rule = css.slice(css.indexOf(".workspace-nav {"));
+    expect(rule.slice(0, rule.indexOf("}"))).not.toMatch(/\bdisplay\s*:/);
+  });
+});
+
 describe("api bar layout", () => {
   it("sizes the API bar's buttons to their labels", () => {
     expect(css).toMatch(/\.api-bar button \{[^}]*width:\s*auto/);

@@ -693,6 +693,9 @@ app.whenReady().then(async () => {
       workspace.setVisible(visible === true),
     );
     ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
+    ipcMain.handle("workspace:pip", (_event, tabId: unknown) => {
+      if (typeof tabId === "string") workspace.requestPictureInPicture(tabId);
+    });
     ipcMain.handle("editor:open", (_event, project: unknown) =>
       editor.open(typeof project === "string" ? project : ""),
     );

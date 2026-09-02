@@ -29,6 +29,28 @@ describe("MESSAGES", () => {
     expect(MESSAGES.transcriptionFailed("x", "ar")).toContain("تحويل الصوت");
   });
 
+  // The personal browser's three strings: the name in the project
+  // selector, the reason its project-directory tools are dead, and the
+  // Picture-in-Picture button's tooltip. Bilingual like everything else —
+  // the selector label especially, since it sits beside project names the
+  // user chose themselves.
+  describe("the personal browser", () => {
+    it("names itself in both languages", () => {
+      expect(MESSAGES.personalProject("en")).toBe("Personal");
+      expect(MESSAGES.personalProject("ar")).toBe("شخصي");
+    });
+
+    it("says why the project tools are unavailable, in both languages", () => {
+      expect(MESSAGES.personalHasNoDirectory("en")).toMatch(/folder|directory/i);
+      expect(MESSAGES.personalHasNoDirectory("ar")).toContain("مجلد");
+    });
+
+    it("labels the picture-in-picture button in both languages", () => {
+      expect(MESSAGES.pictureInPicture("en")).toMatch(/float|picture/i);
+      expect(MESSAGES.pictureInPicture("ar")).toContain("فيديو");
+    });
+  });
+
   // Cheap fix: app.ts's history-count badge previously read
   // `${sessions.length} sessions` unconditionally, printing "1 sessions".
   describe("sessionsCount", () => {

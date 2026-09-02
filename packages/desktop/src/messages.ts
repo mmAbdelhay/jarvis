@@ -131,6 +131,22 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر حفظ العلامات المرجعية." : "Could not save bookmarks.",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
+  // The personal browser's name in the project selector. Its *key* is the
+  // reserved "__personal__" (see personal.ts) — never shown; this is what
+  // the user reads, beside project names they chose themselves.
+  personalProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "شخصي" : "Personal",
+  // Why Editor / Database / Terminal / API are dead while the personal
+  // browser is selected. A disabled control with no stated reason reads as
+  // a bug, so this goes into the tool status line beside them.
+  personalHasNoDirectory: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "المتصفح الشخصي بلا مجلد على القرص — لا محرر ولا قاعدة بيانات ولا طرفية ولا واجهة برمجة."
+      : "The personal browser has no folder on disk — no editor, database, terminal or API.",
+  // The Picture-in-Picture button, shown only while the page actually has a
+  // video playing.
+  pictureInPicture: (language: "ar" | "en"): string =>
+    language === "ar" ? "شغّل الفيديو في نافذة عائمة" : "Float this video above everything",
   // Settings' save flow. The headline is bilingual per the Global
   // Constraint every other view follows; parseConfig's own thrown message
   // (English, developer-facing — e.g. "Config `agents.x.command` must be a

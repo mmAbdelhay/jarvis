@@ -78,6 +78,16 @@ describe("parseConfig", () => {
     );
   });
 
+  // The personal browser is a project key that deliberately has no path.
+  // A jarvis.yaml that claimed it would give it a directory, and with it an
+  // Editor, a Terminal and a place in git polling — the exact opposite of
+  // what it is for. See personal.ts.
+  it("refuses a project that claims the reserved personal key", () => {
+    expect(() => parseConfig({ ...valid, projects: { __personal__: "/tmp/p" } })).toThrow(
+      /__personal__/,
+    );
+  });
+
   it("throws when a projects value is not a string", () => {
     expect(() => parseConfig({ ...valid, projects: { acme: 123 } })).toThrow(
       /projects\.acme/,

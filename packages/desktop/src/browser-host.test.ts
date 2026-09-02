@@ -47,6 +47,17 @@ class FakeView implements HostedView {
   setDevToolsBounds(bounds: Rect): void {
     this.devToolsBounds = bounds;
   }
+  /** What the page will answer when asked whether a video is playing. */
+  videoPlaying = false;
+  probes = 0;
+  pipRequests = 0;
+  hasPlayingVideo(): Promise<boolean> {
+    this.probes += 1;
+    return Promise.resolve(this.videoPlaying);
+  }
+  requestPictureInPicture(): void {
+    this.pipRequests += 1;
+  }
   onEvent(listener: (event: HostedViewEvent) => void): void {
     this.#listeners.push(listener);
   }
@@ -429,6 +440,151 @@ class FakeContents implements WebContentsLike {
   }
 }
 
+// The personal browser is a project key with no directory behind it (see
+// personal.ts). To the host it is simply a project: nothing here knows the
+// difference, and these pin that.
+describe("BrowserHost and the personal pseudo-project", () => {
+  let views: FakeView[];
+  let partitions: string[];
+
+  const hostWith = (maxTabs: number): BrowserHost => {
+    views = [];
+    partitions = [];
+    return new BrowserHost(
+      (partition) => {
+        partitions.push(partition);
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      },
+      { maxTabs },
+    );
+  };
+
+  // A personal browser holds the user's own signed-in accounts. Its jar is
+  // its own so that a page opened by a work project cannot ride them — and
+  // it falls out of the existing per-project rule rather than being a
+  // special case.
+  it("gives it a cookie jar of its own, shared with no project", () => {
+    const host = hostWith(8);
+    host.open("__personal__", "youtube.com");
+    host.open("acme", "youtube.com");
+
+    expect(partitions).toEqual(["persist:project-__personal__", "persist:project-acme"]);
+  });
+
+  // The tab cap bounds Chromium renderer processes, and a personal tab is
+  // one. Exempting it would let a long personal session defeat the cap, so
+  // it evicts on the same least-recently-active rule as everything else.
+  it("counts its tabs against the tab cap like any other", () => {
+    const host = hostWith(2);
+    host.open("__personal__", "one.com");
+    host.open("acme", "two.com");
+    host.open("acme", "three.com");
+
+    expect(host.state().tabs.map((t) => t.project)).toEqual(["acme", "acme"]);
+    expect(views[0]?.destroyed).toBe(true);
+  });
+});
+
+// The "play popup": Chromium's own Picture-in-Picture window, which floats
+// above every application. The host's job is to know which tabs may offer
+// it and to route the request; the window itself is Chromium's.
+describe("BrowserHost picture-in-picture", () => {
+  let views: FakeView[];
+  let host: BrowserHost;
+
+  beforeEach(() => {
+    views = [];
+    host = new BrowserHost(() => {
+      const view = new FakeView();
+      views.push(view);
+      return view;
+    });
+  });
+
+  // Chromium's media-started-playing fires for audio too, and for a <video>
+  // that has not decoded a frame. The button must not appear for either, so
+  // the event is only a prompt to ask the page — the page's answer decides.
+  it("asks the page whether a video is really playing before flagging the tab", async () => {
+    host.open("acme", "example.com");
+    const view = views[0];
+    if (view === undefined) throw new Error("no view");
+    view.videoPlaying = true;
+
+    view.emit({ kind: "media", playing: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(view.probes).toBe(1);
+    expect(host.state().tabs[0]?.hasPlayingVideo).toBe(true);
+  });
+
+  it("leaves the flag off when the page says it is only audio", async () => {
+    host.open("acme", "example.com");
+    const view = views[0];
+    if (view === undefined) throw new Error("no view");
+    view.videoPlaying = false;
+
+    view.emit({ kind: "media", playing: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.state().tabs[0]?.hasPlayingVideo).toBe(false);
+  });
+
+  // Nothing is playing, so there is nothing to ask about — and asking would
+  // race the page into saying "yes" about media it has just stopped.
+  it("clears the flag without asking the page when media stops", async () => {
+    host.open("acme", "example.com");
+    const view = views[0];
+    if (view === undefined) throw new Error("no view");
+    view.videoPlaying = true;
+    view.emit({ kind: "media", playing: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    view.emit({ kind: "media", playing: false });
+
+    expect(view.probes).toBe(1);
+    expect(host.state().tabs[0]?.hasPlayingVideo).toBe(false);
+  });
+
+  // A page that navigates away takes its video with it; a flag left set
+  // would leave the button offering to float a page that is gone.
+  it("clears the flag on navigation", async () => {
+    host.open("acme", "example.com");
+    const view = views[0];
+    if (view === undefined) throw new Error("no view");
+    view.videoPlaying = true;
+    view.emit({ kind: "media", playing: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    view.emit({ kind: "navigated", url: "https://example.com/next", canGoBack: true, canGoForward: false });
+
+    expect(host.state().tabs[0]?.hasPlayingVideo).toBe(false);
+  });
+
+  it("routes a picture-in-picture request to that tab's view alone", () => {
+    host.open("acme", "example.com");
+    host.open("acme", "other.com");
+    const first = host.state().tabs[0];
+    if (first === undefined) throw new Error("no tab");
+
+    host.requestPictureInPicture(first.id);
+
+    expect(views[0]?.pipRequests).toBe(1);
+    expect(views[1]?.pipRequests).toBe(0);
+  });
+
+  // A terminal or API tab has no view at all; so does a tab id that was
+  // closed a moment ago. Neither may throw out of an IPC handler.
+  it("ignores a request for a tab with no view", () => {
+    expect(() => host.requestPictureInPicture("tab-does-not-exist")).not.toThrow();
+  });
+});
+
 describe("bridgeEvents", () => {
   let contents: FakeContents;
   let events: HostedViewEvent[];
@@ -451,6 +607,18 @@ describe("bridgeEvents", () => {
     contents.fire("page-title-updated", {}, "GitHub");
 
     expect(events).toEqual([{ kind: "title", title: "GitHub" }]);
+  });
+
+  // Chromium tells us when media starts and stops. It is a prompt to ask
+  // the page, not an answer in itself — see the host's own tests.
+  it("reports media starting and stopping", () => {
+    contents.fire("media-started-playing");
+    contents.fire("media-paused");
+
+    expect(events).toEqual([
+      { kind: "media", playing: true },
+      { kind: "media", playing: false },
+    ]);
   });
 
   it("reports loading start and stop", () => {

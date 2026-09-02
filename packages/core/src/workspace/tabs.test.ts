@@ -28,10 +28,18 @@ describe("TabStore", () => {
           canGoBack: false,
           canGoForward: false,
           error: undefined,
+          hasPlayingVideo: false,
         },
       ],
       activeTabId: "tab-1",
     });
+  });
+
+  // Drives the Picture-in-Picture button, which must not be offered on a
+  // page with nothing to float. A tab starts with nothing playing: the
+  // page has not even loaded yet.
+  it("opens a tab with no video playing", () => {
+    expect(store().open("acme", "https://example.com").hasPlayingVideo).toBe(false);
   });
 
   it("defaults a tab's kind to web", () => {

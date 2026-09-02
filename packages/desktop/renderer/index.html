@@ -269,6 +269,10 @@
                   title="Open DevTools for this page">&#9881;</button>
           <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
                   title="Bookmark this page">☆</button>
+          <!-- Picture-in-Picture. Hidden until the page reports a video
+               actually playing, and its title is set from MESSAGES at init
+               rather than written here, because it is user-visible text. -->
+          <button id="workspace-pip" class="workspace-nav" type="button" hidden>&#9635;</button>
         </div>
         <div id="workspace-error" class="changes-error" hidden></div>
         <div id="workspace-page" class="workspace-page"></div>

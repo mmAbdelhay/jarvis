@@ -1,7 +1,9 @@
 # Workspace tabs
 
 The Workspace is a browser whose tabs are not all web pages. Each tab belongs
-to a project, and its kind decides what chrome makes sense around it.
+to a project — or to the personal browser, which is a project in every respect
+but the one that matters — and its kind decides what chrome makes sense around
+it.
 
 | Kind | What it is | Address bar & bookmarks |
 |---|---|---|
@@ -25,9 +27,47 @@ open activates that tab rather than opening a second copy.
 page — the real DevTools front end, network and application panels included,
 rendered into a panel you can drag to size rather than a detached window.
 
+**▣** floats the page's video in a small always-on-top window — the "play
+popup". It appears only while the page actually has a video playing, so it is
+never a dead button; a second press puts the video back in the tab. The window
+is Chromium's own Picture-in-Picture window, so it stays above the Workspace,
+above Jarvis's other routes, and above other applications entirely. See
+[the spike](../../spikes/pip/FINDINGS.md) for why it is that window and not one
+of ours.
+
 Tabs from other projects collapse into a counted, coloured pill; the selected
 project's tabs expand. Eight hosted pages is the cap — each is a Chromium
 process — and terminal and API tabs are exempt, since they are neither.
+
+## Personal — the browser that belongs to no project
+
+The last entry in the project selector is **Personal**: somewhere to keep tabs
+that are not work. Its tabs stay open, in place and logged in as the project
+selection changes around them, exactly as any other project's do — switching
+away collapses them into a counted pill, switching back finds them as they
+were.
+
+It is a project as far as the tab strip, the tab store, the bookmark file and
+the cookie jar are concerned. The one thing it does not have is a **directory
+on disk**, and everything follows from that:
+
+- **Editor, Database, Terminal and API are disabled**, with the reason shown
+  beside them. There is no folder to edit, no cwd for a shell, and no
+  collection tree to read.
+- **It never appears where "a project" means "a repo".** The Changes view, git
+  polling, session routing and the Dashboard's project list all resolve a
+  project through `projects:` in `jarvis.yaml`, which it is deliberately absent
+  from. `jarvis.yaml` is refused at load time if it tries to declare a project
+  under the reserved name.
+- **Its logins are its own.** It gets its own persistent session partition,
+  like every project, so a page opened by a work project cannot ride the
+  accounts you are signed into here. The cost is signing in twice where you use
+  the same site for both, which is the right way round.
+- **Bookmarks** work exactly as a project's do, kept under their own key in the
+  same `bookmarks.json`.
+- **Its tabs count against the eight-page cap** like any other. The cap bounds
+  Chromium renderer processes and these are Chromium renderer processes; a long
+  personal session is exactly the thing the cap exists to survive.
 
 ## Editor
 

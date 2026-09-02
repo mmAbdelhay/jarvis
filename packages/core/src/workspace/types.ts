@@ -31,6 +31,11 @@ export type WorkspaceTab = {
   canGoForward: boolean;
   /** Set by a failed load, cleared by the next successful navigation. */
   error: string | undefined;
+  /** Whether the page currently has a <video> that is actually playing —
+   *  reported by the page itself, not guessed from the URL. It is the only
+   *  thing that puts the Picture-in-Picture button on screen, so that the
+   *  button is never a dead control on a page with nothing to float. */
+  hasPlayingVideo: boolean;
 };
 
 export type WorkspaceState = {
