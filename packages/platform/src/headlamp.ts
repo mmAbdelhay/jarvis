@@ -164,8 +164,14 @@ export function createHeadlampManager(deps: HeadlampManagerDeps): HeadlampManage
     return { ok: true, url: base };
   }
 
+  // The `#` is not decoration: Headlamp's front end is a hash-router SPA, so
+  // `/c/<cluster>` is served the same index.html as every other path and the
+  // router then reads an empty `#/` and lands on the cluster chooser. The
+  // cluster is a route, not a path — verified against 0.45.0, where
+  // `/c/<cluster>` renders "Choose a cluster" and `/#/c/<cluster>` renders
+  // the cluster.
   function urlFor(base: string, context: string): string {
-    return `${base}/c/${clusterUrlSegment(context)}`;
+    return `${base}/#/c/${clusterUrlSegment(context)}`;
   }
 
   return {

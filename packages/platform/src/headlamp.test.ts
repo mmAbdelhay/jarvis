@@ -127,7 +127,7 @@ describe("createHeadlampManager", () => {
   it("returns a URL naming the context, under the instance's port", async () => {
     const { manager } = harness();
     const result = await manager.open("opf", "ctx-a");
-    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" });
+    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:5000/#/c/ctx-a" });
   });
 
   it("rewrites a slash in the context to a double hyphen", async () => {
@@ -136,7 +136,7 @@ describe("createHeadlampManager", () => {
       clusters: { opf: [{ name: "dev", context: "arn:x:cluster/app_dev" }] },
     });
     const result = await manager.open("opf", "arn:x:cluster/app_dev");
-    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:5000/c/arn:x:cluster--app_dev" });
+    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:5000/#/c/arn:x:cluster--app_dev" });
   });
 
   it("spawns once per project, not once per cluster", async () => {
@@ -146,8 +146,8 @@ describe("createHeadlampManager", () => {
     const first = await manager.open("opf", "ctx-a");
     const second = await manager.open("opf", "ctx-b");
     expect(spawned).toHaveLength(1);
-    expect(first).toEqual({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" });
-    expect(second).toEqual({ ok: true, url: "http://127.0.0.1:5000/c/ctx-b" });
+    expect(first).toEqual({ ok: true, url: "http://127.0.0.1:5000/#/c/ctx-a" });
+    expect(second).toEqual({ ok: true, url: "http://127.0.0.1:5000/#/c/ctx-b" });
   });
 
   it("spawns separately for a different project", async () => {
