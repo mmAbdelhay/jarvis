@@ -5,7 +5,6 @@ import type {
   SessionOutput,
   SessionStore,
   Spawner,
-  ResumeInput,
   StartInput,
 } from "./types.js";
 
@@ -72,49 +71,6 @@ export class SessionManager {
     this.#spawn = spawn;
     this.#store = store;
     this.#schedule = options?.schedule ?? defaultSchedule;
-  }
-
-  /**
-   * Picks a past session back up as a live one.
-   *
-   * The id is the session's own, not a new one: the CLI is asked to
-   * `--resume` that id, so the conversation continues in the transcript and
-   * the history row it already has instead of forking into a second entry.
-   * That is what makes a session started in a terminal continuable inside
-   * Jarvis rather than merely readable.
-   */
-  resume(input: ResumeInput): Session {
-    const now = Date.now();
-    const session: Session = {
-      id: input.id,
-      project: input.project,
-      projectPath: input.projectPath,
-      agentId: input.agent.id,
-      ...(input.agent.model === undefined ? {} : { model: input.agent.model }),
-      state: "starting",
-      summary: "",
-      startedAt: now,
-      lastActivityAt: now,
-    };
-
-    this.#sessions.set(input.id, session);
-
-    let handle: ProcessHandle;
-    try {
-      handle = this.#spawn(input.agent, input.projectPath, input.id, { resume: true });
-    } catch (error) {
-      // Same as start(): a session that never spawned must not be left in
-      // the list claiming to be starting.
-      this.#sessions.delete(input.id);
-      throw error;
-    }
-    this.#processes.set(input.id, handle);
-    handle.onOutput((chunk) => this.#onOutput(input.id, chunk));
-    handle.onExit((code) => this.#onExit(input.id, code));
-
-    this.#persist(session);
-    this.#emit();
-    return session;
   }
 
   start(input: StartInput): Session {

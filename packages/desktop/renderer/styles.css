@@ -1996,6 +1996,86 @@
     white-space: nowrap;
   }
 
+  /* The Session view's default screen: every recorded session, newest
+     first. It scrolls on its own so the header stays put. */
+  .session-table {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 0 20px 20px;
+  }
+
+  .session-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .session-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 12px 10px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .session-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  .session-table-row { cursor: pointer; }
+  .session-table-row:hover { background: var(--surface-raised); }
+
+  /* The summary is the long column and the one that may lose characters;
+     everything beside it is short and load-bearing. */
+  .session-table-summary {
+    max-width: 0;
+    width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .session-table-project { color: var(--text); white-space: nowrap; }
+
+  /* Sized to its word, like the header's Resume — .workspace-nav's 28px
+     icon square would clip it. */
+  .session-table-resume {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 3px 10px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .session-table-resume:hover { color: var(--text); border-color: var(--border-strong); }
+
+  .session-table-status {
+    min-height: 16px;
+    padding: 8px 10px 0;
+    font-size: 11px;
+    color: var(--del);
+  }
+
+  .session-table-empty {
+    padding: 24px 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
   /* .workspace-nav is a 28px square built for an icon, and this button
      carries a word — the same mismatch .api-bar button documents above,
      which printed "Resume" half-clipped at the right edge of the header.

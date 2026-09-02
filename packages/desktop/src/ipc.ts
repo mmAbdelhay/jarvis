@@ -11,14 +11,13 @@ import {
   type GitOutcome,
   type GitProvider,
   type ProviderStatus,
-  type ResumeInput,
   type Session,
   type SessionChanges,
   type SessionOutput,
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState } from "@jarvis/core";
 import {
   awsLoginCommand,
@@ -344,8 +343,14 @@ export type RendererApi = {
   /** The rendered conversation of a session imported from a transcript.
    *  Empty for a session Jarvis spawned, which has a pty backlog instead. */
   getSessionTranscript(sessionId: string): Promise<string>;
-  /** Picks a past session back up as a live one, keeping its id. */
-  resumeSession(sessionId: string): Promise<{ ok: boolean; text?: string; language: "ar" | "en" }>;
+  /** Continues a past session in a Workspace Terminal tab, rooted where the
+   *  session ran. `selectedProject` is the project the tab hangs on when the
+   *  session's own directory belongs to none. Resolves with the project the
+   *  tab landed under, so the view can follow it. */
+  resumeSession(
+    sessionId: string,
+    selectedProject: string,
+  ): Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }>;
   /**
    * Raw keystrokes for one session's terminal, written to its pty exactly
    * as given — including control bytes (Ctrl-C, arrows, Escape). This is
@@ -453,7 +458,7 @@ export type RendererApi = {
   /** Opens a terminal tab for `project` and starts its shell. The new tab
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
-  openTerminal(project: string): Promise<GitViewResult<void>>;
+  openTerminal(project: string, directory?: string): Promise<GitViewResult<void>>;
   /** Suggestions for what is typed at `tabId`'s prompt, best first. Each
    *  one is a whole replacement line. An empty array means no dropdown —
    *  and so zsh's own Tab completion, unchanged. */
@@ -898,54 +903,99 @@ export function createTranscriptHandler(
   };
 }
 
-/** What resuming needs: the recorded sessions, the configured agents, a
- *  way to check a directory still exists, and the manager that spawns. */
-export type ResumeHandlerDeps = {
+/**
+ * The shell line that continues a session, or undefined if it cannot be
+ * built safely.
+ *
+ * This is typed into a live shell rather than passed as argv, so every part
+ * of it executes. Neither half is attacker-controlled today — the command
+ * comes from `agents:` in the user's own config and the id from a transcript
+ * filename — but "not reachable today" is not a reason to hand a shell an
+ * unquoted string, and a session id that is not a plain identifier is a
+ * transcript this code does not understand rather than something to escape
+ * and hope.
+ */
+export function resumeCommandFor(command: string, sessionId: string): string | undefined {
+  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return undefined;
+  const quoted = /^[A-Za-z0-9._/-]+$/.test(command)
+    ? command
+    : `'${command.replaceAll("'", `'\\''`)}'`;
+  return `${quoted} --resume ${sessionId}`;
+}
+
+/** What resuming into a terminal needs. Every side effect injected, so the
+ *  handler is testable without a window, a shell or a filesystem. */
+export type ResumeInTerminalDeps = {
   history(): Session[];
   agents: Record<string, AgentConfig>;
+  projects: Readonly<Record<string, string>>;
   directoryExists(path: string): Promise<boolean>;
-  resume(input: ResumeInput): Session;
+  /** Opens a Terminal tab under `project`, with its shell rooted at `cwd`.
+   *  Returns the tab id so the command can be typed into it. */
+  openTerminal(project: string, cwd: string): string;
+  sendInput(tabId: string, data: string): void;
   language: "ar" | "en";
 };
 
 /**
- * Picks a past session back up as a live one.
+ * Continues a past session in a Workspace Terminal tab.
  *
- * Both preconditions are checked before spawning rather than after: an
- * agent removed from the config would spawn a command that no longer
- * exists, and a recorded directory since deleted would spawn in nowhere.
- * Refusing first means the failure is a message, not a dead session in the
- * list.
+ * Jarvis opens the tab and types the command; the agent then runs as an
+ * ordinary terminal process that Jarvis does not own. That is the trade the
+ * design makes deliberately — a real shell, in exchange for no live state
+ * and no exit code until the importer next reads the transcript.
+ *
+ * The tab needs a project because a project is how the Workspace groups and
+ * displays tabs; a tab belonging to none would render nowhere. A session
+ * that resolves to a project opens under it — the case a user expects. One
+ * that does not (66 of 95 sessions on the machine this was built against)
+ * opens under whichever project is currently selected, with its shell rooted
+ * in the session's own directory, so every session stays resumable without
+ * inventing a kind of tab the workspace cannot show.
  */
-export function createResumeHandler(
-  deps: ResumeHandlerDeps,
-): (sessionId: unknown) => Promise<{ ok: boolean; text?: string; language: "ar" | "en" }> {
+export function createResumeInTerminalHandler(
+  deps: ResumeInTerminalDeps,
+): (
+  sessionId: unknown,
+  selectedProject: unknown,
+) => Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }> {
   const refuse = (): { ok: false; text: string; language: "ar" | "en" } => ({
     ok: false,
     text: MESSAGES.cannotResumeSession(deps.language),
     language: deps.language,
   });
 
-  return async (sessionId) => {
+  return async (sessionId, selectedProject) => {
     if (!isString(sessionId)) return refuse();
     const session = deps.history().find((candidate) => candidate.id === sessionId);
     if (session === undefined) return refuse();
+
     const agent = deps.agents[session.agentId];
     if (agent === undefined) return refuse();
+
+    const command = resumeCommandFor(agent.command, session.id);
+    if (command === undefined) return refuse();
+
+    // The session's own project when it has one, else the one on screen.
+    const fallback = isString(selectedProject) ? selectedProject : "";
+    const project =
+      session.project !== null && deps.projects[session.project] !== undefined
+        ? session.project
+        : fallback;
+    if (deps.projects[project] === undefined) return refuse();
+
+    // Checked before the tab exists: a refusal should be a message, not an
+    // empty terminal sitting in a directory that is gone.
     if (!(await deps.directoryExists(session.projectPath))) return refuse();
+
+    let tabId: string;
     try {
-      deps.resume({
-        id: session.id,
-        project: session.project,
-        projectPath: session.projectPath,
-        agent,
-      });
+      tabId = deps.openTerminal(project, session.projectPath);
     } catch {
-      // A spawn that throws is a refusal, not an unhandled rejection that
-      // leaves the button waiting forever.
       return refuse();
     }
-    return { ok: true, language: deps.language };
+    deps.sendInput(tabId, `${command}\r`);
+    return { ok: true, project, language: deps.language };
   };
 }
 
@@ -1257,7 +1307,12 @@ export type TerminalHandlers = {
   /** Opens a terminal tab for `project` and starts its shell. Synchronous:
    *  there is no port to wait for and no page to load — the tab and the pty
    *  both exist by the time this returns. */
-  open(project: string): GitViewResult<void>;
+  /** `directory` overrides the project's own path, for a terminal that must
+   *  start where a past session ran rather than where its tab is filed.
+   *  Returns the new tab's id: resuming a session needs it to type into the
+   *  shell, and routing that through here rather than opening a tab directly
+   *  is what keeps the tab's directory registered for path completion. */
+  open(project: string, directory?: string): GitViewResult<string>;
   input(tabId: string, data: string): void;
   resize(tabId: string, cols: number, rows: number): void;
   /** Kills the tab's shell and every shell its splits are running. Called
@@ -1302,8 +1357,10 @@ export type TerminalHandlers = {
 export type TerminalHandlerDeps = {
   shells: ShellManager;
   /** Opens the tab itself and returns its id — BrowserHost.openTerminal,
-   *  injected so these handlers stay testable without a window. */
-  openTerminalTab: (project: string) => string;
+   *  injected so these handlers stay testable without a window. `label`
+   *  replaces the project's name in the tab's title, for a terminal whose
+   *  shell is rooted somewhere other than its project. */
+  openTerminalTab: (project: string, label?: string) => string;
   /** Name to absolute path, from config. The renderer never sees a path. */
   projects: Readonly<Record<string, string>>;
   language: "ar" | "en";
@@ -1406,17 +1463,26 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
   };
 
   return {
-    open(project) {
-      const cwd = isString(project) ? deps.projects[project] : undefined;
-      if (cwd === undefined) {
+    open(project, directory) {
+      const projectCwd = isString(project) ? deps.projects[project] : undefined;
+      if (projectCwd === undefined) {
         return { ok: false, text: MESSAGES.unknownProject(deps.language), language: deps.language };
       }
+      // A tab still belongs to a project — that is how the Workspace groups
+      // and shows it — but its shell may start somewhere else. Resuming a
+      // session opens a terminal in the directory that session ran in, which
+      // for most sessions is not any configured project's directory.
+      const cwd = isString(directory) && directory !== "" ? directory : projectCwd;
+      // A tab reading "acme — Terminal" whose shell sits in
+      // ~/projects/jarvis is a lie about where typing lands, so a foreign
+      // directory names its own tab.
+      const label = cwd === projectCwd ? undefined : basename(cwd);
       // The tab first, then the shell: the pty is keyed by the tab id, and
       // a shell with no tab to draw it would be an orphan process.
-      const tabId = deps.openTerminalTab(project);
+      const tabId = deps.openTerminalTab(project, label);
       directories.set(tabId, cwd);
       deps.shells.start(tabId, cwd);
-      return { ok: true, value: undefined };
+      return { ok: true, value: tabId };
     },
 
     input(tabId, data) {

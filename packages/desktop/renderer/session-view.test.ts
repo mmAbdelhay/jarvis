@@ -29,8 +29,10 @@ function layoutDom(): void {
       <div id="session-view-state"></div>
       <button id="session-resume" hidden></button>
       <div id="session-view-agent"></div>
+      <button id="session-back" hidden></button>
       <div id="session-terminal"></div>
       <div id="session-empty" hidden></div>
+      <div id="session-table" hidden><div id="session-table-status"></div><table><tbody id="session-table-body"></tbody></table></div>
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
@@ -43,6 +45,7 @@ type Jarvis = Pick<
   | "getSessionLog"
   | "getSessionTranscript"
   | "resumeSession"
+  | "getHistory"
   | "sendSessionInput"
   | "resizeSession"
   | "setVoiceTarget"
@@ -52,7 +55,8 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
     getSessionTranscript: vi.fn(async () => ""),
-    resumeSession: vi.fn(async () => ({ ok: true, language: "en" as const })),
+    resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
+    getHistory: vi.fn(async () => [] as Session[]),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -540,7 +544,7 @@ describe("resume", () => {
     document.getElementById("session-resume")?.click();
     await Promise.resolve();
 
-    expect(resumeSession).toHaveBeenCalledWith("past-1");
+    expect(resumeSession).toHaveBeenCalledWith("past-1", expect.anything());
   });
 
   // A refusal has to be visible: a button that silently does nothing is the
@@ -560,8 +564,92 @@ describe("resume", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("session-view-state")?.textContent).toContain(
+    // The refusal lands in the sessions view's own status line, which is
+    // where both Resume buttons report — a button that silently does nothing
+    // is the bug this whole view exists to fix.
+    expect(document.getElementById("session-table-status")?.textContent).toContain(
       "cannot be resumed",
     );
+  });
+});
+
+describe("session table", () => {
+  const rows = (): HTMLElement[] => [
+    ...document.querySelectorAll("#session-table-body > tr"),
+  ] as HTMLElement[];
+
+  it("lists every recorded session", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => [
+        makeSession({ id: "a", summary: "first" }),
+        makeSession({ id: "b", summary: "second" }),
+      ]),
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]?.textContent).toContain("first");
+  });
+
+  // The whole point of the table: every row can be picked back up.
+  it("gives every row a Resume button", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "a", state: "done" })]) });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(rows()[0]?.querySelector("button")?.textContent).toBe("Resume");
+  });
+
+  it("resumes the row's own session, naming the selected project", async () => {
+    const resumeSession = vi.fn(async () => ({ ok: true, project: "app", language: "en" as const }));
+    stubJarvis({
+      getHistory: vi.fn(async () => [makeSession({ id: "the-one" })]),
+      resumeSession,
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    rows()[0]?.querySelector("button")?.click();
+    await Promise.resolve();
+
+    expect(resumeSession).toHaveBeenCalledWith("the-one", expect.anything());
+  });
+
+  // A row is untrusted text: a summary is whatever the user typed into an
+  // agent, and it reaches this table straight from a transcript.
+  it("renders a summary as text, never as markup", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => [makeSession({ summary: "<img src=x onerror=alert(1)>" })]),
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(document.querySelector("#session-table-body img")).toBeNull();
+    expect(rows()[0]?.textContent).toContain("<img");
+  });
+
+  it("says so rather than showing an empty table when there are none", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => []) });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(document.getElementById("session-table")?.textContent).toMatch(/no sessions/i);
+  });
+
+  // Opening a session hides the table; going back brings it out again.
+  it("swaps between the table and a session's terminal", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => [makeSession()]) });
+    const { renderSessionTable, openSession } = await import("./session-view.js");
+    await renderSessionTable();
+    expect(document.getElementById("session-table")?.hidden).toBe(false);
+
+    await openSession(makeSession());
+    expect(document.getElementById("session-table")?.hidden).toBe(true);
+    expect(document.getElementById("session-back")?.hidden).toBe(false);
+
+    document.getElementById("session-back")?.click();
+    await Promise.resolve();
+    expect(document.getElementById("session-table")?.hidden).toBe(false);
   });
 });

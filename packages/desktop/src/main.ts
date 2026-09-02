@@ -88,7 +88,7 @@ import {
   createEditorHandlers,
   createTerminalHandlers,
   createTranscriptHandler,
-  createResumeHandler,
+  createResumeInTerminalHandler,
   createGitHandlers,
   createSettingsHandlers,
   isDeclaredContainer,
@@ -640,7 +640,7 @@ app.whenReady().then(async () => {
 
     const terminal = createTerminalHandlers({
       shells,
-      openTerminalTab: (project) => workspace.openTerminal(project),
+      openTerminalTab: (project, label) => workspace.openTerminal(project, label),
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
@@ -940,23 +940,37 @@ app.whenReady().then(async () => {
       sessionTranscript(sessionId),
     );
 
-    // Continuing a terminal-started conversation inside Jarvis. Keeps the
-    // session's own id, so it resumes into the row and transcript it
-    // already has instead of forking a second one.
-    const sessionResume = createResumeHandler({
+    // Continuing a past session in a Workspace Terminal tab: Jarvis opens
+    // the tab in the directory the session ran in and types the resume
+    // command. The agent then runs as an ordinary terminal process that
+    // Jarvis does not own — a real shell, at the cost of no live state.
+    const sessionResume = createResumeInTerminalHandler({
       history: () => sessionStore.history(),
       agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
-      directoryExists: async (path) => {
+      projects: config.projects,
+      directoryExists: async (path: string) => {
         try {
           return (await stat(path)).isDirectory();
         } catch {
           return false;
         }
       },
-      resume: (input) => sessions.resume(input),
+      // Through the terminal handlers, never around them: they are what
+      // registers a tab's directory for path completion and history
+      // affinity, so a resumed terminal is a terminal like any other.
+      openTerminal: (project: string, cwd: string) => {
+        const opened = terminal.open(project, cwd);
+        if (!opened.ok) throw new Error(opened.text);
+        return opened.value;
+      },
+      sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
       language: PRIMARY_LANGUAGE,
     });
-    ipcMain.handle("session:resume", (_event, sessionId: unknown) => sessionResume(sessionId));
+    ipcMain.handle(
+      "session:resume",
+      (_event, sessionId: unknown, selectedProject: unknown) =>
+        sessionResume(sessionId, selectedProject),
+    );
 
     // Keystrokes into a session's pty. Validated rather than trusted: the
     // renderer names a session id, never a process — the main process owns

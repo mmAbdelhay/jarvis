@@ -221,6 +221,146 @@ function clearLiveScreen(view: TerminalPane | undefined): void {
  * chunk arrives through appendSessionOutput. Switching sessions clears the
  * screen rather than interleaving two agents' output.
  */
+
+/**
+ * Every recorded session as a table, and the Session view's default screen.
+ *
+ * The view used to be one session's terminal and nothing else, so a session
+ * could only be reached through the History overlay. The table makes the
+ * whole record — 95 sessions on the machine this was built for, of which 89
+ * were started in a terminal Jarvis never ran — the thing Session actually
+ * shows.
+ */
+export async function renderSessionTable(): Promise<void> {
+  const table = $("session-table");
+  const body = $("session-table-body");
+  if (table === null || body === null) return;
+
+  let sessions: Session[] = [];
+  try {
+    sessions = await window.jarvis.getHistory();
+  } catch (error) {
+    console.error(`Failed to load sessions: ${errorMessage(error)}`);
+  }
+
+  showTable();
+  if (sessions.length === 0) {
+    // An empty table is indistinguishable from a broken one.
+    const empty = document.createElement("div");
+    empty.className = "session-table-empty";
+    empty.textContent = "No sessions recorded yet.";
+    body.replaceChildren();
+    table.append(empty);
+    return;
+  }
+  table.querySelector(".session-table-empty")?.remove();
+  body.replaceChildren(...sessions.map(buildSessionTableRow));
+}
+
+function buildSessionTableRow(session: Session): HTMLElement {
+  const row = document.createElement("tr");
+  row.className = "session-table-row";
+
+  // Every cell goes in as textContent. A summary is whatever the user typed
+  // into an agent and reaches this table straight out of a transcript, so it
+  // is data to display, never markup to run.
+  const cell = (text: string, className = ""): HTMLElement => {
+    const td = document.createElement("td");
+    if (className !== "") td.className = className;
+    const language = detectLanguage(text);
+    td.dir = language === "ar" ? "rtl" : "ltr";
+    td.classList.toggle("arabic", language === "ar");
+    td.textContent = text;
+    return td;
+  };
+
+  row.append(
+    cell(projectLabel(session), "session-table-project"),
+    cell(session.summary === "" ? "—" : session.summary, "session-table-summary"),
+    cell([session.agentId, session.model].filter(Boolean).join(" · "), "mono changes-muted"),
+    cell(session.branch === undefined || session.branch === "" ? "—" : session.branch, "mono changes-muted"),
+    cell(session.state, "mono changes-dim"),
+    cell(formatWhen(session.lastActivityAt), "mono changes-muted"),
+  );
+
+  const actions = document.createElement("td");
+  const resume = document.createElement("button");
+  resume.type = "button";
+  resume.className = "session-table-resume";
+  resume.textContent = "Resume";
+  resume.addEventListener("click", (event) => {
+    // The row opens the transcript; the button continues the session. Both
+    // are useful and they must not fire together.
+    event.stopPropagation();
+    void resumeInTerminal(session.id);
+  });
+  actions.append(resume);
+  row.append(actions);
+
+  row.addEventListener("click", () => void openSession(session));
+  return row;
+}
+
+/** Local time, to the minute: a history row answers "when did I last touch
+ *  this", which seconds do not help with. */
+function formatWhen(at: number): string {
+  const date = new Date(at);
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+/**
+ * Continues a session in a Workspace Terminal tab.
+ *
+ * The selected project is passed because a session whose directory is not
+ * any configured project's still needs a project to hang its tab on — the
+ * Workspace has no way to display one that belongs to none.
+ */
+async function resumeInTerminal(id: string): Promise<void> {
+  const selected = (document.getElementById("workspace-project") as HTMLSelectElement | null)?.value;
+  let result: { ok: boolean; text?: string; project?: string };
+  try {
+    result = await window.jarvis.resumeSession(id, selected ?? "");
+  } catch (error) {
+    result = { ok: false, text: errorMessage(error) };
+  }
+  const status = $("session-table-status");
+  if (!result.ok) {
+    // A button that silently does nothing is the bug this view exists to fix.
+    if (status !== null) status.textContent = result.text ?? "";
+    return;
+  }
+  if (status !== null) status.textContent = "";
+  // The tab is already open in the main process; the view follows it.
+  const select = document.getElementById("workspace-project") as HTMLSelectElement | null;
+  if (select !== null && result.project !== undefined && select.value !== result.project) {
+    select.value = result.project;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  document.getElementById("nav-workspace")?.click();
+}
+
+/** The table showing, the terminal put away. */
+function showTable(): void {
+  const table = $("session-table");
+  if (table !== null) table.hidden = false;
+  const back = $("session-back");
+  if (back !== null) back.hidden = true;
+  const empty = $("session-empty");
+  if (empty !== null) empty.hidden = true;
+  showView("session");
+}
+
+/** The terminal showing, the table put away. */
+function showTerminal(): void {
+  const table = $("session-table");
+  if (table !== null) table.hidden = true;
+  const back = $("session-back");
+  if (back !== null) {
+    back.hidden = false;
+    back.onclick = () => void renderSessionTable();
+  }
+}
+
 export async function openSession(session: Session): Promise<void> {
   currentId = session.id;
   // The *configured* project, not the display label: this drives
@@ -229,6 +369,7 @@ export async function openSession(session: Session): Promise<void> {
   currentProject = session.project ?? undefined;
   renderHeader(session);
   showView("session");
+  showTerminal();
   setVoiceTarget(session.id);
 
   const view = ensurePane();
@@ -313,13 +454,11 @@ export function updateSessionHeader(sessions: Session[]): void {
 
 export function wireSessionView(): void {
   $("nav-session")?.addEventListener("click", () => {
-    // Reopens whatever is already loaded. With nothing loaded it still
-    // switches views — the empty state explains itself, which beats a
-    // button that appears to do nothing.
-    showView("session");
+    // The table, always — Session is the list of sessions, and a session's
+    // terminal is what you get by picking one. Reopening whatever happened
+    // to be loaded made the view depend on invisible state.
+    void renderSessionTable();
     claimVoice();
-    refit();
-    pane?.focus();
   });
 
   // Clicking anywhere in the pane focuses the terminal, so typing goes to
@@ -357,25 +496,13 @@ function renderResume(session: Session): void {
   const ended = session.state === "done" || session.state === "dead";
   button.hidden = !ended;
   if (!ended) return;
+  // The same path as the table's own Resume: one way to continue a
+  // session, reachable from either screen.
   button.onclick = () => {
-    void resumeCurrent(session.id);
+    void resumeInTerminal(session.id);
   };
 }
 
-async function resumeCurrent(id: string): Promise<void> {
-  let result: { ok: boolean; text?: string };
-  try {
-    result = await window.jarvis.resumeSession(id);
-  } catch (error) {
-    result = { ok: false, text: errorMessage(error) };
-  }
-  // A refusal has to be visible. A button that silently does nothing is the
-  // exact failure this whole feature was built to fix.
-  if (!result.ok) {
-    const state = $("session-view-state");
-    if (state !== null && result.text !== undefined) state.textContent = result.text;
-  }
-}
 
 /** Sets text and direction together — an Arabic project name must not be
  *  laid out left-to-right. Same rule as changes.ts's own setText. */

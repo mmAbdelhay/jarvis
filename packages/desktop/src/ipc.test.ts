@@ -13,7 +13,8 @@ import {
   createApiHandlers,
   createTerminalHandlers,
   createTranscriptHandler,
-  createResumeHandler,
+  createResumeInTerminalHandler,
+  resumeCommandFor,
   type ApiHandlerDeps,
   type DockerHandlerDeps,
   type DockerHandlers,
@@ -3172,9 +3173,90 @@ describe("createTranscriptHandler", () => {
   });
 });
 
-describe("createResumeHandler", () => {
+describe("terminal open with an explicit directory", () => {
+  function harness() {
+    const started: { tabId: string; cwd: string }[] = [];
+    const labels: (string | undefined)[] = [];
+    const handlers = createTerminalHandlers({
+      shells: {
+        start: (tabId: string, cwd: string) => started.push({ tabId, cwd }),
+        write: () => {},
+        resize: () => {},
+        kill: () => {},
+        attach: () => "",
+      } as unknown as TerminalHandlerDeps["shells"],
+      openTerminalTab: (_project: string, label?: string) => {
+        labels.push(label);
+        return "tab-1";
+      },
+      projects: { app: "/home/u/app" },
+      language: "en",
+      terminal: {
+        completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
+        blocks: { enabled: true, inputEditor: true },
+        notifyAfterSeconds: 30,
+      },
+    });
+    return { handlers, started, labels };
+  }
+
+  it("uses the project's own directory when none is given", () => {
+    const { handlers, started } = harness();
+    expect(handlers.open("app").ok).toBe(true);
+    expect(started).toEqual([{ tabId: "tab-1", cwd: "/home/u/app" }]);
+  });
+
+  // A resumed session's directory is often not any configured project's —
+  // 66 of 95 on this machine — so the tab hangs on a project for display
+  // while its shell starts where the session actually ran.
+  it("starts the shell in an explicit directory when one is given", () => {
+    const { handlers, started } = harness();
+    expect(handlers.open("app", "/home/u/elsewhere").ok).toBe(true);
+    expect(started).toEqual([{ tabId: "tab-1", cwd: "/home/u/elsewhere" }]);
+  });
+
+  // A tab reading "acme — Terminal" whose shell is in ~/projects/jarvis
+  // is a lie about where typing lands. The directory names its own tab.
+  it("names the tab after the directory when it is not the project's own", () => {
+    const { handlers, labels } = harness();
+    handlers.open("app", "/home/u/elsewhere");
+    expect(labels).toEqual(["elsewhere"]);
+  });
+
+  it("leaves the tab named after the project when the directory is its own", () => {
+    const { handlers, labels } = harness();
+    handlers.open("app");
+    expect(labels).toEqual([undefined]);
+  });
+
+  it("still refuses an unknown project even with a directory", () => {
+    const { handlers, started } = harness();
+    expect(handlers.open("nope", "/home/u/elsewhere").ok).toBe(false);
+    expect(started).toEqual([]);
+  });
+});
+
+describe("resumeCommandFor", () => {
+  it("builds the CLI line that continues a session", () => {
+    expect(resumeCommandFor("claude-mm", "abc-123")).toBe("claude-mm --resume abc-123");
+  });
+
+  // The command is typed into a live shell, so anything odd in it executes.
+  // Both halves come from config or a transcript filename rather than from a
+  // prompt, but "not attacker-controlled today" is not a reason to hand a
+  // shell an unquoted string.
+  it("quotes a command containing a space", () => {
+    expect(resumeCommandFor("my agent", "abc")).toBe("'my agent' --resume abc");
+  });
+
+  it("refuses a session id that is not a plain identifier", () => {
+    expect(resumeCommandFor("claude-mm", "abc; rm -rf /")).toBeUndefined();
+  });
+});
+
+describe("createResumeInTerminalHandler", () => {
   const past = (over: Partial<Session> = {}): Session => ({
-    id: "s1",
+    id: "11111111-2222-4333-8444-555555555555",
     project: null,
     projectPath: "/home/u/app",
     agentId: "claude-mm",
@@ -3193,86 +3275,93 @@ describe("createResumeHandler", () => {
     "claude-mm": { id: "claude-mm", command: "claude-mm" },
   };
 
-  it("resumes the session in the directory it was recorded in", async () => {
-    const calls: { id: string; path: string }[] = [];
-    const handler = createResumeHandler({
-      history: () => [past()],
+  function harness(
+    session: Session,
+    projects: Record<string, string> = { app: "/home/u/app", other: "/home/u/other" },
+  ) {
+    const opened: { project: string; cwd: string }[] = [];
+    const typed: { tabId: string; data: string }[] = [];
+    const handler = createResumeInTerminalHandler({
+      history: () => [session],
       agents,
+      projects,
       directoryExists: async () => true,
-      resume: (input) => {
-        calls.push({ id: input.id, path: input.projectPath });
-        return past({ state: "starting" });
+      openTerminal: (project, cwd) => {
+        opened.push({ project, cwd });
+        return "tab-1";
       },
+      sendInput: (tabId, data) => typed.push({ tabId, data }),
       language: "en",
     });
-    const result = await handler("s1");
+    return { handler, opened, typed };
+  }
+
+  // The natural case: the session belongs to a project, so its terminal
+  // opens where the user would expect to find it.
+  it("opens the terminal under the session's own project", async () => {
+    const { handler, opened } = harness(past({ project: "app" }));
+    const result = await handler(past({ project: "app" }).id, "other");
     expect(result.ok).toBe(true);
-    expect(calls).toEqual([{ id: "s1", path: "/home/u/app" }]);
+    expect(opened).toEqual([{ project: "app", cwd: "/home/u/app" }]);
   });
 
-  // Resuming a session whose agent was removed from the config would spawn
-  // a command that no longer exists; refused before spawning, not after.
+  // 66 of 95 sessions on the machine this was built against have no
+  // configured project. A tab with no project cannot be displayed at all, so
+  // it opens under whatever project is selected, rooted in its own directory.
+  it("falls back to the selected project when the session has none", async () => {
+    const { handler, opened } = harness(past({ project: null }));
+    await handler(past().id, "other");
+    expect(opened).toEqual([{ project: "other", cwd: "/home/u/app" }]);
+  });
+
+  it("types the resume command and presses enter", async () => {
+    const { handler, typed } = harness(past({ project: "app" }));
+    await handler(past().id, "app");
+    expect(typed).toEqual([
+      { tabId: "tab-1", data: "claude-mm --resume 11111111-2222-4333-8444-555555555555\r" },
+    ]);
+  });
+
+  it("reports which project the tab landed under, so the view can follow it", async () => {
+    const { handler } = harness(past({ project: "app" }));
+    expect((await handler(past().id, "other")).project).toBe("app");
+  });
+
   it("refuses when the session's agent is no longer configured", async () => {
-    const resume = vi.fn();
-    const handler = createResumeHandler({
-      history: () => [past({ agentId: "gone" })],
-      agents,
-      directoryExists: async () => true,
-      resume,
-      language: "en",
-    });
-    expect((await handler("s1")).ok).toBe(false);
-    expect(resume).not.toHaveBeenCalled();
+    const { handler, opened } = harness(past({ agentId: "gone" }));
+    expect((await handler(past().id, "app")).ok).toBe(false);
+    expect(opened).toEqual([]);
   });
 
-  it("refuses when the recorded directory no longer exists", async () => {
-    const resume = vi.fn();
-    const handler = createResumeHandler({
+  it("refuses when the recorded directory is gone", async () => {
+    const opened: { project: string; cwd: string }[] = [];
+    const handler = createResumeInTerminalHandler({
       history: () => [past()],
       agents,
+      projects: { app: "/home/u/app" },
       directoryExists: async () => false,
-      resume,
+      openTerminal: (project, cwd) => {
+        opened.push({ project, cwd });
+        return "tab-1";
+      },
+      sendInput: () => {},
       language: "en",
     });
-    expect((await handler("s1")).ok).toBe(false);
-    expect(resume).not.toHaveBeenCalled();
+    expect((await handler(past().id, "app")).ok).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it("refuses when there is no project to hang the tab on", async () => {
+    const { handler } = harness(past({ project: null }), {});
+    expect((await handler(past().id, "nope")).ok).toBe(false);
   });
 
   it("refuses an unknown session", async () => {
-    const resume = vi.fn();
-    const handler = createResumeHandler({
-      history: () => [],
-      agents,
-      directoryExists: async () => true,
-      resume,
-      language: "en",
-    });
-    expect((await handler("nope")).ok).toBe(false);
-    expect(resume).not.toHaveBeenCalled();
-  });
-
-  // A spawn that throws must come back as a refusal, not an unhandled
-  // rejection that leaves the button spinning.
-  it("reports a failed spawn instead of throwing", async () => {
-    const handler = createResumeHandler({
-      history: () => [past()],
-      agents,
-      directoryExists: async () => true,
-      resume: () => {
-        throw new Error("no binary");
-      },
-      language: "en",
-    });
-    expect((await handler("s1")).ok).toBe(false);
+    const { handler } = harness(past());
+    expect((await handler("not-a-session", "app")).ok).toBe(false);
   });
 });
 
-// ipcMain.handle calls its listener as (event, ...args). A handler that
-// takes the id as its FIRST parameter therefore receives the event object
-// instead, and every guard on that id fails silently — the transcript
-// handler returned "" for every session and resume refused every one,
-// while their unit tests passed because they call the handler directly.
-// Caught by running the app, so the shape is pinned at the source here.
 describe("main.ts ipc registrations", () => {
   const mainSource = readFileSync(
     fileURLToPath(new URL("./main.ts", import.meta.url)),
