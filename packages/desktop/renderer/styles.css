@@ -2158,7 +2158,28 @@
   /* Ninety-six buttons compete with the content they sit beside, so the
      button waits for the row. Keyboard focus shows it too — hover is not a
      thing every user has. */
-  .session-table-resume { opacity: 0; }
+  /* A button, not a browser default: without these it renders as the UA's
+     own grey-on-white control, which is the one thing on the page wearing
+     none of the design system. */
+  .session-table-resume {
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 3px 10px;
+    white-space: nowrap;
+    cursor: pointer;
+    /* Ninety-six buttons compete with the content they sit beside, so it
+       waits for its row. Keyboard focus reveals it too — hover is not a
+       thing every user has. */
+    opacity: 0;
+    transition: opacity 90ms ease-out;
+  }
+
+  .session-table-resume:hover { color: var(--text); border-color: var(--border-strong); }
+
   .session-table-row:hover .session-table-resume,
   .session-table-resume:focus-visible { opacity: 1; }
 

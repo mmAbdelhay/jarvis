@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -95,5 +95,44 @@ describe("the stylesheet's home", () => {
   it("is linked rather than inlined", () => {
     expect(html).toContain('href="./styles.css"');
     expect(html).not.toContain("<style>");
+  });
+});
+
+// A button the renderer builds and never styles falls back to the user
+// agent's own control — grey-on-white, square, wearing none of the design
+// system, and the one thing on the page that looks like it came from
+// somewhere else. The session table's Resume button shipped that way after
+// an edit dropped its appearance rules and left only its `opacity`, which is
+// why "has a rule at all" is not the property worth testing.
+describe("renderer buttons", () => {
+  const rendererDir = fileURLToPath(new URL(".", import.meta.url));
+
+  /** Every declaration block whose selector mentions this class. */
+  function declarationsFor(className: string): string {
+    const escaped = className.replaceAll("-", "\\-");
+    const rule = new RegExp(`[^{}]*\\.${escaped}\\b[^{}]*\\{([^}]*)\\}`, "g");
+    return [...css.matchAll(rule)].map((match) => match[1]).join(" ");
+  }
+
+  const created = readdirSync(rendererDir)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    .flatMap((name) => {
+      const source = readFileSync(`${rendererDir}${name}`, "utf8");
+      const pattern =
+        /const (\w+) = document\.createElement\("button"\);[\s\S]{0,400}?\1\.className = "([a-z0-9 _-]+)"/g;
+      return [...source.matchAll(pattern)].map((match) => ({ file: name, classes: match[2] }));
+    });
+
+  it("finds the buttons the renderer builds", () => {
+    expect(created.length).toBeGreaterThan(0);
+  });
+
+  it.each(created)("$file: .$classes is styled, not a browser default", ({ classes }) => {
+    const styled = (classes as string)
+      .split(/\s+/)
+      .filter(Boolean)
+      .some((className) => /background/.test(declarationsFor(className)));
+
+    expect(styled).toBe(true);
   });
 });
