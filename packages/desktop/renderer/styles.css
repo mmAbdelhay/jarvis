@@ -1194,6 +1194,15 @@
     font-size: 12px;
     color: var(--text-muted);
   }
+  /* The published ports, in Docker's own spelling. Never grows: the status
+     beside it is what takes the slack, so a container with two published
+     ports does not push the buttons off the row. */
+  .workspace-docker-row-ports {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
   .workspace-docker-row-actions { display: flex; gap: var(--s1); flex-shrink: 0; }
   .workspace-docker-row-actions button,
   .workspace-docker-compose button {

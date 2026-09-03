@@ -83,6 +83,72 @@ describe("renderDockerPane", () => {
     expect(labels).not.toContain("Stop");
   });
 
+  it("shows Docker's own status string unchanged", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, status: "Up 3 hours" } }],
+    });
+
+    expect(element.querySelector(".workspace-docker-row-status")?.textContent).toBe("Up 3 hours");
+  });
+
+  it("shows the published ports", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    expect(element.querySelector(".workspace-docker-row-ports")?.textContent).toBe(
+      "0.0.0.0:8000->8000/tcp",
+    );
+  });
+
+  it("shows no ports element for a container that publishes none", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, ports: [] } }],
+    });
+
+    expect(element.querySelector(".workspace-docker-row-ports")).toBeNull();
+  });
+
+  it("keeps the log host attached across a re-render", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    const log = element.querySelector(".workspace-docker-log");
+    expect(log).not.toBeNull();
+
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    // The very same node, never removed and re-appended: a poll tick must
+    // not disturb a selection the user made inside the log.
+    expect(element.querySelector(".workspace-docker-log")).toBe(log);
+    expect(element.querySelectorAll(".workspace-docker-log")).toHaveLength(1);
+    expect(element.querySelectorAll(".workspace-docker-row")).toHaveLength(2);
+  });
+
+  it("drops the compose bar when a later view no longer has one", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    expect(element.querySelector(".workspace-docker-compose")).not.toBeNull();
+
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      composeProject: undefined,
+      composeWorkingDir: undefined,
+    });
+
+    expect(element.querySelector(".workspace-docker-compose")).toBeNull();
+  });
+
+  it("keeps exactly one compose bar across repeated renders", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    expect(element.querySelectorAll(".workspace-docker-compose")).toHaveLength(1);
+  });
+
   it("marks a configured container Docker does not have", () => {
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);

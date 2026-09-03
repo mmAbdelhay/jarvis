@@ -1,5 +1,6 @@
 import type { DockerRow, DockerView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
 // The Workspace's Docker pane: one row per container the project declares
@@ -51,11 +52,24 @@ const POLL_INTERVAL_MS = 3_000;
 
 type Pane = {
   logHost: HTMLElement;
+  /** The rows list, created once and refilled in place on every poll tick —
+   *  see renderDockerPane. */
+  rowsHost: HTMLElement;
+  /** The compose bar, when the view has one. Removed and rebuilt as the
+   *  view's compose project appears or goes away; `undefined` when the pane
+   *  currently shows none. */
+  compose: HTMLElement | undefined;
   /** Built lazily, on the first row selection: constructing an xterm
    *  instance touches real browser APIs (matchMedia, canvas) that plain DOM
    *  rendering has no reason to need, so a pane that is never selected
    *  never builds one. */
   terminal: Terminal | undefined;
+  /** The terminal's fit addon and the observer that drives it — both live
+   *  exactly as long as `terminal` does, and the observer must be
+   *  disconnected when the pane is disposed or it outlives the element it
+   *  watches, the same discipline workspace-terminal.ts follows. */
+  fit: FitAddon | undefined;
+  observer: ResizeObserver | undefined;
   /** The container currently selected for its log tail, if any. Survives a
    *  re-render (the 3s poll) so the highlighted row and the running
    *  follower do not reset every tick. */
@@ -70,14 +84,26 @@ function getPane(tabId: string): Pane {
 
   const logHost = document.createElement("div");
   logHost.className = "workspace-docker-log";
-  const pane: Pane = { logHost, terminal: undefined, selected: undefined };
+  const rowsHost = document.createElement("div");
+  rowsHost.className = "workspace-docker-rows";
+  const pane: Pane = {
+    logHost,
+    rowsHost,
+    compose: undefined,
+    terminal: undefined,
+    fit: undefined,
+    observer: undefined,
+    selected: undefined,
+  };
   panes.set(tabId, pane);
   return pane;
 }
 
 /** Built the way workspace-terminal.ts:129 builds its terminal — same font,
- *  size, line height and theme — but read-only: no terminal.onData wiring,
- *  because there is nothing to type into a log. */
+ *  size, line height and theme, same fit addon and resize observer — but
+ *  read-only: no terminal.onData wiring, because there is nothing to type
+ *  into a log. Without the addon the log would render at xterm's default
+ *  80×24 inside a pane that grows with the window, and would never reflow. */
 function ensureTerminal(pane: Pane): Terminal {
   if (pane.terminal !== undefined) return pane.terminal;
   const terminal = new Terminal({
@@ -89,9 +115,32 @@ function ensureTerminal(pane: Pane): Terminal {
     disableStdin: true,
     cursorBlink: false,
   });
+  const fit = new FitAddon();
+  terminal.loadAddon(fit);
   terminal.open(pane.logHost);
   pane.terminal = terminal;
+  pane.fit = fit;
+  refit(pane);
+
+  if (typeof ResizeObserver !== "undefined") {
+    pane.observer = new ResizeObserver(() => refit(pane));
+    pane.observer.observe(pane.logHost);
+  }
   return terminal;
+}
+
+/** The same guard workspace-terminal.ts's refit uses: a host with no layout
+ *  yet (hidden, or the window minimised) measures as zero and would make the
+ *  addon throw. */
+function refit(pane: Pane): void {
+  if (pane.fit === undefined) return;
+  if (pane.logHost.clientWidth === 0 || pane.logHost.clientHeight === 0) return;
+  try {
+    pane.fit.fit();
+  } catch {
+    // A measurement the addon could not use. The log is still readable at
+    // whatever size it currently has.
+  }
 }
 
 function selectRow(host: HTMLElement, tabId: string, project: string, row: DockerRow): void {
@@ -124,8 +173,8 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
   name.textContent = row.name;
   element.append(name);
 
-  // Docker's own status vocabulary ("running", "exited (0) 2 minutes ago"),
-  // shown unchanged rather than translated — the same treatment
+  // Docker's own status vocabulary ("Up 3 hours", "Exited (0) 2 minutes
+  // ago"), shown unchanged rather than translated — the same treatment
   // row.facts.status gets everywhere else. A missing container has none;
   // the dashed, muted --missing class is what marks the row, not a message
   // invented for the gap.
@@ -133,6 +182,17 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
   status.className = "workspace-docker-row-status";
   status.textContent = row.facts?.status ?? "";
   element.append(status);
+
+  // The published ports, in Docker's own spelling, under the status — the
+  // spec's `:8000→8000` line. A container that publishes nothing gets no
+  // element at all rather than an empty one taking up a column.
+  const ports = row.facts?.ports ?? [];
+  if (ports.length > 0) {
+    const published = document.createElement("span");
+    published.className = "workspace-docker-row-ports";
+    published.textContent = ports.join("  ");
+    element.append(published);
+  }
 
   element.addEventListener("click", () => selectRow(host, tabId, project, row));
 
@@ -219,21 +279,34 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
 
 /** Renders a DockerView into `host`. Pure DOM given the view — the pane's
  *  only state that must outlive this call (the selected row, its log
- *  terminal) lives in `panes`, keyed by tabId, and is merely re-attached
- *  here rather than rebuilt. */
+ *  terminal) lives in `panes`, keyed by tabId.
+ *
+ *  Only what the 3s poll can actually change is rebuilt: the rows, and the
+ *  compose bar. `logHost` is attached once and left alone, because taking it
+ *  out of the document every three seconds would drop whatever text the user
+ *  had selected in the log and disturb xterm's own renderer under it. */
 export function renderDockerPane(host: HTMLElement, tabId: string, project: string, view: DockerView): void {
-  host.replaceChildren();
+  const pane = getPane(tabId);
 
-  const rows = document.createElement("div");
-  rows.className = "workspace-docker-rows";
-  for (const row of view.rows) rows.append(renderRow(host, tabId, project, row));
-  host.append(rows);
-
-  if (view.composeProject !== undefined) {
-    host.append(renderCompose(project, view.composeProject));
+  // First render into this host, or a re-render after the failure branch
+  // replaced the host's children with an error line.
+  if (pane.rowsHost.parentElement !== host) {
+    host.replaceChildren(pane.rowsHost, pane.logHost);
+    pane.compose = undefined;
   }
 
-  host.append(getPane(tabId).logHost);
+  pane.rowsHost.replaceChildren(
+    ...view.rows.map((row) => renderRow(host, tabId, project, row)),
+  );
+
+  // The compose bar sits between the rows and the log, and only exists while
+  // every row shares one stack — which a poll can change either way.
+  pane.compose?.remove();
+  pane.compose = undefined;
+  if (view.composeProject !== undefined) {
+    pane.compose = renderCompose(project, view.composeProject);
+    host.insertBefore(pane.compose, pane.logHost);
+  }
 }
 
 type Attached = { timer: ReturnType<typeof setInterval> };
@@ -282,15 +355,24 @@ export function attachDockerPane(tabId: string, project: string): void {
   attached.set(tabId, { timer });
 }
 
-/** Stops the poll and unfollows whatever log this tab was tailing. The
- *  pane's terminal is disposed with it — closing the tab is the only way to
- *  lose its scrollback, same as workspace-terminal.ts's terminals. */
+/** Stops the poll and unfollows whatever log this tab was tailing, then
+ *  disposes the pane entirely — terminal, resize observer and all.
+ *
+ *  Unlike workspace-terminal.ts's panes, which survive a tab switch, this
+ *  runs on *hide* as well as on close (workspace.ts calls it whenever the
+ *  Docker tab stops being the active one). So switching away and back loses
+ *  the log's scrollback and the selected row: the log is re-tailed from
+ *  Docker's own last 500 lines when the tab comes back, and a `docker logs
+ *  -f` child is not left running for a pane nobody is looking at. That is
+ *  the trade this makes deliberately. */
 export function detachDockerPane(tabId: string): void {
   const entry = attached.get(tabId);
   if (entry !== undefined) clearInterval(entry.timer);
   attached.delete(tabId);
   void window.jarvis.dockerUnfollow(tabId);
 
-  panes.get(tabId)?.terminal?.dispose();
+  const pane = panes.get(tabId);
+  pane?.observer?.disconnect();
+  pane?.terminal?.dispose();
   panes.delete(tabId);
 }

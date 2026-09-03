@@ -194,7 +194,8 @@ login, because loopback is the whole mitigation.
 ## Docker
 
 One tab per project, listing the containers `docker:` maps to it. Each row
-shows the container's own status line (Docker's words, unchanged) with
+shows the container's own status line (Docker's words, unchanged — `Up 3
+hours`, `Exited (0) 2 minutes ago`) and the ports it publishes, with
 **Start**, or **Stop** and **Restart** according to what it is doing, and
 **Shell**, which opens a Terminal tab already inside the container. A row
 configured in `docker:` with no matching container shows greyed out instead of
@@ -202,7 +203,10 @@ a status — see
 [troubleshooting](troubleshooting.md#a-container-in-the-docker-tab-is-greyed-out).
 
 Selecting a row tails its log in the pane below the list — one `docker logs
--f` at a time, for the row you are looking at. When every container in the
+-f` at a time, for the row you are looking at. Switching away from the tab
+stops that follower rather than leaving it running for a pane nobody is
+watching, so coming back starts the tail again from Docker's own last 500
+lines. When every container in the
 list belongs to one compose project, **Up** and **Down** appear beneath the
 rows and above the log, and act on the stack as a whole.
 
