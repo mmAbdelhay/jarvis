@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import type { JarvisConfig } from "../src/config.js";
+import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { initSettings, openSettings } from "./settings.js";
 
 type Recorded = { call: string; args: unknown[] };
@@ -906,6 +906,62 @@ describe("settings docker section", () => {
     expect((saved?.args[0] as JarvisConfig).docker).toEqual({
       acme: [{ name: "app", container: "acme-app-1" }],
     });
+  });
+
+  // Two compose stacks each with an `app` service, filed under one project:
+  // parseConfig rejects duplicate names within a project, so the second one
+  // has to be suffixed or Save fails on a config the picker itself wrote.
+  it("de-duplicates a display name two ticked containers would share", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const boxes = [
+      ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
+    ] as HTMLInputElement[];
+    boxes[1]!.checked = true;
+    change(boxes[1]!);
+
+    document.getElementById("settings-docker-confirm")?.click();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings");
+    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+      acme: [
+        { name: "app", container: "acme-app-1" },
+        { name: "app-2", container: "other-app-1" },
+      ],
+    });
+  });
+
+  // "+ Add container" used to seed an empty `container`, which parseConfig
+  // refuses — Add then Save failed with a raw parser message.
+  it("adds a row that is already saveable before it is filled in", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-add")?.click();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings");
+    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+      acme: [{ name: "container-1", container: "container-1" }],
+    });
+    // The thing that actually matters: parseConfig accepts it.
+    expect(() =>
+      parseConfig({
+        agents: { a: { command: "a" } },
+        projects: { acme: "/x/projects/acme" },
+        brain: { cwd: "/x/brain" },
+        docker: (saved?.args[0] as JarvisConfig).docker,
+      }),
+    ).not.toThrow();
   });
 
   it("keeps a configured container Docker no longer has", async () => {

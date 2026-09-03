@@ -735,8 +735,24 @@ function addDockerEntry(): void {
   // addEditorRoot's generated name.
   let n = 1;
   while (existing.some((entry) => entry.name === `container-${n}`)) n += 1;
-  draft.docker[project] = [...existing, { name: `container-${n}`, container: "" }];
+  // `container` is seeded with the same placeholder rather than left empty,
+  // for the reason addEditorRoot seeds `path: "."`: parseConfig rejects an
+  // empty `docker.<p>[i].container`, so a freshly added row must already be
+  // saveable before the user has filled in the real container name.
+  draft.docker[project] = [...existing, { name: `container-${n}`, container: `container-${n}` }];
   renderSettings();
+}
+
+/** A display name no other entry in this project already uses — `app`,
+ *  `app-2`, … — because parseConfig rejects duplicate names within a
+ *  project, and two compose stacks filed under one project can each have an
+ *  `app` service. The same rule addDockerEntry follows for its own generated
+ *  names. */
+function uniqueDockerName(existing: readonly DockerEntry[], base: string): string {
+  if (!existing.some((entry) => entry.name === base)) return base;
+  let n = 2;
+  while (existing.some((entry) => entry.name === `${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
 }
 
 /** One container offered by Auto-populate, paired with the project it would
@@ -831,8 +847,10 @@ function renderDockerPicker(): void {
 /** Replaces each ticked container's project entry with the union of what
  *  was already configured and the newly ticked containers, defaulting a new
  *  entry's name to its compose service label and falling back to the
- *  container name. A container already configured is left exactly as it
- *  was — an existing custom name is never overwritten. */
+ *  container name — suffixed if that name is already taken in the project,
+ *  since two stacks can each have an `app`. A container already configured
+ *  is left exactly as it was — an existing custom name is never
+ *  overwritten. */
 function confirmDockerPicker(): void {
   if (draft === undefined || dockerPicker === undefined) return;
   for (const entry of dockerPicker) {
@@ -840,7 +858,7 @@ function confirmDockerPicker(): void {
     if (entry.project === "" || draft.projects[entry.project] === undefined) continue;
     const existing = draft.docker[entry.project] ?? [];
     if (existing.some((row) => row.container === entry.facts.name)) continue;
-    const name = entry.facts.composeService ?? entry.facts.name;
+    const name = uniqueDockerName(existing, entry.facts.composeService ?? entry.facts.name);
     draft.docker[entry.project] = [...existing, { name, container: entry.facts.name }];
   }
   dockerPicker = undefined;
