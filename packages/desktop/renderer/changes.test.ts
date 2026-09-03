@@ -64,6 +64,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     openDockerTab: vi.fn(async () => notStubbed),
     dockerNames: vi.fn(async () => notStubbed),
     dockerView: vi.fn(async () => notStubbed),
+    dockerContainers: vi.fn(async () => notStubbed),
     dockerStart: vi.fn(async () => notStubbed),
     dockerStop: vi.fn(async () => notStubbed),
     dockerRestart: vi.fn(async () => notStubbed),

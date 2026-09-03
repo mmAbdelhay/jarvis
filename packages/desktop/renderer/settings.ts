@@ -1,5 +1,5 @@
 import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
-import type { DbGateConnection, DbGateEngine, EditorRoot } from "@jarvis/platform";
+import type { ContainerFacts, DbGateConnection, DbGateEngine, DockerEntry, EditorRoot } from "@jarvis/platform";
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
@@ -45,6 +45,7 @@ function renderSettings(): void {
   renderProjects();
   renderDatabases();
   renderEditors();
+  renderDocker();
   renderBrain();
   renderVoice();
   renderWhisper();
@@ -393,17 +394,26 @@ function renameProject(oldName: string, newName: string): void {
     delete draft.editors[oldName];
     draft.editors[newName] = roots;
   }
+  // `docker` is keyed by project name too, and parseConfig rejects a key
+  // naming no configured project — so the entries move with the rename for
+  // the same reason the connections and roots above do.
+  const containers = draft.docker[oldName];
+  if (containers !== undefined) {
+    delete draft.docker[oldName];
+    draft.docker[newName] = containers;
+  }
   renderSettings();
 }
 
 function removeProject(name: string): void {
   if (draft === undefined) return;
   delete draft.projects[name];
-  // Same reason as the rename above: a connection list — or a root list —
-  // keyed to a project that no longer exists is a config parseConfig would
-  // refuse to load.
+  // Same reason as the rename above: a connection list — or a root list, or
+  // a container list — keyed to a project that no longer exists is a config
+  // parseConfig would refuse to load.
   delete draft.databases[name];
   delete draft.editors[name];
+  delete draft.docker[name];
 }
 
 function addProject(): void {
@@ -639,6 +649,196 @@ function addEditorRoot(): void {
   renderSettings();
 }
 
+// ------------------------------------------------------------------ Docker
+
+/** Every configured container across every project, flattened into rows —
+ *  the same shape the databases and editor-roots sections above use, and
+ *  for the same reason: a row names its own project, so moving a container
+ *  is a select change rather than a delete and a re-add. */
+function renderDocker(): void {
+  if (draft === undefined) return;
+  const container = $("settings-docker");
+  container.replaceChildren();
+  for (const [project, entries] of Object.entries(draft.docker)) {
+    entries.forEach((entry, index) => {
+      container.append(renderDockerRow(project, index, entry));
+    });
+  }
+  // parseConfig rejects a container keyed to a project that does not exist,
+  // so with no projects there is no valid row to add.
+  ($("settings-docker-add") as HTMLButtonElement).disabled =
+    Object.keys(draft.projects).length === 0;
+  renderDockerPicker();
+}
+
+function renderDockerRow(project: string, index: number, entry: DockerEntry): HTMLElement {
+  if (draft === undefined) return document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "settings-row";
+
+  const projectField = fieldSelect("project", project, Object.keys(draft.projects), (value) =>
+    moveDockerEntry(project, index, value),
+  );
+  const nameField = fieldInput("name", entry.name, (value) => {
+    if (value !== "") updateDockerEntry(project, index, { name: value });
+  });
+  const containerField = fieldInput("container", entry.container, (value) => {
+    if (value !== "") updateDockerEntry(project, index, { container: value });
+  });
+
+  row.append(
+    projectField,
+    nameField,
+    containerField,
+    spacer(),
+    removeControl(() => removeDockerEntry(project, index)),
+  );
+  return row;
+}
+
+function updateDockerEntry(project: string, index: number, patch: Partial<DockerEntry>): void {
+  if (draft === undefined) return;
+  const entry = draft.docker[project]?.[index];
+  if (entry === undefined) return;
+  Object.assign(entry, patch);
+}
+
+function moveDockerEntry(project: string, index: number, toProject: string): void {
+  if (draft === undefined || toProject === project) return;
+  const entries = draft.docker[project];
+  const entry = entries?.[index];
+  if (entries === undefined || entry === undefined) return;
+  if (draft.projects[toProject] === undefined) return;
+
+  const remaining = entries.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.docker[project];
+  else draft.docker[project] = remaining;
+  draft.docker[toProject] = [...(draft.docker[toProject] ?? []), entry];
+  renderSettings();
+}
+
+function removeDockerEntry(project: string, index: number): void {
+  if (draft === undefined) return;
+  const entries = draft.docker[project];
+  if (entries === undefined) return;
+  const remaining = entries.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.docker[project];
+  else draft.docker[project] = remaining;
+}
+
+function addDockerEntry(): void {
+  if (draft === undefined) return;
+  const project = Object.keys(draft.projects)[0];
+  if (project === undefined) return;
+  const existing = draft.docker[project] ?? [];
+  // Names are unique within a project (parseConfig enforces it), same as
+  // addEditorRoot's generated name.
+  let n = 1;
+  while (existing.some((entry) => entry.name === `container-${n}`)) n += 1;
+  draft.docker[project] = [...existing, { name: `container-${n}`, container: "" }];
+  renderSettings();
+}
+
+/** One container offered by Auto-populate, paired with the project it would
+ *  be filed under if ticked. */
+type DockerPickerEntry = { facts: ContainerFacts; project: string; checked: boolean };
+
+let dockerPicker: DockerPickerEntry[] | undefined;
+
+/** True when `dir` is `base` itself or a path under it — a trailing-
+ *  separator-aware prefix test, so "/p/acme-old" does not match
+ *  "/p/acme". */
+function isInsideProject(dir: string, base: string): boolean {
+  if (base === "") return false;
+  return dir === base || dir.startsWith(base.endsWith("/") ? base : `${base}/`);
+}
+
+/** The first configured project whose directory contains this container's
+ *  compose working directory, if any. */
+function projectForContainer(facts: ContainerFacts): string | undefined {
+  if (draft === undefined || facts.composeWorkingDir === undefined) return undefined;
+  for (const [project, path] of Object.entries(draft.projects)) {
+    if (isInsideProject(facts.composeWorkingDir, path)) return project;
+  }
+  return undefined;
+}
+
+/** Fetches every container on the machine and opens the checklist, ticking
+ *  the ones that live inside a configured project's directory. Changes
+ *  nothing until the checklist is confirmed. */
+async function autopopulateDocker(): Promise<void> {
+  const result = await window.jarvis.dockerContainers();
+  if (!result.ok) {
+    const status = $("settings-status");
+    status.textContent = result.text;
+    status.classList.add("settings-status--error");
+    return;
+  }
+  if (draft === undefined) return;
+  dockerPicker = result.value.map((facts) => {
+    const matched = projectForContainer(facts);
+    return {
+      facts,
+      project: matched ?? Object.keys(draft?.projects ?? {})[0] ?? "",
+      checked: matched !== undefined,
+    };
+  });
+  renderDockerPicker();
+}
+
+function renderDockerPicker(): void {
+  const container = $("settings-docker-picker");
+  container.replaceChildren();
+  if (dockerPicker === undefined) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+
+  for (const entry of dockerPicker) {
+    const row = document.createElement("label");
+    row.className = "settings-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = entry.checked;
+    checkbox.addEventListener("change", () => {
+      entry.checked = checkbox.checked;
+    });
+    const name = document.createElement("span");
+    name.textContent = entry.facts.name;
+    row.append(checkbox, name);
+    container.append(row);
+  }
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.id = "settings-docker-confirm";
+  confirm.className = "settings-add";
+  confirm.textContent = "Confirm";
+  confirm.addEventListener("click", () => confirmDockerPicker());
+  container.append(confirm);
+}
+
+/** Replaces each ticked container's project entry with the union of what
+ *  was already configured and the newly ticked containers, defaulting a new
+ *  entry's name to its compose service label and falling back to the
+ *  container name. A container already configured is left exactly as it
+ *  was — an existing custom name is never overwritten. */
+function confirmDockerPicker(): void {
+  if (draft === undefined || dockerPicker === undefined) return;
+  for (const entry of dockerPicker) {
+    if (!entry.checked) continue;
+    if (entry.project === "" || draft.projects[entry.project] === undefined) continue;
+    const existing = draft.docker[entry.project] ?? [];
+    if (existing.some((row) => row.container === entry.facts.name)) continue;
+    const name = entry.facts.composeService ?? entry.facts.name;
+    draft.docker[entry.project] = [...existing, { name, container: entry.facts.name }];
+  }
+  dockerPicker = undefined;
+  clearSaveStatus();
+  renderSettings();
+}
+
 // ------------------------------------------------------------------ Brain
 
 function renderBrain(): void {
@@ -861,6 +1061,11 @@ function wireStaticFields(): void {
     addEditorRoot();
     clearSaveStatus();
   });
+  $("settings-docker-add").addEventListener("click", () => {
+    addDockerEntry();
+    clearSaveStatus();
+  });
+  $("settings-docker-autopopulate").addEventListener("click", () => void autopopulateDocker());
 
   $("settings-save").addEventListener("click", () => void saveSettings());
   $("settings-restart").addEventListener("click", () => void window.jarvis.restartApp());

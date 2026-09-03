@@ -31,6 +31,10 @@ export type ContainerFacts = {
   ports: string[];
   composeProject?: string;
   composeWorkingDir?: string;
+  /** The compose service name (`com.docker.compose.service`), for defaulting
+   *  a new Settings entry's display name to something more readable than the
+   *  container name. Undefined for a container compose did not create. */
+  composeService?: string;
 };
 
 /**
@@ -109,6 +113,7 @@ function factsOf(raw: unknown): ContainerFacts | undefined {
     ports: portsOf(network["Ports"]),
     composeProject: labelOf(labels, "com.docker.compose.project"),
     composeWorkingDir: labelOf(labels, "com.docker.compose.project.working_dir"),
+    composeService: labelOf(labels, "com.docker.compose.service"),
   };
 }
 

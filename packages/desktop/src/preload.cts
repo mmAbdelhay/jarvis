@@ -72,6 +72,7 @@ const api: RendererApi = {
   openDockerTab: (project) => ipcRenderer.invoke("docker:open", project),
   dockerNames: (project) => ipcRenderer.invoke("docker:names", project),
   dockerView: (project) => ipcRenderer.invoke("docker:view", project),
+  dockerContainers: () => ipcRenderer.invoke("docker:containers"),
   dockerStart: (project, container) => ipcRenderer.invoke("docker:start", project, container),
   dockerStop: (project, container) => ipcRenderer.invoke("docker:stop", project, container),
   dockerRestart: (project, container) => ipcRenderer.invoke("docker:restart", project, container),

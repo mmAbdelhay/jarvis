@@ -108,6 +108,36 @@ describe("createDockerClient.list", () => {
     expect(result.containers[0]?.composeWorkingDir).toBeUndefined();
   });
 
+  it("reads the compose service label, and leaves it undefined when absent", async () => {
+    const { run } = runnerFor([
+      { code: 0, stdout: "abc123\ndef456\n", stderr: "" },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          inspected({
+            Config: {
+              Image: "acme-app:latest",
+              Labels: {
+                "com.docker.compose.project": "acme",
+                "com.docker.compose.project.working_dir": "/Users/u/projects/acme",
+                "com.docker.compose.service": "app",
+              },
+            },
+          }),
+          inspected({ Id: "def456", Name: "/redis-1", Config: { Image: "redis:7", Labels: {} } }),
+        ]),
+        stderr: "",
+      },
+    ]);
+
+    const result = await createDockerClient(run, noLogs).list();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.containers[0]?.composeService).toBe("app");
+    expect(result.containers[1]?.composeService).toBeUndefined();
+  });
+
   it("reports a missing binary as not-installed", async () => {
     const run: CommandRunner = () =>
       Promise.reject(Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" }));

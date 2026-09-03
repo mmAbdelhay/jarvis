@@ -51,6 +51,10 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <div id="settings-databases"></div>
     <button id="settings-editor-add"></button>
     <div id="settings-editors"></div>
+    <button id="settings-docker-add"></button>
+    <button id="settings-docker-autopopulate"></button>
+    <div id="settings-docker"></div>
+    <div id="settings-docker-picker" hidden></div>
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
@@ -91,12 +95,44 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
       calls.push({ call: "restartApp", args: [] });
       return Promise.resolve();
     },
+    dockerContainers: () =>
+      Promise.resolve({
+        ok: true,
+        value: [
+          {
+            name: "acme-app-1",
+            id: "a",
+            image: "app:latest",
+            state: "running",
+            status: "running",
+            ports: [],
+            composeProject: "acme",
+            composeWorkingDir: "/x/projects/acme",
+            composeService: "app",
+          },
+          {
+            name: "other-app-1",
+            id: "b",
+            image: "other:latest",
+            state: "running",
+            status: "running",
+            ports: [],
+            composeProject: "other",
+            composeWorkingDir: "/x/projects/other",
+            composeService: "app",
+          },
+        ],
+      }),
   };
   return { calls, config };
 }
 
 function change(element: Element): void {
   element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 beforeEach(() => {
@@ -815,5 +851,80 @@ describe("choosing the engine by choosing a voice", () => {
     expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe(
       "Alan (neural)",
     );
+  });
+});
+
+describe("settings docker section", () => {
+  it("draws one row per configured container", async () => {
+    const config = sample();
+    config.docker = { acme: [{ name: "app", container: "acme-app-1" }] };
+    harness(config);
+    initSettings();
+    await openSettings();
+
+    expect(document.querySelectorAll("#settings-docker .settings-row")).toHaveLength(1);
+  });
+
+  it("pre-ticks only the containers inside the project's directory", async () => {
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const boxes = [
+      ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
+    ] as HTMLInputElement[];
+    expect(boxes.map((box) => box.checked)).toEqual([true, false]);
+  });
+
+  it("changes nothing until the checklist is confirmed", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings");
+    expect((saved?.args[0] as JarvisConfig).docker).toEqual({});
+  });
+
+  it("adds exactly the ticked containers, named after their compose service", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    document.getElementById("settings-docker-confirm")?.click();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings");
+    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+      acme: [{ name: "app", container: "acme-app-1" }],
+    });
+  });
+
+  it("keeps a configured container Docker no longer has", async () => {
+    const config = sample();
+    config.docker = { acme: [{ name: "gone", container: "acme-gone-1" }] };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    document.getElementById("settings-docker-confirm")?.click();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings");
+    expect((saved?.args[0] as JarvisConfig).docker["acme"]).toContainEqual({
+      name: "gone",
+      container: "acme-gone-1",
+    });
   });
 });

@@ -1010,6 +1010,7 @@ app.whenReady().then(async () => {
     });
     ipcMain.handle("docker:names", (_event, project: unknown) => docker.names(project as string));
     ipcMain.handle("docker:view", (_event, project: unknown) => docker.view(project as string));
+    ipcMain.handle("docker:containers", () => docker.containers());
     ipcMain.handle("docker:start", (_event, project: unknown, container: unknown) =>
       docker.start(project as string, container as string),
     );

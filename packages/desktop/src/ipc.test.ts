@@ -2063,6 +2063,36 @@ describe("createDockerHandlers", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("lists every container on the machine, unscoped to a project", async () => {
+    const result = await handlers(
+      {},
+      {
+        ok: true,
+        containers: [facts(), facts({ name: "other-app-1", composeProject: "other" })],
+      },
+    ).handlers.containers();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.map((c) => c.name)).toEqual(["acme-app-1", "other-app-1"]);
+  });
+
+  it("translates a missing docker binary for containers() too", async () => {
+    const { handlers: h } = handlers({}, {
+      ok: false,
+      reason: "not-installed",
+      detail: "spawn docker ENOENT",
+    });
+
+    const result = await h.containers();
+
+    expect(result).toEqual({
+      ok: false,
+      text: MESSAGES.dockerNotInstalled("en"),
+      language: "en",
+    });
+  });
+
   it("refuses a container the project does not declare", async () => {
     const result = await handlers().handlers.stop("acme", "not-mine");
 

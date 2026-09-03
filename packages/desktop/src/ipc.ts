@@ -431,6 +431,9 @@ export type RendererApi = {
   openDockerTab(project: string): Promise<GitViewResult<void>>;
   dockerNames(project: string): Promise<GitViewResult<string[]>>;
   dockerView(project: string): Promise<GitViewResult<DockerView>>;
+  /** Every container on the machine, unscoped to a project. Used by Settings
+   *  to offer a checklist of containers a project could declare. */
+  dockerContainers(): Promise<GitViewResult<ContainerFacts[]>>;
   dockerStart(project: string, container: string): Promise<GitViewResult<void>>;
   dockerStop(project: string, container: string): Promise<GitViewResult<void>>;
   dockerRestart(project: string, container: string): Promise<GitViewResult<void>>;
@@ -874,6 +877,10 @@ export type DockerHandlers = {
    *  whether the Docker button is a live control at all. Mirrors the
    *  existing `ClusterHandlers.names`. */
   names(project: string): GitViewResult<string[]>;
+  /** Every container on the machine, for Settings to offer as a checklist.
+   *  Not scoped to a project on purpose: the whole point is to find the
+   *  containers a project does not yet declare. */
+  containers(): Promise<GitViewResult<ContainerFacts[]>>;
 };
 
 export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
@@ -991,6 +998,18 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
       // asking for bash outright fails outright on an alpine container.
       deps.sendInput(tabId, `docker exec -it ${container} sh -c 'exec bash || exec sh'\r`);
       return { ok: true, value: undefined };
+    },
+
+    async containers() {
+      const listed = await deps.docker.list();
+      if (!listed.ok) {
+        return fail(
+          listed.reason === "not-installed"
+            ? MESSAGES.dockerNotInstalled(deps.language)
+            : MESSAGES.dockerDaemonDown(deps.language),
+        );
+      }
+      return { ok: true, value: listed.containers };
     },
   };
 }
