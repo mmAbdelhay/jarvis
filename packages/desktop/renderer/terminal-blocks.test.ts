@@ -127,4 +127,33 @@ describe("the splitter", () => {
     expect(allOutput.endsWith(`${ALT_ON}live frame`)).toBe(true);
     expect(allOutput.split(ALT_ON).length - 1).toBe(1);
   });
+
+  it("passes another program's OSC through untouched", () => {
+    const splitter = createSplitter({ now: clock() });
+    const title = "]0;my title";
+    const clipboard = "]52;c;YmFzZTY0";
+    const events = splitter.push(`${A}$ ${B}${title}ls\r\n${C("ls")}${clipboard}a  b\r\n${D(0)}`);
+    const text = events
+      .filter((event) => event.type === "output")
+      .map((event) => event.text)
+      .join("");
+    expect(text).toBe(`$ ${title}ls\r\n${clipboard}a  b\r\n`);
+  });
+
+  it("closes the alt-screen when D arrives with no closing [?1049l", () => {
+    const splitter = createSplitter({ now: clock() });
+    const entering = splitter.push(`${A}$ ${B}top\r\n${C("top")}${ALT_ON}live frame`);
+    expect(entering).toContainEqual({ type: "alt-screen", active: true });
+
+    // The program is killed by a signal: no [?1049l, straight to D.
+    const closing = splitter.push(D(137));
+    expect(closing).toContainEqual({ type: "alt-screen", active: false });
+    expect(closing.filter((event) => event.type === "alt-screen")).toHaveLength(1);
+    expect(done(closing)[0]).toMatchObject({ exitCode: 137, output: "" });
+
+    // The alt-screen flag must actually be cleared: the next command's
+    // output is captured normally, not silently dropped.
+    const next = splitter.push(`${A}$ ${B}echo hi\r\n${C("echo hi")}hi\r\n${D(0)}`);
+    expect(done(next)[0]).toMatchObject({ command: "echo hi", output: "hi\r\n" });
+  });
 });

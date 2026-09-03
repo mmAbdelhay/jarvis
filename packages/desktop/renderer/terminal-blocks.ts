@@ -125,7 +125,20 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
       const code = Number.parseInt(body.slice(2), 10);
       current.exitCode = Number.isNaN(code) ? undefined : code;
       current.endedAt = now();
+      // A full-screen program can die (a signal, say) without ever writing
+      // [?1049l. Left set, `alt` would silently swallow every later
+      // command's output forever — so a block closing while it is held
+      // clears it too, and says so: the pane keys its full-screen layout
+      // off this event, and clearing the flag without announcing it would
+      // leave the UI stuck full-screen even though capture had resumed.
+      // Emitted after block-done, matching the order the bytes implied:
+      // the block ended first, and only then — because it ended — is the
+      // screen no longer "alternate" from this file's point of view.
       events.push({ type: "block-done", block: current });
+      if (alt) {
+        alt = false;
+        events.push({ type: "alt-screen", active: false });
+      }
       current = undefined;
     }
   }
