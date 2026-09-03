@@ -244,3 +244,49 @@ describe("cluster strings", () => {
     expect(MESSAGES.clusterLoginTimedOut("ar")).toContain("لم تكتمل");
   });
 });
+
+describe("docker messages", () => {
+  it("says both why Docker is unavailable, in both languages", () => {
+    expect(MESSAGES.dockerNotInstalled("en")).toBe(
+      "Docker is not installed, or is not on the shell PATH.",
+    );
+    expect(MESSAGES.dockerDaemonDown("en")).toBe("The Docker daemon is not running.");
+    expect(MESSAGES.dockerNotInstalled("ar")).not.toBe(MESSAGES.dockerNotInstalled("en"));
+    expect(MESSAGES.dockerDaemonDown("ar")).not.toBe(MESSAGES.dockerDaemonDown("en"));
+  });
+
+  it("names the container in every confirmation", () => {
+    expect(MESSAGES.dockerConfirmStop("app", "en")).toContain("app");
+    expect(MESSAGES.dockerConfirmRestart("app", "en")).toContain("app");
+    expect(MESSAGES.dockerConfirmStop("app", "ar")).toContain("app");
+    expect(MESSAGES.dockerConfirmRestart("app", "ar")).toContain("app");
+  });
+
+  it("warns that compose down removes containers", () => {
+    expect(MESSAGES.dockerConfirmComposeDown("acme", "en")).toBe(
+      "Take down the acme stack? This removes its containers.",
+    );
+    expect(MESSAGES.dockerConfirmComposeDown("acme", "ar")).toContain("acme");
+  });
+
+  it("distinguishes nothing configured from nothing composable", () => {
+    expect(MESSAGES.dockerNoContainers("en")).toBe(
+      "No containers configured for this project",
+    );
+    expect(MESSAGES.dockerNoComposeProject("en")).toBe(
+      "These containers do not belong to a single compose project.",
+    );
+  });
+
+  it("has an Arabic form for every docker message", () => {
+    const both = [
+      MESSAGES.dockerNoContainers,
+      MESSAGES.dockerUnknownContainer,
+      MESSAGES.dockerNoComposeProject,
+    ];
+    for (const message of both) {
+      expect(message("ar")).not.toBe(message("en"));
+      expect(message("ar")).not.toBe("");
+    }
+  });
+});

@@ -93,6 +93,34 @@ export const MESSAGES = {
     language === "ar"
       ? "لم تكتمل عملية الدخول إلى AWS في الوقت المحدد. تحقّق من الطرفية وحاول مرة أخرى."
       : "AWS login did not finish in time. Check the terminal and try again.",
+  dockerNotInstalled: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "دوكر غير مثبّت، أو غير موجود في مسار الصدفة."
+      : "Docker is not installed, or is not on the shell PATH.",
+  dockerDaemonDown: (language: "ar" | "en"): string =>
+    language === "ar" ? "خدمة دوكر لا تعمل." : "The Docker daemon is not running.",
+  dockerNoContainers: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد حاويات مهيأة لهذا المشروع"
+      : "No containers configured for this project",
+  dockerUnknownContainer: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "هذه الحاوية غير مهيأة لهذا المشروع."
+      : "That container is not configured for this project.",
+  // Distinct from dockerNoContainers: this project *has* containers, they
+  // simply do not form one compose stack, so up and down have no target.
+  dockerNoComposeProject: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "هذه الحاويات لا تنتمي إلى حزمة compose واحدة."
+      : "These containers do not belong to a single compose project.",
+  dockerConfirmStop: (name: string, language: "ar" | "en"): string =>
+    language === "ar" ? `إيقاف ${name}؟` : `Stop ${name}?`,
+  dockerConfirmRestart: (name: string, language: "ar" | "en"): string =>
+    language === "ar" ? `إعادة تشغيل ${name}؟` : `Restart ${name}?`,
+  dockerConfirmComposeDown: (project: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `إيقاف حزمة ${project} وإزالة حاوياتها؟`
+      : `Take down the ${project} stack? This removes its containers.`,
   // headlamp-server was measured at roughly twelve seconds cold — longer
   // than code-server, shorter than DbGate — so the toolbar says so for the
   // whole wait rather than leaving the app looking frozen.
