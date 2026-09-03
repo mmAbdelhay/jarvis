@@ -237,6 +237,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       terminal.dispose();
       for (const view of views.splice(0)) view.element.remove();
       element.remove();
+      // Releases the sticky header's document-level scroll listener — left
+      // running, it would outlive this tab for the rest of the process.
+      attempt(() => nav?.dispose());
     },
     // A copy: the internal array goes on changing as commands finish, and a
     // caller holding what it was told is a readonly list must not see it move.

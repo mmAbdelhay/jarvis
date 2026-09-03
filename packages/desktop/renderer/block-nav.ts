@@ -39,6 +39,12 @@ export type BlockNav = {
    *  view" needs — `searchText()` alone has no block boundaries to scroll
    *  to, only concatenated text. */
   findText(query: string): boolean;
+  /** Releases the sticky header's document-level scroll listener. Call once,
+   *  when the pane that owns this nav is disposed — without it, the
+   *  listener (and everything it closes over: `views`, `selected`, `list`,
+   *  `sticky`) outlives the tab that created it for the life of the
+   *  process, and every scroll anywhere in the app pays for checking it. */
+  dispose(): void;
 };
 
 /** Runs a piece of DOM measurement or manipulation, swallowing anything it
@@ -123,16 +129,11 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
   // fresh on every event rather than cached at construction time, since the
   // pane appends `list` to its root after creating it in some call orders
   // (and every order in this file's own tests).
-  attempt(() =>
-    document.addEventListener(
-      "scroll",
-      (event) => {
-        if (!(event.target instanceof Node) || !event.target.contains(list)) return;
-        attempt(updateSticky);
-      },
-      true,
-    ),
-  );
+  const onScroll = (event: Event): void => {
+    if (!(event.target instanceof Node) || !event.target.contains(list)) return;
+    attempt(updateSticky);
+  };
+  attempt(() => document.addEventListener("scroll", onScroll, true));
 
   return {
     move(delta: number): void {
@@ -165,7 +166,14 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
     },
     sync(next: readonly BlockView[]): void {
       views = next;
-      if (selected !== undefined && !views.includes(selected)) selected = undefined;
+      // Through select(), like every other path that drops a selection —
+      // never by reassigning `selected` directly, which would skip
+      // setSelected(false) and leave the dropped block's element carrying
+      // a stale .selected class forever (it usually has no visible effect,
+      // since the pane removes a dropped block's element around the same
+      // time, but that is an accident of call order, not something this
+      // function may rely on).
+      if (selected !== undefined && !views.includes(selected)) select(undefined);
       applyFilter();
     },
     searchText(): string {
@@ -184,6 +192,9 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
         setTimeout(() => attempt(() => match.element.classList.remove("found")), 1000);
       });
       return true;
+    },
+    dispose(): void {
+      attempt(() => document.removeEventListener("scroll", onScroll, true));
     },
   };
 }

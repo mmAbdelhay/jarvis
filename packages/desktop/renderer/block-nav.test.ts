@@ -142,6 +142,34 @@ describe("filtering to failures", () => {
     expect(views[1]?.element.hidden).toBe(false);
   });
 
+  // Distinct from "clears the selection ... when its block is dropped"
+  // above: this drops the selection through toggleFailedFilter() directly,
+  // not through sync() — applyFilter()'s own clearing path, not select()'s.
+  it("clears a selection directly, by toggling the failed filter over it, not only via sync", () => {
+    const { nav: n } = nav();
+    const views = [fakeView("a", 0), fakeView("b", 1)];
+    n.sync(views);
+    n.move(1); // selects the first visible block: "a"
+    expect(n.selected()).toBe(views[0]);
+
+    n.toggleFailedFilter(); // hides "a" (ok)
+    expect(n.selected()).toBeUndefined();
+    expect(views[0]?.element.classList.contains("selected")).toBe(false);
+  });
+
+  // Same shape, over filterToCommand() instead of the failed filter.
+  it("clears a selection directly, by filtering to a different command over it", () => {
+    const { nav: n } = nav();
+    const views = [fakeView("a", 0), fakeView("b", 0)];
+    n.sync(views);
+    n.move(1); // selects "a"
+    expect(n.selected()).toBe(views[0]);
+
+    n.filterToCommand("b"); // hides "a"
+    expect(n.selected()).toBeUndefined();
+    expect(views[0]?.element.classList.contains("selected")).toBe(false);
+  });
+
   it("only ever moves between visible blocks while filtered", () => {
     const { nav: n } = nav();
     const views = [fakeView("a", 0), fakeView("b", 1), fakeView("c", 0), fakeView("d", 1)];
@@ -194,7 +222,7 @@ describe("sync", () => {
     expect(n.selected()).toBe(selected);
   });
 
-  it("clears the selection when its block is dropped", () => {
+  it("clears the selection, and its .selected class, when its block is dropped", () => {
     const { nav: n } = nav();
     const views = [fakeView("a", 0), fakeView("b", 0)];
     n.sync(views);
@@ -204,6 +232,10 @@ describe("sync", () => {
 
     n.sync([views[0]!]);
     expect(n.selected()).toBeUndefined();
+    // Not just the return value of selected(): the dropped block's own
+    // element must lose the class too, or a re-added block (or a stray
+    // caller reading the DOM directly) would find it still marked selected.
+    expect(views[1]?.element.classList.contains("selected")).toBe(false);
   });
 
   it("applies the active filter to newly synced blocks", () => {
@@ -324,5 +356,44 @@ describe("the sticky header", () => {
     container.dispatchEvent(new Event("scroll"));
 
     expect(sticky.textContent).toBe("a");
+  });
+});
+
+describe("dispose", () => {
+  // The sticky header listens on `document`, not on any element this nav
+  // was handed — dispose() is the only way to stop it, and without it the
+  // listener (and everything it closes over) outlives the pane forever.
+  it("stops updating the sticky header once disposed", () => {
+    const { list, sticky, nav: n } = nav();
+    const container = document.createElement("div");
+    container.append(sticky, list);
+    document.body.append(container);
+    container.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+
+    const a = fakeView("a", 0);
+    const b = fakeView("b", 0);
+    list.append(a.element, b.element);
+    n.sync([a, b]);
+
+    // Scrolled past "a" only: the listener works, same as the plain sticky
+    // header tests above.
+    a.element.getBoundingClientRect = () => ({ top: -40 }) as DOMRect;
+    b.element.getBoundingClientRect = () => ({ top: 20 }) as DOMRect;
+    container.dispatchEvent(new Event("scroll"));
+    expect(sticky.textContent).toBe("a");
+
+    // Now scrolled past both — if the listener still ran, this would flip
+    // the header to "b". dispose() first, so it must not.
+    n.dispose();
+    b.element.getBoundingClientRect = () => ({ top: -10 }) as DOMRect;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(sticky.textContent).toBe("a");
+  });
+
+  it("does not throw when called twice", () => {
+    const { nav: n } = nav();
+    n.dispose();
+    expect(() => n.dispose()).not.toThrow();
   });
 });
