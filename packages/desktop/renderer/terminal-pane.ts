@@ -36,6 +36,18 @@ export type PaneHooks = {
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
   history?: (() => Promise<string[]>) | undefined;
+  /** Consulted before the editor acts on a key, while the editor is
+   *  visible — the same contract as `TerminalHooks.interceptKey` in
+   *  terminal-addons.ts, and for the same reason: terminal-completion.ts's
+   *  dropdown claims Tab/↑/↓/Enter/Escape for as long as it is open.
+   *  xterm's own custom key handler cannot do this job here — it only ever
+   *  sees a keydown that lands on its own textarea, and while the editor
+   *  is visible the event targets the editor's own instead. Returning
+   *  false means the key was claimed. Absent for a terminal with no
+   *  autocomplete wired up, which is exactly why every keystroke below
+   *  reaches the editor unless this says otherwise — never affecting
+   *  the pane's behaviour when it is not passed. */
+  interceptKey?: ((event: KeyboardEvent) => boolean) | undefined;
 };
 
 export type { BlockView };
@@ -56,6 +68,22 @@ export type TerminalPane = {
    *  and doing nothing with it. */
   blockNav: BlockNav | undefined;
   terminal: Terminal;
+  /** What terminal-completion.ts reads instead of the xterm buffer: the
+   *  editor's own value while it is visible, undefined the rest of the
+   *  time — no editor at all, or one hidden because a command is running.
+   *  Undefined is exactly the signal the buffer scrape's fallback wants:
+   *  every one of those states already has no prompt mark for completion
+   *  to work from either. */
+  readInput(): string | undefined;
+  /** Accepts a suggestion into the editor directly — no backspaces, since
+   *  the pty never held the line the buffer scrape would otherwise erase.
+   *  A pane with no editor, or a hidden one, quietly does nothing: there
+   *  is nowhere for the line to go. */
+  applyInput(line: string): void;
+  /** The editor's own element, for the dropdown to anchor its position to
+   *  — undefined exactly when `readInput` and `applyInput` have nothing to
+   *  work with either. */
+  editorElement(): HTMLElement | undefined;
 };
 
 /** Blocks a pane keeps, oldest dropped first. A session that ran thousands
@@ -236,6 +264,27 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   }
 
   const editor = hooks.settings.inputEditor ? buildEditor() : undefined;
+
+  // The dropdown's first look at an editor keystroke. A capture-phase
+  // listener on the pane's own root sees a keydown before it reaches the
+  // editor's own (bubble-phase) listener in createEditor — capture always
+  // runs before bubble, on every ancestor, regardless of which was
+  // registered first — so this is where completion gets to claim
+  // Tab/↑/↓/Enter/Escape before the editor's history walk, submit or
+  // nothing at all acts on the same key. stopPropagation() is what keeps
+  // it from also reaching that listener once claimed; interceptKey has
+  // already called preventDefault() on anything it claims.
+  const interceptKey = hooks.interceptKey;
+  if (interceptKey !== undefined) {
+    element.addEventListener(
+      "keydown",
+      (event) => {
+        if (editor === undefined || !editor.isVisible()) return;
+        if (!interceptKey(event)) event.stopPropagation();
+      },
+      true,
+    );
+  }
 
   function buildEditor(): TerminalEditor | undefined {
     try {
@@ -453,5 +502,8 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // caller holding what it was told is a readonly list must not see it move.
     blocks: () => [...views],
     blockNav: nav,
+    readInput: () => (editor !== undefined && editor.isVisible() ? editor.value() : undefined),
+    applyInput: (line) => attempt(() => editor?.setValue(line)),
+    editorElement: () => editor?.element,
   };
 }

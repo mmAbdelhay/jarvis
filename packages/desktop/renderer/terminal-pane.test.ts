@@ -403,4 +403,125 @@ describe("the command editor in a pane", () => {
     p.dispose();
     expect(() => p.write(`out\r\n${D(0)}${A}$ ${B}`)).not.toThrow();
   });
+
+  // What terminal-completion.ts reads instead of the xterm buffer, and
+  // what it writes a suggestion back through — see Task 10.
+  describe("what the pane exposes for completion to read and write", () => {
+    it("reads the editor's own value while it is visible", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}`);
+      const field = textarea(p);
+      if (field === null) throw new Error("no editor");
+      field.value = "git sta";
+
+      expect(p.readInput()).toBe("git sta");
+    });
+
+    it("has no input to read when there is no editor at all", () => {
+      const { p } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+      p.write(`${A}$ ${B}`);
+      expect(p.readInput()).toBeUndefined();
+    });
+
+    it("has no input to read while the editor is hidden — a command running", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+      expect(p.readInput()).toBeUndefined();
+    });
+
+    it("applies a suggestion by setting the editor's value, not by touching the pty", () => {
+      const { p, sendInput } = editorPane();
+      p.write(`${A}$ ${B}`);
+
+      p.applyInput("git status");
+
+      expect(textarea(p)?.value).toBe("git status");
+      expect(sendInput).not.toHaveBeenCalled();
+    });
+
+    it("exposes the editor's own element for the dropdown to anchor to", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}`);
+      expect(p.editorElement()).toBe(editorEl(p));
+    });
+
+    it("has no editor element to expose when the editor is off", () => {
+      const { p } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+      p.write(`${A}$ ${B}`);
+      expect(p.editorElement()).toBeUndefined();
+    });
+  });
+
+  // The dropdown claims a key over the editor's textarea the same way it
+  // claims one over xterm: consulted first, before anything else acts on
+  // it. xterm's own attachCustomKeyEventHandler never sees these — the
+  // event targets the editor's <textarea>, not xterm's, and never bubbles
+  // there — so this is the pane's own consultation point instead.
+  describe("interceptKey — the dropdown's first look at an editor keystroke", () => {
+    function editorPaneWithIntercept(interceptKey: (event: KeyboardEvent) => boolean) {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const sendInput = vi.fn();
+      const p = createPane(host, {
+        sendInput,
+        resize: vi.fn(),
+        attach: async () => "",
+        settings: EDITOR_SETTINGS,
+        history: async () => ["git status", "ls"],
+        interceptKey,
+      });
+      return { p, sendInput };
+    }
+
+    it("asks interceptKey before the editor acts on the same key", () => {
+      const seen: string[] = [];
+      const { p } = editorPaneWithIntercept((event) => {
+        seen.push(event.key);
+        return true;
+      });
+      p.write(`${A}$ ${B}`);
+
+      press(p, { key: "ArrowUp" });
+
+      expect(seen).toEqual(["ArrowUp"]);
+    });
+
+    it("stops the editor from also handling a key the dropdown claimed", async () => {
+      const { p } = editorPaneWithIntercept(() => false);
+      p.write(`${A}$ ${B}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const field = textarea(p);
+      if (field === null) throw new Error("no editor");
+      field.value = "half-typed";
+
+      // ArrowUp would normally walk into Jarvis's command log.
+      press(p, { key: "ArrowUp" });
+
+      expect(field.value).toBe("half-typed");
+    });
+
+    it("lets the editor handle the key normally once interceptKey declines it", async () => {
+      const { p } = editorPaneWithIntercept(() => true);
+      p.write(`${A}$ ${B}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      press(p, { key: "ArrowUp" });
+
+      expect(textarea(p)?.value).toBe("git status");
+    });
+
+    it("never consults interceptKey once the editor is hidden", () => {
+      const seen: string[] = [];
+      const { p, sendInput } = editorPaneWithIntercept((event) => {
+        seen.push(event.key);
+        return true;
+      });
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+
+      FakeTerminal.instances[0]?.emitData("y");
+
+      expect(seen).toEqual([]);
+      expect(sendInput).toHaveBeenCalledWith("y");
+    });
+  });
 });

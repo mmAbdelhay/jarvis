@@ -124,6 +124,13 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   element.className = "workspace-terminal-pane";
   host.append(element);
 
+  // Completion needs the pane's terminal to exist before it can be built,
+  // but the editor's own keystrokes need completion consulted from inside
+  // createPane, before completion can exist — so the pane gets a forward
+  // reference, filled in once attachCompletion has actually run, exactly
+  // the way `completion` itself already gets reassigned below.
+  let completion: Completion = { handleKey: () => true };
+
   // The tab's terminal: frozen blocks over a live xterm when the shell's
   // integration is on, and today's bare terminal when it is not. Keystrokes,
   // the cell grid and the shell's buffered prologue are all its business;
@@ -148,6 +155,10 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
         return [];
       }
     },
+    // The dropdown's first look at a keystroke over the editor — xterm's
+    // own custom key handler below never sees these, since the event
+    // targets the editor's own <textarea>, not xterm's.
+    interceptKey: (event) => completion.handleKey(event),
   });
   const terminal = view.terminal;
 
@@ -157,11 +168,35 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   // terminal, which is the same rule the addon stack follows. Its key
   // handling goes through enhanceTerminal rather than being attached
   // separately: xterm keeps only one custom key handler.
-  let completion: Completion = { handleKey: () => true };
+  //
+  // readInput/applyInput/anchor go in only when the pane actually has an
+  // editor — with `inputEditor` off, the pane's own readInput/applyInput/
+  // editorElement always read as "no editor" anyway, but passing them
+  // regardless would still hand attachCompletion an `anchor` hook, and an
+  // anchor hook changes how the dropdown positions itself even over a bare
+  // terminal. Today's cell-under-the-cursor placement has to stay exactly
+  // what it was for a pane that never asked for an editor.
+  const editorCompletionHooks = terminalSettings.inputEditor
+    ? {
+        readInput: () => view.readInput(),
+        applyInput: (line: string) => view.applyInput(line),
+        // Left-aligned to the editor's own box, one editor-height below its
+        // top — not a caret cell, since the buffer never moves while the
+        // editor is live to compute one from.
+        anchor: () => {
+          const editorEl = view.editorElement();
+          if (editorEl === undefined) return { x: 0, y: 0 };
+          const editorBox = editorEl.getBoundingClientRect();
+          const hostBox = element.getBoundingClientRect();
+          return { x: editorBox.left - hostBox.left, y: editorBox.bottom - hostBox.top };
+        },
+      }
+    : {};
   try {
     completion = attachCompletion(terminal, element, {
       suggest: (input) => window.jarvis.suggestCompletions(tabId, input),
       sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+      ...editorCompletionHooks,
     });
   } catch {
     // No dropdown. The shell is untouched.

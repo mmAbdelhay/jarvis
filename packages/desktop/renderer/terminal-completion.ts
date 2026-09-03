@@ -203,6 +203,30 @@ export type CompletionHooks = {
   suggest: (input: string) => Promise<string[]>;
   /** Sends bytes to this terminal's pty. */
   sendInput: (data: string) => void;
+  /** The current line, read from somewhere other than the xterm buffer —
+   *  the DOM editor Task 8 put in front of the shell. When this is given
+   *  it is the source of the current line and `currentInput`'s buffer
+   *  scrape is not consulted: while that editor is live the screen still
+   *  shows the bare prompt, since nothing the user types reaches the pty
+   *  (and so the buffer) until they press Enter. Absent — the terminal has
+   *  no editor, or this is the alternate screen — the buffer scrape is
+   *  exactly what it always was. */
+  readInput?: () => string | undefined;
+  /** Accepts a suggestion by setting the editor's value directly, in place
+   *  of erasing what is typed with backspaces and retyping it. When this
+   *  is given, `sendInput` is not called at all on accept: the pty never
+   *  received the typed line in the first place (see `readInput`), so
+   *  backspacing it there would erase bytes the shell does not have, or
+   *  worse, whatever real input arrives next. Absent, acceptance falls
+   *  back to the backspace-and-retype dance against the pty. */
+  applyInput?: (line: string) => void;
+  /** Where to put the dropdown when there is an editor: a pixel position,
+   *  relative to `host`, rather than the buffer-cell math `mark` drives.
+   *  The editor draws over the terminal, so there is no caret cell to
+   *  compute the dropdown's position from — the caller hands over the
+   *  editor's own bounding box instead. Absent, the dropdown positions
+   *  itself under the prompt mark's cell, as it always has. */
+  anchor?: () => { x: number; y: number };
 };
 
 /** DEL, the byte a terminal sends for Backspace and the one zsh's line
@@ -299,7 +323,7 @@ export function attachCompletion(
 
     let input: string | undefined;
     try {
-      input = currentInput(terminal.buffer.active, mark);
+      input = hooks.readInput?.() ?? currentInput(terminal.buffer.active, mark);
     } catch {
       input = undefined;
     }
@@ -321,7 +345,7 @@ export function attachCompletion(
     if (latest === undefined) return;
     let stillTyped: string | undefined;
     try {
-      stillTyped = currentInput(terminal.buffer.active, latest);
+      stillTyped = hooks.readInput?.() ?? currentInput(terminal.buffer.active, latest);
     } catch {
       stillTyped = undefined;
     }
@@ -329,6 +353,14 @@ export function attachCompletion(
 
     const cell = cellSize(host, terminal.cols, terminal.rows);
     dropdown.show(items, mark, cell.x, cell.y);
+    // An editor in front of the shell has no caret cell to be under — the
+    // buffer never moves while it is live — so its own bounding box wins
+    // over the cell math `show` just did.
+    if (hooks.anchor !== undefined && dropdown.isOpen()) {
+      const box = hooks.anchor();
+      dropdown.element.style.left = `${box.x}px`;
+      dropdown.element.style.top = `${box.y}px`;
+    }
     openFor = dropdown.isOpen() ? input : undefined;
   }
 
@@ -338,14 +370,30 @@ export function attachCompletion(
     setTimeout(() => void refresh(), 0);
   });
 
+  // With an editor live, nothing reaches the pty per keystroke — the whole
+  // point of readInput — so `terminal.onData` never fires while the user
+  // types and refresh() has nothing else to wake it. A keydown is the only
+  // signal left, deferred a turn so the read lands after the editor (or
+  // the browser's own default action) has actually applied it, the same
+  // way the onData path defers behind the pty's own echo.
+  function scheduleRefresh(): void {
+    if (hooks.readInput !== undefined) setTimeout(() => void refresh(), 0);
+  }
+
   function handleKey(event: KeyboardEvent): boolean {
     if (event.type !== "keydown") return true;
     // Closed: every key is zsh's, unchanged. This is the line that keeps
     // the terminal behaving exactly as it does today.
-    if (!dropdown.isOpen()) return true;
+    if (!dropdown.isOpen()) {
+      scheduleRefresh();
+      return true;
+    }
     // A chord is the app's or the shell's — Ctrl-C must still interrupt,
     // Cmd-F must still open the find bar.
-    if (event.ctrlKey || event.metaKey || event.altKey) return true;
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      scheduleRefresh();
+      return true;
+    }
 
     if (event.key === "Escape") {
       dropdown.hide();
@@ -367,14 +415,21 @@ export function attachCompletion(
       openFor = undefined;
       event.preventDefault();
       if (value !== undefined && typed !== undefined) {
-        // Erase what is typed, then write the whole line. No newline: the
-        // user still presses Enter themselves, so accepting a suggestion
-        // can never run a command they did not read.
-        hooks.sendInput(BACKSPACE.repeat(typed.length) + value);
+        if (hooks.applyInput !== undefined) {
+          // The editor's own value, direct — nothing to erase, because the
+          // pty never had the typed line to begin with.
+          hooks.applyInput(value);
+        } else {
+          // Erase what is typed, then write the whole line. No newline: the
+          // user still presses Enter themselves, so accepting a suggestion
+          // can never run a command they did not read.
+          hooks.sendInput(BACKSPACE.repeat(typed.length) + value);
+        }
       }
       return false;
     }
 
+    scheduleRefresh();
     return true;
   }
 

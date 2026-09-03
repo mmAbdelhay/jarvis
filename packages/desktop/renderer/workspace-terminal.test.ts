@@ -567,3 +567,86 @@ describe("moving around a pane's blocks", () => {
     expect(pane.querySelector(".block.found")).toBeNull();
   });
 });
+
+// Task 10: with the command editor live, completion reads and writes it
+// instead of the xterm buffer, which shows nothing but the bare prompt
+// while the editor holds the line.
+describe("completion with the command editor live", () => {
+  beforeEach(() => harness());
+
+  async function editorPane() {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["terminalHistory"] = () => Promise.resolve(["ls -la"]);
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    // Drives the pane's own block/editor state machine — real bytes, the
+    // way xterm's own parser would hand them to the splitter. The editor
+    // only shows once the pane has seen a prompt this way.
+    dataListener?.("tab-1", "]133;A~/p > ]133;B");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Drives attachCompletion's own OSC tracking separately: the FakeTerminal
+    // double's write() does not parse escape sequences the way real xterm
+    // does, so the registered OSC handler needs feeding directly — the same
+    // way the plain-terminal completion tests above do.
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+
+    const field = document.querySelector<HTMLTextAreaElement>("textarea.terminal-input-text");
+    if (field === null) throw new Error("expected the editor's textarea");
+    if (field.closest(".terminal-input")?.hasAttribute("hidden")) {
+      throw new Error("expected the editor to be visible");
+    }
+    return { terminal, field };
+  }
+
+  it("suggests from the editor's value, not the bare prompt still on screen", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The xterm buffer never moved past "~/p > " — nothing reached the pty
+    // — so a call asking about that would prove the bug this task fixes.
+    expect(calls).toContainEqual({ call: "suggestCompletions", args: ["tab-1", "git sta"] });
+  });
+
+  it("accepts into the editor and sends nothing to the pty", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+
+    expect(field.value).toBe("git status");
+    expect(calls.some((c) => c.call === "sendTerminalInput")).toBe(false);
+  });
+
+  // The dropdown's own keys — here, ArrowDown — must not also run the
+  // editor's own handling of the same keystroke: the capture-phase
+  // consultation in terminal-pane.ts has to see it first and stop it there.
+  it("does not let the editor's own history walk run on a key the dropdown claimed", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+
+    // Had the editor's own handling also run on the same keystroke, this
+    // would have walked Jarvis's command log to "ls -la" instead of moving
+    // the dropdown's own selection.
+    expect(field.value).toBe("git sta");
+  });
+});
