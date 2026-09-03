@@ -26,6 +26,8 @@ function harness(): Recorded[] {
       <button id="workspace-open-api" title="Send requests from the project's collections"></button>
       <button id="workspace-open-cluster" title="Browse the project's Kubernetes clusters"></button>
       <div id="workspace-cluster-menu" hidden></div>
+      <button id="workspace-open-chat" title="Open the project's chat"></button>
+      <div id="workspace-chat-menu" hidden></div>
       <button id="workspace-open-docker" title="Manage the project's containers"></button>
       <div id="workspace-docker" hidden></div>
       <button id="workspace-toggle-bookmarks"></button>
@@ -129,6 +131,11 @@ function harness(): Recorded[] {
     openEditor: () => Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" }),
     editorRoots: () => Promise.resolve([]),
     clusterNames: () => Promise.resolve([]),
+    chatNames: () => Promise.resolve([]),
+    openChat: (...args: unknown[]) => {
+      calls.push({ call: "openChat", args });
+      return Promise.resolve({ ok: true, value: "https://acme.slack.com/" });
+    },
     openCluster: (...args: unknown[]) => {
       calls.push({ call: "openCluster", args });
       return Promise.resolve({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
@@ -1270,6 +1277,154 @@ describe("the Cluster button", () => {
     const button = document.getElementById("workspace-open-cluster") as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     expect(button.title).toBe("Browse the project's Kubernetes clusters");
+  });
+
+  // The Chat button follows the Cluster button's rule exactly, minus the
+  // waiting: there is no server to start, so no "starting…" state and no
+  // hover pre-warm.
+  describe("the Chat button", () => {
+    function chatMenuItems(): HTMLElement[] {
+      return [...document.querySelectorAll("#workspace-chat-menu button")] as HTMLElement[];
+    }
+
+    it("opens straight away when the project has one chat", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme"]);
+      initWorkspace(["acme"]);
+      await flush();
+      renderWorkspace({ tabs: [], activeTabId: undefined });
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(calls).toContainEqual({ call: "openChat", args: ["acme", "Acme"] });
+    });
+
+    it("opens the tab main resolved, as a chat tab named after the entry", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme"]);
+      initWorkspace(["acme"]);
+      await flush();
+      renderWorkspace({ tabs: [], activeTabId: undefined });
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(calls).toContainEqual({
+        call: "openTab",
+        args: ["acme", "https://acme.slack.com/", "chat", "Acme"],
+      });
+    });
+
+    it("offers a menu when the project has two or more", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme", "Vendors"]);
+      initWorkspace(["acme"]);
+      await flush();
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(document.getElementById("workspace-chat-menu")?.hidden).toBe(false);
+      expect(chatMenuItems().map((item) => item.textContent)).toEqual(["Acme", "Vendors"]);
+      expect(calls.some((entry) => entry.call === "openChat")).toBe(false);
+    });
+
+    it("closes the menu on a second press instead of reopening it", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme", "Vendors"]);
+      initWorkspace(["acme"]);
+      await flush();
+      const button = document.getElementById("workspace-open-chat");
+
+      button?.click();
+      await flush();
+      button?.click();
+      await flush();
+
+      expect(document.getElementById("workspace-chat-menu")?.hidden).toBe(true);
+    });
+
+    it("activates an open tab rather than opening a second", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme"]);
+      initWorkspace(["acme"]);
+      await flush();
+      renderWorkspace({
+        tabs: [tab({ id: "t1", project: "acme", kind: "chat", detail: "Acme" })],
+        activeTabId: "t1",
+      });
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(calls).toContainEqual({ call: "activateTab", args: ["t1"] });
+      expect(calls.some((entry) => entry.call === "openChat")).toBe(false);
+    });
+
+    // A project may have both a Teams tenant and a Slack workspace, so the
+    // tab's own `detail` decides which is already open, not the project.
+    it("tells two chats of one project apart by detail", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme", "Vendors"]);
+      initWorkspace(["acme"]);
+      await flush();
+      renderWorkspace({
+        tabs: [tab({ id: "t1", project: "acme", kind: "chat", detail: "Acme" })],
+        activeTabId: "t1",
+      });
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+      chatMenuItems()[1]?.click();
+      await flush();
+
+      expect(calls).toContainEqual({ call: "openChat", args: ["acme", "Vendors"] });
+    });
+
+    // A chat name is config text rendered into the menu — a node with its
+    // textContent set, never markup, same discipline as the cluster's.
+    it("renders a chat name as text, not as markup", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["<img src=x onerror=alert(1)>", "Vendors"]);
+      initWorkspace(["acme"]);
+      await flush();
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(document.querySelector("#workspace-chat-menu img")).toBeNull();
+      expect(chatMenuItems()[0]?.textContent).toBe("<img src=x onerror=alert(1)>");
+    });
+
+    it("shows the failure text when main refuses", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme"]);
+      jarvis["openChat"] = () =>
+        Promise.resolve({ ok: false, text: "Could not open that chat.", language: "en" });
+      initWorkspace(["acme"]);
+      await flush();
+      renderWorkspace({ tabs: [], activeTabId: undefined });
+
+      document.getElementById("workspace-open-chat")?.click();
+      await flush();
+
+      expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+        "Could not open that chat.",
+      );
+    });
+
+    it("disables the button for a project with no chat, with the reason shown", async () => {
+      jarvis["chatNames"] = () => Promise.resolve([]);
+      initWorkspace(["acme"]);
+      await flush();
+
+      const button = document.getElementById("workspace-open-chat") as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(button.title).toBe("No chat configured for this project.");
+    });
+
+    it("enables the button for a project with chat configured", async () => {
+      jarvis["chatNames"] = () => Promise.resolve(["Acme"]);
+      initWorkspace(["acme"]);
+      await flush();
+
+      const button = document.getElementById("workspace-open-chat") as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      expect(button.title).toBe("Open the project's chat");
+    });
   });
 
   // The personal browser declares no clusters, so it falls out of the same

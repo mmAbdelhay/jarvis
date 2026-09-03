@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiring,
   createBookmarksHandlers,
+  createChatHandlers,
   createClusterHandlers,
   createDatabaseHandlers,
   createDockerHandlers,
@@ -952,6 +953,7 @@ const sampleConfig: JarvisConfig = {
   projects: { acme: "/p/acme" },
   databases: {},
   editors: {},
+  chat: {},
   clusters: {},
   docker: {},
   headlamp: { binary: "/some/path" },
@@ -2270,5 +2272,61 @@ describe("createDockerHandlers", () => {
     expect(result.ok).toBe(false);
     expect(opened).toEqual([]);
     expect(sent).toEqual([]);
+  });
+});
+
+describe("createChatHandlers", () => {
+  const chat = {
+    acme: [
+      { name: "Acme", driver: "slack" as const, account: "acme" },
+      { name: "Vendors", driver: "teams" as const },
+    ],
+  };
+  const projects = { acme: "/Users/x/projects/acme" };
+
+  const chatHandlers = () => createChatHandlers({ chat, projects, language: "en" as const });
+
+  it("lists a project's chat names in config order", async () => {
+    expect(await chatHandlers().names("acme")).toEqual(["Acme", "Vendors"]);
+  });
+
+  it("lists nothing for a project with no chat entries", async () => {
+    expect(await chatHandlers().names("nope")).toEqual([]);
+  });
+
+  it("resolves a chat name to the URL its driver opens", async () => {
+    expect(await chatHandlers().open("acme", "Acme")).toEqual({
+      ok: true,
+      value: "https://acme.slack.com/",
+    });
+  });
+
+  it("resolves an entry with no account to the provider's own picker", async () => {
+    expect(await chatHandlers().open("acme", "Vendors")).toEqual({
+      ok: true,
+      value: "https://teams.microsoft.com/",
+    });
+  });
+
+  // The personal browser is in no `projects:` entry, so it can declare no
+  // chat — the same reason its Editor and Database buttons are dead.
+  it("refuses a project it does not know", async () => {
+    const result = await chatHandlers().open("personal", "Acme");
+    expect(result.ok).toBe(false);
+  });
+
+  // The renderer names a chat; main resolves it. A renderer-supplied string
+  // never becomes a URL on its own — the same discipline as the cluster's.
+  it("refuses a chat name the project does not declare", async () => {
+    const result = await chatHandlers().open("acme", "made-up");
+    expect(result).toEqual({
+      ok: false,
+      text: "Could not open that chat.",
+      language: "en",
+    });
+  });
+
+  it("refuses a name that is not a string", async () => {
+    expect((await chatHandlers().open("acme", 3 as unknown as string)).ok).toBe(false);
   });
 });

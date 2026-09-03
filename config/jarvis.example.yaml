@@ -46,6 +46,19 @@ editors:
     - { name: portal-vue, path: portal-vue }
     - { name: api, path: api }
 
+# Where each project's people talk. `driver` is slack or teams; `account`
+# says which org — the subdomain for Slack, the tenant domain or id for
+# Teams — and is optional, absent meaning the provider's own picker.
+#
+# There is deliberately no token here. A chat tab is the provider's web app
+# opened in the project's own browser partition, so you sign in once, in the
+# tab, and two projects on two Teams tenants never see each other's session.
+chat:
+  acme:
+    - { name: Acme, driver: slack, account: acme }
+  globex:
+    - { name: Globex, driver: teams }
+
 brain:
   cwd: ~/.config/jarvis/brain
   # Which account Jarvis's own reasoning runs under. Setting it makes the

@@ -1,5 +1,13 @@
 import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
-import type { ContainerFacts, DbGateConnection, DbGateEngine, DockerEntry, EditorRoot } from "@jarvis/platform";
+import type {
+  ChatDriver,
+  ChatEntry,
+  ContainerFacts,
+  DbGateConnection,
+  DbGateEngine,
+  DockerEntry,
+  EditorRoot,
+} from "@jarvis/platform";
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
@@ -46,6 +54,7 @@ function renderSettings(): void {
   renderDatabases();
   renderEditors();
   renderDocker();
+  renderChat();
   renderBrain();
   renderVoice();
   renderWhisper();
@@ -866,6 +875,130 @@ function confirmDockerPicker(): void {
   renderSettings();
 }
 
+// -------------------------------------------------------------------- Chat
+
+// The drivers @jarvis/platform's CHAT_DRIVERS declares, restated here for
+// the same reason ENGINE_OPTIONS is: a value import from a workspace
+// package is runtime-fatal in the renderer bundle, and only the type may
+// cross. The `satisfies` is what keeps the two from drifting, and it is
+// stricter than ENGINE_OPTIONS' annotation — this one fails to compile when
+// a driver is *added* to the union as well as when one is removed, which is
+// the direction that would otherwise leave a driver unpickable in Settings.
+const DRIVER_OPTIONS = Object.keys({
+  slack: true,
+  teams: true,
+} satisfies Record<ChatDriver, true>) as ChatDriver[];
+
+/** Every chat across every project, flattened into rows — the same shape
+ *  the sections above use, and for the same reason: a row names its own
+ *  project, so moving a chat is a select change rather than a delete and a
+ *  re-add. */
+function renderChat(): void {
+  if (draft === undefined) return;
+  const container = $("settings-chat");
+  container.replaceChildren();
+  for (const [project, entries] of Object.entries(draft.chat)) {
+    entries.forEach((entry, index) => {
+      container.append(renderChatRow(project, index, entry));
+    });
+  }
+  // parseConfig rejects a chat keyed to a project that does not exist, so
+  // with no projects there is no valid row to add.
+  ($("settings-chat-add") as HTMLButtonElement).disabled =
+    Object.keys(draft.projects).length === 0;
+}
+
+function renderChatRow(project: string, index: number, entry: ChatEntry): HTMLElement {
+  if (draft === undefined) return document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "settings-row";
+
+  const projectField = fieldSelect("project", project, Object.keys(draft.projects), (value) =>
+    moveChatEntry(project, index, value),
+  );
+  const nameField = fieldInput("name", entry.name, (value) => {
+    if (value !== "") updateChatEntry(project, index, { name: value });
+  });
+  const driverField = fieldSelect("driver", entry.driver, DRIVER_OPTIONS, (value) => {
+    if (isDriverOption(value)) updateChatEntry(project, index, { driver: value });
+  });
+  // Which org's Slack or Teams, and optional: an emptied field means the
+  // provider's own picker, so it drops the key rather than saving
+  // `account: ""` — which parseConfig refuses, and would otherwise make a
+  // config Settings itself wrote unloadable.
+  const accountField = fieldInput("account", entry.account ?? "", (value) => {
+    updateChatAccount(project, index, value);
+  });
+
+  row.append(
+    projectField,
+    nameField,
+    driverField,
+    accountField,
+    spacer(),
+    removeControl(() => removeChatEntry(project, index)),
+  );
+  return row;
+}
+
+function isDriverOption(value: string): value is ChatDriver {
+  return (DRIVER_OPTIONS as string[]).includes(value);
+}
+
+function updateChatEntry(project: string, index: number, patch: Partial<ChatEntry>): void {
+  if (draft === undefined) return;
+  const entry = draft.chat[project]?.[index];
+  if (entry === undefined) return;
+  Object.assign(entry, patch);
+}
+
+/** Kept apart from updateChatEntry because clearing this field must delete
+ *  the key, and Object.assign with `undefined` leaves it present. */
+function updateChatAccount(project: string, index: number, value: string): void {
+  if (draft === undefined) return;
+  const entry = draft.chat[project]?.[index];
+  if (entry === undefined) return;
+  if (value === "") delete entry.account;
+  else entry.account = value;
+}
+
+function moveChatEntry(project: string, index: number, toProject: string): void {
+  if (draft === undefined || toProject === project) return;
+  const entries = draft.chat[project];
+  const entry = entries?.[index];
+  if (entries === undefined || entry === undefined) return;
+  if (draft.projects[toProject] === undefined) return;
+
+  const remaining = entries.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.chat[project];
+  else draft.chat[project] = remaining;
+  draft.chat[toProject] = [...(draft.chat[toProject] ?? []), entry];
+  renderSettings();
+}
+
+function removeChatEntry(project: string, index: number): void {
+  if (draft === undefined) return;
+  const entries = draft.chat[project];
+  if (entries === undefined) return;
+  const remaining = entries.filter((_entry, i) => i !== index);
+  if (remaining.length === 0) delete draft.chat[project];
+  else draft.chat[project] = remaining;
+}
+
+function addChatEntry(): void {
+  if (draft === undefined) return;
+  const project = Object.keys(draft.projects)[0];
+  if (project === undefined) return;
+  const existing = draft.chat[project] ?? [];
+  // Names are unique within a project (parseConfig enforces it), and a row
+  // with no account is already valid — so a freshly added row can be saved
+  // before it is filled in, exactly as addEditorRoot's can.
+  let n = 1;
+  while (existing.some((entry) => entry.name === `chat-${n}`)) n += 1;
+  draft.chat[project] = [...existing, { name: `chat-${n}`, driver: "slack" }];
+  renderSettings();
+}
+
 // ------------------------------------------------------------------ Brain
 
 function renderBrain(): void {
@@ -1093,6 +1226,10 @@ function wireStaticFields(): void {
     clearSaveStatus();
   });
   $("settings-docker-autopopulate").addEventListener("click", () => void autopopulateDocker());
+  $("settings-chat-add").addEventListener("click", () => {
+    addChatEntry();
+    clearSaveStatus();
+  });
 
   $("settings-save").addEventListener("click", () => void saveSettings());
   $("settings-restart").addEventListener("click", () => void window.jarvis.restartApp());

@@ -67,6 +67,8 @@ const api: RendererApi = {
   openCluster: (project, cluster, background) =>
     ipcRenderer.invoke("cluster:open", project, cluster, background),
   clusterNames: (project) => ipcRenderer.invoke("cluster:names", project),
+  openChat: (project, name) => ipcRenderer.invoke("chat:open", project, name),
+  chatNames: (project) => ipcRenderer.invoke("chat:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
   suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
   openDockerTab: (project) => ipcRenderer.invoke("docker:open", project),

@@ -260,6 +260,13 @@
       </div>
       <button id="workspace-open-docker" class="workspace-nav" type="button"
               style="width: auto; padding: 0 12px;" title="Manage the project's containers">Docker</button>
+      <div class="workspace-menu-anchor">
+        <button id="workspace-open-chat" class="workspace-nav" type="button"
+                style="width: auto; padding: 0 12px;" title="Open the project's chat">Chat</button>
+        <!-- Filled in by workspace.ts when the selected project declares more
+             than one `chat:` entry; empty and hidden otherwise. -->
+        <div id="workspace-chat-menu" class="workspace-menu" hidden></div>
+      </div>
       <button id="workspace-toggle-bookmarks" class="workspace-nav" type="button"
               title="Show or hide the bookmarks bar">&#9776;</button>
       <span id="workspace-tool-status" class="mono"></span>
@@ -436,6 +443,14 @@
         </div>
         <div id="settings-docker" class="settings-rows"></div>
         <div id="settings-docker-picker" class="settings-rows" hidden></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <div class="lbl">CHAT</div>
+          <button id="settings-chat-add" class="settings-add" type="button">+ Add chat</button>
+        </div>
+        <div id="settings-chat" class="settings-rows"></div>
       </section>
 
       <section class="settings-section">

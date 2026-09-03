@@ -1,6 +1,9 @@
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import { defaultSessionsDbPath, loadConfig, parseConfig } from "./config.js";
@@ -188,6 +191,24 @@ describe("parseConfig", () => {
     const config = parseConfig(valid);
     expect(config.sessionsDbPath).toBe(join(homedir(), ".config/jarvis/sessions.db"));
     expect(config.sessionsDbPath).toBe(defaultSessionsDbPath());
+  });
+});
+
+// The example is the file a new machine is told to copy (see SETUP.md), and
+// nothing else reads it — so without this it can drift out of parseConfig's
+// reach silently, and the first person to find out is someone whose Jarvis
+// will not start.
+describe("the shipped example config", () => {
+  const examplePath = fileURLToPath(new URL("../../../config/jarvis.example.yaml", import.meta.url));
+
+  it("parses", () => {
+    const config = parseConfig(parse(readFileSync(examplePath, "utf8")));
+
+    expect(Object.keys(config.projects)).toContain("globex");
+    expect(config.chat["acme"]).toEqual([
+      { name: "Acme", driver: "slack", account: "acme" },
+    ]);
+    expect(config.chat["globex"]).toEqual([{ name: "Globex", driver: "teams" }]);
   });
 });
 
@@ -656,6 +677,69 @@ describe("clusters", () => {
         },
       }),
     ).toThrow(/duplicates an earlier container/);
+  });
+
+  it("parses a project's chat entries in config order", () => {
+    const config = parseConfig({
+      ...base,
+      chat: {
+        acme: [
+          { name: "Acme", driver: "slack", account: "acme" },
+          { name: "Vendors", driver: "teams" },
+        ],
+      },
+    });
+    expect(config.chat["acme"]).toEqual([
+      { name: "Acme", driver: "slack", account: "acme" },
+      { name: "Vendors", driver: "teams" },
+    ]);
+  });
+
+  it("parses an absent chat section as an empty map", () => {
+    expect(parseConfig(base).chat).toEqual({});
+  });
+
+  it("rejects a chat key that names no configured project", () => {
+    expect(() =>
+      parseConfig({ ...base, chat: { nope: [{ name: "a", driver: "slack" }] } }),
+    ).toThrow(/names no configured project/);
+  });
+
+  it("rejects a chat entry with an empty name", () => {
+    expect(() =>
+      parseConfig({ ...base, chat: { acme: [{ name: "", driver: "slack" }] } }),
+    ).toThrow(/name/);
+  });
+
+  it("rejects a chat entry whose driver is not one this build knows", () => {
+    expect(() =>
+      parseConfig({ ...base, chat: { acme: [{ name: "a", driver: "discord" }] } }),
+    ).toThrow(/driver/);
+  });
+
+  // An empty account is not the same as an absent one: absent means "the
+  // provider's own picker", while "" would build https://.slack.com/.
+  it("rejects a chat entry with an empty account rather than treating it as absent", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        chat: { acme: [{ name: "a", driver: "slack", account: "" }] },
+      }),
+    ).toThrow(/account/);
+  });
+
+  it("rejects two chat entries with the same name in one project", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        chat: {
+          acme: [
+            { name: "Chat", driver: "slack" },
+            { name: "Chat", driver: "teams" },
+          ],
+        },
+      }),
+    ).toThrow(/duplicates an earlier chat/);
   });
 
   it("defaults to no clusters when the section is absent", () => {

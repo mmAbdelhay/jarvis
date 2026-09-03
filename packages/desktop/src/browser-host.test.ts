@@ -432,6 +432,19 @@ describe("BrowserHost", () => {
     expect(host.state().tabs[0]?.detail).toBe("dev");
   });
 
+  // Slack and Teams both rewrite document.title with the active channel
+  // and an unread count — "(3) general | acme | Slack" — which is
+  // exactly the churn a hosted app's fixed label exists to keep out of the
+  // tab strip.
+  it("names the chat in the title, and never lets the page overwrite it", () => {
+    host.open("acme", "https://acme.slack.com/", "chat", "Acme");
+
+    views[0]?.emit({ kind: "title", title: "(3) general | acme | Slack" });
+
+    expect(host.state().tabs[0]?.title).toBe("acme — Chat · Acme");
+    expect(host.state().tabs[0]?.detail).toBe("Acme");
+  });
+
   it("still applies page-title-updated for an ordinary web tab", () => {
     host.open("acme", "one.example");
 
