@@ -312,11 +312,16 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Shared with the terminal's two AI actions below (TerminalHandlerDeps.brain)
+    // — one brain, one account attribution, rather than a second SDK session
+    // with its own onUsage wiring.
+    const brain = createBrain({
+      ...config.brain,
+      onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
+    });
+
     const orchestrator = new Orchestrator({
-      brain: createBrain({
-        ...config.brain,
-        onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
-      }),
+      brain,
       registry,
       sessions,
       git,
@@ -632,6 +637,10 @@ app.whenReady().then(async () => {
         config: config.workflows,
         defaultDir: defaultWorkflowsDir(),
       },
+      // The two AI actions' only route to the brain — see
+      // TerminalHandlerDeps.brain's own note on why nothing else in ipc.ts
+      // calls it.
+      brain,
     });
 
     // Constructed here, not beside headlamp above, because opening the
@@ -1117,6 +1126,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:settings", () => terminal.settings());
     ipcMain.handle("terminal:workflows", (_event, project: unknown) =>
       terminal.workflows(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("terminal:ai", (_event, kind: unknown, text: unknown) =>
+      terminal.terminalAi(kind as "generate" | "explain", text as string),
     );
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),

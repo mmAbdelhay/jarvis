@@ -18,7 +18,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import { join, resolve, sep } from "node:path";
-import type { WorkspaceState } from "@jarvis/core";
+import type { Brain, WorkspaceState } from "@jarvis/core";
 import {
   awsLoginCommand,
   eksUpdateKubeconfigArgs,
@@ -449,6 +449,12 @@ export type RendererApi = {
   /** Every saved workflow the ⌘P palette's "Run workflow…" can offer for
    *  `project` — see TerminalHandlers.workflows above. */
   terminalWorkflows(project: string): Promise<Workflow[]>;
+  /**
+   * The two AI actions, both explicit and both on demand — see
+   * TerminalHandlers.terminalAi. Never rejects: any failure, including no
+   * brain configured at all, resolves "".
+   */
+  terminalAi(kind: "generate" | "explain", text: string): Promise<string>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -872,6 +878,16 @@ export type TerminalHandlers = {
    *  configured directory, if it has one. Never rejects: a workflow source
    *  that cannot be read is a shorter list, not a broken palette. */
   workflows(project: string): Promise<Workflow[]>;
+  /**
+   * The whole of the two AI actions — "Generate command" and "Explain this
+   * failure" — behind one handler. `kind` picks which prompt gets built;
+   * `text` is the user's request for "generate", or a JSON-encoded
+   * `{ command, exitCode, output }` for "explain". Never rejects: no brain
+   * configured, an untyped argument, an unparseable explain payload, or the
+   * brain itself throwing are all "" — the same silent-nothing this whole
+   * feature promises everywhere else a call might fail.
+   */
+  terminalAi(kind: "generate" | "explain", text: string): Promise<string>;
 };
 
 export type TerminalHandlerDeps = {
@@ -903,7 +919,35 @@ export type TerminalHandlerDeps = {
         defaultDir: string;
       }
     | undefined;
+  /**
+   * The two AI actions' only route to Jarvis's brain. Absent means
+   * `terminalAi` always resolves "" — a terminal with no AI actions at all,
+   * exactly as a terminal with completion off has no dropdown. Nothing else
+   * in this file ever calls it: that is the whole of the "nothing reaches
+   * the brain except through an explicit action" rule, enforced by there
+   * being exactly one call site.
+   */
+  brain?: Brain;
 };
+
+/** A failing build's output is not a prompt: only the last 4000 characters
+ *  of it — the part most likely to say why — ever reach the brain. Applied
+ *  here, in main, rather than trusted from the renderer: this is the one
+ *  point every explain call passes through regardless of what the renderer
+ *  sent. */
+const EXPLAIN_OUTPUT_CAP = 4000;
+
+type ExplainPayload = { command: string; exitCode: number; output: string };
+
+function isExplainPayload(value: unknown): value is ExplainPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate["command"] === "string" &&
+    typeof candidate["exitCode"] === "number" &&
+    typeof candidate["output"] === "string"
+  );
+}
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
   // Which directory each tab's shell was started in. The renderer knows
@@ -1043,6 +1087,49 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // taking a terminal's palette down over — an empty list is what a
         // closed dropdown already means.
         return [];
+      }
+    },
+
+    async terminalAi(kind, text) {
+      const brain = deps.brain;
+      if (brain === undefined) return "";
+      if (kind !== "generate" && kind !== "explain") return "";
+      if (!isString(text)) return "";
+
+      let prompt: string;
+      if (kind === "generate") {
+        // A single command, nothing else: the user reads it before it ever
+        // reaches the pty, and prose in the middle of it would be typed as
+        // shell input.
+        prompt =
+          "Turn this into a single shell command. Respond with only the " +
+          `command itself — no prose, no explanation, no markdown fences.\n\n${text}`;
+      } else {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          return "";
+        }
+        if (!isExplainPayload(payload)) return "";
+        const tail = payload.output.slice(-EXPLAIN_OUTPUT_CAP);
+        prompt =
+          "This shell command failed. Explain briefly why, and how to fix it.\n\n" +
+          `Command: ${payload.command}\nExit code: ${payload.exitCode}\nOutput:\n${tail}`;
+      }
+
+      try {
+        const reply = await brain.ask({
+          text: prompt,
+          tools: [],
+          context: { projects: [], sessions: [], changes: [] },
+        });
+        return reply.text;
+      } catch {
+        // A brain that rejects is "" — nothing here is worth throwing into
+        // a terminal for, the same rule every other AI-action failure
+        // follows.
+        return "";
       }
     },
   };

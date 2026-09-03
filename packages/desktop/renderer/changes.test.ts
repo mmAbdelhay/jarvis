@@ -68,6 +68,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       home: "/home/x",
     })),
     terminalWorkflows: vi.fn(async () => []),
+    terminalAi: vi.fn(async () => ""),
     setDevTools: vi.fn(async () => {}),
     openApiTab: vi.fn(async () => notStubbed),
     listApiCollections: vi.fn(async () => notStubbed),

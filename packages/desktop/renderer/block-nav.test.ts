@@ -38,6 +38,7 @@ function fakeView(command: string, exitCode: number | undefined, output = ""): B
     collapse: () => {},
     isCollapsed: () => false,
     text: () => `${command}\n${output}`,
+    explain: () => {},
   };
 }
 

@@ -26,7 +26,7 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import type { AgentHealth, WorkspaceState } from "@jarvis/core";
+import type { AgentHealth, Brain, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 
@@ -1986,6 +1986,133 @@ describe("terminal handlers", () => {
       const handlers = withWorkflows({});
 
       expect(await handlers.workflows(7 as unknown as string)).toEqual([]);
+    });
+  });
+
+  // The two AI actions, and nothing else: every call the brain sees came
+  // from a "generate" or "explain" terminalAi call, never from opening a
+  // pane, typing, running a command or closing it.
+  describe("terminalAi", () => {
+    function fakeBrain(reply: { text: string; toolCalls?: never[] } = { text: "" }): {
+      brain: Brain;
+      calls: Parameters<Brain["ask"]>[0][];
+    } {
+      const calls: Parameters<Brain["ask"]>[0][] = [];
+      return {
+        calls,
+        brain: {
+          ask: async (input) => {
+            calls.push(input);
+            return { text: reply.text, toolCalls: [] };
+          },
+        },
+      };
+    }
+
+    function withBrain(brain?: Brain) {
+      const { manager } = shells();
+      return createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-7",
+        projects: { acme: "/p/acme" },
+        language: "en",
+        terminal: terminalConfig,
+        brain,
+      });
+    }
+
+    it("asks the brain for a single shell command with no prose, and returns it", async () => {
+      const { brain, calls } = fakeBrain({ text: "ls -la" });
+      const handlers = withBrain(brain);
+
+      const result = await handlers.terminalAi("generate", "list files in this directory");
+
+      expect(result).toBe("ls -la");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.tools).toEqual([]);
+      const prompt = calls[0]?.text ?? "";
+      expect(prompt).toContain("list files in this directory");
+      expect(prompt).toContain("single shell command");
+      expect(prompt).toContain("no prose");
+    });
+
+    it("asks the brain with the command, the exit code and the output tail when explaining", async () => {
+      const { brain, calls } = fakeBrain({ text: "npm test failed because a dependency is missing." });
+      const handlers = withBrain(brain);
+      const output = `head-${"x".repeat(5000)}-tail`;
+
+      const result = await handlers.terminalAi(
+        "explain",
+        JSON.stringify({ command: "npm test", exitCode: 1, output }),
+      );
+
+      expect(result).toBe("npm test failed because a dependency is missing.");
+      expect(calls).toHaveLength(1);
+      const prompt = calls[0]?.text ?? "";
+      expect(prompt).toContain("npm test");
+      expect(prompt).toContain("1");
+      // Capped at 4000 characters: the tail survives, the head does not.
+      expect(prompt).toContain(output.slice(-4000));
+      expect(prompt).not.toContain("head-");
+    });
+
+    it("returns \"\" without throwing when the brain rejects", async () => {
+      const brain: Brain = {
+        ask: async () => {
+          throw new Error("boom");
+        },
+      };
+      const handlers = withBrain(brain);
+
+      await expect(handlers.terminalAi("generate", "anything")).resolves.toBe("");
+    });
+
+    it("returns \"\" and calls nothing when no brain is configured", async () => {
+      const handlers = withBrain(undefined);
+
+      expect(await handlers.terminalAi("generate", "anything")).toBe("");
+    });
+
+    it("returns \"\" for a kind that is neither of the two literals, without calling the brain", async () => {
+      const { brain, calls } = fakeBrain({ text: "ls -la" });
+      const handlers = withBrain(brain);
+
+      expect(await handlers.terminalAi("delete-everything" as "generate", "x")).toBe("");
+      expect(calls).toHaveLength(0);
+    });
+
+    it("returns \"\" for a non-string text, without calling the brain", async () => {
+      const { brain, calls } = fakeBrain({ text: "ls -la" });
+      const handlers = withBrain(brain);
+
+      expect(await handlers.terminalAi("generate", 7 as unknown as string)).toBe("");
+      expect(calls).toHaveLength(0);
+    });
+
+    it("returns \"\" for an explain payload that fails to parse or is missing fields", async () => {
+      const { brain, calls } = fakeBrain({ text: "should not be seen" });
+      const handlers = withBrain(brain);
+
+      expect(await handlers.terminalAi("explain", "not json")).toBe("");
+      expect(await handlers.terminalAi("explain", JSON.stringify({ command: "x" }))).toBe("");
+      expect(calls).toHaveLength(0);
+    });
+
+    // The whole point of the feature: nothing about opening a pane, typing
+    // into it, running a command, failing it or closing it ever reaches the
+    // brain — only an explicit terminalAi call does.
+    it("never calls the brain from opening, running or closing a pane", () => {
+      const { brain, calls } = fakeBrain({ text: "should never be produced" });
+      const handlers = withBrain(brain);
+
+      handlers.open("acme");
+      handlers.input("tab-7", "npm test\r");
+      handlers.resize("tab-7", 80, 24);
+      handlers.split("tab-7", "p1");
+      handlers.closePane("tab-7:p1");
+      handlers.close("tab-7");
+
+      expect(calls).toHaveLength(0);
     });
   });
 });

@@ -30,6 +30,14 @@ export type BlockView = {
   collapse(collapsed: boolean): void;
   isCollapsed(): boolean;
   text(): string;
+  /**
+   * Appends (or, on a second call, replaces) a `.block-explanation` element
+   * holding the brain's answer to "Explain this failure" — via
+   * `textContent`, never `innerHTML`: the answer is untrusted text
+   * rendered exactly like the block's own output. "" does nothing, which
+   * is what a failed or empty explain call already resolves to.
+   */
+  explain(text: string): void;
 };
 
 /** `((endedAt - startedAt) / 1000).toFixed(1) + "s"` under a minute,
@@ -183,6 +191,7 @@ export function createBlockView(record: BlockRecord, hooks: BlockViewHooks): Blo
   element.dataset["status"] = record.exitCode === 0 ? "ok" : "failed";
 
   let collapsed = false;
+  let explanationEl: HTMLElement | undefined;
   const view: BlockView = {
     element,
     record,
@@ -198,6 +207,16 @@ export function createBlockView(record: BlockRecord, hooks: BlockViewHooks): Blo
     },
     text(): string {
       return `${record.command}\n${record.output}`;
+    },
+    explain(text: string): void {
+      if (text === "") return;
+      if (explanationEl === undefined) {
+        explanationEl = document.createElement("div");
+        explanationEl.className = "block-explanation";
+        element.append(explanationEl);
+      }
+      // textContent, deliberately — see the type's own note above.
+      explanationEl.textContent = text;
     },
   };
 

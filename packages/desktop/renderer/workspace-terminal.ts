@@ -269,6 +269,10 @@ function makePane(
     // The palette's split right / split down / close pane — the same tree
     // handleSplitKey already acts on for the app's own ⌘D/⌘⇧D/⌘W chords.
     splitKeys,
+    // The two AI actions' only route to the brain. window.jarvis.terminalAi
+    // never rejects (main resolves every failure, including no brain
+    // configured, to ""), so this needs no guard of its own.
+    terminalAi: (kind, text) => window.jarvis.terminalAi(kind, text),
     // So the palette can hide a suggestion list left showing from
     // mid-typing before it opens over the same pane.
     closeCompletion: () => completion.close(),

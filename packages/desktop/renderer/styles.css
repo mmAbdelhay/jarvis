@@ -1318,6 +1318,12 @@
   .block-output { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; white-space: pre; }
   .block-line { min-height: 1.35em; }
   .block-elided { color: var(--text-muted); font-style: italic; }
+  /* "Explain this failure"'s answer, inside the block it explains — a
+     brain's prose next to the raw output it was asked about, not a
+     separate surface the user has to go find. */
+  .block-explanation { margin-top: 6px; padding: 6px 8px; border-left: 2px solid var(--accent);
+    background: var(--accent-quiet); color: var(--text); white-space: pre-wrap;
+    font: 12px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar

@@ -189,6 +189,7 @@ describe("the command editor in a pane", () => {
     } = EDITOR_SETTINGS,
     history: () => Promise<string[]> = async () => [],
     workflows?: () => Promise<Workflow[]>,
+    terminalAi?: (kind: "generate" | "explain", text: string) => Promise<string>,
   ) {
     const host = document.createElement("div");
     document.body.append(host);
@@ -201,6 +202,7 @@ describe("the command editor in a pane", () => {
       notify: vi.fn(),
       history,
       workflows,
+      terminalAi,
     });
     return { p, sendInput };
   }
@@ -998,6 +1000,119 @@ describe("the command editor in a pane", () => {
         expect(field.value).toBe("half-typed");
         expect(sendInput).not.toHaveBeenCalled();
         expect(paletteEl(p)?.hidden).toBe(true);
+      });
+    });
+
+    describe("the two AI actions", () => {
+      it("is not offered when the pane has no terminalAi hook wired up", () => {
+        const { p } = editorPane();
+        p.write(`${A}$ ${B}`);
+
+        press(p, { key: "p", metaKey: true });
+
+        expect(paletteEl(p)?.textContent).not.toContain("Generate command");
+      });
+
+      it("Generate command… asks free text, fills the editor with the reply, and never sends it", async () => {
+        const calls: [string, string][] = [];
+        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
+          calls.push([kind, text]);
+          return "git status";
+        });
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Generate command";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // The free-text prompt.
+        const askInput = paletteEl(p)?.querySelector("input");
+        if (askInput === null || askInput === undefined) throw new Error("no free-text input");
+        askInput.value = "show me the current branch status";
+        askInput.dispatchEvent(new Event("input"));
+        askInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(calls).toEqual([["generate", "show me the current branch status"]]);
+        expect(textarea(p)?.value).toBe("git status");
+        expect(sendInput).not.toHaveBeenCalled();
+      });
+
+      it("leaves the editor untouched when Generate command… is answered with Escape", async () => {
+        const ai = vi.fn(async () => "should not be called");
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, ai);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const field = textarea(p);
+        if (field === null) throw new Error("no editor");
+        field.value = "half-typed";
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Generate command";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(field.value).toBe("half-typed");
+        expect(ai).not.toHaveBeenCalled();
+      });
+
+      it("offers Explain this failure only for a selected block with a non-zero exit code", () => {
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async () => "explanation");
+        p.write(`${A}$ ${B}ok\r\n${C("ok")}${D(0)}${A}$ ${B}bad\r\n${C("bad")}${D(1)}${A}$ ${B}`);
+
+        p.blockNav?.move(1); // selects the first block, "ok" (exit 0)
+        press(p, { key: "p", metaKey: true });
+        expect(paletteEl(p)?.textContent).not.toContain("Explain this failure");
+        press(p, { key: "Escape" });
+
+        p.blockNav?.move(1); // "bad" (exit 1)
+        press(p, { key: "p", metaKey: true });
+        expect(paletteEl(p)?.textContent).toContain("Explain this failure");
+      });
+
+      it("Explain this failure sends the command, exit code and output, and renders the reply into the block", async () => {
+        const calls: [string, string][] = [];
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
+          calls.push([kind, text]);
+          return "npm test failed because a dependency is missing.";
+        });
+        p.write(`${A}$ ${B}npm test\r\n${C("npm test")}some output${D(1)}${A}$ ${B}`);
+        p.blockNav?.move(1);
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Explain this failure";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.[0]).toBe("explain");
+        const payload = JSON.parse(calls[0]?.[1] ?? "{}") as { command: string; exitCode: number; output: string };
+        expect(payload).toEqual({ command: "npm test", exitCode: 1, output: "some output" });
+
+        const explanation = p.element.querySelector(".block-explanation");
+        expect(explanation?.textContent).toBe("npm test failed because a dependency is missing.");
       });
     });
 

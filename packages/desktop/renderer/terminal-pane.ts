@@ -72,6 +72,15 @@ export type PaneHooks = {
    *  stale underneath it. Absent for a terminal with no completion wired
    *  up, in which case there is nothing to close. */
   closeCompletion?: (() => void) | undefined;
+  /**
+   * The two AI actions' only route out of this pane — window.jarvis.terminalAi,
+   * one call per action, never called anywhere else in this file. Absent
+   * (no brain configured at all, the main-process side of the "absent
+   * means no AI actions" rule) leaves both actions out of the palette
+   * entirely, the same way `workflows` being absent leaves out "Run
+   * workflow…".
+   */
+  terminalAi?: ((kind: "generate" | "explain", text: string) => Promise<string>) | undefined;
 };
 
 export type { BlockView };
@@ -455,8 +464,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    * of being present and silently doing nothing when chosen). Split
    * right/split down/close pane are left out the same way when this pane
    * has no splits to act on (`hooks.splitKeys` absent — the Session
-   * route). Workflows and the two AI actions are later tasks and belong
-   * here too, once they exist — nothing about this list is final.
+   * route). "Generate command…" and "Explain this failure" follow the same
+   * rule: left out entirely when `hooks.terminalAi` is absent (no brain
+   * configured), and "Explain this failure" further requires a selected
+   * block whose exit code is a real, non-zero number.
    */
   function paletteActions(): PaletteAction[] {
     const actions: PaletteAction[] = [];
@@ -469,6 +480,13 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       if (idle()) {
         actions.push({ id: "rerun", label: "Re-run command", run: () => fill(selected.record.command) });
       }
+      // Only a real failure — a defined, non-zero exit code — has a
+      // command, a code and an output worth sending; an unknown exit code
+      // (should not normally reach a frozen block) offers nothing rather
+      // than explaining a status that was never actually observed.
+      if (hooks.terminalAi !== undefined && selected.record.exitCode !== undefined && selected.record.exitCode !== 0) {
+        actions.push({ id: "explain-failure", label: "Explain this failure", run: explainFailure });
+      }
     }
     actions.push({
       id: "collapse-all",
@@ -478,6 +496,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     actions.push({ id: "clear", label: "Clear terminal", run: () => attempt(() => terminal.clear()) });
     if (hooks.workflows !== undefined && editor !== undefined) {
       actions.push({ id: "run-workflow", label: "Run workflow…", run: runWorkflow });
+    }
+    if (hooks.terminalAi !== undefined && editor !== undefined) {
+      actions.push({ id: "generate-command", label: "Generate command…", run: generateCommand });
     }
     if (nav !== undefined) {
       const currentNav = nav;
@@ -588,6 +609,77 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       const value = values[name];
       return value === undefined ? whole : value;
     });
+  }
+
+  /**
+   * "Generate command…"'s whole flow: ask the palette for a free-text
+   * description, hand it to `terminalAi("generate", …)`, and put whatever
+   * comes back in the editor. It fills; it never runs — the result is
+   * never handed to `hooks.sendInput`, the same rule re-run and workflows
+   * both follow, so the user always reads a generated command before it
+   * can do anything.
+   *
+   * Never throws into the terminal: Escape at the prompt, or a brain call
+   * that fails (which resolves "" rather than rejecting, but this still
+   * guards the await), simply leaves the editor as it was. An empty result
+   * also leaves the editor untouched — "" is not a command worth showing.
+   */
+  function generateCommand(): void {
+    const ai = hooks.terminalAi;
+    if (ai === undefined || editor === undefined) return;
+    const editorEl = editor;
+    void (async () => {
+      // Yields once before touching the palette — the same gap `runWorkflow`
+      // and `historySearch` get for free from their own leading `await
+      // read()`. Without it, this action's own `palette.ask` would be set
+      // up and torn down inside the *same* synchronous call: the "Actions"
+      // palette's `chooseSelected` runs this action's `run()` and then
+      // immediately closes the palette, and a nested `ask()` opened before
+      // that close call would be the thing it closes.
+      await Promise.resolve();
+      let request: string | undefined;
+      try {
+        request = await palette.ask([], "What should this do?");
+      } catch {
+        return;
+      }
+      if (request === undefined || request === "") return;
+      let result: string;
+      try {
+        result = await ai("generate", request);
+      } catch {
+        return;
+      }
+      if (result !== "") attempt(() => editorEl.setValue(result));
+    })();
+  }
+
+  /**
+   * "Explain this failure"'s whole flow: send the selected block's command,
+   * exit code and output to `terminalAi("explain", …)`, and render whatever
+   * comes back inside that same block. Only ever offered — see
+   * `paletteActions` — for a selected block whose exit code is a real
+   * non-zero number, so there is always a command, a code and an output to
+   * send.
+   *
+   * Never throws into the terminal: a call that fails resolves "" (never
+   * rejects), and `BlockView.explain("")` already does nothing.
+   */
+  function explainFailure(): void {
+    const ai = hooks.terminalAi;
+    const selected = nav?.selected();
+    if (ai === undefined || selected === undefined) return;
+    const record = selected.record;
+    const payload = JSON.stringify({
+      command: record.command,
+      exitCode: record.exitCode,
+      output: record.output,
+    });
+    void ai("explain", payload)
+      .then((result) => attempt(() => selected.explain(result)))
+      .catch(() => {
+        // No explanation. The block is untouched.
+      });
   }
 
   /**
