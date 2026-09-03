@@ -718,6 +718,23 @@ describe("bridgeEvents", () => {
     expect(events).toEqual([]);
   });
 
+  // Minor 10: this is an untyped IPC payload. `[0]` on a *string* yields one
+  // character, which used to become an "icon url" of "h" — a fetch that
+  // fails and records a seven-day miss against the origin, suppressing the
+  // site's real icon for that whole week.
+  it.each([
+    ["a bare string", "https://a.test/icon.png"],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { icon: "https://a.test/icon.png" }],
+    ["an array of non-strings", [{ url: "https://a.test/icon.png" }]],
+    ["an array holding an empty string", [""]],
+  ])("ignores a favicon payload that is %s", (_name, payload) => {
+    contents.fire("page-favicon-updated", {}, payload);
+
+    expect(events).toEqual([]);
+  });
+
   // Chromium tells us when media starts and stops. It is a prompt to ask
   // the page, not an answer in itself — see the host's own tests.
   it("reports media starting and stopping", () => {

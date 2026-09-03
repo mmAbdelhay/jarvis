@@ -488,10 +488,15 @@ export function bridgeEvents(
   // fires — including sites that declare it in HTML rather than serving
   // /favicon.ico — so this is both the most accurate source and free.
   // icons can be empty (a page with no favicon at all); [0] is Chromium's
-  // own preferred candidate.
-  on("page-favicon-updated", ((_event: unknown, icons: string[]) => {
-    const iconUrl = icons[0];
-    if (iconUrl === undefined) return;
+  // own preferred candidate. The Array.isArray guard is not paranoia about
+  // Chromium: this is an untyped IPC payload, and `[0]` on a *string*
+  // silently yields one character — an "icon url" of "h" that fails to
+  // fetch and records a week-long miss against the origin, suppressing the
+  // real icon for that whole week.
+  on("page-favicon-updated", ((_event: unknown, icons: unknown) => {
+    if (!Array.isArray(icons)) return;
+    const iconUrl: unknown = icons[0];
+    if (typeof iconUrl !== "string" || iconUrl === "") return;
     emit({ kind: "favicon", pageUrl: contents.getURL(), iconUrl, session: contents.session });
   }) as (...args: never[]) => void);
 
