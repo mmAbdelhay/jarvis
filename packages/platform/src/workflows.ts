@@ -96,20 +96,30 @@ export type LoadWorkflowsDeps = {
   readFile: (path: string) => string;
   /** The directories to read, in order — `loadConfig`'s always-read
    *  `~/.config/jarvis/workflows/` plus whatever `workflows:` names for
-   *  the current project. */
+   *  the current project — in order from least to most specific: the
+   *  always-read global directory first, a project's own directory last.
+   *  That order is what gives a later path precedence below. */
   paths: string[];
 };
 
 /**
- * Every workflow across `deps.paths`, in directory order and then
- * directory-listing order. A directory that cannot be listed is skipped,
- * not fatal — the same "a bad source costs only itself" rule
- * `parseWorkflow` follows for a single bad file, and `zshWrapperFiles`'s
- * caller follows for a shell integration that fails to install. Never
- * throws.
+ * Every workflow across `deps.paths`, deduplicated by name. A directory
+ * that cannot be listed is skipped, not fatal — the same "a bad source
+ * costs only itself" rule `parseWorkflow` follows for a single bad file,
+ * and `zshWrapperFiles`'s caller follows for a shell integration that
+ * fails to install. Never throws.
+ *
+ * "Most specific wins": when the same name appears in more than one
+ * directory (or twice within one), the version from the *later* path in
+ * `deps.paths` replaces the earlier one — `paths` is expected least-to-most
+ * specific (see its doc), so a project's own directory shadows the
+ * always-read global one, the same way a project overrides a global default
+ * everywhere else in this app (editors:, clusters:). This is what keeps the
+ * palette from ever listing one name twice and filling the wrong command
+ * for whichever entry the user did not mean.
  */
 export function loadWorkflows(deps: LoadWorkflowsDeps): Workflow[] {
-  const workflows: Workflow[] = [];
+  const byName = new Map<string, Workflow>();
   for (const dir of deps.paths) {
     let names: string[];
     try {
@@ -125,8 +135,8 @@ export function loadWorkflows(deps: LoadWorkflowsDeps): Workflow[] {
         continue;
       }
       const workflow = parseWorkflow(text);
-      if (workflow !== undefined) workflows.push(workflow);
+      if (workflow !== undefined) byName.set(workflow.name, workflow);
     }
   }
-  return workflows;
+  return [...byName.values()];
 }

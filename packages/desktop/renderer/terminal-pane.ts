@@ -570,8 +570,13 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  `{{name}}` / `{{ name }}` occurrence a value was supplied for, and
    *  leaves the rest in place. Restated rather than imported — a renderer
    *  module may only import *types* from a workspace package (see
-   *  no-value-imports.test.ts); the real implementation, and the tests
-   *  for this exact behaviour, live in workflows.ts. */
+   *  no-value-imports.test.ts); the real implementation lives in
+   *  workflows.ts, whose fillWorkflow suite is the source of truth this
+   *  copy must track: "substitutes both spaced and unspaced forms of the
+   *  same placeholder" and "leaves an unsupplied placeholder in place
+   *  rather than becoming 'undefined'" (workflows.test.ts). Both are
+   *  exercised against this copy too, in terminal-pane.test.ts's "Run
+   *  workflow…" suite — keep all three in sync on any change here. */
   function fillWorkflow(workflow: Workflow, values: Record<string, string>): string {
     return workflow.command.replace(/\{\{\s*([^\s{}]+)\s*\}\}/g, (whole: string, name: string) => {
       const value = values[name];

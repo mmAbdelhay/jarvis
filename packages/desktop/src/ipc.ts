@@ -1031,6 +1031,10 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       const workflows = deps.workflows;
       if (workflows === undefined || !isString(project)) return [];
       const projectDir = workflows.config[project];
+      // `defaultDir` first, the project's own directory last: loadWorkflows
+      // dedupes a name shared across paths by keeping the *later* one, so
+      // this order is what lets a project's workflow shadow a same-named
+      // global one rather than the reverse.
       const paths = projectDir === undefined ? [workflows.defaultDir] : [workflows.defaultDir, projectDir];
       try {
         return loadWorkflows({ readDir: workflows.readDir, readFile: workflows.readFile, paths });

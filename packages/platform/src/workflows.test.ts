@@ -16,13 +16,15 @@ describe("parseWorkflow", () => {
   });
 
   it("treats {{branch}} and {{ branch }} as the same placeholder, deduplicated, in first-appearance order", () => {
+    // "target" sorts before "branch" alphabetically, so this only passes if
+    // the order really is first-appearance rather than an incidental sort.
     const text = [
       "name: Rebase",
-      "command: git fetch && git rebase {{ branch }} && echo {{branch}} {{target}}",
+      "command: git fetch && git rebase {{ target }} && echo {{branch}} {{target}} {{branch}}",
       "description: Rebase onto a branch",
     ].join("\n");
 
-    expect(parseWorkflow(text)?.placeholders).toEqual(["branch", "target"]);
+    expect(parseWorkflow(text)?.placeholders).toEqual(["target", "branch"]);
   });
 
   it("returns undefined for a file missing `command`", () => {
@@ -135,5 +137,50 @@ describe("loadWorkflows", () => {
     });
 
     expect(workflows.map((w) => w.name)).toEqual(["Good"]);
+  });
+
+  it("returns nothing for a directory that lists no files", () => {
+    const workflows = loadWorkflows({
+      readDir: () => [],
+      readFile: () => {
+        throw new Error("should never be read");
+      },
+      paths: ["/empty"],
+    });
+
+    expect(workflows).toEqual([]);
+  });
+
+  // "Most specific wins": a later path in `paths` shadows an earlier one
+  // that declares a workflow of the same name, deduped down to one entry —
+  // callers list the always-read global directory first and a project's
+  // own directory last, so the project's own version is what the palette
+  // offers. Undated per-project override is how the rest of the app's
+  // config works (editors:, clusters:), and disambiguating the palette's
+  // labels instead would make the user resolve a collision they never
+  // created.
+  it("dedupes a name shared across directories, keeping the later (more specific) path's version", () => {
+    const files: Record<string, string> = {
+      "/global/deploy.yaml": "name: Deploy\ncommand: echo global\ndescription: Global",
+      "/project/deploy.yaml": "name: Deploy\ncommand: echo project\ndescription: Project",
+    };
+    const dirs: Record<string, string[]> = {
+      "/global": ["deploy.yaml"],
+      "/project": ["deploy.yaml"],
+    };
+
+    const workflows = loadWorkflows({
+      readDir: (path) => dirs[path] ?? [],
+      readFile: (path) => {
+        const text = files[path];
+        if (text === undefined) throw new Error("not found");
+        return text;
+      },
+      paths: ["/global", "/project"],
+    });
+
+    expect(workflows).toEqual([
+      { name: "Deploy", command: "echo project", description: "Project", placeholders: [] },
+    ]);
   });
 });

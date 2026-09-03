@@ -861,6 +861,141 @@ describe("the command editor in a pane", () => {
 
         expect(field.value).toBe("half-typed");
       });
+
+      // terminal-pane.ts restates workflows.ts's fillWorkflow rather than
+      // importing it (see the no-value-imports guard) — these two exercise
+      // the restated copy against the same two behaviours
+      // workflows.test.ts's fillWorkflow suite covers on the original:
+      // "substitutes both spaced and unspaced forms of the same
+      // placeholder" and "leaves an unsupplied placeholder in place rather
+      // than becoming 'undefined'". Keep both suites in sync.
+      it("substitutes the spaced {{ name }} form, same as workflows.ts's fillWorkflow", async () => {
+        const spaced: Workflow = {
+          name: "Rebase",
+          command: "git rebase {{ branch }} && echo done",
+          description: "Rebase onto a branch",
+          placeholders: ["branch"],
+        };
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [spaced]);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Run workflow";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const branchInput = paletteEl(p)?.querySelector("input");
+        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        branchInput.value = "main";
+        branchInput.dispatchEvent(new Event("input"));
+        branchInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(textarea(p)?.value).toBe("git rebase main && echo done");
+      });
+
+      it("leaves an unsupplied placeholder in place rather than becoming 'undefined', same as workflows.ts's fillWorkflow", async () => {
+        // Hand-authored so `command` names a placeholder `placeholders`
+        // does not — the only way to reach an unsupplied one through the
+        // real flow, since every listed placeholder is always asked for.
+        const partial: Workflow = {
+          name: "Deploy",
+          command: "deploy {{branch}} --tag {{tag}}",
+          description: "Deploy",
+          placeholders: ["branch"],
+        };
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [partial]);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Run workflow";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const branchInput = paletteEl(p)?.querySelector("input");
+        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        branchInput.value = "main";
+        branchInput.dispatchEvent(new Event("input"));
+        branchInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(textarea(p)?.value).toBe("deploy main --tag {{tag}}");
+      });
+
+      // Escaping the *first* placeholder of one is a weaker claim than
+      // escaping the second of three: it never proves an already-answered
+      // value was discarded rather than merely never collected.
+      it("abandons the whole thing on Escape at the second of three placeholders, leaking no partial values", async () => {
+        const threePlaceholders: Workflow = {
+          name: "Multi",
+          command: "cmd {{a}} {{b}} {{c}}",
+          description: "Multi",
+          placeholders: ["a", "b", "c"],
+        };
+        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], async () => [threePlaceholders]);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const field = textarea(p);
+        if (field === null) throw new Error("no editor");
+        field.value = "half-typed";
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Run workflow";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        // Choose "Multi".
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Answer the first placeholder, "a".
+        const aInput = paletteEl(p)?.querySelector("input");
+        if (aInput === null || aInput === undefined) throw new Error("no placeholder input");
+        aInput.value = "1";
+        aInput.dispatchEvent(new Event("input"));
+        aInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Escape on the second, "b".
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(field.value).toBe("half-typed");
+        expect(sendInput).not.toHaveBeenCalled();
+        expect(paletteEl(p)?.hidden).toBe(true);
+      });
     });
 
     // A pane can be disposed while historySearch() is still awaiting
