@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { runCommand } from "./spawn.js";
+
 /** One container the Docker tab may manage, as `jarvis.yaml` names it.
  *
  *  `container` is a container *name*, never an id. `docker compose down`
@@ -123,8 +126,33 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Success, or the daemon's own words.
+ *
+ *  Deliberately not the desktop package's GitViewResult: @jarvis/platform
+ *  does not depend on @jarvis/desktop, and `detail` is untranslated on
+ *  purpose — the same split HeadlampResult uses. The IPC layer turns a
+ *  `detail` into the bilingual text the renderer shows. */
+export type DockerResult = { ok: true } | { ok: false; detail: string };
+
+/** A running `docker logs -f`. Closing it is what stops the child. */
+export type LogFollower = { close(): void };
+
+/** Streaming, so it is not a CommandRunner: `docker logs -f` never exits on
+ *  its own and its output has to arrive as it is produced, not at the end. */
+export type LogSpawner = (
+  command: string,
+  args: string[],
+  onChunk: (chunk: string) => void,
+) => LogFollower;
+
 export type DockerClient = {
   list(): Promise<DockerListResult>;
+  start(name: string): Promise<DockerResult>;
+  stop(name: string): Promise<DockerResult>;
+  restart(name: string): Promise<DockerResult>;
+  composeUp(workingDir: string): Promise<DockerResult>;
+  composeDown(project: string): Promise<DockerResult>;
+  follow(name: string, onChunk: (chunk: string) => void): LogFollower;
 };
 
 /**
@@ -137,7 +165,20 @@ export type DockerClient = {
  * returns a real JSON label map instead: two calls, one parse path, no
  * guessing.
  */
-export function createDockerClient(run: CommandRunner): DockerClient {
+export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): DockerClient {
+  /** Every action is the same shape: run it, and on failure hand back what
+   *  Docker said rather than a sentence of our own. A refused `stop` is
+   *  worth reading — it names the container it could not find. */
+  async function act(args: string[]): Promise<DockerResult> {
+    let outcome: { code: number; stdout: string; stderr: string };
+    try {
+      outcome = await run("docker", args);
+    } catch (error) {
+      return { ok: false, detail: messageOf(error) };
+    }
+    return outcome.code === 0 ? { ok: true } : { ok: false, detail: outcome.stderr.trim() };
+  }
+
   return {
     async list(): Promise<DockerListResult> {
       let ids: { code: number; stdout: string; stderr: string };
@@ -184,5 +225,40 @@ export function createDockerClient(run: CommandRunner): DockerClient {
       }
       return { ok: true, containers };
     },
+    start: (name) => act(["start", name]),
+    stop: (name) => act(["stop", name]),
+    restart: (name) => act(["restart", name]),
+    composeUp: (workingDir) =>
+      act(["compose", "--project-directory", workingDir, "up", "-d"]),
+    composeDown: (project) => act(["compose", "-p", project, "down"]),
+    follow: (name, onChunk) =>
+      spawnLog("docker", ["logs", "-f", "--tail", "500", name], onChunk),
   };
+}
+
+/** The real client: `docker` resolved on the login shell's PATH.
+ *
+ *  `env` is passed explicitly for the same reason headlamp.ts passes it — a
+ *  GUI-launched app's PATH is not the user's, and `docker` lives in
+ *  /opt/homebrew/bin or an OrbStack shim directory that only a login shell
+ *  knows about. */
+export function createRealDockerClient(env: NodeJS.ProcessEnv = process.env): DockerClient {
+  return createDockerClient(
+    (command, args) => runCommand(command, args, env),
+    (command, args, onChunk) => {
+      // stderr is merged into the same callback: a container writes its
+      // logs to both streams and the tab shows one interleaved view, which
+      // is what `docker logs` itself does.
+      const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
+      for (const stream of [child.stdout, child.stderr]) {
+        stream?.setEncoding("utf8");
+        stream?.on("data", (chunk: string) => onChunk(chunk));
+      }
+      // A missing binary arrives as an async "error" event, not a throw.
+      // Unhandled it takes the whole app down; reported as a line of log it
+      // is something the user can read in the pane they are looking at.
+      child.on("error", (error) => onChunk(`${error.message}\n`));
+      return { close: () => child.kill() };
+    },
+  );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDockerClient, type CommandRunner } from "./docker.js";
+import { createDockerClient, type CommandRunner, type LogSpawner } from "./docker.js";
 
 /** One `docker inspect` element, trimmed to the fields list() reads. */
 function inspected(over: Record<string, unknown> = {}): unknown {
@@ -39,6 +39,8 @@ function runnerFor(replies: { code: number; stdout: string; stderr: string }[]):
   };
 }
 
+const noLogs: LogSpawner = () => ({ close: () => {} });
+
 describe("createDockerClient.list", () => {
   it("asks for ids first, then inspects exactly those ids", async () => {
     const { run, calls } = runnerFor([
@@ -46,7 +48,7 @@ describe("createDockerClient.list", () => {
       { code: 0, stdout: JSON.stringify([inspected()]), stderr: "" },
     ]);
 
-    await createDockerClient(run).list();
+    await createDockerClient(run, noLogs).list();
 
     expect(calls[0]).toEqual({ command: "docker", args: ["ps", "-aq"] });
     expect(calls[1]).toEqual({ command: "docker", args: ["inspect", "abc123", "def456"] });
@@ -58,7 +60,7 @@ describe("createDockerClient.list", () => {
       { code: 0, stdout: JSON.stringify([inspected()]), stderr: "" },
     ]);
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result).toEqual({
       ok: true,
@@ -80,7 +82,7 @@ describe("createDockerClient.list", () => {
   it("does not inspect when there are no containers", async () => {
     const { run, calls } = runnerFor([{ code: 0, stdout: "\n", stderr: "" }]);
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result).toEqual({ ok: true, containers: [] });
     expect(calls).toHaveLength(1);
@@ -98,7 +100,7 @@ describe("createDockerClient.list", () => {
       },
     ]);
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -110,7 +112,7 @@ describe("createDockerClient.list", () => {
     const run: CommandRunner = () =>
       Promise.reject(Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" }));
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result).toEqual({
       ok: false,
@@ -128,7 +130,7 @@ describe("createDockerClient.list", () => {
       },
     ]);
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result).toEqual({
       ok: false,
@@ -149,7 +151,7 @@ describe("createDockerClient.list", () => {
       },
     ]);
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -164,12 +166,108 @@ describe("createDockerClient.list", () => {
       return Promise.reject(new Error("boom"));
     };
 
-    const result = await createDockerClient(run).list();
+    const result = await createDockerClient(run, noLogs).list();
 
     expect(result).toEqual({
       ok: false,
       reason: "daemon-down",
       detail: "boom",
     });
+  });
+});
+
+describe("createDockerClient actions", () => {
+  it("runs the documented command for each lifecycle action", async () => {
+    const cases = [
+      ["start", ["start", "acme-app-1"]],
+      ["stop", ["stop", "acme-app-1"]],
+      ["restart", ["restart", "acme-app-1"]],
+    ] as const;
+
+    for (const [action, expected] of cases) {
+      const { run, calls } = runnerFor([{ code: 0, stdout: "", stderr: "" }]);
+      const result = await createDockerClient(run, noLogs)[action]("acme-app-1");
+      expect(result).toEqual({ ok: true });
+      expect(calls[0]).toEqual({ command: "docker", args: [...expected] });
+    }
+  });
+
+  it("carries the daemon's own words out of a failed action", async () => {
+    const { run } = runnerFor([
+      { code: 1, stdout: "", stderr: "Error response from daemon: No such container: nope\n" },
+    ]);
+
+    const result = await createDockerClient(run, noLogs).stop("nope");
+
+    expect(result).toEqual({
+      ok: false,
+      detail: "Error response from daemon: No such container: nope",
+    });
+  });
+
+  it("reports a missing binary as a failure rather than throwing", async () => {
+    const run: CommandRunner = () =>
+      Promise.reject(Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" }));
+
+    await expect(createDockerClient(run, noLogs).start("app")).resolves.toEqual({
+      ok: false,
+      detail: "spawn docker ENOENT",
+    });
+  });
+
+  it("brings a stack up from its project directory", async () => {
+    const { run, calls } = runnerFor([{ code: 0, stdout: "", stderr: "" }]);
+
+    await createDockerClient(run, noLogs).composeUp("/Users/u/projects/acme");
+
+    expect(calls[0]).toEqual({
+      command: "docker",
+      args: ["compose", "--project-directory", "/Users/u/projects/acme", "up", "-d"],
+    });
+  });
+
+  it("takes a stack down by project name", async () => {
+    const { run, calls } = runnerFor([{ code: 0, stdout: "", stderr: "" }]);
+
+    await createDockerClient(run, noLogs).composeDown("acme");
+
+    expect(calls[0]).toEqual({
+      command: "docker",
+      args: ["compose", "-p", "acme", "down"],
+    });
+  });
+});
+
+describe("createDockerClient.follow", () => {
+  it("follows a container's log from a bounded tail", () => {
+    const spawned: { command: string; args: string[] }[] = [];
+    const spawnLog: LogSpawner = (command, args) => {
+      spawned.push({ command, args });
+      return { close: () => {} };
+    };
+
+    createDockerClient(runnerFor([]).run, spawnLog).follow("acme-app-1", () => {});
+
+    expect(spawned[0]).toEqual({
+      command: "docker",
+      args: ["logs", "-f", "--tail", "500", "acme-app-1"],
+    });
+  });
+
+  it("hands chunks straight through and closes what it started", () => {
+    const chunks: string[] = [];
+    let closed = false;
+    const spawnLog: LogSpawner = (_command, _args, onChunk) => {
+      onChunk("first line\n");
+      return { close: () => { closed = true; } };
+    };
+
+    const follower = createDockerClient(runnerFor([]).run, spawnLog).follow("app", (chunk) =>
+      chunks.push(chunk),
+    );
+    follower.close();
+
+    expect(chunks).toEqual(["first line\n"]);
+    expect(closed).toBe(true);
   });
 });
