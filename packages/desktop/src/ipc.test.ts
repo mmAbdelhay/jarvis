@@ -6,10 +6,13 @@ import {
   createBookmarksHandlers,
   createClusterHandlers,
   createDatabaseHandlers,
+  createDockerHandlers,
   createEditorHandlers,
   createApiHandlers,
   createTerminalHandlers,
   type ApiHandlerDeps,
+  type DockerHandlerDeps,
+  type DockerHandlers,
   type TerminalHandlerDeps,
   createGitHandlers,
   createSettingsHandlers,
@@ -20,13 +23,17 @@ import type {
   Bookmark,
   BookmarkStore,
   CodeServerManager,
+  ContainerFacts,
   DbGateManager,
+  DockerListResult,
+  DockerResult,
   HeadlampManager,
   ShellManager,
 } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig } from "./config.js";
+import { MESSAGES } from "./messages.js";
 
 // Shared fixture for buildWiring's provider-facing tests: everything a
 // WiringDeps needs, wired to a `sent` capture array instead of a bare
@@ -1909,5 +1916,253 @@ describe("api editing handlers", () => {
       text: "Only Postman Collection v2.0 and v2.1 are supported",
       language: "en",
     });
+  });
+});
+
+describe("createDockerHandlers", () => {
+  const facts = (over: Partial<ContainerFacts> = {}): ContainerFacts => ({
+    name: "acme-app-1",
+    id: "abc",
+    image: "app:latest",
+    state: "running",
+    status: "running",
+    ports: [],
+    composeProject: "acme",
+    composeWorkingDir: "/p/acme",
+    ...over,
+  });
+
+  function handlers(
+    over: Partial<DockerHandlerDeps> = {},
+    listResult: DockerListResult = { ok: true, containers: [facts()] },
+  ): { handlers: DockerHandlers; opened: string[]; sent: string[]; acted: string[] } {
+    const opened: string[] = [];
+    const sent: string[] = [];
+    const acted: string[] = [];
+    const record =
+      (action: string) =>
+      async (arg: string): Promise<DockerResult> => {
+        acted.push(`${action}:${arg}`);
+        return { ok: true };
+      };
+    return {
+      opened,
+      sent,
+      acted,
+      handlers: createDockerHandlers({
+        docker: {
+          list: async () => listResult,
+          start: record("start"),
+          stop: record("stop"),
+          restart: record("restart"),
+          composeUp: record("composeUp"),
+          composeDown: record("composeDown"),
+          follow: () => ({ close: () => {} }),
+        },
+        projects: { acme: "/p/acme" },
+        containers: { acme: [{ name: "app", container: "acme-app-1" }] },
+        openTerminal: (project) => {
+          opened.push(project);
+          return "tab-1";
+        },
+        sendInput: (_tabId, data) => sent.push(data),
+        language: "en",
+        ...over,
+      }),
+    };
+  }
+
+  it("pairs each configured entry with the container Docker reports", async () => {
+    const result = await handlers().handlers.view("acme");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rows).toEqual([
+      { name: "app", container: "acme-app-1", facts: facts() },
+    ]);
+  });
+
+  it("reports a configured container that does not exist, rather than hiding it", async () => {
+    const result = await handlers({}, { ok: true, containers: [] }).handlers.view("acme");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rows[0]?.facts).toBeUndefined();
+  });
+
+  it("offers compose control when every row shares one compose project", async () => {
+    const result = await handlers().handlers.view("acme");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.composeProject).toBe("acme");
+    expect(result.value.composeWorkingDir).toBe("/p/acme");
+  });
+
+  it("offers no compose control when the rows span two compose projects", async () => {
+    const { handlers: h } = handlers(
+      {
+        containers: {
+          acme: [
+            { name: "app", container: "acme-app-1" },
+            { name: "other", container: "other-app-1" },
+          ],
+        },
+      },
+      {
+        ok: true,
+        containers: [
+          facts(),
+          facts({ name: "other-app-1", composeProject: "other", composeWorkingDir: "/p/other" }),
+        ],
+      },
+    );
+
+    const result = await h.view("acme");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.composeProject).toBeUndefined();
+  });
+
+  it("translates a missing docker binary", async () => {
+    const { handlers: h } = handlers({}, {
+      ok: false,
+      reason: "not-installed",
+      detail: "spawn docker ENOENT",
+    });
+
+    const result = await h.view("acme");
+
+    expect(result).toEqual({
+      ok: false,
+      text: MESSAGES.dockerNotInstalled("en"),
+      language: "en",
+    });
+  });
+
+  it("translates a daemon that is not running", async () => {
+    const { handlers: h } = handlers({}, {
+      ok: false,
+      reason: "daemon-down",
+      detail: "Cannot connect",
+    });
+
+    const result = await h.view("acme");
+
+    expect(result).toEqual({
+      ok: false,
+      text: MESSAGES.dockerDaemonDown("en"),
+      language: "en",
+    });
+  });
+
+  it("refuses a project it does not know", async () => {
+    const result = await handlers().handlers.view("nope");
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a container the project does not declare", async () => {
+    const result = await handlers().handlers.stop("acme", "not-mine");
+
+    expect(result).toEqual({
+      ok: false,
+      text: MESSAGES.dockerUnknownContainer("en"),
+      language: "en",
+    });
+  });
+
+  it("runs each lifecycle action against the named container", async () => {
+    const { handlers: h, acted } = handlers();
+
+    await h.start("acme", "acme-app-1");
+    await h.stop("acme", "acme-app-1");
+    await h.restart("acme", "acme-app-1");
+
+    expect(acted).toEqual([
+      "start:acme-app-1",
+      "stop:acme-app-1",
+      "restart:acme-app-1",
+    ]);
+  });
+
+  it("surfaces the daemon's own words when an action fails", async () => {
+    const { handlers: h } = handlers({
+      docker: {
+        list: async () => ({ ok: true, containers: [facts()] }),
+        start: async () => ({ ok: false, detail: "No such container" }),
+        stop: async () => ({ ok: true }),
+        restart: async () => ({ ok: true }),
+        composeUp: async () => ({ ok: true }),
+        composeDown: async () => ({ ok: true }),
+        follow: () => ({ close: () => {} }),
+      },
+    });
+
+    const result = await h.start("acme", "acme-app-1");
+
+    expect(result).toEqual({ ok: false, text: "No such container", language: "en" });
+  });
+
+  it("brings the stack up from its working directory", async () => {
+    const { handlers: h, acted } = handlers();
+
+    await h.composeUp("acme");
+
+    expect(acted).toEqual(["composeUp:/p/acme"]);
+  });
+
+  it("takes the stack down by compose project name", async () => {
+    const { handlers: h, acted } = handlers();
+
+    await h.composeDown("acme");
+
+    expect(acted).toEqual(["composeDown:acme"]);
+  });
+
+  it("refuses compose control when there is no single compose project", async () => {
+    const { handlers: h, acted } = handlers({}, { ok: true, containers: [] });
+
+    const result = await h.composeUp("acme");
+
+    expect(result.ok).toBe(false);
+    expect(acted).toEqual([]);
+  });
+
+  it("names what the project declares, so the button knows to be live", () => {
+    const result = handlers().handlers.names("acme");
+
+    expect(result).toEqual({ ok: true, value: ["app"] });
+  });
+
+  it("names nothing for a project that declares nothing", () => {
+    const { handlers: h } = handlers({ containers: {} });
+
+    expect(h.names("acme")).toEqual({ ok: true, value: [] });
+  });
+
+  it("opens a terminal tab and types the exec command", () => {
+    const { handlers: h, opened, sent } = handlers();
+
+    const result = h.shell("acme", "acme-app-1");
+
+    expect(result.ok).toBe(true);
+    expect(opened).toEqual(["acme"]);
+    expect(sent).toEqual([
+      "docker exec -it acme-app-1 sh -c 'exec bash || exec sh'\r",
+    ]);
+  });
+
+  it("never types a container name that is not a container name", () => {
+    const { handlers: h, opened, sent } = handlers({
+      containers: { acme: [{ name: "app", container: "app; rm -rf /" }] },
+    });
+
+    const result = h.shell("acme", "app; rm -rf /");
+
+    expect(result.ok).toBe(false);
+    expect(opened).toEqual([]);
+    expect(sent).toEqual([]);
   });
 });

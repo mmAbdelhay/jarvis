@@ -35,7 +35,11 @@ import type {
   BrunoTree,
   ClustersConfig,
   CodeServerManager,
+  ContainerFacts,
   DbGateManager,
+  DockerClient,
+  DockerConfig,
+  DockerResult,
   EditorsConfig,
   HeadlampManager,
   InstalledVoice,
@@ -800,6 +804,175 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
       } catch {
         return fail(MESSAGES.clusterUnavailable(deps.language));
       }
+    },
+  };
+}
+
+/** Docker's own name grammar. Validated here because a value read from
+ *  jarvis.yaml is about to be typed into a live pty — the same hardening
+ *  aws-session.ts was given, for the same reason. */
+const CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+
+/** One configured container, paired with what Docker currently reports of
+ *  it. `facts` is undefined for a container that is configured but does not
+ *  exist — a stale entry is shown and named, never silently dropped, because
+ *  a row that vanishes looks identical to a row that was never configured. */
+export type DockerRow = {
+  name: string;
+  container: string;
+  facts: ContainerFacts | undefined;
+};
+
+export type DockerView = {
+  rows: DockerRow[];
+  /** Set only when every existing row shares one compose project: that is
+   *  the only case in which "up" and "down" have an unambiguous target. */
+  composeProject: string | undefined;
+  composeWorkingDir: string | undefined;
+};
+
+export type DockerHandlerDeps = {
+  docker: DockerClient;
+  /** Only used to reject a project name that is not configured, and as the
+   *  cwd for the shell terminal — Personal above all, which has no entry. */
+  projects: Readonly<Record<string, string>>;
+  containers: Readonly<DockerConfig>;
+  /** Opens a Terminal tab under `project`, with its shell rooted at `cwd`.
+   *  Returns the tab id so the exec command can be typed into it. */
+  openTerminal(project: string, cwd: string): string;
+  sendInput(tabId: string, data: string): void;
+  language: "ar" | "en";
+};
+
+export type DockerHandlers = {
+  view(project: string): Promise<GitViewResult<DockerView>>;
+  start(project: string, container: string): Promise<GitViewResult<void>>;
+  stop(project: string, container: string): Promise<GitViewResult<void>>;
+  restart(project: string, container: string): Promise<GitViewResult<void>>;
+  composeUp(project: string): Promise<GitViewResult<void>>;
+  composeDown(project: string): Promise<GitViewResult<void>>;
+  shell(project: string, container: string): GitViewResult<void>;
+  /** The display names this project declares, for the renderer to decide
+   *  whether the Docker button is a live control at all. Mirrors the
+   *  existing `ClusterHandlers.names`. */
+  names(project: string): GitViewResult<string[]>;
+};
+
+export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  /** A container this project does not declare is refused here rather than
+   *  passed to Docker: the renderer names what the config already allowed,
+   *  exactly as the Cluster handlers require a declared context. */
+  function declared(project: string, container: string): boolean {
+    return (deps.containers[project] ?? []).some((entry) => entry.container === container);
+  }
+
+  async function build(project: string): Promise<GitViewResult<DockerView>> {
+    if (deps.projects[project] === undefined) {
+      return fail(MESSAGES.unknownProject(deps.language));
+    }
+    const entries = deps.containers[project] ?? [];
+    const listed = await deps.docker.list();
+    if (!listed.ok) {
+      return fail(
+        listed.reason === "not-installed"
+          ? MESSAGES.dockerNotInstalled(deps.language)
+          : MESSAGES.dockerDaemonDown(deps.language),
+      );
+    }
+
+    const byName = new Map(listed.containers.map((facts) => [facts.name, facts]));
+    const rows: DockerRow[] = entries.map((entry) => ({
+      name: entry.name,
+      container: entry.container,
+      facts: byName.get(entry.container),
+    }));
+
+    const projectsSeen = new Set<string>();
+    let workingDir: string | undefined;
+    for (const row of rows) {
+      if (row.facts?.composeProject === undefined) continue;
+      projectsSeen.add(row.facts.composeProject);
+      workingDir ??= row.facts.composeWorkingDir;
+    }
+    const single = projectsSeen.size === 1 ? [...projectsSeen][0] : undefined;
+
+    return {
+      ok: true,
+      value: {
+        rows,
+        composeProject: single,
+        composeWorkingDir: single === undefined ? undefined : workingDir,
+      },
+    };
+  }
+
+  async function act(
+    project: string,
+    container: string,
+    run: (name: string) => Promise<DockerResult>,
+  ): Promise<GitViewResult<void>> {
+    if (deps.projects[project] === undefined) {
+      return fail(MESSAGES.unknownProject(deps.language));
+    }
+    if (!declared(project, container) || !CONTAINER_NAME.test(container)) {
+      return fail(MESSAGES.dockerUnknownContainer(deps.language));
+    }
+    const outcome = await run(container);
+    return outcome.ok ? { ok: true, value: undefined } : fail(outcome.detail);
+  }
+
+  async function compose(
+    project: string,
+    run: (view: DockerView) => Promise<DockerResult>,
+  ): Promise<GitViewResult<void>> {
+    const view = await build(project);
+    if (!view.ok) return view;
+    if (view.value.composeProject === undefined) {
+      return fail(MESSAGES.dockerNoComposeProject(deps.language));
+    }
+    const outcome = await run(view.value);
+    return outcome.ok ? { ok: true, value: undefined } : fail(outcome.detail);
+  }
+
+  return {
+    view: build,
+    start: (project, container) => act(project, container, deps.docker.start),
+    stop: (project, container) => act(project, container, deps.docker.stop),
+    restart: (project, container) => act(project, container, deps.docker.restart),
+
+    composeUp: (project) =>
+      compose(project, (view) =>
+        view.composeWorkingDir === undefined
+          ? Promise.resolve({ ok: false, detail: "no compose working directory" })
+          : deps.docker.composeUp(view.composeWorkingDir),
+      ),
+    composeDown: (project) =>
+      // Non-null: compose() has already refused an undefined project.
+      compose(project, (view) => deps.docker.composeDown(view.composeProject as string)),
+
+    names(project) {
+      if (deps.projects[project] === undefined) {
+        return fail(MESSAGES.unknownProject(deps.language));
+      }
+      return { ok: true, value: (deps.containers[project] ?? []).map((entry) => entry.name) };
+    },
+
+    shell(project, container) {
+      if (deps.projects[project] === undefined) {
+        return fail(MESSAGES.unknownProject(deps.language));
+      }
+      if (!declared(project, container) || !CONTAINER_NAME.test(container)) {
+        return fail(MESSAGES.dockerUnknownContainer(deps.language));
+      }
+      const tabId = deps.openTerminal(project, deps.projects[project] ?? "");
+      // `exec bash || exec sh`: most images have sh, many have bash, and
+      // asking for bash outright fails outright on an alpine container.
+      deps.sendInput(tabId, `docker exec -it ${container} sh -c 'exec bash || exec sh'\r`);
+      return { ok: true, value: undefined };
     },
   };
 }
