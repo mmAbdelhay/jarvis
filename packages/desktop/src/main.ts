@@ -718,21 +718,31 @@ app.whenReady().then(async () => {
 
     /** The fallback path, for a bookmark never opened in Jarvis — which is
      *  everything imported from another browser. One request to the site's
-     *  own /favicon.ico; a failure is recorded as a miss so it is not
-     *  retried on every render. */
+     *  own /favicon.ico, through the project's own session partition — a
+     *  site reachable only there (SSO, a VPN-scoped profile) would
+     *  otherwise fail against a shared session and record a week-long
+     *  miss. A failure is recorded as a miss so it is not retried on every
+     *  render. The in-flight guard is keyed by project and origin
+     *  together: two projects legitimately fetch the same origin through
+     *  different sessions, and an origin-only key would let the first
+     *  project's in-flight request suppress the second's entirely. */
     const fetching = new Set<string>();
-    function requestFavicon(url: string): void {
+    function requestFavicon(project: string, url: string): void {
       let origin: string;
       try {
         origin = new URL(url).origin;
       } catch {
         return;
       }
-      if (fetching.has(origin)) return;
-      fetching.add(origin);
-      void cacheFavicon(url, `${origin}/favicon.ico`, session.defaultSession).finally(() =>
-        fetching.delete(origin),
-      );
+      const key = `${project}\n${origin}`;
+      if (fetching.has(key)) return;
+      fetching.add(key);
+      // The partition is what makes a project's logins its own, mirroring
+      // browser-host.ts's own partition name — encodeURIComponent because
+      // a project name is user-supplied config and a partition name with a
+      // slash or a space in it is not addressable.
+      const from = session.fromPartition(`persist:project-${encodeURIComponent(project)}`);
+      void cacheFavicon(url, `${origin}/favicon.ico`, from).finally(() => fetching.delete(key));
     }
 
     const bookmarks = createBookmarksHandlers({

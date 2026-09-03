@@ -1015,6 +1015,25 @@ describe("bookmarks handlers", () => {
     expect(result.ok && result.value[0]?.icon).toBeUndefined();
   });
 
+  it("requests the missing favicon through the bookmark's own project", async () => {
+    const requested: { project: string; url: string }[] = [];
+    const handlers = createBookmarksHandlers({
+      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      favicons: {
+        get: async () => ({ ok: true, value: undefined }),
+        put: async () => ({ ok: true, value: undefined }),
+        putMiss: async () => ({ ok: true, value: undefined }),
+        shouldFetch: async () => ({ ok: true, value: true }),
+      },
+      requestFavicon: (project, url) => requested.push({ project, url }),
+      language: "en",
+    });
+
+    await handlers.list("acme");
+
+    expect(requested).toEqual([{ project: "acme", url: "https://a.test/" }]);
+  });
+
   it("translates the store's pin-limit refusal", async () => {
     const handlers = createBookmarksHandlers({
       store: store({ setPinned: () => Promise.resolve({ ok: false, detail: "pin-limit" }) }),

@@ -1550,10 +1550,12 @@ export type BookmarksHandlerDeps = {
   store: BookmarkStore;
   favicons: FaviconStore;
   /** Fire-and-forget: asks the desktop layer to go and fetch this origin's
-   *  icon. Injected because fetching needs a session, which ipc.ts has no
-   *  business holding. Nothing awaits it — the icon lands in the cache and
-   *  the next listBookmarks carries it. */
-  requestFavicon(url: string): void;
+   *  icon, through the given project's own session partition — a site
+   *  reachable only there (SSO, a VPN-scoped profile) must be fetched from
+   *  it, not from some shared session. Injected because fetching needs a
+   *  session, which ipc.ts has no business holding. Nothing awaits it — the
+   *  icon lands in the cache and the next listBookmarks carries it. */
+  requestFavicon(project: string, url: string): void;
   language: "ar" | "en";
 };
 
@@ -1582,7 +1584,7 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
    *  has never been opened in Jarvis has no captured icon, and asking here
    *  is what eventually gives it one. The request is not awaited: the list
    *  must return at render speed, and the icon arrives on a later call. */
-  async function withIcons(bookmarks: Bookmark[]): Promise<BookmarkView[]> {
+  async function withIcons(project: string, bookmarks: Bookmark[]): Promise<BookmarkView[]> {
     return Promise.all(
       bookmarks.map(async (bookmark) => {
         const icon = await deps.favicons.get(bookmark.url);
@@ -1590,7 +1592,7 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
           return { ...bookmark, icon: icon.value.dataUri };
         }
         const wanted = await deps.favicons.shouldFetch(bookmark.url);
-        if (wanted.ok && wanted.value) deps.requestFavicon(bookmark.url);
+        if (wanted.ok && wanted.value) deps.requestFavicon(project, bookmark.url);
         return bookmark;
       }),
     );
@@ -1609,7 +1611,7 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
     async list(project) {
       if (!isString(project)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.list(project);
-      return result.ok ? { ok: true, value: await withIcons(result.value) } : translate(result.detail);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async add(project, bookmark) {
@@ -1617,13 +1619,13 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.add(project, bookmark);
-      return result.ok ? { ok: true, value: await withIcons(result.value) } : translate(result.detail);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async remove(project, url) {
       if (!isString(project) || !isString(url)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.remove(project, url);
-      return result.ok ? { ok: true, value: await withIcons(result.value) } : translate(result.detail);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async setPinned(project, url, pinned) {
@@ -1631,7 +1633,7 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.setPinned(project, url, pinned);
-      return result.ok ? { ok: true, value: await withIcons(result.value) } : translate(result.detail);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async reorder(project, urls) {
@@ -1639,7 +1641,7 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.reorder(project, urls);
-      return result.ok ? { ok: true, value: await withIcons(result.value) } : translate(result.detail);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
   };
 }
