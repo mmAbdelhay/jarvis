@@ -787,6 +787,7 @@ async function autopopulateDocker(): Promise<void> {
 }
 
 function renderDockerPicker(): void {
+  if (draft === undefined) return;
   const container = $("settings-docker-picker");
   container.replaceChildren();
   if (dockerPicker === undefined) {
@@ -796,7 +797,9 @@ function renderDockerPicker(): void {
   container.hidden = false;
 
   for (const entry of dockerPicker) {
-    const row = document.createElement("label");
+    // A plain row, not a <label>: the project <select> below must not be
+    // nested inside a control whose implicit click target is the checkbox.
+    const row = document.createElement("div");
     row.className = "settings-row";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -806,7 +809,13 @@ function renderDockerPicker(): void {
     });
     const name = document.createElement("span");
     name.textContent = entry.facts.name;
-    row.append(checkbox, name);
+    // Visible and editable, never a silent default: a container with no
+    // matching project directory still needs a project the user picked,
+    // not one guessed on their behalf.
+    const projectField = fieldSelect("project", entry.project, Object.keys(draft.projects), (value) => {
+      entry.project = value;
+    });
+    row.append(checkbox, name, projectField);
     container.append(row);
   }
 

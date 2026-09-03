@@ -927,4 +927,42 @@ describe("settings docker section", () => {
       container: "acme-gone-1",
     });
   });
+
+  // A container with no matching project directory must never be written
+  // to a project the user did not see and could not change — the picker
+  // must show, and let the user choose, exactly where it will land.
+  it("assigns a manually-ticked unmatched container to the project chosen on its row, not silently to the first one", async () => {
+    const config = sample();
+    config.projects = { acme: "/x/projects/acme", extra: "/x/projects/extra" };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const boxes = [
+      ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
+    ] as HTMLInputElement[];
+    // other-app-1 (the second container) matches no configured project's
+    // directory, so it starts unticked with the row defaulting to the
+    // first project — the user must move it explicitly.
+    boxes[1]!.checked = true;
+    boxes[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const selects = [
+      ...document.querySelectorAll("#settings-docker-picker select"),
+    ] as HTMLSelectElement[];
+    selects[1]!.value = "extra";
+    selects[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    document.getElementById("settings-docker-confirm")?.click();
+    document.getElementById("settings-save")?.click();
+    await flush();
+
+    const saved = (calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig)
+      .docker;
+    expect(saved["extra"]).toContainEqual({ name: "app", container: "other-app-1" });
+    expect(saved["acme"]?.some((entry) => entry.container === "other-app-1")).toBe(false);
+  });
 });
