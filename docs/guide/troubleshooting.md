@@ -74,6 +74,10 @@ the button logs you in itself: it opens a Terminal tab, runs
 cluster once that succeeds. Approve the MFA push when it arrives. If it does
 not finish, see below.
 
+If the tab opens but the page itself reports the cluster as unreachable,
+`headlamp-server` says why: its output is printed to the terminal Jarvis was
+launched from, prefixed `[headlamp]`.
+
 ## The Cluster tab shows clusters from another project
 
 This should not happen; if it does, the context names in `clusters:` do not

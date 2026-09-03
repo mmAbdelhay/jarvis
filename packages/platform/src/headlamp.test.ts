@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clusterUrlSegment,
@@ -382,5 +384,40 @@ describe("createRealHeadlampSpawner", () => {
       process.onExit(resolve);
     });
     expect(code).toBeNull();
+  });
+
+  it("forwards both output streams to the log, a line at a time", async () => {
+    // headlamp-server explains a refused cluster on stderr, and that
+    // explanation used to go to /dev/null. Both streams, because it uses
+    // stdout for the same purpose depending on the failure.
+    const dir = await mkdtemp(join(tmpdir(), "headlamp-log-"));
+    const binary = join(dir, "fake-headlamp-server");
+    await writeFile(
+      binary,
+      // Split across two writes so a line has to be reassembled from
+      // more than one chunk, which is the case the buffering exists for.
+      '#!/bin/sh\nprintf "listening on "\nsleep 0.05\nprintf "127.0.0.1\\n"\n' +
+        'printf "auth failed\\n" >&2\n',
+      { mode: 0o755 },
+    );
+
+    const lines: string[] = [];
+    const child = createRealHeadlampSpawner({}, (line) => lines.push(line))({
+      binary,
+      frontendDir: join(dir, "frontend"),
+      kubeconfigPath: join(dir, "config"),
+      port: 4466,
+      skippedContexts: [],
+    });
+
+    await new Promise<number | null>((resolve) => {
+      child.onExit(resolve);
+    });
+    // "exit" can beat the last stream flush, so settle the event loop.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(lines).toContain("[headlamp] listening on 127.0.0.1");
+    expect(lines).toContain("[headlamp] auth failed");
+    await rm(dir, { recursive: true, force: true });
   });
 });

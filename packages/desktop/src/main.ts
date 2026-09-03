@@ -722,22 +722,83 @@ app.whenReady().then(async () => {
       healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
     });
     wiring.start();
-    window.on("closed", () => {
-      wiring.stop();
+
+    // Every child this process started, released exactly once.
+    //
+    // Hung off more than the window's "closed" event on purpose. Each of
+    // these children outlives its parent on POSIX — there is no
+    // PDEATHSIG on macOS — so anything that ends the main process without
+    // closing the window leaks them, and they are long-lived servers, not
+    // one-shot commands. Ctrl+C in the terminal that ran `pnpm start` is
+    // the case that actually bit: it left three headlamp-server processes
+    // alive at once, each holding a port and a kubeconfig exec plugin.
+    // Idempotent because the paths below overlap on a clean quit.
+    let released = false;
+    const releaseChildren = (): void => {
+      if (released) return;
+      released = true;
+      // Each step is guarded so that one that throws — destroying a
+      // WebContentsView from a signal handler is the plausible one — does
+      // not strand every child after it. A leaked process is worse than a
+      // logged error.
+      const safely = (what: string, release: () => void): void => {
+        try {
+          release();
+        } catch (error) {
+          console.error(`[shutdown] ${what} failed: ${errorMessage(error)}`);
+        }
+      };
+      safely("wiring", () => wiring.stop());
       // Each hosted view is a live Chromium process; they do not go away
       // with the window on their own.
-      workspace.destroy();
+      safely("hosted views", () => workspace.destroy());
       // Each open editor is a live code-server child process, same reasoning.
-      codeServer.stopAll();
+      safely("code-server", () => codeServer.stopAll());
       // And each open Database tab is a live dbgate-serve child process.
-      dbgate.stopAll();
+      safely("dbgate", () => dbgate.stopAll());
       // And each open Cluster tab is a live headlamp-server child process.
-      headlamp.stopAll();
+      safely("headlamp-server", () => headlamp.stopAll());
       // And each open Terminal tab is a live shell.
-      shells.stopAll();
+      safely("shells", () => shells.stopAll());
       // And the importer holds an fs watch per transcript directory.
-      sessionImporter.stop();
-    });
+      safely("session importer", () => sessionImporter.stop());
+      // A recording started but never stopped holds ffmpeg — and the
+      // microphone — open indefinitely.
+      safely("recorder", () => recorder.abort());
+      // Sessions still "starting"/"running"/"waiting" never reach
+      // SessionManager#update's endedAt-setting branch on their own once
+      // the window is gone, so their history() rows would stay wrong
+      // forever, sorted to the very top (most-recently-active first).
+      // kill() is the same path a user-initiated stop takes, so it
+      // persists an endedAt-bearing row through the normal #persist choke
+      // point — and it releases the agent process, which is the reason
+      // this belongs here rather than only in "will-quit".
+      safely("sessions", () => {
+        for (const session of sessions.list()) {
+          if (session.state === "done" || session.state === "dead") continue;
+          sessions.kill(session.id);
+        }
+      });
+    };
+
+    window.on("closed", releaseChildren);
+    // Cmd+Q with the window already gone, and every other quit that never
+    // destroys a window.
+    app.on("will-quit", releaseChildren);
+    // A signal is not a quit: Electron's default handling tears the process
+    // down without running "will-quit" listeners, so the children have to be
+    // released here and the quit asked for explicitly. Exit code follows the
+    // shell convention of 128 + signal number.
+    for (const [signal, number] of [
+      ["SIGINT", 2],
+      ["SIGTERM", 15],
+      ["SIGHUP", 1],
+    ] as const) {
+      process.on(signal, () => {
+        releaseChildren();
+        process.exit(128 + number);
+      });
+    }
 
     ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
       await orchestrator.handle(text, language);
@@ -1185,27 +1246,15 @@ app.whenReady().then(async () => {
     ipcMain.handle("voice:start", () => startVoice());
     ipcMain.handle("voice:stop", () => stopVoice());
 
+    // The recorder and any live sessions are released by releaseChildren,
+    // which is already wired to "will-quit" above — and, unlike this
+    // listener, to the signals that never reach "will-quit" at all. Only
+    // the shortcuts are left here; nothing owns a process. A hard kill or
+    // crash still reaches none of this, which is why
+    // createSqliteSessionStore's startup reconciliation (session-store.ts)
+    // remains the backstop for session rows.
     app.on("will-quit", () => {
       globalShortcut.unregisterAll();
-      // A recording started but never stopped (e.g. the user quits with
-      // Alt+Space still active) would otherwise leave ffmpeg running as an
-      // orphaned process with the microphone held open indefinitely.
-      recorder.abort();
-      // Sessions still "starting"/"running"/"waiting" at quit time never
-      // reach SessionManager#update's endedAt-setting branch on their own
-      // — nothing calls onExit/kill for them once the window is gone — so
-      // without this their history() rows stay wrong forever, sorted to
-      // the very top (most-recently-active first). kill() is the same
-      // path a user-initiated stop already takes, so it persists an
-      // endedAt-bearing row through the normal #persist choke point. This
-      // only fires on a clean quit, though — a hard kill or crash never
-      // reaches `will-quit` at all — so createSqliteSessionStore's own
-      // startup reconciliation (session-store.ts) is the backstop that's
-      // guaranteed to run regardless of how the previous run ended.
-      for (const session of sessions.list()) {
-        if (session.state === "done" || session.state === "dead") continue;
-        sessions.kill(session.id);
-      }
     });
 
     // The renderer's own errors, surfaced in the terminal that launched the

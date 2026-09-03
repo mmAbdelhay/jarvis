@@ -264,10 +264,44 @@ export function createKubeContextLister(path: string): () => Promise<string[]> {
  * which client-go resolves on PATH, and a GUI app's PATH is not the user's
  * (see the note in shell.ts). Handing it a login shell's PATH is what makes
  * cluster auth work when Jarvis was not launched from a terminal.
+ *
+ * Both output streams are piped and forwarded to `log` rather than
+ * discarded. headlamp-server is the one hosted app whose failures are
+ * invisible from outside: a cluster that will not connect looks identical
+ * whether the exec credential plugin is missing, the token was refused, or
+ * the API server is unreachable, and the server says which on stderr. An
+ * "Unreachable" banner cost hours of bisection precisely because that
+ * output was going to /dev/null. Piped streams must be consumed or the
+ * child blocks once the pipe buffer fills, which is what the line reader
+ * below is for.
  */
-export function createRealHeadlampSpawner(env: NodeJS.ProcessEnv = process.env): HeadlampSpawner {
+export function createRealHeadlampSpawner(
+  env: NodeJS.ProcessEnv = process.env,
+  log: (line: string) => void = (line) => console.error(line),
+): HeadlampSpawner {
   return ({ binary, ...rest }) => {
-    const child = spawn(binary, headlampArgs(rest), { stdio: "ignore", env });
+    const child = spawn(binary, headlampArgs(rest), {
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+    });
+
+    for (const stream of [child.stdout, child.stderr]) {
+      if (stream === null) continue;
+      stream.setEncoding("utf8");
+      let pending = "";
+      stream.on("data", (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split("\n");
+        // The last element is whatever came after the final newline — an
+        // incomplete line, held back until the rest of it arrives.
+        pending = lines.pop() ?? "";
+        for (const line of lines) if (line !== "") log(`[headlamp] ${line}`);
+      });
+      stream.on("end", () => {
+        if (pending !== "") log(`[headlamp] ${pending}`);
+        pending = "";
+      });
+    }
 
     const exitListeners: ((code: number | null) => void)[] = [];
     // A missing binary arrives as an async "error" event, not a throw. Left
