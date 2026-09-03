@@ -117,7 +117,7 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
         } catch (error) {
           return { ok: false, detail: errorMessage(error) };
         }
-        return { ok: true, value: next };
+        return { ok: true, value: sorted(next) };
       });
     },
 
@@ -131,7 +131,7 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
         } catch (error) {
           return { ok: false, detail: errorMessage(error) };
         }
-        return { ok: true, value: next };
+        return { ok: true, value: sorted(next) };
       });
     },
 
@@ -139,6 +139,10 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
       return enqueue(async () => {
         const all = await readAll();
         const existing = all[project] ?? [];
+        // Pinning an unknown url is a no-op, like remove — check membership first.
+        if (!existing.some((b) => b.url === url)) {
+          return { ok: true, value: sorted(existing) };
+        }
         if (pinned && existing.filter((b) => b.pinned === true && b.url !== url).length >= MAX_PINNED) {
           return { ok: false, detail: "pin-limit" };
         }

@@ -146,6 +146,24 @@ describe("createBookmarkStore", () => {
       acme: [{ url: "https://github.com", title: "GitHub" }],
     });
   });
+
+  it("returns sorted results from add: pinned bookmarks sort first", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://b.test/", title: "B" });
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.add("p", { url: "https://a.test/", title: "A" });
+    // Pin the unpinned one to test sorting
+    await store.setPinned("p", "https://b.test/", true);
+    // Add another, should come after the pinned B even though added last
+    const addResult = await store.add("p", { url: "https://c.test/", title: "C" });
+
+    expect(addResult.ok && addResult.value.map((b) => b.url)).toEqual([
+      "https://b.test/", // pinned
+      "https://a.test/",
+      "https://c.test/",
+    ]);
+  });
 });
 
 describe("pinning", () => {
@@ -191,6 +209,21 @@ describe("pinning", () => {
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.value).toHaveLength(1);
+  });
+
+  it("pinning an unknown url when cap is full is a no-op, not a pin-limit error", async () => {
+    const store = createBookmarkStore(await tempFile());
+    for (let i = 0; i < 13; i++) {
+      await store.add("p", { url: `https://s${i}.test/`, title: `S${i}` });
+    }
+    for (let i = 0; i < 12; i++) {
+      await store.setPinned("p", `https://s${i}.test/`, true);
+    }
+
+    const result = await store.setPinned("p", "https://unknown.test/", true);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value).toHaveLength(13);
   });
 });
 
