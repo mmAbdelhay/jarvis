@@ -989,6 +989,62 @@ describe("reordering bookmarks", () => {
       "https://a.test/",
     ]);
   });
+
+  it("stops the reorder when a cross-group pin change is refused", async () => {
+    harness();
+    const setPinned = vi.fn(async () => ({
+      ok: false as const,
+      text: "The grid holds 12 bookmarks; unpin one first.",
+      language: "en" as const,
+    }));
+    const reorder = vi.fn(async () => ({ ok: true, value: [] }));
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true },
+      { url: "https://b.test/", title: "B" },
+    ]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = setPinned;
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks = reorder;
+    initWorkspace(["acme"]);
+    await flush();
+
+    // "B" is listed, dropped onto the pinned tile "A" — a cross-group drop,
+    // which is a pin change first. The store refuses it.
+    const target = document.querySelector('.workspace-essential[data-url="https://a.test/"]') as HTMLElement;
+    target.dispatchEvent(dropEvent("https://b.test/"));
+    await flush();
+
+    expect(setPinned).toHaveBeenCalledWith(expect.any(String), "https://b.test/", true);
+    // The important assertion: a refused pin must stop the reorder rather
+    // than proceed with the renderer and the store disagreeing about what
+    // is pinned.
+    expect(reorder).not.toHaveBeenCalled();
+    expect(document.querySelector("#workspace-tool-status")?.textContent).toBe(
+      "The grid holds 12 bookmarks; unpin one first.",
+    );
+  });
+
+  it("sends the whole new order when a listed row is dropped on another listed row", async () => {
+    harness();
+    const reorder = vi.fn(async () => ({ ok: true, value: [] }));
+    stubBookmarks([
+      { url: "https://p.test/", title: "P", pinned: true },
+      { url: "https://a.test/", title: "A" },
+      { url: "https://b.test/", title: "B" },
+    ]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks = reorder;
+    initWorkspace(["acme"]);
+    await flush();
+
+    const first = document.querySelector('.workspace-bookmark[title="https://a.test/"]') as HTMLElement;
+    first.dispatchEvent(dropEvent("https://b.test/"));
+    await flush();
+
+    // The listed group's new order, with the pinned group left untouched.
+    expect(reorder).toHaveBeenCalledWith(expect.any(String), [
+      "https://b.test/",
+      "https://a.test/",
+    ]);
+  });
 });
 
 describe("open in editor", () => {
