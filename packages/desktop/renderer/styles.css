@@ -1189,9 +1189,15 @@
   .block:hover .block-header [role="button"], .block.selected .block-header [role="button"] { opacity: 1; }
   .block.selected { background: var(--accent-quiet); }
   .block.collapsed .block-output { display: none; }
-  .block-more-menu { display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  /* The anchor the dropdown positions against — without this the menu
+     would float relative to the pane (or the page) instead of the button
+     that opened it. */
+  .block-header-wrap { position: relative; }
+  .block-more-menu { position: absolute; top: 100%; right: 0; z-index: 1; margin-top: 2px;
+    display: flex; flex-direction: column; gap: 2px; padding: 4px;
     background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-control);
-    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; width: fit-content; }
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; width: max-content;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
   .block-more-menu[hidden] { display: none; }
   .block-more-item { color: var(--text); cursor: pointer; padding: 2px 6px; }
   .block-more-item[aria-disabled="true"] { color: var(--text-muted); cursor: default; }

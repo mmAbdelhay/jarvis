@@ -37,8 +37,12 @@ function formatDuration(startedAt: number, endedAt: number | undefined): string 
   const millis = Math.max(0, (endedAt ?? startedAt) - startedAt);
   const seconds = millis / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds - minutes * 60);
+  // Rounded to whole seconds first, then split — splitting the unrounded
+  // value can round a >=59.5s remainder up to "60s" (e.g. 119.5s would read
+  // as "1m 60s" instead of "2m 0s").
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  const rest = total - minutes * 60;
   return `${minutes}m ${rest}s`;
 }
 
@@ -114,10 +118,13 @@ function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView
   });
 
   const moreButton = actionButton("block-more", "⋯", "More");
+  moreButton.setAttribute("aria-expanded", "false");
   const menu = buildMoreMenu(record, hooks);
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    menu.hidden = !menu.hidden;
+    const next = menu.hidden; // opening if it was hidden
+    menu.hidden = !next;
+    moreButton.setAttribute("aria-expanded", String(next));
   });
 
   actions.append(collapseButton, copyButton, rerunButton, moreButton);

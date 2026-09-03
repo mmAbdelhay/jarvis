@@ -89,10 +89,36 @@ describe("a block", () => {
     expect(header).toContain("1m 5s");
   });
 
+  // 119.5s: naive rounding of the seconds-within-the-minute remainder
+  // (59.5 -> 60) reads as the invalid "1m 60s". Rounding the total first
+  // and deriving minutes/seconds from that carries the second into the
+  // next minute instead.
+  it("carries a remainder that rounds up to 60 seconds into the next minute", () => {
+    const view = createBlockView(record({ startedAt: 0, endedAt: 119_500 }), hooks());
+    const header = view.element.querySelector(".block-header")?.textContent ?? "";
+    expect(header).toContain("2m 0s");
+  });
+
   it("leaves the more menu's filter entry disabled", () => {
     const view = createBlockView(record(), hooks());
     view.element.querySelector<HTMLElement>(".block-more")?.click();
     const filter = view.element.querySelector<HTMLElement>('[data-action="filter"]');
     expect(filter?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("toggles aria-expanded on the more button as its menu opens and closes", () => {
+    const view = createBlockView(record(), hooks());
+    const more = view.element.querySelector<HTMLElement>(".block-more");
+    expect(more?.getAttribute("aria-expanded")).toBe("false");
+    more?.click();
+    expect(more?.getAttribute("aria-expanded")).toBe("true");
+    more?.click();
+    expect(more?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("leaves the cwd unchanged when home is empty", () => {
+    const view = createBlockView(record({ cwd: "/Users/x/projects/jarvis" }), { ...hooks(), home: "" });
+    const header = view.element.querySelector(".block-header")?.textContent ?? "";
+    expect(header).toContain("/Users/x/projects/jarvis");
   });
 });
