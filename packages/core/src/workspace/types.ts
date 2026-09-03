@@ -14,12 +14,12 @@ export type TabId = string;
  *  others it renames its own document.title as you move through resources,
  *  which is exactly why a hosted app's title is fixed at open.
  *
- *  "terminal" and "api" are the odd ones: tabs with no hosted page at all.
- *  A terminal's pty and an api tab's requests live in the main process while
- *  their surfaces are drawn by the renderer itself, so they have no URL, no
- *  view, and nothing for the address bar or the history controls to act
- *  on. */
-export type TabKind = "web" | "editor" | "database" | "terminal" | "api" | "cluster";
+ *  "terminal", "api" and "docker" are the odd ones: tabs with no hosted page
+ *  at all. A terminal's pty, an api tab's requests and a docker tab's
+ *  commands live in the main process while their surfaces are drawn by the
+ *  renderer itself, so they have no URL, no view, and nothing for the
+ *  address bar or the history controls to act on. */
+export type TabKind = "web" | "editor" | "database" | "terminal" | "api" | "cluster" | "docker";
 
 export type WorkspaceTab = {
   id: TabId;

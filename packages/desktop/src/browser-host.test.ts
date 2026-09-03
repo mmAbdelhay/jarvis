@@ -864,6 +864,22 @@ describe("BrowserHost terminal tabs", () => {
     expect(views[0]?.visible).toBe(false);
   });
 
+  it("labels a docker tab Docker", () => {
+    host.openDocker("acme");
+
+    const opened = host.state().tabs.filter((tab) => tab.kind === "docker");
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.project).toBe("acme");
+    expect(opened[0]?.title).toBe("acme — Docker");
+  });
+
+  it("opens a docker tab without a hosted view", () => {
+    host.openDocker("acme");
+
+    expect(host.state().tabs[0]?.url).toBe("");
+    expect(views).toHaveLength(0);
+  });
+
   // The OAuth2 authorization-code dance: the provider sends the user back to
   // a callback carrying ?code=, and the app already has a browser to catch it.
   it("resolves with the redirect that carries the code, and closes the tab", async () => {

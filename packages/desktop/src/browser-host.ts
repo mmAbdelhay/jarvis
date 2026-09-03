@@ -69,6 +69,7 @@ const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
   terminal: "Terminal",
   api: "API",
   cluster: "Cluster",
+  docker: "Docker",
 };
 
 export class BrowserHost {
@@ -152,6 +153,15 @@ export class BrowserHost {
   }
 
   /**
+   * Opens a docker tab. Same shape as terminal and api: no hosted page, a
+   * surface the renderer draws, and Docker commands issued from the main
+   * process.
+   */
+  openDocker(project: string): TabId {
+    return this.#openViewless(project, "docker");
+  }
+
+  /**
    * A tab with no hosted view behind it. There is no URL to normalise and
    * nothing to load; the renderer draws the surface itself.
    *
@@ -163,7 +173,7 @@ export class BrowserHost {
    * Returns the new tab's id: main needs it to key whatever it is about to
    * start for this tab.
    */
-  #openViewless(project: string, kind: "terminal" | "api"): TabId {
+  #openViewless(project: string, kind: "terminal" | "api" | "docker"): TabId {
     this.#evictIfFull();
     this.#suppressed = false;
     const tab = this.#store.open(project, "", kind);
