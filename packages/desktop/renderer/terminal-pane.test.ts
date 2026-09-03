@@ -524,4 +524,145 @@ describe("the command editor in a pane", () => {
       expect(sendInput).toHaveBeenCalledWith("y");
     });
   });
+
+  // ⌘P and `^R`: Task 12's palette, over the focused pane. Both are claimed
+  // by the same capture-phase listener the dropdown uses, gated the same
+  // way — only while the editor is what is showing.
+  describe("the command palette", () => {
+    function paletteEl(p: { element: HTMLElement }): HTMLElement | null {
+      return p.element.querySelector(".terminal-palette");
+    }
+
+    it("opens on Cmd+P at an idle prompt, listing the pane's actions", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}`);
+
+      press(p, { key: "p", metaKey: true });
+
+      const palette = paletteEl(p);
+      expect(palette?.hidden).toBe(false);
+      expect(palette?.textContent).toContain("Clear terminal");
+      expect(palette?.textContent).toContain("Collapse all blocks");
+    });
+
+    it("does not open Cmd+P while a command is running — the editor is not there to claim it", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+
+      p.element.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "p", metaKey: true }),
+      );
+
+      expect(paletteEl(p)?.hidden).toBe(true);
+    });
+
+    it("runs the chosen action exactly once on Enter, and closes", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}`);
+      press(p, { key: "p", metaKey: true });
+
+      const input = paletteEl(p)?.querySelector("input");
+      if (input === null || input === undefined) throw new Error("no palette input");
+      input.value = "Clear terminal";
+      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+
+      expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+      expect(paletteEl(p)?.hidden).toBe(true);
+    });
+
+    it("offers copy/re-run for the selected block only when a block is selected", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+
+      press(p, { key: "p", metaKey: true });
+      expect(paletteEl(p)?.textContent).not.toContain("Re-run command");
+
+      // Closing and selecting a block before opening again.
+      press(p, { key: "Escape" });
+      p.blockNav?.move(1);
+      press(p, { key: "p", metaKey: true });
+
+      expect(paletteEl(p)?.textContent).toContain("Re-run command");
+      expect(paletteEl(p)?.textContent).toContain("Copy output");
+      expect(paletteEl(p)?.textContent).toContain("Copy command");
+    });
+
+    it("re-runs the selected block by filling the editor, never sending it", () => {
+      const { p, sendInput } = editorPane();
+      p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+      p.blockNav?.move(1);
+      press(p, { key: "p", metaKey: true });
+
+      const input = paletteEl(p)?.querySelector("input");
+      if (input === null || input === undefined) throw new Error("no palette input");
+      input.value = "Re-run command";
+      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+
+      expect(textarea(p)?.value).toBe("ls");
+      expect(sendInput).not.toHaveBeenCalledWith(expect.stringContaining("\r"));
+    });
+
+    it("offers no split actions with no splitKeys — nothing reachable through it does nothing", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}`);
+
+      press(p, { key: "p", metaKey: true });
+
+      expect(paletteEl(p)?.textContent).not.toContain("Split right");
+    });
+
+    it("leaves Cmd+P claiming nothing before this pane has ever seen a prompt", () => {
+      const { p } = editorPane();
+
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "p",
+        metaKey: true,
+      });
+      p.element.dispatchEvent(event);
+
+      expect(paletteEl(p)?.hidden ?? true).toBe(true);
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it("^R asks over Jarvis's own command log and fills the editor with the choice, never running it", async () => {
+      const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => ["git status", "git log"]);
+      p.write(`${A}$ ${B}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      press(p, { key: "r", ctrlKey: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const palette = paletteEl(p);
+      expect(palette?.hidden).toBe(false);
+      const input = palette?.querySelector("input");
+      if (input === null || input === undefined) throw new Error("no palette input");
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowDown" }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(textarea(p)?.value).toBe("git log");
+      expect(sendInput).not.toHaveBeenCalledWith(expect.stringContaining("\r"));
+    });
+
+    it("^R leaves the editor untouched on Escape", async () => {
+      const { p } = editorPane(EDITOR_SETTINGS, async () => ["git status"]);
+      p.write(`${A}$ ${B}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const field = textarea(p);
+      if (field === null) throw new Error("no editor");
+      field.value = "half-typed";
+
+      press(p, { key: "r", ctrlKey: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const input = paletteEl(p)?.querySelector("input");
+      input?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(field.value).toBe("half-typed");
+    });
+  });
 });

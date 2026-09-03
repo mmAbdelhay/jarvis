@@ -19,8 +19,10 @@
 
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
+import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { createEditor, type TerminalEditor } from "./terminal-input.js";
+import { createPalette, type PaletteAction } from "./terminal-palette.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
@@ -48,6 +50,12 @@ export type PaneHooks = {
    *  reaches the editor unless this says otherwise — never affecting
    *  the pane's behaviour when it is not passed. */
   interceptKey?: ((event: KeyboardEvent) => boolean) | undefined;
+  /** What the palette's split right / split down / close pane act on — the
+   *  tab's own tree, shared across every pane split off it. Absent for a
+   *  terminal with no splits at all (the Session route), which is exactly
+   *  why the palette's action list leaves those three out when it is
+   *  missing rather than offering an action that does nothing. */
+  splitKeys?: SplitKeys | undefined;
 };
 
 export type { BlockView };
@@ -265,26 +273,38 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
 
   const editor = hooks.settings.inputEditor ? buildEditor() : undefined;
 
-  // The dropdown's first look at an editor keystroke. A capture-phase
-  // listener on the pane's own root sees a keydown before it reaches the
-  // editor's own (bubble-phase) listener in createEditor — capture always
-  // runs before bubble, on every ancestor, regardless of which was
-  // registered first — so this is where completion gets to claim
-  // Tab/↑/↓/Enter/Escape before the editor's history walk, submit or
-  // nothing at all acts on the same key. stopPropagation() is what keeps
-  // it from also reaching that listener once claimed; interceptKey has
-  // already called preventDefault() on anything it claims.
+  // The palette and the dropdown's first look at an editor keystroke. A
+  // capture-phase listener on the pane's own root sees a keydown before it
+  // reaches the editor's own (bubble-phase) listener in createEditor —
+  // capture always runs before bubble, on every ancestor, regardless of
+  // which was registered first — so this is where the palette gets to
+  // claim ⌘P and `^R` (and, once open, everything it filters and navigates
+  // with) before the editor's history walk, submit, ^R-as-a-passthrough-
+  // byte or nothing at all acts on the same key. stopPropagation() is what
+  // keeps a claimed key from also reaching that listener; both handlers
+  // have already called preventDefault() on anything they claim.
+  //
+  // Gated on the editor actually being what is showing — the one moment
+  // this is safe. Every other moment (nothing running, no editor; running;
+  // the alt screen) is a moment `^R` is a real control byte a shell's own
+  // reverse-i-search or a running program (vim, fzf, `less`) may still
+  // want, and xterm's own custom key handler is where a keystroke in that
+  // state actually lands — this listener is never consulted for it, since
+  // an editor that is not visible does not have the focus a keydown would
+  // need to reach it.
   const interceptKey = hooks.interceptKey;
-  if (interceptKey !== undefined) {
-    element.addEventListener(
-      "keydown",
-      (event) => {
-        if (editor === undefined || !editor.isVisible()) return;
-        if (!interceptKey(event)) event.stopPropagation();
-      },
-      true,
-    );
-  }
+  element.addEventListener(
+    "keydown",
+    (event) => {
+      if (editor === undefined || !editor.isVisible()) return;
+      if (!handlePaletteKey(event, paletteKeys)) {
+        event.stopPropagation();
+        return;
+      }
+      if (interceptKey !== undefined && !interceptKey(event)) event.stopPropagation();
+    },
+    true,
+  );
 
   function buildEditor(): TerminalEditor | undefined {
     try {
@@ -368,6 +388,125 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       void navigator.clipboard?.writeText(text);
     });
   }
+
+  // The command palette: ⌘P over this pane, `^R` for history search. Built
+  // once per pane, host = the pane's own root — the same host the find bar
+  // and the completion dropdown are appended to, so it travels with the
+  // pane it belongs to.
+  const palette = createPalette(element);
+
+  /** Moves the selection forward, wrapping, until it lands on a failed
+   *  block — or gives up after one full pass, when nothing in what is
+   *  currently visible has failed. Built on `nav.move` rather than a new
+   *  BlockNav method: `move` already walks the filtered, visible list in
+   *  order and wraps at both ends, which is exactly the search this
+   *  needs. */
+  function jumpToNextFailed(): void {
+    if (nav === undefined) return;
+    for (let step = 0; step < views.length; step += 1) {
+      nav.move(1);
+      const current = nav.selected();
+      if (current === undefined) return;
+      if (current.record.exitCode !== 0) return;
+    }
+  }
+
+  /**
+   * Everything ⌘P offers over this pane, assembled fresh on every open —
+   * the selected block, the filter state and what is worth re-running can
+   * all have changed since it last opened.
+   *
+   * Copy/re-run act on the selected block and are left out entirely when
+   * there is none to act on, rather than offered as an action that does
+   * nothing. Split right/split down/close pane are left out the same way
+   * when this pane has no splits to act on (`hooks.splitKeys` absent —
+   * the Session route). Workflows and the two AI actions are later tasks
+   * and belong here too, once they exist — nothing about this list is
+   * final.
+   */
+  function paletteActions(): PaletteAction[] {
+    const actions: PaletteAction[] = [];
+    const selected = nav?.selected();
+    if (selected !== undefined) {
+      actions.push(
+        { id: "copy-output", label: "Copy output", run: () => copy(selected.record.output) },
+        { id: "copy-command", label: "Copy command", run: () => copy(selected.record.command) },
+        { id: "rerun", label: "Re-run command", run: () => fill(selected.record.command) },
+      );
+    }
+    actions.push({
+      id: "collapse-all",
+      label: "Collapse all blocks",
+      run: () => attempt(() => views.forEach((view) => view.collapse(true))),
+    });
+    actions.push({ id: "clear", label: "Clear terminal", run: () => attempt(() => terminal.clear()) });
+    if (nav !== undefined) {
+      const currentNav = nav;
+      actions.push({ id: "jump-next-failed", label: "Jump to next failed", run: jumpToNextFailed });
+      actions.push({
+        id: "toggle-failed-filter",
+        label: "Toggle failed-only filter",
+        run: () => attempt(() => currentNav.toggleFailedFilter()),
+      });
+    }
+    const splitKeys = hooks.splitKeys;
+    if (splitKeys !== undefined) {
+      actions.push({
+        id: "split-right",
+        label: "Split right",
+        run: () => attempt(() => splitKeys.split("row")),
+      });
+      actions.push({
+        id: "split-down",
+        label: "Split down",
+        run: () => attempt(() => splitKeys.split("column")),
+      });
+      actions.push({
+        id: "close-pane",
+        label: "Close pane",
+        // The last pane is the tab, so closing it is closing the tab — the
+        // same fallback ⌘W's handleSplitKey follows.
+        run: () =>
+          attempt(() => {
+            if (!splitKeys.closeFocused()) splitKeys.closeTab();
+          }),
+      });
+    }
+    return actions;
+  }
+
+  /**
+   * `^R`'s whole flow: ask the palette over Jarvis's own command log — the
+   * same log the editor's own ↑/↓ walk, not zsh's — and put whatever was
+   * chosen back in the editor. It fills; it never runs, the same rule
+   * re-run follows: nothing here appends a return.
+   *
+   * Never throws into the terminal: a history read that fails, or a
+   * palette the user closed with Escape, simply leaves the editor as it
+   * was.
+   */
+  function historySearch(): void {
+    const read = hooks.history;
+    if (read === undefined || editor === undefined) return;
+    const editorEl = editor;
+    void (async () => {
+      let lines: string[];
+      try {
+        lines = await read();
+      } catch {
+        return;
+      }
+      let chosen: string | undefined;
+      try {
+        chosen = await palette.ask(lines, "History");
+      } catch {
+        return;
+      }
+      if (chosen !== undefined) attempt(() => editorEl.setValue(chosen as string));
+    })();
+  }
+
+  const paletteKeys: PaletteKeys = { palette, actions: paletteActions, historySearch };
 
   function freeze(record: BlockRecord): void {
     const view = createBlockView(record, {

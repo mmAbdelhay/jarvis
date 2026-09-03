@@ -1,4 +1,5 @@
 import type { BlockNav } from "./block-nav.js";
+import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
 import { LigaturesAddon } from "./vendor/addon-ligatures.mjs";
 import { SearchAddon } from "./vendor/addon-search.mjs";
@@ -82,6 +83,55 @@ export function handleSplitKey(event: KeyboardEvent, keys: SplitKeys): boolean {
     attempt(() => {
       if (!keys.closeFocused()) keys.closeTab();
     });
+    return claim(event);
+  }
+
+  return true;
+}
+
+/** What ⌘P and `^R` act on: the palette itself, the (freshly assembled,
+ *  each time it opens) action list ⌘P shows, and history search's own
+ *  flow — a promise, not a plain action list, since `^R`'s choice fills
+ *  the editor rather than running anything. */
+export type PaletteKeys = {
+  palette: Palette;
+  /** Built fresh on every ⌘P — the selected block, the filter state and
+   *  what is worth re-running can all have changed since the palette last
+   *  opened. */
+  actions: () => readonly PaletteAction[];
+  /** `^R`'s whole flow: ask the palette over history, and put whatever was
+   *  chosen in the editor. Fire-and-forget from here — the key is claimed
+   *  the moment the palette opens, and the editor is filled once the user
+   *  has actually chosen something, or never, on Escape. */
+  historySearch: () => void;
+};
+
+/**
+ * The palette's two opening chords: ⌘P shows the action list, `^R` opens
+ * history search. Once the palette is open, every other key goes straight
+ * to `palette.handleKey` — filtering, ↑/↓, Enter, Escape — which is also
+ * where "closed, every key comes back true" lives, so a plain `return true`
+ * below is exactly as safe as the completion dropdown's.
+ *
+ * `^R` is the one control byte this module claims: everywhere else Ctrl is
+ * deliberately left to the shell, but zsh's own reverse-i-search is
+ * superseded by this — the palette already searches the same command log,
+ * against the same history the editor's own ↑/↓ walk, so `^R` finding
+ * nothing here would only be zsh's line editor doing a worse job of the
+ * feature the app now owns.
+ */
+export function handlePaletteKey(event: KeyboardEvent, keys: PaletteKeys): boolean {
+  if (event.type !== "keydown") return true;
+
+  if (keys.palette.isOpen()) return keys.palette.handleKey(event);
+
+  if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
+    keys.palette.open(keys.actions(), "Actions");
+    return claim(event);
+  }
+
+  if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r") {
+    keys.historySearch();
     return claim(event);
   }
 

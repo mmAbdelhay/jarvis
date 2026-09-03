@@ -245,6 +245,9 @@ function makePane(
       }
     },
     interceptKey,
+    // The palette's split right / split down / close pane — the same tree
+    // handleSplitKey already acts on for the app's own ⌘D/⌘⇧D/⌘W chords.
+    splitKeys,
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;

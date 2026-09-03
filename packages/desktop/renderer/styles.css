@@ -903,6 +903,52 @@
   }
   .terminal-completion-item.selected { color: var(--text); background: var(--accent-quiet); }
 
+  /* The command palette — ⌘P over the focused pane, ^R for history search.
+     Centered over its own pane rather than anchored to a caret cell: unlike
+     the completion dropdown it is not completing anything typed, so there
+     is no cell to sit under. Same positioned-host assumption as the find
+     bar and the completion dropdown. */
+  .terminal-palette {
+    position: absolute;
+    top: 12%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    width: min(480px, 80%);
+    max-height: 60%;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+    overflow: hidden;
+  }
+  .terminal-palette[hidden] { display: none; }
+  .terminal-palette-input {
+    padding: 10px 12px;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    outline: none;
+    font-size: 13px;
+  }
+  .terminal-palette-list {
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .terminal-palette-item {
+    padding: 4px 12px;
+    color: var(--text-muted);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .terminal-palette-item.selected { color: var(--text); background: var(--accent-quiet); }
+
   /* The command-line editor: a transparent <textarea> for the value (so
      selection, IME and Arabic input keep working) with a painted <div>
      behind it for syntax highlighting. Font and padding must match exactly
