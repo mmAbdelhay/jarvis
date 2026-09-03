@@ -343,7 +343,12 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
     // for "copy this block's output" or "jump to next failed" — a palette
     // that went inert the moment a command started would deny both at
     // precisely the wrong moment.
-    if (event.key.toLowerCase() === "p") {
+    //
+    // !ctrlKey && !altKey, matching handlePaletteKey's own guard for the
+    // same chord at the editor-visible listener — the two must agree on
+    // exactly which modifiers claim ⌘P, or ⌥⌘P would be claimed in one
+    // pane state and not another.
+    if (!event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
       if (hooks.openPalette === undefined) return true;
       hooks.openPalette();
       return claim(event);

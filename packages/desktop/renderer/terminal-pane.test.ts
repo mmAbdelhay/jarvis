@@ -382,6 +382,35 @@ describe("the command editor in a pane", () => {
     expect(sendInput).toHaveBeenCalledTimes(1);
   });
 
+  // "No editor" also covers a hidden one, and a re-run that fell through
+  // to typing at the prompt in that state would be typing straight into
+  // whatever is now reading stdin — a running program, not zsh. The
+  // block's own ↻ control has been reachable since Task 6/7; this is the
+  // regression test for the fix that finally guards it.
+  it("sends nothing when the block's own re-run control is clicked while a command is running", () => {
+    const { p, sendInput } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+    p.write(`sleep 9\r\n${C("sleep 9")}`);
+    expect(p.element.dataset["state"]).toBe("running");
+    sendInput.mockClear();
+
+    p.element.querySelector<HTMLElement>(".block-rerun")?.click();
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the block's own re-run control is clicked while the alt screen is held", () => {
+    const { p, sendInput } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+    p.write(`top\r\n${C("top")}[?1049h`);
+    expect(p.element.dataset["state"]).toBe("alt");
+    sendInput.mockClear();
+
+    p.element.querySelector<HTMLElement>(".block-rerun")?.click();
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
   it("reads the command log once per prompt, not once per state change", async () => {
     let reads = 0;
     const { p } = editorPane(EDITOR_SETTINGS, async () => {
@@ -635,6 +664,37 @@ describe("the command editor in a pane", () => {
       expect(paletteEl(p)?.textContent).toContain("Copy command");
     });
 
+    // The selection survives into "running" — this is the palette's half
+    // of the fix: re-run offering to type the command straight into
+    // whatever is now reading stdin. Copy stays offered; nothing about it
+    // touches the pty.
+    it("drops the re-run entry (but keeps copy) once a command starts running with a block still selected", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+      p.blockNav?.move(1);
+      p.write(`sleep 9\r\n${C("sleep 9")}`);
+      expect(p.element.dataset["state"]).toBe("running");
+
+      p.openPalette();
+
+      const text = paletteEl(p)?.textContent ?? "";
+      expect(text).toContain("Copy output");
+      expect(text).toContain("Copy command");
+      expect(text).not.toContain("Re-run command");
+    });
+
+    it("drops the re-run entry while the alt screen is held, same as while running", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+      p.blockNav?.move(1);
+      p.write(`top\r\n${C("top")}[?1049h`);
+      expect(p.element.dataset["state"]).toBe("alt");
+
+      p.openPalette();
+
+      expect(paletteEl(p)?.textContent).not.toContain("Re-run command");
+    });
+
     it("re-runs the selected block by filling the editor, never sending it", () => {
       const { p, sendInput } = editorPane();
       p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
@@ -648,7 +708,7 @@ describe("the command editor in a pane", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
 
       expect(textarea(p)?.value).toBe("ls");
-      expect(sendInput).not.toHaveBeenCalledWith(expect.stringContaining("\r"));
+      expect(sendInput).not.toHaveBeenCalled();
     });
 
     it("offers no split actions with no splitKeys — nothing reachable through it does nothing", () => {
@@ -692,7 +752,7 @@ describe("the command editor in a pane", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(textarea(p)?.value).toBe("git log");
-      expect(sendInput).not.toHaveBeenCalledWith(expect.stringContaining("\r"));
+      expect(sendInput).not.toHaveBeenCalled();
     });
 
     it("^R leaves the editor untouched on Escape", async () => {
@@ -710,6 +770,59 @@ describe("the command editor in a pane", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(field.value).toBe("half-typed");
+    });
+
+    // A pane can be disposed while historySearch() is still awaiting
+    // palette.ask() — dispose() must close the palette (and so resolve
+    // that promise to undefined) rather than leave it pending forever.
+    it("closes the palette on dispose, resolving a ^R search still in flight", async () => {
+      const { p } = editorPane(EDITOR_SETTINGS, async () => ["git status"]);
+      p.write(`${A}$ ${B}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      press(p, { key: "r", ctrlKey: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(paletteEl(p)?.hidden).toBe(false);
+
+      expect(() => p.dispose()).not.toThrow();
+
+      expect(paletteEl(p)?.hidden).toBe(true);
+    });
+
+    function editorPaneWithCloseCompletion(closeCompletion: () => void) {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const p = createPane(host, {
+        sendInput: vi.fn(),
+        resize: vi.fn(),
+        attach: async () => "",
+        settings: EDITOR_SETTINGS,
+        history: async () => [],
+        closeCompletion,
+      });
+      return { p };
+    }
+
+    it("closes the completion dropdown before opening via openPalette()", () => {
+      let closed = 0;
+      const { p } = editorPaneWithCloseCompletion(() => (closed += 1));
+      p.write(`${A}$ ${B}`);
+
+      p.openPalette();
+
+      expect(closed).toBe(1);
+      expect(paletteEl(p)?.hidden).toBe(false);
+    });
+
+    it("closes the completion dropdown before opening via the editor-gated Cmd+P listener", () => {
+      let closed = 0;
+      const { p } = editorPaneWithCloseCompletion(() => (closed += 1));
+      p.write(`${A}$ ${B}`);
+
+      press(p, { key: "p", metaKey: true });
+
+      expect(closed).toBe(1);
+      expect(paletteEl(p)?.hidden).toBe(false);
     });
   });
 });

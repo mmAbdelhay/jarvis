@@ -22,7 +22,7 @@ import { createBlockView, type BlockView } from "./block-view.js";
 import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { createEditor, type TerminalEditor } from "./terminal-input.js";
-import { createPalette, type PaletteAction } from "./terminal-palette.js";
+import { createPalette, type Palette, type PaletteAction } from "./terminal-palette.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
@@ -56,6 +56,11 @@ export type PaneHooks = {
    *  why the palette's action list leaves those three out when it is
    *  missing rather than offering an action that does nothing. */
   splitKeys?: SplitKeys | undefined;
+  /** Hides the completion dropdown — called right before the palette
+   *  opens, so a suggestion list left showing from mid-typing does not sit
+   *  stale underneath it. Absent for a terminal with no completion wired
+   *  up, in which case there is nothing to close. */
+  closeCompletion?: (() => void) | undefined;
 };
 
 export type { BlockView };
@@ -374,10 +379,16 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   // With an editor live the command goes into it — putting it into zsh's
   // line buffer instead would leave the shell holding one line while the
   // editor showed another, the divergence this design refuses everywhere.
-  // With no editor (or one that is hidden, because something is running)
-  // it is typed at the live prompt, exactly as it was before the editor
-  // existed. Copy goes straight to the system clipboard, the same call the
-  // rest of the terminal already makes for a selection.
+  // With no editor it is typed at the live prompt, exactly as it was
+  // before the editor existed — but only when there *is* a live prompt to
+  // type it at. "No editor" also covers a hidden one, and the editor is
+  // hidden exactly while a command is running or the alt screen is held —
+  // states in which whatever is reading stdin right now is `vim`, a REPL,
+  // or a running program, never zsh waiting for a line. idle() is the same
+  // check applyState() already uses to decide whether the editor belongs
+  // on screen at all, so this is not a new rule, only this path finally
+  // honouring it. Copy goes straight to the system clipboard, the same
+  // call the rest of the terminal already makes for a selection.
   function fill(command: string): void {
     attempt(() => {
       if (editor !== undefined && editor.isVisible()) {
@@ -385,6 +396,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         editor.focus();
         return;
       }
+      if (!idle()) return;
       hooks.sendInput(command);
     });
   }
@@ -424,11 +436,16 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *
    * Copy/re-run act on the selected block and are left out entirely when
    * there is none to act on, rather than offered as an action that does
-   * nothing. Split right/split down/close pane are left out the same way
-   * when this pane has no splits to act on (`hooks.splitKeys` absent —
-   * the Session route). Workflows and the two AI actions are later tasks
-   * and belong here too, once they exist — nothing about this list is
-   * final.
+   * nothing. Re-run is left out on top of that unless the pane is idle —
+   * selection survives into "running" and "alt", and offering re-run there
+   * would be offering to type the command straight into whatever program
+   * is currently reading stdin (see fill()'s own guard, which this mirrors
+   * rather than relies on: the action simply is not in the list, instead
+   * of being present and silently doing nothing when chosen). Split
+   * right/split down/close pane are left out the same way when this pane
+   * has no splits to act on (`hooks.splitKeys` absent — the Session
+   * route). Workflows and the two AI actions are later tasks and belong
+   * here too, once they exist — nothing about this list is final.
    */
   function paletteActions(): PaletteAction[] {
     const actions: PaletteAction[] = [];
@@ -437,8 +454,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       actions.push(
         { id: "copy-output", label: "Copy output", run: () => copy(selected.record.output) },
         { id: "copy-command", label: "Copy command", run: () => copy(selected.record.command) },
-        { id: "rerun", label: "Re-run command", run: () => fill(selected.record.command) },
       );
+      if (idle()) {
+        actions.push({ id: "rerun", label: "Re-run command", run: () => fill(selected.record.command) });
+      }
     }
     actions.push({
       id: "collapse-all",
@@ -512,7 +531,21 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     })();
   }
 
-  const paletteKeys: PaletteKeys = { palette, actions: paletteActions, historySearch };
+  // A view of `palette` whose `open` first hides the completion dropdown —
+  // handed to `handlePaletteKey` rather than `palette` itself, so ⌘P
+  // claimed at this listener (the editor-visible state) closes a stale
+  // suggestion list the same way `openPalette()` below does for every
+  // other state. `isOpen`/`handleKey`/`ask`/`close` are the same
+  // functions `palette` itself has — only `open` differs.
+  const paletteForKeys: Palette = {
+    ...palette,
+    open: (actions, placeholder) => {
+      attempt(() => hooks.closeCompletion?.());
+      palette.open(actions, placeholder);
+    },
+  };
+
+  const paletteKeys: PaletteKeys = { palette: paletteForKeys, actions: paletteActions, historySearch };
 
   function freeze(record: BlockRecord): void {
     const view = createBlockView(record, {
@@ -642,6 +675,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // Releases the sticky header's document-level scroll listener — left
       // running, it would outlive this tab for the rest of the process.
       attempt(() => nav?.dispose());
+      // A pane can be closed while historySearch() is still awaiting
+      // palette.ask() — closing here resolves that promise (to undefined,
+      // same as Escape) instead of leaving it pending forever.
+      attempt(() => palette.close());
     },
     // A copy: the internal array goes on changing as commands finish, and a
     // caller holding what it was told is a readonly list must not see it move.
@@ -654,6 +691,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // palette must open whether a command is running, the alt screen is
     // held, or there is no editor at all. Only the *actions* it offers
     // are state-dependent, inside paletteActions() itself.
-    openPalette: () => attempt(() => palette.open(paletteActions(), "Actions")),
+    openPalette: () =>
+      attempt(() => {
+        hooks.closeCompletion?.();
+        palette.open(paletteActions(), "Actions");
+      }),
   };
 }

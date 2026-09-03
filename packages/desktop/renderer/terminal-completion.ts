@@ -263,6 +263,10 @@ export type Completion = {
    *  Shift+Enter with it. terminal-addons.ts owns the one handler and
    *  consults this first. */
   handleKey(event: KeyboardEvent): boolean;
+  /** Hides the dropdown without accepting anything — what the command
+   *  palette calls before it opens over the same pane, so a suggestion
+   *  list left showing from mid-typing does not sit stale underneath it. */
+  close(): void;
 };
 
 /** The OSC identifier FinalTerm defined and iTerm2, VS Code, WezTerm and
@@ -310,7 +314,7 @@ export function attachCompletion(
   } catch {
     // No marks means no dropdown, and that is the whole failure. Every key
     // goes straight through.
-    return { handleKey: () => true };
+    return { handleKey: () => true, close: () => {} };
   }
 
   async function refresh(): Promise<void> {
@@ -433,5 +437,11 @@ export function attachCompletion(
     return true;
   }
 
-  return { handleKey };
+  return {
+    handleKey,
+    close: () => {
+      dropdown.hide();
+      openFor = undefined;
+    },
+  };
 }

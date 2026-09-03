@@ -203,7 +203,7 @@ function makePane(
   // createPane, before completion can exist — so the pane gets a forward
   // reference, filled in once attachCompletion has actually run, exactly
   // the way `completion` itself already gets reassigned below.
-  let completion: Completion = { handleKey: () => true };
+  let completion: Completion = { handleKey: () => true, close: () => {} };
 
   // The pane's own first look at a keystroke: the split chords, then the
   // autocomplete dropdown. It is passed both to the pane (the editor's
@@ -248,6 +248,9 @@ function makePane(
     // The palette's split right / split down / close pane — the same tree
     // handleSplitKey already acts on for the app's own ⌘D/⌘⇧D/⌘W chords.
     splitKeys,
+    // So the palette can hide a suggestion list left showing from
+    // mid-typing before it opens over the same pane.
+    closeCompletion: () => completion.close(),
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;
