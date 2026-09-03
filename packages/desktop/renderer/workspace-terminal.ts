@@ -161,6 +161,11 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     // what puts it through normalizeInput and the app's navigation rules
     // instead of handing an arbitrary string to the OS.
     openLink: (url) => void window.jarvis.openTab(project, url),
+    // Undefined with blocks switched off — createPane leaves its own
+    // blockNav undefined in that case, and the key handler's guards make
+    // that mean "behave exactly as today" rather than claiming ⌘↑/⌘↓/⌘⇧F
+    // and doing nothing with them.
+    blockNav: view.blockNav,
   });
 
   const pane: Pane = { element, pane: view };

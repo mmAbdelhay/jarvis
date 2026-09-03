@@ -10,8 +10,8 @@ const record = (over: Partial<Parameters<typeof createBlockView>[0]> = {}) => ({
 
 // The brief's hooks() omits `home`, which the header needs to collapse
 // `$HOME` to `~` (see the task's Decisions Already Made). Fixed here rather
-// than in the assertion it exists to satisfy.
-const hooks = () => ({ cols: 80, fill: vi.fn(), copy: vi.fn(), home: "/Users/x" });
+// than in the assertion it exists to satisfy. `filterToCommand` is Task 7's.
+const hooks = () => ({ cols: 80, fill: vi.fn(), copy: vi.fn(), home: "/Users/x", filterToCommand: vi.fn() });
 
 describe("a block", () => {
   it("shows the command, its status, its duration and where it ran", () => {
@@ -99,11 +99,13 @@ describe("a block", () => {
     expect(header).toContain("2m 0s");
   });
 
-  it("leaves the more menu's filter entry disabled", () => {
-    const view = createBlockView(record(), hooks());
+  it("filters to this command from the more menu", () => {
+    const h = hooks();
+    const view = createBlockView(record({ command: "git status" }), h);
     view.element.querySelector<HTMLElement>(".block-more")?.click();
     const filter = view.element.querySelector<HTMLElement>('[data-action="filter"]');
-    expect(filter?.getAttribute("aria-disabled")).toBe("true");
+    filter?.click();
+    expect(h.filterToCommand).toHaveBeenCalledWith("git status");
   });
 
   it("toggles aria-expanded on the more button as its menu opens and closes", () => {

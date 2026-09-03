@@ -1167,12 +1167,24 @@
     overflow-y: auto; background: var(--ground); padding: 10px 14px; }
   .terminal-blocks { display: flex; flex-direction: column; gap: 6px; }
   .terminal-live { flex: 1 1 auto; min-height: 120px; }
+  /* Which block the user has scrolled past — block-nav.ts fills it in and
+     shows/hides it as the pane scrolls. position: sticky holds it at the
+     pane's own top, since .terminal-pane (not .terminal-blocks) is what
+     actually scrolls. */
+  .terminal-sticky-header { position: sticky; top: 0; z-index: 2;
+    background: var(--ground); border-bottom: 1px solid var(--border);
+    padding: 2px 0 4px; margin-bottom: 2px;
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-sticky-header[hidden] { display: none; }
   /* A full-screen program gets the whole pane, exactly as it would in any
      other terminal — no blocks above it, no padding around it. */
-  .terminal-pane[data-state="alt"] .terminal-blocks { display: none; }
+  .terminal-pane[data-state="alt"] .terminal-blocks,
+  .terminal-pane[data-state="alt"] .terminal-sticky-header { display: none; }
   .terminal-pane[data-state="alt"] { overflow: hidden; padding: 0; }
   /* Blocks off, or a shell with no integration: today's terminal. */
-  .terminal-pane[data-state="plain"] .terminal-blocks { display: none; }
+  .terminal-pane[data-state="plain"] .terminal-blocks,
+  .terminal-pane[data-state="plain"] .terminal-sticky-header { display: none; }
   /* A block's border-left is its status at a glance, so data-status carries
      the colour rather than a class — a block with no exit code is drawn
      failed, never mistaken for a quiet success. */
@@ -1189,6 +1201,11 @@
   .block:hover .block-header [role="button"], .block.selected .block-header [role="button"] { opacity: 1; }
   .block.selected { background: var(--accent-quiet); }
   .block.collapsed .block-output { display: none; }
+  /* The find bar's fallback: ⌘F's own match on a frozen block, shown for
+     one second (block-nav.ts owns the timing) since there is no live
+     cursor to land on inside frozen text the way there is in the live
+     terminal. */
+  .block.found { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* The anchor the dropdown positions against — without this the menu
      would float relative to the pane (or the page) instead of the button
      that opened it. */

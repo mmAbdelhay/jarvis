@@ -18,6 +18,9 @@ export type BlockViewHooks = {
   copy: (text: string) => void;
   /** The user's home directory, for collapsing `cwd` to `~`. */
   home: string;
+  /** The more menu's "Filter to this command" — narrows the block list down
+   *  to blocks that ran this exact command. Wired to the pane's BlockNav. */
+  filterToCommand: (command: string) => void;
 };
 
 export type BlockView = {
@@ -136,8 +139,7 @@ function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView
   return wrap;
 }
 
-/** copy command, copy both, and filter to this command — the last created
- *  disabled: filtering is Task 7's, not this one's. */
+/** copy command, copy both, and filter to this command. */
 function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement {
   const menu = document.createElement("div");
   menu.className = "block-more-menu";
@@ -162,7 +164,11 @@ function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement 
 
   const filter = actionButton("block-more-item", "Filter to this command", "Filter to this command");
   filter.dataset["action"] = "filter";
-  filter.setAttribute("aria-disabled", "true");
+  filter.addEventListener("click", (event) => {
+    event.stopPropagation();
+    hooks.filterToCommand(record.command);
+    menu.hidden = true;
+  });
 
   menu.append(copyCommand, copyBoth, filter);
   return menu;

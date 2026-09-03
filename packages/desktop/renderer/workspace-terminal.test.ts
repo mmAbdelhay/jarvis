@@ -367,6 +367,22 @@ describe("terminal key bindings and addons", () => {
     expect(FakeTerminal.instances[0]?.pressKey({ key: "k", ctrlKey: true })).toBe(true);
   });
 
+  // A pane with blocks switched off (this describe block's default
+  // settings) has no BlockNav, and the key handler's undefined guards are
+  // what keeps ⌘↑/⌘↓/⌘⇧F behaving exactly as they did before blocks
+  // existed — left to xterm — rather than claiming the key and doing
+  // nothing with it.
+  it("leaves the block-navigation keys to xterm when the pane has no blocks", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    expect(terminal.pressKey({ key: "ArrowDown", metaKey: true })).toBe(true);
+    expect(terminal.pressKey({ key: "ArrowUp", metaKey: true })).toBe(true);
+    expect(terminal.pressKey({ key: "F", shiftKey: true, metaKey: true })).toBe(true);
+  });
+
   it("opens the find bar on Cmd+F and closes it on Escape", async () => {
     const { renderWorkspaceTerminals } = await load();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
@@ -446,5 +462,108 @@ describe("terminal key bindings and addons", () => {
     renderWorkspaceTerminals(tabs, "tab-2", "acme");
 
     expect(document.querySelectorAll(".terminal-completion")).toHaveLength(2);
+  });
+});
+
+describe("moving around a pane's blocks", () => {
+  beforeEach(() => harness());
+
+  async function paneWithBlocks(): Promise<HTMLElement> {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    // See "builds a pane of blocks when the settings say so" above: the
+    // settings arrive on a promise, so the pane has to be built after it
+    // resolves or it falls back to the plain terminal.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    if (pane === null) throw new Error("expected a pane");
+    return pane;
+  }
+
+  function finishCommand(command: string, exitCode: number): void {
+    dataListener?.(
+      "tab-1",
+      `]133;A$ ]133;B${command}\r\n` +
+        `]133;C;${command}ok\r\n]133;D;${exitCode}`,
+    );
+  }
+
+  it("selects the next and previous block on Cmd+ArrowDown/Up, clamping at both ends", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("a", 0);
+    finishCommand("b", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+    const blocks = () => Array.from(pane.querySelectorAll(".block"));
+
+    expect(terminal.pressKey({ key: "ArrowDown", metaKey: true })).toBe(false);
+    expect(blocks()[0]?.classList.contains("selected")).toBe(true);
+
+    terminal.pressKey({ key: "ArrowDown", metaKey: true });
+    expect(blocks()[1]?.classList.contains("selected")).toBe(true);
+    expect(blocks()[0]?.classList.contains("selected")).toBe(false);
+
+    // Past the last block: stays there rather than wrapping.
+    terminal.pressKey({ key: "ArrowDown", metaKey: true });
+    expect(blocks()[1]?.classList.contains("selected")).toBe(true);
+
+    terminal.pressKey({ key: "ArrowUp", metaKey: true });
+    expect(blocks()[0]?.classList.contains("selected")).toBe(true);
+  });
+
+  it("hides ok blocks on Cmd+Shift+F and restores them on a second press", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("git status", 0);
+    finishCommand("git push", 1);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+    const blocks = () => Array.from(pane.querySelectorAll<HTMLElement>(".block"));
+
+    const handled = terminal.pressKey({ key: "F", shiftKey: true, metaKey: true });
+    expect(handled).toBe(false);
+    expect(blocks()[0]?.hidden).toBe(true); // ok — hidden
+    expect(blocks()[1]?.hidden).toBe(false); // failed — stays
+
+    terminal.pressKey({ key: "F", shiftKey: true, metaKey: true });
+    expect(blocks().every((b) => !b.hidden)).toBe(true);
+  });
+
+  // The live terminal is where the user is looking, so its own match — if
+  // it has one — wins; only once it comes up empty does the frozen list get
+  // scanned. FakeTerminal never actually activates the real search addon
+  // (loadAddon here only records it), so findNext/findPrevious throw and
+  // this exercises the "no match" branch on every call — which is exactly
+  // the case this feature exists for.
+  it("flags the first frozen block that matches once the live terminal has no match", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("ls", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.pressKey({ key: "f", metaKey: true });
+    const input = document.querySelector<HTMLInputElement>(".terminal-find-input");
+    if (input === null) throw new Error("expected the find bar's input");
+    input.value = "ok";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(pane.querySelector(".block")?.classList.contains("found")).toBe(true);
+  });
+
+  it("does not flag anything when nothing frozen matches either", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("ls", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.pressKey({ key: "f", metaKey: true });
+    const input = document.querySelector<HTMLInputElement>(".terminal-find-input");
+    if (input === null) throw new Error("expected the find bar's input");
+    input.value = "no-such-text-anywhere";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(pane.querySelector(".block.found")).toBeNull();
   });
 });

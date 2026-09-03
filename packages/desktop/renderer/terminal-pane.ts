@@ -17,6 +17,7 @@
 // is an enhancement, so every part of it is guarded: a pane whose block
 // machinery fails is still a working terminal.
 
+import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
@@ -43,6 +44,12 @@ export type TerminalPane = {
   dispose(): void;
   /** The frozen blocks, oldest first — what Tasks 6, 7 and 12 act on. */
   blocks(): readonly BlockView[];
+  /** Selection, jumping and filtering over `blocks()`. Undefined for a pane
+   *  with blocks switched off (`settings.blocks === false`) — there is
+   *  nothing to navigate, and callers use this to leave the app's Cmd
+   *  chords behaving exactly as they do today rather than claiming a key
+   *  and doing nothing with it. */
+  blockNav: BlockNav | undefined;
   terminal: Terminal;
 };
 
@@ -66,12 +73,23 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   element.className = "terminal-pane";
   element.dataset["state"] = hooks.settings.blocks ? "blocks" : "plain";
 
+  // The sticky header lives above the block list so position: sticky can
+  // hold it at the pane's own top as blocks scroll under it; block-nav.ts
+  // owns everything about what it shows.
+  const sticky = document.createElement("div");
+  sticky.className = "terminal-sticky-header";
+  sticky.hidden = true;
   const list = document.createElement("div");
   list.className = "terminal-blocks";
   const live = document.createElement("div");
   live.className = "terminal-live";
-  element.append(list, live);
+  element.append(sticky, list, live);
   host.append(element);
+
+  // Selection, jumping and filtering: nothing to navigate with blocks off,
+  // so `nav` stays undefined and the pane's `blockNav` — what
+  // terminal-addons.ts's key handler checks — follows it.
+  const nav = hooks.settings.blocks ? createBlockNav(list, sticky) : undefined;
 
   const terminal = new Terminal({
     scrollback: SCROLLBACK_LINES,
@@ -113,10 +131,17 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   }
 
   function freeze(record: BlockRecord): void {
-    const view = createBlockView(record, { cols: terminal.cols, fill, copy, home: hooks.settings.home });
+    const view = createBlockView(record, {
+      cols: terminal.cols,
+      fill,
+      copy,
+      home: hooks.settings.home,
+      filterToCommand: (command) => attempt(() => nav?.filterToCommand(command)),
+    });
     views.push(view);
     list.append(view.element);
     while (views.length > MAX_BLOCKS) views.shift()?.element.remove();
+    attempt(() => nav?.sync(views));
   }
 
   function handle(event: BlockEvent): void {
@@ -216,5 +241,6 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // A copy: the internal array goes on changing as commands finish, and a
     // caller holding what it was told is a readonly list must not see it move.
     blocks: () => [...views],
+    blockNav: nav,
   };
 }

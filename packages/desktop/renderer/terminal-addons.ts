@@ -1,3 +1,4 @@
+import type { BlockNav } from "./block-nav.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
 import { LigaturesAddon } from "./vendor/addon-ligatures.mjs";
 import { SearchAddon } from "./vendor/addon-search.mjs";
@@ -28,6 +29,13 @@ export type TerminalHooks = {
    *  Cmd+F, Cmd+V and Shift+Enter with it. Returning false means the key
    *  was claimed. Absent for a terminal with no autocomplete. */
   interceptKey?: ((event: KeyboardEvent) => boolean) | undefined;
+  /** Selection, jumping and filtering over a pane's frozen blocks — ⌘↑/⌘↓
+   *  move the selection, ⌘⇧F toggles the failed-only filter. Absent for a
+   *  terminal with no blocks (the Session route today, or a pane with
+   *  blocks switched off), which is exactly why every key below guards on
+   *  it: those keys must behave exactly as they do today when it is
+   *  missing, not silently claim a keystroke and do nothing with it. */
+  blockNav?: BlockNav | undefined;
 };
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
@@ -43,7 +51,7 @@ const SHIFT_ENTER = "\u001b\r";
  */
 export function enhanceTerminal(terminal: Terminal, host: HTMLElement, hooks: TerminalHooks): void {
   loadAddons(terminal, hooks);
-  const search = attachSearch(terminal, host);
+  const search = attachSearch(terminal, host, hooks);
   attachKeys(terminal, hooks, search);
 }
 
@@ -90,6 +98,17 @@ function attempt(load: () => void): void {
   }
 }
 
+/** Like `attempt`, but for the search addon's findNext/findPrevious, whose
+ *  boolean result decides whether the frozen blocks get scanned too — a
+ *  throw here must read as "no match", not crash the find bar. */
+function attemptFind(search: () => boolean): boolean {
+  try {
+    return search();
+  } catch {
+    return false;
+  }
+}
+
 type Search = { open(): void; close(): void; isOpen(): boolean };
 
 /**
@@ -98,7 +117,7 @@ type Search = { open(): void; close(): void; isOpen(): boolean };
  * so it travels with the pane it belongs to — no innerHTML, same discipline
  * as every other renderer module.
  */
-function attachSearch(terminal: Terminal, host: HTMLElement): Search {
+function attachSearch(terminal: Terminal, host: HTMLElement, hooks: TerminalHooks): Search {
   const addon = new SearchAddon();
   attempt(() => terminal.loadAddon(addon));
 
@@ -123,9 +142,14 @@ function attachSearch(terminal: Terminal, host: HTMLElement): Search {
   const options = { caseSensitive: false, regex: false, wholeWord: false };
   const find = (forward: boolean): void => {
     if (input.value === "") return;
-    attempt(() =>
+    // The live terminal first — it is where the user is looking. Only once
+    // the search addon itself reports no match does the frozen list above
+    // it get scanned; a pane with no blocks (hooks.blockNav undefined)
+    // simply stops here, same as today.
+    const matched = attemptFind(() =>
       forward ? addon.findNext(input.value, options) : addon.findPrevious(input.value, options),
     );
+    if (!matched) attempt(() => hooks.blockNav?.findText(input.value));
   };
 
   const hide = (): void => {
@@ -199,6 +223,21 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
 
     if (event.key === "f") {
       search.open();
+      return claim(event);
+    }
+
+    // Jump the selection between blocks. Undefined blockNav (no blocks in
+    // this pane) leaves the key to xterm exactly as before this existed.
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (hooks.blockNav === undefined) return true;
+      hooks.blockNav.move(event.key === "ArrowDown" ? 1 : -1);
+      return claim(event);
+    }
+
+    // Failed-only filter.
+    if (event.key === "F" && event.shiftKey) {
+      if (hooks.blockNav === undefined) return true;
+      hooks.blockNav.toggleFailedFilter();
       return claim(event);
     }
 
