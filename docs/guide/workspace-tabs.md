@@ -36,13 +36,13 @@ out: the grid is a fixed twelve.
 
 Icons come from the site itself. Jarvis keeps the favicon Chromium resolved
 when you last visited a page, and for a bookmark you have never opened it
-asks that site once for its own icon — never a third-party icon service, so
-no list of the sites you bookmark ever leaves your machine. A site with no
-icon gets a coloured tile bearing the first letter of its title.
+asks that site for its own icon, trying again every few days if it has
+none — never a third-party icon service, so no list of the sites you
+bookmark ever leaves your machine. A site with no icon gets a coloured tile
+bearing the first letter of its title.
 
 The sidebar is a fixed width beside the hosted page, not a resizable split —
-its width is the page's left inset, the same relationship the old bar had to
-the page below it. **☰** collapses it out of the way.
+its width is the page's left inset. **☰** collapses it out of the way.
 
 **⚙** opens DevTools for the current
 page — the real DevTools front end, network and application panels included,
