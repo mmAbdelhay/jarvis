@@ -25,9 +25,22 @@ const view = {
 };
 
 function host(): HTMLElement {
+  // Every action button routes a failure into #workspace-tool-status, the
+  // same shared status line openApi/openDocker use in workspace.ts — so it
+  // has to exist for a click to have anywhere to report to, exactly as
+  // workspace.test.ts's own harness() provides it.
+  if (document.getElementById("workspace-tool-status") === null) {
+    const status = document.createElement("span");
+    status.id = "workspace-tool-status";
+    document.body.append(status);
+  }
   const element = document.createElement("div");
   document.body.append(element);
   return element;
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("renderDockerPane", () => {
@@ -136,5 +149,36 @@ describe("renderDockerPane", () => {
 
     expect(start).toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failed action in the shared status line", async () => {
+    const stop = vi.fn(() =>
+      Promise.resolve({ ok: false as const, text: "The container is gone.", language: "en" as const }),
+    );
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    button?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("The container is gone.");
+  });
+
+  it("leaves the status line alone when the action succeeds", async () => {
+    const start = vi.fn(() => Promise.resolve({ ok: true as const, value: undefined }));
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStart: start };
+
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+    });
+    [...element.querySelectorAll("button")].find((b) => b.textContent === "Start")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
   });
 });

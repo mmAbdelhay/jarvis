@@ -1,4 +1,4 @@
-import type { DockerRow, DockerView } from "../src/ipc.js";
+import type { DockerRow, DockerView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -144,23 +144,23 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
     buttons.append(
       actionButton("Stop", () => {
         if (!window.confirm(MESSAGES.dockerConfirmStop(row.name, PRIMARY_LANGUAGE))) return;
-        void window.jarvis.dockerStop(project, row.container);
+        runAction(window.jarvis.dockerStop(project, row.container));
       }),
       actionButton("Restart", () => {
         if (!window.confirm(MESSAGES.dockerConfirmRestart(row.name, PRIMARY_LANGUAGE))) return;
-        void window.jarvis.dockerRestart(project, row.container);
+        runAction(window.jarvis.dockerRestart(project, row.container));
       }),
     );
   } else {
     buttons.append(
       actionButton("Start", () => {
-        void window.jarvis.dockerStart(project, row.container);
+        runAction(window.jarvis.dockerStart(project, row.container));
       }),
     );
   }
   buttons.append(
     actionButton("Shell", () => {
-      void window.jarvis.dockerShell(project, row.container);
+      runAction(window.jarvis.dockerShell(project, row.container));
     }),
   );
   // A click on a button is not a row selection.
@@ -168,6 +168,23 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
   element.append(buttons);
 
   return element;
+}
+
+/** Runs a Start/Stop/Restart/Shell/Compose action and routes a failure into
+ *  the shared status line — the same surface, and the same clear-then-report
+ *  shape, `openApi`/`openDocker` in workspace.ts use for their own failures.
+ *  A dead container, a permission error, a compose file gone bad: none of
+ *  these are visible any other way, since the next poll would otherwise be
+ *  the only sign anything happened at all. */
+function runAction(action: Promise<GitViewResult<void>>): void {
+  const status = $("workspace-tool-status");
+  status.textContent = "";
+  status.classList.remove("workspace-tool-status--error");
+  void action.then((result) => {
+    if (result.ok) return;
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+  });
 }
 
 function actionButton(label: string, onClick: () => void): HTMLButtonElement {
@@ -189,11 +206,11 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
 
   element.append(
     actionButton("Up", () => {
-      void window.jarvis.dockerComposeUp(project);
+      runAction(window.jarvis.dockerComposeUp(project));
     }),
     actionButton("Down", () => {
       if (!window.confirm(MESSAGES.dockerConfirmComposeDown(composeProject, PRIMARY_LANGUAGE))) return;
-      void window.jarvis.dockerComposeDown(project);
+      runAction(window.jarvis.dockerComposeDown(project));
     }),
   );
 
