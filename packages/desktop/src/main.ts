@@ -364,7 +364,7 @@ app.whenReady().then(async () => {
     // The Workspace's hosted browser tabs. Each is a native WebContentsView
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
-    const workspace = new BrowserHost(createElectronViewFactory(window));
+    const workspace = new BrowserHost(createElectronViewFactory(window), { cacheFavicon });
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
