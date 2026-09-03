@@ -66,6 +66,10 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // this function renderer-supplied data cast to JarvisConfig, which an
     // older renderer may not have filled in.
     ...(Object.keys(config.clusters ?? {}).length === 0 ? {} : { clusters: config.clusters }),
+    // Same rule as `clusters:` above — written only when a project actually
+    // declares containers, and guarded for the same reason: a draft that
+    // reached here from an older renderer may not have the key at all.
+    ...(Object.keys(config.docker ?? {}).length === 0 ? {} : { docker: config.docker }),
     ...(config.headlamp?.binary === undefined
       ? {}
       : { headlamp: { binary: config.headlamp.binary } }),

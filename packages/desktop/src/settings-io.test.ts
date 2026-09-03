@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import type { JarvisConfig } from "./config.js";
+import { parseConfig, type JarvisConfig } from "./config.js";
 import { toRawConfig, validateDraft, writeSettingsFile } from "./settings-io.js";
 
 async function tempDir(): Promise<string> {
@@ -290,5 +290,58 @@ describe("clusters and headlamp round-trip", () => {
     const raw = toRawConfig(draft) as Record<string, unknown>;
 
     expect(raw["headlamp"]).toEqual({ binary: draft.headlamp.binary });
+  });
+});
+
+describe("docker round-trip", () => {
+  const withDocker: JarvisConfig = {
+    ...draft,
+    docker: { acme: [{ name: "app", container: "acme-app-1" }] },
+  };
+
+  it("writes the docker section", () => {
+    const raw = toRawConfig(withDocker) as Record<string, unknown>;
+
+    expect(raw["docker"]).toEqual({ acme: [{ name: "app", container: "acme-app-1" }] });
+  });
+
+  it("omits the docker key entirely when no project declares a container", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect("docker" in raw).toBe(false);
+  });
+
+  // The whole renderer→settings-io→file→parseConfig path, in one test: this
+  // is the boundary a missing `docker` key in toRawConfig silently deleted,
+  // and no test on either side of it could have caught that alone.
+  it("survives writeSettingsFile → parseConfig unchanged", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+
+    const result = await writeSettingsFile(path, withDocker);
+    expect(result).toEqual({ ok: true });
+
+    const written = parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    expect(written["docker"]).toEqual({ acme: [{ name: "app", container: "acme-app-1" }] });
+    expect(parseConfig(written).docker).toEqual({
+      acme: [{ name: "app", container: "acme-app-1" }],
+    });
+  });
+
+  // A user who hand-wrote `docker:` and then edits something unrelated in
+  // Settings must not lose it — the second half of the same bug.
+  it("keeps a hand-written docker section across an unrelated Settings save", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeSettingsFile(path, withDocker);
+
+    // What Settings would hand back after a read/edit cycle that never
+    // touched the Docker page at all.
+    const reread = parseConfig(parse(await readFile(path, "utf8")));
+    await writeSettingsFile(path, { ...reread, brain: { ...reread.brain, systemPrompt: "Changed." } });
+
+    const after = parseConfig(parse(await readFile(path, "utf8")));
+    expect(after.docker).toEqual({ acme: [{ name: "app", container: "acme-app-1" }] });
+    expect(after.brain.systemPrompt).toBe("Changed.");
   });
 });
