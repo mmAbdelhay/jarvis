@@ -11,6 +11,7 @@ import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 // workspace-terminal.test.ts.
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
 
 type Recorded = { call: string; args: unknown[] };
@@ -184,6 +185,14 @@ function harness(): Recorded[] {
     },
     removeBookmark: (...args: unknown[]) => {
       calls.push({ call: "removeBookmark", args });
+      return Promise.resolve({ ok: true, value: [] });
+    },
+    setBookmarkPinned: (...args: unknown[]) => {
+      calls.push({ call: "setBookmarkPinned", args });
+      return Promise.resolve({ ok: true, value: [] });
+    },
+    reorderBookmarks: (...args: unknown[]) => {
+      calls.push({ call: "reorderBookmarks", args });
       return Promise.resolve({ ok: true, value: [] });
     },
   };
@@ -953,6 +962,166 @@ describe("the bookmarks sidebar", () => {
   });
 });
 
+// Fix 1 and 2: the spec (design :240) gives every list row a pin control
+// and every grid tile an unpin action. Drag alone left the feature
+// unreachable from the state every existing install upgrades into — nothing
+// pinned, so an empty grid with no tile to drop on — and offered a keyboard
+// user no path at all.
+describe("the pin and unpin controls", () => {
+  it("pins a listed bookmark from its own pin control, without opening it", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-pin")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "setBookmarkPinned",
+      args: ["acme", "https://b.test/", true],
+    });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  it("surfaces the store's refusal when the pin control hits the limit", async () => {
+    harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = async () => ({
+      ok: false as const,
+      text: "The grid holds 12 bookmarks; unpin one first.",
+      language: "en" as const,
+    });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-pin")?.click();
+    await flush();
+
+    expect(document.querySelector("#workspace-tool-status")?.textContent).toBe(
+      "The grid holds 12 bookmarks; unpin one first.",
+    );
+  });
+
+  it("unpins a tile from its own unpin action, and the bookmark lands in the list", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = async () => ({
+      ok: true as const,
+      value: [{ url: "https://a.test/", title: "A", pinned: false }],
+    });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks = async () => ({
+      ok: true as const,
+      value: [{ url: "https://a.test/", title: "A", pinned: false }],
+    });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-essential-unpin")?.click();
+    await flush();
+
+    expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(0);
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(1);
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  // The mirror of the empty grid: with every bookmark pinned the list is
+  // empty, so there is no row to drop onto. The tile's own action is the
+  // way out, and it must work in exactly that state.
+  it("unpins from an all-pinned project, where the list has no row to drop on", async () => {
+    const calls = harness();
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true },
+      { url: "https://b.test/", title: "B", pinned: true },
+    ]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(0);
+    document.querySelector<HTMLElement>('.workspace-essential[data-url="https://a.test/"] .workspace-essential-unpin')
+      ?.click();
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "setBookmarkPinned",
+      args: ["acme", "https://a.test/", false],
+    });
+  });
+
+  // A button inside a button is invalid markup that browsers reparent, so
+  // the tile stopped being a button when it gained the unpin action. What
+  // it must not stop doing is opening the bookmark.
+  it("still opens the bookmark when the tile itself is clicked", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-essential-open")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openTab", args: ["acme", "https://a.test/"] });
+  });
+
+  it("nests no button inside another on a tile", async () => {
+    harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector("#workspace-essentials button button")).toBeNull();
+  });
+
+  it("names both controls for a screen reader as well as a pointer", async () => {
+    harness();
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true },
+      { url: "https://b.test/", title: "B" },
+    ]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    for (const selector of [".workspace-bookmark-pin", ".workspace-essential-unpin"]) {
+      const control = document.querySelector<HTMLElement>(selector);
+      expect(control?.getAttribute("aria-label")).toMatch(/\S/);
+      expect(control?.title).toBe(control?.getAttribute("aria-label"));
+      expect(control?.querySelector("[aria-hidden=\"true\"]")?.textContent).toMatch(/\S/);
+    }
+  });
+
+  // The grid keeps its height with nothing in it (styles.css min-height, see
+  // workspace-markup.test.ts) so it stays a drop target; a blank band with
+  // no words in it would read as a rendering glitch.
+  it("explains the empty grid instead of leaving a blank band", async () => {
+    harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector("#workspace-essentials .workspace-essentials-empty")?.textContent).toMatch(/\S/);
+  });
+
+  it("drops the grid's note once something is pinned", async () => {
+    harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector(".workspace-essentials-empty")).toBeNull();
+  });
+
+  // Important 3: the tooltip was hard-coded English in index.html, and
+  // still said "bar" long after the bar became a sidebar.
+  it("labels the sidebar toggle from MESSAGES rather than from the markup", () => {
+    harness();
+    initWorkspace(["acme"]);
+
+    expect(document.getElementById("workspace-toggle-bookmarks")?.getAttribute("title")).toBe(
+      MESSAGES.toggleBookmarksSidebar(PRIMARY_LANGUAGE),
+    );
+  });
+});
+
 describe("reordering bookmarks", () => {
   it("pins a listed bookmark dropped on the grid", async () => {
     harness();
@@ -1021,6 +1190,87 @@ describe("reordering bookmarks", () => {
     expect(document.querySelector("#workspace-tool-status")?.textContent).toBe(
       "The grid holds 12 bookmarks; unpin one first.",
     );
+  });
+
+  // Minor 6: a pin change leaves `order` alone, so a listed bookmark
+  // carrying order 2 would otherwise be inserted in the middle of the grid
+  // rather than where the drop implied. Empty space means "at the end".
+  it("appends a bookmark dropped on the grid's empty space to the end of the grid", async () => {
+    harness();
+    const reorder = vi.fn(async () => ({ ok: true, value: [] }));
+    stubBookmarks([
+      { url: "https://p1.test/", title: "P1", pinned: true, order: 0 },
+      { url: "https://p2.test/", title: "P2", pinned: true, order: 1 },
+      { url: "https://b.test/", title: "B", order: 2 },
+    ]);
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    // What the store returns after the pin: `order: 2` is untouched, which
+    // is exactly the value that used to place B between P1 and P2.
+    jarvis["setBookmarkPinned"] = async () => ({
+      ok: true as const,
+      value: [
+        { url: "https://p1.test/", title: "P1", pinned: true, order: 0 },
+        { url: "https://p2.test/", title: "P2", pinned: true, order: 1 },
+        { url: "https://b.test/", title: "B", pinned: true, order: 2 },
+      ],
+    });
+    jarvis["reorderBookmarks"] = reorder;
+    initWorkspace(["acme"]);
+    await flush();
+
+    (document.querySelector("#workspace-essentials") as HTMLElement).dispatchEvent(
+      dropEvent("https://b.test/"),
+    );
+    await flush();
+
+    expect(reorder).toHaveBeenCalledWith(expect.any(String), [
+      "https://p1.test/",
+      "https://p2.test/",
+      "https://b.test/",
+    ]);
+  });
+
+  // Dropping a tile back on empty grid space asks for nothing: it is
+  // already pinned, and the call would still rewrite bookmarks.json.
+  it("does not re-pin a tile dropped on the grid's own empty space", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    (document.querySelector("#workspace-essentials") as HTMLElement).dispatchEvent(
+      dropEvent("https://a.test/"),
+    );
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "setBookmarkPinned")).toBe(false);
+    expect(calls.some((entry) => entry.call === "reorderBookmarks")).toBe(false);
+  });
+
+  // The mirror of the grid's container drop: with everything pinned the
+  // list holds no row to drop onto, so without this the drag path could
+  // never take anything back out.
+  it("unpins a tile dropped on the list's empty space, and appends it there", async () => {
+    harness();
+    const reorder = vi.fn(async () => ({ ok: true, value: [] }));
+    const setPinned = vi.fn(async () => ({
+      ok: true as const,
+      value: [{ url: "https://a.test/", title: "A", pinned: false }],
+    }));
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["setBookmarkPinned"] = setPinned;
+    jarvis["reorderBookmarks"] = reorder;
+    initWorkspace(["acme"]);
+    await flush();
+
+    (document.querySelector("#workspace-bookmark-list") as HTMLElement).dispatchEvent(
+      dropEvent("https://a.test/"),
+    );
+    await flush();
+
+    expect(setPinned).toHaveBeenCalledWith(expect.any(String), "https://a.test/", false);
+    expect(reorder).toHaveBeenCalledWith(expect.any(String), ["https://a.test/"]);
   });
 
   it("sends the whole new order when a listed row is dropped on another listed row", async () => {

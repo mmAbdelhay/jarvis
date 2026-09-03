@@ -30,9 +30,11 @@ Bookmarks sit in a sidebar down the left of the Workspace, in two parts. The
 the handful you open daily, reachable without reading. Everything else is
 listed below them, each row showing its icon too, then its title.
 
-Pin a bookmark by dragging it from the list into the grid, and drag within
-either group to reorder. A thirteenth pin is refused rather than pushing one
-out: the grid is a fixed twelve.
+Pin a bookmark with the **⊞** on its row, or by dragging it from the list
+into the grid; take one back out with the **⊟** in the corner of its tile, or
+by dragging it down into the list. Drag within either group to reorder. A
+thirteenth pin is refused rather than pushing one out: the grid is a fixed
+twelve.
 
 Icons come from the site itself. Jarvis keeps the favicon Chromium resolved
 when you last visited a page, and for a bookmark you have never opened it

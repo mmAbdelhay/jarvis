@@ -11,8 +11,8 @@ import type { Rect } from "./browser-host.js";
  * found on — devicePixelRatio 2.19 against a display scale factor of 2 — a
  * 1577px-wide slot was handed straight across and placed as 1577 DIP inside
  * a 1728 DIP window: every hosted page sat 9% short, leaving a band of empty
- * window down the right and along the bottom, and covering the bookmarks bar
- * because the same shortfall applied to the offset.
+ * window down the right and along the bottom, and overlapping the bookmarks sidebar on
+ * the left because the same shortfall applied to the offset.
  *
  * The scale is `devicePixelRatio / scaleFactor` — how many device pixels a
  * CSS pixel is worth, over how many a DIP is worth. It is deliberately not

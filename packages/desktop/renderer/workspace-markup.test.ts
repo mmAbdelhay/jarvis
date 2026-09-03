@@ -188,6 +188,22 @@ describe("bookmarks sidebar layout", () => {
     expect(css).toMatch(/\.workspace-essentials \{[^}]*display:\s*grid/);
   });
 
+  // Critical 1: a grid with no children lays out at zero height, and this
+  // container is the "pin by dropping here" target — so in the state every
+  // existing install upgrades into (nothing pinned) there would be no area
+  // to drop on at all. The min-height is what keeps the empty grid a real
+  // drop target.
+  it("keeps the empty essentials grid a droppable height", () => {
+    expect(css).toMatch(/\.workspace-essentials \{[^}]*min-height:\s*\d/);
+  });
+
+  // The unpin action sits in the tile's corner, over the icon; the tile is
+  // the positioning context for it.
+  it("positions the tile so its unpin action can sit in the corner", () => {
+    expect(css).toMatch(/\.workspace-essential \{[^}]*position:\s*relative/);
+    expect(css).toMatch(/\.workspace-essential \.workspace-essential-unpin \{[^}]*position:\s*absolute/);
+  });
+
   // A narrow column has no width to spare for the bar's old horizontal
   // scroll-and-ellipsis compromise; the title wraps instead.
   it("wraps the listed bookmark's title instead of truncating it", () => {

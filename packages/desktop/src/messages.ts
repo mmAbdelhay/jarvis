@@ -227,14 +227,32 @@ export const MESSAGES = {
     language === "ar"
       ? `لا يمكن تثبيت أكثر من ${limit} إشارة في الشبكة.`
       : `The grid holds ${limit} bookmarks; unpin one first.`,
-  // Stands in the bookmarks bar when the selected project has none. An
-  // empty one-line strip under the address bar reads as a rendering glitch
-  // rather than as an empty list, and the star that fills it is two
-  // elements away in the same chrome.
+  // Stands in the bookmarks list when the selected project has none. An
+  // empty column in the sidebar reads as a rendering glitch rather than as
+  // an empty list, and the star that fills it is two elements away in the
+  // same chrome.
   noBookmarks: (language: "ar" | "en"): string =>
     language === "ar"
       ? "لا توجد علامات مرجعية — احفظ صفحة بالنجمة ★"
       : "No bookmarks yet — save a page with the ★",
+  /** The accessible name of the pin control on a listed row — the click and
+   *  keyboard path to the essentials grid, beside the drag one. */
+  pinBookmark: (language: "ar" | "en"): string =>
+    language === "ar" ? "تثبيت في الشبكة" : "Pin to the grid",
+  /** The accessible name of the unpin action on a grid tile — the way back
+   *  out of the grid without a drag. */
+  unpinBookmark: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء التثبيت" : "Unpin from the grid",
+  /** Stands in the essentials grid while nothing is pinned. The grid keeps
+   *  its height either way (it is the drop target for a dragged row), so
+   *  without this it is a blank band with no explanation. */
+  noEssentials: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "اسحب علامة مرجعية إلى هنا لتثبيتها"
+      : "Drag a bookmark here, or use its pin",
+  /** The ☰ button beside the address bar: the sidebar's own toggle. */
+  toggleBookmarksSidebar: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار أو إخفاء شريط العلامات الجانبي" : "Show or hide the bookmarks sidebar",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // The personal browser's name in the project selector. Its *key* is the
