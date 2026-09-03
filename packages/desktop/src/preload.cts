@@ -129,6 +129,9 @@ const api: RendererApi = {
   listBookmarks: (project) => ipcRenderer.invoke("bookmarks:list", project),
   addBookmark: (project, bookmark) => ipcRenderer.invoke("bookmarks:add", project, bookmark),
   removeBookmark: (project, url) => ipcRenderer.invoke("bookmarks:remove", project, url),
+  setBookmarkPinned: (project, url, pinned) =>
+    ipcRenderer.invoke("bookmarks:setPinned", project, url, pinned),
+  reorderBookmarks: (project, urls) => ipcRenderer.invoke("bookmarks:reorder", project, urls),
   getSettings: () => ipcRenderer.invoke("settings:read"),
   saveSettings: (draft) => ipcRenderer.invoke("settings:save", draft),
   testAgent: (agent) => ipcRenderer.invoke("settings:testAgent", agent),

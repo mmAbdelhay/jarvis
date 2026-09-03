@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from "electron";
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, session } from "electron";
+import type { Session } from "electron";
 import {
   AgentRegistry,
   ChangeTracker,
@@ -23,6 +24,7 @@ import {
   createCapacityReader,
   createCodeServerManager,
   createDbGateManager,
+  createFaviconStore,
   createFsImportDeps,
   createGitProvider,
   createHeadlampManager,
@@ -693,8 +695,50 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    const favicons = createFaviconStore(join(homedir(), ".config/jarvis/favicons"));
+
+    /** A failure is recorded as a miss so a site without an icon is not
+     *  refetched on every render. */
+    async function cacheFavicon(pageUrl: string, iconUrl: string, from: Session): Promise<void> {
+      try {
+        const response = await from.fetch(iconUrl);
+        if (!response.ok) {
+          await favicons.putMiss(pageUrl);
+          return;
+        }
+        const type = response.headers.get("content-type") ?? "image/png";
+        await favicons.put(pageUrl, new Uint8Array(await response.arrayBuffer()), type);
+      } catch {
+        // Unreachable host or malformed icon url. Recorded as a miss, not
+        // surfaced: the tile falls back to a monogram and the user has
+        // nothing to act on.
+        await favicons.putMiss(pageUrl);
+      }
+    }
+
+    /** The fallback path, for a bookmark never opened in Jarvis — which is
+     *  everything imported from another browser. One request to the site's
+     *  own /favicon.ico; a failure is recorded as a miss so it is not
+     *  retried on every render. */
+    const fetching = new Set<string>();
+    function requestFavicon(url: string): void {
+      let origin: string;
+      try {
+        origin = new URL(url).origin;
+      } catch {
+        return;
+      }
+      if (fetching.has(origin)) return;
+      fetching.add(origin);
+      void cacheFavicon(url, `${origin}/favicon.ico`, session.defaultSession).finally(() =>
+        fetching.delete(origin),
+      );
+    }
+
     const bookmarks = createBookmarksHandlers({
       store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
+      favicons,
+      requestFavicon,
       language: PRIMARY_LANGUAGE,
     });
 
@@ -1212,6 +1256,12 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("bookmarks:remove", (_event, project: unknown, url: unknown) =>
       bookmarks.remove(typeof project === "string" ? project : "", typeof url === "string" ? url : ""),
+    );
+    ipcMain.handle("bookmarks:setPinned", (_event, project: unknown, url: unknown, pinned: unknown) =>
+      bookmarks.setPinned(project as string, url as string, pinned as boolean),
+    );
+    ipcMain.handle("bookmarks:reorder", (_event, project: unknown, urls: unknown) =>
+      bookmarks.reorder(project as string, urls as string[]),
     );
     ipcMain.handle("settings:read", () => settings.read());
     ipcMain.handle("settings:save", (_event, draft: unknown) => settings.save(draft));
