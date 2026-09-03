@@ -25,7 +25,11 @@ export type ContainerFacts = {
   id: string;
   image: string;
   state: ContainerState;
-  /** Docker's own `State.Status` string, shown to the user unchanged. */
+  /** Docker's own human status column — `docker ps`'s `{{.Status}}`, e.g.
+   *  "Up 3 hours" or "Exited (0) 2 minutes ago" — shown to the user
+   *  unchanged. Deliberately not `inspect`'s `State.Status`, which is the
+   *  same terse enum `state` already carries. Empty when `docker ps` did
+   *  not name this container (it was created between the two calls). */
   status: string;
   /** Published ports, spelled the way `docker ps` prints them. */
   ports: string[];
@@ -91,7 +95,24 @@ function labelOf(labels: unknown, key: string): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-function factsOf(raw: unknown): ContainerFacts | undefined {
+/** `docker ps --no-trunc --format '{{.ID}}\t{{.Status}}'`, one container per
+ *  line. A tab is chosen because Docker never prints one inside either
+ *  field, so the split is unambiguous — unlike a space, which every status
+ *  string is full of. `--no-trunc` makes the id the same full id `inspect`
+ *  reports, so the two calls join on an exact match rather than a prefix.
+ *  As defensive as factsOf/portsOf: a line without a tab, or an empty one,
+ *  is skipped rather than throwing. */
+function statusesOf(stdout: string): Map<string, string> {
+  const statuses = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const tab = line.indexOf("\t");
+    if (tab <= 0) continue;
+    statuses.set(line.slice(0, tab).trim(), line.slice(tab + 1).trim());
+  }
+  return statuses;
+}
+
+function factsOf(raw: unknown, statuses: Map<string, string>): ContainerFacts | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const entry = raw as Record<string, unknown>;
   const id = entry["Id"];
@@ -109,7 +130,7 @@ function factsOf(raw: unknown): ContainerFacts | undefined {
     id,
     image: typeof config["Image"] === "string" ? config["Image"] : "",
     state: stateOf(state["Status"]),
-    status: typeof state["Status"] === "string" ? state["Status"] : "",
+    status: statuses.get(id) ?? "",
     ports: portsOf(network["Ports"]),
     composeProject: labelOf(labels, "com.docker.compose.project"),
     composeWorkingDir: labelOf(labels, "com.docker.compose.project.working_dir"),
@@ -169,6 +190,12 @@ export type DockerClient = {
  * directory is exactly the kind of value that might. `docker inspect`
  * returns a real JSON label map instead: two calls, one parse path, no
  * guessing.
+ *
+ * The `ps` call asks for the human status column alongside the id because
+ * that column is the one thing `inspect` cannot give: `State.Status` is the
+ * terse enum `state` already carries, while "Up 3 hours" is composed by the
+ * CLI at print time. Asking for it here is Docker's own words for free —
+ * still two calls, and no relative-time formatter of ours to keep correct.
  */
 export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): DockerClient {
   /** Every action is the same shape: run it, and on failure hand back what
@@ -188,7 +215,7 @@ export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): Do
     async list(): Promise<DockerListResult> {
       let ids: { code: number; stdout: string; stderr: string };
       try {
-        ids = await run("docker", ["ps", "-aq"]);
+        ids = await run("docker", ["ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Status}}"]);
       } catch (error) {
         if (isMissingBinary(error)) {
           return { ok: false, reason: "not-installed", detail: messageOf(error) };
@@ -199,7 +226,8 @@ export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): Do
         return { ok: false, reason: "daemon-down", detail: ids.stderr.trim() };
       }
 
-      const list = ids.stdout.split("\n").filter((line) => line.trim() !== "");
+      const statuses = statusesOf(ids.stdout);
+      const list = [...statuses.keys()];
       if (list.length === 0) return { ok: true, containers: [] };
 
       let inspected: { code: number; stdout: string; stderr: string };
@@ -225,7 +253,7 @@ export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): Do
 
       const containers: ContainerFacts[] = [];
       for (const raw of parsed) {
-        const facts = factsOf(raw);
+        const facts = factsOf(raw, statuses);
         if (facts !== undefined) containers.push(facts);
       }
       return { ok: true, containers };

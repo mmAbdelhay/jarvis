@@ -44,19 +44,22 @@ const noLogs: LogSpawner = () => ({ close: () => {} });
 describe("createDockerClient.list", () => {
   it("asks for ids first, then inspects exactly those ids", async () => {
     const { run, calls } = runnerFor([
-      { code: 0, stdout: "abc123\ndef456\n", stderr: "" },
+      { code: 0, stdout: "abc123\tUp 3 hours\ndef456\tExited (0) 2 minutes ago\n", stderr: "" },
       { code: 0, stdout: JSON.stringify([inspected()]), stderr: "" },
     ]);
 
     await createDockerClient(run, noLogs).list();
 
-    expect(calls[0]).toEqual({ command: "docker", args: ["ps", "-aq"] });
+    expect(calls[0]).toEqual({
+      command: "docker",
+      args: ["ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Status}}"],
+    });
     expect(calls[1]).toEqual({ command: "docker", args: ["inspect", "abc123", "def456"] });
   });
 
-  it("reads name, image, state, ports and compose labels", async () => {
+  it("reads name, image, state, human status, ports and compose labels", async () => {
     const { run } = runnerFor([
-      { code: 0, stdout: "abc123\n", stderr: "" },
+      { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
       { code: 0, stdout: JSON.stringify([inspected()]), stderr: "" },
     ]);
 
@@ -70,13 +73,71 @@ describe("createDockerClient.list", () => {
           id: "abc123",
           image: "acme-app:latest",
           state: "running",
-          status: "running",
+          status: "Up 3 hours",
           ports: ["0.0.0.0:8000->8000/tcp"],
           composeProject: "acme",
           composeWorkingDir: "/Users/u/projects/acme",
         },
       ],
     });
+  });
+
+  it("carries docker ps's human status, not inspect's terse enum", async () => {
+    const { run } = runnerFor([
+      {
+        code: 0,
+        stdout: "abc123\tUp 3 hours\ndef456\tExited (0) 2 minutes ago\n",
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          inspected(),
+          inspected({ Id: "def456", Name: "/redis-1", State: { Status: "exited" } }),
+        ]),
+        stderr: "",
+      },
+    ]);
+
+    const result = await createDockerClient(run, noLogs).list();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.containers.map((c) => [c.state, c.status])).toEqual([
+      ["running", "Up 3 hours"],
+      ["exited", "Exited (0) 2 minutes ago"],
+    ]);
+  });
+
+  it("skips a malformed ps line rather than throwing", async () => {
+    const { run, calls } = runnerFor([
+      { code: 0, stdout: "\nnot-a-pair\nabc123\tUp 3 hours\n\t orphaned\n", stderr: "" },
+      { code: 0, stdout: JSON.stringify([inspected()]), stderr: "" },
+    ]);
+
+    const result = await createDockerClient(run, noLogs).list();
+
+    expect(calls[1]).toEqual({ command: "docker", args: ["inspect", "abc123"] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.containers[0]?.status).toBe("Up 3 hours");
+  });
+
+  it("leaves the status empty for a container ps did not name", async () => {
+    const { run } = runnerFor([
+      { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
+      {
+        code: 0,
+        stdout: JSON.stringify([inspected({ Id: "zzz999" })]),
+        stderr: "",
+      },
+    ]);
+
+    const result = await createDockerClient(run, noLogs).list();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.containers[0]?.status).toBe("");
   });
 
   it("does not inspect when there are no containers", async () => {
@@ -90,7 +151,7 @@ describe("createDockerClient.list", () => {
 
   it("leaves compose fields undefined for a container compose did not start", async () => {
     const { run } = runnerFor([
-      { code: 0, stdout: "abc123\n", stderr: "" },
+      { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
       {
         code: 0,
         stdout: JSON.stringify([
@@ -110,7 +171,7 @@ describe("createDockerClient.list", () => {
 
   it("reads the compose service label, and leaves it undefined when absent", async () => {
     const { run } = runnerFor([
-      { code: 0, stdout: "abc123\ndef456\n", stderr: "" },
+      { code: 0, stdout: "abc123\tUp 3 hours\ndef456\tUp 2 days\n", stderr: "" },
       {
         code: 0,
         stdout: JSON.stringify([
@@ -171,7 +232,7 @@ describe("createDockerClient.list", () => {
 
   it("treats an unpublished port as no port at all", async () => {
     const { run } = runnerFor([
-      { code: 0, stdout: "abc123\n", stderr: "" },
+      { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
       {
         code: 0,
         stdout: JSON.stringify([
@@ -191,7 +252,7 @@ describe("createDockerClient.list", () => {
   it("converts a rejection on the inspect call to daemon-down", async () => {
     const run: CommandRunner = (command, args) => {
       if (command === "docker" && args[0] === "ps") {
-        return Promise.resolve({ code: 0, stdout: "abc123\n", stderr: "" });
+        return Promise.resolve({ code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" });
       }
       return Promise.reject(new Error("boom"));
     };
