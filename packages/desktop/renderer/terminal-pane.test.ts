@@ -1114,6 +1114,36 @@ describe("the command editor in a pane", () => {
         const explanation = p.element.querySelector(".block-explanation");
         expect(explanation?.textContent).toBe("npm test failed because a dependency is missing.");
       });
+
+      // Capped before this ever crosses IPC — a megabyte of build output
+      // must not leave this process only to be trimmed on the far side.
+      // Asserted on what the fake terminalAi hook actually received, not
+      // on anything main.ts builds from it.
+      it("sends no more than 4000 characters of output for a block whose output is far larger", async () => {
+        const calls: [string, string][] = [];
+        const bigOutput = `head-${"x".repeat(6000)}-tail`;
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
+          calls.push([kind, text]);
+          return "explained";
+        });
+        p.write(`${A}$ ${B}build\r\n${C("build")}${bigOutput}${D(1)}${A}$ ${B}`);
+        p.blockNav?.move(1);
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Explain this failure";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const payload = JSON.parse(calls[0]?.[1] ?? "{}") as { output: string };
+        expect(payload.output.length).toBeLessThanOrEqual(4000);
+        expect(payload.output).toBe(bigOutput.slice(-4000));
+        expect(payload.output).not.toContain("head-");
+      });
     });
 
     // A pane can be disposed while historySearch() is still awaiting

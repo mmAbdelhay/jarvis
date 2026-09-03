@@ -129,6 +129,13 @@ export type TerminalPane = {
  *  of commands must not grow a DOM node per command forever. */
 const MAX_BLOCKS = 500;
 
+/** A failing build's output is not a prompt: capped here, before it ever
+ *  crosses IPC, so a megabyte of build log never leaves this process in
+ *  the first place — ipc.ts caps again on the far side, but that is the
+ *  boundary that must hold regardless of what this process sends, not a
+ *  reason to send more than the brain will ever be asked about. */
+const EXPLAIN_OUTPUT_CAP = 4000;
+
 /** Runs a piece of the block machinery, swallowing anything it throws. The
  *  same discipline terminal-addons.ts follows, and for the same reason:
  *  nothing here is worth taking a terminal down for. */
@@ -656,11 +663,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
 
   /**
    * "Explain this failure"'s whole flow: send the selected block's command,
-   * exit code and output to `terminalAi("explain", …)`, and render whatever
-   * comes back inside that same block. Only ever offered — see
-   * `paletteActions` — for a selected block whose exit code is a real
-   * non-zero number, so there is always a command, a code and an output to
-   * send.
+   * exit code and output (its last `EXPLAIN_OUTPUT_CAP` characters —
+   * capped before this ever reaches IPC, not only once it lands in main)
+   * to `terminalAi("explain", …)`, and render whatever comes back inside
+   * that same block. Only ever offered — see `paletteActions` — for a
+   * selected block whose exit code is a real non-zero number, so there is
+   * always a command, a code and an output to send.
    *
    * Never throws into the terminal: a call that fails resolves "" (never
    * rejects), and `BlockView.explain("")` already does nothing.
@@ -673,7 +681,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     const payload = JSON.stringify({
       command: record.command,
       exitCode: record.exitCode,
-      output: record.output,
+      output: record.output.slice(-EXPLAIN_OUTPUT_CAP),
     });
     void ai("explain", payload)
       .then((result) => attempt(() => selected.explain(result)))
