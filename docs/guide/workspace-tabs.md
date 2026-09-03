@@ -16,8 +16,8 @@ it.
 | `docker` | The project's containers | hidden |
 
 Browser chrome belongs to browser tabs: anything that is not a plain page hides
-the address bar and the bookmarks bar beneath it, because nobody navigates an
-editor or a shell the way they navigate a website.
+the address bar and the bookmarks sidebar beside it, because nobody navigates
+an editor or a shell the way they navigate a website.
 
 ## The browser
 
@@ -25,14 +25,26 @@ An address bar, back/forward/reload, and per-project bookmarks kept in
 `~/.config/jarvis/bookmarks.json`. Clicking a bookmark the project already has
 open activates that tab rather than opening a second copy.
 
-The bookmarks sit in a horizontal bar directly under the address bar, inside
-the browser's own chrome — where Chrome, Safari and Firefox put theirs — not in
-a rail beside the whole workspace. More bookmarks than fit scroll sideways
-rather than wrapping onto a second row: the bar's height is the inset of the
-hosted page below it, so a taller bar would move the page every time you saved
-something.
+Bookmarks sit in a sidebar down the left of the Workspace, in two parts. The
+**essentials** are up to twelve pinned bookmarks shown as a grid of icons —
+the handful you open daily, reachable without reading. Everything else is
+listed below them, each row showing its icon too, then its title.
 
-**☰** toggles the bookmarks bar. **⚙** opens DevTools for the current
+Pin a bookmark by dragging it from the list into the grid, and drag within
+either group to reorder. A thirteenth pin is refused rather than pushing one
+out: the grid is a fixed twelve.
+
+Icons come from the site itself. Jarvis keeps the favicon Chromium resolved
+when you last visited a page, and for a bookmark you have never opened it
+asks that site once for its own icon — never a third-party icon service, so
+no list of the sites you bookmark ever leaves your machine. A site with no
+icon gets a coloured tile bearing the first letter of its title.
+
+The sidebar is a fixed width beside the hosted page, not a resizable split —
+its width is the page's left inset, the same relationship the old bar had to
+the page below it. **☰** collapses it out of the way.
+
+**⚙** opens DevTools for the current
 page — the real DevTools front end, network and application panels included,
 rendered into a panel you can drag to size rather than a detached window.
 

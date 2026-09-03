@@ -30,10 +30,10 @@ and the status line says so.
 ## A hosted page does not fill its slot
 
 A browser or editor page leaving a band of empty window down the right, or
-sitting up over the bookmarks bar, means the rectangle main was given is in
-different units from the ones it placed the view with. The renderer measures
-in CSS pixels; a view is placed in device-independent pixels, and those differ
-on a display running a scaled resolution.
+overlapping the bookmarks sidebar on the left, means the rectangle main was
+given is in different units from the ones it placed the view with. The
+renderer measures in CSS pixels; a view is placed in device-independent
+pixels, and those differ on a display running a scaled resolution.
 
 Jarvis converts for this (`devicePixelRatio / scaleFactor`, per the display the
 window is actually on) so dragging the window between monitors of different
