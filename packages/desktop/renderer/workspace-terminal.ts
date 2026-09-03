@@ -128,10 +128,6 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
     resize: (cols, rows) => void window.jarvis.resizeTerminal(tabId, cols, rows),
-    // A link opens as an ordinary browser tab in the same project, which is
-    // what puts it through normalizeInput and the app's navigation rules
-    // instead of handing an arbitrary string to the OS.
-    openLink: (url) => void window.jarvis.openTab(project, url),
     // Whatever the shell printed before this pane existed — its prompt,
     // usually. Buffered by the shell manager exactly for this gap.
     attach: () => window.jarvis.attachTerminal(tabId),

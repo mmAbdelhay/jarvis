@@ -26,17 +26,8 @@ import { Terminal } from "./vendor/xterm.mjs";
 export type PaneHooks = {
   sendInput: (data: string) => void;
   resize: (cols: number, rows: number) => void;
-  /** Where a link clicked in the terminal goes. Wired by the caller, which
-   *  is the only thing that knows which project the terminal belongs to. */
-  openLink: (url: string) => void;
   attach: () => Promise<string>;
-  settings: {
-    blocks: boolean;
-    inputEditor: boolean;
-    notifyAfterSeconds: number;
-    /** Carried through untouched for the tasks that use it. */
-    home?: string;
-  };
+  settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number };
 };
 
 /** A frozen command: the record it was built from, and the element showing
@@ -209,6 +200,8 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       for (const view of views.splice(0)) view.element.remove();
       element.remove();
     },
-    blocks: () => views,
+    // A copy: the internal array goes on changing as commands finish, and a
+    // caller holding what it was told is a readonly list must not see it move.
+    blocks: () => [...views],
   };
 }

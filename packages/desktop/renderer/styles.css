@@ -1173,7 +1173,7 @@
   .terminal-pane[data-state="alt"] { overflow: hidden; padding: 0; }
   /* Blocks off, or a shell with no integration: today's terminal. */
   .terminal-pane[data-state="plain"] .terminal-blocks { display: none; }
-  .block-command { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
+  .block-command { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted); }
   .block-output { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; white-space: pre; }
   .block-line { min-height: 1.35em; }
 

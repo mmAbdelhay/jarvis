@@ -275,6 +275,32 @@ describe("workspace terminals", () => {
     expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(0);
     expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
   });
+
+  // Settings are read once for the module, not once per pane, and every other
+  // test in this file runs with that read failing — so without this one the
+  // wiring is only ever exercised in the "blocks off" direction, and a
+  // regression (a value captured at import, a rebinding no pane ever sees)
+  // would ship blocks silently disabled for everyone with nothing failing.
+  it("builds a pane of blocks when the settings say so", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    // The settings arrive on a promise; a pane built before it resolves is
+    // deliberately the plain terminal, so the pane under test comes after.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.dataset["state"]).toBe("blocks");
+
+    dataListener?.(
+      "tab-1",
+      `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C;ls\u0007a b\r\n\u001b]133;D;0\u0007`,
+    );
+
+    expect(pane?.querySelectorAll(".terminal-block")).toHaveLength(1);
+  });
 });
 
 describe("terminal key bindings and addons", () => {
