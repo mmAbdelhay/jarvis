@@ -805,7 +805,21 @@
     overflow: hidden;
   }
   .workspace-essential:hover { border-color: var(--accent); }
-  .workspace-essential img { width: 20px; height: 20px; }
+  /* A favicon is drawn for any background, light or dark — an unbacked
+     dark mark (GitHub's, for one) all but disappears against the tile's
+     own dark surface. A light neutral plate behind the image, the way
+     every other browser backs a favicon, keeps every icon legible; the
+     monogram tile below keeps its own hue instead, since it never has
+     this problem. */
+  .workspace-essential img {
+    width: 22px;
+    height: 22px;
+    padding: 3px;
+    box-sizing: border-box;
+    background: var(--text);
+    border-radius: 4px;
+    object-fit: contain;
+  }
   .workspace-essential-monogram {
     width: 100%;
     height: 100%;
@@ -835,6 +849,27 @@
     cursor: pointer;
   }
   .workspace-bookmark:hover { background: var(--panel); }
+
+  /* The row's icon, at list-row size rather than the grid tile's — same
+     cached-icon-or-monogram choice, same neutral plate under the image for
+     the same reason .workspace-essential img has one. */
+  .workspace-bookmark-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .workspace-bookmark-icon img {
+    width: 100%;
+    height: 100%;
+    padding: 2px;
+    box-sizing: border-box;
+    background: var(--text);
+    border-radius: 3px;
+    object-fit: contain;
+  }
+  .workspace-bookmark-icon .workspace-essential-monogram { font-size: 9px; }
 
   /* The column is narrow, so the title wraps instead of truncating — the
      bar's ellipsis-and-tooltip compromise existed only for a one-line chip

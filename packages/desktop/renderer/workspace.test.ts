@@ -919,6 +919,30 @@ describe("the bookmarks sidebar", () => {
 
     expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(12);
   });
+
+  it("shows the cached icon on a listed (unpinned) row too", async () => {
+    harness();
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", icon: "data:image/png;base64,AQ==" },
+    ]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    const img = document.querySelector("#workspace-bookmark-list img");
+    expect(img?.getAttribute("src")).toBe("data:image/png;base64,AQ==");
+  });
+
+  it("falls back to a monogram on a listed row with no icon", async () => {
+    harness();
+    stubBookmarks([{ url: "https://a.test/", title: "Alpha" }]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector("#workspace-bookmark-list img")).toBeNull();
+    expect(document.querySelector("#workspace-bookmark-list .workspace-essential-monogram")?.textContent).toBe("A");
+  });
 });
 
 describe("open in editor", () => {

@@ -239,16 +239,29 @@ function openBookmark(url: string): void {
   else void window.jarvis.openTab(project, url);
 }
 
-/** One chip in the bar. The rail stacked the title over the host; a row
+/** One row in the list. The rail stacked the title over the host; a row
  *  one line tall has space for the title alone, so the address moves to the
- *  tooltip — where it is the more useful half anyway. */
-function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
+ *  tooltip — where it is the more useful half anyway. Its icon is the same
+ *  cached-icon-or-monogram choice the grid makes, at list-row size rather
+ *  than the grid's tile size. */
+function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   const chip = document.createElement("div");
   chip.className = "workspace-bookmark";
   // Both the title and the URL are page-supplied text; the attribute takes
   // it as text and nothing else, same discipline as the tab strip.
   chip.title = bookmark.url;
   chip.addEventListener("click", () => openBookmark(bookmark.url));
+
+  const icon = document.createElement("span");
+  icon.className = "workspace-bookmark-icon";
+  if (bookmark.icon === undefined) {
+    icon.append(monogramTile(bookmark));
+  } else {
+    const img = document.createElement("img");
+    img.src = bookmark.icon;
+    img.alt = "";
+    icon.append(img);
+  }
 
   const title = document.createElement("span");
   title.className = "workspace-bookmark-title";
@@ -269,7 +282,7 @@ function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
     void removeBookmark(bookmark.url);
   });
 
-  chip.append(title, remove);
+  chip.append(icon, title, remove);
   return chip;
 }
 
