@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderDockerPane } from "./workspace-docker.js";
+import { renderDockerPane, toTerminalText } from "./workspace-docker.js";
 
 const view = {
   rows: [
@@ -246,5 +246,27 @@ describe("renderDockerPane", () => {
     await flush();
 
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+  });
+});
+
+describe("toTerminalText", () => {
+  // `docker logs` is spawned on a pipe, not a pty, so its lines arrive with a
+  // bare LF. Written to xterm unchanged they render as a staircase: each line
+  // starts at the column the previous one ended on. Found by driving the real
+  // app — jsdom cannot render xterm, so no pane-level test can see it.
+  it("gives a bare LF the CR a terminal needs", () => {
+    expect(toTerminalText("line one\nline two\n")).toBe("line one\r\nline two\r\n");
+  });
+
+  it("leaves an existing CRLF alone rather than doubling it", () => {
+    expect(toTerminalText("line one\r\nline two\r\n")).toBe("line one\r\nline two\r\n");
+  });
+
+  it("passes through a chunk with no line ending", () => {
+    expect(toTerminalText("partial line")).toBe("partial line");
+  });
+
+  it("does not invent a newline for a lone CR", () => {
+    expect(toTerminalText("progress\r")).toBe("progress\r");
   });
 });

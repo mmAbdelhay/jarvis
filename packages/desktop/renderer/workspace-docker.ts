@@ -314,6 +314,16 @@ const attached = new Map<string, Attached>();
 
 let logSubscribed = false;
 
+/** `docker logs` is spawned on a pipe, not a pty, so its lines end in a bare
+ *  LF. A terminal needs the CR too: without it every line starts at the
+ *  column the previous one ended on and the pane renders a staircase. The
+ *  Terminal tab never needed this because node-pty's cooked mode emits CRLF
+ *  itself. A CR already present is left alone, so a chunk boundary that
+ *  splits a CRLF cannot produce a doubled newline. */
+export function toTerminalText(chunk: string): string {
+  return chunk.replace(/\r?\n/g, "\r\n");
+}
+
 /** Wired once, ever — every pane created afterwards reads from this same
  *  subscription rather than adding one of its own, the same pattern
  *  workspace-terminal.ts's initWorkspaceTerminals uses for onTerminalData. */
@@ -321,7 +331,7 @@ function ensureLogSubscription(): void {
   if (logSubscribed) return;
   logSubscribed = true;
   window.jarvis.onDockerLog(({ tabId, chunk }) => {
-    panes.get(tabId)?.terminal?.write(chunk);
+    panes.get(tabId)?.terminal?.write(toTerminalText(chunk));
   });
 }
 
