@@ -54,6 +54,13 @@ clusters:                       # optional; per project, for the Cluster tab
     - name: chaos
       context: arn:aws:eks:eu-west-1:123456789012:cluster/app_staging
 
+docker:                         # optional; per project, for the Docker tab
+  acme:
+    - name: app                 # what the Docker tab shows
+      container: acme-app-1
+    - name: mysql
+      container: acme-mysql-1
+
 headlamp:
   binary: /Applications/Headlamp.app/Contents/Resources/headlamp-server
 
@@ -140,6 +147,14 @@ filesystem to consult.
 startup — Jarvis will not refuse to launch over a cluster you were not going
 to open today, and a stale or misspelled context only fails when its own tab
 is opened, in the same status-line way a missing binary does.
+
+**`docker` stores a container's name, not its id.** A `docker compose down`
+followed by `up` gives a container the same name and a new id, so a stored id
+would go stale on every restart of the stack. There is no compose-file field
+either: the compose project is read from the containers' own
+`com.docker.compose.project` labels, so there is no second copy of that fact
+to drift. Settings can fill this section in for you — see the Docker section
+there.
 
 **Sessions you started in a terminal show up in History too.** Every Claude
 Code session writes a JSONL transcript under its account's

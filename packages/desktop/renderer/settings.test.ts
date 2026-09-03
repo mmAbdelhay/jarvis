@@ -18,6 +18,7 @@ function sample(): JarvisConfig {
     databases: {},
     editors: {},
     clusters: {},
+    docker: {},
     headlamp: { binary: "/some/path" },
     terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
     voice: {

@@ -30,3 +30,4 @@ export * from "./api-store.js";
 export * from "./postman-import.js";
 export * from "./dbgate-types.js";
 export * from "./dbgate.js";
+export * from "./docker.js";

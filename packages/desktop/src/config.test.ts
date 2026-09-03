@@ -606,6 +606,58 @@ describe("clusters", () => {
     ]);
   });
 
+  it("parses a project's docker containers in config order", () => {
+    const config = parseConfig({
+      ...base,
+      docker: {
+        acme: [
+          { name: "app", container: "acme-app-1" },
+          { name: "mysql", container: "acme-mysql-1" },
+        ],
+      },
+    });
+    expect(config.docker["acme"]).toEqual([
+      { name: "app", container: "acme-app-1" },
+      { name: "mysql", container: "acme-mysql-1" },
+    ]);
+  });
+
+  it("parses an absent docker section as an empty map", () => {
+    expect(parseConfig(base).docker).toEqual({});
+  });
+
+  it("rejects a docker key that names no configured project", () => {
+    expect(() =>
+      parseConfig({ ...base, docker: { nope: [{ name: "a", container: "c" }] } }),
+    ).toThrow(/names no configured project/);
+  });
+
+  it("rejects a docker entry with an empty name", () => {
+    expect(() =>
+      parseConfig({ ...base, docker: { acme: [{ name: "", container: "c" }] } }),
+    ).toThrow(/name/);
+  });
+
+  it("rejects a docker entry with an empty container", () => {
+    expect(() =>
+      parseConfig({ ...base, docker: { acme: [{ name: "a", container: "" }] } }),
+    ).toThrow(/container/);
+  });
+
+  it("rejects two docker entries with the same name in one project", () => {
+    expect(() =>
+      parseConfig({
+        ...base,
+        docker: {
+          acme: [
+            { name: "app", container: "one" },
+            { name: "app", container: "two" },
+          ],
+        },
+      }),
+    ).toThrow(/duplicates an earlier container/);
+  });
+
   it("defaults to no clusters when the section is absent", () => {
     expect(parseConfig(base).clusters).toEqual({});
   });

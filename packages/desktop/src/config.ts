@@ -10,6 +10,7 @@ import type {
   DatabasesConfig,
   DbGateConnection,
   DbGateEngine,
+  DockerConfig,
   EditorsConfig,
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, defaultHeadlampBinary } from "@jarvis/platform";
@@ -72,6 +73,10 @@ export type JarvisConfig = {
    *  project name. An absent `clusters:` section parses to {} — that
    *  project's button is disabled, like Personal's. */
   clusters: ClustersConfig;
+  /** Per-project containers the Docker tab manages, keyed by project name.
+   *  An absent `docker:` section parses to {} — that project's Docker
+   *  button is disabled, like Personal's. */
+  docker: DockerConfig;
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
@@ -167,6 +172,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const databases = parseDatabases(root["databases"], projects);
   const editors = parseEditors(root["editors"], projects);
   const clusters = parseClusters(root["clusters"], projects);
+  const docker = parseDocker(root["docker"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
   const whisper = parseWhisper(root["whisper"]);
@@ -197,6 +203,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     databases,
     editors,
     clusters,
+    docker,
     headlamp,
     terminal,
     brain: {
@@ -575,6 +582,54 @@ function parseClusters(rawClusters: unknown, projects: Record<string, string>): 
       }
 
       return { name, context };
+    });
+  }
+  return result;
+}
+
+/** `docker:` is keyed by project name, exactly as `clusters:` is, and is
+ *  rejected on the same three grounds: a key naming no configured project,
+ *  an empty display name, an empty container name. Duplicate display names
+ *  within one project are rejected too — the Docker tab keys its rows by
+ *  that name, so two rows called "app" would be indistinguishable. */
+function parseDocker(rawDocker: unknown, projects: Record<string, string>): DockerConfig {
+  if (rawDocker === undefined) return {};
+  if (typeof rawDocker !== "object" || rawDocker === null || Array.isArray(rawDocker)) {
+    throw new Error("Config `docker` must be an object");
+  }
+
+  const result: DockerConfig = {};
+  for (const [project, rawList] of Object.entries(rawDocker as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`docker\` names no configured project: "${project}"`);
+    }
+    if (!Array.isArray(rawList)) {
+      throw new Error(`Config \`docker.${project}\` must be an array`);
+    }
+
+    const seen = new Set<string>();
+    result[project] = rawList.map((rawEntry, index) => {
+      const where = `docker.${project}[${index}]`;
+      if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        throw new Error(`Config \`${where}\` must be an object`);
+      }
+      const entry = rawEntry as Record<string, unknown>;
+
+      const name = entry["name"];
+      if (typeof name !== "string" || name === "") {
+        throw new Error(`Config \`${where}.name\` must be a non-empty string`);
+      }
+      if (seen.has(name)) {
+        throw new Error(`Config \`${where}.name\` duplicates an earlier container: "${name}"`);
+      }
+      seen.add(name);
+
+      const container = entry["container"];
+      if (typeof container !== "string" || container === "") {
+        throw new Error(`Config \`${where}.container\` must be a non-empty string`);
+      }
+
+      return { name, container };
     });
   }
   return result;
