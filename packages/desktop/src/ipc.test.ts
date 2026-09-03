@@ -871,6 +871,8 @@ describe("bookmarks handlers", () => {
       list: () => Promise.resolve({ ok: true, value: [] }),
       add: (_project, bookmark) => Promise.resolve({ ok: true, value: [bookmark] }),
       remove: () => Promise.resolve({ ok: true, value: [] }),
+      setPinned: () => Promise.resolve({ ok: true, value: [] }),
+      reorder: () => Promise.resolve({ ok: true, value: [] }),
       ...overrides,
     };
   }

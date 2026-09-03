@@ -147,3 +147,93 @@ describe("createBookmarkStore", () => {
     });
   });
 });
+
+describe("pinning", () => {
+  it("pins a bookmark and reports it in the returned list", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.setPinned("p", "https://a.test/", true);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value[0]?.pinned).toBe(true);
+  });
+
+  it("unpins again", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.setPinned("p", "https://a.test/", true);
+
+    const result = await store.setPinned("p", "https://a.test/", false);
+
+    expect(result.ok && result.value[0]?.pinned).toBe(false);
+  });
+
+  it("refuses a thirteenth pin rather than evicting one", async () => {
+    const store = createBookmarkStore(await tempFile());
+    for (let i = 0; i < 13; i++) {
+      await store.add("p", { url: `https://s${i}.test/`, title: `S${i}` });
+    }
+    for (let i = 0; i < 12; i++) {
+      await store.setPinned("p", `https://s${i}.test/`, true);
+    }
+
+    const result = await store.setPinned("p", "https://s12.test/", true);
+
+    expect(result).toEqual({ ok: false, detail: "pin-limit" });
+  });
+
+  it("pinning an unknown url is a no-op, not a failure", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.setPinned("p", "https://gone.test/", true);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value).toHaveLength(1);
+  });
+});
+
+describe("reorder", () => {
+  it("rewrites order across the listed urls", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.add("p", { url: "https://b.test/", title: "B" });
+
+    const result = await store.reorder("p", ["https://b.test/", "https://a.test/"]);
+
+    expect(result.ok && result.value.map((b) => b.url)).toEqual([
+      "https://b.test/",
+      "https://a.test/",
+    ]);
+  });
+
+  it("ignores a url the project does not have", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.reorder("p", ["https://gone.test/", "https://a.test/"]);
+
+    expect(result.ok && result.value.map((b) => b.url)).toEqual(["https://a.test/"]);
+  });
+});
+
+describe("a file written before pinning existed", () => {
+  it("loads with every bookmark unpinned, in the order it was written", async () => {
+    const file = await tempFile();
+    await writeFile(
+      file,
+      JSON.stringify({ p: [{ url: "https://a.test/", title: "A" }, { url: "https://b.test/", title: "B" }] }),
+      "utf8",
+    );
+    const store = createBookmarkStore(file);
+
+    const result = await store.list("p");
+
+    expect(result.ok && result.value.map((b) => b.url)).toEqual([
+      "https://a.test/",
+      "https://b.test/",
+    ]);
+    expect(result.ok && result.value.every((b) => b.pinned !== true)).toBe(true);
+  });
+});
