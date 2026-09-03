@@ -1080,13 +1080,21 @@ app.whenReady().then(async () => {
     );
     // The renderer's xterm for this tab is ready: hand over whatever the
     // shell printed before it existed, then stream the rest.
-    ipcMain.handle("terminal:attach", (_event, tabId: unknown) => {
-      if (typeof tabId !== "string") return "";
+    ipcMain.handle("terminal:attach", (_event, paneKey: unknown) => {
+      if (typeof paneKey !== "string") return "";
       return shells.attach(
-        tabId,
-        (chunk) => window.webContents.send("terminal:data", { tabId, chunk }),
-        (code) => window.webContents.send("terminal:exit", { tabId, code }),
+        paneKey,
+        (chunk) => window.webContents.send("terminal:data", { paneKey, chunk }),
+        (code) => window.webContents.send("terminal:exit", { paneKey, code }),
       );
+    });
+    // A tab's second (and third…) shell, and the one kill that is not the
+    // tab's own — see TerminalHandlers.split/closePane.
+    ipcMain.handle("terminal:split", (_event, tabId: unknown, paneId: unknown) => {
+      terminal.split(tabId as string, paneId as string);
+    });
+    ipcMain.handle("terminal:closePane", (_event, paneKey: unknown) => {
+      terminal.closePane(paneKey as string);
     });
     ipcMain.handle("terminal:suggest", (_event, tabId: unknown, input: unknown) =>
       terminal.suggest(tabId as string, input as string),

@@ -1,16 +1,23 @@
 import type { WorkspaceTab } from "@jarvis/core";
-import { enhanceTerminal } from "./terminal-addons.js";
+import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
+import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
 // The Workspace's Terminal tabs.
 //
 // A terminal tab has no hosted view (see BrowserHost.openTerminal): its
 // shell runs under a pty in the main process and its screen is drawn right
 // here, in the renderer's own DOM, over the same slot a hosted page would
-// occupy. One xterm instance per tab, kept alive for as long as the tab is —
+// occupy. One tree of panes per tab, kept alive for as long as the tab is —
 // so switching tabs is showing and hiding elements, not replaying a stream,
 // and scrollback survives without anyone having to store it.
+//
+// A tab holds a tree rather than a single pane because a tab can be split
+// (see terminal-splits.ts). Every leaf is a whole pane with a shell of its
+// own, keyed "<tabId>:<paneId>" — and a tab nobody has split is one leaf
+// keyed by the bare tab id, which is exactly what it was before splits
+// existed, down to the shell key.
 
 const $ = (id: string): HTMLElement => {
   const element = document.getElementById(id);
@@ -19,8 +26,14 @@ const $ = (id: string): HTMLElement => {
 };
 
 /** The outer element belongs to the Workspace — one per tab, shown and
- *  hidden as tabs change — and the pane is what draws inside it. */
-type Pane = { element: HTMLElement; pane: TerminalPane };
+ *  hidden as tabs change — and the tree is what draws inside it. */
+type Pane = { element: HTMLElement; tree: SplitTree };
+
+/** Which shell each pane is drawing. A WeakMap rather than a lookup table
+ *  the tree would have to keep in step: a pane that has been closed is
+ *  simply no longer among `tree.panes()`, so a key can never resolve to a
+ *  pane that is gone. */
+const paneKeys = new WeakMap<TerminalPane, string>();
 
 /** How many commands the command editor's arrows may walk back through.
  *  Long enough to reach this morning's command, short enough that a prompt
@@ -56,20 +69,35 @@ export function initWorkspaceTerminals(): void {
   if (wired) return;
   wired = true;
 
-  window.jarvis.onTerminalData((tabId, chunk) => {
-    panes.get(tabId)?.pane.write(chunk);
+  window.jarvis.onTerminalData((paneKey, chunk) => {
+    paneFor(paneKey)?.write(chunk);
   });
 
-  window.jarvis.onTerminalExit((tabId, code) => {
+  window.jarvis.onTerminalExit((paneKey, code) => {
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
     // silently stopped responding. It goes straight to the live terminal:
     // this is Jarvis speaking, not the pty, so it is no command's output and
     // has no business inside a block.
-    panes
-      .get(tabId)
-      ?.pane.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
+    paneFor(paneKey)?.terminal.write(
+      `\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`,
+    );
   });
+}
+
+/**
+ * The pane drawing `paneKey`'s shell, or undefined for a shell this window
+ * has no pane for.
+ *
+ * The pty stream is routed by shell key, never by tab: a split tab has one
+ * shell per pane, and putting one pane's output into another's would be the
+ * worst thing this module could do. The tab id is the part before the first
+ * colon — tab ids have none of their own (see WorkspaceTabs' `tab-<n>`).
+ */
+function paneFor(paneKey: string): TerminalPane | undefined {
+  const colon = paneKey.indexOf(":");
+  const entry = panes.get(colon === -1 ? paneKey : paneKey.slice(0, colon));
+  return entry?.tree.panes().find((pane) => paneKeys.get(pane) === paneKey);
 }
 
 /**
@@ -90,7 +118,9 @@ export function renderWorkspaceTerminals(
   // being reaped by main's own close handler.
   for (const [tabId, pane] of panes) {
     if (live.has(tabId)) continue;
-    pane.pane.dispose();
+    // Every pane of the tab, not only the one that was focused: main's own
+    // close handler reaps the tab's shells and its splits' with them.
+    pane.tree.dispose();
     pane.element.remove();
     panes.delete(tabId);
   }
@@ -110,10 +140,11 @@ export function renderWorkspaceTerminals(
 
   if (showing === undefined) return;
   const pane = panes.get(showing);
+  if (pane === undefined) return;
   // The host was hidden until a moment ago, so this is the first point at
-  // which the pane has a real size to be laid out at.
-  pane?.pane.refit();
-  pane?.pane.focus();
+  // which the panes have a real size to be laid out at.
+  for (const leaf of pane.tree.panes()) leaf.refit();
+  pane.tree.focused().focus();
 }
 
 function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
@@ -124,6 +155,49 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   element.className = "workspace-terminal-pane";
   host.append(element);
 
+  // The tree is built from the panes it is given, so its own actions can
+  // only be wired after it exists — and they are only ever called from a
+  // keystroke, long after this returns.
+  let tree: SplitTree | undefined;
+  const splitKeys: SplitKeys = {
+    split: (direction) => tree?.split(direction),
+    // No tree yet is "no other pane", which sends ⌘W to the tab — the same
+    // answer as a tab that was never split.
+    closeFocused: () => tree?.closeFocused() ?? false,
+    focus: (delta) => tree?.focus(delta),
+    closeTab: () => void window.jarvis.closeTab(tabId),
+  };
+
+  const built = createSplitTree(
+    element,
+    (paneKey, paneHost) => makePane(tabId, paneKey, project, paneHost, splitKeys),
+    tabId,
+  );
+  tree = built;
+
+  const pane: Pane = { element, tree: built };
+  panes.set(tabId, pane);
+  return pane;
+}
+
+/**
+ * One leaf of a tab's tree: a whole terminal pane, with its own blocks, its
+ * own editor and its own autocomplete, talking to the shell keyed
+ * `paneKey`. Nothing here is conditional on whether the pane is the tab's
+ * first or one split off it — the only difference between them is the key.
+ */
+function makePane(
+  tabId: string,
+  paneKey: string,
+  project: string,
+  element: HTMLElement,
+  splitKeys: SplitKeys,
+): TerminalPane {
+  // A split pane's shell has to exist before the pane can attach to it, so
+  // the attach below waits on this. The tab's own pane has had a shell
+  // since main opened the tab.
+  const started = startShell(tabId, paneKey);
+
   // Completion needs the pane's terminal to exist before it can be built,
   // but the editor's own keystrokes need completion consulted from inside
   // createPane, before completion can exist — so the pane gets a forward
@@ -131,18 +205,33 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   // the way `completion` itself already gets reassigned below.
   let completion: Completion = { handleKey: () => true };
 
-  // The tab's terminal: frozen blocks over a live xterm when the shell's
+  // The pane's own first look at a keystroke: the split chords, then the
+  // autocomplete dropdown. It is passed both to the pane (the editor's
+  // path) and to enhanceTerminal (xterm's), because those are two
+  // different events — while the command editor is visible a keystroke
+  // targets its field and never reaches xterm at all — and the split
+  // chords have to work at either.
+  const interceptKey = (event: KeyboardEvent): boolean =>
+    handleSplitKey(event, splitKeys) && completion.handleKey(event);
+
+  // The pane's terminal: frozen blocks over a live xterm when the shell's
   // integration is on, and today's bare terminal when it is not. Keystrokes,
   // the cell grid and the shell's buffered prologue are all its business;
-  // what stays here is everything that needs to know which tab this is.
+  // what stays here is everything that needs to know which shell this is.
   const view = createPane(element, {
     // Every keystroke verbatim, control bytes included — that is what makes
     // Ctrl-C, arrows and Escape work rather than only plain text.
-    sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
-    resize: (cols, rows) => void window.jarvis.resizeTerminal(tabId, cols, rows),
+    sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
+    resize: (cols, rows) => void window.jarvis.resizeTerminal(paneKey, cols, rows),
     // Whatever the shell printed before this pane existed — its prompt,
-    // usually. Buffered by the shell manager exactly for this gap.
-    attach: () => window.jarvis.attachTerminal(tabId),
+    // usually. Buffered by the shell manager exactly for this gap, and
+    // waited for so a split pane never attaches to a shell main has not
+    // started yet: attaching to an unknown key registers no listener at
+    // all, and the pane would stay blank for good.
+    attach: () =>
+      started === undefined
+        ? window.jarvis.attachTerminal(paneKey)
+        : started.then(() => window.jarvis.attachTerminal(paneKey)),
     settings: terminalSettings,
     // What the command editor's arrows walk: Jarvis's own command log,
     // never zsh's line editor. Guarded because a preload without the
@@ -150,16 +239,14 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     // than an exception at every prompt.
     history: async () => {
       try {
-        return await window.jarvis.terminalHistory(tabId, HISTORY_LIMIT);
+        return await window.jarvis.terminalHistory(paneKey, HISTORY_LIMIT);
       } catch {
         return [];
       }
     },
-    // The dropdown's first look at a keystroke over the editor — xterm's
-    // own custom key handler below never sees these, since the event
-    // targets the editor's own <textarea>, not xterm's.
-    interceptKey: (event) => completion.handleKey(event),
+    interceptKey,
   });
+  paneKeys.set(view, paneKey);
   const terminal = view.terminal;
 
   // Autocomplete: a dropdown under the cursor, completing from this user's
@@ -194,8 +281,11 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     : {};
   try {
     completion = attachCompletion(terminal, element, {
-      suggest: (input) => window.jarvis.suggestCompletions(tabId, input),
-      sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+      // The pane's own key, never the tab's: main resolves a split's cwd
+      // through the same map it resolves the tab's, so a pane in a split
+      // completes against the directory its own shell is in.
+      suggest: (input) => window.jarvis.suggestCompletions(paneKey, input),
+      sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
       ...editorCompletionHooks,
     });
   } catch {
@@ -206,8 +296,8 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   // terminal so the two behave identically. After open(): WebGL needs a real
   // element to attach a context to.
   enhanceTerminal(terminal, element, {
-    interceptKey: (event) => completion.handleKey(event),
-    sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+    interceptKey,
+    sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
     // A link opens as an ordinary browser tab in the same project, which is
     // what puts it through normalizeInput and the app's navigation rules
     // instead of handing an arbitrary string to the OS.
@@ -219,12 +309,35 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     blockNav: view.blockNav,
   });
 
-  const pane: Pane = { element, pane: view };
-  panes.set(tabId, pane);
-
+  // The pane's own slot, which a divider drag or a sibling's closing
+  // resizes as well as the window does.
   if (typeof ResizeObserver !== "undefined") {
     new ResizeObserver(() => view.refit()).observe(element);
   }
 
-  return pane;
+  return view;
+}
+
+/**
+ * Starts the shell for a pane split off `tabId`, in the tab's own
+ * directory. The tab's first pane already has one — main started it when
+ * it opened the tab — and gets undefined, so that pane attaches exactly as
+ * it did before splits existed, on the same tick.
+ *
+ * Never rejects: a split whose shell could not be started leaves a pane
+ * that draws nothing, which is a great deal better than an exception in
+ * the middle of a terminal.
+ */
+function startShell(tabId: string, paneKey: string): Promise<void> | undefined {
+  if (paneKey === tabId) return undefined;
+  try {
+    // Everything after the tab id and its colon — see createSplitTree,
+    // which is what composed the key.
+    return Promise.resolve(window.jarvis.splitTerminal(tabId, paneKey.slice(tabId.length + 1))).catch(
+      () => undefined,
+    );
+  } catch {
+    // A preload without the channel.
+    return Promise.resolve();
+  }
 }

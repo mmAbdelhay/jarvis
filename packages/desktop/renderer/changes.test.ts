@@ -100,6 +100,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     resizeTerminal: vi.fn(async () => {}),
     onTerminalData: vi.fn(),
     onTerminalExit: vi.fn(),
+    splitTerminal: vi.fn(async () => {}),
+    closeTerminalPane: vi.fn(async () => {}),
     listBookmarks: vi.fn(async () => notStubbed),
     addBookmark: vi.fn(async () => notStubbed),
     removeBookmark: vi.fn(async () => notStubbed),

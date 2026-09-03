@@ -1189,6 +1189,28 @@
   .workspace-terminal-pane { position: absolute; inset: 0; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
 
+  /* A tab's panes. The tree is nested flex boxes: a branch lays its two
+     children out along its own direction (set inline by terminal-splits.ts,
+     the only thing that file writes to a style), and a leaf is the box one
+     whole .terminal-pane draws inside. min-width/min-height: 0 is what
+     stops a flex child refusing to shrink below its content — without it a
+     long line in one pane would push the other off screen. */
+  .terminal-split { position: absolute; inset: 0; display: flex; }
+  .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
+  .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
+    overflow: hidden; }
+  /* Which pane the keys go to. Quiet — it is a hint, not a frame — and
+     drawn as an inset shadow so it costs the pane no layout at all. */
+  .terminal-split-leaf.focused { box-shadow: inset 0 0 0 1px var(--border); }
+  /* The grab handle between two panes. Wide enough to hit, drawn as a hair
+     line, and with the cursor the direction it actually resizes. */
+  .terminal-split-divider { flex: 0 0 6px; background: var(--ground);
+    border-left: 1px solid var(--border); }
+  .terminal-split-divider[data-direction="row"] { cursor: col-resize; }
+  .terminal-split-divider[data-direction="column"] { flex-basis: 6px; cursor: row-resize;
+    border-left: none; border-top: 1px solid var(--border); }
+  .terminal-split-divider:hover { background: var(--border); }
+
   /* One terminal as the user sees it: frozen blocks stacked above a live
      xterm. data-state is set by terminal-pane.ts and is the only thing that
      lays this out, so that module measures nothing. */

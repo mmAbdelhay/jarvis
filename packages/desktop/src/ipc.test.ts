@@ -1562,6 +1562,152 @@ describe("terminal handlers", () => {
     expect(killed).toEqual(["tab-7"]);
   });
 
+  // A split is another shell under the same tab, keyed "<tabId>:<paneId>" —
+  // ShellManager is keyed by an arbitrary string, so the pane's shell needs
+  // nothing here beyond a key and the tab's own directory.
+  it("starts a split's shell in the tab's own directory", () => {
+    const { manager, started } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+    });
+    handlers.open("acme");
+
+    handlers.split("tab-7", "p1");
+
+    expect(started).toEqual([
+      { tabId: "tab-7", cwd: "/p/acme" },
+      { tabId: "tab-7:p1", cwd: "/p/acme" },
+    ]);
+  });
+
+  it("refuses to split a tab it never started, or on a non-string argument", () => {
+    const { manager, started } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+    });
+    handlers.open("acme");
+
+    handlers.split("ghost", "p1");
+    handlers.split("tab-7", undefined as unknown as string);
+    handlers.split(undefined as unknown as string, "p1");
+
+    expect(started).toEqual([{ tabId: "tab-7", cwd: "/p/acme" }]);
+  });
+
+  // Registering the split's directory is what makes autocomplete and the
+  // command editor's history work inside a split: both resolve their key
+  // through the same map.
+  it("suggests inside a split against the tab's directory", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+
+    expect(await handlers.suggest("tab-7:p1", "git sta")).toEqual(["git status"]);
+    expect(asked).toEqual([["/p/acme", "git sta"]]);
+  });
+
+  it("kills a pane's own shell and forgets its directory when the pane is closed", async () => {
+    const { manager, killed } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+      completion: { enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } },
+    });
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+
+    handlers.closePane("tab-7:p1");
+    handlers.closePane(undefined as unknown as string);
+
+    expect(killed).toEqual(["tab-7:p1"]);
+    expect(await handlers.suggest("tab-7:p1", "git")).toEqual([]);
+  });
+
+  // The one place where getting this wrong leaks real child processes: a
+  // tab's splits are shells of their own, and nothing else will reap them.
+  it("kills every split of a tab when the tab is closed", () => {
+    const { manager, killed } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+    });
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+    handlers.split("tab-7", "p2");
+
+    handlers.close("tab-7");
+
+    expect(killed.sort()).toEqual(["tab-7", "tab-7:p1", "tab-7:p2"]);
+  });
+
+  // Another tab's shells are not this tab's to kill, and a tab id that is a
+  // prefix of another's must not take it down with it.
+  it("leaves another tab's shells alone when one tab is closed", () => {
+    const { manager, killed } = shells();
+    let next = 0;
+    const ids = ["tab-7", "tab-70"];
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => ids[next++] ?? "",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+    });
+    handlers.open("acme");
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+    handlers.split("tab-70", "p1");
+
+    handlers.close("tab-7");
+
+    expect(killed.sort()).toEqual(["tab-7", "tab-7:p1"]);
+  });
+
+  // Closing the first pane of a split takes the tab's own shell with it, so
+  // the tab's directory has to survive in one of its splits — otherwise the
+  // next ⌘D in the pane still open would silently do nothing.
+  it("still splits after the tab's own pane has been closed", () => {
+    const { manager, started } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+    });
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+    handlers.closePane("tab-7");
+
+    handlers.split("tab-7", "p2");
+
+    expect(started).toContainEqual({ tabId: "tab-7:p2", cwd: "/p/acme" });
+  });
+
   function completing(
     completion: TerminalHandlerDeps["completion"],
   ): ReturnType<typeof createTerminalHandlers> {

@@ -69,6 +69,18 @@ function harness(buffered = ""): void {
       calls.push({ call: "suggestCompletions", args: [tabId, input] });
       return Promise.resolve(["git status"]);
     },
+    splitTerminal: (tabId: string, paneId: string) => {
+      calls.push({ call: "splitTerminal", args: [tabId, paneId] });
+      return Promise.resolve();
+    },
+    closeTerminalPane: (paneKey: string) => {
+      calls.push({ call: "closeTerminalPane", args: [paneKey] });
+      return Promise.resolve();
+    },
+    closeTab: (id: string) => {
+      calls.push({ call: "closeTab", args: [id] });
+      return Promise.resolve();
+    },
   };
 }
 
@@ -648,5 +660,143 @@ describe("completion with the command editor live", () => {
     // would have walked Jarvis's command log to "ls -la" instead of moving
     // the dropdown's own selection.
     expect(field.value).toBe("git sta");
+  });
+});
+
+// Task 11: a tab holds a tree of panes. Every leaf is a whole pane with its
+// own shell, keyed "<tabId>:<paneId>" — which is what makes autocomplete and
+// the command editor's history work inside a split without main having to
+// know a split exists.
+describe("splitting a terminal tab", () => {
+  beforeEach(() => harness());
+
+  async function split(key: string, shift = false): Promise<void> {
+    const terminal = FakeTerminal.instances.at(-1);
+    terminal?.pressKey({ key, metaKey: true, shiftKey: shift });
+    // The pane's shell has to be started before the pane attaches to it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("starts a second shell in the same tab on Cmd+D and draws a pane for it", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    await split("d");
+
+    expect(calls).toContainEqual({ call: "splitTerminal", args: ["tab-1", "p1"] });
+    expect(calls).toContainEqual({ call: "attachTerminal", args: ["tab-1:p1"] });
+    expect(FakeTerminal.instances).toHaveLength(2);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(2);
+  });
+
+  it("splits down on Cmd+Shift+D", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    await split("d", true);
+
+    const branch = document.querySelector<HTMLElement>(".terminal-split-branch");
+    expect(branch?.style.flexDirection).toBe("column");
+  });
+
+  // The renderer routes the pty stream by shell key, not by tab: the wrong
+  // answer here would put one shell's output into another shell's pane.
+  it("writes each pane's output into that pane and no other", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    dataListener?.("tab-1:p1", "in the split");
+    dataListener?.("tab-1", "in the first");
+
+    expect(FakeTerminal.instances[0]?.text).toBe("in the first");
+    expect(FakeTerminal.instances[1]?.text).toBe("in the split");
+  });
+
+  it("says which pane's shell exited, in that pane", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    exitListener?.("tab-1:p1", 130);
+
+    expect(FakeTerminal.instances[1]?.text).toContain("[process exited with code 130]");
+    expect(FakeTerminal.instances[0]?.text).toBe("");
+  });
+
+  it("sends a split pane's keystrokes to its own shell", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    FakeTerminal.instances[1]?.emitData(CTRL_C);
+
+    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1:p1", CTRL_C] });
+  });
+
+  // Completion resolves its key through the same directories map main
+  // registered the split in, so a split pane completes like any other.
+  it("asks for completions against the split pane's own key", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+    const terminal = FakeTerminal.instances[1];
+    if (terminal === undefined) throw new Error("expected the split pane's terminal");
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine("~/p > git sta");
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toContainEqual({ call: "suggestCompletions", args: ["tab-1:p1", "git sta"] });
+  });
+
+  it("closes the focused pane on Cmd+W and kills its shell, keeping the tab", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    FakeTerminal.instances[1]?.pressKey({ key: "w", metaKey: true });
+
+    expect(calls).toContainEqual({ call: "closeTerminalPane", args: ["tab-1:p1"] });
+    expect(calls.some((entry) => entry.call === "closeTab")).toBe(false);
+    expect(FakeTerminal.instances[1]?.disposed).toBe(true);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(1);
+  });
+
+  // The last pane is the tab: closing it closes the tab, which is what
+  // reaps whatever shells are left.
+  it("closes the tab when Cmd+W has no other pane to fall back to", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    FakeTerminal.instances[0]?.pressKey({ key: "w", metaKey: true });
+
+    expect(calls).toContainEqual({ call: "closeTab", args: ["tab-1"] });
+    expect(calls.some((entry) => entry.call === "closeTerminalPane")).toBe(false);
+  });
+
+  it("moves the focus between panes on Alt+Cmd+Arrow", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+    const focusedBefore = FakeTerminal.instances[0]?.focused ?? 0;
+
+    FakeTerminal.instances[1]?.pressKey({ key: "ArrowLeft", metaKey: true, altKey: true });
+
+    expect(FakeTerminal.instances[0]?.focused).toBe(focusedBefore + 1);
+  });
+
+  it("disposes every pane of a split tab when the tab is closed", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    renderWorkspaceTerminals([], undefined, "acme");
+
+    expect(FakeTerminal.instances.every((terminal) => terminal.disposed)).toBe(true);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(0);
   });
 });

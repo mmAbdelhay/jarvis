@@ -38,6 +38,56 @@ export type TerminalHooks = {
   blockNav?: BlockNav | undefined;
 };
 
+/** What the split keys act on — the tab's tree of panes, plus the tab
+ *  itself, because ⌘W closes the focused pane and falls through to closing
+ *  the tab when there was no other pane to fall back to. */
+export type SplitKeys = {
+  split(direction: "row" | "column"): void;
+  /** False when the focused pane was the last one and nothing was closed. */
+  closeFocused(): boolean;
+  focus(delta: -1 | 1): void;
+  closeTab(): void;
+};
+
+/**
+ * The split chords: ⌘D beside, ⌘⇧D below, ⌘W closes the pane (or the tab,
+ * when it was the pane's last), ⌥⌘←/→ move the focus.
+ *
+ * Returns false when the key was claimed — the same contract as
+ * `TerminalHooks.interceptKey`, and it is chained through exactly that
+ * rather than through xterm's key handler alone, because a pane with the
+ * command editor live never lets a keystroke reach xterm at all: the event
+ * targets the editor's own field. Both paths consult interceptKey, so this
+ * is the one place both can see.
+ */
+export function handleSplitKey(event: KeyboardEvent, keys: SplitKeys): boolean {
+  if (event.type !== "keydown" || !event.metaKey) return true;
+
+  // ⌥⌘←/→ before anything else, and only with Option held: ⌘←/⌘→ are
+  // start-of-line and end-of-line, which no split may take.
+  if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    attempt(() => keys.focus(event.key === "ArrowRight" ? 1 : -1));
+    return claim(event);
+  }
+
+  // Shift makes it "D": one key, two directions.
+  if (event.key === "d" || event.key === "D") {
+    attempt(() => keys.split(event.shiftKey ? "column" : "row"));
+    return claim(event);
+  }
+
+  if (event.key === "w") {
+    // The last pane is the tab, so closing it is closing the tab — which is
+    // also what reaps whatever shells the tab still has.
+    attempt(() => {
+      if (!keys.closeFocused()) keys.closeTab();
+    });
+    return claim(event);
+  }
+
+  return true;
+}
+
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
  *  Enter, so nothing downstream can tell "newline" from "run this". This is
  *  the sequence the convention settled on for the distinction, and the one

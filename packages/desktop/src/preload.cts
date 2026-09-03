@@ -103,15 +103,17 @@ const api: RendererApi = {
     ipcRenderer.invoke("api:saveEnvironment", project, collectionPath, name, variables),
   importPostmanCollection: (project, name, collection) =>
     ipcRenderer.invoke("api:importPostman", project, name, collection),
-  attachTerminal: (tabId) => ipcRenderer.invoke("terminal:attach", tabId),
-  sendTerminalInput: (tabId, data) => ipcRenderer.invoke("terminal:input", tabId, data),
-  resizeTerminal: (tabId, cols, rows) => ipcRenderer.invoke("terminal:resize", tabId, cols, rows),
+  attachTerminal: (paneKey) => ipcRenderer.invoke("terminal:attach", paneKey),
+  sendTerminalInput: (paneKey, data) => ipcRenderer.invoke("terminal:input", paneKey, data),
+  resizeTerminal: (paneKey, cols, rows) => ipcRenderer.invoke("terminal:resize", paneKey, cols, rows),
   onTerminalData: (cb) => {
-    ipcRenderer.on("terminal:data", (_e, payload) => cb(payload.tabId, payload.chunk));
+    ipcRenderer.on("terminal:data", (_e, payload) => cb(payload.paneKey, payload.chunk));
   },
   onTerminalExit: (cb) => {
-    ipcRenderer.on("terminal:exit", (_e, payload) => cb(payload.tabId, payload.code));
+    ipcRenderer.on("terminal:exit", (_e, payload) => cb(payload.paneKey, payload.code));
   },
+  splitTerminal: (tabId, paneId) => ipcRenderer.invoke("terminal:split", tabId, paneId),
+  closeTerminalPane: (paneKey) => ipcRenderer.invoke("terminal:closePane", paneKey),
   listBookmarks: (project) => ipcRenderer.invoke("bookmarks:list", project),
   addBookmark: (project, bookmark) => ipcRenderer.invoke("bookmarks:add", project, bookmark),
   removeBookmark: (project, url) => ipcRenderer.invoke("bookmarks:remove", project, url),

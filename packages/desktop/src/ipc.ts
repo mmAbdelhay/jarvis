@@ -59,8 +59,10 @@ export type IpcChannels = {
   "providers:update": ProviderStatus[];
   "session:output": SessionOutput;
   "workspace:update": WorkspaceState;
-  "terminal:data": { tabId: string; chunk: string };
-  "terminal:exit": { tabId: string; code: number };
+  // Keyed by shell key, not by tab: a split tab has one of these per pane,
+  // and the key is "<tabId>:<paneId>" for every pane but the tab's first.
+  "terminal:data": { paneKey: string; chunk: string };
+  "terminal:exit": { paneKey: string; code: number };
 };
 
 /**
@@ -493,11 +495,19 @@ export type RendererApi = {
   importPostmanCollection(project: string, name: string, collection: unknown): Promise<GitViewResult<string>>;
   /** Announces that this tab's xterm exists; returns whatever the shell
    *  printed before it did. */
-  attachTerminal(tabId: string): Promise<string>;
-  sendTerminalInput(tabId: string, data: string): Promise<void>;
-  resizeTerminal(tabId: string, cols: number, rows: number): Promise<void>;
-  onTerminalData(cb: (tabId: string, chunk: string) => void): void;
-  onTerminalExit(cb: (tabId: string, code: number) => void): void;
+  attachTerminal(paneKey: string): Promise<string>;
+  sendTerminalInput(paneKey: string, data: string): Promise<void>;
+  resizeTerminal(paneKey: string, cols: number, rows: number): Promise<void>;
+  /** Output for one pane's shell. `paneKey` is the key the renderer
+   *  attached with — a tab id for a tab that has never been split, and
+   *  "<tabId>:<paneId>" for every pane split off it. */
+  onTerminalData(cb: (paneKey: string, chunk: string) => void): void;
+  onTerminalExit(cb: (paneKey: string, code: number) => void): void;
+  /** Starts a second shell in the same tab and the same directory, for a
+   *  pane the renderer has just split off. */
+  splitTerminal(tabId: string, paneId: string): Promise<void>;
+  /** Kills one pane's shell. Closing the tab reaps whatever is left. */
+  closeTerminalPane(paneKey: string): Promise<void>;
   listBookmarks(project: string): Promise<GitViewResult<Bookmark[]>>;
   addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
   removeBookmark(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
@@ -825,8 +835,15 @@ export type TerminalHandlers = {
   open(project: string): GitViewResult<void>;
   input(tabId: string, data: string): void;
   resize(tabId: string, cols: number, rows: number): void;
-  /** Kills the tab's shell. Called when the tab is closed. */
+  /** Kills the tab's shell and every shell its splits are running. Called
+   *  when the tab is closed — nothing else reaps a split, and a shell that
+   *  outlives its pane is an orphan process on the user's machine. */
   close(tabId: string): void;
+  /** A second shell in the same tab, in the same directory. The pane key is
+   *  the tab id and a pane id, because ShellManager is keyed by string and
+   *  a split is just another key. */
+  split(tabId: string, paneId: string): void;
+  closePane(paneKey: string): void;
   /** What to offer for `input` typed at the prompt of `tabId`. Empty is an
    *  ordinary answer — a closed dropdown, and zsh's own Tab completion
    *  behaving exactly as it does today. */
@@ -865,6 +882,18 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
   // meaningless without the cwd behind it.
   const directories = new Map<string, string>();
 
+  /** Where a tab's shells are running. The tab's own key first; failing
+   *  that, any pane the tab has split off — closing the first pane of a
+   *  split kills the tab's own shell and forgets its entry, and without
+   *  this the next ⌘D in the pane still open would silently do nothing. */
+  const directoryOf = (tabId: string): string | undefined => {
+    const own = directories.get(tabId);
+    if (own !== undefined) return own;
+    const prefix = `${tabId}:`;
+    for (const [key, cwd] of directories) if (key.startsWith(prefix)) return cwd;
+    return undefined;
+  };
+
   return {
     open(project) {
       const cwd = isString(project) ? deps.projects[project] : undefined;
@@ -895,6 +924,30 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (!isString(tabId)) return;
       directories.delete(tabId);
       deps.shells.kill(tabId);
+      // And every shell the tab's splits are running. The colon is what
+      // makes this exact rather than a prefix match over tab ids: "tab-7"
+      // must never take "tab-70" down with it.
+      const prefix = `${tabId}:`;
+      for (const key of [...directories.keys()]) {
+        if (!key.startsWith(prefix)) continue;
+        directories.delete(key);
+        deps.shells.kill(key);
+      }
+    },
+
+    split(tabId, paneId) {
+      if (!isString(tabId) || !isString(paneId)) return;
+      const cwd = directoryOf(tabId);
+      if (cwd === undefined) return;
+      const key = `${tabId}:${paneId}`;
+      directories.set(key, cwd);
+      deps.shells.start(key, cwd);
+    },
+
+    closePane(paneKey) {
+      if (!isString(paneKey)) return;
+      directories.delete(paneKey);
+      deps.shells.kill(paneKey);
     },
 
     async suggest(tabId, input) {
