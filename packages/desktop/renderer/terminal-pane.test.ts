@@ -40,6 +40,7 @@ function pane(settings = { blocks: true, inputEditor: false, notifyAfterSeconds:
     resize: vi.fn(),
     attach: async () => "",
     settings,
+    notify: vi.fn(),
   });
 }
 
@@ -197,6 +198,7 @@ describe("the command editor in a pane", () => {
       resize: vi.fn(),
       attach: async () => "",
       settings,
+      notify: vi.fn(),
       history,
       workflows,
     });
@@ -499,6 +501,7 @@ describe("the command editor in a pane", () => {
         resize: vi.fn(),
         attach: async () => "",
         settings: EDITOR_SETTINGS,
+        notify: vi.fn(),
         history: async () => ["git status", "ls"],
         interceptKey,
       });
@@ -1023,6 +1026,7 @@ describe("the command editor in a pane", () => {
         resize: vi.fn(),
         attach: async () => "",
         settings: EDITOR_SETTINGS,
+        notify: vi.fn(),
         history: async () => [],
         closeCompletion,
       });
@@ -1050,5 +1054,83 @@ describe("the command editor in a pane", () => {
       expect(closed).toBe(1);
       expect(paletteEl(p)?.hidden).toBe(false);
     });
+  });
+});
+
+// Task 14: a finished block's own duration (endedAt - startedAt, in
+// seconds) compared against settings.notifyAfterSeconds — and, when it
+// crosses that line, whether this pane is the one being watched. The
+// pane never touches `Notification` itself; it only calls the injected
+// `notify` hook, which is what makes every one of these cases assertable
+// without a real notification ever firing.
+describe("notifications", () => {
+  function notifyPane(notifyAfterSeconds: number) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const notify = vi.fn();
+    const p = createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: { blocks: true, inputEditor: false, notifyAfterSeconds, home: "/Users/x" },
+      notify,
+    });
+    return { p, notify };
+  }
+
+  // jsdom's document.hasFocus() starts out false, and a pane's element is
+  // never focused unless a test focuses it — so an untouched pane is
+  // already "not watched" without any extra setup, and focusing its own
+  // element is what makes it the watched one.
+  function focus(p: ReturnType<typeof notifyPane>["p"]): void {
+    p.element.tabIndex = -1;
+    p.element.focus();
+  }
+
+  /** Runs one command whose block spans exactly `seconds` seconds. */
+  function runCommand(p: ReturnType<typeof notifyPane>["p"], seconds: number, exitCode = 0): void {
+    const start = 1_700_000_000_000;
+    const dateSpy = vi.spyOn(Date, "now");
+    dateSpy.mockReturnValueOnce(start);
+    p.write(`${A}$ ${B}${C("ls -la")}`);
+    dateSpy.mockReturnValue(start + seconds * 1000);
+    p.write(`a b\r\n${D(exitCode)}`);
+    dateSpy.mockRestore();
+  }
+
+  it("notifies with the command and its status when a slow block finishes unwatched", () => {
+    const { p, notify } = notifyPane(30);
+
+    runCommand(p, 45);
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    const [, body] = notify.mock.calls[0] as [string, string];
+    expect(body).toContain("ls -la");
+    expect(body.toLowerCase()).toMatch(/succeed|finish|done|complet/);
+  });
+
+  it("does not notify a fast block", () => {
+    const { p, notify } = notifyPane(30);
+
+    runCommand(p, 5);
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not notify a slow block in a focused pane", () => {
+    const { p, notify } = notifyPane(30);
+    focus(p);
+
+    runCommand(p, 45);
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("never notifies when notifyAfterSeconds is 0, however slow the block or unwatched the pane", () => {
+    const { p, notify } = notifyPane(0);
+
+    runCommand(p, 10_000);
+
+    expect(notify).not.toHaveBeenCalled();
   });
 });

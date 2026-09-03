@@ -223,6 +223,17 @@ function makePane(
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
     resize: (cols, rows) => void window.jarvis.resizeTerminal(paneKey, cols, rows),
+    // A `Notification` this environment lacks, or has never been granted
+    // permission for, throws — and this is the one call in the pane's
+    // whole chain of side effects allowed to swallow that, since nothing
+    // here reaches the pty or the DOM the terminal itself depends on.
+    notify: (title, body) => {
+      try {
+        new Notification(title, { body });
+      } catch {
+        // Notification unsupported or denied: no less a working terminal.
+      }
+    },
     // Whatever the shell printed before this pane existed — its prompt,
     // usually. Buffered by the shell manager exactly for this gap, and
     // waited for so a split pane never attaches to a shell main has not

@@ -35,6 +35,12 @@ export type PaneHooks = {
   /** The full renderer-facing settings payload — see window.jarvis.terminalSettings()
    *  in src/ipc.ts, which is where `home` comes from. */
   settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  /** Tells the outside world a block finished — the pane never calls
+   *  `Notification` itself, since that is what makes the decision (and the
+   *  guard around a constructor that can throw) testable at all. Called
+   *  only for a block whose own duration meets `settings.notifyAfterSeconds`
+   *  while this pane was not the one being watched. */
+  notify: (title: string, body: string) => void;
   /** The most recent commands from Jarvis's own command log, newest first —
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
@@ -631,6 +637,24 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
 
   const paletteKeys: PaletteKeys = { palette: paletteForKeys, actions: paletteActions, historySearch };
 
+  /** True while this pane is the one the user is looking at: the window
+   *  itself has focus, and the focused element is inside this pane (its
+   *  live terminal or its command editor — both live under `element`). */
+  function isWatched(): boolean {
+    return document.hasFocus() && element.contains(document.activeElement);
+  }
+
+  function notifyIfUnwatched(record: BlockRecord): void {
+    const threshold = hooks.settings.notifyAfterSeconds;
+    if (threshold <= 0) return;
+    if (record.endedAt === undefined) return;
+    const durationSeconds = (record.endedAt - record.startedAt) / 1000;
+    if (durationSeconds < threshold) return;
+    if (isWatched()) return;
+    const status = record.exitCode === 0 ? "succeeded" : `failed (exit ${record.exitCode ?? "unknown"})`;
+    hooks.notify("Command finished", `${record.command} ${status}`);
+  }
+
   function freeze(record: BlockRecord): void {
     const view = createBlockView(record, {
       cols: terminal.cols,
@@ -665,6 +689,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // that follows must happen either way, or the live terminal would go
       // on showing output the block above it is also showing.
       attempt(() => freeze(event.block));
+      attempt(() => notifyIfUnwatched(event.block));
       // The frozen block now holds what the live terminal was drawing.
       terminal.reset();
       attempt(() => applyState("blocks"));
