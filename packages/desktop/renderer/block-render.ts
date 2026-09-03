@@ -27,13 +27,6 @@ export function renderOutput(ansi: string, cols: number): HTMLElement {
   const element = document.createElement("div");
   element.className = "block-output";
 
-  const terminal = new Terminal({
-    cols: Math.max(cols, 20),
-    rows: 24,
-    scrollback: 100_000,
-    allowProposedApi: true,
-  });
-
   // Terminal.write() always defers its parsing to a macrotask (xterm
   // schedules processing via setTimeout unless the write immediately
   // follows user keyboard input) — there is no public synchronous
@@ -42,21 +35,33 @@ export function renderOutput(ansi: string, cols: number): HTMLElement {
   // away; the caller appends it, and its children arrive a tick later.
   // That is invisible to a user and is a documented part of this
   // function's contract (see the test that pins it).
+  //
+  // Constructing the terminal is inside this same try: a bad `cols` (NaN,
+  // say) or any internal xterm failure must still leave a block with its
+  // text on the page, never an uncaught throw out of renderOutput().
+  let terminal: Terminal | undefined;
   try {
+    const width = Number.isFinite(cols) ? Math.max(cols, 20) : 80;
+    terminal = new Terminal({
+      cols: width,
+      rows: 24,
+      scrollback: 100_000,
+      allowProposedApi: true,
+    });
     terminal.write(ansi, () => {
       try {
-        paint(terminal, element);
+        paint(terminal as Terminal, element);
       } catch {
         fallBackToText(ansi, element);
       } finally {
-        dispose(terminal);
+        dispose(terminal as Terminal);
       }
     });
   } catch {
     // A block that cannot be frozen shows its text without styling rather
     // than nothing at all.
     fallBackToText(ansi, element);
-    dispose(terminal);
+    if (terminal !== undefined) dispose(terminal);
   }
 
   return element;

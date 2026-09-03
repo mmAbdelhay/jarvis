@@ -49,6 +49,15 @@ describe("freezing a block's output", () => {
     await flush();
     expect(element.textContent).toContain("世界");
   });
+
+  it("survives a bad cols value instead of throwing", async () => {
+    let element: HTMLElement | undefined;
+    expect(() => {
+      element = renderOutput("hello\r\n", Number.NaN);
+    }).not.toThrow();
+    await flush();
+    expect(element?.textContent).toContain("hello");
+  });
 });
 
 /** jsdom normalises inline colours to rgb(); the theme is written in hex. */
