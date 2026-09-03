@@ -283,13 +283,25 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     });
   }
 
-  // Re-run and copy, for a block with no input editor yet (that is a later
-  // task): fill types the command at the live prompt without a trailing
-  // return, so it lands ready to edit and never runs on its own; copy goes
-  // straight to the system clipboard, the same call the rest of the
-  // terminal already makes for a selection or a `tmux save-buffer`.
+  // Re-run and copy. Filling is the whole of re-run: neither path appends a
+  // return, so nothing about it can run a command on its own.
+  //
+  // With an editor live the command goes into it — putting it into zsh's
+  // line buffer instead would leave the shell holding one line while the
+  // editor showed another, the divergence this design refuses everywhere.
+  // With no editor (or one that is hidden, because something is running)
+  // it is typed at the live prompt, exactly as it was before the editor
+  // existed. Copy goes straight to the system clipboard, the same call the
+  // rest of the terminal already makes for a selection.
   function fill(command: string): void {
-    attempt(() => hooks.sendInput(command));
+    attempt(() => {
+      if (editor !== undefined && editor.isVisible()) {
+        editor.setValue(command);
+        editor.focus();
+        return;
+      }
+      hooks.sendInput(command);
+    });
   }
 
   function copy(text: string): void {

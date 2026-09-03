@@ -305,6 +305,32 @@ describe("the command editor in a pane", () => {
     expect(textarea(p)?.value).toBe("git status");
   });
 
+  // Re-run fills; it never runs. With an editor live it must fill *that* —
+  // putting the command into zsh's line buffer instead would leave the shell
+  // and the line on screen disagreeing until the next prompt.
+  it("fills the editor on re-run, sending nothing to the pty", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+    expect(editorEl(p)?.hidden).toBe(false);
+
+    p.element.querySelector<HTMLElement>(".block-rerun")?.click();
+
+    expect(textarea(p)?.value).toBe("ls");
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
+  it("types the command at the prompt on re-run when there is no editor", () => {
+    const { p, sendInput } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+
+    p.element.querySelector<HTMLElement>(".block-rerun")?.click();
+
+    expect(editorEl(p)).toBeNull();
+    // The command only — a re-run that appended a return would run it.
+    expect(sendInput).toHaveBeenCalledWith("ls");
+    expect(sendInput).toHaveBeenCalledTimes(1);
+  });
+
   // A tab closed while a command is still running: the pane is gone, and
   // nothing the editor path does may throw into what is left.
   it("survives a pane disposed in the middle of a command", () => {
