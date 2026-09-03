@@ -26,6 +26,8 @@ function harness(): Recorded[] {
       <button id="workspace-open-api" title="Send requests from the project's collections"></button>
       <button id="workspace-open-cluster" title="Browse the project's Kubernetes clusters"></button>
       <div id="workspace-cluster-menu" hidden></div>
+      <button id="workspace-open-docker" title="Manage the project's containers"></button>
+      <div id="workspace-docker" hidden></div>
       <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
       <button id="workspace-new-tab"></button>
@@ -138,6 +140,12 @@ function harness(): Recorded[] {
       }),
     openTerminal: recordOk("openTerminal"),
     openApiTab: recordOk("openApiTab"),
+    openDockerTab: recordOk("openDockerTab"),
+    dockerNames: () => Promise.resolve({ ok: true, value: ["app"] }),
+    dockerView: () =>
+      Promise.resolve({ ok: true, value: { rows: [], composeProject: undefined, composeWorkingDir: undefined } }),
+    dockerUnfollow: record("dockerUnfollow"),
+    onDockerLog: () => {},
     listApiCollections: () => Promise.resolve({ ok: true, value: [] }),
     readApiTree: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     readApiRequest: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
@@ -1975,6 +1983,62 @@ describe("open the API tab", () => {
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "I don't know a project by that name.",
     );
+  });
+
+  it("opens a docker tab for the selected project", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-open-docker")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openDockerTab", args: ["acme"] });
+  });
+
+  // One per project, for the same reason the api tab is one per project:
+  // a second would show the same containers as the first.
+  it("activates the existing docker tab instead of opening a second", async () => {
+    renderWorkspace({ tabs: [tab({ id: "tab-5", kind: "docker", url: "" })], activeTabId: "tab-5" });
+
+    document.getElementById("workspace-open-docker")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-5"] });
+    expect(calls.some((entry) => entry.call === "openDockerTab")).toBe(false);
+  });
+
+  it("opens one when the existing docker tab belongs to another project", async () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-5", kind: "docker", project: "storefront", url: "" })],
+      activeTabId: "tab-5",
+    });
+
+    document.getElementById("workspace-open-docker")?.click();
+    await flush();
+
+    expect(calls).toContainEqual({ call: "openDockerTab", args: ["acme"] });
+  });
+
+  it("shows a localised failure in the shared status line", async () => {
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    jarvis["openDockerTab"] = () =>
+      Promise.resolve({ ok: false, text: "I don't know a project by that name.", language: "en" });
+
+    document.getElementById("workspace-open-docker")?.click();
+    await flush();
+
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "I don't know a project by that name.",
+    );
+  });
+
+  it("disables the docker button for a project that declares no containers", async () => {
+    jarvis["dockerNames"] = () => Promise.resolve({ ok: true, value: [] });
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+    await flush();
+
+    const button = document.getElementById("workspace-open-docker") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("No containers configured for this project");
   });
 });
 

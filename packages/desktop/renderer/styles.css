@@ -1157,6 +1157,75 @@
   .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
 
+  /* The Docker tab: rows of configured containers, compose controls when
+     they share one stack, and a log tail below — same page-slot region the
+     terminal and the API tab share. */
+  .workspace-docker {
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    padding: var(--s3);
+    overflow-y: auto;
+  }
+  .workspace-docker[hidden] { display: none; }
+  .workspace-docker-rows { display: flex; flex-direction: column; gap: var(--s2); }
+  .workspace-docker-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+  }
+  .workspace-docker-row:hover { border-color: var(--border-strong); }
+  .workspace-docker-row--selected { border-color: var(--accent); }
+  .workspace-docker-row--missing { color: var(--text-muted); border-style: dashed; }
+  .workspace-docker-row-name { font-family: var(--font-mono); flex-shrink: 0; }
+  .workspace-docker-row-status {
+    flex-grow: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .workspace-docker-row-actions { display: flex; gap: var(--s1); flex-shrink: 0; }
+  .workspace-docker-row-actions button,
+  .workspace-docker-compose button {
+    font: inherit;
+    font-size: 12px;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 3px var(--s3);
+    cursor: pointer;
+  }
+  .workspace-docker-row-actions button:hover,
+  .workspace-docker-compose button:hover { border-color: var(--accent); }
+  .workspace-docker-compose {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-raised);
+  }
+  .workspace-docker-compose-label { font-family: var(--font-mono); flex-grow: 1; }
+  .workspace-docker-log {
+    flex-grow: 1;
+    min-height: 160px;
+    padding: var(--s2);
+    border-radius: var(--r-panel);
+    background: var(--ground);
+  }
+
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar
      below it, the classic "attached tab" look — a uniform bottom padding

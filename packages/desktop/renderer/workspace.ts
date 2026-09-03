@@ -3,6 +3,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
 import { detectLanguage } from "./format.js";
 import { initApi, renderApi } from "./api.js";
+import { attachDockerPane, detachDockerPane } from "./workspace-docker.js";
 import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
 
 // Structurally the same shape the preload bridge and main process pass
@@ -64,6 +65,11 @@ const toolTitles = new Map<string, string>();
  *  them (see renderClusterButton). */
 let clusterButtonTitle = "";
 
+/** The Docker button's own tooltip, captured for the same reason
+ *  clusterButtonTitle is: a project with no configured containers
+ *  overwrites it, and switching to one that has some must restore it. */
+let dockerButtonTitle = "";
+
 /**
  * The personal browser has no directory on disk, so there is no folder to
  * edit, no database to spawn against, no cwd for a shell and no collection
@@ -117,6 +123,26 @@ async function renderClusterButton(): Promise<void> {
   button.title = disabled ? MESSAGES.noClustersConfigured(PRIMARY_LANGUAGE) : clusterButtonTitle;
 }
 
+/** The Docker button follows the Cluster button's rule exactly: disabled
+ *  whenever the selected project declares no containers to manage — most
+ *  projects, and always the personal browser. A dead daemon is deliberately
+ *  NOT checked here: that would cost a `docker` subprocess on every project
+ *  switch, and the tab itself says so plainly the moment it opens — only
+ *  "nothing configured" is knowable for free. */
+async function renderDockerButton(): Promise<void> {
+  const project = selectedProject();
+  const result = project === "" ? { ok: true as const, value: [] } : await window.jarvis.dockerNames(project);
+  // The user may have switched projects while that request was in flight;
+  // a stale answer must not clobber whatever project is selected now.
+  if (selectedProject() !== project) return;
+
+  const names = result.ok ? result.value : [];
+  const button = $("workspace-open-docker") as HTMLButtonElement;
+  const disabled = names.length === 0;
+  button.disabled = disabled;
+  button.title = disabled ? MESSAGES.dockerNoContainers(PRIMARY_LANGUAGE) : dockerButtonTitle;
+}
+
 // A small fixed palette, none of it reused from the app's semantic colors
 // (--good/--bad/--accent/etc). Assigned to a project the first time it is
 // seen and never reassigned — the same project keeps the same color for as
@@ -161,6 +187,7 @@ async function switchToProject(project: string): Promise<void> {
 
   renderProjectTools();
   void renderClusterButton();
+  void renderDockerButton();
   await refreshBookmarks();
 }
 
@@ -180,7 +207,7 @@ const devToolsByTab = new Set<string>();
 /** Tab kinds whose surface the renderer draws itself, over the region a
  *  hosted page would occupy. The page slot and these panes are flex
  *  siblings that both grow, so exactly one may be in the layout at a time. */
-const RENDERER_DRAWN: ReadonlySet<WorkspaceTab["kind"]> = new Set(["terminal", "api"]);
+const RENDERER_DRAWN: ReadonlySet<WorkspaceTab["kind"]> = new Set(["terminal", "api", "docker"]);
 
 /** The panel's share of the browser column's height. Dragged by the handle
  *  above it, clamped so neither the page nor the panel is squeezed away. */
@@ -421,6 +448,7 @@ export function initWorkspace(projects: string[]): void {
 
   for (const id of PROJECT_TOOL_BUTTONS) toolTitles.set(id, ($(id) as HTMLButtonElement).title);
   clusterButtonTitle = ($("workspace-open-cluster") as HTMLButtonElement).title;
+  dockerButtonTitle = ($("workspace-open-docker") as HTMLButtonElement).title;
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -473,6 +501,7 @@ export function initWorkspace(projects: string[]): void {
   }
   $("workspace-open-terminal").addEventListener("click", () => void openTerminal());
   $("workspace-open-api").addEventListener("click", () => void openApi());
+  $("workspace-open-docker").addEventListener("click", () => void openDocker());
   initApi();
   initWorkspaceTerminals();
 
@@ -489,6 +518,7 @@ export function initWorkspace(projects: string[]): void {
   renderBookmarksVisibility(false);
   renderProjectTools();
   void renderClusterButton();
+  void renderDockerButton();
   void refreshBookmarks();
 }
 
@@ -829,6 +859,52 @@ async function openApi(): Promise<void> {
   }
 }
 
+/** Opens the project's Docker tab, or activates the one it already has.
+ *
+ *  One per project, for the same reason the API tab is: the tab shows the
+ *  containers a project declares, not a session, so a second tab would show
+ *  the same thing the first already does. */
+async function openDocker(): Promise<void> {
+  const project = selectedProject();
+
+  const existing = latest.tabs.find((tab) => tab.kind === "docker" && tab.project === project);
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    return;
+  }
+
+  const status = $("workspace-tool-status");
+  status.textContent = "";
+  status.classList.remove("workspace-tool-status--error");
+
+  const result = await window.jarvis.openDockerTab(project);
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+  }
+}
+
+/** The docker tab currently polling, if any. Unlike a terminal — which keeps
+ *  every open tab's pty alive in the background — the Docker pane's poll is
+ *  only worth running while it is actually on screen, so there is at most
+ *  one attached tab at a time rather than a pane per tab. */
+let dockerAttached: string | undefined;
+
+/** Shows or hides the Docker pane and starts/stops its poll to match: the
+ *  same "flex sibling of the page slot" rule the terminal and API panes
+ *  follow, and the same show/hide call site they are wired at. */
+function renderDocker(tabs: WorkspaceTab[], activeTabId: string | undefined, selectedProject: string): void {
+  const active = tabs.find((tab) => tab.id === activeTabId);
+  const showing = active?.kind === "docker" && active.project === selectedProject ? active.id : undefined;
+
+  ($("workspace-docker") as HTMLElement).hidden = showing === undefined;
+  if (showing === dockerAttached) return;
+
+  if (dockerAttached !== undefined) detachDockerPane(dockerAttached);
+  if (showing !== undefined) attachDockerPane(showing, selectedProject);
+  dockerAttached = showing;
+}
+
 function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTMLElement {
   const element = document.createElement("div");
   element.className = "workspace-tab";
@@ -956,6 +1032,12 @@ export function renderWorkspace(state: WorkspaceState): void {
     tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
   renderApi(state.tabs, state.activeTabId, selected);
+  renderDocker(state.tabs, state.activeTabId, selected);
+  // dockerNames is a config lookup, not a docker subprocess (see
+  // renderDockerButton) — cheap enough to recheck on every push of
+  // workspace state, which is what lets a config change or a stale answer
+  // correct itself without waiting for the user to switch projects and back.
+  void renderDockerButton();
 
   // A closed tab takes its DevTools with it: main destroys the panel's view
   // along with the page's, so an id left here would resurrect a panel for a

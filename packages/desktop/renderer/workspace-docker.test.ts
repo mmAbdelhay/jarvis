@@ -1,0 +1,140 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderDockerPane } from "./workspace-docker.js";
+
+const view = {
+  rows: [
+    {
+      name: "app",
+      container: "acme-app-1",
+      facts: {
+        name: "acme-app-1",
+        id: "abc",
+        image: "app:latest",
+        state: "running" as const,
+        status: "running",
+        ports: ["0.0.0.0:8000->8000/tcp"],
+        composeProject: "acme",
+        composeWorkingDir: "/p/acme",
+      },
+    },
+    { name: "mysql", container: "acme-mysql-1", facts: undefined },
+  ],
+  composeProject: "acme",
+  composeWorkingDir: "/p/acme",
+};
+
+function host(): HTMLElement {
+  const element = document.createElement("div");
+  document.body.append(element);
+  return element;
+}
+
+describe("renderDockerPane", () => {
+  // vi.spyOn on an already-spied method reuses the same mock rather than
+  // resetting its call history, so a spy left over from an earlier test in
+  // this file would otherwise be counted against a later one that asserts
+  // "not called" — restoring after every test keeps each spy's history its
+  // own.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a row per configured container", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    expect(element.querySelectorAll(".workspace-docker-row")).toHaveLength(2);
+  });
+
+  it("offers Stop and Restart for a running container, not Start", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    const row = element.querySelectorAll(".workspace-docker-row")[0] as HTMLElement;
+    const labels = [...row.querySelectorAll("button")].map((b) => b.textContent);
+    expect(labels).toContain("Stop");
+    expect(labels).toContain("Restart");
+    expect(labels).not.toContain("Start");
+  });
+
+  it("offers Start for a container that is not running", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+    });
+
+    const labels = [...element.querySelectorAll("button")].map((b) => b.textContent);
+    expect(labels).toContain("Start");
+    expect(labels).not.toContain("Stop");
+  });
+
+  it("marks a configured container Docker does not have", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    const row = element.querySelectorAll(".workspace-docker-row")[1] as HTMLElement;
+    expect(row.classList.contains("workspace-docker-row--missing")).toBe(true);
+  });
+
+  it("shows compose controls when there is one compose project", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    expect(element.querySelector(".workspace-docker-compose")).not.toBeNull();
+  });
+
+  it("hides compose controls when there is not", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      composeProject: undefined,
+      composeWorkingDir: undefined,
+    });
+
+    expect(element.querySelector(".workspace-docker-compose")).toBeNull();
+  });
+
+  it("confirms before stopping, and does nothing when refused", () => {
+    const stop = vi.fn();
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    button?.click();
+
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("stops once the confirmation is accepted", () => {
+    const stop = vi.fn(() => Promise.resolve({ ok: true, value: undefined }));
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    button?.click();
+
+    expect(stop).toHaveBeenCalledWith("acme", "acme-app-1");
+  });
+
+  it("starts without asking", () => {
+    const start = vi.fn(() => Promise.resolve({ ok: true, value: undefined }));
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStart: start };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+    });
+    [...element.querySelectorAll("button")].find((b) => b.textContent === "Start")?.click();
+
+    expect(start).toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+});
