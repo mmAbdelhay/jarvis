@@ -913,14 +913,17 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     },
 
     async history(paneKey, limit) {
+      // Both arguments cross an untyped IPC boundary, and they are checked
+      // before anything else so a malformed call is always refused for what
+      // is wrong with it rather than for what happens to be configured.
+      if (!isString(paneKey) || typeof limit !== "number" || !Number.isFinite(limit)) return [];
+      if (limit <= 0) return [];
       const completion = deps.completion;
       // Not gated on `completion.enabled`: that flag is the autocomplete
       // dropdown's, and a user who turned the dropdown off did not ask for
       // an editor whose arrows do nothing. What it does need is the source,
       // which is where the command log's reader lives.
       if (completion === undefined) return [];
-      if (!isString(paneKey) || typeof limit !== "number" || !Number.isFinite(limit)) return [];
-      if (limit <= 0) return [];
       // The same resolution `suggest` does: an unknown key is a shell this
       // process never started, and it gets nothing.
       if (directories.get(paneKey) === undefined) return [];

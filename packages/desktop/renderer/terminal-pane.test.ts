@@ -205,8 +205,10 @@ describe("the command editor in a pane", () => {
   const textarea = (p: { element: HTMLElement }) =>
     p.element.querySelector<HTMLTextAreaElement>("textarea.terminal-input-text");
 
-  function press(p: { element: HTMLElement }, init: KeyboardEventInit): void {
-    textarea(p)?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
+  function press(p: { element: HTMLElement }, init: KeyboardEventInit): KeyboardEvent {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+    textarea(p)?.dispatchEvent(event);
+    return event;
   }
 
   it("shows the editor once the shell says it is at a prompt", () => {
@@ -216,11 +218,23 @@ describe("the command editor in a pane", () => {
     expect(editorEl(p)?.hidden).toBe(false);
   });
 
-  it("hides the editor while a command is running", () => {
-    const { p } = editorPane();
+  it("hides the editor while a command is running and lets the pty have the keys", () => {
+    const { p, sendInput } = editorPane();
     p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
     expect(p.element.dataset["state"]).toBe("running");
     expect(editorEl(p)?.hidden).toBe(true);
+    // Hidden is only half the claim: the keystroke has to arrive somewhere,
+    // and while a command runs that somewhere is the pty, raw.
+    FakeTerminal.instances[0]?.emitData("y");
+    expect(sendInput).toHaveBeenCalledWith("y");
+  });
+
+  // The one whose loss a user would notice within a minute.
+  it("interrupts a running command with ^C", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+    FakeTerminal.instances[0]?.emitData("\u0003");
+    expect(sendInput).toHaveBeenCalledWith("\u0003");
   });
 
   // A TUI owns the screen and every key on it; an editor drawn over that
@@ -265,6 +279,8 @@ describe("the command editor in a pane", () => {
     field.value = "ls -la";
     press(p, { key: "Enter" });
     expect(sendInput).toHaveBeenCalledWith("ls -la\r");
+    // Once. A line sent twice runs the command twice.
+    expect(sendInput).toHaveBeenCalledTimes(1);
   });
 
   // The two whose loss would make the terminal feel broken: ^C interrupts,
@@ -276,6 +292,41 @@ describe("the command editor in a pane", () => {
     expect(sendInput).toHaveBeenCalledWith("\u0003");
     press(p, { key: "d", ctrlKey: true });
     expect(sendInput).toHaveBeenCalledWith("\u0004");
+  });
+
+  it("sends nothing for a Ctrl chord that has no control byte", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}`);
+    const field = textarea(p);
+    if (field === null) throw new Error("no editor");
+    field.value = "ls -l";
+
+    const event = press(p, { key: "1", ctrlKey: true });
+
+    // Nothing to the pty — zsh's line buffer would otherwise hold "1" while
+    // the editor showed "ls -l", and the next Enter would run "1ls -l".
+    expect(sendInput).not.toHaveBeenCalled();
+    expect(field.value).toBe("ls -l");
+    // And the key was not swallowed either: nothing was sent, so nothing was
+    // prevented.
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  // ↑ takes the line away; ↓ has to give it back. Losing a half-typed
+  // command to a stray arrow is the kind of small betrayal that stops people
+  // trusting the editor.
+  it("gives the half-typed line back when the arrows walk off the newest entry", async () => {
+    const { p } = editorPane(EDITOR_SETTINGS, async () => ["git status", "ls"]);
+    p.write(`${A}$ ${B}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const field = textarea(p);
+    if (field === null) throw new Error("no editor");
+    field.value = "half-typed";
+
+    press(p, { key: "ArrowUp" });
+    expect(field.value).toBe("git status");
+    press(p, { key: "ArrowDown" });
+    expect(field.value).toBe("half-typed");
   });
 
   // Read off the screen, never modelled: the prompt shown is the one the
@@ -329,6 +380,19 @@ describe("the command editor in a pane", () => {
     // The command only — a re-run that appended a return would run it.
     expect(sendInput).toHaveBeenCalledWith("ls");
     expect(sendInput).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the command log once per prompt, not once per state change", async () => {
+    let reads = 0;
+    const { p } = editorPane(EDITOR_SETTINGS, async () => {
+      reads += 1;
+      return [];
+    });
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}${A}$ ${B}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Two prompts in that stream — the one before `ls` and the one after it.
+    expect(reads).toBe(2);
   });
 
   // A tab closed while a command is still running: the pane is gone, and

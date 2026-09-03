@@ -73,31 +73,27 @@ function attempt(work: () => void): void {
   }
 }
 
-/** The keys a terminal encodes as something other than themselves. */
-const NAMED_KEYS: Readonly<Record<string, string>> = {
-  Enter: "\r",
-  Tab: "\t",
-  Escape: "\u001b",
-  Backspace: "\u007f",
-};
-
 /**
- * What the pty should receive for a key the editor would not handle.
+ * The C0 control byte a Ctrl chord stands for, or undefined when it stands
+ * for nothing.
  *
- * A Ctrl chord over a letter is the C0 byte the terminal has always sent for
- * it — ^C is \u0003, ^D is \u0004 — which is the whole reason this path
- * exists: losing those two would make the terminal feel broken. Anything
- * else goes as its ordinary encoding, and a key with no encoding at all
- * (a bare modifier, a function key) sends nothing rather than a guess.
+ * A chord over `@`–`_` — every letter, once upper-cased — is the byte the
+ * terminal has always sent for it: ^C is \u0003, ^D is \u0004, and losing
+ * those two would make the terminal feel broken. That is the whole of it.
+ *
+ * Everything else returns undefined, and the caller then sends nothing and
+ * prevents nothing. This is deliberate and load-bearing: falling back to the
+ * key's own character would put a raw `1` into zsh's line buffer for Ctrl+1
+ * while the editor went on showing the line the user can see, so the next
+ * Enter would run a command neither of them displayed. A chord Jarvis has no
+ * byte for is a chord that does nothing, which is the only answer that
+ * cannot make the DOM line and the shell's line disagree.
  */
 export function controlByte(event: KeyboardEvent): string | undefined {
-  const named = NAMED_KEYS[event.key];
-  if (named !== undefined) return named;
-  if (event.key.length !== 1) return undefined;
-  if (!event.ctrlKey) return event.key;
+  if (!event.ctrlKey || event.key.length !== 1) return undefined;
   const code = event.key.toUpperCase().charCodeAt(0);
-  // @ through _ — the range a Ctrl chord maps into the C0 controls.
-  return code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : event.key;
+  if (code < 64 || code > 95) return undefined;
+  return String.fromCharCode(code - 64);
 }
 
 export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
@@ -152,9 +148,11 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  goes to the pty exactly as it does today. */
   let sawPrompt = false;
   /** The command log, newest first, and where ↑/↓ have walked to in it.
-   *  -1 is the line the user is typing. */
+   *  -1 is the line the user is typing, which is held in `draft` while the
+   *  arrows are showing something else. */
   let historyLines: readonly string[] = [];
   let historyIndex = -1;
+  let draft = "";
 
   /**
    * The last line the live terminal drew before the cursor — the prompt,
@@ -182,13 +180,21 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     }
   }
 
-  /** Fresh at every prompt: the command just run is the one most likely to
-   *  be wanted back, and the arrows start from the empty line again. */
-  function loadHistory(): void {
+  /** Back to the line the user is typing. Costs nothing, so it runs every
+   *  time the editor appears. */
+  function resetHistoryCursor(): void {
     historyIndex = -1;
+    draft = "";
+  }
+
+  /** Fresh at every prompt — and only there, because it is an IPC round trip
+   *  and the log cannot have changed in between: the command just run is the
+   *  one most likely to be wanted back. */
+  function loadHistory(): void {
+    resetHistoryCursor();
     historyLines = [];
     const read = hooks.history;
-    if (read === undefined) return;
+    if (read === undefined || editor === undefined) return;
     attempt(() => {
       void read()
         .then((lines) => {
@@ -210,8 +216,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     if (next < 0) {
       if (historyIndex < 0) return undefined;
       historyIndex = -1;
-      return "";
+      // The half-typed line the arrows took away, handed back intact.
+      return draft;
     }
+    // Leaving the line the user was typing: keep it, or walking up and back
+    // down would quietly destroy a command they had half written.
+    if (historyIndex < 0) draft = editor?.value() ?? "";
     historyIndex = next;
     return historyLines[next];
   }
@@ -274,7 +284,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     if (editorEl === undefined) return;
     attempt(() => {
       if (state === "blocks" && idle()) {
-        loadHistory();
+        resetHistoryCursor();
         editorEl.show(promptText());
       } else {
         editorEl.hide();
@@ -365,6 +375,8 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // The shell's integration has spoken: from here on this pane knows a
       // prompt when it sees one.
       sawPrompt = true;
+      // Once per prompt, which is the only moment the log can have changed.
+      attempt(() => loadHistory());
       attempt(() => applyState("blocks"));
       // The prompt's own bytes are still on their way through xterm's
       // parser when this arrives, so the row promptText() reads is the
