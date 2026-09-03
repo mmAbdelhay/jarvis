@@ -86,6 +86,7 @@ import {
   createTerminalHandlers,
   createGitHandlers,
   createSettingsHandlers,
+  isDeclaredContainer,
   PROVIDER_HEALTH_INTERVAL_MS,
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
@@ -918,10 +919,14 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("workspace:close", (_event, id: unknown) => {
       if (typeof id !== "string") return;
-      // A terminal tab's shell is a child process of its own; closing the
-      // tab has to reap it. kill() on a tab with no shell is a no-op, so
-      // this needs no test of the tab's kind.
+      // A terminal tab's shell and a Docker tab's `docker logs -f` are both
+      // child processes of their own; closing the tab has to reap them.
+      // Either call on a tab that has neither is a no-op, so this needs no
+      // test of the tab's kind. The renderer unfollows too when it notices
+      // the tab go away, but a guarantee about a live child process must not
+      // rest on the renderer alone.
       terminal.close(id);
+      unfollow(id);
       workspace.close(id);
     });
     ipcMain.handle("workspace:activate", (_event, id: unknown) => {
@@ -1044,11 +1049,10 @@ app.whenReady().then(async () => {
         if (typeof tabId !== "string" || typeof project !== "string" || typeof container !== "string") {
           return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
         }
-        // Routed through the handlers rather than straight to the client so
-        // that an undeclared container is refused here too — `follow` would
-        // otherwise be the one door into Docker that skips the check.
-        const allowed = (config.docker[project] ?? []).some((entry) => entry.container === container);
-        if (!allowed) {
+        // The same check the Docker handlers apply — membership and name
+        // grammar both, from the one shared helper — so `follow` is not the
+        // one door into Docker that enforces a weaker rule than the rest.
+        if (!isDeclaredContainer(config.docker[project], container)) {
           return {
             ok: false,
             text: MESSAGES.dockerUnknownContainer(PRIMARY_LANGUAGE),

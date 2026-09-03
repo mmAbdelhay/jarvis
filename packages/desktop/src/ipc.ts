@@ -39,6 +39,7 @@ import type {
   DbGateManager,
   DockerClient,
   DockerConfig,
+  DockerEntry,
   DockerResult,
   EditorsConfig,
   HeadlampManager,
@@ -834,6 +835,26 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
  *  aws-session.ts was given, for the same reason. */
 const CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
+/** The one answer to "may this project act on this container?": it is one of
+ *  the containers the project declares, *and* its name is a name Docker
+ *  itself would accept.
+ *
+ *  Both halves, always. The membership test alone would let a jarvis.yaml
+ *  entry carrying shell metacharacters through to `shell()`, which types the
+ *  name into a live pty; the grammar test alone would let any well-named
+ *  container on the machine be driven from a project that never declared it.
+ *  Exported because main.ts's `docker:follow` needs exactly this check too,
+ *  and an inline second copy of it drifted from this one once already. */
+export function isDeclaredContainer(
+  entries: readonly DockerEntry[] | undefined,
+  container: string,
+): boolean {
+  return (
+    CONTAINER_NAME.test(container) &&
+    (entries ?? []).some((entry) => entry.container === container)
+  );
+}
+
 /** One configured container, paired with what Docker currently reports of
  *  it. `facts` is undefined for a container that is configured but does not
  *  exist — a stale entry is shown and named, never silently dropped, because
@@ -888,11 +909,12 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
     return { ok: false, text, language: deps.language };
   }
 
-  /** A container this project does not declare is refused here rather than
-   *  passed to Docker: the renderer names what the config already allowed,
-   *  exactly as the Cluster handlers require a declared context. */
+  /** A container this project does not declare — or whose name Docker itself
+   *  would not accept — is refused here rather than passed to Docker: the
+   *  renderer names what the config already allowed, exactly as the Cluster
+   *  handlers require a declared context. */
   function declared(project: string, container: string): boolean {
-    return (deps.containers[project] ?? []).some((entry) => entry.container === container);
+    return isDeclaredContainer(deps.containers[project], container);
   }
 
   async function build(project: string): Promise<GitViewResult<DockerView>> {
@@ -943,7 +965,7 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
     if (deps.projects[project] === undefined) {
       return fail(MESSAGES.unknownProject(deps.language));
     }
-    if (!declared(project, container) || !CONTAINER_NAME.test(container)) {
+    if (!declared(project, container)) {
       return fail(MESSAGES.dockerUnknownContainer(deps.language));
     }
     const outcome = await run(container);
@@ -972,7 +994,14 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
     composeUp: (project) =>
       compose(project, (view) =>
         view.composeWorkingDir === undefined
-          ? Promise.resolve({ ok: false, detail: "no compose working directory" })
+          ? // compose() routes a detail straight into the status line, so
+            // this one is written in the user's own language here rather
+            // than left as the English placeholder it used to be — Docker's
+            // own words pass through untranslated, ours never do.
+            Promise.resolve({
+              ok: false,
+              detail: MESSAGES.dockerNoComposeWorkingDir(deps.language),
+            })
           : deps.docker.composeUp(view.composeWorkingDir),
       ),
     composeDown: (project) =>
@@ -990,7 +1019,7 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
       if (deps.projects[project] === undefined) {
         return fail(MESSAGES.unknownProject(deps.language));
       }
-      if (!declared(project, container) || !CONTAINER_NAME.test(container)) {
+      if (!declared(project, container)) {
         return fail(MESSAGES.dockerUnknownContainer(deps.language));
       }
       const tabId = deps.openTerminal(project, deps.projects[project] ?? "");

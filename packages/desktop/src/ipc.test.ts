@@ -16,6 +16,7 @@ import {
   type TerminalHandlerDeps,
   createGitHandlers,
   createSettingsHandlers,
+  isDeclaredContainer,
   type WiringDeps,
 } from "./ipc.js";
 import type {
@@ -1919,13 +1920,57 @@ describe("api editing handlers", () => {
   });
 });
 
+// Pinned the same way the "never puts capacity on a timer" test above is,
+// and for the same kind of reason: closing a tab must reap its child
+// processes main-side, whatever the renderer does or fails to do. The
+// composition in main.ts has no seam a unit test can reach, so the
+// guarantee is pinned against its source instead of left uncovered.
+describe("workspace:close reaps a closed tab's children", () => {
+  const source = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
+  const handler = source.slice(source.indexOf('ipcMain.handle("workspace:close"'));
+  const body = handler.slice(0, handler.indexOf("workspace.close(id);"));
+
+  it("kills the tab's shell", () => {
+    expect(body).toContain("terminal.close(id);");
+  });
+
+  it("stops the tab's `docker logs -f`, rather than trusting the renderer to", () => {
+    expect(body).toContain("unfollow(id);");
+  });
+});
+
+// The one check both the Docker handlers and main.ts's `docker:follow` use.
+// It is exported precisely so those two cannot drift apart again: the inline
+// copy in main.ts had lost the grammar half of it.
+describe("isDeclaredContainer", () => {
+  const entries = [{ name: "app", container: "acme-app-1" }];
+
+  it("accepts a declared container with a name Docker would accept", () => {
+    expect(isDeclaredContainer(entries, "acme-app-1")).toBe(true);
+  });
+
+  it("refuses a container the project does not declare", () => {
+    expect(isDeclaredContainer(entries, "other-app-1")).toBe(false);
+  });
+
+  it("refuses a declared container whose name is not a container name", () => {
+    expect(isDeclaredContainer([{ name: "app", container: "app; rm -rf /" }], "app; rm -rf /")).toBe(
+      false,
+    );
+  });
+
+  it("refuses everything for a project that declares nothing", () => {
+    expect(isDeclaredContainer(undefined, "acme-app-1")).toBe(false);
+  });
+});
+
 describe("createDockerHandlers", () => {
   const facts = (over: Partial<ContainerFacts> = {}): ContainerFacts => ({
     name: "acme-app-1",
     id: "abc",
     image: "app:latest",
     state: "running",
-    status: "running",
+    status: "Up 3 hours",
     ports: [],
     composeProject: "acme",
     composeWorkingDir: "/p/acme",
@@ -2158,6 +2203,37 @@ describe("createDockerHandlers", () => {
 
     expect(result.ok).toBe(false);
     expect(acted).toEqual([]);
+  });
+
+  // The stack is one compose project but nothing carries the working_dir
+  // label, so `up` has no directory to run in. The user must be told that in
+  // their own language — this used to reach the status line as the English
+  // string "no compose working directory".
+  it("refuses compose up in the user's own language when the working directory is unknown", async () => {
+    const { handlers: h, acted } = handlers(
+      { language: "ar" },
+      { ok: true, containers: [facts({ composeWorkingDir: undefined })] },
+    );
+
+    const result = await h.composeUp("acme");
+
+    expect(result).toEqual({
+      ok: false,
+      text: MESSAGES.dockerNoComposeWorkingDir("ar"),
+      language: "ar",
+    });
+    expect(acted).toEqual([]);
+  });
+
+  it("still takes that same stack down, which needs only its name", async () => {
+    const { handlers: h, acted } = handlers(
+      {},
+      { ok: true, containers: [facts({ composeWorkingDir: undefined })] },
+    );
+
+    await h.composeDown("acme");
+
+    expect(acted).toEqual(["composeDown:acme"]);
   });
 
   it("names what the project declares, so the button knows to be live", () => {

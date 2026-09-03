@@ -113,6 +113,14 @@ export const MESSAGES = {
     language === "ar"
       ? "هذه الحاويات لا تنتمي إلى حزمة compose واحدة."
       : "These containers do not belong to a single compose project.",
+  // Distinct again from dockerNoComposeProject: the containers *do* share one
+  // compose project, but none of them carries the
+  // com.docker.compose.project.working_dir label, so `compose up` has no
+  // directory to run in. `down` still works — it needs only the project name.
+  dockerNoComposeWorkingDir: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يُعرف مجلد ملف compose لهذه الحزمة، فتعذّر تشغيلها."
+      : "The compose file's directory for this stack is unknown, so it cannot be brought up.",
   dockerConfirmStop: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `إيقاف ${name}؟` : `Stop ${name}?`,
   dockerConfirmRestart: (name: string, language: "ar" | "en"): string =>
