@@ -217,6 +217,14 @@ function stubBookmarks(bookmarks: BookmarkView[]): void {
   };
 }
 
+/** jsdom has no DataTransfer, and the drag protocol here only ever moves a
+ *  url — so a stub carrying one is the whole contract under test. */
+function dropEvent(url: string): Event {
+  const event = new Event("drop", { bubbles: true }) as Event & { dataTransfer: unknown };
+  event.dataTransfer = { getData: () => url, setData: () => undefined };
+  return event;
+}
+
 describe("workspace chrome", () => {
   let calls: Recorded[];
 
@@ -942,6 +950,44 @@ describe("the bookmarks sidebar", () => {
 
     expect(document.querySelector("#workspace-bookmark-list img")).toBeNull();
     expect(document.querySelector("#workspace-bookmark-list .workspace-essential-monogram")?.textContent).toBe("A");
+  });
+});
+
+describe("reordering bookmarks", () => {
+  it("pins a listed bookmark dropped on the grid", async () => {
+    harness();
+    const setPinned = vi.fn(async () => ({ ok: true, value: [] }));
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = setPinned;
+    initWorkspace(["acme"]);
+    await flush();
+
+    const grid = document.querySelector("#workspace-essentials") as HTMLElement;
+    grid.dispatchEvent(dropEvent("https://b.test/"));
+    await flush();
+
+    expect(setPinned).toHaveBeenCalledWith(expect.any(String), "https://b.test/", true);
+  });
+
+  it("sends the whole new order when a tile is dropped on another", async () => {
+    harness();
+    const reorder = vi.fn(async () => ({ ok: true, value: [] }));
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true },
+      { url: "https://b.test/", title: "B", pinned: true },
+    ]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks = reorder;
+    initWorkspace(["acme"]);
+    await flush();
+
+    const first = document.querySelector('.workspace-essential[data-url="https://a.test/"]') as HTMLElement;
+    first.dispatchEvent(dropEvent("https://b.test/"));
+    await flush();
+
+    expect(reorder).toHaveBeenCalledWith(expect.any(String), [
+      "https://b.test/",
+      "https://a.test/",
+    ]);
   });
 });
 

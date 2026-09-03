@@ -104,6 +104,14 @@ function renderProjectTools(): void {
   }
 }
 
+/** The shared status line under the tool row, the same surface openApi and
+ *  openDocker report failures to. */
+function showToolStatus(text: string): void {
+  const status = $("workspace-tool-status");
+  status.textContent = text;
+  status.classList.add("workspace-tool-status--error");
+}
+
 /**
  * The Cluster button is disabled whenever the selected project has nothing
  * for it to open — not just the personal browser, but any ordinary project
@@ -251,6 +259,7 @@ function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   // it as text and nothing else, same discipline as the tab strip.
   chip.title = bookmark.url;
   chip.addEventListener("click", () => openBookmark(bookmark.url));
+  wireDrag(chip, bookmark);
 
   const icon = document.createElement("span");
   icon.className = "workspace-bookmark-icon";
@@ -329,7 +338,68 @@ function renderEssential(bookmark: BookmarkView): HTMLElement {
     tile.append(img);
   }
   tile.addEventListener("click", () => openBookmark(bookmark.url));
+  wireDrag(tile, bookmark);
   return tile;
+}
+
+/** Dropping onto a bookmark puts the dragged one in its place, within
+ *  whichever group the target belongs to. The store is sent the whole
+ *  group in its new order, so it never has to infer a move from a delta. */
+async function dropOnto(draggedUrl: string, target: BookmarkView): Promise<void> {
+  const project = selectedProject();
+  const dragged = bookmarks.find((b) => b.url === draggedUrl);
+  if (dragged === undefined) return;
+
+  // Crossing between the grid and the list is a pin change first: the
+  // store decides whether a thirteenth pin is allowed, and a refusal must
+  // stop the reorder rather than leave the two disagreeing.
+  if ((dragged.pinned === true) !== (target.pinned === true)) {
+    const pinResult = await window.jarvis.setBookmarkPinned(project, draggedUrl, target.pinned === true);
+    if (!pinResult.ok) {
+      showToolStatus(pinResult.text);
+      return;
+    }
+    bookmarks = pinResult.value;
+  }
+
+  const group = bookmarks.filter((b) => (b.pinned === true) === (target.pinned === true));
+  const without = group.filter((b) => b.url !== draggedUrl).map((b) => b.url);
+  const at = without.indexOf(target.url);
+  const order = [...without.slice(0, at), draggedUrl, ...without.slice(at)];
+
+  const result = await window.jarvis.reorderBookmarks(project, order);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Dropping on the grid's empty space pins without reordering. */
+async function dropOnGrid(draggedUrl: string): Promise<void> {
+  const result = await window.jarvis.setBookmarkPinned(selectedProject(), draggedUrl, true);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Makes a bookmark's element draggable and wires the reorder/pin drop
+ *  protocol shared by the grid and the list: the only thing a drag ever
+ *  carries is a url, so renderEssential and renderBookmarkChip wire this
+ *  identically. */
+function wireDrag(element: HTMLElement, bookmark: BookmarkView): void {
+  element.draggable = true;
+  element.addEventListener("dragstart", (event) => {
+    (event as DragEvent).dataTransfer?.setData("text/plain", bookmark.url);
+  });
+  element.addEventListener("dragover", (event) => event.preventDefault());
+  element.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
+      "text/plain",
+    );
+    if (dragged === "" || dragged === bookmark.url) return;
+    void dropOnto(dragged, bookmark);
+  });
 }
 
 function renderBookmarks(): void {
@@ -583,6 +653,16 @@ export function initWorkspace(projects: string[]): void {
     if (tab !== undefined) void window.jarvis.requestPictureInPicture(tab.id);
   });
   ($("workspace-pip") as HTMLButtonElement).title = MESSAGES.pictureInPicture(PRIMARY_LANGUAGE);
+
+  const grid = $("workspace-essentials");
+  grid.addEventListener("dragover", (event) => event.preventDefault());
+  grid.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
+      "text/plain",
+    );
+    if (dragged !== "") void dropOnGrid(dragged);
+  });
 
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
   $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksBar());

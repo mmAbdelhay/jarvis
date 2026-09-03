@@ -850,6 +850,10 @@
   }
   .workspace-bookmark:hover { background: var(--panel); }
 
+  /* Held-down affordance while dragging a tile or a row to pin/reorder it. */
+  .workspace-essential[draggable="true"]:active { opacity: 0.6; }
+  .workspace-bookmark[draggable="true"]:active { opacity: 0.6; }
+
   /* The row's icon, at list-row size rather than the grid tile's — same
      cached-icon-or-monogram choice, same neutral plate under the image for
      the same reason .workspace-essential img has one. */
