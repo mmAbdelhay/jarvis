@@ -906,8 +906,16 @@
   /* The command-line editor: a transparent <textarea> for the value (so
      selection, IME and Arabic input keep working) with a painted <div>
      behind it for syntax highlighting. Font and padding must match exactly
-     between the two layers or the highlight drifts from the caret. */
-  .terminal-input { position: relative; font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; }
+     between the two layers or the highlight drifts from the caret. The
+     prompt is a flex sibling of .terminal-input-field (not a parent of the
+     painted layer or the textarea), so its width is ordinary flex space
+     taken out of the row — both layers inside .terminal-input-field see the
+     same remaining width and start at the same x, with nobody computing an
+     offset to apply to each of them separately. */
+  .terminal-input { position: relative; display: flex; align-items: flex-start;
+    font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; }
+  .terminal-input-prompt { flex: 0 0 auto; white-space: pre; color: var(--text-muted); }
+  .terminal-input-field { position: relative; flex: 1 1 auto; min-width: 0; }
   .terminal-input-paint { position: absolute; inset: 0; pointer-events: none; white-space: pre-wrap; }
   .terminal-input-text { width: 100%; background: transparent; color: transparent;
     caret-color: var(--accent); border: 0; outline: 0; resize: none; white-space: pre-wrap;

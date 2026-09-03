@@ -63,6 +63,18 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   const wrapper = document.createElement("div");
   wrapper.className = "terminal-input";
 
+  const promptEl = document.createElement("div");
+  promptEl.className = "terminal-input-prompt";
+
+  // The painted layer and the textarea live inside their own flex item
+  // (.terminal-input-field), a sibling of the prompt rather than the
+  // prompt's parent. That way the prompt's width shows up as ordinary flex
+  // space taken from the row — nobody has to compute an offset and apply it
+  // to both layers, so there is no way for them to apply it inconsistently
+  // and drift apart.
+  const field = document.createElement("div");
+  field.className = "terminal-input-field";
+
   const paint = document.createElement("div");
   paint.className = "terminal-input-paint";
 
@@ -71,7 +83,8 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   textarea.spellcheck = false;
   textarea.rows = 1;
 
-  wrapper.append(paint, textarea);
+  field.append(paint, textarea);
+  wrapper.append(promptEl, field);
   host.append(wrapper);
   // Starts hidden: the pane that owns this editor decides when it appears.
   wrapper.hidden = true;
@@ -240,11 +253,16 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
       textarea.focus();
     },
     show(prompt: string) {
-      wrapper.dataset.prompt = prompt;
+      // A prompt is user-configured text arriving from the shell — untrusted
+      // exactly like a command line — so it goes in via textContent, never
+      // markup. An empty prompt clears the element rather than leaving
+      // whatever a previous show() rendered.
+      promptEl.textContent = prompt;
       wrapper.hidden = false;
     },
     hide() {
       wrapper.hidden = true;
+      promptEl.textContent = "";
     },
     isVisible() {
       return !wrapper.hidden;

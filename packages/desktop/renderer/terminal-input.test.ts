@@ -76,4 +76,34 @@ describe("the input editor", () => {
     expect(e.element.querySelector("script")).toBeNull();
     expect(e.element.textContent).toContain("<script>");
   });
+
+  it("shows the prompt", () => {
+    const { editor: e } = editor();
+    e.show("user@host $ ");
+    expect(e.element.querySelector(".terminal-input-prompt")?.textContent).toBe("user@host $ ");
+  });
+
+  it("renders a prompt containing markup as text", () => {
+    const { editor: e } = editor();
+    e.show("<img src=x>$ ");
+    expect(e.element.querySelector("img")).toBeNull();
+    expect(e.element.querySelector(".terminal-input-prompt")?.textContent).toBe("<img src=x>$ ");
+  });
+
+  it("replaces rather than appends the prompt on a second show()", () => {
+    const { editor: e } = editor();
+    e.show("first $ ");
+    e.show("second $ ");
+    const prompts = e.element.querySelectorAll(".terminal-input-prompt");
+    expect(prompts.length).toBe(1);
+    expect(prompts[0]?.textContent).toBe("second $ ");
+  });
+
+  it("leaves no stale prompt after hide() then show('')", () => {
+    const { editor: e } = editor();
+    e.show("user@host $ ");
+    e.hide();
+    e.show("");
+    expect(e.element.querySelector(".terminal-input-prompt")?.textContent).toBe("");
+  });
 });
