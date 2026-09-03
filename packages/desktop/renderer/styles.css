@@ -1157,30 +1157,48 @@
   .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
 
-  /* The Docker tab: rows of configured containers, compose controls when
-     they share one stack, and a log tail below — same page-slot region the
-     terminal and the API tab share. */
+  /* The Docker tab, laid out as the design specifies: a left column of
+     configured containers with the compose controls above them, and the log
+     tail beside it filling the rest — same page-slot region the terminal and
+     the API tab share. The list scrolls on its own so the log keeps its full
+     height however many containers a project declares. */
   .workspace-docker {
     flex-grow: 1;
     min-height: 0;
     display: flex;
-    flex-direction: column;
-    gap: var(--s2);
+    flex-direction: row;
+    gap: var(--s3);
     padding: var(--s3);
-    overflow-y: auto;
+    overflow: hidden;
   }
   .workspace-docker[hidden] { display: none; }
-  .workspace-docker-rows { display: flex; flex-direction: column; gap: var(--s2); }
-  .workspace-docker-row {
+  .workspace-docker-side {
+    flex: 0 0 clamp(260px, 30%, 420px);
+    min-height: 0;
     display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    overflow-y: auto;
+  }
+  .workspace-docker-rows { display: flex; flex-direction: column; gap: var(--s2); }
+  /* Stacked rather than one wide line: in a column this narrow the spec's
+     own sketch puts the name and status on the first line, the published
+     ports under them, and the buttons under those. Auto-placement means a
+     container that publishes nothing simply has no ports line, instead of
+     an empty track holding the gap open. */
+  .workspace-docker-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
     align-items: center;
-    gap: var(--s3);
+    gap: 2px var(--s3);
     padding: var(--s2) var(--s3);
     border: 1px solid var(--border);
     border-radius: var(--r-control);
     background: var(--surface);
     cursor: pointer;
   }
+  .workspace-docker-row-ports,
+  .workspace-docker-row-actions { grid-column: 1 / -1; }
   .workspace-docker-row:hover { border-color: var(--border-strong); }
   .workspace-docker-row--selected { border-color: var(--accent); }
   .workspace-docker-row--missing { color: var(--text-muted); border-style: dashed; }
@@ -1194,16 +1212,21 @@
     font-size: 12px;
     color: var(--text-muted);
   }
-  /* The published ports, in Docker's own spelling. Never grows: the status
-     beside it is what takes the slack, so a container with two published
-     ports does not push the buttons off the row. */
+  /* The published ports, in Docker's own spelling, on their own line under
+     the status — the spec's `:8000→8000`. Wraps rather than truncates: the
+     column is narrow and a second published port is worth seeing. */
   .workspace-docker-row-ports {
-    flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-muted);
+    overflow-wrap: anywhere;
   }
-  .workspace-docker-row-actions { display: flex; gap: var(--s1); flex-shrink: 0; }
+  .workspace-docker-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+    margin-top: var(--s1);
+  }
   .workspace-docker-row-actions button,
   .workspace-docker-compose button {
     font: inherit;
@@ -1229,7 +1252,8 @@
   .workspace-docker-compose-label { font-family: var(--font-mono); flex-grow: 1; }
   .workspace-docker-log {
     flex-grow: 1;
-    min-height: 160px;
+    min-width: 0;
+    min-height: 0;
     padding: var(--s2);
     border-radius: var(--r-panel);
     background: var(--ground);

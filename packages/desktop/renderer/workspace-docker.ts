@@ -52,6 +52,10 @@ const POLL_INTERVAL_MS = 3_000;
 
 type Pane = {
   logHost: HTMLElement;
+  /** The left column of the spec's layout: the compose bar above the rows
+   *  list, with the log beside it rather than beneath. Created once and
+   *  kept, so the log is never detached by a re-render. */
+  side: HTMLElement;
   /** The rows list, created once and refilled in place on every poll tick —
    *  see renderDockerPane. */
   rowsHost: HTMLElement;
@@ -86,8 +90,12 @@ function getPane(tabId: string): Pane {
   logHost.className = "workspace-docker-log";
   const rowsHost = document.createElement("div");
   rowsHost.className = "workspace-docker-rows";
+  const side = document.createElement("div");
+  side.className = "workspace-docker-side";
+  side.append(rowsHost);
   const pane: Pane = {
     logHost,
+    side,
     rowsHost,
     compose: undefined,
     terminal: undefined,
@@ -288,24 +296,28 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
 export function renderDockerPane(host: HTMLElement, tabId: string, project: string, view: DockerView): void {
   const pane = getPane(tabId);
 
+  // Dropped before anything else is decided. The bar only exists while every
+  // row shares one stack, which a poll can change either way — and because
+  // the side column survives a re-render into a fresh host, clearing the
+  // reference without removing the element would strand the old bar inside
+  // it and grow a new one on every tick.
+  pane.compose?.remove();
+  pane.compose = undefined;
+
   // First render into this host, or a re-render after the failure branch
   // replaced the host's children with an error line.
-  if (pane.rowsHost.parentElement !== host) {
-    host.replaceChildren(pane.rowsHost, pane.logHost);
-    pane.compose = undefined;
+  if (pane.side.parentElement !== host) {
+    host.replaceChildren(pane.side, pane.logHost);
   }
 
   pane.rowsHost.replaceChildren(
     ...view.rows.map((row) => renderRow(host, tabId, project, row)),
   );
 
-  // The compose bar sits between the rows and the log, and only exists while
-  // every row shares one stack — which a poll can change either way.
-  pane.compose?.remove();
-  pane.compose = undefined;
+  // The compose bar sits above the rows, in the left column.
   if (view.composeProject !== undefined) {
     pane.compose = renderCompose(project, view.composeProject);
-    host.insertBefore(pane.compose, pane.logHost);
+    pane.side.insertBefore(pane.compose, pane.rowsHost);
   }
 }
 

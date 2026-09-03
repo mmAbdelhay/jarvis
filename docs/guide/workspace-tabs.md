@@ -202,13 +202,13 @@ configured in `docker:` with no matching container shows greyed out instead of
 a status — see
 [troubleshooting](troubleshooting.md#a-container-in-the-docker-tab-is-greyed-out).
 
-Selecting a row tails its log in the pane below the list — one `docker logs
--f` at a time, for the row you are looking at. Switching away from the tab
-stops that follower rather than leaving it running for a pane nobody is
-watching, so coming back starts the tail again from Docker's own last 500
-lines. When every container in the
-list belongs to one compose project, **Up** and **Down** appear beneath the
-rows and above the log, and act on the stack as a whole.
+The containers sit in a column down the left; selecting one tails its log in
+the pane beside them — one `docker logs -f` at a time, for the row you are
+looking at. Switching away from the tab stops that follower rather than
+leaving it running for a pane nobody is watching, so coming back starts the
+tail again from Docker's own last 500 lines. When every container in the
+list belongs to one compose project, **Up** and **Down** appear above the
+rows, and act on the stack as a whole.
 
 Stop, Restart and Down ask first. Start and Up do not: neither interrupts
 anything that is running.
