@@ -3,6 +3,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
 import { detectLanguage, projectLabel } from "./format.js";
 import { enhanceTerminal } from "./terminal-addons.js";
+import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -16,41 +17,6 @@ import { Terminal } from "./vendor/xterm.mjs";
 // which is the whole point of running it this way.
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
-
-/**
- * Scrollback in lines. Generous because the transcript is the record of
- * what an agent did, and a long run's early decisions are exactly what you
- * scroll back for.
- */
-const SCROLLBACK_LINES = 20_000;
-
-/**
- * Matches the dashboard's palette (index.html's :root custom properties).
- * Declared here rather than read from CSS because xterm.js paints to a
- * canvas and takes its colours as values, not as inherited style.
- */
-const THEME = {
-  background: "#060a0f",
-  foreground: "#e6f3f8",
-  cursor: "#45c8dc",
-  cursorAccent: "#060a0f",
-  selectionBackground: "#1c3f49",
-  black: "#0b1219",
-  red: "#d9645a",
-  green: "#5fb87a",
-  yellow: "#d9a85a",
-  blue: "#45c8dc",
-  magenta: "#a97fd0",
-  cyan: "#7ddced",
-  white: "#cfe4ec",
-  brightBlack: "#5c7484",
-  brightRed: "#e8837a",
-  brightGreen: "#7fd398",
-  brightYellow: "#efc47c",
-  brightBlue: "#7ddced",
-  brightMagenta: "#c3a0e4",
-  brightWhite: "#ffffff",
-};
 
 let terminal: Terminal | undefined;
 let fit: FitAddon | undefined;
@@ -108,10 +74,8 @@ function ensureTerminal(): Terminal | undefined {
 
   const term = new Terminal({
     scrollback: SCROLLBACK_LINES,
-    fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
-    fontSize: 12,
-    lineHeight: 1.35,
-    theme: THEME,
+    ...TERMINAL_FONT,
+    theme: TERMINAL_THEME,
     cursorBlink: true,
     // The agent owns the window title and the bell; neither has anywhere
     // sensible to go inside a panel, so both are left alone.

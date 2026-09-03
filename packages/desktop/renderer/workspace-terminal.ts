@@ -1,6 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { enhanceTerminal } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
+import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -17,37 +18,6 @@ const $ = (id: string): HTMLElement => {
   const element = document.getElementById(id);
   if (element === null) throw new Error(`Missing element #${id}`);
   return element;
-};
-
-/** Matches the Session view's terminal: same scrollback, same reasoning —
- *  the scrollback is the record of what you did. */
-const SCROLLBACK_LINES = 20_000;
-
-/** The dashboard's palette, restated as values because xterm.js paints to a
- *  canvas and cannot inherit CSS. Kept identical to session-view.ts's THEME:
- *  the two terminals are the same surface in the user's eyes and must not
- *  drift apart visually. */
-const THEME = {
-  background: "#060a0f",
-  foreground: "#e6f3f8",
-  cursor: "#45c8dc",
-  cursorAccent: "#060a0f",
-  selectionBackground: "#1c3f49",
-  black: "#0b1219",
-  red: "#d9645a",
-  green: "#5fb87a",
-  yellow: "#d9a85a",
-  blue: "#45c8dc",
-  magenta: "#a97fd0",
-  cyan: "#7ddced",
-  white: "#cfe4ec",
-  brightBlack: "#5c7484",
-  brightRed: "#e8837a",
-  brightGreen: "#7fd398",
-  brightYellow: "#efc47c",
-  brightBlue: "#7ddced",
-  brightMagenta: "#c3a0e4",
-  brightWhite: "#ffffff",
 };
 
 type Pane = { element: HTMLElement; terminal: Terminal; fit: FitAddon };
@@ -128,10 +98,8 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
 
   const terminal = new Terminal({
     scrollback: SCROLLBACK_LINES,
-    fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
-    fontSize: 12,
-    lineHeight: 1.35,
-    theme: THEME,
+    ...TERMINAL_FONT,
+    theme: TERMINAL_THEME,
     cursorBlink: true,
     allowProposedApi: true,
   });
