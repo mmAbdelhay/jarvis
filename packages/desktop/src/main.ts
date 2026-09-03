@@ -30,6 +30,7 @@ import {
   createMetricsReader,
   createPtySpawner,
   createRealCodeServerSpawner,
+  createRealDockerClient,
   createRealShellSpawner,
   createSessionImporter,
   createShellManager,
@@ -80,6 +81,7 @@ import {
   createBookmarksHandlers,
   createClusterHandlers,
   createDatabaseHandlers,
+  createDockerHandlers,
   createEditorHandlers,
   createTerminalHandlers,
   createGitHandlers,
@@ -420,6 +422,10 @@ app.whenReady().then(async () => {
     });
     const checkAwsSession = createAwsSessionChecker(env);
     const awaitAwsSession = createAwsSessionPoller(checkAwsSession);
+    // Same reasoning as headlamp above: `docker` lives wherever the login
+    // shell's PATH puts it (Homebrew, OrbStack, Docker Desktop's shim), not
+    // wherever a GUI-launched process's PATH puts it.
+    const dockerClient = createRealDockerClient(env);
 
     // Terminal autocomplete's shell integration, installed before the first
     // shell can be started. It writes a Jarvis-owned ZDOTDIR whose files
@@ -665,6 +671,27 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // Same openTerminal/sendInput pairing as cluster above, copied rather
+    // than shared: the two are wired to different handler sets and keeping
+    // each construction self-contained is worth the few duplicated lines.
+    const docker = createDockerHandlers({
+      docker: dockerClient,
+      projects: config.projects,
+      containers: config.docker,
+      openTerminal: (project: string, cwd: string) => {
+        const tabId = workspace.openTerminal(project);
+        try {
+          shells.start(tabId, cwd);
+        } catch (error) {
+          workspace.close(tabId);
+          throw error;
+        }
+        return tabId;
+      },
+      sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
+      language: PRIMARY_LANGUAGE,
+    });
+
     const bookmarks = createBookmarksHandlers({
       store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
       language: PRIMARY_LANGUAGE,
@@ -778,6 +805,11 @@ app.whenReady().then(async () => {
           if (session.state === "done" || session.state === "dead") continue;
           sessions.kill(session.id);
         }
+      });
+      // Each followed container log is a live `docker logs -f` child.
+      safely("docker logs", () => {
+        for (const follower of logFollowers.values()) follower.close();
+        logFollowers.clear();
       });
     };
 
@@ -966,6 +998,77 @@ app.whenReady().then(async () => {
     ipcMain.handle("cluster:names", (_event, project: unknown) =>
       cluster.names(typeof project === "string" ? project : ""),
     );
+
+    // Whether a project already has a Docker tab is the renderer's business,
+    // exactly as it is for the API tab.
+    ipcMain.handle("docker:open", (_event, project: unknown) => {
+      if (typeof project !== "string" || config.projects[project] === undefined) {
+        return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+      }
+      workspace.openDocker(project);
+      return { ok: true, value: undefined };
+    });
+    ipcMain.handle("docker:names", (_event, project: unknown) => docker.names(project as string));
+    ipcMain.handle("docker:view", (_event, project: unknown) => docker.view(project as string));
+    ipcMain.handle("docker:start", (_event, project: unknown, container: unknown) =>
+      docker.start(project as string, container as string),
+    );
+    ipcMain.handle("docker:stop", (_event, project: unknown, container: unknown) =>
+      docker.stop(project as string, container as string),
+    );
+    ipcMain.handle("docker:restart", (_event, project: unknown, container: unknown) =>
+      docker.restart(project as string, container as string),
+    );
+    ipcMain.handle("docker:composeUp", (_event, project: unknown) =>
+      docker.composeUp(project as string),
+    );
+    ipcMain.handle("docker:composeDown", (_event, project: unknown) =>
+      docker.composeDown(project as string),
+    );
+    ipcMain.handle("docker:shell", (_event, project: unknown, container: unknown) =>
+      docker.shell(project as string, container as string),
+    );
+
+    // One `docker logs -f` per open Docker tab, never per container: the tab
+    // shows one log at a time, and a follower per row would be a process per
+    // container for output nobody is looking at.
+    const logFollowers = new Map<string, { close(): void }>();
+    const unfollow = (tabId: string): void => {
+      logFollowers.get(tabId)?.close();
+      logFollowers.delete(tabId);
+    };
+    ipcMain.handle(
+      "docker:follow",
+      (_event, tabId: unknown, project: unknown, container: unknown) => {
+        if (typeof tabId !== "string" || typeof project !== "string" || typeof container !== "string") {
+          return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+        }
+        // Routed through the handlers rather than straight to the client so
+        // that an undeclared container is refused here too — `follow` would
+        // otherwise be the one door into Docker that skips the check.
+        const allowed = (config.docker[project] ?? []).some((entry) => entry.container === container);
+        if (!allowed) {
+          return {
+            ok: false,
+            text: MESSAGES.dockerUnknownContainer(PRIMARY_LANGUAGE),
+            language: PRIMARY_LANGUAGE,
+          };
+        }
+        unfollow(tabId);
+        logFollowers.set(
+          tabId,
+          dockerClient.follow(container, (chunk) => {
+            if (window.isDestroyed()) return;
+            window.webContents.send("docker:log", { tabId, chunk });
+          }),
+        );
+        return { ok: true, value: undefined };
+      },
+    );
+    ipcMain.handle("docker:unfollow", (_event, tabId: unknown) => {
+      if (typeof tabId === "string") unfollow(tabId);
+    });
+
     // Opening the tab is main's job (only it holds the BrowserHost); deciding
     // whether one already exists is the renderer's, exactly as it is for the
     // Editor and Database buttons.

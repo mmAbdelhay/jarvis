@@ -69,6 +69,21 @@ const api: RendererApi = {
   clusterNames: (project) => ipcRenderer.invoke("cluster:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
   suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
+  openDockerTab: (project) => ipcRenderer.invoke("docker:open", project),
+  dockerNames: (project) => ipcRenderer.invoke("docker:names", project),
+  dockerView: (project) => ipcRenderer.invoke("docker:view", project),
+  dockerStart: (project, container) => ipcRenderer.invoke("docker:start", project, container),
+  dockerStop: (project, container) => ipcRenderer.invoke("docker:stop", project, container),
+  dockerRestart: (project, container) => ipcRenderer.invoke("docker:restart", project, container),
+  dockerComposeUp: (project) => ipcRenderer.invoke("docker:composeUp", project),
+  dockerComposeDown: (project) => ipcRenderer.invoke("docker:composeDown", project),
+  dockerShell: (project, container) => ipcRenderer.invoke("docker:shell", project, container),
+  dockerFollow: (tabId, project, container) =>
+    ipcRenderer.invoke("docker:follow", tabId, project, container),
+  dockerUnfollow: (tabId) => ipcRenderer.invoke("docker:unfollow", tabId),
+  onDockerLog: (cb) => {
+    ipcRenderer.on("docker:log", (_e, payload) => cb(payload));
+  },
   openApiTab: (project) => ipcRenderer.invoke("api:open", project),
   listApiCollections: (project) => ipcRenderer.invoke("api:collections", project),
   readApiTree: (project, path) => ipcRenderer.invoke("api:tree", project, path),

@@ -427,6 +427,24 @@ export type RendererApi = {
    *  one is a whole replacement line. An empty array means no dropdown —
    *  and so zsh's own Tab completion, unchanged. */
   suggestCompletions(tabId: string, input: string): Promise<string[]>;
+  /** Opens (or reuses) the project's Docker tab. */
+  openDockerTab(project: string): Promise<GitViewResult<void>>;
+  dockerNames(project: string): Promise<GitViewResult<string[]>>;
+  dockerView(project: string): Promise<GitViewResult<DockerView>>;
+  dockerStart(project: string, container: string): Promise<GitViewResult<void>>;
+  dockerStop(project: string, container: string): Promise<GitViewResult<void>>;
+  dockerRestart(project: string, container: string): Promise<GitViewResult<void>>;
+  dockerComposeUp(project: string): Promise<GitViewResult<void>>;
+  dockerComposeDown(project: string): Promise<GitViewResult<void>>;
+  dockerShell(project: string, container: string): Promise<GitViewResult<void>>;
+  /** Starts (or restarts, if the tab was already following a different
+   *  container) a `docker logs -f` for `container`, streamed to `onDockerLog`
+   *  tagged with `tabId`. */
+  dockerFollow(tabId: string, project: string, container: string): Promise<GitViewResult<void>>;
+  /** Stops the log follower for `tabId`, if one is running. Called when the
+   *  tab closes or switches to a different container. */
+  dockerUnfollow(tabId: string): Promise<void>;
+  onDockerLog(cb: (payload: { tabId: string; chunk: string }) => void): void;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
