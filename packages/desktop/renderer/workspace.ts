@@ -70,6 +70,10 @@ let clusterButtonTitle = "";
  *  overwrites it, and switching to one that has some must restore it. */
 let dockerButtonTitle = "";
 
+/** The Chat button's own tooltip, captured for the same reason
+ *  clusterButtonTitle and dockerButtonTitle are. */
+let chatButtonTitle = "";
+
 /**
  * The personal browser has no directory on disk, so there is no folder to
  * edit, no database to spawn against, no cwd for a shell and no collection
@@ -143,6 +147,23 @@ async function renderDockerButton(): Promise<void> {
   button.title = disabled ? MESSAGES.dockerNoContainers(PRIMARY_LANGUAGE) : dockerButtonTitle;
 }
 
+/** The Chat button follows the Cluster button's rule: disabled whenever the
+ *  selected project declares no `chat:` entry, which is most projects and
+ *  always the personal browser. Its own reason rather than
+ *  personalHasNoDirectory — a chat is not rooted in a directory either. */
+async function renderChatButton(): Promise<void> {
+  const project = selectedProject();
+  const names = project === "" ? [] : await window.jarvis.chatNames(project);
+  // The user may have switched projects while that request was in flight;
+  // a stale answer must not clobber whatever project is selected now.
+  if (selectedProject() !== project) return;
+
+  const button = $("workspace-open-chat") as HTMLButtonElement;
+  const disabled = names.length === 0;
+  button.disabled = disabled;
+  button.title = disabled ? MESSAGES.noChatConfigured(PRIMARY_LANGUAGE) : chatButtonTitle;
+}
+
 // A small fixed palette, none of it reused from the app's semantic colors
 // (--good/--bad/--accent/etc). Assigned to a project the first time it is
 // seen and never reassigned — the same project keeps the same color for as
@@ -177,6 +198,9 @@ async function switchToProject(project: string): Promise<void> {
   // the OLD project, so a stale one left open would open or activate the
   // wrong project's cluster tab.
   closeClusterMenu();
+  // And again for the chat menu, whose items close over the old project in
+  // exactly the same way.
+  closeChatMenu();
 
   const remembered = lastActiveTabByProject.get(project);
   const target =
@@ -188,6 +212,7 @@ async function switchToProject(project: string): Promise<void> {
   renderProjectTools();
   void renderClusterButton();
   void renderDockerButton();
+  void renderChatButton();
   await refreshBookmarks();
 }
 
@@ -449,6 +474,7 @@ export function initWorkspace(projects: string[]): void {
   for (const id of PROJECT_TOOL_BUTTONS) toolTitles.set(id, ($(id) as HTMLButtonElement).title);
   clusterButtonTitle = ($("workspace-open-cluster") as HTMLButtonElement).title;
   dockerButtonTitle = ($("workspace-open-docker") as HTMLButtonElement).title;
+  chatButtonTitle = ($("workspace-open-chat") as HTMLButtonElement).title;
 
   const address = $("workspace-address") as HTMLInputElement;
   address.addEventListener("keydown", (event) => {
@@ -488,6 +514,9 @@ export function initWorkspace(projects: string[]): void {
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
   $("workspace-open-cluster").addEventListener("click", () => void openCluster());
+  // No preWarm twin below: nothing is spawned behind a chat tab, so a hover
+  // has nothing to warm and the click pays nothing to skip.
+  $("workspace-open-chat").addEventListener("click", () => void openChat());
   // See preWarm: the pointer arriving is a few hundred milliseconds of a
   // ~2s start that the click no longer has to pay for. "focus" is the same
   // signal for a keyboard user, who never emits a pointerenter.
@@ -519,6 +548,7 @@ export function initWorkspace(projects: string[]): void {
   renderProjectTools();
   void renderClusterButton();
   void renderDockerButton();
+  void renderChatButton();
   void refreshBookmarks();
 }
 
@@ -708,6 +738,85 @@ async function openClusterNamed(project: string, name: string): Promise<void> {
   }
   status.textContent = "";
   void window.jarvis.openTab(project, result.value, "cluster", name);
+}
+
+/** The Chat button. The Cluster button's shape with the waiting taken out:
+ *  no chat entries disables it (see renderChatButton), one opens it, two or
+ *  more offer a menu. Names are re-read on every click rather than cached,
+ *  so a config change needs no more than the Settings restart. */
+async function openChat(): Promise<void> {
+  // A second click on the button is "put that menu away", not "open it
+  // again" — the only other way out would be clicking a name.
+  if (!chatMenu().hidden) {
+    closeChatMenu();
+    return;
+  }
+
+  const project = selectedProject();
+  const names = await window.jarvis.chatNames(project);
+  if (names.length === 0) return;
+  if (names.length > 1) {
+    showChatMenu(project, names);
+    return;
+  }
+  await openChatNamed(project, names[0] as string);
+}
+
+function chatMenu(): HTMLElement {
+  return $("workspace-chat-menu");
+}
+
+function closeChatMenu(): void {
+  const menu = chatMenu();
+  menu.hidden = true;
+  menu.replaceChildren();
+}
+
+/** The name picker. A chat name is config text like a project name, so it
+ *  is a node with its textContent set — no innerHTML here either. */
+function showChatMenu(project: string, names: string[]): void {
+  const menu = chatMenu();
+  menu.replaceChildren();
+  for (const name of names) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "workspace-menu-item";
+    item.textContent = name;
+    item.addEventListener("click", () => {
+      closeChatMenu();
+      void openChatNamed(project, name);
+    });
+    menu.append(item);
+  }
+  menu.hidden = false;
+}
+
+/** Opens one of a project's configured chats as an ordinary hosted page.
+ *
+ *  There is no beginStarting here, unlike every other button in this
+ *  toolbar: nothing is spawned, so main answers with the URL in the time an
+ *  IPC round trip takes, and a "starting…" line would flash and vanish. */
+async function openChatNamed(project: string, name: string): Promise<void> {
+  // A project may declare both a Teams tenant and a Slack workspace, so the
+  // tab's own `detail` decides which is already open and the project alone
+  // cannot — the same reason openClusterNamed matches on detail.
+  const existing = latest.tabs.find(
+    (tab) => tab.kind === "chat" && tab.project === project && tab.detail === name,
+  );
+  if (existing !== undefined) {
+    void window.jarvis.activateTab(existing.id);
+    return;
+  }
+
+  const status = $("workspace-tool-status");
+  const result = await window.jarvis.openChat(project, name);
+  if (!result.ok) {
+    status.textContent = result.text;
+    status.classList.add("workspace-tool-status--error");
+    return;
+  }
+  status.textContent = "";
+  void window.jarvis.openTab(project, result.value, "chat", name);
 }
 
 /**

@@ -70,6 +70,12 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // declares containers, and guarded for the same reason: a draft that
     // reached here from an older renderer may not have the key at all.
     ...(Object.keys(config.docker ?? {}).length === 0 ? {} : { docker: config.docker }),
+    // Same rule as `docker:` above. This line is the whole reason a new
+    // per-project section is not done when it parses: `toRawConfig` is the
+    // sole allowlist of keys that reach the file, so a section missing from
+    // it is deleted on the next save — which is what 5d70188 fixed for
+    // `docker:` and what settings-io.test.ts now guards for both.
+    ...(Object.keys(config.chat ?? {}).length === 0 ? {} : { chat: config.chat }),
     ...(config.headlamp?.binary === undefined
       ? {}
       : { headlamp: { binary: config.headlamp.binary } }),

@@ -19,6 +19,7 @@ function sample(): JarvisConfig {
     editors: {},
     clusters: {},
     docker: {},
+    chat: {},
     headlamp: { binary: "/some/path" },
     terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
     voice: {
@@ -55,6 +56,8 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <button id="settings-docker-autopopulate"></button>
     <div id="settings-docker"></div>
     <div id="settings-docker-picker" hidden></div>
+    <button id="settings-chat-add"></button>
+    <div id="settings-chat"></div>
     <input id="settings-brain-cwd" />
     <select id="settings-brain-account"></select>
     <textarea id="settings-brain-prompt"></textarea>
@@ -1020,5 +1023,125 @@ describe("settings docker section", () => {
       .docker;
     expect(saved["extra"]).toContainEqual({ name: "app", container: "other-app-1" });
     expect(saved["acme"]?.some((entry) => entry.container === "other-app-1")).toBe(false);
+  });
+});
+
+describe("settings chat section", () => {
+  function withChat(): JarvisConfig {
+    return {
+      ...sample(),
+      chat: { acme: [{ name: "Acme", driver: "slack", account: "acme" }] },
+    };
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+  }
+
+  it("renders one row per configured chat", async () => {
+    harness(withChat());
+    initSettings();
+    await openSettings();
+
+    expect(document.querySelectorAll("#settings-chat .settings-row")).toHaveLength(1);
+  });
+
+  it("offers every driver the build knows, and no others", async () => {
+    harness(withChat());
+    initSettings();
+    await openSettings();
+
+    const driver = document.querySelector<HTMLSelectElement>('#settings-chat select[data-field="driver"]')!;
+    expect([...driver.options].map((option) => option.value)).toEqual(["slack", "teams"]);
+  });
+
+  it("switches a project's driver into the draft", async () => {
+    const { calls } = harness(withChat());
+    initSettings();
+    await openSettings();
+
+    const driver = document.querySelector<HTMLSelectElement>('#settings-chat select[data-field="driver"]')!;
+    driver.value = "teams";
+    change(driver);
+
+    expect((await saved(calls)).chat["acme"]?.[0]?.driver).toBe("teams");
+  });
+
+  it("edits an account into the draft", async () => {
+    const { calls } = harness(withChat());
+    initSettings();
+    await openSettings();
+
+    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    account.value = "globex.com";
+    change(account);
+
+    expect((await saved(calls)).chat["acme"]?.[0]?.account).toBe("globex.com");
+  });
+
+  // An emptied account means "the provider's own picker", and parseConfig
+  // rejects `account: ""` — so clearing the field must drop the key, not
+  // save a config the user cannot then load.
+  it("drops the account key when the field is cleared", async () => {
+    const { calls } = harness(withChat());
+    initSettings();
+    await openSettings();
+
+    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    account.value = "";
+    change(account);
+
+    expect((await saved(calls)).chat["acme"]?.[0]).toEqual({
+      name: "Acme",
+      driver: "slack",
+    });
+  });
+
+  it("commits on change, never on input", async () => {
+    const { calls } = harness(withChat());
+    initSettings();
+    await openSettings();
+
+    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    account.value = "half-typ";
+    account.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect((await saved(calls)).chat["acme"]?.[0]?.account).toBe("acme");
+  });
+
+  it("removes a chat from its own remove control", async () => {
+    harness(withChat());
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-chat .settings-row-remove")?.click();
+
+    expect(document.querySelectorAll("#settings-chat .settings-row")).toHaveLength(0);
+  });
+
+  it("adds a chat with a name that does not collide", async () => {
+    harness(withChat());
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-chat-add")?.click();
+
+    const names = [
+      ...document.querySelectorAll<HTMLInputElement>('#settings-chat input[data-field="name"]'),
+    ].map((input) => input.value);
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+  });
+
+  // parseConfig rejects a chat keyed to a project that does not exist, so
+  // with no projects there is no valid row to add.
+  it("disables + Add chat when no project is configured", async () => {
+    harness({ ...sample(), projects: {}, chat: {} });
+    initSettings();
+    await openSettings();
+
+    expect((document.getElementById("settings-chat-add") as HTMLButtonElement).disabled).toBe(true);
   });
 });

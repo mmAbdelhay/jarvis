@@ -86,6 +86,12 @@ export const MESSAGES = {
   // editorUnavailable and databaseUnavailable.
   clusterUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر فتح متصفّح العنقود." : "Could not open the cluster browser.",
+  // Covers both halves of "main will not open that": a project it does not
+  // know, and a chat name the project does not declare. There is nothing
+  // spawned behind a chat tab, so unlike the three above this headline
+  // never has a manager's detail underneath it.
+  chatUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر فتح تلك المحادثة." : "Could not open that chat.",
   // Shown when ensureAwsSession's wait for saml2aws login to finish (typed
   // into a Workspace Terminal tab) runs out the clock — the terminal is left
   // open rather than closed out from under the user mid-login.
@@ -161,6 +167,11 @@ export const MESSAGES = {
   // directory, so "no directory on disk" would be a false explanation.
   noClustersConfigured: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد عناقيد مُعرَّفة لهذا المشروع." : "No clusters configured for this project.",
+  // Follows noClustersConfigured exactly, and for the same reason: a chat
+  // is not rooted in a directory either, so the personal browser's own
+  // explanation would be the wrong one here.
+  noChatConfigured: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد محادثات مُعرَّفة لهذا المشروع." : "No chat configured for this project.",
   // DbGate has no bind-address option and always listens on 0.0.0.0, so
   // every instance is guarded by a login generated at spawn. This is how
   // the user learns it; both halves are opaque technical tokens and stay

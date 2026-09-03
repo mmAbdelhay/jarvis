@@ -18,7 +18,7 @@ import {
 } from "@jarvis/core";
 import { join, resolve, sep } from "node:path";
 import type { WorkspaceState } from "@jarvis/core";
-import { awsLoginCommand, eksUpdateKubeconfigArgs, profileForContext } from "@jarvis/platform";
+import { awsLoginCommand, chatUrl, eksUpdateKubeconfigArgs, profileForContext } from "@jarvis/platform";
 import type {
   ApiFailure,
   ApiResponse,
@@ -33,6 +33,7 @@ import type {
   BookmarkStore,
   BrunoCollection,
   BrunoTree,
+  ChatConfig,
   ClustersConfig,
   CodeServerManager,
   ContainerFacts,
@@ -359,7 +360,7 @@ export type RendererApi = {
   openTab(
     project: string,
     input: string,
-    kind?: "web" | "editor" | "database" | "cluster",
+    kind?: "web" | "editor" | "database" | "cluster" | "chat",
     /** Which one, for a kind a project can have more than one of — the
      *  editor root a code-server tab is rooted at. Becomes part of the
      *  tab's stable title. */
@@ -420,6 +421,15 @@ export type RendererApi = {
   /** The names of `project`'s configured `clusters:`, in config order. Empty
    *  for a project that declares none, and for Personal. */
   clusterNames(project: string): Promise<string[]>;
+  /** Resolves one of `project`'s configured `chat:` entries to the URL its
+   *  driver opens — call openTab(project, url, "chat", name) with it.
+   *
+   *  No `background` twin of openCluster's: nothing runs behind a chat tab,
+   *  so a hover has nothing to warm. */
+  openChat(project: string, name: string): Promise<GitViewResult<string>>;
+  /** The names of `project`'s configured `chat:`, in config order. Empty
+   *  for a project that declares none, and for Personal. */
+  chatNames(project: string): Promise<string[]>;
   /** Opens a terminal tab for `project` and starts its shell. The new tab
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
@@ -691,6 +701,65 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
       } catch {
         return fail(MESSAGES.databaseUnavailable(deps.language));
       }
+    },
+  };
+}
+
+export type ChatHandlers = {
+  /** The names of `project`'s configured `chat:`, in config order. The
+   *  renderer needs them to decide whether the Chat button opens straight
+   *  away or offers a choice; it gets names only, never drivers or
+   *  accounts. */
+  names(project: string): Promise<string[]>;
+  /** Resolves the chat named `name` within `project` to the URL its driver
+   *  opens — call openTab(project, url, "chat", name) with the result.
+   *
+   *  There is no `background` pre-warm twin of the cluster's: nothing is
+   *  spawned behind a chat tab, so there is nothing a hover could warm. */
+  open(project: string, name: string): Promise<GitViewResult<string>>;
+};
+
+export type ChatHandlerDeps = {
+  /** Only used to reject a project name that is not configured — Personal
+   *  above all, which has no entry and therefore no chat. */
+  projects: Readonly<Record<string, string>>;
+  chat: Readonly<ChatConfig>;
+  language: "ar" | "en";
+};
+
+/**
+ * The Chat tab's two verbs. The thinnest handler in this file: a chat tab
+ * is a hosted page with nothing running behind it, so there is no manager
+ * to reuse, nothing to kill on quit, and no failure that is not simply
+ * "main will not open that".
+ *
+ * It still resolves rather than trusts. The renderer names a chat; this
+ * turns the name into a URL by looking it up in the config, and a name the
+ * project does not declare is refused here — so no renderer-supplied string
+ * ever becomes a URL the Workspace loads.
+ */
+export function createChatHandlers(deps: ChatHandlerDeps): ChatHandlers {
+  function fail(text: string): { ok: false; text: string; language: "ar" | "en" } {
+    return { ok: false, text, language: deps.language };
+  }
+
+  return {
+    async names(project) {
+      if (!isString(project)) return [];
+      return (deps.chat[project] ?? []).map((entry) => entry.name);
+    },
+
+    async open(project, name) {
+      if (!isString(project) || deps.projects[project] === undefined) {
+        return fail(MESSAGES.chatUnavailable(deps.language));
+      }
+
+      const declared = isString(name)
+        ? deps.chat[project]?.find((entry) => entry.name === name)
+        : undefined;
+      if (declared === undefined) return fail(MESSAGES.chatUnavailable(deps.language));
+
+      return { ok: true, value: chatUrl(declared) };
     },
   };
 }

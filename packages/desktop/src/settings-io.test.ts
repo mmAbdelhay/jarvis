@@ -20,6 +20,7 @@ const draft: JarvisConfig = {
   editors: {},
   clusters: {},
   docker: {},
+  chat: {},
   headlamp: { binary: "/some/path" },
   terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
   voice: {
@@ -343,5 +344,67 @@ describe("docker round-trip", () => {
     const after = parseConfig(parse(await readFile(path, "utf8")));
     expect(after.docker).toEqual({ acme: [{ name: "app", container: "acme-app-1" }] });
     expect(after.brain.systemPrompt).toBe("Changed.");
+  });
+});
+
+describe("chat round-trip", () => {
+  const withChat: JarvisConfig = {
+    ...draft,
+    chat: { acme: [{ name: "Acme", driver: "slack", account: "acme" }] },
+  };
+
+  it("writes the chat section", () => {
+    const raw = toRawConfig(withChat) as Record<string, unknown>;
+
+    expect(raw["chat"]).toEqual({
+      acme: [{ name: "Acme", driver: "slack", account: "acme" }],
+    });
+  });
+
+  it("omits the chat key entirely when no project declares a chat", () => {
+    const raw = toRawConfig(draft) as Record<string, unknown>;
+
+    expect("chat" in raw).toBe(false);
+  });
+
+  // The same boundary the docker section lost a whole section to. A new
+  // per-project section is not wired until this passes.
+  it("survives writeSettingsFile → parseConfig unchanged", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+
+    const result = await writeSettingsFile(path, withChat);
+    expect(result).toEqual({ ok: true });
+
+    const written = parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    expect(parseConfig(written).chat).toEqual({
+      acme: [{ name: "Acme", driver: "slack", account: "acme" }],
+    });
+  });
+
+  it("keeps a hand-written chat section across an unrelated Settings save", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeSettingsFile(path, withChat);
+
+    const reread = parseConfig(parse(await readFile(path, "utf8")));
+    await writeSettingsFile(path, { ...reread, brain: { ...reread.brain, systemPrompt: "Changed." } });
+
+    const after = parseConfig(parse(await readFile(path, "utf8")));
+    expect(after.chat).toEqual({
+      acme: [{ name: "Acme", driver: "slack", account: "acme" }],
+    });
+  });
+
+  // An entry with no account is the common case for a one-tenant Teams, and
+  // an `account: undefined` key must not reach the YAML as a null.
+  it("writes an entry with no account without an empty account key", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeSettingsFile(path, { ...draft, chat: { acme: [{ name: "Globex", driver: "teams" }] } });
+
+    const text = await readFile(path, "utf8");
+    expect(text).not.toContain("account");
+    expect(parseConfig(parse(text)).chat).toEqual({ acme: [{ name: "Globex", driver: "teams" }] });
   });
 });

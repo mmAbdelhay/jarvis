@@ -6,6 +6,7 @@ import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type {
   BrainConfig,
+  ChatConfig,
   ClustersConfig,
   DatabasesConfig,
   DbGateConnection,
@@ -13,7 +14,7 @@ import type {
   DockerConfig,
   EditorsConfig,
 } from "@jarvis/platform";
-import { DB_GATE_ENGINES, defaultHeadlampBinary } from "@jarvis/platform";
+import { DB_GATE_ENGINES, defaultHeadlampBinary, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 
 /** What Jarvis sounds like, and what it says on opening. */
@@ -77,6 +78,10 @@ export type JarvisConfig = {
    *  An absent `docker:` section parses to {} — that project's Docker
    *  button is disabled, like Personal's. */
   docker: DockerConfig;
+  /** Per-project chat destinations the Chat button may open, keyed by
+   *  project name. An absent `chat:` section parses to {} — that project's
+   *  Chat button is disabled, like Personal's. */
+  chat: ChatConfig;
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
@@ -173,6 +178,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const editors = parseEditors(root["editors"], projects);
   const clusters = parseClusters(root["clusters"], projects);
   const docker = parseDocker(root["docker"], projects);
+  const chat = parseChat(root["chat"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
   const whisper = parseWhisper(root["whisper"]);
@@ -204,6 +210,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     editors,
     clusters,
     docker,
+    chat,
     headlamp,
     terminal,
     brain: {
@@ -630,6 +637,67 @@ function parseDocker(rawDocker: unknown, projects: Record<string, string>): Dock
       }
 
       return { name, container };
+    });
+  }
+  return result;
+}
+
+/** `chat:` is keyed by project name, exactly as `docker:` and `clusters:`
+ *  are, and rejected on the same grounds plus two of its own: a `driver`
+ *  outside the table this build knows, and an empty `account`.
+ *
+ *  An empty `account` is rejected rather than quietly read as absent
+ *  because the two mean different things — absent opens the provider's own
+ *  picker, while "" would build `https://.slack.com/` — and a key someone
+ *  typed and then emptied is far more likely a mistake than a request for
+ *  the picker.
+ *
+ *  Unlike `editors:` there is nothing here to contain: an account is a
+ *  subdomain or a tenant id, and the driver decides the host, so no entry
+ *  can point the tab at a site of its own choosing. */
+function parseChat(rawChat: unknown, projects: Record<string, string>): ChatConfig {
+  if (rawChat === undefined) return {};
+  if (typeof rawChat !== "object" || rawChat === null || Array.isArray(rawChat)) {
+    throw new Error("Config `chat` must be an object");
+  }
+
+  const result: ChatConfig = {};
+  for (const [project, rawList] of Object.entries(rawChat as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`chat\` names no configured project: "${project}"`);
+    }
+    if (!Array.isArray(rawList)) {
+      throw new Error(`Config \`chat.${project}\` must be an array`);
+    }
+
+    const seen = new Set<string>();
+    result[project] = rawList.map((rawEntry, index) => {
+      const where = `chat.${project}[${index}]`;
+      if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        throw new Error(`Config \`${where}\` must be an object`);
+      }
+      const entry = rawEntry as Record<string, unknown>;
+
+      const name = entry["name"];
+      if (typeof name !== "string" || name === "") {
+        throw new Error(`Config \`${where}.name\` must be a non-empty string`);
+      }
+      if (seen.has(name)) {
+        throw new Error(`Config \`${where}.name\` duplicates an earlier chat: "${name}"`);
+      }
+      seen.add(name);
+
+      const driver = entry["driver"];
+      if (!isChatDriver(driver)) {
+        throw new Error(`Config \`${where}.driver\` must be one of: slack, teams`);
+      }
+
+      const account = entry["account"];
+      if (account !== undefined && (typeof account !== "string" || account === "")) {
+        throw new Error(`Config \`${where}.account\` must be a non-empty string when present`);
+      }
+
+      return account === undefined ? { name, driver } : { name, driver, account };
     });
   }
   return result;

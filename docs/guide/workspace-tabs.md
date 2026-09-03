@@ -14,6 +14,7 @@ it.
 | `api` | The API client | hidden |
 | `cluster` | A Kubernetes cluster browser | hidden |
 | `docker` | The project's containers | hidden |
+| `chat` | The project's Slack or Teams, on the web | hidden |
 
 Browser chrome belongs to browser tabs: anything that is not a plain page hides
 the address bar and the bookmarks bar beneath it, because nobody navigates an
@@ -220,6 +221,29 @@ anything that is running.
 
 The list refreshes every three seconds while the tab is visible, because
 containers stop without asking Jarvis first.
+
+## Chat
+
+Where the project's people talk, which is not the same place for every
+project: `driver: teams` for one, `driver: slack` for another. The **Chat**
+button opens the one the project declares; with two or more it offers a
+menu, like Editor and Cluster.
+
+The tab is that provider's ordinary web app — nothing is spawned, no token
+is stored, and no API is called. What makes it worth a tab rather than a
+bookmark is the partition: a chat opens in the project's own cookie jar, so
+two projects on two different Teams tenants stay logged in side by side and
+neither sees the other. You sign in once and it holds across restarts.
+
+Its title is fixed at open — `project — Chat · name` — because Slack and
+Teams both rewrite their own page title with the active channel and an
+unread count, which is exactly the churn that would make the tab strip
+unreadable.
+
+A project with no `chat:` entry has the button disabled, and so does
+Personal. See [configuration](configuration.md) for the section, and for
+what a Conditional Access policy can do to a Teams tenant in a browser
+Jarvis hosts.
 
 ## Terminal
 

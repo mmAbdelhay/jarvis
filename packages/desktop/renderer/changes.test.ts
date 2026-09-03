@@ -58,6 +58,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     openDatabase: vi.fn(async () => notStubbed),
     openCluster: vi.fn(async () => notStubbed),
     clusterNames: vi.fn(async () => []),
+    openChat: vi.fn(async () => notStubbed),
+    chatNames: vi.fn(async () => []),
     openTerminal: vi.fn(async () => notStubbed),
     suggestCompletions: vi.fn(async () => []),
     setDevTools: vi.fn(async () => {}),

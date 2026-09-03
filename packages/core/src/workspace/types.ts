@@ -18,8 +18,22 @@ export type TabId = string;
  *  at all. A terminal's pty, an api tab's requests and a docker tab's
  *  commands live in the main process while their surfaces are drawn by the
  *  renderer itself, so they have no URL, no view, and nothing for the
- *  address bar or the history controls to act on. */
-export type TabKind = "web" | "editor" | "database" | "terminal" | "api" | "cluster" | "docker";
+ *  address bar or the history controls to act on.
+ *
+ *  "chat" is a hosted app of the plainest sort — a project's Slack or Teams
+ *  on the web, with nothing spawned behind it. It is not "web" because both
+ *  providers rewrite their own document.title with the active channel and an
+ *  unread count, which is precisely the churn a fixed label keeps out of the
+ *  tab strip. */
+export type TabKind =
+  | "web"
+  | "editor"
+  | "database"
+  | "terminal"
+  | "api"
+  | "cluster"
+  | "docker"
+  | "chat";
 
 export type WorkspaceTab = {
   id: TabId;

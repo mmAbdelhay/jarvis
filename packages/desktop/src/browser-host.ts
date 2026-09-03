@@ -70,6 +70,7 @@ const HOSTED_APP_LABELS: Record<Exclude<TabKind, "web">, string> = {
   api: "API",
   cluster: "Cluster",
   docker: "Docker",
+  chat: "Chat",
 };
 
 export class BrowserHost {

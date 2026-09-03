@@ -61,6 +61,16 @@ docker:                         # optional; per project, for the Docker tab
     - name: mysql
       container: acme-mysql-1
 
+chat:                           # optional; per project, for the Chat tab
+  acme:
+    - name: Acme             # what the Chat menu shows
+      driver: slack               # slack | teams
+      account: acme          # the Slack subdomain
+  globex:
+    - name: Globex
+      driver: teams
+      account: globex.com           # the Teams tenant domain or id
+
 headlamp:
   binary: /Applications/Headlamp.app/Contents/Resources/headlamp-server
 
@@ -155,6 +165,37 @@ either: the compose project is read from the containers' own
 `com.docker.compose.project` labels, so there is no second copy of that fact
 to drift. Settings can fill this section in for you — see the Docker section
 there.
+
+**`chat` holds no token, and never will while the tab is a web page.** A Chat
+tab is the project's Slack or Teams on the web, opened in that project's own
+Chromium partition — the same cookie jar its ordinary browser tabs use. So
+you log into it once, in the tab, and it stays logged in across restarts;
+and two projects on two different Teams tenants never see each other's
+session. There is deliberately no `tokenEnv` here even though `databases`
+has its `passwordEnv`: nothing in Jarvis calls a chat API, and a
+secret-shaped key with nothing reading it is a lie in a file Settings
+rewrites on every save.
+
+`driver` picks the messaging driver — `slack` or `teams` — and `account`
+says which org: for Slack the subdomain (`acme` opens
+`acme.slack.com`), for Teams the tenant domain or id. `account` is
+optional, and leaving it out opens the provider's own picker, which is the
+right thing when you have only one. It may not be *empty*: `account: ""` is
+refused at load, because an emptied key is far more likely a mistake than a
+request for the picker, and it would otherwise build `https://.slack.com/`.
+
+Like the four sections above it, `chat` is keyed by project name and a key
+naming no configured project is refused at load — so the Personal browser
+cannot have one. A project may list more than one entry: with one the Chat
+button opens it, with two or more it offers a menu, exactly as the Editor
+and Cluster buttons do.
+
+Whether a given Teams tenant will actually open is your organisation's call,
+not Jarvis's. A Conditional Access policy that demands a managed or
+compliant device will refuse a browser Jarvis is hosting, the same way it
+would refuse any unenrolled browser; the desktop Teams app works because it
+is the approved client on a registered device. Try the tenant in a clean
+browser profile first if you are not sure.
 
 **Sessions you started in a terminal show up in History too.** Every Claude
 Code session writes a JSONL transcript under its account's

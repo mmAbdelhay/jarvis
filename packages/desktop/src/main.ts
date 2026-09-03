@@ -79,6 +79,7 @@ import {
   buildWiring,
   createApiHandlers,
   createBookmarksHandlers,
+  createChatHandlers,
   createClusterHandlers,
   createDatabaseHandlers,
   createDockerHandlers,
@@ -672,6 +673,15 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    // Nothing to inject but the config itself: a chat tab is a hosted page
+    // with no server behind it, so there is no manager to build, nothing to
+    // kill on quit, and no side effect for a test to fake.
+    const chat = createChatHandlers({
+      projects: config.projects,
+      chat: config.chat,
+      language: PRIMARY_LANGUAGE,
+    });
+
     // Same openTerminal/sendInput pairing as cluster above, copied rather
     // than shared: the two are wired to different handler sets and keeping
     // each construction self-contained is worth the few duplicated lines.
@@ -1002,6 +1012,15 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("cluster:names", (_event, project: unknown) =>
       cluster.names(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("chat:open", (_event, project: unknown, name: unknown) =>
+      chat.open(
+        typeof project === "string" ? project : "",
+        typeof name === "string" ? name : "",
+      ),
+    );
+    ipcMain.handle("chat:names", (_event, project: unknown) =>
+      chat.names(typeof project === "string" ? project : ""),
     );
 
     // Whether a project already has a Docker tab is the renderer's business,
