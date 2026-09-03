@@ -1,0 +1,253 @@
+// packages/desktop/renderer/terminal-input.ts
+//
+// A real DOM editor for the command line, standing in front of the shell
+// instead of typing straight into the pty. Built as a <textarea> (the value,
+// invisible text with a visible caret) painted over by a <div> behind it
+// (the syntax highlighting) — the standard highlighted-textarea trick, and
+// the only one that keeps selection, IME and Arabic input working. Never
+// reach for contenteditable here.
+
+export type EditorHooks = {
+  /** Enter: the whole line, for the pane to send with a carriage return. */
+  submit: (line: string) => void;
+  /** A key the editor will not handle. The pane sends it to the pty. */
+  passthrough: (event: KeyboardEvent) => void;
+  /** ↑/↓ on an empty-history-position line. Returns the previous or next
+   *  command, or undefined at the end of the list. */
+  history: (delta: number) => string | undefined;
+};
+
+export type TerminalEditor = {
+  element: HTMLElement;
+  value(): string;
+  setValue(text: string): void;
+  focus(): void;
+  show(prompt: string): void;
+  hide(): void;
+  isVisible(): boolean;
+};
+
+// Three rules and nothing more. This is not a shell parser: it exists to
+// paint a command line, not to understand one, and a parser that hangs on a
+// pathological heredoc costs far more than a slightly wrong highlight.
+type Token = { text: string; cls: string | null };
+
+function tokenize(line: string): Token[] {
+  const tokens: Token[] = [];
+  // Split on runs of whitespace, keeping the whitespace itself as plain
+  // tokens so the painted text lines up character-for-character with the
+  // textarea underneath.
+  const parts = line.split(/(\s+)/);
+  let seenCommand = false;
+  for (const part of parts) {
+    if (part === "") continue;
+    if (/^\s+$/.test(part)) {
+      tokens.push({ text: part, cls: null });
+      continue;
+    }
+    if (!seenCommand) {
+      tokens.push({ text: part, cls: "tok-command" });
+      seenCommand = true;
+    } else if (part.startsWith("-")) {
+      tokens.push({ text: part, cls: "tok-flag" });
+    } else if (part.includes("/")) {
+      tokens.push({ text: part, cls: "tok-path" });
+    } else {
+      tokens.push({ text: part, cls: null });
+    }
+  }
+  return tokens;
+}
+
+export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEditor {
+  const wrapper = document.createElement("div");
+  wrapper.className = "terminal-input";
+
+  const paint = document.createElement("div");
+  paint.className = "terminal-input-paint";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "terminal-input-text";
+  textarea.spellcheck = false;
+  textarea.rows = 1;
+
+  wrapper.append(paint, textarea);
+  host.append(wrapper);
+  // Starts hidden: the pane that owns this editor decides when it appears.
+  wrapper.hidden = true;
+
+  function repaint() {
+    paint.textContent = "";
+    for (const tok of tokenize(textarea.value)) {
+      if (tok.cls === null) {
+        paint.append(document.createTextNode(tok.text));
+      } else {
+        const span = document.createElement("span");
+        span.className = tok.cls;
+        span.textContent = tok.text;
+        paint.append(span);
+      }
+    }
+    // A trailing newline collapses in a <div>'s rendering unless there's
+    // something after it; keep the painted layer's wrapping matching the
+    // textarea by appending a zero-width trailer when the value ends in \n.
+    if (textarea.value.endsWith("\n")) paint.append(document.createTextNode(""));
+  }
+
+  function setCursorToEnd() {
+    const end = textarea.value.length;
+    textarea.selectionStart = end;
+    textarea.selectionEnd = end;
+  }
+
+  function killWordBeforeCursor() {
+    const pos = textarea.selectionStart ?? textarea.value.length;
+    const before = textarea.value.slice(0, pos);
+    const after = textarea.value.slice(pos);
+    // Trim trailing whitespace, then the word before it.
+    const trimmed = before.replace(/\s+$/, "");
+    const cut = trimmed.replace(/\S+$/, "");
+    textarea.value = cut + after;
+    textarea.selectionStart = cut.length;
+    textarea.selectionEnd = cut.length;
+    repaint();
+  }
+
+  function killWholeLine() {
+    textarea.value = "";
+    setCursorToEnd();
+    repaint();
+  }
+
+  function submitLine() {
+    const line = textarea.value;
+    hooks.submit(line);
+    textarea.value = "";
+    repaint();
+  }
+
+  function insertNewlineAtCursor() {
+    const pos = textarea.selectionStart ?? textarea.value.length;
+    const before = textarea.value.slice(0, pos);
+    const after = textarea.value.slice(pos);
+    textarea.value = before + "\n" + after;
+    textarea.selectionStart = pos + 1;
+    textarea.selectionEnd = pos + 1;
+    repaint();
+  }
+
+  function moveCursorToLineStart() {
+    const pos = textarea.selectionStart ?? 0;
+    const lineStart = textarea.value.lastIndexOf("\n", pos - 1) + 1;
+    textarea.selectionStart = lineStart;
+    textarea.selectionEnd = lineStart;
+  }
+
+  function moveCursorToLineEnd() {
+    const pos = textarea.selectionStart ?? textarea.value.length;
+    let lineEnd = textarea.value.indexOf("\n", pos);
+    if (lineEnd === -1) lineEnd = textarea.value.length;
+    textarea.selectionStart = lineEnd;
+    textarea.selectionEnd = lineEnd;
+  }
+
+  function historyStep(delta: number) {
+    const result = hooks.history(delta);
+    if (result === undefined) return;
+    textarea.value = result;
+    setCursorToEnd();
+    repaint();
+  }
+
+  function onKeyDown(event: KeyboardEvent) {
+    try {
+      // Enter / Shift+Enter.
+      if (event.key === "Enter") {
+        if (event.shiftKey) {
+          event.preventDefault();
+          insertNewlineAtCursor();
+        } else {
+          event.preventDefault();
+          submitLine();
+        }
+        return;
+      }
+
+      if (event.ctrlKey && !event.metaKey && !event.altKey) {
+        switch (event.key.toLowerCase()) {
+          case "w":
+            event.preventDefault();
+            killWordBeforeCursor();
+            return;
+          case "u":
+            event.preventDefault();
+            killWholeLine();
+            return;
+          case "a":
+            event.preventDefault();
+            moveCursorToLineStart();
+            return;
+          case "e":
+            event.preventDefault();
+            moveCursorToLineEnd();
+            return;
+          case "k": {
+            event.preventDefault();
+            const pos = textarea.selectionStart ?? textarea.value.length;
+            let lineEnd = textarea.value.indexOf("\n", pos);
+            if (lineEnd === -1) lineEnd = textarea.value.length;
+            textarea.value = textarea.value.slice(0, pos) + textarea.value.slice(lineEnd);
+            textarea.selectionStart = pos;
+            textarea.selectionEnd = pos;
+            repaint();
+            return;
+          }
+          default:
+            // Every other Ctrl chord — ^C, ^D above all — is not ours to
+            // eat: it is how a user interrupts a command or exits a shell.
+            hooks.passthrough(event);
+            return;
+        }
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        historyStep(-1);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        historyStep(1);
+        return;
+      }
+    } catch {
+      // A failure in this widget must never take the terminal down with it.
+    }
+  }
+
+  wrapper.addEventListener("keydown", onKeyDown);
+  textarea.addEventListener("input", repaint);
+
+  return {
+    element: wrapper,
+    value: () => textarea.value,
+    setValue(text: string) {
+      textarea.value = text;
+      setCursorToEnd();
+      repaint();
+    },
+    focus() {
+      textarea.focus();
+    },
+    show(prompt: string) {
+      wrapper.dataset.prompt = prompt;
+      wrapper.hidden = false;
+    },
+    hide() {
+      wrapper.hidden = true;
+    },
+    isVisible() {
+      return !wrapper.hidden;
+    },
+  };
+}
