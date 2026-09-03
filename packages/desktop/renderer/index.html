@@ -283,14 +283,24 @@
              rather than written here, because it is user-visible text. -->
         <button id="workspace-pip" class="workspace-nav" type="button" hidden>&#9635;</button>
       </div>
-      <!-- The bookmarks bar. Browser chrome, not workspace chrome: it
-           belongs under the address bar and hides with it, the way every
-           other browser does it. -->
-      <div id="workspace-bookmarks" class="workspace-bookmarks">
-        <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
-      </div>
       <div id="workspace-error" class="changes-error" hidden></div>
-      <div id="workspace-page" class="workspace-page"></div>
+      <!-- The row holding the bookmarks sidebar and the page slot. Hidden
+           in lockstep with #workspace-page (see workspace.ts): a terminal
+           or API tab draws over this same region, and an empty row here
+           would otherwise still claim its flex share and squeeze the pane
+           drawn below it. -->
+      <div id="workspace-body" class="workspace-body">
+        <!-- The bookmarks sidebar: a grid of pinned essentials above a
+             list of everything else. It sits beside the page slot rather
+             than above it, so #workspace-page measures narrower and the
+             hosted view follows without any change to the bounds
+             reporting. -->
+        <div id="workspace-bookmarks" class="workspace-bookmarks">
+          <div id="workspace-essentials" class="workspace-essentials"></div>
+          <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
+        </div>
+        <div id="workspace-page" class="workspace-page"></div>
+      </div>
       <!-- The DevTools panel. Like the page slot it holds no content: a
            hosted view is positioned over the rectangle it measures. The
            handle above it drags the split between the two. -->

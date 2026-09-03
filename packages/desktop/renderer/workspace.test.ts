@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceState } from "@jarvis/core";
+import type { BookmarkView } from "../src/ipc.js";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
 // workspace.ts pulls in workspace-terminal.ts, which hosts a real terminal
@@ -42,11 +43,14 @@ function harness(): Recorded[] {
           <button id="workspace-bookmark-toggle"></button>
           <button id="workspace-pip" hidden></button>
         </div>
-        <div id="workspace-bookmarks">
-          <div id="workspace-bookmark-list"></div>
-        </div>
         <div id="workspace-error" hidden></div>
-        <div id="workspace-page"></div>
+        <div id="workspace-body">
+          <div id="workspace-bookmarks">
+            <div id="workspace-essentials"></div>
+            <div id="workspace-bookmark-list"></div>
+          </div>
+          <div id="workspace-page"></div>
+        </div>
         <div id="workspace-devtools-handle" hidden></div>
         <div id="workspace-devtools" hidden></div>
         <div id="workspace-terminal" hidden></div>
@@ -204,6 +208,13 @@ function tab(overrides: Partial<WorkspaceState["tabs"][number]> = {}) {
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function stubBookmarks(bookmarks: BookmarkView[]): void {
+  (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
+    ...(window as unknown as { jarvis: Record<string, unknown> }).jarvis,
+    listBookmarks: async () => ({ ok: true, value: bookmarks }),
+  };
 }
 
 describe("workspace chrome", () => {
@@ -837,6 +848,76 @@ describe("workspace bookmarks", () => {
     expect(
       calls.some((entry) => entry.call === "addBookmark" || entry.call === "removeBookmark"),
     ).toBe(false);
+  });
+});
+
+describe("the bookmarks sidebar", () => {
+  it("puts pinned bookmarks in the grid and the rest in the list", async () => {
+    harness();
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true },
+      { url: "https://b.test/", title: "B" },
+    ]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(1);
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(1);
+  });
+
+  it("draws the cached icon when there is one", async () => {
+    harness();
+    stubBookmarks([
+      { url: "https://a.test/", title: "A", pinned: true, icon: "data:image/png;base64,AQ==" },
+    ]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    const img = document.querySelector("#workspace-essentials img");
+    expect(img?.getAttribute("src")).toBe("data:image/png;base64,AQ==");
+  });
+
+  it("falls back to a monogram of the title when there is no icon", async () => {
+    harness();
+    stubBookmarks([{ url: "https://a.test/", title: "Alpha", pinned: true }]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelector("#workspace-essentials img")).toBeNull();
+    expect(document.querySelector("#workspace-essentials .workspace-essential-monogram")?.textContent).toBe("A");
+  });
+
+  it("gives one origin the same monogram colour every time", async () => {
+    harness();
+    stubBookmarks([
+      { url: "https://a.test/one", title: "One", pinned: true },
+      { url: "https://a.test/two", title: "Two", pinned: true },
+    ]);
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    const tiles = [...document.querySelectorAll(".workspace-essential-monogram")] as HTMLElement[];
+    expect(tiles[0]?.style.backgroundColor).toBe(tiles[1]?.style.backgroundColor);
+  });
+
+  it("shows at most twelve tiles even if the file holds more", async () => {
+    harness();
+    stubBookmarks(
+      Array.from({ length: 15 }, (_, i) => ({
+        url: `https://s${i}.test/`,
+        title: `S${i}`,
+        pinned: true,
+      })),
+    );
+
+    initWorkspace(["acme"]);
+    await flush();
+
+    expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(12);
   });
 });
 
@@ -1714,6 +1795,24 @@ describe("open a terminal", () => {
     renderWorkspace({ tabs: [tab({ kind: "api", url: "" })], activeTabId: "tab-1" });
 
     expect(document.getElementById("workspace-page")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  // The sidebar and the page slot share a wrapping row now (#workspace-body)
+  // instead of the page being a direct flex sibling of the terminal — so
+  // hiding the page alone is not enough. Left visible, the empty row would
+  // still claim its own flex share and squeeze the terminal into half the
+  // screen, exactly the bug the page's own hiding exists to avoid.
+  it("hides the body row too, so it does not compete with the terminal for height", () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+
+    expect(document.getElementById("workspace-body")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("shows the body row again when a hosted tab is reactivated", () => {
+    renderWorkspace({ tabs: [tab({ kind: "terminal", url: "" })], activeTabId: "tab-1" });
+    renderWorkspace({ tabs: [tab({ id: "tab-2", kind: "web" })], activeTabId: "tab-2" });
+
+    expect(document.getElementById("workspace-body")?.hasAttribute("hidden")).toBe(false);
   });
 
   it("shows the page slot again when a hosted tab is reactivated", () => {

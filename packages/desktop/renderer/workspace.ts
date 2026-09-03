@@ -11,7 +11,11 @@ import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-te
 // — duplicated here rather than imported, since the renderer may only
 // import *types* from @jarvis/core (a bare-specifier value import from any
 // other workspace package is runtime-fatal once bundled).
-type Bookmark = { url: string; title: string };
+type Bookmark = { url: string; title: string; pinned?: boolean; order?: number };
+// Same shape as ipc.ts's BookmarkView: a Bookmark plus the cached icon a
+// listBookmarks resolution may carry. Its absence, not an empty string, is
+// what tells renderEssential to draw a monogram instead.
+type BookmarkView = Bookmark & { icon?: string };
 
 // The Workspace's chrome. Everything a page can influence — its title, its
 // URL, a load error — is attacker-controlled text arriving in the process
@@ -191,7 +195,7 @@ async function switchToProject(project: string): Promise<void> {
   await refreshBookmarks();
 }
 
-let bookmarks: Bookmark[] = [];
+let bookmarks: BookmarkView[] = [];
 
 /** Whether the user wants the bookmarks bar at all. Their preference for
  *  browser tabs only — a hosted app has no bar to show either way, so
@@ -269,25 +273,81 @@ function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
   return chip;
 }
 
+const MAX_ESSENTIALS = 12;
+
+/** A deterministic hue from the origin, so one site is always the same
+ *  colour and two bookmarks of the same host match. */
+function monogramColour(url: string): string {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    origin = url;
+  }
+  let hash = 0;
+  for (const ch of origin) hash = (hash * 31 + ch.codePointAt(0)!) % 360;
+  return `hsl(${hash}, 45%, 32%)`;
+}
+
+/** The tile for a bookmark with no cached icon: its first letter on that
+ *  colour. Without this the grid is a row of empty squares for everything
+ *  never opened in Jarvis. */
+function monogramTile(bookmark: BookmarkView): HTMLElement {
+  const mark = document.createElement("span");
+  mark.className = "workspace-essential-monogram";
+  mark.style.backgroundColor = monogramColour(bookmark.url);
+  const label = bookmark.title === "" ? bookmark.url : bookmark.title;
+  mark.textContent = [...label][0]?.toUpperCase() ?? "?";
+  return mark;
+}
+
+function renderEssential(bookmark: BookmarkView): HTMLElement {
+  const tile = document.createElement("button");
+  tile.type = "button";
+  tile.className = "workspace-essential";
+  tile.title = bookmark.title === "" ? bookmark.url : bookmark.title;
+  tile.dataset["url"] = bookmark.url;
+  if (bookmark.icon === undefined) {
+    tile.append(monogramTile(bookmark));
+  } else {
+    const img = document.createElement("img");
+    img.src = bookmark.icon;
+    img.alt = "";
+    tile.append(img);
+  }
+  tile.addEventListener("click", () => openBookmark(bookmark.url));
+  return tile;
+}
+
 function renderBookmarks(): void {
+  const grid = $("workspace-essentials");
   const list = $("workspace-bookmark-list");
-  list.replaceChildren();
-  if (bookmarks.length === 0) {
+  // The store already sorts pinned-first and by order, so the split is a
+  // filter rather than a sort. Capped again here: a file holding more than
+  // twelve pins must not spill a fourth row into the list's space.
+  const pinned = bookmarks.filter((b) => b.pinned === true).slice(0, MAX_ESSENTIALS);
+  const listed = bookmarks.filter((b) => b.pinned !== true);
+
+  grid.replaceChildren(...pinned.map(renderEssential));
+  list.replaceChildren(...listed.map(renderBookmarkChip));
+
+  // The existing empty note, moved verbatim — including the dir handling,
+  // whose comment explains why the language is read off the text rather
+  // than off PRIMARY_LANGUAGE (the constant is a literal type, so comparing
+  // it narrows to never and tsc rejects it).
+  if (listed.length === 0) {
     const empty = document.createElement("span");
     empty.className = "workspace-bookmarks-empty";
     const note = MESSAGES.noBookmarks(PRIMARY_LANGUAGE);
     empty.textContent = note;
-    // Read off the text rather than off PRIMARY_LANGUAGE: the constant is a
-    // literal type, so comparing it narrows to never and tsc rejects it.
     empty.dir = detectLanguage(note) === "ar" ? "rtl" : "ltr";
     list.append(empty);
   }
-  for (const bookmark of bookmarks) list.append(renderBookmarkChip(bookmark));
+
   updateBookmarkToggle();
-  // The bar's height depends on what is in it (a row of chips is taller
-  // than the empty note), and its height is the page slot's top inset. A
-  // DOM change the renderer made itself fires no reflow event, so the
-  // hosted view would stay pinned over the old rectangle.
+  // The sidebar's width is the page slot's left inset, and a DOM change the
+  // renderer made itself fires no reflow event — so the hosted view would
+  // stay pinned over the old rectangle.
   reportWorkspaceBounds();
 }
 
@@ -1028,8 +1088,13 @@ export function renderWorkspace(state: WorkspaceState): void {
   // Hiding the slot also makes its rectangle zero, which is why
   // reportWorkspaceBounds below refuses to report a zero rect: a hosted view
   // must not be moved to nowhere just because a terminal is on top.
-  ($("workspace-page") as HTMLElement).hidden =
-    tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
+  const pageHidden = tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
+  ($("workspace-page") as HTMLElement).hidden = pageHidden;
+  // The row wrapping the sidebar and the page slot must hide with the page:
+  // otherwise, with the sidebar already hidden by hostedApp above, it would
+  // sit here empty yet still claim its flex share, squeezing whichever
+  // renderer-drawn pane is meant to fill that space instead.
+  ($("workspace-body") as HTMLElement).hidden = pageHidden;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
   renderApi(state.tabs, state.activeTabId, selected);
   renderDocker(state.tabs, state.activeTabId, selected);

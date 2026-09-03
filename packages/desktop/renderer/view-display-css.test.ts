@@ -116,11 +116,11 @@ describe(".main / .main--changes [hidden] cascade", () => {
     expect(hasOverride).toBe(true);
   });
 
-  // The bookmarks bar is now browser chrome hidden by the same rule as the
-  // address bar above it, so it inherits the address bar's footgun: it is a
-  // flex row, and an unconditional `display: flex` is an author rule that
+  // The bookmarks sidebar is browser chrome hidden by the same rule as the
+  // address bar, so it inherits the address bar's footgun: it is a flex
+  // column, and an unconditional `display: flex` is an author rule that
   // beats the UA's [hidden]{display:none} no matter what renderWorkspace
-  // sets. Without this override the bar would sit over an editor tab.
+  // sets. Without this override the sidebar would sit over an editor tab.
   it("overrides display for .workspace-bookmarks when hidden is present", () => {
     const rules = [...htmlSource.matchAll(/\.workspace-bookmarks(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
       (m) => m[0],
