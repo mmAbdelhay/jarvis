@@ -17,7 +17,7 @@
 // is an enhancement, so every part of it is guarded: a pane whose block
 // machinery fails is still a working terminal.
 
-import { renderOutput } from "./block-render.js";
+import { createBlockView, type BlockView } from "./block-view.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
@@ -27,13 +27,12 @@ export type PaneHooks = {
   sendInput: (data: string) => void;
   resize: (cols: number, rows: number) => void;
   attach: () => Promise<string>;
-  settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number };
+  /** The full renderer-facing settings payload — see window.jarvis.terminalSettings()
+   *  in src/ipc.ts, which is where `home` comes from. */
+  settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
 };
 
-/** A frozen command: the record it was built from, and the element showing
- *  it. A stub in this task — Task 6 gives it a header, a status and its
- *  actions — so building one is kept behind createBlockView() alone. */
-export type BlockView = { element: HTMLElement; record: BlockRecord };
+export type { BlockView };
 
 export type TerminalPane = {
   element: HTMLElement;
@@ -98,20 +97,23 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  writing to a disposed xterm throws. */
   let disposed = false;
 
-  function createBlockView(record: BlockRecord, cols: number): BlockView {
-    const view = document.createElement("div");
-    view.className = "terminal-block";
-    const command = document.createElement("div");
-    command.className = "block-command";
-    // textContent, never innerHTML: this string came out of the user's
-    // shell and must reach the page as text whatever it contains.
-    command.textContent = record.command;
-    view.append(command, renderOutput(record.output, cols));
-    return { element: view, record };
+  // Re-run and copy, for a block with no input editor yet (that is a later
+  // task): fill types the command at the live prompt without a trailing
+  // return, so it lands ready to edit and never runs on its own; copy goes
+  // straight to the system clipboard, the same call the rest of the
+  // terminal already makes for a selection or a `tmux save-buffer`.
+  function fill(command: string): void {
+    attempt(() => hooks.sendInput(command));
+  }
+
+  function copy(text: string): void {
+    attempt(() => {
+      void navigator.clipboard?.writeText(text);
+    });
   }
 
   function freeze(record: BlockRecord): void {
-    const view = createBlockView(record, terminal.cols);
+    const view = createBlockView(record, { cols: terminal.cols, fill, copy, home: hooks.settings.home });
     views.push(view);
     list.append(view.element);
     while (views.length > MAX_BLOCKS) views.shift()?.element.remove();
@@ -145,8 +147,19 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       terminal.reset();
       attempt(() => {
         element.dataset["state"] = "blocks";
-        element.scrollTop = element.scrollHeight;
       });
+      // renderOutput() paints a block's output a macrotask after
+      // createBlockView() returns (see its own contract) — scrolling here,
+      // synchronously, would settle at a height that does not include that
+      // block's output yet. Deferred behind the same kind of macrotask so
+      // the pane lands at the true bottom once painting has actually
+      // happened, not before.
+      setTimeout(() => {
+        if (disposed) return;
+        attempt(() => {
+          element.scrollTop = element.scrollHeight;
+        });
+      }, 0);
       return;
     }
     // "prompt": nothing to do — the live terminal is already drawing it.

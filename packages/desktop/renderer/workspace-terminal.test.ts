@@ -299,7 +299,7 @@ describe("workspace terminals", () => {
       `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C;ls\u0007a b\r\n\u001b]133;D;0\u0007`,
     );
 
-    expect(pane?.querySelectorAll(".terminal-block")).toHaveLength(1);
+    expect(pane?.querySelectorAll(".block")).toHaveLength(1);
   });
 });
 

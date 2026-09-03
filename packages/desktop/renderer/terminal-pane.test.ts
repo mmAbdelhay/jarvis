@@ -11,13 +11,17 @@ import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
+// A vi.fn() wrapper, not a bare arrow function, so one test (the deferred
+// scroll below) can swap in a renderOutput that actually defers, matching
+// its documented contract, without disturbing every other test's default.
+const renderOutputMock = vi.fn((ansi: string, _cols: number) => {
+  const element = document.createElement("div");
+  element.className = "block-output";
+  element.textContent = ansi;
+  return element;
+});
 vi.mock("./block-render.js", () => ({
-  renderOutput: (ansi: string) => {
-    const element = document.createElement("div");
-    element.className = "block-output";
-    element.textContent = ansi;
-    return element;
-  },
+  renderOutput: (ansi: string, cols: number) => renderOutputMock(ansi, cols),
 }));
 
 const { createPane } = await import("./terminal-pane.js");
@@ -27,7 +31,7 @@ const B = "\u001b]133;B\u0007";
 const C = (c: string) => `\u001b]133;C;${c}\u0007`;
 const D = (n: number) => `\u001b]133;D;${n}\u0007`;
 
-function pane(settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0 }) {
+function pane(settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" }) {
   const host = document.createElement("div");
   document.body.append(host);
   return createPane(host, {
@@ -109,11 +113,44 @@ describe("a terminal pane", () => {
   // exactly as it arrived, marks and all, which is the terminal Jarvis
   // shipped before blocks existed.
   it("builds no blocks at all when blocks are off", () => {
-    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0 });
+    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" });
     const chunk = `${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}`;
     p.write(chunk);
     expect(p.blocks()).toHaveLength(0);
     expect(FakeTerminal.instances[0]?.written.join("")).toBe(chunk);
+  });
+
+  // renderOutput() populates its element a macrotask after it returns (see
+  // its own contract in block-render.ts) — a scroll fired the instant the
+  // block is appended would settle at a height that does not include its
+  // output yet. This pins the fix: the pane must not have scrolled to the
+  // true bottom until that macrotask has actually run.
+  it("scrolls to the bottom only once the block has finished painting, not before", async () => {
+    let painted = false;
+    renderOutputMock.mockImplementationOnce((ansi: string) => {
+      const element = document.createElement("div");
+      element.className = "block-output";
+      setTimeout(() => {
+        painted = true;
+        element.textContent = ansi;
+      }, 0);
+      return element;
+    });
+
+    const p = pane();
+    Object.defineProperty(p.element, "scrollHeight", {
+      configurable: true,
+      get: () => (painted ? 500 : 100),
+    });
+
+    p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}`);
+    // Synchronously after block-done: the output has not painted yet, so a
+    // scroll fired now would land short.
+    expect(p.element.scrollTop).not.toBe(500);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(painted).toBe(true);
+    expect(p.element.scrollTop).toBe(500);
   });
 
   it("drops the oldest blocks past the cap", () => {

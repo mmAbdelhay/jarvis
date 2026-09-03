@@ -1173,9 +1173,31 @@
   .terminal-pane[data-state="alt"] { overflow: hidden; padding: 0; }
   /* Blocks off, or a shell with no integration: today's terminal. */
   .terminal-pane[data-state="plain"] .terminal-blocks { display: none; }
-  .block-command { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted); }
+  /* A block's border-left is its status at a glance, so data-status carries
+     the colour rather than a class — a block with no exit code is drawn
+     failed, never mistaken for a quiet success. */
+  .block { border-left: 2px solid var(--border); padding: 2px 0 2px 8px; }
+  .block[data-status="failed"] { border-left-color: var(--del); }
+  .block[data-status="ok"] { border-left-color: var(--good); }
+  .block-header { display: flex; gap: 10px; align-items: baseline; color: var(--text-muted);
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; cursor: default; }
+  .block-command { color: var(--text); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .block-actions { display: flex; gap: 6px; }
+  /* Controls stay out of the way until the block is worth acting on: under
+     the pointer, or already selected (Task 8 sets .selected). */
+  .block-header [role="button"] { cursor: pointer; opacity: 0; }
+  .block:hover .block-header [role="button"], .block.selected .block-header [role="button"] { opacity: 1; }
+  .block.selected { background: var(--accent-quiet); }
+  .block.collapsed .block-output { display: none; }
+  .block-more-menu { display: flex; flex-direction: column; gap: 2px; padding: 4px;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-control);
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; width: fit-content; }
+  .block-more-menu[hidden] { display: none; }
+  .block-more-item { color: var(--text); cursor: pointer; padding: 2px 6px; }
+  .block-more-item[aria-disabled="true"] { color: var(--text-muted); cursor: default; }
   .block-output { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; white-space: pre; }
   .block-line { min-height: 1.35em; }
+  .block-elided { color: var(--text-muted); font-style: italic; }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar
