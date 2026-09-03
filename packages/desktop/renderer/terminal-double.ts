@@ -20,8 +20,13 @@ export class FakeTerminal {
   static instances: FakeTerminal[] = [];
 
   readonly options: FakeTerminalOptions;
-  /** Every chunk written, in order — the terminal's whole input stream. */
+  /** Every chunk written, in order — the terminal's whole input stream,
+   *  including what a later reset() wiped off the screen. A pane freezing a
+   *  finished command resets the live terminal as it goes, so this is the
+   *  only place a test can still see that no byte was swallowed on the way. */
   written: string[] = [];
+  /** What is on the screen: everything written since the last reset(). */
+  #screen: string[] = [];
   resets = 0;
   focused = 0;
   opened: unknown;
@@ -106,9 +111,10 @@ export class FakeTerminal {
     FakeTerminal.instances.push(this);
   }
 
-  /** Everything written, joined — what the screen would be showing. */
+  /** Everything written since the last reset, joined — what the screen
+   *  would be showing. */
   get text(): string {
-    return this.written.join("");
+    return this.#screen.join("");
   }
 
   open(host: unknown): void {
@@ -119,10 +125,11 @@ export class FakeTerminal {
   }
   write(data: string): void {
     this.written.push(data);
+    this.#screen.push(data);
   }
   reset(): void {
     this.resets += 1;
-    this.written = [];
+    this.#screen = [];
   }
   focus(): void {
     this.focused += 1;

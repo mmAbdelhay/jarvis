@@ -1154,8 +1154,28 @@
 
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
-  .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
+  /* The tab's slot. The padding lives on .terminal-pane inside it, which is
+     the element that scrolls — padding here would stay put while the blocks
+     scrolled under it. */
+  .workspace-terminal-pane { position: absolute; inset: 0; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
+
+  /* One terminal as the user sees it: frozen blocks stacked above a live
+     xterm. data-state is set by terminal-pane.ts and is the only thing that
+     lays this out, so that module measures nothing. */
+  .terminal-pane { position: absolute; inset: 0; display: flex; flex-direction: column;
+    overflow-y: auto; background: var(--ground); padding: 10px 14px; }
+  .terminal-blocks { display: flex; flex-direction: column; gap: 6px; }
+  .terminal-live { flex: 1 1 auto; min-height: 120px; }
+  /* A full-screen program gets the whole pane, exactly as it would in any
+     other terminal — no blocks above it, no padding around it. */
+  .terminal-pane[data-state="alt"] .terminal-blocks { display: none; }
+  .terminal-pane[data-state="alt"] { overflow: hidden; padding: 0; }
+  /* Blocks off, or a shell with no integration: today's terminal. */
+  .terminal-pane[data-state="plain"] .terminal-blocks { display: none; }
+  .block-command { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
+  .block-output { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; white-space: pre; }
+  .block-line { min-height: 1.35em; }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar

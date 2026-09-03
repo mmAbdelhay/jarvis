@@ -1,9 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { enhanceTerminal } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
-import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
-import { FitAddon } from "./vendor/addon-fit.mjs";
-import { Terminal } from "./vendor/xterm.mjs";
+import { createPane, type TerminalPane } from "./terminal-pane.js";
 
 // The Workspace's Terminal tabs.
 //
@@ -20,10 +18,31 @@ const $ = (id: string): HTMLElement => {
   return element;
 };
 
-type Pane = { element: HTMLElement; terminal: Terminal; fit: FitAddon };
+/** The outer element belongs to the Workspace — one per tab, shown and
+ *  hidden as tabs change — and the pane is what draws inside it. */
+type Pane = { element: HTMLElement; pane: TerminalPane };
 
 const panes = new Map<string, Pane>();
 let wired = false;
+
+/** How terminals behave: read once for the whole module rather than once per
+ *  pane, because a change to jarvis.yaml takes effect on restart anyway.
+ *  Until it resolves — and if it never does — a pane is built with these,
+ *  which are the terminal Jarvis shipped before blocks existed and so the
+ *  right thing to fall back to. */
+let terminalSettings = { blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "" };
+try {
+  void window.jarvis
+    .terminalSettings()
+    .then((settings) => {
+      terminalSettings = settings;
+    })
+    .catch(() => {
+      // Today's terminal. Nothing else about the tab is affected.
+    });
+} catch {
+  // A preload without the channel — the same fallback.
+}
 
 /** Called once, from initWorkspace. Subscribes to the two streams main
  *  pushes; every pane created later reads from the same subscription rather
@@ -33,14 +52,18 @@ export function initWorkspaceTerminals(): void {
   wired = true;
 
   window.jarvis.onTerminalData((tabId, chunk) => {
-    panes.get(tabId)?.terminal.write(chunk);
+    panes.get(tabId)?.pane.write(chunk);
   });
 
   window.jarvis.onTerminalExit((tabId, code) => {
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
-    // silently stopped responding.
-    panes.get(tabId)?.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
+    // silently stopped responding. It goes straight to the live terminal:
+    // this is Jarvis speaking, not the pty, so it is no command's output and
+    // has no business inside a block.
+    panes
+      .get(tabId)
+      ?.pane.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
   });
 }
 
@@ -62,7 +85,7 @@ export function renderWorkspaceTerminals(
   // being reaped by main's own close handler.
   for (const [tabId, pane] of panes) {
     if (live.has(tabId)) continue;
-    pane.terminal.dispose();
+    pane.pane.dispose();
     pane.element.remove();
     panes.delete(tabId);
   }
@@ -84,8 +107,8 @@ export function renderWorkspaceTerminals(
   const pane = panes.get(showing);
   // The host was hidden until a moment ago, so this is the first point at
   // which the pane has a real size to be laid out at.
-  refit(pane);
-  pane?.terminal.focus();
+  pane?.pane.refit();
+  pane?.pane.focus();
 }
 
 function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
@@ -96,20 +119,25 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
   element.className = "workspace-terminal-pane";
   host.append(element);
 
-  const terminal = new Terminal({
-    scrollback: SCROLLBACK_LINES,
-    ...TERMINAL_FONT,
-    theme: TERMINAL_THEME,
-    cursorBlink: true,
-    allowProposedApi: true,
+  // The tab's terminal: frozen blocks over a live xterm when the shell's
+  // integration is on, and today's bare terminal when it is not. Keystrokes,
+  // the cell grid and the shell's buffered prologue are all its business;
+  // what stays here is everything that needs to know which tab this is.
+  const view = createPane(element, {
+    // Every keystroke verbatim, control bytes included — that is what makes
+    // Ctrl-C, arrows and Escape work rather than only plain text.
+    sendInput: (data) => void window.jarvis.sendTerminalInput(tabId, data),
+    resize: (cols, rows) => void window.jarvis.resizeTerminal(tabId, cols, rows),
+    // A link opens as an ordinary browser tab in the same project, which is
+    // what puts it through normalizeInput and the app's navigation rules
+    // instead of handing an arbitrary string to the OS.
+    openLink: (url) => void window.jarvis.openTab(project, url),
+    // Whatever the shell printed before this pane existed — its prompt,
+    // usually. Buffered by the shell manager exactly for this gap.
+    attach: () => window.jarvis.attachTerminal(tabId),
+    settings: terminalSettings,
   });
-  const fit = new FitAddon();
-  terminal.loadAddon(fit);
-  terminal.open(element);
-
-  // Every keystroke verbatim, control bytes included — that is what makes
-  // Ctrl-C, arrows and Escape work rather than only plain text.
-  terminal.onData((data) => void window.jarvis.sendTerminalInput(tabId, data));
+  const terminal = view.terminal;
 
   // Autocomplete: a dropdown under the cursor, completing from this user's
   // own shell history. Guarded because it is an enhancement and never a
@@ -139,35 +167,12 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     openLink: (url) => void window.jarvis.openTab(project, url),
   });
 
-  // The pty's size has to track the pane's, or a full-screen program draws
-  // to a width that does not exist.
-  terminal.onResize(({ cols, rows }) => void window.jarvis.resizeTerminal(tabId, cols, rows));
-
-  const pane: Pane = { element, terminal, fit };
+  const pane: Pane = { element, pane: view };
   panes.set(tabId, pane);
 
   if (typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(() => refit(pane)).observe(element);
+    new ResizeObserver(() => view.refit()).observe(element);
   }
-
-  // Whatever the shell printed before this pane existed — its prompt,
-  // usually. Buffered by the shell manager exactly for this gap.
-  void window.jarvis.attachTerminal(tabId).then((buffered) => {
-    if (buffered !== "") terminal.write(buffered);
-  });
 
   return pane;
-}
-
-function refit(pane: Pane | undefined): void {
-  if (pane === undefined) return;
-  // A pane with no layout yet (hidden, or the window minimised) measures as
-  // zero and would make the addon throw.
-  if (pane.element.clientWidth === 0 || pane.element.clientHeight === 0) return;
-  try {
-    pane.fit.fit();
-  } catch {
-    // A fit racing a layout change is not worth surfacing; the next
-    // observation corrects it.
-  }
 }
