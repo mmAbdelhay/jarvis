@@ -34,33 +34,49 @@ export function renderOutput(ansi: string, cols: number): HTMLElement {
     allowProposedApi: true,
   });
 
+  // Terminal.write() always defers its parsing to a macrotask (xterm
+  // schedules processing via setTimeout unless the write immediately
+  // follows user keyboard input) — there is no public synchronous
+  // alternative, and this module touches no private xterm API to fake one.
+  // renderOutput() therefore returns its (initially empty) element right
+  // away; the caller appends it, and its children arrive a tick later.
+  // That is invisible to a user and is a documented part of this
+  // function's contract (see the test that pins it).
   try {
-    // Terminal.write() always defers to a macrotask (xterm schedules
-    // processing via setTimeout unless the write follows user input), so it
-    // cannot be awaited from a synchronous function. CoreTerminal.writeSync
-    // — reached through the undocumented `_core`, xterm exposes no public
-    // equivalent — runs the parser immediately instead, which is what makes
-    // a synchronous renderOutput() possible at all.
-    const core = (terminal as unknown as { _core: { writeSync(data: string): void } })._core;
-    core.writeSync(ansi);
-    paint(terminal, element);
+    terminal.write(ansi, () => {
+      try {
+        paint(terminal, element);
+      } catch {
+        fallBackToText(ansi, element);
+      } finally {
+        dispose(terminal);
+      }
+    });
   } catch {
     // A block that cannot be frozen shows its text without styling rather
     // than nothing at all.
-    const fallback = document.createElement("div");
-    fallback.className = "block-line";
-    fallback.textContent = ansi.replace(/\[[0-9;]*[A-Za-z]/g, "");
-    element.append(fallback);
-  } finally {
-    try {
-      terminal.dispose();
-    } catch {
-      // Disposing a terminal that never opened can throw; nothing depends
-      // on it having worked.
-    }
+    fallBackToText(ansi, element);
+    dispose(terminal);
   }
 
   return element;
+}
+
+function fallBackToText(ansi: string, element: HTMLElement): void {
+  element.replaceChildren();
+  const fallback = document.createElement("div");
+  fallback.className = "block-line";
+  fallback.textContent = ansi.replace(/\[[0-9;]*[A-Za-z]/g, "");
+  element.append(fallback);
+}
+
+function dispose(terminal: Terminal): void {
+  try {
+    terminal.dispose();
+  } catch {
+    // Disposing a terminal that never opened can throw; nothing depends on
+    // it having worked.
+  }
 }
 
 function paint(terminal: Terminal, element: HTMLElement): void {
