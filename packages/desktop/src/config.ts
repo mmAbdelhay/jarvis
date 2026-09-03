@@ -11,6 +11,7 @@ import type {
   DbGateConnection,
   DbGateEngine,
   EditorsConfig,
+  WorkflowsConfig,
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, defaultHeadlampBinary } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
@@ -79,6 +80,12 @@ export type JarvisConfig = {
    *  project name. An absent `clusters:` section parses to {} — that
    *  project's button is disabled, like Personal's. */
   clusters: ClustersConfig;
+  /** Per-project saved-workflow directories, keyed by project name, on top
+   *  of the always-read `~/.config/jarvis/workflows/`. An absent
+   *  `workflows:` section parses to {} — every project still gets the
+   *  always-read directory, which is what every project had before this
+   *  existed. */
+  workflows: WorkflowsConfig;
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
@@ -103,6 +110,13 @@ export type JarvisConfig = {
 // isolation directory below.
 export function defaultSessionsDbPath(): string {
   return join(homedir(), ".config/jarvis/sessions.db");
+}
+
+// The always-read workflow directory, on top of whatever `workflows:`
+// names for the current project — every project gets these, which is why
+// it lives beside jarvis.yaml rather than under a project root.
+export function defaultWorkflowsDir(): string {
+  return join(homedir(), ".config/jarvis/workflows");
 }
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
@@ -174,6 +188,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const databases = parseDatabases(root["databases"], projects);
   const editors = parseEditors(root["editors"], projects);
   const clusters = parseClusters(root["clusters"], projects);
+  const workflows = parseWorkflows(root["workflows"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
   const whisper = parseWhisper(root["whisper"]);
@@ -204,6 +219,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     databases,
     editors,
     clusters,
+    workflows,
     headlamp,
     terminal,
     brain: {
@@ -583,6 +599,35 @@ function parseClusters(rawClusters: unknown, projects: Record<string, string>): 
 
       return { name, context };
     });
+  }
+  return result;
+}
+
+/**
+ * The `workflows:` section — a project name to a single directory of
+ * workflow files, on top of the always-read
+ * `~/.config/jarvis/workflows/`. The section is optional and an absent one
+ * is not an error: most projects will never have an entry, and every
+ * project still gets the always-read directory.
+ *
+ *     workflows:
+ *       acme: ./.jarvis/workflows
+ */
+function parseWorkflows(rawWorkflows: unknown, projects: Record<string, string>): WorkflowsConfig {
+  if (rawWorkflows === undefined) return {};
+  if (typeof rawWorkflows !== "object" || rawWorkflows === null || Array.isArray(rawWorkflows)) {
+    throw new Error("Config `workflows` must be an object");
+  }
+
+  const result: WorkflowsConfig = {};
+  for (const [project, rawDir] of Object.entries(rawWorkflows as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`workflows\` names no configured project: "${project}"`);
+    }
+    if (typeof rawDir !== "string" || rawDir === "") {
+      throw new Error(`Config \`workflows.${project}\` must be a non-empty string`);
+    }
+    result[project] = expandTilde(rawDir);
   }
   return result;
 }

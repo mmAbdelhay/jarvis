@@ -18,6 +18,7 @@ function sample(): JarvisConfig {
     databases: {},
     editors: {},
     clusters: {},
+    workflows: {},
     headlamp: { binary: "/some/path" },
     terminal: {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },

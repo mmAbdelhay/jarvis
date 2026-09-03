@@ -7,6 +7,7 @@
 // here is the pane's state machine and, above all, that every byte still
 // reaches the live terminal.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Workflow } from "@jarvis/platform";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
@@ -186,6 +187,7 @@ describe("the command editor in a pane", () => {
       home: string;
     } = EDITOR_SETTINGS,
     history: () => Promise<string[]> = async () => [],
+    workflows?: () => Promise<Workflow[]>,
   ) {
     const host = document.createElement("div");
     document.body.append(host);
@@ -196,6 +198,7 @@ describe("the command editor in a pane", () => {
       attach: async () => "",
       settings,
       history,
+      workflows,
     });
     return { p, sendInput };
   }
@@ -770,6 +773,94 @@ describe("the command editor in a pane", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(field.value).toBe("half-typed");
+    });
+
+    describe("Run workflow…", () => {
+      const workflow: Workflow = {
+        name: "New branch",
+        command: "git checkout -b {{branch}} && git push -u origin {{branch}}",
+        description: "Start a branch",
+        placeholders: ["branch"],
+      };
+
+      it("is not offered when the pane has no workflows hook wired up", () => {
+        const { p } = editorPane();
+        p.write(`${A}$ ${B}`);
+
+        press(p, { key: "p", metaKey: true });
+
+        expect(paletteEl(p)?.textContent).not.toContain("Run workflow");
+      });
+
+      it("prompts for each placeholder in order and fills the editor, never sending it", async () => {
+        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], async () => [workflow]);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Run workflow";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // The workflow-name prompt.
+        expect(paletteEl(p)?.textContent).toContain("New branch");
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // The placeholder prompt — free text, filled in and submitted.
+        const branchInput = paletteEl(p)?.querySelector("input");
+        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        branchInput.value = "feature/login";
+        branchInput.dispatchEvent(new Event("input"));
+        branchInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(textarea(p)?.value).toBe(
+          "git checkout -b feature/login && git push -u origin feature/login",
+        );
+        expect(sendInput).not.toHaveBeenCalled();
+        expect(paletteEl(p)?.hidden).toBe(true);
+      });
+
+      it("abandons the whole thing without filling the editor when Escape is pressed on a placeholder prompt", async () => {
+        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [workflow]);
+        p.write(`${A}$ ${B}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const field = textarea(p);
+        if (field === null) throw new Error("no editor");
+        field.value = "half-typed";
+
+        press(p, { key: "p", metaKey: true });
+        const actionsInput = paletteEl(p)?.querySelector("input");
+        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        actionsInput.value = "Run workflow";
+        actionsInput.dispatchEvent(new Event("input"));
+        actionsInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        paletteEl(p)
+          ?.querySelector("input")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(field.value).toBe("half-typed");
+      });
     });
 
     // A pane can be disposed while historySearch() is still awaiting

@@ -24,6 +24,7 @@ import type {
   DbGateManager,
   HeadlampManager,
   ShellManager,
+  WorkflowsConfig,
 } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
@@ -946,6 +947,7 @@ const sampleConfig: JarvisConfig = {
   databases: {},
   editors: {},
   clusters: {},
+  workflows: {},
   headlamp: { binary: "/some/path" },
   terminal: {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
@@ -1900,6 +1902,91 @@ describe("terminal handlers", () => {
     });
 
     expect(handlers.settings()).toMatchObject({ blocks: false, inputEditor: false });
+  });
+
+  describe("workflows", () => {
+    function withWorkflows(overrides: {
+      config?: WorkflowsConfig;
+      readDir?: (path: string) => string[];
+      readFile?: (path: string) => string;
+    }) {
+      const { manager } = shells();
+      return createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-7",
+        projects: { acme: "/p/acme" },
+        language: "en",
+        terminal: terminalConfig,
+        workflows: {
+          defaultDir: "/home/.config/jarvis/workflows",
+          config: overrides.config ?? {},
+          readDir: overrides.readDir ?? (() => []),
+          readFile: overrides.readFile ?? (() => ""),
+        },
+      });
+    }
+
+    it("reads the always-read directory for every project", async () => {
+      const seen: string[] = [];
+      const handlers = withWorkflows({
+        readDir: (path) => {
+          seen.push(path);
+          return path === "/home/.config/jarvis/workflows" ? ["a.yaml"] : [];
+        },
+        readFile: () => "name: Deploy\ncommand: deploy {{env}}\ndescription: Deploy",
+      });
+
+      const workflows = await handlers.workflows("acme");
+
+      expect(seen).toEqual(["/home/.config/jarvis/workflows"]);
+      expect(workflows).toEqual([
+        { name: "Deploy", command: "deploy {{env}}", description: "Deploy", placeholders: ["env"] },
+      ]);
+    });
+
+    it("also reads the project's configured workflow directory", async () => {
+      const seen: string[] = [];
+      const handlers = withWorkflows({
+        config: { acme: "/p/acme/.jarvis/workflows" },
+        readDir: (path) => {
+          seen.push(path);
+          return [];
+        },
+      });
+
+      await handlers.workflows("acme");
+
+      expect(seen).toEqual(["/home/.config/jarvis/workflows", "/p/acme/.jarvis/workflows"]);
+    });
+
+    it("returns an empty list when no workflow dependency was wired up", async () => {
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-7",
+        projects: { acme: "/p/acme" },
+        language: "en",
+        terminal: terminalConfig,
+      });
+
+      expect(await handlers.workflows("acme")).toEqual([]);
+    });
+
+    it("returns an empty list rather than throwing when the directory listing throws", async () => {
+      const handlers = withWorkflows({
+        readDir: () => {
+          throw new Error("ENOENT");
+        },
+      });
+
+      expect(await handlers.workflows("acme")).toEqual([]);
+    });
+
+    it("gives nothing for a project argument that is not a string", async () => {
+      const handlers = withWorkflows({});
+
+      expect(await handlers.workflows(7 as unknown as string)).toEqual([]);
+    });
   });
 });
 

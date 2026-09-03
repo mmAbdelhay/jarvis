@@ -77,6 +77,11 @@ export function createPalette(host: HTMLElement): Palette {
    *  in `open()` mode (or closed). Exactly one may be pending at a time —
    *  a second call finishes the first with undefined before starting. */
   let resolveAsk: ((value: string | undefined) => void) | undefined;
+  /** Set only by `ask([], …)` — an empty item list, meaning there is
+   *  nothing to choose from and Enter should resolve to whatever is typed
+   *  instead of requiring a filtered match. What a workflow's placeholder
+   *  prompts are built from. */
+  let freeText = false;
 
   function paint(): void {
     list.replaceChildren();
@@ -122,6 +127,7 @@ export function createPalette(host: HTMLElement): Palette {
     entries = [];
     filtered = [];
     index = 0;
+    freeText = false;
     list.replaceChildren();
     // Escape, or any other path out: a choice that was never made resolves
     // to undefined rather than leaving `ask()`'s caller waiting forever.
@@ -134,10 +140,17 @@ export function createPalette(host: HTMLElement): Palette {
     paint();
   }
 
-  /** Runs the selected entry exactly once, then closes. An empty filtered
-   *  list has nothing to run — the key is still claimed, but the palette
-   *  stays open rather than closing on a choice that was never made. */
+  /** Runs the selected entry exactly once, then closes. In free-text mode
+   *  there is no entry to select — Enter resolves to the input's own
+   *  value instead, even when it is "". An empty filtered list otherwise
+   *  has nothing to run — the key is still claimed, but the palette stays
+   *  open rather than closing on a choice that was never made. */
   function chooseSelected(): void {
+    if (freeText) {
+      finishAsk(input.value);
+      closePalette();
+      return;
+    }
     const entry = filtered[index];
     if (entry === undefined) return;
     entry.run();
@@ -149,6 +162,7 @@ export function createPalette(host: HTMLElement): Palette {
   return {
     open(actions, placeholder) {
       finishAsk(undefined);
+      freeText = false;
       entries = actions.map((action) => ({ label: action.label, run: action.run }));
       reset(placeholder);
       show();
@@ -156,6 +170,7 @@ export function createPalette(host: HTMLElement): Palette {
 
     ask(items, placeholder) {
       finishAsk(undefined);
+      freeText = items.length === 0;
       return new Promise<string | undefined>((resolve) => {
         resolveAsk = resolve;
         entries = items.map((item) => ({ label: item, run: () => finishAsk(item) }));

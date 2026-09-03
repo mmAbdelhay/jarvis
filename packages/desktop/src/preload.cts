@@ -71,6 +71,7 @@ const api: RendererApi = {
   suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
   terminalHistory: (paneKey, limit) => ipcRenderer.invoke("terminal:history", paneKey, limit),
   terminalSettings: () => ipcRenderer.invoke("terminal:settings"),
+  terminalWorkflows: (project) => ipcRenderer.invoke("terminal:workflows", project),
   openApiTab: (project) => ipcRenderer.invoke("api:open", project),
   listApiCollections: (project) => ipcRenderer.invoke("api:collections", project),
   readApiTree: (project, path) => ipcRenderer.invoke("api:tree", project, path),

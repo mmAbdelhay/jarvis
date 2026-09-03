@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -94,7 +94,7 @@ import {
   createDirectoryLister,
   createFileReader,
 } from "./completion-source.js";
-import { DEFAULT_CONFIG_PATH, loadConfig } from "./config.js";
+import { DEFAULT_CONFIG_PATH, defaultWorkflowsDir, loadConfig } from "./config.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
@@ -626,6 +626,12 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
       terminal: config.terminal,
+      workflows: {
+        readDir: (path) => readdirSync(path),
+        readFile: (path) => readFileSync(path, "utf8"),
+        config: config.workflows,
+        defaultDir: defaultWorkflowsDir(),
+      },
     });
 
     // Constructed here, not beside headlamp above, because opening the
@@ -1109,6 +1115,9 @@ app.whenReady().then(async () => {
       terminal.resize(tabId as string, cols as number, rows as number);
     });
     ipcMain.handle("terminal:settings", () => terminal.settings());
+    ipcMain.handle("terminal:workflows", (_event, project: unknown) =>
+      terminal.workflows(typeof project === "string" ? project : ""),
+    );
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );

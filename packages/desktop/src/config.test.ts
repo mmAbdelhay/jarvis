@@ -767,3 +767,48 @@ describe("terminal blocks and notifications", () => {
     expect(() => parseConfig(raw)).toThrow(/terminal\.notifyAfterSeconds/);
   });
 });
+
+describe("workflows", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  it("defaults to an empty record when the section is absent — a jarvis.yaml written before workflows existed keeps loading", () => {
+    expect(parseConfig(base).workflows).toEqual({});
+  });
+
+  it("parses a project's workflow directory", () => {
+    const config = parseConfig({
+      ...base,
+      workflows: { acme: "/p/acme/.jarvis/workflows" },
+    });
+
+    expect(config.workflows["acme"]).toBe("/p/acme/.jarvis/workflows");
+  });
+
+  it("expands a leading ~ the same way other paths in config do", () => {
+    const config = parseConfig({ ...base, workflows: { acme: "~/workflows" } });
+
+    expect(config.workflows["acme"]).toBe(join(homedir(), "workflows"));
+  });
+
+  it("rejects a key naming no configured project", () => {
+    expect(() => parseConfig({ ...base, workflows: { nope: "/x" } })).toThrow(
+      'Config `workflows` names no configured project: "nope"',
+    );
+  });
+
+  it("rejects a non-string directory", () => {
+    expect(() => parseConfig({ ...base, workflows: { acme: 7 } })).toThrow(
+      "Config `workflows.acme` must be a non-empty string",
+    );
+  });
+
+  it("rejects a workflows section that is not an object", () => {
+    expect(() => parseConfig({ ...base, workflows: ["nope"] })).toThrow(
+      "Config `workflows` must be an object",
+    );
+  });
+});

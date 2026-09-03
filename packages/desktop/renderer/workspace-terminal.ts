@@ -244,6 +244,16 @@ function makePane(
         return [];
       }
     },
+    // What ⌘P's "Run workflow…" offers — this project's saved workflows.
+    // Guarded the same way `history` is: a channel that fails leaves the
+    // action with nothing to offer, never a terminal that throws.
+    workflows: async () => {
+      try {
+        return await window.jarvis.terminalWorkflows(project);
+      } catch {
+        return [];
+      }
+    },
     interceptKey,
     // The palette's split right / split down / close pane — the same tree
     // handleSplitKey already acts on for the app's own ⌘D/⌘⇧D/⌘W chords.

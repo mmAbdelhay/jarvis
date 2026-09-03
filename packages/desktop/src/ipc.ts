@@ -19,7 +19,12 @@ import {
 } from "@jarvis/core";
 import { join, resolve, sep } from "node:path";
 import type { WorkspaceState } from "@jarvis/core";
-import { awsLoginCommand, eksUpdateKubeconfigArgs, profileForContext } from "@jarvis/platform";
+import {
+  awsLoginCommand,
+  eksUpdateKubeconfigArgs,
+  loadWorkflows,
+  profileForContext,
+} from "@jarvis/platform";
 import type {
   ApiFailure,
   ApiResponse,
@@ -41,6 +46,8 @@ import type {
   HeadlampManager,
   InstalledVoice,
   ShellManager,
+  Workflow,
+  WorkflowsConfig,
 } from "@jarvis/platform";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
@@ -439,6 +446,9 @@ export type RendererApi = {
     notifyAfterSeconds: number;
     home: string;
   }>;
+  /** Every saved workflow the ⌘P palette's "Run workflow…" can offer for
+   *  `project` — see TerminalHandlers.workflows above. */
+  terminalWorkflows(project: string): Promise<Workflow[]>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -857,6 +867,11 @@ export type TerminalHandlers = {
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
   settings(): { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  /** Every saved workflow the palette can offer for `project` — the
+   *  always-read `~/.config/jarvis/workflows/` plus that project's
+   *  configured directory, if it has one. Never rejects: a workflow source
+   *  that cannot be read is a shorter list, not a broken palette. */
+  workflows(project: string): Promise<Workflow[]>;
 };
 
 export type TerminalHandlerDeps = {
@@ -874,6 +889,20 @@ export type TerminalHandlerDeps = {
   /** The `terminal:` section of config, for the renderer-facing settings
    *  channel — see `settings()` above. */
   terminal: TerminalConfig;
+  /** Saved workflows. Absent means no workflow source at all — `workflows()`
+   *  returns [], same as a directory that fails to read. */
+  workflows?:
+    | {
+        readDir: (path: string) => string[];
+        readFile: (path: string) => string;
+        /** Project name → its configured workflow directory, from
+         *  `workflows:` in jarvis.yaml. A project absent here still gets
+         *  `defaultDir`. */
+        config: WorkflowsConfig;
+        /** `~/.config/jarvis/workflows/`, read for every project. */
+        defaultDir: string;
+      }
+    | undefined;
 };
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
@@ -997,6 +1026,21 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       notifyAfterSeconds: deps.terminal.notifyAfterSeconds,
       home: homedir(),
     }),
+
+    async workflows(project) {
+      const workflows = deps.workflows;
+      if (workflows === undefined || !isString(project)) return [];
+      const projectDir = workflows.config[project];
+      const paths = projectDir === undefined ? [workflows.defaultDir] : [workflows.defaultDir, projectDir];
+      try {
+        return loadWorkflows({ readDir: workflows.readDir, readFile: workflows.readFile, paths });
+      } catch {
+        // loadWorkflows never throws on its own, but nothing here is worth
+        // taking a terminal's palette down over — an empty list is what a
+        // closed dropdown already means.
+        return [];
+      }
+    },
   };
 }
 

@@ -17,6 +17,7 @@
 // is an enhancement, so every part of it is guarded: a pane whose block
 // machinery fails is still a working terminal.
 
+import type { Workflow } from "@jarvis/platform";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
@@ -38,6 +39,10 @@ export type PaneHooks = {
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
   history?: (() => Promise<string[]>) | undefined;
+  /** This project's saved workflows, for ⌘P's "Run workflow…". Absent
+   *  means the action is left out of the palette entirely, the same rule
+   *  `splitKeys` follows for split right/split down/close pane. */
+  workflows?: (() => Promise<Workflow[]>) | undefined;
   /** Consulted before the editor acts on a key, while the editor is
    *  visible — the same contract as `TerminalHooks.interceptKey` in
    *  terminal-addons.ts, and for the same reason: terminal-completion.ts's
@@ -465,6 +470,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       run: () => attempt(() => views.forEach((view) => view.collapse(true))),
     });
     actions.push({ id: "clear", label: "Clear terminal", run: () => attempt(() => terminal.clear()) });
+    if (hooks.workflows !== undefined && editor !== undefined) {
+      actions.push({ id: "run-workflow", label: "Run workflow…", run: runWorkflow });
+    }
     if (nav !== undefined) {
       const currentNav = nav;
       actions.push({ id: "jump-next-failed", label: "Jump to next failed", run: jumpToNextFailed });
@@ -498,6 +506,77 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       });
     }
     return actions;
+  }
+
+  /**
+   * "Run workflow…"'s whole flow: ask the palette which saved workflow,
+   * then ask it again for each of that workflow's placeholders in order —
+   * free text, via `palette.ask([], name)` — and put the filled-in command
+   * back in the editor. It fills; it never runs, the same rule
+   * historySearch and re-run both follow.
+   *
+   * Escape at any prompt — the workflow itself, or any one placeholder —
+   * abandons the whole thing: nothing is written to the editor, not even
+   * the placeholders that were already answered. That is `values` never
+   * escaping this function on the path where a `palette.ask` resolves
+   * undefined.
+   *
+   * Never throws into the terminal: a workflow read that fails, or a
+   * palette closed with Escape, simply leaves the editor as it was.
+   */
+  function runWorkflow(): void {
+    const read = hooks.workflows;
+    if (read === undefined || editor === undefined) return;
+    const editorEl = editor;
+    void (async () => {
+      let workflows: Workflow[];
+      try {
+        workflows = await read();
+      } catch {
+        return;
+      }
+      if (workflows.length === 0) return;
+
+      let chosenName: string | undefined;
+      try {
+        chosenName = await palette.ask(
+          workflows.map((workflow) => workflow.name),
+          "Run workflow…",
+        );
+      } catch {
+        return;
+      }
+      if (chosenName === undefined) return;
+      const workflow = workflows.find((candidate) => candidate.name === chosenName);
+      if (workflow === undefined) return;
+
+      const values: Record<string, string> = {};
+      for (const placeholder of workflow.placeholders) {
+        let value: string | undefined;
+        try {
+          value = await palette.ask([], placeholder);
+        } catch {
+          return;
+        }
+        if (value === undefined) return;
+        values[placeholder] = value;
+      }
+
+      attempt(() => editorEl.setValue(fillWorkflow(workflow, values)));
+    })();
+  }
+
+  /** @jarvis/platform's fillWorkflow, restated: substitutes every
+   *  `{{name}}` / `{{ name }}` occurrence a value was supplied for, and
+   *  leaves the rest in place. Restated rather than imported — a renderer
+   *  module may only import *types* from a workspace package (see
+   *  no-value-imports.test.ts); the real implementation, and the tests
+   *  for this exact behaviour, live in workflows.ts. */
+  function fillWorkflow(workflow: Workflow, values: Record<string, string>): string {
+    return workflow.command.replace(/\{\{\s*([^\s{}]+)\s*\}\}/g, (whole: string, name: string) => {
+      const value = values[name];
+      return value === undefined ? whole : value;
+    });
   }
 
   /**

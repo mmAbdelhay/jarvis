@@ -172,3 +172,43 @@ describe("createPalette — ask(items)", () => {
     expect(text).not.toContain("npm run build");
   });
 });
+
+// `ask([], placeholder)` — free text: no list to choose from, so Enter
+// resolves to whatever was typed instead of requiring a match. This is
+// what a workflow's placeholder prompts are built from.
+describe("createPalette — ask([]) free text", () => {
+  it("resolves to whatever was typed on Enter", async () => {
+    const host = document.createElement("div");
+    const palette = createPalette(host);
+
+    const result = palette.ask([], "branch");
+    const input = host.querySelector("input") as HTMLInputElement;
+    typeInto(input, "feature/login");
+    palette.handleKey(keydown("Enter"));
+
+    expect(await result).toBe("feature/login");
+    expect(palette.isOpen()).toBe(false);
+  });
+
+  it("still resolves to undefined on Escape, never to what was typed", async () => {
+    const host = document.createElement("div");
+    const palette = createPalette(host);
+
+    const result = palette.ask([], "branch");
+    const input = host.querySelector("input") as HTMLInputElement;
+    typeInto(input, "feature/login");
+    palette.handleKey(keydown("Escape"));
+
+    expect(await result).toBeUndefined();
+  });
+
+  it("resolves to an empty string when Enter is pressed with nothing typed", async () => {
+    const host = document.createElement("div");
+    const palette = createPalette(host);
+
+    const result = palette.ask([], "branch");
+    palette.handleKey(keydown("Enter"));
+
+    expect(await result).toBe("");
+  });
+});
