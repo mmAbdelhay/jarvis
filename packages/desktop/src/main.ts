@@ -93,6 +93,7 @@ import {
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
+import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
 import { isAllowedNavigation } from "./navigation.js";
 import {
   createCompletionSource,
@@ -697,23 +698,11 @@ app.whenReady().then(async () => {
 
     const favicons = createFaviconStore(join(homedir(), ".config/jarvis/favicons"));
 
-    /** A failure is recorded as a miss so a site without an icon is not
-     *  refetched on every render. */
+    /** The size cap, the image-type check and the miss-on-failure rule all
+     *  live in favicon-fetch.ts, where they are testable without Electron.
+     *  This is only the binding of the store to it. */
     async function cacheFavicon(pageUrl: string, iconUrl: string, from: Session): Promise<void> {
-      try {
-        const response = await from.fetch(iconUrl);
-        if (!response.ok) {
-          await favicons.putMiss(pageUrl);
-          return;
-        }
-        const type = response.headers.get("content-type") ?? "image/png";
-        await favicons.put(pageUrl, new Uint8Array(await response.arrayBuffer()), type);
-      } catch {
-        // Unreachable host or malformed icon url. Recorded as a miss, not
-        // surfaced: the tile falls back to a monogram and the user has
-        // nothing to act on.
-        await favicons.putMiss(pageUrl);
-      }
+      await fetchFavicon(favicons, pageUrl, iconUrl, from);
     }
 
     /** The fallback path, for a bookmark never opened in Jarvis — which is
