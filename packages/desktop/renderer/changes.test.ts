@@ -109,6 +109,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     listBookmarks: vi.fn(async () => notStubbed),
     addBookmark: vi.fn(async () => notStubbed),
     removeBookmark: vi.fn(async () => notStubbed),
+    setBookmarkPinned: vi.fn(async () => notStubbed),
+    reorderBookmarks: vi.fn(async () => notStubbed),
     getSettings: vi.fn(async () => {
       throw new Error("not stubbed in this test");
     }),

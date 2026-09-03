@@ -221,6 +221,12 @@ export const MESSAGES = {
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر حفظ العلامات المرجعية." : "Could not save bookmarks.",
+  /** The store refuses a thirteenth pin; this is the only place that turns
+   *  its "pin-limit" token into words. */
+  bookmarkPinLimit: (limit: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `لا يمكن تثبيت أكثر من ${limit} إشارة في الشبكة.`
+      : `The grid holds ${limit} bookmarks; unpin one first.`,
   // Stands in the bookmarks bar when the selected project has none. An
   // empty one-line strip under the address bar reads as a rendering glitch
   // rather than as an empty list, and the star that fills it is two
