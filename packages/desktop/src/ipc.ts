@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
   checkAgent,
   gitFailureText,
@@ -42,7 +43,7 @@ import type {
   ShellManager,
 } from "@jarvis/platform";
 import type { CompletionSource } from "./completion-source.js";
-import type { JarvisConfig } from "./config.js";
+import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
 export type VoiceNotice = { text: string; language: "ar" | "en" };
@@ -423,6 +424,15 @@ export type RendererApi = {
    *  one is a whole replacement line. An empty array means no dropdown —
    *  and so zsh's own Tab completion, unchanged. */
   suggestCompletions(tabId: string, input: string): Promise<string[]>;
+  /** What the renderer needs to know about how terminals behave. Read once
+   *  per pane; a change to jarvis.yaml takes effect on restart, like every
+   *  other terminal setting. */
+  terminalSettings(): Promise<{
+    blocks: boolean;
+    inputEditor: boolean;
+    notifyAfterSeconds: number;
+    home: string;
+  }>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -817,6 +827,10 @@ export type TerminalHandlers = {
    *  ordinary answer — a closed dropdown, and zsh's own Tab completion
    *  behaving exactly as it does today. */
   suggest(tabId: string, input: string): Promise<string[]>;
+  /** What the renderer needs to know about how terminals behave. Read
+   *  once per pane; a change to jarvis.yaml takes effect on restart, like
+   *  every other terminal setting. */
+  settings(): { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
 };
 
 export type TerminalHandlerDeps = {
@@ -831,6 +845,9 @@ export type TerminalHandlerDeps = {
    *  suggestions at all, which is a terminal exactly as it was before the
    *  feature existed. */
   completion?: { source: CompletionSource; enabled: boolean } | undefined;
+  /** The `terminal:` section of config, for the renderer-facing settings
+   *  channel — see `settings()` above. */
+  terminal: TerminalConfig;
 };
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
@@ -885,6 +902,15 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         return [];
       }
     },
+
+    settings: () => ({
+      blocks: deps.terminal.blocks.enabled,
+      // `&&`-ed deliberately: there is no editor without blocks, and one
+      // flag the renderer can trust beats two it has to combine.
+      inputEditor: deps.terminal.blocks.enabled && deps.terminal.blocks.inputEditor,
+      notifyAfterSeconds: deps.terminal.notifyAfterSeconds,
+      home: homedir(),
+    }),
   };
 }
 

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,7 +27,7 @@ import type {
 } from "@jarvis/platform";
 import type { AgentHealth, WorkspaceState } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
-import type { JarvisConfig } from "./config.js";
+import type { JarvisConfig, TerminalConfig } from "./config.js";
 
 // Shared fixture for buildWiring's provider-facing tests: everything a
 // WiringDeps needs, wired to a `sent` capture array instead of a bare
@@ -946,7 +947,11 @@ const sampleConfig: JarvisConfig = {
   editors: {},
   clusters: {},
   headlamp: { binary: "/some/path" },
-  terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
+  terminal: {
+    completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
+    blocks: { enabled: true, inputEditor: true },
+    notifyAfterSeconds: 30,
+  },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",
@@ -1408,6 +1413,12 @@ users:
 });
 
 describe("terminal handlers", () => {
+  const terminalConfig: TerminalConfig = {
+    completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
+    blocks: { enabled: true, inputEditor: true },
+    notifyAfterSeconds: 30,
+  };
+
   function shells(): {
     manager: ShellManager;
     started: { tabId: string; cwd: string }[];
@@ -1443,6 +1454,7 @@ describe("terminal handlers", () => {
       },
       projects: { acme: "/p/acme" },
       language: "en",
+      terminal: terminalConfig,
     });
 
     const result = handlers.open("acme");
@@ -1463,6 +1475,7 @@ describe("terminal handlers", () => {
       },
       projects: { acme: "/p/acme" },
       language: "en",
+      terminal: terminalConfig,
     });
 
     const result = handlers.open("nope");
@@ -1479,6 +1492,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: { acme: "/p/acme" },
       language: "en",
+      terminal: terminalConfig,
     });
 
     expect(handlers.open(undefined as unknown as string).ok).toBe(false);
@@ -1491,6 +1505,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: {},
       language: "en",
+      terminal: terminalConfig,
     });
 
     handlers.input("tab-7", "ls\r");
@@ -1506,6 +1521,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: {},
       language: "en",
+      terminal: terminalConfig,
     });
 
     handlers.input(undefined as unknown as string, "ls");
@@ -1522,6 +1538,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: {},
       language: "en",
+      terminal: terminalConfig,
     });
 
     handlers.resize("tab-7", "80" as unknown as number, 24);
@@ -1537,6 +1554,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: {},
       language: "en",
+      terminal: terminalConfig,
     });
 
     handlers.close("tab-7");
@@ -1553,6 +1571,7 @@ describe("terminal handlers", () => {
       openTerminalTab: () => "tab-7",
       projects: { acme: "/p/acme" },
       language: "en",
+      terminal: terminalConfig,
       completion,
     });
   }
@@ -1625,6 +1644,37 @@ describe("terminal handlers", () => {
 
     expect(await handlers.suggest(7 as unknown as string, "git")).toEqual([]);
     expect(await handlers.suggest("tab-7", 7 as unknown as string)).toEqual([]);
+  });
+
+  it("reports the renderer-facing settings straight from config, with home", () => {
+    const { manager } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+      terminal: terminalConfig,
+    });
+
+    expect(handlers.settings()).toEqual({
+      blocks: true,
+      inputEditor: true,
+      notifyAfterSeconds: 30,
+      home: homedir(),
+    });
+  });
+
+  it("reports blocks off when the config says so, and never an editor without blocks", () => {
+    const { manager } = shells();
+    const handlers = createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: {},
+      language: "en",
+      terminal: { ...terminalConfig, blocks: { enabled: false, inputEditor: true } },
+    });
+
+    expect(handlers.settings()).toMatchObject({ blocks: false, inputEditor: false });
   });
 });
 

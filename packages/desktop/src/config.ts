@@ -55,6 +55,13 @@ export type TerminalConfig = {
      *  working directory and directory affinity needs one. */
     commandLogPath: string;
   };
+  /** Blocks, and the DOM input editor that only exists inside them. Two
+   *  switches rather than one: the editor is the invasive half, and turning
+   *  it off must not cost the user their blocks. */
+  blocks: { enabled: boolean; inputEditor: boolean };
+  /** A command that finishes after this many seconds with its pane
+   *  unfocused raises a notification. 0 disables it. */
+  notifyAfterSeconds: number;
 };
 
 export type JarvisConfig = {
@@ -600,13 +607,26 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
       historyPath: DEFAULT_HISTORY_PATH,
       commandLogPath: DEFAULT_COMMAND_LOG_PATH,
     },
+    blocks: { enabled: true, inputEditor: true },
+    notifyAfterSeconds: 30,
   };
   if (rawTerminal === undefined) return defaults;
   if (typeof rawTerminal !== "object" || rawTerminal === null || Array.isArray(rawTerminal)) {
     throw new Error("Config `terminal` must be an object");
   }
+  const terminal = rawTerminal as Record<string, unknown>;
 
-  const rawCompletion = (rawTerminal as Record<string, unknown>)["completion"];
+  return {
+    completion: parseTerminalCompletion(terminal["completion"], defaults.completion),
+    blocks: parseTerminalBlocks(terminal["blocks"], defaults.blocks),
+    notifyAfterSeconds: parseNotifyAfterSeconds(terminal["notifyAfterSeconds"], defaults.notifyAfterSeconds),
+  };
+}
+
+function parseTerminalCompletion(
+  rawCompletion: unknown,
+  defaults: TerminalConfig["completion"],
+): TerminalConfig["completion"] {
   if (rawCompletion === undefined) return defaults;
   if (
     typeof rawCompletion !== "object" ||
@@ -631,12 +651,43 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
   };
 
   return {
-    completion: {
-      enabled: enabled ?? true,
-      historyPath: path("historyPath", DEFAULT_HISTORY_PATH),
-      commandLogPath: path("commandLogPath", DEFAULT_COMMAND_LOG_PATH),
-    },
+    enabled: enabled ?? defaults.enabled,
+    historyPath: path("historyPath", defaults.historyPath),
+    commandLogPath: path("commandLogPath", defaults.commandLogPath),
   };
+}
+
+function parseTerminalBlocks(
+  rawBlocks: unknown,
+  defaults: TerminalConfig["blocks"],
+): TerminalConfig["blocks"] {
+  if (rawBlocks === undefined) return defaults;
+  if (typeof rawBlocks !== "object" || rawBlocks === null || Array.isArray(rawBlocks)) {
+    throw new Error("Config `terminal.blocks` must be an object");
+  }
+  const blocks = rawBlocks as Record<string, unknown>;
+
+  const enabled = blocks["enabled"];
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("Config `terminal.blocks.enabled` must be true or false");
+  }
+  const inputEditor = blocks["inputEditor"];
+  if (inputEditor !== undefined && typeof inputEditor !== "boolean") {
+    throw new Error("Config `terminal.blocks.inputEditor` must be true or false");
+  }
+
+  return {
+    enabled: enabled ?? defaults.enabled,
+    inputEditor: inputEditor ?? defaults.inputEditor,
+  };
+}
+
+function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
+  if (rawValue === undefined) return fallback;
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue) || rawValue < 0) {
+    throw new Error("Config `terminal.notifyAfterSeconds` must be a number of seconds, or 0");
+  }
+  return rawValue;
 }
 
 /** The `headlamp:` section. One key, with a per-OS default, so an absent

@@ -625,6 +625,7 @@ app.whenReady().then(async () => {
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
+      terminal: config.terminal,
     });
 
     // Constructed here, not beside headlamp above, because opening the
@@ -1096,6 +1097,7 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:resize", (_event, tabId: unknown, cols: unknown, rows: unknown) => {
       terminal.resize(tabId as string, cols as number, rows as number);
     });
+    ipcMain.handle("terminal:settings", () => terminal.settings());
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );
