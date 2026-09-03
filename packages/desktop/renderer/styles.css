@@ -916,8 +916,16 @@
     font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; }
   .terminal-input-prompt { flex: 0 0 auto; white-space: pre; color: var(--text-muted); }
   .terminal-input-field { position: relative; flex: 1 1 auto; min-width: 0; }
-  .terminal-input-paint { position: absolute; inset: 0; pointer-events: none; white-space: pre-wrap; }
-  .terminal-input-text { width: 100%; background: transparent; color: transparent;
+  /* Chromium's UA stylesheet gives <textarea> non-zero default padding (and
+     browsers vary on border/overflow too); a plain <div>'s defaults are all
+     zero/visible. Left alone, the textarea's text renders inset from the
+     painted layer's and the caret drifts from the highlight. Pin every
+     box-model property both elements share so their defaults cannot differ,
+     not only the ones this stylesheet happens to set. */
+  .terminal-input-paint { position: absolute; inset: 0; margin: 0; padding: 0; border: 0;
+    overflow: hidden; pointer-events: none; white-space: pre-wrap; }
+  .terminal-input-text { width: 100%; margin: 0; padding: 0; overflow: hidden;
+    background: transparent; color: transparent;
     caret-color: var(--accent); border: 0; outline: 0; resize: none; white-space: pre-wrap;
     font: inherit; }
   .tok-command { color: var(--accent); }

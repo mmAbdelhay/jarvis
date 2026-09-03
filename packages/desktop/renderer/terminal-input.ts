@@ -156,12 +156,24 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
     textarea.selectionEnd = lineStart;
   }
 
+  function lineEndFrom(pos: number): number {
+    const lineEnd = textarea.value.indexOf("\n", pos);
+    return lineEnd === -1 ? textarea.value.length : lineEnd;
+  }
+
   function moveCursorToLineEnd() {
-    const pos = textarea.selectionStart ?? textarea.value.length;
-    let lineEnd = textarea.value.indexOf("\n", pos);
-    if (lineEnd === -1) lineEnd = textarea.value.length;
+    const lineEnd = lineEndFrom(textarea.selectionStart ?? textarea.value.length);
     textarea.selectionStart = lineEnd;
     textarea.selectionEnd = lineEnd;
+  }
+
+  function killToLineEnd() {
+    const pos = textarea.selectionStart ?? textarea.value.length;
+    const lineEnd = lineEndFrom(pos);
+    textarea.value = textarea.value.slice(0, pos) + textarea.value.slice(lineEnd);
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    repaint();
   }
 
   function historyStep(delta: number) {
@@ -204,17 +216,10 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
             event.preventDefault();
             moveCursorToLineEnd();
             return;
-          case "k": {
+          case "k":
             event.preventDefault();
-            const pos = textarea.selectionStart ?? textarea.value.length;
-            let lineEnd = textarea.value.indexOf("\n", pos);
-            if (lineEnd === -1) lineEnd = textarea.value.length;
-            textarea.value = textarea.value.slice(0, pos) + textarea.value.slice(lineEnd);
-            textarea.selectionStart = pos;
-            textarea.selectionEnd = pos;
-            repaint();
+            killToLineEnd();
             return;
-          }
           default:
             // Every other Ctrl chord — ^C, ^D above all — is not ours to
             // eat: it is how a user interrupts a command or exits a shell.
@@ -241,28 +246,45 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   wrapper.addEventListener("keydown", onKeyDown);
   textarea.addEventListener("input", repaint);
 
+  // Nothing this widget does may throw into the terminal it sits in front
+  // of — it is an enhancement, and a bug here must leave a usable terminal
+  // behind. Every public method below runs through this guard.
+  function guard(fn: () => void) {
+    try {
+      fn();
+    } catch {
+      // Swallowed deliberately: see the comment above.
+    }
+  }
+
   return {
     element: wrapper,
     value: () => textarea.value,
     setValue(text: string) {
-      textarea.value = text;
-      setCursorToEnd();
-      repaint();
+      guard(() => {
+        textarea.value = text;
+        setCursorToEnd();
+        repaint();
+      });
     },
     focus() {
-      textarea.focus();
+      guard(() => textarea.focus());
     },
     show(prompt: string) {
-      // A prompt is user-configured text arriving from the shell — untrusted
-      // exactly like a command line — so it goes in via textContent, never
-      // markup. An empty prompt clears the element rather than leaving
-      // whatever a previous show() rendered.
-      promptEl.textContent = prompt;
-      wrapper.hidden = false;
+      guard(() => {
+        // A prompt is user-configured text arriving from the shell —
+        // untrusted exactly like a command line — so it goes in via
+        // textContent, never markup. An empty prompt clears the element
+        // rather than leaving whatever a previous show() rendered.
+        promptEl.textContent = prompt;
+        wrapper.hidden = false;
+      });
     },
     hide() {
-      wrapper.hidden = true;
-      promptEl.textContent = "";
+      guard(() => {
+        wrapper.hidden = true;
+        promptEl.textContent = "";
+      });
     },
     isVisible() {
       return !wrapper.hidden;

@@ -37,6 +37,18 @@ describe("the input editor", () => {
     expect(e.value()).toBe("git commit ");
   });
 
+  it("kills the word before the cursor on ^W mid-line, leaving the rest", () => {
+    const { editor: e } = editor();
+    e.setValue("git commit --amend now");
+    const textarea = e.element.querySelector("textarea") as HTMLTextAreaElement;
+    // Cursor right after "--amend", before the space and "now".
+    const pos = "git commit --amend".length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    press(e.element, { key: "w", ctrlKey: true });
+    expect(e.value()).toBe("git commit  now");
+  });
+
   it("kills the whole line on ^U", () => {
     const { editor: e } = editor();
     e.setValue("rm -rf /");
@@ -44,16 +56,22 @@ describe("the input editor", () => {
     expect(e.value()).toBe("");
   });
 
-  it("hands ^C to the pty rather than eating it", () => {
+  it("hands ^C to the pty rather than eating it, leaving the value alone", () => {
     const { editor: e, hooks } = editor();
+    e.setValue("sleep 10");
     press(e.element, { key: "c", ctrlKey: true });
     expect(hooks.passthrough).toHaveBeenCalled();
+    expect(e.value()).toBe("sleep 10");
+    expect(hooks.submit).not.toHaveBeenCalled();
   });
 
-  it("hands ^D to the pty, so exit still exits", () => {
+  it("hands ^D to the pty, so exit still exits, leaving the value alone", () => {
     const { editor: e, hooks } = editor();
+    e.setValue("");
     press(e.element, { key: "d", ctrlKey: true });
     expect(hooks.passthrough).toHaveBeenCalled();
+    expect(e.value()).toBe("");
+    expect(hooks.submit).not.toHaveBeenCalled();
   });
 
   it("walks Jarvis's own history with the arrows", () => {
@@ -105,5 +123,26 @@ describe("the input editor", () => {
     e.hide();
     e.show("");
     expect(e.element.querySelector(".terminal-input-prompt")?.textContent).toBe("");
+  });
+
+  it("tokenizes a single word with no spaces as just the command", () => {
+    const { editor: e } = editor();
+    e.setValue("ls");
+    expect(e.element.querySelector(".tok-command")?.textContent).toBe("ls");
+    expect(e.element.textContent).toBe("ls");
+  });
+
+  it("tokenizes an all-whitespace line without throwing", () => {
+    const { editor: e } = editor();
+    e.setValue("   ");
+    expect(e.element.querySelector(".tok-command")).toBeNull();
+    expect(e.element.textContent).toBe("   ");
+  });
+
+  it("tokenizes one very long token without hanging", () => {
+    const { editor: e } = editor();
+    const long = "a".repeat(50_000);
+    e.setValue(long);
+    expect(e.element.querySelector(".tok-command")?.textContent).toBe(long);
   });
 });
