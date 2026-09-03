@@ -13,6 +13,7 @@ it.
 | `terminal` | A login shell under a pty | hidden |
 | `api` | The API client | hidden |
 | `cluster` | A Kubernetes cluster browser | hidden |
+| `docker` | The project's containers | hidden |
 
 Browser chrome belongs to browser tabs: anything that is not a plain page hides
 the address bar and the bookmarks bar beneath it, because nobody navigates an
@@ -62,10 +63,11 @@ on disk**, and everything follows from that:
 - **Editor, Database, Terminal and API are disabled**, with the reason shown
   beside them. There is no folder to edit, no cwd for a shell, and no
   collection tree to read.
-- **Cluster is disabled too, but for a different reason**: Personal has no
-  `clusters:` entry, not because it has no directory. The reason shown beside
-  the button says so — "No clusters configured for this project" — the same
-  message any ordinary project gets when it declares none.
+- **Cluster and Docker are disabled too, but for a different reason**: Personal
+  has no `clusters:` entry and no `docker:` entry, not because it has no
+  directory. The reason shown beside each button says so — "No clusters
+  configured for this project", "No containers configured for this project" —
+  the same message any ordinary project gets when it declares none.
 - **It never appears where "a project" means "a repo".** The Changes view, git
   polling, session routing and the Dashboard's project list all resolve a
   project through `projects:` in `jarvis.yaml`, which it is deliberately absent
@@ -188,6 +190,27 @@ follows. If it does not, see
 
 Like the Editor tab, the server binds to `127.0.0.1` only — no generated
 login, because loopback is the whole mitigation.
+
+## Docker
+
+One tab per project, listing the containers `docker:` maps to it. Each row
+shows the container's own status line (Docker's words, unchanged) with
+**Start**, or **Stop** and **Restart** according to what it is doing, and
+**Shell**, which opens a Terminal tab already inside the container. A row
+configured in `docker:` with no matching container shows greyed out instead of
+a status — see
+[troubleshooting](troubleshooting.md#a-container-in-the-docker-tab-is-greyed-out).
+
+Selecting a row tails its log in the pane below the list — one `docker logs
+-f` at a time, for the row you are looking at. When every container in the
+list belongs to one compose project, **Up** and **Down** appear beneath the
+rows and above the log, and act on the stack as a whole.
+
+Stop, Restart and Down ask first. Start and Up do not: neither interrupts
+anything that is running.
+
+The list refreshes every three seconds while the tab is visible, because
+containers stop without asking Jarvis first.
 
 ## Terminal
 

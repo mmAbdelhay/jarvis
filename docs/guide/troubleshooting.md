@@ -102,6 +102,31 @@ and it did not succeed within three minutes — a declined or missed MFA push,
 a wrong password, or `saml2aws` itself erroring. The terminal tab is left
 open; check it, finish or retry the login by hand, then click Cluster again.
 
+## The Docker button is disabled
+
+The project declares no containers. That is the only thing the button can know
+without running `docker` on every project switch, so it is the only reason it
+ever shows. Settings will fill the section in for you — Docker → Auto-populate.
+
+## The Docker tab says Docker is not installed, or that the daemon is down
+
+These two say what they say, and they need different fixes. Jarvis resolves
+`docker` the way it resolves `aws`, through a login shell's PATH: a Docker
+installed for your shell is one Jarvis can find, one installed only for a GUI
+session is not. A daemon that is not running is Docker Desktop, OrbStack or
+colima not started — start it and reopen the tab.
+
+They appear inside the tab rather than on the button because finding out costs
+a subprocess, and the button would have to pay it every time you switched
+project.
+
+## A container in the Docker tab is greyed out
+
+It is configured in `docker:` but Docker has no container by that name. Either
+the stack is down — bring it up and the row fills in — or the container was
+renamed, in which case fix the name in Settings. Jarvis will not remove your
+declaration on your behalf.
+
 ## Voice does nothing
 
 `whisper.binaryPath` and `whisper.modelPath` must both point at files that
