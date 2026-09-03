@@ -20,6 +20,7 @@
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
+import { createEditor, type TerminalEditor } from "./terminal-input.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
@@ -31,6 +32,10 @@ export type PaneHooks = {
   /** The full renderer-facing settings payload — see window.jarvis.terminalSettings()
    *  in src/ipc.ts, which is where `home` comes from. */
   settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  /** The most recent commands from Jarvis's own command log, newest first —
+   *  what ↑/↓ in the command editor walk. Absent (or failing) means the
+   *  arrows find nothing, which is a line that simply does not change. */
+  history?: (() => Promise<string[]>) | undefined;
 };
 
 export type { BlockView };
@@ -66,6 +71,33 @@ function attempt(work: () => void): void {
   } catch {
     // The terminal is untouched.
   }
+}
+
+/** The keys a terminal encodes as something other than themselves. */
+const NAMED_KEYS: Readonly<Record<string, string>> = {
+  Enter: "\r",
+  Tab: "\t",
+  Escape: "\u001b",
+  Backspace: "\u007f",
+};
+
+/**
+ * What the pty should receive for a key the editor would not handle.
+ *
+ * A Ctrl chord over a letter is the C0 byte the terminal has always sent for
+ * it — ^C is \u0003, ^D is \u0004 — which is the whole reason this path
+ * exists: losing those two would make the terminal feel broken. Anything
+ * else goes as its ordinary encoding, and a key with no encoding at all
+ * (a bare modifier, a function key) sends nothing rather than a guess.
+ */
+export function controlByte(event: KeyboardEvent): string | undefined {
+  const named = NAMED_KEYS[event.key];
+  if (named !== undefined) return named;
+  if (event.key.length !== 1) return undefined;
+  if (!event.ctrlKey) return event.key;
+  const code = event.key.toUpperCase().charCodeAt(0);
+  // @ through _ — the range a Ctrl chord maps into the C0 controls.
+  return code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : event.key;
 }
 
 export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
@@ -114,6 +146,142 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   /** A tab can be closed while its buffered prologue is still in flight, and
    *  writing to a disposed xterm throws. */
   let disposed = false;
+  /** Whether the shell has ever said "here is a prompt". Until it has, there
+   *  is no integration to trust: Jarvis cannot tell a prompt from `sudo`
+   *  asking for a password, so the editor never appears and every keystroke
+   *  goes to the pty exactly as it does today. */
+  let sawPrompt = false;
+  /** The command log, newest first, and where ↑/↓ have walked to in it.
+   *  -1 is the line the user is typing. */
+  let historyLines: readonly string[] = [];
+  let historyIndex = -1;
+
+  /**
+   * The last line the live terminal drew before the cursor — the prompt,
+   * since the editor is only ever shown at an idle one.
+   *
+   * Read out of xterm's buffer, exactly as terminal-completion.ts reads the
+   * typed line, and never modelled by accumulating keystrokes. What is on
+   * the screen is what the shell drew, so this cannot come to disagree with
+   * what the shell believes; a model of the prompt would, the first time a
+   * precmd repainted it.
+   */
+  function promptText(): string {
+    try {
+      const buffer = terminal.buffer.active;
+      const line = buffer.getLine(buffer.baseY + buffer.cursorY);
+      if (line === undefined) return "";
+      // Verbatim, up to the cursor: the cursor is where the prompt stops,
+      // so there is no padding to trim and the trailing space a prompt
+      // usually ends in is part of it.
+      return line.translateToString(false, 0, buffer.cursorX);
+    } catch {
+      // A disposed terminal, or a row that has scrolled away: an unlabelled
+      // editor beats an exception.
+      return "";
+    }
+  }
+
+  /** Fresh at every prompt: the command just run is the one most likely to
+   *  be wanted back, and the arrows start from the empty line again. */
+  function loadHistory(): void {
+    historyIndex = -1;
+    historyLines = [];
+    const read = hooks.history;
+    if (read === undefined) return;
+    attempt(() => {
+      void read()
+        .then((lines) => {
+          if (!disposed) historyLines = lines;
+        })
+        .catch(() => {
+          // No history. The arrows leave the line alone.
+        });
+    });
+  }
+
+  /** ↑ (delta < 0) walks back into the log, ↓ walks forward and off the end
+   *  of it to the empty line the user started from. Undefined means "leave
+   *  the line as it is" — at the oldest command, or already on that empty
+   *  line. */
+  function historyStep(delta: number): string | undefined {
+    const next = historyIndex + (delta < 0 ? 1 : -1);
+    if (next >= historyLines.length) return undefined;
+    if (next < 0) {
+      if (historyIndex < 0) return undefined;
+      historyIndex = -1;
+      return "";
+    }
+    historyIndex = next;
+    return historyLines[next];
+  }
+
+  /** Focus follows the editor, but only inside a pane that already holds it:
+   *  a command finishing in a background tab must not steal the caret from
+   *  wherever the user actually is. */
+  function refocus(editorEl: TerminalEditor): void {
+    if (!element.contains(document.activeElement)) return;
+    if (editorEl.isVisible()) editorEl.focus();
+    else terminal.focus();
+  }
+
+  const editor = hooks.settings.inputEditor ? buildEditor() : undefined;
+
+  function buildEditor(): TerminalEditor | undefined {
+    try {
+      return createEditor(element, {
+        // The one thing that runs a command, and only from a key the user
+        // pressed: the line, then the carriage return the shell is waiting
+        // for. Nothing else here writes a newline to the pty.
+        submit: (line) => attempt(() => hooks.sendInput(`${line}\r`)),
+        // Not ours to eat — ^C interrupts, ^D ends the shell. The byte goes
+        // to the pty and the browser is told to keep its hands off the key.
+        passthrough: (event) =>
+          attempt(() => {
+            const byte = controlByte(event);
+            if (byte === undefined) return;
+            event.preventDefault();
+            hooks.sendInput(byte);
+          }),
+        history: (delta) => historyStep(delta),
+      });
+    } catch {
+      // No editor. The terminal underneath is untouched and takes the keys.
+      return undefined;
+    }
+  }
+
+  /** Whether the shell is sitting at a prompt with nothing running: the one
+   *  moment the editor may stand in front of it. A program that leaves the
+   *  alternate screen part-way through its run (a script that calls vim and
+   *  carries on) is still running, and its keys are still its own. */
+  function idle(): boolean {
+    return sawPrompt && splitter.active() === undefined;
+  }
+
+  /**
+   * The state → visibility rule, in one place.
+   *
+   * The editor is shown in "blocks" — and only there, and only once the
+   * shell's integration has proved itself — and hidden in "running", "alt"
+   * and "plain". Scattering show() calls through the event handlers is how a
+   * pane ends up with an editor over a running command, eating the keystroke
+   * that would have interrupted it.
+   */
+  function applyState(state: "blocks" | "running" | "alt" | "plain"): void {
+    element.dataset["state"] = state;
+    const editorEl = editor;
+    if (editorEl === undefined) return;
+    attempt(() => {
+      if (state === "blocks" && idle()) {
+        loadHistory();
+        editorEl.show(promptText());
+      } else {
+        editorEl.hide();
+      }
+      refocus(editorEl);
+    });
+  }
 
   // Re-run and copy, for a block with no input editor yet (that is a later
   // task): fill types the command at the live prompt without a trailing
@@ -152,15 +320,11 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       return;
     }
     if (event.type === "alt-screen") {
-      attempt(() => {
-        element.dataset["state"] = event.active ? "alt" : "blocks";
-      });
+      attempt(() => applyState(event.active ? "alt" : "blocks"));
       return;
     }
     if (event.type === "command-start") {
-      attempt(() => {
-        element.dataset["state"] = "running";
-      });
+      attempt(() => applyState("running"));
       return;
     }
     if (event.type === "block-done") {
@@ -170,9 +334,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       attempt(() => freeze(event.block));
       // The frozen block now holds what the live terminal was drawing.
       terminal.reset();
-      attempt(() => {
-        element.dataset["state"] = "blocks";
-      });
+      attempt(() => applyState("blocks"));
       // renderOutput() paints a block's output a macrotask after
       // createBlockView() returns (see its own contract) — scrolling here,
       // synchronously, would settle at a height that does not include that
@@ -187,7 +349,21 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       }, 0);
       return;
     }
-    // "prompt": nothing to do — the live terminal is already drawing it.
+    if (event.type === "prompt") {
+      // The shell's integration has spoken: from here on this pane knows a
+      // prompt when it sees one.
+      sawPrompt = true;
+      attempt(() => applyState("blocks"));
+      // The prompt's own bytes are still on their way through xterm's
+      // parser when this arrives, so the row promptText() reads is the
+      // previous one. Re-read once the screen has caught up; the editor's
+      // visibility is already settled above, and only its label changes.
+      setTimeout(() => {
+        if (disposed || editor === undefined || !editor.isVisible()) return;
+        attempt(() => editor.show(promptText()));
+      }, 0);
+    }
+    // Everything else the live terminal is already drawing.
   }
 
   function write(chunk: string): void {
@@ -225,7 +401,15 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     element,
     terminal,
     write,
-    focus: () => terminal.focus(),
+    // The editor has the keys whenever it is on screen; the terminal has
+    // them every other moment.
+    focus: () => {
+      if (editor !== undefined && editor.isVisible()) {
+        editor.focus();
+        return;
+      }
+      terminal.focus();
+    },
     refit: () => {
       // A pane with no layout yet (hidden, or the window minimised) measures
       // as zero and would make the addon throw.

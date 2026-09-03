@@ -69,6 +69,7 @@ const api: RendererApi = {
   clusterNames: (project) => ipcRenderer.invoke("cluster:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
   suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
+  terminalHistory: (paneKey, limit) => ipcRenderer.invoke("terminal:history", paneKey, limit),
   terminalSettings: () => ipcRenderer.invoke("terminal:settings"),
   openApiTab: (project) => ipcRenderer.invoke("api:open", project),
   listApiCollections: (project) => ipcRenderer.invoke("api:collections", project),

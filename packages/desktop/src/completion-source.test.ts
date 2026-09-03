@@ -126,4 +126,26 @@ describe("createCompletionSource", () => {
 
     expect(reads).toBe(2);
   });
+  // The editor's arrows read this: Jarvis's own log, newest first, with a
+  // command run twice appearing once — and read fresh every time, because
+  // the command you just ran is the one you are most likely to want back.
+  it("gives the command log's commands newest first, deduplicated and capped", async () => {
+    const instance = source({
+      readCommandLog: async () =>
+        "100\t/p\tls\n101\t/p\tgit status\n102\t/p\tls\n103\t/p\tmake\n",
+    });
+
+    expect(await instance.history(2)).toEqual(["make", "ls"]);
+    expect(await instance.history(10)).toEqual(["make", "ls", "git status"]);
+  });
+
+  it("gives no history when the command log cannot be read", async () => {
+    const instance = source({
+      readCommandLog: async () => {
+        throw new Error("gone");
+      },
+    });
+
+    await expect(instance.history(10)).resolves.toEqual([]);
+  });
 });

@@ -1091,6 +1091,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:suggest", (_event, tabId: unknown, input: unknown) =>
       terminal.suggest(tabId as string, input as string),
     );
+    ipcMain.handle("terminal:history", (_event, paneKey: unknown, limit: unknown) =>
+      terminal.history(paneKey as string, limit as number),
+    );
     ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
       terminal.input(tabId as string, data as string);
     });

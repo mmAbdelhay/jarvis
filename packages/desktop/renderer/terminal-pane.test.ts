@@ -163,3 +163,154 @@ describe("a terminal pane", () => {
     expect(p.element.querySelector(".terminal-blocks")?.children).toHaveLength(500);
   });
 });
+
+// The command editor: a DOM line that stands in front of the shell, but
+// only while the shell is sitting at an idle prompt. Every other moment —
+// a command running, a full-screen program, a shell with no integration at
+// all — the editor is gone and keystrokes go to the pty raw, which is what
+// keeps a sudo password prompt, `git rebase -i` and a ^C for a hung command
+// working exactly as they do today.
+describe("the command editor in a pane", () => {
+  const EDITOR_SETTINGS = {
+    blocks: true,
+    inputEditor: true,
+    notifyAfterSeconds: 0,
+    home: "/Users/x",
+  };
+
+  function editorPane(
+    settings: {
+      blocks: boolean;
+      inputEditor: boolean;
+      notifyAfterSeconds: number;
+      home: string;
+    } = EDITOR_SETTINGS,
+    history: () => Promise<string[]> = async () => [],
+  ) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const sendInput = vi.fn();
+    const p = createPane(host, {
+      sendInput,
+      resize: vi.fn(),
+      attach: async () => "",
+      settings,
+      history,
+    });
+    return { p, sendInput };
+  }
+
+  const editorEl = (p: { element: HTMLElement }) =>
+    p.element.querySelector<HTMLElement>(".terminal-input");
+  const textarea = (p: { element: HTMLElement }) =>
+    p.element.querySelector<HTMLTextAreaElement>("textarea.terminal-input-text");
+
+  function press(p: { element: HTMLElement }, init: KeyboardEventInit): void {
+    textarea(p)?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
+  }
+
+  it("shows the editor once the shell says it is at a prompt", () => {
+    const { p } = editorPane();
+    p.write(`${A}$ ${B}`);
+    expect(p.element.dataset["state"]).toBe("blocks");
+    expect(editorEl(p)?.hidden).toBe(false);
+  });
+
+  it("hides the editor while a command is running", () => {
+    const { p } = editorPane();
+    p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+    expect(p.element.dataset["state"]).toBe("running");
+    expect(editorEl(p)?.hidden).toBe(true);
+  });
+
+  // A TUI owns the screen and every key on it; an editor drawn over that
+  // would swallow the keys the program is waiting for.
+  it("hides the editor while a program holds the alternate screen", () => {
+    const { p } = editorPane();
+    p.write(`${A}$ ${B}top\r\n${C("top")}\u001b[?1049h`);
+    expect(p.element.dataset["state"]).toBe("alt");
+    expect(editorEl(p)?.hidden).toBe(true);
+    // Leaving the alternate screen is not the end of the command — a script
+    // that calls vim and carries on is still running, and its keys are still
+    // its own. The editor comes back at the next prompt, not before.
+    p.write("\u001b[?1049l");
+    expect(editorEl(p)?.hidden).toBe(true);
+    p.write(`${D(0)}${A}$ ${B}`);
+    expect(editorEl(p)?.hidden).toBe(false);
+  });
+
+  // No OSC 133 means Jarvis cannot tell a prompt from a password prompt, so
+  // the editor never appears — the "plain" terminal, in every way that
+  // matters to a keystroke.
+  it("keeps the editor hidden in a shell with no prompt marks at all", () => {
+    const { p } = editorPane();
+    p.write("Password: ");
+    expect(editorEl(p)?.hidden).toBe(true);
+  });
+
+  it("creates no editor at all when the input editor is off", () => {
+    const { p, sendInput } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+    p.write(`${A}$ ${B}`);
+    expect(editorEl(p)).toBeNull();
+    // And a keystroke reaches the pty exactly as it does today.
+    FakeTerminal.instances[0]?.emitData("x");
+    expect(sendInput).toHaveBeenCalledWith("x");
+  });
+
+  it("sends a submitted line to the pty with a carriage return", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}`);
+    const field = textarea(p);
+    if (field === null) throw new Error("no editor");
+    field.value = "ls -la";
+    press(p, { key: "Enter" });
+    expect(sendInput).toHaveBeenCalledWith("ls -la\r");
+  });
+
+  // The two whose loss would make the terminal feel broken: ^C interrupts,
+  // ^D ends the shell. Neither is the editor's to eat.
+  it("passes a Ctrl chord to the pty as its control byte", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}`);
+    press(p, { key: "c", ctrlKey: true });
+    expect(sendInput).toHaveBeenCalledWith("\u0003");
+    press(p, { key: "d", ctrlKey: true });
+    expect(sendInput).toHaveBeenCalledWith("\u0004");
+  });
+
+  // Read off the screen, never modelled: the prompt shown is the one the
+  // shell actually drew.
+  it("labels the editor with the prompt the shell drew", () => {
+    const { p } = editorPane();
+    const terminal = FakeTerminal.instances[0];
+    terminal?.typeLine("~/p master $ ");
+    p.write(`${A}${B}`);
+    expect(p.element.querySelector(".terminal-input-prompt")?.textContent).toBe(
+      "~/p master $ ",
+    );
+  });
+
+  // Jarvis's own command log, not zsh's line editor: a line the DOM composed
+  // and a line zsh believes it is editing must never be two different things.
+  it("walks Jarvis's own command log with the arrows", async () => {
+    const { p } = editorPane(EDITOR_SETTINGS, async () => ["git status", "ls"]);
+    p.write(`${A}$ ${B}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    press(p, { key: "ArrowUp" });
+    expect(textarea(p)?.value).toBe("git status");
+    press(p, { key: "ArrowUp" });
+    expect(textarea(p)?.value).toBe("ls");
+    press(p, { key: "ArrowDown" });
+    expect(textarea(p)?.value).toBe("git status");
+  });
+
+  // A tab closed while a command is still running: the pane is gone, and
+  // nothing the editor path does may throw into what is left.
+  it("survives a pane disposed in the middle of a command", () => {
+    const { p } = editorPane();
+    p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+    p.dispose();
+    expect(() => p.write(`out\r\n${D(0)}${A}$ ${B}`)).not.toThrow();
+  });
+});

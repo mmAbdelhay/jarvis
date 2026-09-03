@@ -424,6 +424,10 @@ export type RendererApi = {
    *  one is a whole replacement line. An empty array means no dropdown —
    *  and so zsh's own Tab completion, unchanged. */
   suggestCompletions(tabId: string, input: string): Promise<string[]>;
+  /** The most recent commands Jarvis's own command log holds, newest first
+   *  and deduplicated — what ↑/↓ in the command editor walk. `paneKey` is a
+   *  shell key: a tab id today, "<tabId>:<paneId>" once a tab can be split. */
+  terminalHistory(paneKey: string, limit: number): Promise<string[]>;
   /** What the renderer needs to know about how terminals behave. Read once
    *  per pane; a change to jarvis.yaml takes effect on restart, like every
    *  other terminal setting. */
@@ -827,6 +831,11 @@ export type TerminalHandlers = {
    *  ordinary answer — a closed dropdown, and zsh's own Tab completion
    *  behaving exactly as it does today. */
   suggest(tabId: string, input: string): Promise<string[]>;
+  /** The most recent commands from Jarvis's own command log, newest first
+   *  and deduplicated — what ↑/↓ in the command editor walk. `paneKey` is a
+   *  shell key (a tab id today, "<tabId>:<paneId>" once splits arrive),
+   *  resolved through the same map `suggest` uses. */
+  history(paneKey: string, limit: number): Promise<string[]>;
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
@@ -899,6 +908,27 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       } catch {
         // A suggestion that failed is a dropdown that does not open. There
         // is nothing here worth interrupting a terminal for.
+        return [];
+      }
+    },
+
+    async history(paneKey, limit) {
+      const completion = deps.completion;
+      // Not gated on `completion.enabled`: that flag is the autocomplete
+      // dropdown's, and a user who turned the dropdown off did not ask for
+      // an editor whose arrows do nothing. What it does need is the source,
+      // which is where the command log's reader lives.
+      if (completion === undefined) return [];
+      if (!isString(paneKey) || typeof limit !== "number" || !Number.isFinite(limit)) return [];
+      if (limit <= 0) return [];
+      // The same resolution `suggest` does: an unknown key is a shell this
+      // process never started, and it gets nothing.
+      if (directories.get(paneKey) === undefined) return [];
+      try {
+        return await completion.source.history(Math.floor(limit));
+      } catch {
+        // No history is an ordinary answer — an arrow that does nothing,
+        // never an error in a terminal.
         return [];
       }
     },

@@ -22,6 +22,11 @@ const $ = (id: string): HTMLElement => {
  *  hidden as tabs change — and the pane is what draws inside it. */
 type Pane = { element: HTMLElement; pane: TerminalPane };
 
+/** How many commands the command editor's arrows may walk back through.
+ *  Long enough to reach this morning's command, short enough that a prompt
+ *  costs one small read. */
+const HISTORY_LIMIT = 200;
+
 const panes = new Map<string, Pane>();
 let wired = false;
 
@@ -132,6 +137,17 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
     // usually. Buffered by the shell manager exactly for this gap.
     attach: () => window.jarvis.attachTerminal(tabId),
     settings: terminalSettings,
+    // What the command editor's arrows walk: Jarvis's own command log,
+    // never zsh's line editor. Guarded because a preload without the
+    // channel must still be a terminal, with arrows that do nothing rather
+    // than an exception at every prompt.
+    history: async () => {
+      try {
+        return await window.jarvis.terminalHistory(tabId, HISTORY_LIMIT);
+      } catch {
+        return [];
+      }
+    },
   });
   const terminal = view.terminal;
 

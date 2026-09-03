@@ -1588,6 +1588,7 @@ describe("terminal handlers", () => {
           asked.push([cwd, input]);
           return ["git status"];
         },
+        history: async () => [],
       },
     });
     handlers.open("acme");
@@ -1597,13 +1598,13 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing for a tab it never started", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
 
     expect(await handlers.suggest("ghost", "git")).toEqual([]);
   });
 
   it("forgets a tab's directory when the tab is closed", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
     handlers.open("acme");
     handlers.close("tab-7");
 
@@ -1611,7 +1612,7 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing when completion is disabled", async () => {
-    const handlers = completing({ enabled: false, source: { suggest: async () => ["git status"] } });
+    const handlers = completing({ enabled: false, source: { suggest: async () => ["git status"], history: async () => [] } });
     handlers.open("acme");
 
     expect(await handlers.suggest("tab-7", "git")).toEqual([]);
@@ -1631,6 +1632,7 @@ describe("terminal handlers", () => {
         suggest: async () => {
           throw new Error("boom");
         },
+        history: async () => [],
       },
     });
     handlers.open("acme");
@@ -1639,11 +1641,88 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing for arguments that are not strings", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"] } });
+    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
     handlers.open("acme");
 
     expect(await handlers.suggest(7 as unknown as string, "git")).toEqual([]);
     expect(await handlers.suggest("tab-7", 7 as unknown as string)).toEqual([]);
+  });
+
+  // ↑/↓ in the command editor walk Jarvis's own command log, so the line the
+  // DOM composed and the line zsh believes it is editing can never disagree.
+  // The key is a shell key — a tab id today, "<tabId>:<paneId>" once splits
+  // arrive — resolved through the same map suggest uses.
+  it("gives the command log's recent commands for a shell it started", async () => {
+    const asked: number[] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async () => [],
+        history: async (limit) => {
+          asked.push(limit);
+          return ["git status", "ls"];
+        },
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.history("tab-7", 50)).toEqual(["git status", "ls"]);
+    expect(asked).toEqual([50]);
+  });
+
+  it("gives no history for a shell it never started", async () => {
+    const handlers = completing({
+      enabled: true,
+      source: { suggest: async () => [], history: async () => ["git status"] },
+    });
+
+    expect(await handlers.history("ghost", 50)).toEqual([]);
+  });
+
+  // Autocomplete and the editor's arrows are separate features: a user who
+  // turned the dropdown off did not ask for an editor whose history is dead.
+  it("gives history even with the completion dropdown disabled", async () => {
+    const handlers = completing({
+      enabled: false,
+      source: { suggest: async () => [], history: async () => ["git status"] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.history("tab-7", 50)).toEqual(["git status"]);
+  });
+
+  it("gives no history when no completion source is configured at all", async () => {
+    const handlers = completing(undefined);
+    handlers.open("acme");
+
+    expect(await handlers.history("tab-7", 50)).toEqual([]);
+  });
+
+  it("gives no history rather than throwing when the source fails", async () => {
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async () => [],
+        history: async () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    handlers.open("acme");
+
+    await expect(handlers.history("tab-7", 50)).resolves.toEqual([]);
+  });
+
+  it("gives no history for arguments that are not a string and a number", async () => {
+    const handlers = completing({
+      enabled: true,
+      source: { suggest: async () => [], history: async () => ["git status"] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.history(7 as unknown as string, 50)).toEqual([]);
+    expect(await handlers.history("tab-7", "50" as unknown as number)).toEqual([]);
+    expect(await handlers.history("tab-7", 0)).toEqual([]);
   });
 
   it("reports the renderer-facing settings straight from config, with home", () => {
