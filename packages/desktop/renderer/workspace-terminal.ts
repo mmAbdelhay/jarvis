@@ -310,6 +310,10 @@ function makePane(
     // that mean "behave exactly as today" rather than claiming ⌘↑/⌘↓/⌘⇧F
     // and doing nothing with them.
     blockNav: view.blockNav,
+    // ⌘P, claimed in every pane state — see terminal-addons.ts's own note
+    // on why this one, unlike ^R, is never gated on the editor or on
+    // whether something is running.
+    openPalette: () => view.openPalette(),
   });
 
   // The pane's own slot, which a divider drag or a sibling's closing

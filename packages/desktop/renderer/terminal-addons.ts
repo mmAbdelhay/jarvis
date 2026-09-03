@@ -37,6 +37,17 @@ export type TerminalHooks = {
    *  it: those keys must behave exactly as they do today when it is
    *  missing, not silently claim a keystroke and do nothing with it. */
   blockNav?: BlockNav | undefined;
+  /** Opens the command palette over this pane's actions — ⌘P, claimed
+   *  unconditionally, in every pane state. Unlike `^R` (see
+   *  terminal-pane.ts's own capture-phase listener, which is where that
+   *  one is claimed, and only while the editor is showing), a Cmd chord is
+   *  never a byte a running program could want: the OS and the browser
+   *  already keep it away from anything a pty could receive, so there is
+   *  no state in which claiming it costs a program its keystroke. Absent
+   *  for a terminal with no palette (the Session route today), which is
+   *  exactly why this key is left alone below when it is missing rather
+   *  than claimed and made to do nothing. */
+  openPalette?: (() => void) | undefined;
 };
 
 /** What the split keys act on — the tab's tree of panes, plus the tab
@@ -323,6 +334,18 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
 
     if (event.key === "f") {
       search.open();
+      return claim(event);
+    }
+
+    // The command palette. Claimed here, unconditionally, rather than
+    // guarded by pane state the way `^R` is: a command running, or the
+    // alternate screen held, is exactly when a user most wants to reach
+    // for "copy this block's output" or "jump to next failed" — a palette
+    // that went inert the moment a command started would deny both at
+    // precisely the wrong moment.
+    if (event.key.toLowerCase() === "p") {
+      if (hooks.openPalette === undefined) return true;
+      hooks.openPalette();
       return claim(event);
     }
 

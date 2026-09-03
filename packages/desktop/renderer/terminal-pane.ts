@@ -92,6 +92,12 @@ export type TerminalPane = {
    *  — undefined exactly when `readInput` and `applyInput` have nothing to
    *  work with either. */
   editorElement(): HTMLElement | undefined;
+  /** Opens the command palette over this pane's actions — what ⌘P calls,
+   *  from terminal-addons.ts's own key handler, in every pane state:
+   *  "blocks", "running", "alt" and "plain" alike. Never gated on the
+   *  editor or on `idle()` the way `^R` is — see terminal-addons.ts's
+   *  `openPalette` hook for why the two chords differ. */
+  openPalette(): void;
 };
 
 /** Blocks a pane keeps, oldest dropped first. A session that ran thousands
@@ -644,5 +650,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     readInput: () => (editor !== undefined && editor.isVisible() ? editor.value() : undefined),
     applyInput: (line) => attempt(() => editor?.setValue(line)),
     editorElement: () => editor?.element,
+    // Unconditional — no state check here. That is the whole point: the
+    // palette must open whether a command is running, the alt screen is
+    // held, or there is no editor at all. Only the *actions* it offers
+    // are state-dependent, inside paletteActions() itself.
+    openPalette: () => attempt(() => palette.open(paletteActions(), "Actions")),
   };
 }

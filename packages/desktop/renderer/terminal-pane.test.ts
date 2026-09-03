@@ -545,15 +545,62 @@ describe("the command editor in a pane", () => {
       expect(palette?.textContent).toContain("Collapse all blocks");
     });
 
-    it("does not open Cmd+P while a command is running — the editor is not there to claim it", () => {
+    // The pane's own capture-phase listener (this file's `press`, which
+    // targets the editor's textarea) defers Cmd+P once the editor is
+    // hidden — it is not the listener that claims it in that state.
+    // terminal-addons.ts's attachKeys is, unconditionally, via the
+    // `openPalette` hook exercised directly below and covered end to end
+    // in terminal-addons.test.ts.
+    it("the editor-gated listener leaves Cmd+P unclaimed once the editor is hidden", () => {
       const { p } = editorPane();
       p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
 
-      p.element.dispatchEvent(
-        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "p", metaKey: true }),
-      );
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "p",
+        metaKey: true,
+      });
+      p.element.dispatchEvent(event);
 
       expect(paletteEl(p)?.hidden).toBe(true);
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    // What actually claims ⌘P in every state that is not "the editor is
+    // showing": terminal-addons.ts's attachKeys calls exactly this method,
+    // unconditionally — see terminal-addons.test.ts for that wiring, and
+    // workspace-terminal.ts for `hooks.openPalette: () => view.openPalette()`.
+    it("openPalette() opens while a command is running", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+      expect(p.element.dataset["state"]).toBe("running");
+
+      p.openPalette();
+
+      const palette = paletteEl(p);
+      expect(palette?.hidden).toBe(false);
+      expect(palette?.textContent).toContain("Clear terminal");
+    });
+
+    it("openPalette() opens while the alternate screen is held", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}top\r\n${C("top")}[?1049h`);
+      expect(p.element.dataset["state"]).toBe("alt");
+
+      p.openPalette();
+
+      expect(paletteEl(p)?.hidden).toBe(false);
+    });
+
+    it("openPalette() opens with the input editor off entirely", () => {
+      const { p } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+      p.write(`${A}$ ${B}`);
+      expect(editorEl(p)).toBeNull();
+
+      p.openPalette();
+
+      expect(paletteEl(p)?.hidden).toBe(false);
     });
 
     it("runs the chosen action exactly once on Enter, and closes", () => {

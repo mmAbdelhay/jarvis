@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { handlePaletteKey, type PaletteKeys } from "./terminal-addons.js";
+import { enhanceTerminal, handlePaletteKey, type PaletteKeys } from "./terminal-addons.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
+import { FakeTerminal } from "./terminal-double.js";
 
 /** A plain object cast as a KeyboardEvent — the same style
  *  terminal-completion.test.ts and terminal-palette.test.ts use to drive a
@@ -99,5 +100,54 @@ describe("handlePaletteKey", () => {
     const keys: PaletteKeys = { palette, actions: () => [], historySearch: () => {} };
 
     expect(handlePaletteKey(keydown({ key: "ArrowDown" }), keys)).toBe(false);
+  });
+});
+
+// ⌘P, wired through enhanceTerminal's own key handler (attachKeys) rather
+// than through handlePaletteKey above. It has to be: attachKeys is the
+// handler xterm's own textarea actually receives a keydown through
+// whenever the DOM editor is not what has focus — no editor at all, a
+// command running, the alt screen — which is exactly the set of states
+// terminal-pane.ts's editor-gated listener defers on. Between the two,
+// every pane state is covered; this describes the half attachKeys owns.
+describe("enhanceTerminal — ⌘P claims the palette in every pane state", () => {
+  function terminalWithHooks(openPalette: (() => void) | undefined) {
+    const terminal = new FakeTerminal();
+    enhanceTerminal(terminal as never, document.createElement("div"), {
+      sendInput: () => {},
+      openLink: () => {},
+      openPalette,
+    });
+    return terminal;
+  }
+
+  it("calls openPalette() and claims the key on Cmd+P", () => {
+    let opened = 0;
+    const terminal = terminalWithHooks(() => (opened += 1));
+
+    const claimed = terminal.pressKey({ key: "p", metaKey: true });
+
+    expect(claimed).toBe(false);
+    expect(opened).toBe(1);
+    expect(terminal.defaultPrevented).toBe(true);
+  });
+
+  it("does not claim Cmd+P for a terminal with no palette at all", () => {
+    const terminal = terminalWithHooks(undefined);
+
+    const claimed = terminal.pressKey({ key: "p", metaKey: true });
+
+    expect(claimed).toBe(true);
+    expect(terminal.defaultPrevented).toBe(false);
+  });
+
+  it("leaves Ctrl+P (no Cmd) to the shell — this handler only ever claims the Cmd chord", () => {
+    let opened = 0;
+    const terminal = terminalWithHooks(() => (opened += 1));
+
+    const claimed = terminal.pressKey({ key: "p", ctrlKey: true });
+
+    expect(claimed).toBe(true);
+    expect(opened).toBe(0);
   });
 });
