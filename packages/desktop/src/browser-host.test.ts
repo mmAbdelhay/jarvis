@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   BrowserHost,
   bridgeEvents,
+  hostedUserAgent,
   type HostedView,
   type HostedViewEvent,
   type Rect,
@@ -914,5 +915,33 @@ describe("BrowserHost terminal tabs", () => {
     host.navigate(id, "https://github.com");
 
     expect(host.state().tabs[0]?.url).toBe("");
+  });
+});
+
+describe("hostedUserAgent", () => {
+  const real =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) jarvis/0.0.0 Chrome/142.0.0.0 Electron/44.0.0 Safari/537.36";
+
+  it("drops the Electron product token", () => {
+    expect(hostedUserAgent(real)).not.toContain("Electron");
+  });
+
+  it("keeps every other product token, including Chrome", () => {
+    const result = hostedUserAgent(real);
+    expect(result).toContain("Chrome/142.0.0.0");
+    expect(result).toContain("Safari/537.36");
+    expect(result).toContain("jarvis/0.0.0");
+  });
+
+  it("leaves a user agent without the token alone", () => {
+    const chrome =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
+    expect(hostedUserAgent(chrome)).toBe(chrome);
+  });
+
+  it("leaves no double space where the token was", () => {
+    expect(hostedUserAgent(real)).not.toContain("  ");
   });
 });

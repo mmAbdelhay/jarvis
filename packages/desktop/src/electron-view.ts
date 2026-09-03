@@ -1,6 +1,7 @@
 import { WebContentsView, type BrowserWindow } from "electron";
 import {
   bridgeEvents,
+  hostedUserAgent,
   type Rect,
   type ViewFactory,
   type WebContentsLike,
@@ -53,6 +54,11 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
     view.setVisible(false);
 
     const contents = view.webContents;
+
+    // Hosted pages must not look like an Electron app to themselves — see
+    // hostedUserAgent. Set on the WebContents rather than the session so it
+    // covers subframes and survives a partition shared with another view.
+    contents.setUserAgent(hostedUserAgent(contents.getUserAgent()));
 
     // DevTools, when they have been asked for. Rendered into a second view
     // of our own rather than opened as a detached window or docked by

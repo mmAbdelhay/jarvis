@@ -498,3 +498,24 @@ export function bridgeEvents(
     return { action: "deny" };
   });
 }
+
+/**
+ * The user agent a hosted page should see: Electron's own, minus the
+ * `Electron/<version>` product token.
+ *
+ * Hosted pages are ordinary web apps, and several of them sniff that token
+ * to decide they are running as *their* desktop build rather than in a
+ * browser. Headlamp is the one that broke: its frontend treats a UA
+ * containing "Electron" as proof it is the Headlamp desktop app and sends
+ * every API request to a hardcoded `http://localhost:4466` instead of the
+ * origin it was served from. Jarvis starts headlamp-server on a free port,
+ * so nothing answers there, the fetch throws, and the page reports the
+ * cluster as "Unreachable" even though the server behind the tab is healthy.
+ *
+ * Dropping the token is honest — this is Chromium, and every other product
+ * token stays — and it is the same trick Electron's own docs suggest for
+ * embedding third-party sites.
+ */
+export function hostedUserAgent(electronUserAgent: string): string {
+  return electronUserAgent.replace(/\s*Electron\/\S+/, "");
+}
