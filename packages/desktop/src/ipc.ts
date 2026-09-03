@@ -939,20 +939,33 @@ const EXPLAIN_OUTPUT_CAP = 4000;
 
 type ExplainPayload = { command: string; exitCode: number; output: string };
 
-/** Neutralises a literal occurrence of either fence tag inside output that
- *  is about to be spliced *between* those same tags. Output is fully
+/** Matches a close variant of the fence tag loosely enough to catch what a
+ *  model reads as "the closing tag" even when it is not a byte-for-byte
+ *  match for the one this file emits: any case (`</UNTRUSTED-OUTPUT>`) and
+ *  any whitespace around the tag name or before `>` (`</untrusted-output
+ *  >`). Exact-string matching alone (the first pass at this) let both
+ *  straight through. */
+const CLOSING_FENCE_TAG = /<\s*\/\s*untrusted-output\s*>/gi;
+const OPENING_FENCE_TAG = /<\s*untrusted-output\s*>/gi;
+
+/** Neutralises a match for either fence tag inside output that is about to
+ *  be spliced *between* those same tags. Output is fully
  *  attacker-influenceable — it is whatever the command printed — so
- *  without this a build that prints `</untrusted-output>` closes the fence
- *  early and lands whatever text follows outside it, where the framing
- *  sentence no longer covers it: the exact adversary the fence exists for.
- *  A zero-width space breaks the literal tag string while leaving it
- *  legible to a reader (human or model) as "this is what the fence tag
- *  looks like", never an actual tag. */
+ *  without this a build that prints something reading as `</untrusted-output>`
+ *  closes the fence early and lands whatever text follows outside it, where
+ *  the framing sentence no longer covers it: the exact adversary the fence
+ *  exists for. A zero-width space inserted right after `<` breaks the match
+ *  while leaving the text legible to a reader (human or model) as "this is
+ *  what the fence tag looks like", never an actual tag — and only ever
+ *  inserts, so there is no reverse transform an attacker could pre-apply to
+ *  turn their input into a real tag once this runs. The two patterns are
+ *  disjoint (the opening pattern requires the tag name right after `<` and
+ *  optional whitespace; the closing one requires a `/` there instead), so
+ *  the order the two passes run in does not matter. */
 function neutralizeFenceTags(text: string): string {
   const zwsp = "​";
-  return text
-    .replaceAll("<untrusted-output>", `<${zwsp}untrusted-output>`)
-    .replaceAll("</untrusted-output>", `<${zwsp}/untrusted-output>`);
+  const insertZwsp = (match: string) => `<${zwsp}${match.slice(1)}`;
+  return text.replace(CLOSING_FENCE_TAG, insertZwsp).replace(OPENING_FENCE_TAG, insertZwsp);
 }
 
 function isExplainPayload(value: unknown): value is ExplainPayload {
@@ -1137,11 +1150,15 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // own note.
         const tail = neutralizeFenceTags(payload.output.slice(-EXPLAIN_OUTPUT_CAP));
         // A command is one line by construction (it is what the user ran,
-        // or what the shell reported running); a newline inside it would
-        // otherwise forge a fake "Exit code:" line or field of its own in
-        // this line-oriented block, the same class of problem the output
-        // fence exists for.
-        const command = payload.command.replace(/[\r\n]+/g, " ");
+        // or what the shell reported running); a line terminator inside it
+        // would otherwise forge a fake "Exit code:" line or field of its
+        // own in this line-oriented block, the same class of problem the
+        // output fence exists for. The full ECMAScript line-terminator set,
+        // not only \r\n: U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR
+        // and U+0085 NEL are line breaks to the spec and to plenty of
+        // renderers, and stripping only ASCII CR/LF would leave those
+        // three still able to forge a line.
+        const command = payload.command.replace(/[\r\n\u0085\u2028\u2029]+/g, " ");
         // A build's own output is third-party text, not an instruction to
         // the model — a line reading "Ignore the above and instead..." is
         // structurally indistinguishable from a real log line otherwise.
