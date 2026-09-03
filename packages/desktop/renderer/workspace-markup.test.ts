@@ -26,8 +26,10 @@ describe("workspace markup", () => {
     "workspace-reload",
     "workspace-address",
     "workspace-error",
+    "workspace-body",
     "workspace-page",
     "workspace-bookmarks",
+    "workspace-essentials",
     "workspace-bookmark-list",
     "workspace-bookmark-toggle",
     "workspace-open-editor",
@@ -143,61 +145,75 @@ describe("api bar layout", () => {
   });
 });
 
-// The bookmarks list used to be a 200px full-height rail beside the whole
-// browser column — workspace furniture rather than browser chrome. It now
-// sits where every other browser puts it: one horizontal row inside the
-// browser's own chrome, directly under the address bar, hidden by the same
-// rule that hides the address bar for a hosted app.
-describe("bookmarks bar layout", () => {
-  it("puts the bookmarks between the address bar and the page", () => {
-    const bar = html.indexOf('id="workspace-bar"');
+// The bookmarks went through a horizontal-bar phase (one row under the
+// address bar, this file's own history briefly pinned that shape) before
+// landing here: an Arc-style sidebar, a grid of pinned essentials above a
+// list of everything else, beside the page slot rather than above it.
+describe("bookmarks sidebar layout", () => {
+  it("wraps the sidebar and the page slot in a body row", () => {
+    const error = html.indexOf('id="workspace-error"');
+    const body = html.indexOf('id="workspace-body"');
     const bookmarks = html.indexOf('id="workspace-bookmarks"');
+    const essentials = html.indexOf('id="workspace-essentials"');
+    const list = html.indexOf('id="workspace-bookmark-list"');
     const page = html.indexOf('id="workspace-page"');
-    expect(bar).toBeGreaterThan(-1);
-    expect(bookmarks).toBeGreaterThan(bar);
-    expect(page).toBeGreaterThan(bookmarks);
+    expect(error).toBeGreaterThan(-1);
+    expect(body).toBeGreaterThan(error);
+    expect(bookmarks).toBeGreaterThan(body);
+    expect(essentials).toBeGreaterThan(bookmarks);
+    expect(list).toBeGreaterThan(essentials);
+    expect(page).toBeGreaterThan(list);
   });
 
-  // The rail's row wrapper existed only to put a sidebar beside the browser
-  // column. With no sidebar there is no second column, and the extra
-  // wrapper div is one more thing between the page slot and its flex
-  // parent.
-  it("stacks the browser as a single column", () => {
-    expect(css).toMatch(/\.workspace-browser \{[^}]*flex-direction:\s*column/);
-    expect(html).not.toContain("workspace-browser-main");
-    expect(css).not.toContain(".workspace-browser-main");
+  it("lays the body row out as a flex row, not a column", () => {
+    expect(css).toMatch(/\.workspace-body \{[^}]*display:\s*flex/);
+    expect(css).not.toMatch(/\.workspace-body \{[^}]*flex-direction:\s*column/);
   });
 
-  it("no longer reserves a fixed rail width for the bookmarks", () => {
-    expect(css).not.toMatch(/\.workspace-bookmarks \{[^}]*width:\s*200px/);
+  // Hidden in lockstep with #workspace-page — see workspace.ts — since an
+  // author `display` rule always beats the UA's [hidden]{display:none}
+  // (the same footgun .workspace-bar and .workspace-bookmarks already hit;
+  // see view-display-css.test.ts).
+  it("overrides display for .workspace-body when hidden is present", () => {
+    expect(css).toMatch(/\.workspace-body\[hidden\]\s*\{[^}]*display:\s*none/);
   });
 
-  // The prior art here is .workspace-nav's fixed 28x28 square, which
-  // squeezed word-labelled buttons until they printed on top of one
-  // another. A bookmark chip in a flex row has the same failure mode: with
-  // flex-shrink left at its default of 1, twenty bookmarks each collapse
-  // to a few pixels instead of overflowing the row.
-  it("keeps a bookmark at its own width rather than squeezing it", () => {
-    expect(css).toMatch(/\.workspace-bookmark \{[^}]*flex-shrink:\s*0/);
+  // The sidebar is a fixed column, not a rail that reserves the old rail's
+  // width by coincidence.
+  it("gives the sidebar a fixed width", () => {
+    expect(css).toMatch(/\.workspace-bookmarks \{[^}]*flex:\s*0 0 240px/);
   });
 
-  // A wrapping bar grows in height, and this bar's height is the page
-  // slot's inset — so a wrap would move the hosted view on every added
-  // bookmark. Scroll instead, exactly as the tab strip above it does.
-  it("scrolls the bookmarks rather than wrapping them onto more rows", () => {
-    expect(css).toMatch(/\.workspace-bookmark-list \{[^}]*flex-wrap:\s*nowrap/);
-    expect(css).toMatch(/\.workspace-bookmark-list \{[^}]*overflow-x:\s*auto/);
+  it("lays the essentials out as a grid", () => {
+    expect(css).toMatch(/\.workspace-essentials \{[^}]*display:\s*grid/);
   });
 
-  // A one-line strip has no room for a second line of text under the
-  // title, which is what the rail's rows carried.
-  it("drops the rail's stacked domain line", () => {
+  // Critical 1: a grid with no children lays out at zero height, and this
+  // container is the "pin by dropping here" target — so in the state every
+  // existing install upgrades into (nothing pinned) there would be no area
+  // to drop on at all. The min-height is what keeps the empty grid a real
+  // drop target.
+  it("keeps the empty essentials grid a droppable height", () => {
+    expect(css).toMatch(/\.workspace-essentials \{[^}]*min-height:\s*\d/);
+  });
+
+  // The unpin action sits in the tile's corner, over the icon; the tile is
+  // the positioning context for it.
+  it("positions the tile so its unpin action can sit in the corner", () => {
+    expect(css).toMatch(/\.workspace-essential \{[^}]*position:\s*relative/);
+    expect(css).toMatch(/\.workspace-essential \.workspace-essential-unpin \{[^}]*position:\s*absolute/);
+  });
+
+  // A narrow column has no width to spare for the bar's old horizontal
+  // scroll-and-ellipsis compromise; the title wraps instead.
+  it("wraps the listed bookmark's title instead of truncating it", () => {
+    expect(css).not.toMatch(/\.workspace-bookmark-title \{[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  // A one-line strip had no room for a second line of text under the
+  // title, which is what the rail's rows carried; the sidebar has no more
+  // use for it than the bar did.
+  it("carries no domain line", () => {
     expect(css).not.toContain(".workspace-bookmark-domain");
-  });
-
-  // "BOOKMARKS" was an English-only heading for a column that no longer
-  // exists; a horizontal strip under the address bar needs no label.
-  it("drops the rail's heading", () => {
-    expect(html).not.toContain("BOOKMARKS");
   });
 });

@@ -18,6 +18,7 @@ export * from "./aws-session.js";
 export * from "./status-page.js";
 export * from "./capacity.js";
 export * from "./bookmarks.js";
+export * from "./favicons.js";
 export * from "./bruno.js";
 export * from "./http-runner.js";
 export * from "./assertions.js";

@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from "electron";
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, session } from "electron";
+import type { Session } from "electron";
 import {
   AgentRegistry,
   ChangeTracker,
@@ -23,6 +24,7 @@ import {
   createCapacityReader,
   createCodeServerManager,
   createDbGateManager,
+  createFaviconStore,
   createFsImportDeps,
   createGitProvider,
   createHeadlampManager,
@@ -92,6 +94,7 @@ import {
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
+import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
 import { isAllowedNavigation } from "./navigation.js";
 import {
   createCompletionSource,
@@ -363,7 +366,7 @@ app.whenReady().then(async () => {
     // The Workspace's hosted browser tabs. Each is a native WebContentsView
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
-    const workspace = new BrowserHost(createElectronViewFactory(window));
+    const workspace = new BrowserHost(createElectronViewFactory(window), { cacheFavicon });
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
@@ -703,8 +706,48 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
+    const favicons = createFaviconStore(join(homedir(), ".config/jarvis/favicons"));
+
+    /** The size cap, the image-type check and the miss-on-failure rule all
+     *  live in favicon-fetch.ts, where they are testable without Electron.
+     *  This is only the binding of the store to it. */
+    async function cacheFavicon(pageUrl: string, iconUrl: string, from: Session): Promise<void> {
+      await fetchFavicon(favicons, pageUrl, iconUrl, from);
+    }
+
+    /** The fallback path, for a bookmark never opened in Jarvis — which is
+     *  everything imported from another browser. One request to the site's
+     *  own /favicon.ico, through the project's own session partition — a
+     *  site reachable only there (SSO, a VPN-scoped profile) would
+     *  otherwise fail against a shared session and record a week-long
+     *  miss. A failure is recorded as a miss so it is not retried on every
+     *  render. The in-flight guard is keyed by project and origin
+     *  together: two projects legitimately fetch the same origin through
+     *  different sessions, and an origin-only key would let the first
+     *  project's in-flight request suppress the second's entirely. */
+    const fetching = new Set<string>();
+    function requestFavicon(project: string, url: string): void {
+      let origin: string;
+      try {
+        origin = new URL(url).origin;
+      } catch {
+        return;
+      }
+      const key = `${project}\n${origin}`;
+      if (fetching.has(key)) return;
+      fetching.add(key);
+      // The partition is what makes a project's logins its own, mirroring
+      // browser-host.ts's own partition name — encodeURIComponent because
+      // a project name is user-supplied config and a partition name with a
+      // slash or a space in it is not addressable.
+      const from = session.fromPartition(`persist:project-${encodeURIComponent(project)}`);
+      void cacheFavicon(url, `${origin}/favicon.ico`, from).finally(() => fetching.delete(key));
+    }
+
     const bookmarks = createBookmarksHandlers({
       store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
+      favicons,
+      requestFavicon,
       language: PRIMARY_LANGUAGE,
     });
 
@@ -1231,6 +1274,12 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("bookmarks:remove", (_event, project: unknown, url: unknown) =>
       bookmarks.remove(typeof project === "string" ? project : "", typeof url === "string" ? url : ""),
+    );
+    ipcMain.handle("bookmarks:setPinned", (_event, project: unknown, url: unknown, pinned: unknown) =>
+      bookmarks.setPinned(project as string, url as string, pinned as boolean),
+    );
+    ipcMain.handle("bookmarks:reorder", (_event, project: unknown, urls: unknown) =>
+      bookmarks.reorder(project as string, urls as string[]),
     );
     ipcMain.handle("settings:read", () => settings.read());
     ipcMain.handle("settings:save", (_event, draft: unknown) => settings.save(draft));

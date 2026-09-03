@@ -762,80 +762,211 @@
     padding: 4px 8px;
   }
 
-  /* Column: tab strip, address bar, bookmarks bar, then the page slot. The
-     bookmarks used to be a fixed rail in a second column beside all of
-     that, which put a browser feature at the same level as the workspace
-     itself. */
+  /* Column: tab strip, address bar, then the body row (sidebar beside the
+     page slot). */
   .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
   .workspace-browser[hidden] { display: none; }
 
-  /* The bookmarks bar: one row of chips under the address bar, hidden by
-     the same rule (an unconditional display here would beat the UA's
-     [hidden] rule — see view-display-css.test.ts). */
+  .workspace-body { display: flex; flex-grow: 1; min-height: 0; }
+  /* Hidden in lockstep with #workspace-page (workspace.ts): otherwise an
+     empty row would still claim its flex share and squeeze whatever
+     renderer-drawn pane (terminal, API, Docker) is meant to fill it. */
+  .workspace-body[hidden] { display: none; }
+
+  /* The sidebar: a fixed column beside the page, not a bar above it. Its
+     width is what insets the hosted view, measured off #workspace-page. */
   .workspace-bookmarks {
+    flex: 0 0 240px;
+    min-height: 0;
     display: flex;
-    flex-shrink: 0;
-    padding: 4px 10px 5px;
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    gap: var(--s3);
+    padding: var(--s3);
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
   }
   .workspace-bookmarks[hidden] { display: none; }
 
-  /* Overflow is a horizontal scroll rather than a wrap or a "»" menu, for
-     two reasons the layout leaves no way around. A wrap grows the bar's
-     height, and this bar's height *is* the page slot's inset: every extra
-     row would shove the hosted view down a notch, or leave it painted over
-     the bar until the next re-measure. And a "»" menu has to open a popup
-     below the bar — which is precisely where the hosted WebContentsView
-     sits, an OS-level overlay above the renderer's DOM, so the menu would
-     be drawn behind the page and be unclickable. A scroll keeps the bar
-     exactly one row tall for any number of bookmarks, and picks up the
-     writing direction on its own in RTL. The tab strip above already
-     solves the same problem the same way. */
+  /* The min-height is load-bearing, not cosmetic: a grid with no children
+     lays out at zero height, and this container is the drop target for
+     "pin this" — the state every existing install upgrades into (nothing
+     pinned) would otherwise offer nothing to drop on at all. Roughly one
+     tile row, so the empty grid stays a real target and has room for the
+     note that explains itself. */
+  .workspace-essentials {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--s2);
+    min-height: 48px;
+  }
+  /* Spans the whole grid rather than sitting in the first cell — it is a
+     note about the grid, not a tile in it. */
+  .workspace-essentials-empty {
+    grid-column: 1 / -1;
+    align-self: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  /* A wrapper, not a button: it holds the open button and the unpin
+     action side by side, and a button inside a button is invalid markup
+     that browsers reparent. */
+  .workspace-essential {
+    position: relative;
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .workspace-essential:hover { border-color: var(--accent); }
+  /* Fills the tile, so clicking anywhere but the unpin corner opens the
+     bookmark — exactly what the tile itself used to do when it was the
+     button. */
+  .workspace-essential-open {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  /* In the tile's corner, over the icon. Dim at rest, full on tile hover or
+     its own focus — .workspace-docker-action's rest/hover behaviour, which
+     this is the tile-sized cousin of. Dim rather than invisible for the
+     reason that rule gives: the control keeps its tab stop either way, and
+     a discoverable affordance beats one that only exists under a pointer.
+     The rest opacity is stated on the descendant selector, not on the
+     class alone, so it wins over .workspace-bookmark-action's own 0.35
+     regardless of which rule the stylesheet happens to carry later. */
+  .workspace-essential .workspace-essential-unpin {
+    position: absolute;
+    top: 0;
+    inset-inline-end: 0;
+    opacity: 0.35;
+    padding: 1px 3px;
+  }
+  .workspace-essential:hover .workspace-essential-unpin,
+  .workspace-essential .workspace-essential-unpin:focus-visible { opacity: 1; }
+  /* A favicon is drawn for any background, light or dark — an unbacked
+     dark mark (GitHub's, for one) all but disappears against the tile's
+     own dark surface. A light neutral plate behind the image, the way
+     every other browser backs a favicon, keeps every icon legible; the
+     monogram tile below keeps its own hue instead, since it never has
+     this problem. */
+  .workspace-essential img {
+    width: 22px;
+    height: 22px;
+    padding: 3px;
+    box-sizing: border-box;
+    background: var(--text);
+    border-radius: 4px;
+    object-fit: contain;
+  }
+  .workspace-essential-monogram {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* Everything not pinned, as a vertical list below the grid. It scrolls
+     with the sidebar rather than the bar's old horizontal scroll, since a
+     narrow column has no width to spare for that trick. */
   .workspace-bookmark-list {
     display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: center;
+    flex-direction: column;
     gap: 2px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    flex-grow: 1;
     min-width: 0;
   }
 
-  /* flex-shrink: 0 is the whole point of the scroll: left at its default
-     the chips would divide the bar's width between them and every title
-     would collapse to an ellipsis instead of overflowing. */
   .workspace-bookmark {
     display: flex;
     align-items: center;
     gap: 4px;
-    flex-shrink: 0;
-    max-width: 180px;
     padding: 3px 7px;
     border-radius: var(--r-control);
     cursor: pointer;
   }
   .workspace-bookmark:hover { background: var(--panel); }
 
+  /* Held-down affordance while dragging a tile or a row to pin/reorder it. */
+  .workspace-essential[draggable="true"]:active { opacity: 0.6; }
+  .workspace-bookmark[draggable="true"]:active { opacity: 0.6; }
+
+  /* The row's icon, at list-row size rather than the grid tile's — same
+     cached-icon-or-monogram choice, same neutral plate under the image for
+     the same reason .workspace-essential img has one. */
+  .workspace-bookmark-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .workspace-bookmark-icon img {
+    width: 100%;
+    height: 100%;
+    padding: 2px;
+    box-sizing: border-box;
+    background: var(--text);
+    border-radius: 3px;
+    object-fit: contain;
+  }
+  .workspace-bookmark-icon .workspace-essential-monogram { font-size: 9px; }
+
+  /* The column is narrow, so the title wraps instead of truncating — the
+     bar's ellipsis-and-tooltip compromise existed only for a one-line chip
+     with no room to grow. */
   .workspace-bookmark-title {
     font-size: 11px;
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .workspace-bookmarks-empty {
     font-size: 11px;
     color: var(--text-muted);
-    white-space: nowrap;
     padding: 3px 7px;
   }
 
   /* No hover-reveal: on a chip this narrow the "x" appearing under the
      pointer is the thing you are about to click. It stays dim and present
      so its width is part of the chip at rest. */
+  /* Glyph controls on a bookmark row or tile: dim at rest, full opacity
+     when the row is hovered or the control is focused. They keep their tab
+     stop at rest — only the paint fades — so a keyboard or screen-reader
+     user is never chasing a control that appears on hover. The same idiom
+     as .workspace-docker-action. */
+  .workspace-bookmark-action {
+    flex-shrink: 0;
+    font: inherit;
+    line-height: 1;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-radius: var(--r-control);
+    padding: 0 3px;
+    opacity: 0.35;
+    cursor: pointer;
+    transition: opacity 120ms ease, color 120ms ease;
+  }
+  .workspace-bookmark:hover .workspace-bookmark-action { opacity: 0.7; }
+  .workspace-bookmark-action:hover,
+  .workspace-bookmark-action:focus-visible { opacity: 1; color: var(--accent); }
+
   .workspace-bookmark-remove { flex-shrink: 0; opacity: 0.35; color: var(--text-muted); }
   .workspace-bookmark:hover .workspace-bookmark-remove { opacity: 0.7; }
   .workspace-bookmark-remove:hover { opacity: 1; color: var(--del); }

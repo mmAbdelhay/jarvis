@@ -290,3 +290,32 @@ describe("docker messages", () => {
     }
   });
 });
+
+// The bookmarks sidebar's own strings. The two controls the spec asks for
+// (design :240 — a pin on every list row, an unpin on every grid tile) are
+// named for a screen reader as well as a pointer, and the renderer never
+// builds either string itself.
+describe("the bookmarks sidebar", () => {
+  it("names the pin and unpin controls in English", () => {
+    expect(MESSAGES.pinBookmark("en")).toMatch(/pin/i);
+    expect(MESSAGES.unpinBookmark("en")).toMatch(/unpin/i);
+  });
+
+  it("says the sidebar toggle shows or hides a sidebar, not a bar", () => {
+    expect(MESSAGES.toggleBookmarksSidebar("en")).toMatch(/sidebar/i);
+    expect(MESSAGES.toggleBookmarksSidebar("en")).not.toMatch(/bookmarks bar/i);
+  });
+
+  it("has an Arabic form for every sidebar message", () => {
+    const both = [
+      MESSAGES.pinBookmark,
+      MESSAGES.unpinBookmark,
+      MESSAGES.noEssentials,
+      MESSAGES.toggleBookmarksSidebar,
+    ];
+    for (const message of both) {
+      expect(message("ar")).not.toBe(message("en"));
+      expect(message("ar")).not.toBe("");
+    }
+  });
+});

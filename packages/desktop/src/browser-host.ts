@@ -1,3 +1,4 @@
+import type { Session } from "electron";
 import {
   TabStore,
   isSafeHref,
@@ -20,7 +21,12 @@ export type HostedViewEvent =
   /** Chromium noticed media start or stop in this page. Only a prompt to
    *  ask the page what it actually has — it fires for audio as readily as
    *  for video. See BrowserHost's "media" case. */
-  | { kind: "media"; playing: boolean };
+  | { kind: "media"; playing: boolean }
+  /** Chromium resolved this page's real favicon — including a site that
+   *  declares it in HTML rather than serving /favicon.ico. `session` is
+   *  the view's own, carried on the event because BrowserHost otherwise has
+   *  no route to it: HostedView deliberately exposes no WebContents. */
+  | { kind: "favicon"; pageUrl: string; iconUrl: string; session: Session };
 
 /**
  * One page's worth of browser, as this host needs it. Electron is behind
@@ -86,10 +92,25 @@ export class BrowserHost {
    *  stays visible: the renderer's selected project has no open tab. */
   #suppressed = false;
 
-  constructor(createView: ViewFactory, options?: { maxTabs?: number; store?: TabStore }) {
+  /** Fetches `iconUrl` through `from` and caches it against `pageUrl`'s
+   *  origin. Injected rather than imported: browser-host owns views, not
+   *  storage or the network — see the "favicon" case below. Defaulted to a
+   *  no-op so every other test in this file can go on constructing a host
+   *  without knowing this dep exists. */
+  readonly #cacheFavicon: (pageUrl: string, iconUrl: string, from: Session) => Promise<void>;
+
+  constructor(
+    createView: ViewFactory,
+    options?: {
+      maxTabs?: number;
+      store?: TabStore;
+      cacheFavicon?(pageUrl: string, iconUrl: string, from: Session): Promise<void>;
+    },
+  ) {
     this.#createView = createView;
     this.#store = options?.store ?? new TabStore();
     this.#maxTabs = options?.maxTabs ?? MAX_TABS;
+    this.#cacheFavicon = options?.cacheFavicon ?? (async () => undefined);
   }
 
   state(): WorkspaceState {
@@ -354,6 +375,9 @@ export class BrowserHost {
         // page's own document.title — see the comment there.
         if (this.#store.get(id)?.kind === "web") this.#store.update(id, { title: event.title });
         break;
+      case "favicon":
+        void this.#cacheFavicon(event.pageUrl, event.iconUrl, event.session);
+        break;
       case "loading":
         this.#store.update(id, { loading: event.loading });
         break;
@@ -421,6 +445,11 @@ export type NavigationFacts = { canGoBack(): boolean; canGoForward(): boolean };
 export type WebContentsLike = {
   on(event: string, listener: (...args: never[]) => void): unknown;
   setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+  /** The page's current URL — what a resolved favicon is cached against. */
+  getURL(): string;
+  /** This view's own session, so a favicon fetch goes through the same
+   *  cookies as the page it belongs to (see cacheFavicon's caller). */
+  session: Session;
 };
 
 /** Chromium's ERR_ABORTED — emitted for an ordinary superseded or cancelled
@@ -454,6 +483,22 @@ export function bridgeEvents(
 
   on("page-title-updated", ((_event: unknown, title: string) => {
     emit({ kind: "title", title });
+  }) as (...args: never[]) => void);
+
+  // Chromium has already resolved the page's real icon by the time this
+  // fires — including sites that declare it in HTML rather than serving
+  // /favicon.ico — so this is both the most accurate source and free.
+  // icons can be empty (a page with no favicon at all); [0] is Chromium's
+  // own preferred candidate. The Array.isArray guard is not paranoia about
+  // Chromium: this is an untyped IPC payload, and `[0]` on a *string*
+  // silently yields one character — an "icon url" of "h" that fails to
+  // fetch and records a week-long miss against the origin, suppressing the
+  // real icon for that whole week.
+  on("page-favicon-updated", ((_event: unknown, icons: unknown) => {
+    if (!Array.isArray(icons)) return;
+    const iconUrl: unknown = icons[0];
+    if (typeof iconUrl !== "string" || iconUrl === "") return;
+    emit({ kind: "favicon", pageUrl: contents.getURL(), iconUrl, session: contents.session });
   }) as (...args: never[]) => void);
 
   on("media-started-playing", (() => {

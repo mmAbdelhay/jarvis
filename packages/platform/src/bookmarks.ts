@@ -1,7 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-export type Bookmark = { url: string; title: string };
+/** The essentials grid is a fixed twelve tiles. The cap lives here rather
+ *  than only in the renderer so a hand-edited bookmarks.json cannot
+ *  produce more essentials than the grid can show. */
+export const MAX_PINNED = 12;
+
+export type Bookmark = {
+  url: string;
+  title: string;
+  /** Pinned into the essentials grid. Absent means listed below it. */
+  pinned?: boolean;
+  /** Position within its group — pinned or listed. Absent sorts last, so
+   *  a file written before this change keeps the order it already had. */
+  order?: number;
+};
 
 export type BookmarkOutcome<T> = { ok: true; value: T } | { ok: false; detail: string };
 
@@ -14,6 +27,16 @@ export type BookmarkStore = {
   add(project: string, bookmark: Bookmark): Promise<BookmarkOutcome<Bookmark[]>>;
   /** Removing a URL that was never bookmarked is a no-op, not a failure. */
   remove(project: string, url: string): Promise<BookmarkOutcome<Bookmark[]>>;
+  /** Pins or unpins one bookmark. Refuses a thirteenth pin with detail
+   *  "pin-limit" — a stable token the IPC layer maps to bilingual text,
+   *  rather than English prose crossing the platform boundary. Pinning a
+   *  url the project does not have is a no-op, like remove. */
+  setPinned(project: string, url: string, pinned: boolean): Promise<BookmarkOutcome<Bookmark[]>>;
+  /** Rewrites `order` across one group from the url list given, which is
+   *  the whole group in its new order. A url the project does not have is
+   *  ignored: the renderer's list and the file can disagree if a bookmark
+   *  was removed mid-drag. */
+  reorder(project: string, urls: string[]): Promise<BookmarkOutcome<Bookmark[]>>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -22,6 +45,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Pinned first, then each group by `order`. A bookmark with no `order`
+ *  sorts after every bookmark that has one, and ties keep their file
+ *  position because Array.prototype.sort is stable — which is what lets a
+ *  file written before this change come back in the order it was written. */
+function sorted(bookmarks: Bookmark[]): Bookmark[] {
+  const rank = (b: Bookmark): number => b.order ?? Number.MAX_SAFE_INTEGER;
+  return [...bookmarks].sort((a, b) => {
+    if ((a.pinned === true) !== (b.pinned === true)) return a.pinned === true ? -1 : 1;
+    return rank(a) - rank(b);
+  });
 }
 
 /**
@@ -64,7 +99,7 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
 
   return {
     list(project) {
-      return enqueue(async () => ({ ok: true, value: (await readAll())[project] ?? [] }));
+      return enqueue(async () => ({ ok: true, value: sorted((await readAll())[project] ?? []) }));
     },
 
     add(project, bookmark) {
@@ -82,7 +117,7 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
         } catch (error) {
           return { ok: false, detail: errorMessage(error) };
         }
-        return { ok: true, value: next };
+        return { ok: true, value: sorted(next) };
       });
     },
 
@@ -96,7 +131,47 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
         } catch (error) {
           return { ok: false, detail: errorMessage(error) };
         }
-        return { ok: true, value: next };
+        return { ok: true, value: sorted(next) };
+      });
+    },
+
+    setPinned(project, url, pinned) {
+      return enqueue(async () => {
+        const all = await readAll();
+        const existing = all[project] ?? [];
+        // Pinning an unknown url is a no-op, like remove — check membership first.
+        if (!existing.some((b) => b.url === url)) {
+          return { ok: true, value: sorted(existing) };
+        }
+        if (pinned && existing.filter((b) => b.pinned === true && b.url !== url).length >= MAX_PINNED) {
+          return { ok: false, detail: "pin-limit" };
+        }
+        const next = existing.map((b) => (b.url === url ? { ...b, pinned } : b));
+        all[project] = next;
+        try {
+          await writeAll(all);
+        } catch (error) {
+          return { ok: false, detail: errorMessage(error) };
+        }
+        return { ok: true, value: sorted(next) };
+      });
+    },
+
+    reorder(project, urls) {
+      return enqueue(async () => {
+        const all = await readAll();
+        const existing = all[project] ?? [];
+        const position = new Map(urls.map((url, index) => [url, index]));
+        const next = existing.map((b) =>
+          position.has(b.url) ? { ...b, order: position.get(b.url) } : b,
+        );
+        all[project] = next;
+        try {
+          await writeAll(all);
+        } catch (error) {
+          return { ok: false, detail: errorMessage(error) };
+        }
+        return { ok: true, value: sorted(next) };
       });
     },
   };

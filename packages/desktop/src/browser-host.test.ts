@@ -1,3 +1,4 @@
+import type { Session } from "electron";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   BrowserHost,
@@ -473,6 +474,12 @@ describe("BrowserHost", () => {
 class FakeContents implements WebContentsLike {
   #handlers = new Map<string, ((...args: never[]) => void)[]>();
   popupHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
+  /** What getURL() answers — settable per test, the way real WebContents'
+   *  current URL would vary. */
+  url = "https://a.test/page";
+  /** A stand-in for the view's real Session: opaque here, just an identity
+   *  the tests can assert was threaded through unchanged. */
+  session = { id: "fake-session" } as unknown as Session;
 
   on(event: string, listener: (...args: never[]) => void): this {
     const list = this.#handlers.get(event) ?? [];
@@ -482,6 +489,9 @@ class FakeContents implements WebContentsLike {
   }
   setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void {
     this.popupHandler = handler;
+  }
+  getURL(): string {
+    return this.url;
   }
   fire(event: string, ...args: unknown[]): void {
     for (const listener of this.#handlers.get(event) ?? []) {
@@ -635,6 +645,45 @@ describe("BrowserHost picture-in-picture", () => {
   });
 });
 
+describe("BrowserHost favicons", () => {
+  let views: FakeView[];
+  let cached: { pageUrl: string; iconUrl: string; session: Session }[];
+  let host: BrowserHost;
+
+  beforeEach(() => {
+    views = [];
+    cached = [];
+    host = new BrowserHost(
+      () => {
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      },
+      {
+        cacheFavicon: async (pageUrl, iconUrl, from) => {
+          cached.push({ pageUrl, iconUrl, session: from });
+        },
+      },
+    );
+  });
+
+  it("caches the favicon Chromium resolved, through that view's own session", () => {
+    const fakeSession = { id: "a.test-session" } as unknown as Session;
+    host.open("acme", "https://a.test/page");
+
+    views[0]?.emit({
+      kind: "favicon",
+      pageUrl: "https://a.test/page",
+      iconUrl: "https://a.test/icon.png",
+      session: fakeSession,
+    });
+
+    expect(cached).toEqual([
+      { pageUrl: "https://a.test/page", iconUrl: "https://a.test/icon.png", session: fakeSession },
+    ]);
+  });
+});
+
 describe("bridgeEvents", () => {
   let contents: FakeContents;
   let events: HostedViewEvent[];
@@ -657,6 +706,46 @@ describe("bridgeEvents", () => {
     contents.fire("page-title-updated", {}, "GitHub");
 
     expect(events).toEqual([{ kind: "title", title: "GitHub" }]);
+  });
+
+  // Chromium has already resolved the real icon by the time this fires.
+  // The event carries the page's own URL and session because HostedView
+  // exposes neither to BrowserHost — this is the only place either is read.
+  it("reports the favicon Chromium resolved, with the page's URL and session", () => {
+    contents.url = "https://a.test/page";
+    contents.fire("page-favicon-updated", {}, ["https://a.test/icon.png", "https://a.test/other.png"]);
+
+    expect(events).toEqual([
+      {
+        kind: "favicon",
+        pageUrl: "https://a.test/page",
+        iconUrl: "https://a.test/icon.png",
+        session: contents.session,
+      },
+    ]);
+  });
+
+  it("ignores a favicon event carrying no icons", () => {
+    contents.fire("page-favicon-updated", {}, []);
+
+    expect(events).toEqual([]);
+  });
+
+  // Minor 10: this is an untyped IPC payload. `[0]` on a *string* yields one
+  // character, which used to become an "icon url" of "h" — a fetch that
+  // fails and records a seven-day miss against the origin, suppressing the
+  // site's real icon for that whole week.
+  it.each([
+    ["a bare string", "https://a.test/icon.png"],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { icon: "https://a.test/icon.png" }],
+    ["an array of non-strings", [{ url: "https://a.test/icon.png" }]],
+    ["an array holding an empty string", [""]],
+  ])("ignores a favicon payload that is %s", (_name, payload) => {
+    contents.fire("page-favicon-updated", {}, payload);
+
+    expect(events).toEqual([]);
   });
 
   // Chromium tells us when media starts and stops. It is a prompt to ask

@@ -29,6 +29,7 @@ import type {
   DbGateManager,
   DockerListResult,
   DockerResult,
+  FaviconStore,
   HeadlampManager,
   ShellManager,
 } from "@jarvis/platform";
@@ -866,12 +867,23 @@ describe("editor handlers", () => {
   });
 });
 
+function noFavicons(): FaviconStore {
+  return {
+    get: async () => ({ ok: true, value: undefined }),
+    put: async () => ({ ok: true, value: undefined }),
+    putMiss: async () => ({ ok: true, value: undefined }),
+    shouldFetch: async () => ({ ok: true, value: true }),
+  };
+}
+
 describe("bookmarks handlers", () => {
   function store(overrides: Partial<BookmarkStore> = {}): BookmarkStore {
     return {
       list: () => Promise.resolve({ ok: true, value: [] }),
       add: (_project, bookmark) => Promise.resolve({ ok: true, value: [bookmark] }),
       remove: () => Promise.resolve({ ok: true, value: [] }),
+      setPinned: () => Promise.resolve({ ok: true, value: [] }),
+      reorder: () => Promise.resolve({ ok: true, value: [] }),
       ...overrides,
     };
   }
@@ -885,6 +897,8 @@ describe("bookmarks handlers", () => {
             value: project === "acme" ? [{ url: "https://github.com", title: "GitHub" }] : [],
           }),
       }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
       language: "en",
     });
 
@@ -895,7 +909,12 @@ describe("bookmarks handlers", () => {
   });
 
   it("adds a bookmark and returns the updated list", async () => {
-    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
 
     const result = await handlers.add("acme", { url: "https://github.com", title: "GitHub" });
 
@@ -911,6 +930,8 @@ describe("bookmarks handlers", () => {
           return Promise.resolve({ ok: true, value: [] });
         },
       }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
       language: "en",
     });
 
@@ -920,7 +941,12 @@ describe("bookmarks handlers", () => {
   });
 
   it("refuses a non-string project", async () => {
-    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
 
     const result = await handlers.list(undefined as unknown as string);
 
@@ -928,7 +954,12 @@ describe("bookmarks handlers", () => {
   });
 
   it("refuses a malformed bookmark", async () => {
-    const handlers = createBookmarksHandlers({ store: store(), language: "en" });
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
 
     const result = await handlers.add("acme", { url: "https://github.com" } as unknown as Bookmark);
 
@@ -938,6 +969,8 @@ describe("bookmarks handlers", () => {
   it("reports a store failure as localised text", async () => {
     const handlers = createBookmarksHandlers({
       store: store({ add: () => Promise.resolve({ ok: false, detail: "disk full" }) }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
       language: "en",
     });
 
@@ -945,6 +978,91 @@ describe("bookmarks handlers", () => {
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.text.length).toBeGreaterThan(0);
+  });
+
+  it("attaches each bookmark's cached icon", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      favicons: {
+        get: async () => ({ ok: true, value: { dataUri: "data:image/png;base64,AQ==" } }),
+        put: async () => ({ ok: true, value: undefined }),
+        putMiss: async () => ({ ok: true, value: undefined }),
+        shouldFetch: async () => ({ ok: true, value: false }),
+      },
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.list("p");
+
+    expect(result.ok && result.value[0]?.icon).toBe("data:image/png;base64,AQ==");
+  });
+
+  it("leaves icon absent when the origin has none cached", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      favicons: {
+        get: async () => ({ ok: true, value: undefined }),
+        put: async () => ({ ok: true, value: undefined }),
+        putMiss: async () => ({ ok: true, value: undefined }),
+        shouldFetch: async () => ({ ok: true, value: true }),
+      },
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.list("p");
+
+    expect(result.ok && result.value[0]?.icon).toBeUndefined();
+  });
+
+  it("requests the missing favicon through the bookmark's own project", async () => {
+    const requested: { project: string; url: string }[] = [];
+    const handlers = createBookmarksHandlers({
+      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      favicons: {
+        get: async () => ({ ok: true, value: undefined }),
+        put: async () => ({ ok: true, value: undefined }),
+        putMiss: async () => ({ ok: true, value: undefined }),
+        shouldFetch: async () => ({ ok: true, value: true }),
+      },
+      requestFavicon: (project, url) => requested.push({ project, url }),
+      language: "en",
+    });
+
+    await handlers.list("acme");
+
+    expect(requested).toEqual([{ project: "acme", url: "https://a.test/" }]);
+  });
+
+  it("translates the store's pin-limit refusal", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({ setPinned: () => Promise.resolve({ ok: false, detail: "pin-limit" }) }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.setPinned("p", "https://a.test/", true);
+
+    expect(result).toEqual({
+      ok: false,
+      text: "The grid holds 12 bookmarks; unpin one first.",
+      language: "en",
+    });
+  });
+
+  it("rejects a reorder whose urls are not all strings", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.reorder("p", ["https://a.test/", 7] as unknown as string[]);
+
+    expect(result.ok).toBe(false);
   });
 });
 

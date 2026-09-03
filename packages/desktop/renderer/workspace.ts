@@ -11,7 +11,11 @@ import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-te
 // — duplicated here rather than imported, since the renderer may only
 // import *types* from @jarvis/core (a bare-specifier value import from any
 // other workspace package is runtime-fatal once bundled).
-type Bookmark = { url: string; title: string };
+type Bookmark = { url: string; title: string; pinned?: boolean; order?: number };
+// Same shape as ipc.ts's BookmarkView: a Bookmark plus the cached icon a
+// listBookmarks resolution may carry. Its absence, not an empty string, is
+// what tells renderEssential to draw a monogram instead.
+type BookmarkView = Bookmark & { icon?: string };
 
 // The Workspace's chrome. Everything a page can influence — its title, its
 // URL, a load error — is attacker-controlled text arriving in the process
@@ -102,6 +106,14 @@ function renderProjectTools(): void {
     // login the user still has to type.
     status.textContent = "";
   }
+}
+
+/** The shared status line under the tool row, the same surface openApi and
+ *  openDocker report failures to. */
+function showToolStatus(text: string): void {
+  const status = $("workspace-tool-status");
+  status.textContent = text;
+  status.classList.add("workspace-tool-status--error");
 }
 
 /**
@@ -216,10 +228,10 @@ async function switchToProject(project: string): Promise<void> {
   await refreshBookmarks();
 }
 
-let bookmarks: Bookmark[] = [];
+let bookmarks: BookmarkView[] = [];
 
-/** Whether the user wants the bookmarks bar at all. Their preference for
- *  browser tabs only — a hosted app has no bar to show either way, so
+/** Whether the user wants the bookmarks sidebar at all. Their preference
+ *  for browser tabs only — a hosted app has no sidebar to show either way, so
  *  this is ANDed with the chrome rule rather than replacing it. Session-local
  *  on purpose: it is a glance-level choice, not a setting. */
 let bookmarksVisible = true;
@@ -260,16 +272,30 @@ function openBookmark(url: string): void {
   else void window.jarvis.openTab(project, url);
 }
 
-/** One chip in the bar. The rail stacked the title over the host; a row
+/** One row in the list. The rail stacked the title over the host; a row
  *  one line tall has space for the title alone, so the address moves to the
- *  tooltip — where it is the more useful half anyway. */
-function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
+ *  tooltip — where it is the more useful half anyway. Its icon is the same
+ *  cached-icon-or-monogram choice the grid makes, at list-row size rather
+ *  than the grid's tile size. */
+function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   const chip = document.createElement("div");
   chip.className = "workspace-bookmark";
   // Both the title and the URL are page-supplied text; the attribute takes
   // it as text and nothing else, same discipline as the tab strip.
   chip.title = bookmark.url;
   chip.addEventListener("click", () => openBookmark(bookmark.url));
+  wireDrag(chip, bookmark);
+
+  const icon = document.createElement("span");
+  icon.className = "workspace-bookmark-icon";
+  if (bookmark.icon === undefined) {
+    icon.append(monogramTile(bookmark));
+  } else {
+    const img = document.createElement("img");
+    img.src = bookmark.icon;
+    img.alt = "";
+    icon.append(img);
+  }
 
   const title = document.createElement("span");
   title.className = "workspace-bookmark-title";
@@ -279,6 +305,13 @@ function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
   // punctuation and its ellipsis on the wrong edge — visible immediately in
   // a strip of short chips, which is the whole bar.
   title.dir = detectLanguage(label) === "ar" ? "rtl" : "ltr";
+
+  // The spec's per-row pin control (design :240). Drag alone leaves the
+  // feature unreachable from the state every existing install upgrades
+  // into — everything unpinned, so an empty grid with no tile to drop on —
+  // and gives a keyboard user no path at all.
+  const pin = glyphControl("⊞", MESSAGES.pinBookmark(PRIMARY_LANGUAGE), () => void pinBookmark(bookmark.url, true));
+  pin.classList.add("workspace-bookmark-pin");
 
   const remove = document.createElement("span");
   remove.className = "workspace-bookmark-remove";
@@ -290,29 +323,255 @@ function renderBookmarkChip(bookmark: Bookmark): HTMLElement {
     void removeBookmark(bookmark.url);
   });
 
-  chip.append(title, remove);
+  chip.append(icon, title, pin, remove);
   return chip;
 }
 
+const MAX_ESSENTIALS = 12;
+
+/** A deterministic hue from the origin, so one site is always the same
+ *  colour and two bookmarks of the same host match. */
+function monogramColour(url: string): string {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    origin = url;
+  }
+  let hash = 0;
+  for (const ch of origin) hash = (hash * 31 + ch.codePointAt(0)!) % 360;
+  return `hsl(${hash}, 45%, 32%)`;
+}
+
+/** The tile for a bookmark with no cached icon: its first letter on that
+ *  colour. Without this the grid is a row of empty squares for everything
+ *  never opened in Jarvis. */
+function monogramTile(bookmark: BookmarkView): HTMLElement {
+  const mark = document.createElement("span");
+  mark.className = "workspace-essential-monogram";
+  mark.style.backgroundColor = monogramColour(bookmark.url);
+  const label = bookmark.title === "" ? bookmark.url : bookmark.title;
+  mark.textContent = [...label][0]?.toUpperCase() ?? "?";
+  return mark;
+}
+
+/** A quiet glyph button, the same idiom workspace-docker.ts's actionButton
+ *  uses: dim at rest, full opacity on hover or focus, the bilingual name on
+ *  both `title` and `aria-label` with the glyph itself hidden from the
+ *  accessibility tree. `stopPropagation` because every one of these sits
+ *  inside something that is itself clickable. */
+function glyphControl(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "workspace-bookmark-action";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = glyph;
+  button.append(mark);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return button;
+}
+
+/** A grid tile: the bookmark's icon, plus the spec's unpin action.
+ *
+ *  The tile used to *be* a `<button>`, which leaves nowhere to put the
+ *  unpin control — a button inside a button is invalid HTML and browsers
+ *  reparent it. So the tile is a plain wrapper holding two sibling
+ *  buttons: one filling it, which opens the bookmark, and the unpin action
+ *  in its corner. Both keep a real tab stop that way, which a
+ *  `role="button"` div would have had to reimplement by hand. */
+function renderEssential(bookmark: BookmarkView): HTMLElement {
+  const label = bookmark.title === "" ? bookmark.url : bookmark.title;
+  const tile = document.createElement("div");
+  tile.className = "workspace-essential";
+  tile.title = label;
+  tile.dataset["url"] = bookmark.url;
+
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "workspace-essential-open";
+  open.setAttribute("aria-label", label);
+  if (bookmark.icon === undefined) {
+    open.append(monogramTile(bookmark));
+  } else {
+    const img = document.createElement("img");
+    img.src = bookmark.icon;
+    img.alt = "";
+    open.append(img);
+  }
+  open.addEventListener("click", () => openBookmark(bookmark.url));
+
+  const unpin = glyphControl("⊟", MESSAGES.unpinBookmark(PRIMARY_LANGUAGE), () =>
+    void pinBookmark(bookmark.url, false),
+  );
+  unpin.classList.add("workspace-essential-unpin");
+
+  tile.append(open, unpin);
+  wireDrag(tile, bookmark);
+  return tile;
+}
+
+/** The click and keyboard path for what dragging does: pin a listed
+ *  bookmark, or unpin a tile. A refusal (a thirteenth pin) is surfaced the
+ *  way the drag path surfaces it, through the store's own words. */
+async function pinBookmark(url: string, pinned: boolean): Promise<void> {
+  const result = await window.jarvis.setBookmarkPinned(selectedProject(), url, pinned);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Dropping onto a bookmark puts the dragged one in its place, within
+ *  whichever group the target belongs to. The store is sent the whole
+ *  group in its new order, so it never has to infer a move from a delta. */
+async function dropOnto(draggedUrl: string, target: BookmarkView): Promise<void> {
+  const project = selectedProject();
+  const dragged = bookmarks.find((b) => b.url === draggedUrl);
+  if (dragged === undefined) return;
+
+  // Crossing between the grid and the list is a pin change first: the
+  // store decides whether a thirteenth pin is allowed, and a refusal must
+  // stop the reorder rather than leave the two disagreeing.
+  if ((dragged.pinned === true) !== (target.pinned === true)) {
+    const pinResult = await window.jarvis.setBookmarkPinned(project, draggedUrl, target.pinned === true);
+    if (!pinResult.ok) {
+      showToolStatus(pinResult.text);
+      return;
+    }
+    bookmarks = pinResult.value;
+  }
+
+  const group = bookmarks.filter((b) => (b.pinned === true) === (target.pinned === true));
+  const without = group.filter((b) => b.url !== draggedUrl).map((b) => b.url);
+  const at = without.indexOf(target.url);
+  const order = [...without.slice(0, at), draggedUrl, ...without.slice(at)];
+
+  const result = await window.jarvis.reorderBookmarks(project, order);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Dropping on the grid's empty space pins, and puts the newly pinned
+ *  bookmark last.
+ *
+ *  The trailing reorder is not decoration: a pin change leaves `order`
+ *  alone, so a listed bookmark carrying `order: 2` would otherwise land in
+ *  the *middle* of the grid — a position the user never chose and the drop
+ *  never implied. Empty space means "at the end". A tile that is already
+ *  pinned returns before any of that: the pin call would change nothing
+ *  and still rewrite bookmarks.json. */
+async function dropOnGrid(draggedUrl: string): Promise<void> {
+  const project = selectedProject();
+  const dragged = bookmarks.find((b) => b.url === draggedUrl);
+  if (dragged === undefined || dragged.pinned === true) return;
+
+  const result = await window.jarvis.setBookmarkPinned(project, draggedUrl, true);
+  if (!result.ok) {
+    showToolStatus(result.text);
+    renderBookmarks();
+    return;
+  }
+  bookmarks = result.value;
+  await appendWithinGroup(project, draggedUrl, true);
+}
+
+/** Dropping on the list's empty space unpins, on the same terms — the
+ *  mirror of dropOnGrid, and the drag path out of a grid that holds every
+ *  bookmark the project has. */
+async function dropOnList(draggedUrl: string): Promise<void> {
+  const project = selectedProject();
+  const dragged = bookmarks.find((b) => b.url === draggedUrl);
+  if (dragged === undefined || dragged.pinned !== true) return;
+
+  const result = await window.jarvis.setBookmarkPinned(project, draggedUrl, false);
+  if (!result.ok) {
+    showToolStatus(result.text);
+    renderBookmarks();
+    return;
+  }
+  bookmarks = result.value;
+  await appendWithinGroup(project, draggedUrl, false);
+}
+
+/** Sends the group's order with `url` moved to the end of it. */
+async function appendWithinGroup(project: string, url: string, pinned: boolean): Promise<void> {
+  const group = bookmarks.filter((b) => (b.pinned === true) === pinned).map((b) => b.url);
+  const order = [...group.filter((u) => u !== url), url];
+  const result = await window.jarvis.reorderBookmarks(project, order);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Makes a bookmark's element draggable and wires the reorder/pin drop
+ *  protocol shared by the grid and the list: the only thing a drag ever
+ *  carries is a url, so renderEssential and renderBookmarkChip wire this
+ *  identically. */
+function wireDrag(element: HTMLElement, bookmark: BookmarkView): void {
+  element.draggable = true;
+  element.addEventListener("dragstart", (event) => {
+    (event as DragEvent).dataTransfer?.setData("text/plain", bookmark.url);
+  });
+  element.addEventListener("dragover", (event) => event.preventDefault());
+  element.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
+      "text/plain",
+    );
+    if (dragged === "" || dragged === bookmark.url) return;
+    void dropOnto(dragged, bookmark);
+  });
+}
+
 function renderBookmarks(): void {
+  const grid = $("workspace-essentials");
   const list = $("workspace-bookmark-list");
-  list.replaceChildren();
-  if (bookmarks.length === 0) {
+  // The store already sorts pinned-first and by order, so the split is a
+  // filter rather than a sort. Capped again here: a file holding more than
+  // twelve pins must not spill a fourth row into the list's space.
+  const pinned = bookmarks.filter((b) => b.pinned === true).slice(0, MAX_ESSENTIALS);
+  const listed = bookmarks.filter((b) => b.pinned !== true);
+
+  grid.replaceChildren(...pinned.map(renderEssential));
+  list.replaceChildren(...listed.map(renderBookmarkChip));
+
+  // Nothing pinned is the state every install upgrades into, and the grid
+  // keeps its height there (styles.css gives it a min-height) so it stays a
+  // drop target. A blank band with no words in it reads as a glitch — the
+  // same reason the list has had a note of its own all along.
+  if (pinned.length === 0) {
+    const hint = document.createElement("span");
+    hint.className = "workspace-essentials-empty";
+    const note = MESSAGES.noEssentials(PRIMARY_LANGUAGE);
+    hint.textContent = note;
+    hint.dir = detectLanguage(note) === "ar" ? "rtl" : "ltr";
+    grid.append(hint);
+  }
+
+  // The existing empty note, moved verbatim — including the dir handling,
+  // whose comment explains why the language is read off the text rather
+  // than off PRIMARY_LANGUAGE (the constant is a literal type, so comparing
+  // it narrows to never and tsc rejects it).
+  if (listed.length === 0) {
     const empty = document.createElement("span");
     empty.className = "workspace-bookmarks-empty";
     const note = MESSAGES.noBookmarks(PRIMARY_LANGUAGE);
     empty.textContent = note;
-    // Read off the text rather than off PRIMARY_LANGUAGE: the constant is a
-    // literal type, so comparing it narrows to never and tsc rejects it.
     empty.dir = detectLanguage(note) === "ar" ? "rtl" : "ltr";
     list.append(empty);
   }
-  for (const bookmark of bookmarks) list.append(renderBookmarkChip(bookmark));
+
   updateBookmarkToggle();
-  // The bar's height depends on what is in it (a row of chips is taller
-  // than the empty note), and its height is the page slot's top inset. A
-  // DOM change the renderer made itself fires no reflow event, so the
-  // hosted view would stay pinned over the old rectangle.
+  // The sidebar's width is the page slot's left inset, and a DOM change the
+  // renderer made itself fires no reflow event — so the hosted view would
+  // stay pinned over the old rectangle.
   reportWorkspaceBounds();
 }
 
@@ -339,7 +598,7 @@ async function toggleBookmark(): Promise<void> {
   renderBookmarks();
 }
 
-/** The bar shows only when both the chrome rule and the user's own
+/** The sidebar shows only when both the chrome rule and the user's own
  *  toggle allow it. Kept in one function because those two reasons to be
  *  hidden are decided in different places and must not drift. */
 function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && activeTab()?.kind !== "web"): void {
@@ -347,12 +606,12 @@ function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && acti
   $("workspace-toggle-bookmarks").classList.toggle("workspace-nav--on", bookmarksVisible);
 }
 
-function toggleBookmarksBar(): void {
+function toggleBookmarksSidebar(): void {
   bookmarksVisible = !bookmarksVisible;
   renderBookmarksVisibility();
-  // The bar is a row above the page slot; showing or hiding it moves the
-  // slot's top edge, and a hosted view pinned to the old rectangle would be
-  // left overlapping the bar or short of the bottom.
+  // The sidebar is a column beside the page slot; showing or hiding it
+  // moves the slot's left edge, and a hosted view pinned to the old
+  // rectangle would be left overlapping the sidebar or short of the right.
   reportWorkspaceBounds();
 }
 
@@ -540,8 +799,36 @@ export function initWorkspace(projects: string[]): void {
   });
   ($("workspace-pip") as HTMLButtonElement).title = MESSAGES.pictureInPicture(PRIMARY_LANGUAGE);
 
+  const grid = $("workspace-essentials");
+  grid.addEventListener("dragover", (event) => event.preventDefault());
+  grid.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
+      "text/plain",
+    );
+    if (dragged !== "") void dropOnGrid(dragged);
+  });
+
+  // The list's own container drop, mirroring the grid's: without it a
+  // project whose bookmarks are all pinned has an empty list with no
+  // row to drop onto, and dragging could never take anything back out.
+  const list = $("workspace-bookmark-list");
+  list.addEventListener("dragover", (event) => event.preventDefault());
+  list.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
+      "text/plain",
+    );
+    if (dragged !== "") void dropOnList(dragged);
+  });
+
   $("workspace-bookmark-toggle").addEventListener("click", () => void toggleBookmark());
-  $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksBar());
+  $("workspace-toggle-bookmarks").addEventListener("click", () => toggleBookmarksSidebar());
+  // Bilingual like every other user-facing string, and set here rather than
+  // hard-coded in index.html — the same treatment #workspace-pip's title
+  // gets above.
+  ($("workspace-toggle-bookmarks") as HTMLButtonElement).title =
+    MESSAGES.toggleBookmarksSidebar(PRIMARY_LANGUAGE);
   $("workspace-toggle-devtools").addEventListener("click", () => toggleDevTools());
   wireDevToolsHandle();
   renderBookmarksVisibility(false);
@@ -1098,11 +1385,12 @@ export function renderWorkspace(state: WorkspaceState): void {
 
   // Back/forward/reload/address mean nothing for a hosted app — nobody
   // navigates a code editor or a SQL client like a webpage — and neither do
-  // bookmarks: the bar sits inside the browser's own chrome, directly under
-  // the address bar, so it goes away with the rest of it. Stated as "not a
-  // web tab" rather than as a list of kinds, so a fourth hosted app
+  // bookmarks: the sidebar sits inside the browser's own chrome, beside the
+  // page it belongs to, so it goes away with the rest of it. Stated as "not
+  // a web tab" rather than as a list of kinds, so a fourth hosted app
   // inherits the rule for free. With no tab open at all the chrome stays:
-  // that is the state where the bar is the quickest way to open something.
+  // that is the state where the sidebar is the quickest way to open
+  // something.
   const hostedApp = tab !== undefined && tab.kind !== "web";
   ($("workspace-bar") as HTMLElement).hidden = hostedApp;
   renderBookmarksVisibility(hostedApp);
@@ -1137,8 +1425,13 @@ export function renderWorkspace(state: WorkspaceState): void {
   // Hiding the slot also makes its rectangle zero, which is why
   // reportWorkspaceBounds below refuses to report a zero rect: a hosted view
   // must not be moved to nowhere just because a terminal is on top.
-  ($("workspace-page") as HTMLElement).hidden =
-    tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
+  const pageHidden = tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
+  ($("workspace-page") as HTMLElement).hidden = pageHidden;
+  // The row wrapping the sidebar and the page slot must hide with the page:
+  // otherwise, with the sidebar already hidden by hostedApp above, it would
+  // sit here empty yet still claim its flex share, squeezing whichever
+  // renderer-drawn pane is meant to fill that space instead.
+  ($("workspace-body") as HTMLElement).hidden = pageHidden;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
   renderApi(state.tabs, state.activeTabId, selected);
   renderDocker(state.tabs, state.activeTabId, selected);
@@ -1155,9 +1448,10 @@ export function renderWorkspace(state: WorkspaceState): void {
   for (const id of devToolsByTab) if (!liveTabs.has(id)) devToolsByTab.delete(id);
   renderDevTools();
 
-  // Hiding the address bar or the bookmarks bar under it resizes the page
-  // slot the hosted view is pinned to, and nothing else re-measures it — a
-  // resize is the only reflow the window itself reports.
+  // Hiding the address bar above the page, or the bookmarks sidebar beside
+  // it, resizes the page slot the hosted view is pinned to, and nothing else
+  // re-measures it — a resize is the only reflow the window itself
+  // reports.
   reportWorkspaceBounds();
 }
 

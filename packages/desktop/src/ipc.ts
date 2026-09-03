@@ -43,10 +43,12 @@ import type {
   DockerEntry,
   DockerResult,
   EditorsConfig,
+  FaviconStore,
   HeadlampManager,
   InstalledVoice,
   ShellManager,
 } from "@jarvis/platform";
+import { MAX_PINNED } from "@jarvis/platform";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
@@ -520,9 +522,11 @@ export type RendererApi = {
   resizeTerminal(tabId: string, cols: number, rows: number): Promise<void>;
   onTerminalData(cb: (tabId: string, chunk: string) => void): void;
   onTerminalExit(cb: (tabId: string, code: number) => void): void;
-  listBookmarks(project: string): Promise<GitViewResult<Bookmark[]>>;
-  addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
-  removeBookmark(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
+  listBookmarks(project: string): Promise<GitViewResult<BookmarkView[]>>;
+  addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<BookmarkView[]>>;
+  removeBookmark(project: string, url: string): Promise<GitViewResult<BookmarkView[]>>;
+  setBookmarkPinned(project: string, url: string, pinned: boolean): Promise<GitViewResult<BookmarkView[]>>;
+  reorderBookmarks(project: string, urls: string[]): Promise<GitViewResult<BookmarkView[]>>;
   getSettings(): Promise<JarvisConfig>;
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
   testAgent(agent: AgentConfig): Promise<AgentHealth>;
@@ -1596,16 +1600,31 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
   };
 }
 
+/** A bookmark as the renderer needs it: the stored fields plus the cached
+ *  icon for its origin. `icon` absent is what makes the renderer draw a
+ *  monogram tile instead. */
+export type BookmarkView = Bookmark & { icon?: string };
+
 export type BookmarksHandlers = {
-  list(project: string): Promise<GitViewResult<Bookmark[]>>;
+  list(project: string): Promise<GitViewResult<BookmarkView[]>>;
   /** Returns the project's full list after the change, so the renderer
    *  never needs a second list() call just to redraw. */
-  add(project: string, bookmark: Bookmark): Promise<GitViewResult<Bookmark[]>>;
-  remove(project: string, url: string): Promise<GitViewResult<Bookmark[]>>;
+  add(project: string, bookmark: Bookmark): Promise<GitViewResult<BookmarkView[]>>;
+  remove(project: string, url: string): Promise<GitViewResult<BookmarkView[]>>;
+  setPinned(project: string, url: string, pinned: boolean): Promise<GitViewResult<BookmarkView[]>>;
+  reorder(project: string, urls: string[]): Promise<GitViewResult<BookmarkView[]>>;
 };
 
 export type BookmarksHandlerDeps = {
   store: BookmarkStore;
+  favicons: FaviconStore;
+  /** Fire-and-forget: asks the desktop layer to go and fetch this origin's
+   *  icon, through the given project's own session partition — a site
+   *  reachable only there (SSO, a VPN-scoped profile) must be fetched from
+   *  it, not from some shared session. Injected because fetching needs a
+   *  session, which ipc.ts has no business holding. Nothing awaits it — the
+   *  icon lands in the cache and the next listBookmarks carries it. */
+  requestFavicon(project: string, url: string): void;
   language: "ar" | "en";
 };
 
@@ -1626,11 +1645,42 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
     return { ok: false, text, language: deps.language };
   }
 
+  /** The one place a stored list becomes a view. Icons are looked up per
+   *  origin; a store failure for one icon must not fail the whole list, so
+   *  a bad lookup simply leaves that bookmark without one.
+   *
+   *  This is also where the fallback fetch is triggered — a bookmark that
+   *  has never been opened in Jarvis has no captured icon, and asking here
+   *  is what eventually gives it one. The request is not awaited: the list
+   *  must return at render speed, and the icon arrives on a later call. */
+  async function withIcons(project: string, bookmarks: Bookmark[]): Promise<BookmarkView[]> {
+    return Promise.all(
+      bookmarks.map(async (bookmark) => {
+        const icon = await deps.favicons.get(bookmark.url);
+        if (icon.ok && icon.value !== undefined) {
+          return { ...bookmark, icon: icon.value.dataUri };
+        }
+        const wanted = await deps.favicons.shouldFetch(bookmark.url);
+        if (wanted.ok && wanted.value) deps.requestFavicon(project, bookmark.url);
+        return bookmark;
+      }),
+    );
+  }
+
+  /** Turns the store's machine-readable refusals into bilingual text. Any
+   *  detail other than the tokens named here is an IO failure, which the
+   *  user can do nothing about beyond knowing bookmarks are unavailable. */
+  function translate(detail: string): { ok: false; text: string; language: "ar" | "en" } {
+    return detail === "pin-limit"
+      ? fail(MESSAGES.bookmarkPinLimit(MAX_PINNED, deps.language))
+      : fail(MESSAGES.bookmarksUnavailable(deps.language));
+  }
+
   return {
     async list(project) {
       if (!isString(project)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.list(project);
-      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async add(project, bookmark) {
@@ -1638,13 +1688,29 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.add(project, bookmark);
-      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
     async remove(project, url) {
       if (!isString(project) || !isString(url)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.remove(project, url);
-      return result.ok ? result : fail(MESSAGES.bookmarksUnavailable(deps.language));
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+    },
+
+    async setPinned(project, url, pinned) {
+      if (!isString(project) || !isString(url) || typeof pinned !== "boolean") {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      const result = await deps.store.setPinned(project, url, pinned);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+    },
+
+    async reorder(project, urls) {
+      if (!isString(project) || !Array.isArray(urls) || !urls.every(isString)) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      const result = await deps.store.reorder(project, urls);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
   };
 }
