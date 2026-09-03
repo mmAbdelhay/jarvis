@@ -65,10 +65,10 @@ describe("renderDockerPane", () => {
     renderDockerPane(element, "tab-1", "acme", view);
 
     const row = element.querySelectorAll(".workspace-docker-row")[0] as HTMLElement;
-    const labels = [...row.querySelectorAll("button")].map((b) => b.textContent);
-    expect(labels).toContain("Stop");
-    expect(labels).toContain("Restart");
-    expect(labels).not.toContain("Start");
+    const labels = [...row.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+    expect(labels).toContain("Stop the container");
+    expect(labels).toContain("Restart the container");
+    expect(labels).not.toContain("Start the container");
   });
 
   it("offers Start for a container that is not running", () => {
@@ -78,9 +78,9 @@ describe("renderDockerPane", () => {
       rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
     });
 
-    const labels = [...element.querySelectorAll("button")].map((b) => b.textContent);
-    expect(labels).toContain("Start");
-    expect(labels).not.toContain("Stop");
+    const labels = [...element.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+    expect(labels).toContain("Start the container");
+    expect(labels).not.toContain("Stop the container");
   });
 
   it("shows Docker's own status string unchanged", () => {
@@ -182,7 +182,7 @@ describe("renderDockerPane", () => {
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
     button?.click();
 
     expect(stop).not.toHaveBeenCalled();
@@ -195,7 +195,7 @@ describe("renderDockerPane", () => {
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
     button?.click();
 
     expect(stop).toHaveBeenCalledWith("acme", "acme-app-1");
@@ -211,7 +211,7 @@ describe("renderDockerPane", () => {
       ...view,
       rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
     });
-    [...element.querySelectorAll("button")].find((b) => b.textContent === "Start")?.click();
+    [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Start the container")?.click();
 
     expect(start).toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
@@ -226,7 +226,7 @@ describe("renderDockerPane", () => {
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.textContent === "Stop");
+    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
     button?.click();
     await flush();
 
@@ -242,7 +242,7 @@ describe("renderDockerPane", () => {
       ...view,
       rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
     });
-    [...element.querySelectorAll("button")].find((b) => b.textContent === "Start")?.click();
+    [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Start the container")?.click();
     await flush();
 
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
@@ -268,5 +268,73 @@ describe("toTerminalText", () => {
 
   it("does not invent a newline for a lone CR", () => {
     expect(toTerminalText("progress\r")).toBe("progress\r");
+  });
+});
+
+describe("the pane's heading", () => {
+  it("counts the running containers against the declared total", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    expect(element.querySelector(".workspace-docker-count")?.textContent).toBe("1 of 2 running");
+  });
+
+  it("counts a declared container Docker does not have as not running", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [view.rows[1]!, view.rows[1]!],
+    });
+
+    expect(element.querySelector(".workspace-docker-count")?.textContent).toBe("0 of 2 running");
+  });
+});
+
+describe("the row's state dot", () => {
+  it("marks a running container with the good state", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    const dot = element.querySelectorAll(".workspace-docker-row")[0]?.querySelector(".dot");
+    expect(dot?.className).toContain("dot--running");
+  });
+
+  it("marks a stopped container distinctly from a running one", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", {
+      ...view,
+      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited" } }],
+    });
+
+    const dot = element.querySelector(".workspace-docker-row .dot");
+    expect(dot?.className).toContain("dot--stopped");
+    expect(dot?.className).not.toContain("dot--running");
+  });
+
+  it("marks a container Docker does not have as missing", () => {
+    const element = host();
+    renderDockerPane(element, "tab-1", "acme", view);
+
+    const dot = element.querySelectorAll(".workspace-docker-row")[1]?.querySelector(".dot");
+    expect(dot?.className).toContain("dot--missing");
+  });
+});
+
+describe("the log pane's empty state", () => {
+  it("says nothing is selected before a row is picked", () => {
+    const element = host();
+    renderDockerPane(element, "tab-2", "acme", view);
+
+    expect(element.querySelector(".workspace-docker-empty")?.textContent).toBe(
+      "No container selected",
+    );
+  });
+
+  it("keeps the empty state out of the way once a row is selected", () => {
+    const element = host();
+    renderDockerPane(element, "tab-3", "acme", view);
+    (element.querySelector(".workspace-docker-row") as HTMLElement).click();
+
+    expect(element.querySelector(".workspace-docker-empty")).toBeNull();
   });
 });

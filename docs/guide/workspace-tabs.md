@@ -193,18 +193,23 @@ login, because loopback is the whole mitigation.
 
 ## Docker
 
-One tab per project, listing the containers `docker:` maps to it. Each row
-shows the container's own status line (Docker's words, unchanged — `Up 3
-hours`, `Exited (0) 2 minutes ago`) and the ports it publishes, with
-**Start**, or **Stop** and **Restart** according to what it is doing, and
-**Shell**, which opens a Terminal tab already inside the container. A row
+One tab per project, listing the containers `docker:` maps to it, under a
+count of how many of them are up. Each row is led by a dot — filled when the
+container is running, amber while it is restarting or paused, hollow when
+Docker has no such container — and shows the container's own status line
+(Docker's words, unchanged — `Up 3 hours`, `Exited (0) 2 minutes ago`) and the
+ports it publishes.
+
+The buttons on the right of each row are ▶ start, ■ stop, ↻ restart, and ❯,
+which opens a Terminal tab already inside the container. They are dimmed until
+you hover the row or select it; hovering any of them names it. A row
 configured in `docker:` with no matching container shows greyed out instead of
 a status — see
 [troubleshooting](troubleshooting.md#a-container-in-the-docker-tab-is-greyed-out).
 
 The containers sit in a column down the left; selecting one tails its log in
-the pane beside them — one `docker logs -f` at a time, for the row you are
-looking at. Switching away from the tab stops that follower rather than
+the pane beside them, which says so until you pick one — one `docker logs -f`
+at a time, for the row you are looking at. Switching away from the tab stops that follower rather than
 leaving it running for a pane nobody is watching, so coming back starts the
 tail again from Docker's own last 500 lines. When every container in the
 list belongs to one compose project, **Up** and **Down** appear above the

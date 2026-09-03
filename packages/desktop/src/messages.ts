@@ -121,6 +121,27 @@ export const MESSAGES = {
     language === "ar"
       ? "لا يُعرف مجلد ملف compose لهذه الحزمة، فتعذّر تشغيلها."
       : "The compose file's directory for this stack is unknown, so it cannot be brought up.",
+  // The row actions are glyphs, so their accessible name is the only thing
+  // that says what they do — carried on both `title` and `aria-label`, for
+  // the pointer and for a screen reader.
+  dockerActionStart: (language: "ar" | "en"): string =>
+    language === "ar" ? "تشغيل الحاوية" : "Start the container",
+  dockerActionStop: (language: "ar" | "en"): string =>
+    language === "ar" ? "إيقاف الحاوية" : "Stop the container",
+  dockerActionRestart: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادة تشغيل الحاوية" : "Restart the container",
+  dockerActionShell: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح صدفة داخل الحاوية" : "Open a shell inside the container",
+  /** The count line under the pane's heading. "of N" rather than a
+   *  running/stopped split because a container declared in `docker:` that
+   *  Docker does not have is neither — and the total stays honest when one
+   *  goes missing. */
+  dockerRunningCount: (running: number, total: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${running} من ${total} تعمل` : `${running} of ${total} running`,
+  dockerNoSelection: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تُحدَّد حاوية" : "No container selected",
+  dockerHeading: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحاويات" : "Containers",
   dockerConfirmStop: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `إيقاف ${name}؟` : `Stop ${name}?`,
   dockerConfirmRestart: (name: string, language: "ar" | "en"): string =>

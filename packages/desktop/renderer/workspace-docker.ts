@@ -59,6 +59,12 @@ type Pane = {
   /** The rows list, created once and refilled in place on every poll tick —
    *  see renderDockerPane. */
   rowsHost: HTMLElement;
+  /** The "N of M running" line under the heading, refilled per tick. */
+  count: HTMLElement;
+  /** The "no container selected" placeholder standing in for the terminal,
+   *  until the first row selection builds one. Removed then, and never
+   *  rebuilt: a pane that has shown a log has nothing to say this for. */
+  empty: HTMLElement | undefined;
   /** The compose bar, when the view has one. Removed and rebuilt as the
    *  view's compose project appears or goes away; `undefined` when the pane
    *  currently shows none. */
@@ -90,13 +96,33 @@ function getPane(tabId: string): Pane {
   logHost.className = "workspace-docker-log";
   const rowsHost = document.createElement("div");
   rowsHost.className = "workspace-docker-rows";
+  // The heading is static chrome; only its count line changes per tick, so
+  // it is built once here and the count refilled in renderDockerPane.
+  const count = document.createElement("div");
+  count.className = "workspace-docker-count";
+  const heading = document.createElement("div");
+  heading.className = "workspace-docker-heading";
+  const title = document.createElement("div");
+  title.className = "workspace-docker-title";
+  title.textContent = MESSAGES.dockerHeading(PRIMARY_LANGUAGE);
+  heading.append(title, count);
+
+  // Sits where the terminal will go, and is removed by the first row
+  // selection — the terminal itself is built lazily at that same moment.
+  const empty = document.createElement("div");
+  empty.className = "workspace-docker-empty";
+  empty.textContent = MESSAGES.dockerNoSelection(PRIMARY_LANGUAGE);
+  logHost.append(empty);
+
   const side = document.createElement("div");
   side.className = "workspace-docker-side";
-  side.append(rowsHost);
+  side.append(heading, rowsHost);
   const pane: Pane = {
     logHost,
     side,
     rowsHost,
+    count,
+    empty,
     compose: undefined,
     terminal: undefined,
     fit: undefined,
@@ -114,6 +140,10 @@ function getPane(tabId: string): Pane {
  *  80×24 inside a pane that grows with the window, and would never reflow. */
 function ensureTerminal(pane: Pane): Terminal {
   if (pane.terminal !== undefined) return pane.terminal;
+  // The placeholder and the terminal are the same slot: whichever the pane
+  // is showing, it is showing exactly one.
+  pane.empty?.remove();
+  pane.empty = undefined;
   const terminal = new Terminal({
     scrollback: LOG_TAIL_LINES,
     fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
@@ -176,6 +206,14 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
   element.classList.toggle("workspace-docker-row--selected", pane?.selected === row.container);
   element.dataset["container"] = row.container;
 
+  // The state at a glance, off the same `.dot` vocabulary the session rows
+  // use. "missing" is its own state rather than a shade of stopped: the
+  // container is declared in `docker:` and Docker has never heard of it,
+  // which is a configuration problem, not a lifecycle one.
+  const dot = document.createElement("span");
+  dot.className = `dot ${dotStateClass(row)}`;
+  element.append(dot);
+
   const name = document.createElement("span");
   name.className = "workspace-docker-row-name";
   name.textContent = row.name;
@@ -210,24 +248,24 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
 
   if (running) {
     buttons.append(
-      actionButton("Stop", () => {
+      actionButton("■", MESSAGES.dockerActionStop(PRIMARY_LANGUAGE), () => {
         if (!window.confirm(MESSAGES.dockerConfirmStop(row.name, PRIMARY_LANGUAGE))) return;
         runAction(window.jarvis.dockerStop(project, row.container));
       }),
-      actionButton("Restart", () => {
+      actionButton("↻", MESSAGES.dockerActionRestart(PRIMARY_LANGUAGE), () => {
         if (!window.confirm(MESSAGES.dockerConfirmRestart(row.name, PRIMARY_LANGUAGE))) return;
         runAction(window.jarvis.dockerRestart(project, row.container));
       }),
     );
   } else {
     buttons.append(
-      actionButton("Start", () => {
+      actionButton("▶", MESSAGES.dockerActionStart(PRIMARY_LANGUAGE), () => {
         runAction(window.jarvis.dockerStart(project, row.container));
       }),
     );
   }
   buttons.append(
-    actionButton("Shell", () => {
+    actionButton("❯", MESSAGES.dockerActionShell(PRIMARY_LANGUAGE), () => {
       runAction(window.jarvis.dockerShell(project, row.container));
     }),
   );
@@ -255,10 +293,45 @@ function runAction(action: Promise<GitViewResult<void>>): void {
   });
 }
 
-function actionButton(label: string, onClick: () => void): HTMLButtonElement {
+/** Which `.dot` modifier a row wears. Docker's six states collapse to the
+ *  three a reader actually acts on: it is up, it is not, or it is coming and
+ *  going and worth watching. */
+function dotStateClass(row: DockerRow): string {
+  if (row.facts === undefined) return "dot--missing";
+  switch (row.facts.state) {
+    case "running":
+      return "dot--running";
+    case "restarting":
+    case "paused":
+      return "dot--busy";
+    default:
+      return "dot--stopped";
+  }
+}
+
+/** The compose bar's own button: a plain worded control, the one place in
+ *  this pane where the label is the button. */
+function composeButton(label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+/** A glyph button. The glyph is decoration — `aria-hidden` keeps a screen
+ *  reader from reading "black square" — and the accessible name comes from
+ *  the bilingual label on both `title` and `aria-label`. */
+function actionButton(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "workspace-docker-action";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = glyph;
+  button.append(mark);
   button.addEventListener("click", onClick);
   return button;
 }
@@ -272,11 +345,14 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
   label.textContent = composeProject;
   element.append(label);
 
+  // Words, not glyphs, unlike the row actions: these act on the whole stack
+  // and Down removes containers, so the bar says plainly what it does rather
+  // than asking the reader to recognise a symbol.
   element.append(
-    actionButton("Up", () => {
+    composeButton("Up", () => {
       runAction(window.jarvis.dockerComposeUp(project));
     }),
-    actionButton("Down", () => {
+    composeButton("Down", () => {
       if (!window.confirm(MESSAGES.dockerConfirmComposeDown(composeProject, PRIMARY_LANGUAGE))) return;
       runAction(window.jarvis.dockerComposeDown(project));
     }),
@@ -312,6 +388,13 @@ export function renderDockerPane(host: HTMLElement, tabId: string, project: stri
 
   pane.rowsHost.replaceChildren(
     ...view.rows.map((row) => renderRow(host, tabId, project, row)),
+  );
+
+  const running = view.rows.filter((row) => row.facts?.state === "running").length;
+  pane.count.textContent = MESSAGES.dockerRunningCount(
+    running,
+    view.rows.length,
+    PRIMARY_LANGUAGE,
   );
 
   // The compose bar sits above the rows, in the left column.
