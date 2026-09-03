@@ -155,4 +155,21 @@ describe("createDockerClient.list", () => {
     if (!result.ok) return;
     expect(result.containers[0]?.ports).toEqual([]);
   });
+
+  it("converts a rejection on the inspect call to daemon-down", async () => {
+    const run: CommandRunner = (command, args) => {
+      if (command === "docker" && args[0] === "ps") {
+        return Promise.resolve({ code: 0, stdout: "abc123\n", stderr: "" });
+      }
+      return Promise.reject(new Error("boom"));
+    };
+
+    const result = await createDockerClient(run).list();
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "daemon-down",
+      detail: "boom",
+    });
+  });
 });

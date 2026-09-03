@@ -156,7 +156,15 @@ export function createDockerClient(run: CommandRunner): DockerClient {
       const list = ids.stdout.split("\n").filter((line) => line.trim() !== "");
       if (list.length === 0) return { ok: true, containers: [] };
 
-      const inspected = await run("docker", ["inspect", ...list]);
+      let inspected: { code: number; stdout: string; stderr: string };
+      try {
+        inspected = await run("docker", ["inspect", ...list]);
+      } catch (error) {
+        if (isMissingBinary(error)) {
+          return { ok: false, reason: "not-installed", detail: messageOf(error) };
+        }
+        return { ok: false, reason: "daemon-down", detail: messageOf(error) };
+      }
       if (inspected.code !== 0) {
         return { ok: false, reason: "daemon-down", detail: inspected.stderr.trim() };
       }
