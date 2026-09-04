@@ -340,6 +340,35 @@ a `^C` for a hung command are untouched.
 its own, keeping blocks, see `terminal.blocks.inputEditor` in
 **[configuration](configuration.md)**.
 
+An empty editor shows one line of grey hint text, `Type a command · ⌘P for
+actions`; the first keystroke removes it. It is not Warp's wording on
+purpose — Warp's input doubles as an AI prompt, and this one does not, so the
+hint says what the box is for and points at the palette, which is otherwise
+discoverable only by already knowing it exists.
+
+Above the editor sits a row of chips, the same strip Warp draws above its
+own input:
+
+```
+ v22.11.0    ~/projects/jarvis    master    ± 4
+```
+
+Runtime version, the pane's directory (`$HOME` collapsed to `~`), the git
+branch, and a `±` count of insertions and deletions. They refresh once per
+prompt — the same moment the file sidebar re-roots — never on a timer, so a
+slow repository shows a beat-old row rather than blocking the input.
+
+A chip that does not apply is **absent, not empty**: no git repository means
+no branch chip and no `±` chip, not a blank one; no `package.json` means no
+runtime chip; a detached HEAD shows its short SHA in place of a branch name.
+Without the zsh shell integration the pane's directory isn't known at all,
+so there are no chips whatsoever, rather than a guessed one.
+
+**These chips are drawn by Jarvis, above the editor — your shell's own
+`PS1` still renders inside it.** If your prompt already prints a branch,
+you will see it twice: once from Jarvis's chip, once from your own prompt.
+This is a known trade-off for v1, not a bug.
+
 ### Splits
 
 A Terminal tab holds a tree of panes rather than a single shell. **⌘D** splits
@@ -352,6 +381,36 @@ To close a pane, use **⌘P → "Close pane"**; closing the last pane closes the
 tab. (⌘W is the window's own Close Window shortcut and never reaches the page,
 so there is no keyboard chord for this.) Closing a pane kills its shell;
 closing the tab kills every shell under it.
+
+### The file sidebar
+
+A tree of the project on the left of the tab, **one per tab, not one per
+pane** — a three-way split would otherwise be mostly tree, and three toggles
+to manage. It follows whichever pane has focus: split with ⌘D and `cd`
+somewhere in the new pane, and the tree re-roots to that pane's directory;
+click back into the first pane and it re-roots again, to wherever that shell
+is. It needs the same zsh integration blocks does, since it re-roots on the
+same signal a returning prompt sends — a pane without it never grows a
+sidebar at all.
+
+Clicking a folder expands it, listing its immediate children only; nothing is
+listed before you ask. Clicking a file opens that file itself in the
+project's **Editor tab** — not just its folder. Each click opens a new Editor
+tab, with no check for one already open on the same file, so ten files
+clicked over a session is ten tabs.
+
+**The tree cannot show anything outside the project root** — the directory
+`projects:` gives for this project in `jarvis.yaml`, not wherever the shell
+currently is. A shell can `cd /`, and the tree does not follow it out: it
+simply stops at the root, symlinks resolved first so a link pointing outside
+the project doesn't reopen the door. This is the feature's actual security
+boundary, not an incidental limit.
+
+It is dismissable from **⌘P → "Toggle file sidebar"** — there is no keyboard
+chord for it, only the palette entry. It does not watch the filesystem: the
+tree refreshes when the directory changes, when you expand a folder, and on
+an explicit refresh, and nothing else. It cannot rename, delete, create or
+drag a file — it is a way to see and open, not a file manager.
 
 ### The command palette
 
