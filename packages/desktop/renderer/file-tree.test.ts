@@ -209,4 +209,23 @@ describe("the file tree", () => {
     expect(fileName?.getAttribute("title")).toBe("read me.md");
     expect(folderName?.getAttribute("title")).toBe("src");
   });
+
+  // styles.css clips a long name with `white-space: pre` rather than
+  // `nowrap` specifically so this survives: `nowrap` collapses a run of
+  // spaces to one before rendering, `pre` does not. The DOM side of that —
+  // the exact string reaching the name span, unmangled — is what this
+  // pins; terminal-explorer-css.test.ts pins the CSS declaration itself.
+  it("keeps both spaces of a double-space file name in the row's own text", async () => {
+    const twoSpaces: Record<string, { name: string; directory: boolean }[]> = {
+      "/proj": [{ name: "read  me.md", directory: false }],
+    };
+    const { tree: t } = tree({ list: async (p: string) => twoSpaces[p] ?? [] });
+    await t.setRoot("/proj");
+
+    const fileName = t.element.querySelector<HTMLElement>(
+      '[data-path="/proj/read  me.md"] .file-tree-name',
+    );
+    expect(fileName?.textContent).toBe("read  me.md");
+    expect(fileName?.getAttribute("title")).toBe("read  me.md");
+  });
 });

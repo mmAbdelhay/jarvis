@@ -63,7 +63,16 @@ describe("the file sidebar's styling", () => {
     const body = ruleBodyFor(".file-tree-name");
     expect(body).toMatch(/overflow\s*:\s*hidden/);
     expect(body).toMatch(/text-overflow\s*:\s*ellipsis/);
-    expect(body).toMatch(/white-space\s*:\s*nowrap/);
+  });
+
+  // `pre` (not `nowrap`) so a file name with two consecutive spaces still
+  // renders exactly as it is on disk — `nowrap` collapses whitespace runs
+  // before rendering, `pre` does not. Both suppress wrapping, so this does
+  // not change the ellipsis truncation above: it is `overflow: hidden` +
+  // `text-overflow: ellipsis` that clip, and neither value wraps first.
+  it("keeps exact on-disk spacing in a name rather than collapsing it", () => {
+    const body = ruleBodyFor(".file-tree-name");
+    expect(body).toMatch(/white-space\s*:\s*pre\b/);
   });
 
   it("draws an indent guide down each nested group", () => {

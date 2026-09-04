@@ -1426,7 +1426,10 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    /* pre, not nowrap: a name with two consecutive spaces still renders as
+       it is on disk. Neither value wraps, so the ellipsis clip above is
+       unaffected. */
+    white-space: pre;
   }
 
   /* The indent guide: a hairline down each nested level. */
