@@ -1597,6 +1597,14 @@
     font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .terminal-sticky-header[hidden] { display: none; }
+  /* The chip row above the input — a runtime version, the directory, the
+     git branch and its dirty counts, naming where the shell is. */
+  .terminal-chips { display: flex; gap: 8px; align-items: center; padding: 2px 0 4px;
+    font: 12px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+  .terminal-chip { color: var(--text-muted); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0 6px; white-space: pre; }
+  .terminal-chip--branch { color: var(--accent); }
+  .terminal-chip--dirty { color: var(--good); }
   /* A full-screen program gets the whole pane, exactly as it would in any
      other terminal — no blocks above it, no padding around it. */
   .terminal-pane[data-state="alt"] .terminal-blocks,

@@ -360,6 +360,17 @@ function makePane(
         return [];
       }
     },
+    // The chip row's data, read fresh on every cwd event. Guarded the same
+    // way `history` and `workflows` are: a channel that fails (or a preload
+    // without it) leaves the row showing whatever it already had rather
+    // than throwing into the pane.
+    chips: async () => {
+      try {
+        return await window.jarvis.terminalChips(paneKey);
+      } catch {
+        return undefined;
+      }
+    },
     interceptKey,
     // The palette's split right / split down / close pane — the same tree
     // handleSplitKey already acts on for the app's own ⌘D/⌘⇧D/⌘W chords.

@@ -18,10 +18,12 @@
 // machinery fails is still a working terminal.
 
 import type { Workflow } from "@jarvis/platform";
+import type { TerminalChips } from "../src/ipc.js";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
+import { createChipRow } from "./terminal-chips.js";
 import { createEditor, type TerminalEditor } from "./terminal-input.js";
 import { createPalette, type Palette, type PaletteAction } from "./terminal-palette.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
@@ -86,6 +88,13 @@ export type PaneHooks = {
    *  a file sidebar follow a `cd` the moment it finishes rather than when
    *  the next command starts. Absent means nothing follows it. */
   onCwd?: ((path: string) => void) | undefined;
+  /** The chip row's data for this pane, read fresh on every `cwd` event —
+   *  the same trigger `onCwd` fires on, since a prompt returning is exactly
+   *  when the directory, the branch and the dirty counts can all have
+   *  changed. Absent means no chip row is ever populated (it stays empty);
+   *  a read that rejects leaves the row showing whatever it already had —
+   *  a slow or broken repository must never block the input. */
+  chips?: (() => Promise<TerminalChips | undefined>) | undefined;
   /** Shows or hides the tab's file sidebar. Offered as a palette action
    *  and nowhere else — the sidebar has no chord of its own, and this is
    *  what keeps it dismissable. Absent means the tab has no sidebar, and
@@ -228,6 +237,13 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   live.className = "terminal-live";
   element.append(sticky, list, live);
   host.append(element);
+
+  // The chip row: naming where the shell is. Mounted here, ahead of the
+  // editor built further down (`buildEditor` appends its own wrapper to
+  // `element` last), so DOM order alone puts it above the input — a
+  // flex-column pane lays out its children in that order without this file
+  // measuring anything.
+  const chipRow = createChipRow(element, hooks.settings.home);
 
   // Selection, jumping and filtering: nothing to navigate with blocks off,
   // so `nav` stays undefined and the pane's `blockNav` — what
@@ -886,6 +902,27 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     attempt(() => nav?.sync(views));
   }
 
+  /**
+   * Re-reads and re-draws the chip row for whatever prompt just arrived.
+   *
+   * Stale-then-update: the row goes on showing whatever it already had
+   * until this resolves, so a slow repository never means an input the
+   * user cannot type into. A rejected read leaves the previous row exactly
+   * as it was — `chipRow.render` is only ever called with a result that
+   * actually came back.
+   */
+  function refreshChips(): void {
+    const read = hooks.chips;
+    if (read === undefined) return;
+    void read()
+      .then((chips) => {
+        if (!disposed) chipRow.render(chips);
+      })
+      .catch(() => {
+        // The previous row stands.
+      });
+  }
+
   function handle(event: BlockEvent): void {
     // Output first and unguarded: this is the byte stream, and it is the one
     // thing in this function that must never be skipped.
@@ -903,6 +940,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     }
     if (event.type === "cwd") {
       attempt(() => hooks.onCwd?.(event.path));
+      attempt(() => refreshChips());
       return;
     }
     if (event.type === "block-done") {

@@ -36,7 +36,10 @@ const CWD = (path: string) => `]7;file://${path}`;
 
 function pane(
   settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" },
-  hooks: { onCwd?: (path: string) => void } = {},
+  hooks: {
+    onCwd?: (path: string) => void;
+    chips?: () => Promise<import("../src/ipc.js").TerminalChips | undefined>;
+  } = {},
 ) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -266,6 +269,106 @@ describe("a terminal pane", () => {
     const p = pane(undefined, { onCwd });
     p.write(`${CWD("/repo/src")}${A}$ ${B}`);
     expect(onCwd).toHaveBeenCalledWith("/repo/src");
+  });
+});
+
+/** A microtask turn — chip reads resolve on promises the pane never
+ *  synchronously awaits. */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("the chip row in a pane", () => {
+  it("mounts a chip row above the editor", () => {
+    const p = pane({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x" });
+    const chipsEl = p.element.querySelector(".terminal-chips");
+    const editorEl = p.element.querySelector(".terminal-input");
+    expect(chipsEl).not.toBeNull();
+    expect(editorEl).not.toBeNull();
+    // DOM order in a flex-column pane is paint order: the chip row has to
+    // precede the editor to land above it, not merely exist somewhere.
+    const position = chipsEl?.compareDocumentPosition(editorEl as Node);
+    expect((position as number) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("reads and renders chips on every cwd event", async () => {
+    const chips = vi.fn(async () => ({
+      cwd: "/Users/x/proj",
+      branch: "main",
+      detached: false,
+      insertions: 1,
+      deletions: 0,
+      runtime: undefined,
+    }));
+    const p = pane(undefined, { chips });
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(chips).toHaveBeenCalledTimes(1);
+    expect(p.element.querySelectorAll(".terminal-chip").length).toBe(3);
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
+  });
+
+  // Stale-then-update: the row keeps showing what it already had while the
+  // new read is still in flight — an input the user cannot yet type into
+  // would be worse than one naming last prompt's branch for a moment.
+  it("keeps the previous chips visible while a new read is in flight", async () => {
+    let resolveSecond: ((value: unknown) => void) | undefined;
+    const chips = vi
+      .fn()
+      .mockResolvedValueOnce({
+        cwd: "/Users/x/proj",
+        branch: "main",
+        detached: false,
+        insertions: 0,
+        deletions: 0,
+        runtime: undefined,
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const p = pane(undefined, { chips });
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
+
+    // A second prompt starts a second read that has not resolved yet — the
+    // wrapper prints OSC 7 on every precmd, even when the directory has not
+    // changed.
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
+
+    resolveSecond?.({
+      cwd: "/Users/x/proj",
+      branch: "feature",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
+    });
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("feature");
+  });
+
+  it("leaves the previous chips showing when a read rejects", async () => {
+    const chips = vi
+      .fn()
+      .mockResolvedValueOnce({
+        cwd: "/Users/x/proj",
+        branch: "main",
+        detached: false,
+        insertions: 0,
+        deletions: 0,
+        runtime: undefined,
+      })
+      .mockRejectedValueOnce(new Error("read failed"));
+    const p = pane(undefined, { chips });
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
   });
 });
 
