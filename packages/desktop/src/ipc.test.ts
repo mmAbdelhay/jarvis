@@ -2458,11 +2458,23 @@ describe("terminal handlers", () => {
     });
 
     it("refuses a path outside the project root", async () => {
-      const handlers = listing();
+      const read: string[] = [];
+      const handlers = listing({
+        files: {
+          ...files,
+          readDir: (path: string) => {
+            read.push(path);
+            return [];
+          },
+        },
+      });
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/etc")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "/proj/../etc")).resolves.toEqual([]);
+      // Watched, not merely asserted empty: a listing of /etc that came
+      // back empty would read the same as a refusal.
+      expect(read).toEqual([]);
     });
 
     it("refuses a symlink that points outside the project", async () => {
@@ -2471,6 +2483,49 @@ describe("terminal handlers", () => {
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/proj/link")).resolves.toEqual([]);
+    });
+
+    // The escaping link is a *parent* of the path asked for, not its last
+    // segment. realpathSync resolves every component, and this is what
+    // would notice if the check were ever narrowed to the leaf.
+    // `readDir` is watched rather than only its answer asserted: the shared
+    // fake answers [] for every path but "/proj", so an escape that got
+    // through would look exactly like a refusal.
+    it("refuses a path whose parent component is a symlink out of the project", async () => {
+      const read: string[] = [];
+      const escaping = {
+        readDir: (path: string) => {
+          read.push(path);
+          return [];
+        },
+        realPath: (p: string) => (p.startsWith("/proj/link") ? p.replace("/proj/link", "/etc") : p),
+      };
+      const handlers = listing({ files: escaping });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj/link/child")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "/proj/link")).resolves.toEqual([]);
+      expect(read).toEqual([]);
+    });
+
+    // The invariant that makes checking a lexical path and then reading a
+    // real one safe: what gets read is exactly what was approved, never the
+    // string the renderer sent. Anything else is "checked one path, opened
+    // another".
+    it("reads the resolved path it approved, not the caller's string", async () => {
+      const read: string[] = [];
+      const linked = {
+        readDir: (path: string) => {
+          read.push(path);
+          return [];
+        },
+        realPath: (p: string) => (p === "/proj/link" ? "/proj/real" : p),
+      };
+      const handlers = listing({ files: linked });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj/link")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj/real"]);
     });
 
     it("refuses a non-string argument and an unknown pane", async () => {
@@ -2489,6 +2544,20 @@ describe("terminal handlers", () => {
       };
       const handlers = listing({ files: throwing });
       handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
+    });
+
+    // No configured project contains the pane's directory, so there is no
+    // root to bound the listing with — and a listing with no boundary is
+    // exactly what must never happen. Reached here by emptying the projects
+    // record the handlers hold after the pane was opened, since that is the
+    // only way a live pane can end up outside every configured project.
+    it("refuses a pane whose directory belongs to no configured project", async () => {
+      const projects: Record<string, string> = { p: "/proj" };
+      const handlers = listing({ projects });
+      handlers.open("p");
+      delete projects["p"];
 
       await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
     });
