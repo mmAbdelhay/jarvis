@@ -388,6 +388,58 @@ describe("SessionManager", () => {
       expect(log.length).toBe(256 * 1024);
       expect(log.endsWith("TAIL")).toBe(true);
     });
+
+    // 256 KB per session is ~512 KB resident (JS strings are UTF-16), kept
+    // after exit on purpose and with nothing bounding how many dead sessions
+    // pile up across a day. The end is the part anyone opens a dead
+    // transcript for, so the tail is what survives.
+    it("compacts a finished session's log to its tail", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput("z".repeat(200 * 1024));
+      fake.emitOutput("the last thing it said\n");
+      expect(manager.log(session.id).length).toBeGreaterThan(48 * 1024);
+
+      fake.emitExit(1);
+
+      const log = manager.log(session.id);
+      expect(log.length).toBeLessThanOrEqual(48 * 1024);
+      expect(log.endsWith("the last thing it said\n")).toBe(true);
+    });
+
+    it("leaves a running session's log alone", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput("z".repeat(200 * 1024));
+
+      expect(manager.log(session.id).length).toBeGreaterThan(48 * 1024);
+    });
+
+    // A short session has nothing to compact, and slicing it would be a
+    // no-op that still rewrote the map.
+    it("leaves a short finished log exactly as it was", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      fake.emitOutput("all done\n");
+      fake.emitExit(0);
+
+      expect(manager.log(session.id)).toBe("all done\n");
+    });
   });
 });
 

@@ -19,6 +19,15 @@ import type {
  */
 const MAX_LOG_CHARS = 256 * 1024;
 
+/** What a *finished* session keeps.
+ *
+ *  The reason to open a dead session's transcript is to find out why it
+ *  stopped, and that is at the end — so the tail is the whole of the value.
+ *  The 256 KB a live session needs is ~512 KB resident (JS strings are
+ *  UTF-16) held per session forever, with nothing bounding how many sessions
+ *  pile up across a day of starting and killing agents. */
+const DEAD_LOG_CHARS = 48 * 1024;
+
 /**
  * How long a starting session's output must stay quiet before a queued task
  * is typed into it.
@@ -264,6 +273,20 @@ export class SessionManager {
       this.#pendingTasks.delete(id);
     }
     this.#update(id, { state: code === 0 ? "done" : "dead", exitCode: code });
+    this.#compactLog(id);
+  }
+
+  /** Trims a finished session's transcript to its tail — see DEAD_LOG_CHARS.
+   *  Compacted rather than dropped: the log is kept after exit on purpose,
+   *  and the end of it is the part anyone came for. */
+  #compactLog(id: string): void {
+    const chunks = this.#logs.get(id);
+    if (chunks === undefined) return;
+    const joined = chunks.join("");
+    if (joined.length <= DEAD_LOG_CHARS) return;
+    const tail = joined.slice(joined.length - DEAD_LOG_CHARS);
+    this.#logs.set(id, [tail]);
+    this.#logSizes.set(id, tail.length);
   }
 
   #update(id: string, patch: Partial<Session>): void {
