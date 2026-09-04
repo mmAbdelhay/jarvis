@@ -1604,8 +1604,20 @@
      git branch and its dirty counts, naming where the shell is. */
   .terminal-chips { display: flex; gap: 8px; align-items: center; padding: 2px 0 4px;
     font: 12px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+  /* The row is built in every pane, blocks-off panes and shells with no
+     OSC 7 included, and those never get a chip. Without this its padding
+     is a permanent 6px band above the input for a row that stays empty
+     for the life of the pane. */
+  .terminal-chips:empty { display: none; }
   .terminal-chip { color: var(--text-muted); border: 1px solid var(--border);
     border-radius: 4px; padding: 0 6px; white-space: pre; }
+  /* The path is the chip that gives way when the row cannot fit — a deep
+     path in a three-way split. `white-space: pre` in a non-wrapping flex
+     row inside `overflow: hidden` otherwise clips from the right, taking
+     exactly the branch and ± chips: the two carrying what the shell's own
+     prompt does not, to spare the one thing it usually does. `min-width: 0`
+     is what lets a flex item shrink below its content at all. */
+  .terminal-chip--path { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .terminal-chip--branch { color: var(--accent); }
   .terminal-chip--dirty { color: var(--good); }
   /* A full-screen program gets the whole pane, exactly as it would in any

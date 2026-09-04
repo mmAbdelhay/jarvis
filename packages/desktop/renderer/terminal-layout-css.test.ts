@@ -60,4 +60,26 @@ describe("the terminal pane's layout", () => {
     expect(hiding[0]?.[1]).toContain('[data-state="blocks"]');
     expect(hiding[0]?.[1]).toContain('[data-editor="on"]');
   });
+
+  // The chip row is built in every pane — blocks off, no shell integration,
+  // the Session route — and most of those never get a chip. Its padding is
+  // otherwise a permanent band above the input for a row that stays empty
+  // for the life of the pane.
+  it("takes no space when the chip row has no chips", () => {
+    expect(ruleBodyFor(".terminal-chips:empty")).toMatch(/display\s*:\s*none/);
+  });
+
+  // A non-wrapping flex row inside `overflow: hidden` clips from the right,
+  // so a deep path in a narrow split takes out exactly the branch and ±
+  // chips — the two the shell's own prompt does not usually draw. The path
+  // is the chip that yields instead, and `min-width: 0` is the only thing
+  // that lets a flex item shrink below its content.
+  it("lets the path chip shrink so the branch and count chips survive a narrow pane", () => {
+    const body = ruleBodyFor(".terminal-chip--path");
+    expect(body).toMatch(/min-width\s*:\s*0/);
+    expect(body).toMatch(/text-overflow\s*:\s*ellipsis/);
+    // Only the path: a branch or a count is short and must never be
+    // silently truncated into something that reads like another branch.
+    expect(ruleBodyFor(".terminal-chip")).not.toMatch(/text-overflow/);
+  });
 });
