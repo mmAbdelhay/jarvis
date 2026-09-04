@@ -17,7 +17,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState } from "@jarvis/core";
 import {
   awsLoginCommand,
@@ -476,6 +476,11 @@ export type RendererApi = {
    *  and deduplicated — what ↑/↓ in the command editor walk. `paneKey` is a
    *  shell key: a tab id today, "<tabId>:<paneId>" once a tab can be split. */
   terminalHistory(paneKey: string, limit: number): Promise<string[]>;
+  /** The immediate children of `path`, for the file sidebar beside the
+   *  terminal. `paneKey` is a shell key, and its project is what bounds the
+   *  listing: a path outside that project comes back empty, exactly as an
+   *  unreadable directory does. */
+  listTerminalDir(paneKey: string, path: string): Promise<DirEntry[]>;
   /** What the renderer needs to know about how terminals behave. Read once
    *  per pane; a change to jarvis.yaml takes effect on restart, like every
    *  other terminal setting. */
@@ -1157,6 +1162,51 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
   };
 }
 
+/** One immediate child of a listed directory. */
+export type DirEntry = { name: string; directory: boolean };
+
+/**
+ * The file sidebar's security boundary, and deliberately a named function
+ * rather than four lines inside a handler: opening a file from that sidebar
+ * asks the very same question, and two copies of a containment check is how
+ * one of them ends up wrong.
+ *
+ * Answers with the real path of `candidate` when it is `root` itself or
+ * lives beneath it, and `undefined` for everything else — `candidate` comes
+ * from the renderer, where a string is whatever the page felt like sending.
+ *
+ * `realPath` resolves symlinks (`realpathSync` in production) and is applied
+ * to both sides: without it, a link inside the project pointing outside it
+ * walks straight out, and a project reached through a symlinked parent would
+ * never match its own children. `resolve` runs first so that `..` is gone
+ * before any comparison, rather than trusting `realPath` to have collapsed
+ * it. The separator is what makes the prefix test mean "beneath": plain
+ * `startsWith` would hand "/proj-secrets" over as part of "/proj".
+ */
+export function resolveWithin(
+  root: string,
+  candidate: string,
+  realPath: (path: string) => string,
+): string | undefined {
+  if (!isString(root) || !isString(candidate)) return undefined;
+  // A relative path would resolve against whatever directory this process
+  // happens to be running in, which is never the project.
+  if (!isAbsolute(root) || !isAbsolute(candidate)) return undefined;
+  // fs rejects these anyway, but the containment comparison happens first
+  // and a truncating byte has no business reaching it.
+  if (root.includes("\0") || candidate.includes("\0")) return undefined;
+  try {
+    const realRoot = realPath(resolve(root));
+    const real = realPath(resolve(candidate));
+    if (real === realRoot) return real;
+    const prefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+    return real.startsWith(prefix) ? real : undefined;
+  } catch {
+    // A path that cannot be resolved is a path that was not proven inside.
+    return undefined;
+  }
+}
+
 export type TerminalHandlers = {
   /** Opens a terminal tab for `project` and starts its shell. Synchronous:
    *  there is no port to wait for and no page to load — the tab and the pty
@@ -1182,6 +1232,14 @@ export type TerminalHandlers = {
    *  shell key (a tab id today, "<tabId>:<paneId>" once splits arrive),
    *  resolved through the same map `suggest` uses. */
   history(paneKey: string, limit: number): Promise<string[]>;
+  /** The immediate children of `path`, for the file sidebar beside the
+   *  terminal. Never recursive — the tree expands one directory at a time.
+   *  `paneKey` is a shell key, resolved the same way `history` resolves it,
+   *  and names the pane whose project bounds the listing. Empty is the only
+   *  refusal there is: a path outside that project, an unreadable
+   *  directory, an untyped argument and an unknown pane are all a folder
+   *  the tree draws as empty, never an error in a terminal. */
+  listDir(paneKey: string, path: string): Promise<DirEntry[]>;
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
@@ -1218,6 +1276,17 @@ export type TerminalHandlerDeps = {
   /** The `terminal:` section of config, for the renderer-facing settings
    *  channel — see `settings()` above. */
   terminal: TerminalConfig;
+  /** Directory listing, injected so the handler's tests touch no disk.
+   *  Absent means no sidebar listing at all — `listDir()` returns [], the
+   *  same empty answer every other refusal gives. */
+  files?:
+    | {
+        /** The directory's immediate children. Never recursive. */
+        readDir: (path: string) => DirEntry[];
+        /** Resolves symlinks and `..`; `realpathSync` in production. */
+        realPath: (path: string) => string;
+      }
+    | undefined;
   /** Saved workflows. Absent means no workflow source at all — `workflows()`
    *  returns [], same as a directory that fails to read. */
   workflows?:
@@ -1400,6 +1469,45 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       } catch {
         // No history is an ordinary answer — an arrow that does nothing,
         // never an error in a terminal.
+        return [];
+      }
+    },
+
+    async listDir(paneKey, path) {
+      // Both arguments cross an untyped IPC boundary, checked before
+      // anything else so a malformed call is refused for what is wrong with
+      // it rather than for what happens to be configured.
+      if (!isString(paneKey) || !isString(path)) return [];
+      const files = deps.files;
+      if (files === undefined) return [];
+      // The pane's own key first, the tab as the fallback — the resolution
+      // `suggest` and `history` do, so that a split pane answers for itself
+      // rather than for whichever shell its tab started with.
+      const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      // An unknown key is a shell this process never started, and it gets
+      // nothing.
+      if (paneCwd === undefined) return [];
+      // The project's configured directory is what the path is checked
+      // against — never the pane's current directory, which a `cd` moves,
+      // and never the repository root, which a project need not have. The
+      // longest configured directory containing the pane's cwd is the
+      // pane's own project: with a project nested inside another, a
+      // shortest- or first-match would quietly widen the boundary to the
+      // parent.
+      let root: string | undefined;
+      for (const dir of Object.values(deps.projects)) {
+        if (!isString(dir) || !isAbsolute(dir)) continue;
+        const within = paneCwd === dir || paneCwd.startsWith(`${dir}${sep}`);
+        if (!within) continue;
+        if (root === undefined || dir.length > root.length) root = dir;
+      }
+      if (root === undefined) return [];
+      const target = resolveWithin(root, path, files.realPath);
+      if (target === undefined) return [];
+      try {
+        return files.readDir(target);
+      } catch {
+        // An unreadable directory is an empty folder, not an error dialog.
         return [];
       }
     },

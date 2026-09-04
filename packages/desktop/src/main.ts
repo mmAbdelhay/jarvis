@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -643,6 +643,17 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
       terminal: config.terminal,
+      // The file sidebar's disk access. Immediate children only, and
+      // realpath is what the containment check compares against — see
+      // resolveWithin.
+      files: {
+        readDir: (path) =>
+          readdirSync(path, { withFileTypes: true }).map((entry) => ({
+            name: entry.name,
+            directory: entry.isDirectory(),
+          })),
+        realPath: (path) => realpathSync(path),
+      },
       workflows: {
         readDir: (path) => readdirSync(path),
         readFile: (path) => readFileSync(path, "utf8"),
@@ -1289,6 +1300,9 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("terminal:history", (_event, paneKey: unknown, limit: unknown) =>
       terminal.history(paneKey as string, limit as number),
+    );
+    ipcMain.handle("terminal:listDir", (_event, paneKey: unknown, path: unknown) =>
+      terminal.listDir(paneKey as string, path as string),
     );
     ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
       terminal.input(tabId as string, data as string);

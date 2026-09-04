@@ -2416,6 +2416,163 @@ describe("terminal handlers", () => {
       expect(calls).toHaveLength(0);
     });
   });
+
+  // The security boundary of the file sidebar. `path` comes from the
+  // renderer and a shell can cd anywhere, so every one of these asks the
+  // same question: can a string reach a directory outside the project the
+  // pane belongs to?
+  describe("listDir", () => {
+    const files = {
+      readDir: (path: string) =>
+        path === "/proj"
+          ? [
+              { name: "src", directory: true },
+              { name: "a.ts", directory: false },
+            ]
+          : [],
+      realPath: (path: string) => path.replace(/\/$/, ""),
+    };
+
+    function listing(
+      overrides: Partial<Pick<TerminalHandlerDeps, "projects" | "files">> = {},
+    ): ReturnType<typeof createTerminalHandlers> {
+      const { manager } = shells();
+      return createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: overrides.projects ?? { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+        files: "files" in overrides ? overrides.files : files,
+      });
+    }
+
+    it("lists a directory inside the project", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([
+        { name: "src", directory: true },
+        { name: "a.ts", directory: false },
+      ]);
+    });
+
+    it("refuses a path outside the project root", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/etc")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "/proj/../etc")).resolves.toEqual([]);
+    });
+
+    it("refuses a symlink that points outside the project", async () => {
+      const escaping = { ...files, realPath: (p: string) => (p === "/proj/link" ? "/etc" : p) };
+      const handlers = listing({ files: escaping });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj/link")).resolves.toEqual([]);
+    });
+
+    it("refuses a non-string argument and an unknown pane", async () => {
+      const handlers = listing();
+
+      await expect(handlers.listDir(7 as unknown as string, "/proj")).resolves.toEqual([]);
+      await expect(handlers.listDir("nope", "/proj")).resolves.toEqual([]);
+    });
+
+    it("returns [] when the directory cannot be read", async () => {
+      const throwing = {
+        ...files,
+        readDir: () => {
+          throw new Error("EACCES");
+        },
+      };
+      const handlers = listing({ files: throwing });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
+    });
+
+    it("has nothing to list with no file access configured", async () => {
+      const handlers = listing({ files: undefined });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
+    });
+
+    // "/proj-secrets" starts with "/proj" as a string but is a sibling on
+    // disk. A prefix test without the separator hands it over.
+    it("refuses a sibling directory whose name merely starts with the root's", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj-secrets")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "/projX/deep")).resolves.toEqual([]);
+    });
+
+    // Anything not absolute would resolve against whatever directory the
+    // Electron main process happens to be running in — never the project.
+    it("refuses a relative or empty path", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "")).resolves.toEqual([]);
+    });
+
+    it("refuses a path carrying a NUL byte", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/proj\u0000/../etc")).resolves.toEqual([]);
+    });
+
+    // The root is the pane's *own* project, so the longest configured
+    // directory containing the pane's cwd wins — never whichever entry the
+    // projects object happens to list first.
+    it("picks the pane's own project, not another whose path is a prefix", async () => {
+      const handlers = listing({ projects: { other: "/pro", p: "/proj" } });
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "/pro/secret")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toHaveLength(2);
+    });
+
+    it("keeps a nested project inside its own directory", async () => {
+      const read: string[] = [];
+      const recording = {
+        ...files,
+        readDir: (path: string) => {
+          read.push(path);
+          return [];
+        },
+      };
+      const handlers = listing({
+        projects: { outer: "/proj", inner: "/proj/inner" },
+        files: recording,
+      });
+      handlers.open("inner");
+
+      await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "/proj/other")).resolves.toEqual([]);
+      expect(read).toEqual([]);
+      await expect(handlers.listDir("tab-1", "/proj/inner/src")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj/inner/src"]);
+    });
+
+    // A split pane is keyed "<tabId>:<paneId>" and resolves against its own
+    // entry, with the tab as the fallback — the same resolution suggest and
+    // history do.
+    it("lists for a split pane, and refuses a pane of no tab it started", async () => {
+      const handlers = listing();
+      handlers.open("p");
+      handlers.split("tab-1", "p1");
+
+      await expect(handlers.listDir("tab-1:p1", "/proj")).resolves.toHaveLength(2);
+      await expect(handlers.listDir("ghost:p1", "/proj")).resolves.toEqual([]);
+    });
+  });
 });
 
 describe("api handlers", () => {
