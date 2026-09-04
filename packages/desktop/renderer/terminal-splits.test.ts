@@ -366,3 +366,67 @@ describe("the split tree", () => {
     expect(host.querySelector(".terminal-split")?.firstElementChild).toBe(paneOf("tab-1").host);
   });
 });
+
+// The tab's sidebar follows whichever pane has the focus, and only the
+// tree knows when that changes — a split, a close, an ⌥⌘arrow or a click
+// on another pane all move it.
+describe("telling its owner which pane has the focus", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    made = [];
+    killed = [];
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
+      closeTerminalPane: () => Promise.resolve(),
+    };
+  });
+
+  function watched(onFocus?: (key: string) => void): { tree: SplitTree; focused: string[] } {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const focused: string[] = [];
+    const built = createSplitTree(
+      host,
+      makePane,
+      "tab-1",
+      onFocus ?? ((key) => focused.push(key)),
+    );
+    return { tree: built, focused };
+  }
+
+  it("names the pane a split moved the focus to", () => {
+    const { tree: split, focused } = watched();
+
+    split.split("row");
+
+    expect(focused).toEqual(["tab-1:p1"]);
+  });
+
+  it("names the pane the focus moves back to", () => {
+    const { tree: split, focused } = watched();
+    split.split("row");
+
+    split.focus(-1);
+
+    expect(focused).toEqual(["tab-1:p1", "tab-1"]);
+  });
+
+  it("names the pane that survives a close", () => {
+    const { tree: split, focused } = watched();
+    split.split("row");
+
+    split.closeFocused();
+
+    expect(focused).toEqual(["tab-1:p1", "tab-1"]);
+  });
+
+  // Nothing may throw into a terminal: a hook that does is the owner's
+  // problem, never a focus that fails to move.
+  it("moves the focus even when the hook throws", () => {
+    const { tree: split } = watched(() => {
+      throw new Error("no");
+    });
+
+    expect(() => split.split("row")).not.toThrow();
+    expect(keyOf(split.focused())).toBe("tab-1:p1");
+  });
+});

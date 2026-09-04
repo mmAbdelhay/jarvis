@@ -2,6 +2,7 @@ import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
+import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
@@ -28,7 +29,7 @@ const $ = (id: string): HTMLElement => {
 
 /** The outer element belongs to the Workspace — one per tab, shown and
  *  hidden as tabs change — and the tree is what draws inside it. */
-type Pane = { element: HTMLElement; tree: SplitTree };
+type Pane = { element: HTMLElement; tree: SplitTree; explorer: TerminalExplorer };
 
 /** Which shell each pane is drawing. A WeakMap rather than a lookup table
  *  the tree would have to keep in step: a pane that has been closed is
@@ -122,6 +123,7 @@ export function renderWorkspaceTerminals(
     // Every pane of the tab, not only the one that was focused: main's own
     // close handler reaps the tab's shells and its splits' with them.
     pane.tree.dispose();
+    pane.explorer.dispose();
     pane.element.remove();
     panes.delete(tabId);
   }
@@ -193,15 +195,67 @@ function ensurePane(
     closeTab: () => void window.jarvis.closeTab(tabId),
   };
 
+  // The tab's file sidebar, on the left — one for the whole tab, however
+  // many panes it is split into, following whichever of them has the
+  // focus. Appended before the tree so it sits left of the panes.
+  const explorer = createTerminalExplorer(element, {
+    // Guarded: a preload without the channel leaves a sidebar with nothing
+    // to draw, never a terminal that throws. The pane key is the sidebar's
+    // own, and main resolves the path against *that* shell's directory —
+    // which is the containment check, and the reason the key travels with
+    // every listing rather than being assumed from the tab.
+    list: async (paneKey, path) => {
+      try {
+        return await window.jarvis.listTerminalDir(paneKey, path);
+      } catch {
+        return [];
+      }
+    },
+    // Opening a file is the next task's; the sidebar already knows which
+    // shell a click came from, and that is all this hook records today.
+    choose: () => {},
+  });
+
+  /** Where each pane's shell last said it was. Read on a focus change:
+   *  the sidebar follows the newly focused pane, and that pane's prompt
+   *  may be minutes old. */
+  const lastCwd = new Map<string, string>();
+
   const built = createSplitTree(
     element,
     (paneKey, paneHost) =>
-      makePane(tabId, paneKey, project, paneHost, splitKeys, paneSettings(isLoginTerminal)),
+      makePane(
+        tabId,
+        paneKey,
+        project,
+        paneHost,
+        splitKeys,
+        paneSettings(isLoginTerminal),
+        // Only the focused pane's directory drives the sidebar: a
+        // background pane running `cd` must never re-root the tree under
+        // someone reading it in another pane.
+        (path) => {
+          lastCwd.set(paneKey, path);
+          if (focusedKey() === paneKey) explorer.setRoot(paneKey, path);
+        },
+      ),
     tabId,
+    (paneKey) => {
+      const path = lastCwd.get(paneKey);
+      // A pane that has never reported a directory leaves the sidebar
+      // showing what it had — there is nothing truer to show.
+      if (path !== undefined) explorer.setRoot(paneKey, path);
+    },
   );
   tree = built;
 
-  const pane: Pane = { element, tree: built };
+  /** The focused pane's shell key. Resolved through the same WeakMap the
+   *  pty stream is routed by, so it can never name a pane that is gone. */
+  function focusedKey(): string | undefined {
+    return tree === undefined ? undefined : paneKeys.get(tree.focused());
+  }
+
+  const pane: Pane = { element, tree: built, explorer };
   panes.set(tabId, pane);
   return pane;
 }
@@ -219,6 +273,7 @@ function makePane(
   element: HTMLElement,
   splitKeys: SplitKeys,
   settings: typeof terminalSettings,
+  onCwd: (path: string) => void,
 ): TerminalPane {
   // A split pane's shell has to exist before the pane can attach to it, so
   // the attach below waits on this. The tab's own pane has had a shell
@@ -303,6 +358,9 @@ function makePane(
     // So the palette can hide a suggestion list left showing from
     // mid-typing before it opens over the same pane.
     closeCompletion: () => completion.close(),
+    // Where this pane's shell is, as of the prompt it is about to draw —
+    // what the tab's file sidebar follows.
+    onCwd,
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;

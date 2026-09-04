@@ -1366,8 +1366,25 @@
   /* The tab's slot. The padding lives on .terminal-pane inside it, which is
      the element that scrolls — padding here would stay put while the blocks
      scrolled under it. */
-  .workspace-terminal-pane { position: absolute; inset: 0; background: var(--ground); }
+  /* A row: the file sidebar on the left, the tab's panes filling the rest.
+     A tab whose sidebar is hidden is the row with one child, which lays
+     out exactly as the panes alone did. */
+  .workspace-terminal-pane { position: absolute; inset: 0; background: var(--ground);
+    display: flex; }
   .workspace-terminal-pane[hidden] { display: none; }
+
+  /* The tab's file tree, beside its panes — one for the whole tab, rooted
+     at whichever pane has the focus. Monospace and quiet: it sits next to
+     a terminal and must not shout over it. */
+  .terminal-explorer { flex: 0 0 220px; overflow: auto; border-right: 1px solid var(--border);
+    padding: 8px; font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; }
+  .terminal-explorer[hidden] { display: none; }
+  /* white-space: pre keeps a file name with two spaces in it looking like
+     what is on disk. */
+  .file-tree-row { cursor: pointer; white-space: pre; color: var(--text-muted); }
+  .file-tree-row:hover { color: var(--text); }
+  .file-tree-row[data-directory="true"] { color: var(--text); }
+  .file-tree-children { padding-left: 12px; }
 
   /* The Docker tab, laid out as the design specifies: a left column of
      configured containers with the compose controls above them, and the log
@@ -1521,7 +1538,12 @@
      whole .terminal-pane draws inside. min-width/min-height: 0 is what
      stops a flex child refusing to shrink below its content — without it a
      long line in one pane would push the other off screen. */
-  .terminal-split { position: absolute; inset: 0; display: flex; }
+  /* The panes' half of the tab's row — everything the sidebar leaves.
+     position: relative because a leaf's .terminal-pane is absolute inside
+     it, and min-width/min-height: 0 for the same reason a branch needs
+     them. */
+  .terminal-split { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
+    display: flex; }
   .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
   .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
     overflow: hidden; }

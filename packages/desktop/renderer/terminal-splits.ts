@@ -73,6 +73,7 @@ export function createSplitTree(
   host: HTMLElement,
   makePane: (paneKey: string, host: HTMLElement) => TerminalPane,
   tabId: string,
+  onFocus?: (paneKey: string) => void,
 ): SplitTree {
   const element = document.createElement("div");
   element.className = "terminal-split";
@@ -121,6 +122,10 @@ export function createSplitTree(
     current = leaf;
     for (const other of leaves()) other.element.classList.toggle("focused", other === leaf);
     attempt(() => leaf.pane.focus());
+    // Everything that follows the focus rather than owning it — the tab's
+    // file sidebar, today — hears it here, because this is the one place
+    // the focus ever moves: a split, a close, ⌥⌘arrow, a click on a pane.
+    attempt(() => onFocus?.(leaf.key));
   };
 
   const refitAll = (): void => {

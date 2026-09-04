@@ -823,3 +823,136 @@ describe("splitting a terminal tab", () => {
     expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(0);
   });
 });
+
+// The file sidebar: one per tab, on the left, rooted at whichever pane has
+// the focus. A tab split three ways has one tree, not three — so which
+// pane's `cd` it listens to, and which pane's key a listing carries, is
+// the whole of what this wiring has to get right.
+describe("the terminal tab's file sidebar", () => {
+  beforeEach(() => harness());
+
+  /** OSC 7, exactly as the zsh wrapper prints it in precmd. */
+  const CWD = (path: string) => `]7;file://${path}`;
+
+  const settle = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** A tab whose shell reports where it is — the sidebar only ever hears
+   *  from a shell with integration on. `listed` records every listing, so
+   *  a test can say which pane a directory was listed for. */
+  async function tabWithSidebar(): Promise<
+    typeof import("./workspace-terminal.js") & { listed: string[][] }
+  > {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const listed: string[][] = [];
+    jarvis["listTerminalDir"] = (paneKey: string, path: string) => {
+      listed.push([paneKey, path]);
+      return Promise.resolve([{ name: "src", directory: true }]);
+    };
+    const module = await load();
+    await settle();
+    return Object.assign(module, { listed });
+  }
+
+  const sidebar = () => document.querySelector<HTMLElement>(".terminal-explorer");
+
+  async function split(key: string): Promise<void> {
+    FakeTerminal.instances.at(-1)?.pressKey({ key, metaKey: true });
+    await settle();
+  }
+
+  it("roots at the focused pane's directory and lists it for that pane", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+
+    expect(listed).toEqual([["tab-1", "/proj"]]);
+    expect(sidebar()?.hidden).toBe(false);
+    expect(sidebar()?.textContent).toContain("src");
+  });
+
+  // A tab whose shell never reports a directory is the terminal Jarvis had
+  // before this sidebar existed: no column beside it, and no listing.
+  it("shows nothing for a pane with no shell integration", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", "just output\r\n");
+    await settle();
+
+    expect(sidebar()?.hidden).toBe(true);
+    expect(listed).toEqual([]);
+  });
+
+  // The cwd event fires on every prompt, not only on a `cd`.
+  it("does not re-list when the shell prints another prompt in the same place", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+
+    expect(listed).toEqual([["tab-1", "/proj"]]);
+  });
+
+  it("re-roots when the focused pane's shell moves", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    dataListener?.("tab-1", CWD("/proj/src"));
+    await settle();
+
+    expect(listed).toEqual([
+      ["tab-1", "/proj"],
+      ["tab-1", "/proj/src"],
+    ]);
+  });
+
+  // The one thing a sidebar shared by every pane must never do: follow a
+  // shell the user is not looking at.
+  it("ignores a background pane's cd", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d"); // The new pane takes the focus.
+
+    dataListener?.("tab-1:p1", CWD("/proj/split"));
+    dataListener?.("tab-1", CWD("/proj/background"));
+    await settle();
+
+    expect(listed).toEqual([["tab-1:p1", "/proj/split"]]);
+  });
+
+  it("re-roots to the newly focused pane's last known directory", async () => {
+    const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    dataListener?.("tab-1", CWD("/proj"));
+    await split("d");
+    dataListener?.("tab-1:p1", CWD("/proj/split"));
+    await settle();
+
+    FakeTerminal.instances[1]?.pressKey({ key: "ArrowLeft", metaKey: true, altKey: true });
+    await settle();
+
+    expect(listed).toEqual([
+      ["tab-1", "/proj"],
+      ["tab-1:p1", "/proj/split"],
+      ["tab-1", "/proj"],
+    ]);
+  });
+
+  it("takes the sidebar with the tab when the tab is closed", async () => {
+    const { renderWorkspaceTerminals } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+
+    renderWorkspaceTerminals([], undefined, "acme");
+
+    expect(sidebar()).toBeNull();
+  });
+});
