@@ -70,7 +70,8 @@ const api: RendererApi = {
   openChat: (project, name) => ipcRenderer.invoke("chat:open", project, name),
   chatNames: (project) => ipcRenderer.invoke("chat:names", project),
   openTerminal: (project) => ipcRenderer.invoke("terminal:open", project),
-  suggestCompletions: (tabId, input) => ipcRenderer.invoke("terminal:suggest", tabId, input),
+  suggestCompletions: (paneKey, input, path) =>
+    ipcRenderer.invoke("terminal:suggest", paneKey, input, path),
   terminalHistory: (paneKey, limit) => ipcRenderer.invoke("terminal:history", paneKey, limit),
   listTerminalDir: (paneKey, path) => ipcRenderer.invoke("terminal:listDir", paneKey, path),
   openTerminalFile: (paneKey, path) => ipcRenderer.invoke("terminal:openFile", paneKey, path),

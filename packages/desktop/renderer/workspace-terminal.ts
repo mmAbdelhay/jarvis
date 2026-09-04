@@ -308,6 +308,15 @@ function makePane(
   // since main opened the tab.
   const started = startShell(tabId, paneKey);
 
+  // Where this pane's shell last said it was — the same OSC 7 report that
+  // drives `onCwd` and the chip row, kept here too because autocomplete
+  // needs it read fresh at every keystroke, not only on a prompt. `main`
+  // only ever knows where the shell *started*; without this, completions
+  // would keep answering for that directory forever, the very bug this
+  // wiring exists to fix. `undefined` until the first prompt — main falls
+  // back to the start directory for that case on its own.
+  let livePath: string | undefined;
+
   // Completion needs the pane's terminal to exist before it can be built,
   // but the editor's own keystrokes need completion consulted from inside
   // createPane, before completion can exist — so the pane gets a forward
@@ -402,8 +411,12 @@ function makePane(
     // mid-typing before it opens over the same pane.
     closeCompletion: () => completion.close(),
     // Where this pane's shell is, as of the prompt it is about to draw —
-    // what the tab's file sidebar follows.
-    onCwd,
+    // what the tab's file sidebar follows, and now also what autocomplete
+    // reads before it asks main for anything.
+    onCwd: (path) => {
+      livePath = path;
+      onCwd(path);
+    },
     // "Toggle file sidebar" in the pane's own palette. The sidebar belongs
     // to the tab, not to the pane, so every pane's action toggles the same
     // one — which is the point: whichever pane you are in can dismiss it.
@@ -449,8 +462,10 @@ function makePane(
     completion = attachCompletion(terminal, element, {
       // The pane's own key, never the tab's: main resolves a split's cwd
       // through the same map it resolves the tab's, so a pane in a split
-      // completes against the directory its own shell is in.
-      suggest: (input) => window.jarvis.suggestCompletions(paneKey, input),
+      // completes against the directory its own shell is in. `livePath`
+      // travels alongside it for the same reason it travels with `chips`
+      // — main's own record is only ever the shell's *starting* directory.
+      suggest: (input) => window.jarvis.suggestCompletions(paneKey, input, livePath),
       sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
       ...editorCompletionHooks,
     });

@@ -468,6 +468,42 @@ describe("terminal key bindings and addons", () => {
     expect(document.querySelector(".terminal-completion")?.textContent).toContain("git status");
   });
 
+  // main's own record of a shell's directory is only ever where it
+  // *started* — see ipc.ts's TerminalHandlers.suggest. The pane's own live
+  // OSC 7 report travels with every request instead, exactly as it already
+  // does for `chips`, so a completion typed after a `cd` resolves against
+  // where the shell actually is.
+  it("carries the pane's own live directory alongside a completion request", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    const asked: unknown[][] = [];
+    jarvis["suggestCompletions"] = (paneKey: string, input: string, path: string | undefined) => {
+      asked.push([paneKey, input, path]);
+      return Promise.resolve(["git status"]);
+    };
+    // Blocks on: the cwd event this test relies on is the OSC 7 splitter's,
+    // which only runs with blocks integration on — see terminal-pane.ts's
+    // own `write()`.
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    dataListener?.("tab-1", "\x1b]7;file:///proj\x07\x1b]133;A\x07~/p > \x1b]133;B\x07");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine("~/p > git sta");
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual([["tab-1", "git sta", "/proj"]]);
+  });
+
   // xterm keeps exactly one custom key handler. Attaching the dropdown's
   // separately would silently replace the addon stack's and take Cmd+F,
   // Cmd+V and Shift+Enter with it, so both go through the one handler —

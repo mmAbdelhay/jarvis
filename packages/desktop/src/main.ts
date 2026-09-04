@@ -1390,8 +1390,8 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:closePane", (_event, paneKey: unknown) => {
       terminal.closePane(paneKey as string);
     });
-    ipcMain.handle("terminal:suggest", (_event, tabId: unknown, input: unknown) =>
-      terminal.suggest(tabId as string, input as string),
+    ipcMain.handle("terminal:suggest", (_event, paneKey: unknown, input: unknown, path: unknown) =>
+      terminal.suggest(paneKey as string, input as string, path as string | undefined),
     );
     ipcMain.handle("terminal:history", (_event, paneKey: unknown, limit: unknown) =>
       terminal.history(paneKey as string, limit as number),

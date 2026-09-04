@@ -447,10 +447,13 @@ export type RendererApi = {
    *  arrives through the ordinary workspace:update, so nothing is returned
    *  but success or a localised failure. */
   openTerminal(project: string): Promise<GitViewResult<void>>;
-  /** Suggestions for what is typed at `tabId`'s prompt, best first. Each
-   *  one is a whole replacement line. An empty array means no dropdown —
-   *  and so zsh's own Tab completion, unchanged. */
-  suggestCompletions(tabId: string, input: string): Promise<string[]>;
+  /** Suggestions for what is typed at `paneKey`'s prompt, best first. Each
+   *  one is a whole replacement line. `path` is the pane's own live
+   *  directory — the same OSC 7 report `terminalChips` takes — and is used
+   *  as given when supplied; absent, main falls back to where the shell
+   *  started. An empty array means no dropdown — and so zsh's own Tab
+   *  completion, unchanged. */
+  suggestCompletions(paneKey: string, input: string, path?: string): Promise<string[]>;
   /** Opens (or reuses) the project's Docker tab. */
   openDockerTab(project: string): Promise<GitViewResult<void>>;
   dockerNames(project: string): Promise<GitViewResult<string[]>>;
@@ -1236,10 +1239,15 @@ export type TerminalHandlers = {
    *  a split is just another key. */
   split(tabId: string, paneId: string): void;
   closePane(paneKey: string): void;
-  /** What to offer for `input` typed at the prompt of `tabId`. Empty is an
-   *  ordinary answer — a closed dropdown, and zsh's own Tab completion
-   *  behaving exactly as it does today. */
-  suggest(tabId: string, input: string): Promise<string[]>;
+  /** What to offer for `input` typed at the prompt of `paneKey`. `path` is
+   *  the renderer's own live OSC 7 report of where that shell is right now
+   *  — `directories` only ever knows where it *started* — and is used as
+   *  given when supplied; absent, the start directory is the fallback.
+   *  `paneKey` resolves the same way `history`, `listDir` and `chips` do,
+   *  so a split pane completes against its own shell. Empty is an ordinary
+   *  answer — a closed dropdown, and zsh's own Tab completion behaving
+   *  exactly as it does today. */
+  suggest(paneKey: string, input: string, path?: string): Promise<string[]>;
   /** The most recent commands from Jarvis's own command log, newest first
    *  and deduplicated — what ↑/↓ in the command editor walk. `paneKey` is a
    *  shell key (a tab id today, "<tabId>:<paneId>" once splits arrive),
@@ -1730,11 +1738,25 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       deps.shells.kill(paneKey);
     },
 
-    async suggest(tabId, input) {
+    async suggest(paneKey, input, path) {
       const completion = deps.completion;
       if (completion === undefined || !completion.enabled) return [];
-      if (!isString(tabId) || !isString(input)) return [];
-      const cwd = directories.get(tabId);
+      // Both cross an untyped IPC boundary, checked before anything else —
+      // same discipline as listDir and chips. `path` is optional (an older
+      // renderer, or a pane before its first prompt), but when it is
+      // present it gets no exception: a non-string value is refused rather
+      // than silently falling back to the map or being passed through.
+      if (!isString(paneKey) || !isString(input)) return [];
+      if (path !== undefined && !isString(path)) return [];
+      // The pane's own key first, the tab as the fallback — the same
+      // resolution listDir, history and chips use, so a split pane
+      // completes against its own shell rather than its tab's first. This
+      // is the shell's *starting* directory only; `path` above is what the
+      // renderer says the shell is in right now, and takes priority when
+      // it is supplied — no containment check here, unlike chips: a typed
+      // path completes exactly as the shell sitting next to it would `ls`
+      // it, absolute prefixes included, and always has.
+      const cwd = path ?? directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
       if (cwd === undefined) return [];
       try {
         return await completion.source.suggest(cwd, input);
@@ -1757,9 +1779,9 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // an editor whose arrows do nothing. What it does need is the source,
       // which is where the command log's reader lives.
       if (completion === undefined) return [];
-      // The same resolution `suggest` does: an unknown key is a shell this
-      // process never started, and it gets nothing.
-      if (directories.get(paneKey) === undefined) return [];
+      // The same resolution `suggest`, `listDir` and `chips` do: an unknown
+      // key is a shell this process never started, and it gets nothing.
+      if ((directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey)) === undefined) return [];
       try {
         return await completion.source.history(Math.floor(limit));
       } catch {

@@ -1758,6 +1758,33 @@ describe("terminal handlers", () => {
     expect(asked).toEqual([["/p/acme", "git sta"]]);
   });
 
+  // A split pane's own shell can `cd` away from the tab's, and its
+  // completions must follow — not the tab's own pane, which is what a bare
+  // tabId lookup would silently answer with.
+  it("suggests inside a split against its own live directory, not the tab's", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+    handlers.split("tab-7", "p1");
+
+    await handlers.suggest("tab-7:p1", "git sta", "/p/acme/sub");
+    await handlers.suggest("tab-7", "git sta");
+
+    expect(asked).toEqual([
+      ["/p/acme/sub", "git sta"],
+      ["/p/acme", "git sta"],
+    ]);
+  });
+
   it("kills a pane's own shell and forgets its directory when the pane is closed", async () => {
     const { manager, killed } = shells();
     const handlers = createTerminalHandlers({
@@ -1775,6 +1802,13 @@ describe("terminal handlers", () => {
     handlers.closePane(undefined as unknown as string);
 
     expect(killed).toEqual(["tab-7:p1"]);
+    // The pane's own entry is gone, but the tab it split from is not — the
+    // same fallback listDir and chips resolve a closed pane's key through,
+    // so a shell asked for by a key that no longer exists on its own still
+    // answers with the tab's directory rather than nothing. Only closing
+    // the tab itself forgets it completely.
+    expect(await handlers.suggest("tab-7:p1", "git")).toEqual(["git status"]);
+    handlers.close("tab-7");
     expect(await handlers.suggest("tab-7:p1", "git")).toEqual([]);
   });
 
@@ -1875,6 +1909,69 @@ describe("terminal handlers", () => {
 
     expect(await handlers.suggest("tab-7", "git sta")).toEqual(["git status"]);
     expect(asked).toEqual([["/p/acme", "git sta"]]);
+  });
+
+  // `directories` is written once, at open(), and never again — this is the
+  // bug: a shell that has since `cd`ed away must still complete against
+  // where it actually is, which only the renderer's own live OSC 7 report
+  // knows.
+  it("resolves completions against a directory the shell has since moved to", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta", "/p/acme/moved")).toEqual(["git status"]);
+    expect(asked).toEqual([["/p/acme/moved", "git sta"]]);
+  });
+
+  // No path is not malformed — it is an older renderer, or a pane before
+  // its first prompt — and the shell's start directory is still the best
+  // answer available.
+  it("falls back to the start directory when no path is supplied", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta", undefined)).toEqual(["git status"]);
+    expect(asked).toEqual([["/p/acme", "git sta"]]);
+  });
+
+  // Every other argument here is checked before use across this same
+  // untyped IPC boundary; a supplied `path` gets no exception.
+  it("refuses a non-string path rather than falling back or passing it through", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completing({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta", 7 as unknown as string)).toEqual([]);
+    expect(asked).toEqual([]);
   });
 
   it("suggests nothing for a tab it never started", async () => {
