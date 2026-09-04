@@ -31,15 +31,23 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
   // `container` untouched on failure is what keeps a rejected listing from
   // clobbering whatever was already drawn there — the previous tree, or an
   // empty container that never got its first render. Returns whether the
-  // listing succeeded, so a caller (setRoot) can decide what else moves
-  // together with a successful render.
-  async function listInto(path: string, container: HTMLElement): Promise<boolean> {
+  // listing succeeded *and was actually written* — `stillValid` is checked
+  // right before the DOM write (not just before starting the call), so a
+  // caller can supersede an in-flight listing: when a later call has since
+  // taken over, this one's answer arrives too late to matter and must never
+  // clobber what the later call already drew.
+  async function listInto(
+    path: string,
+    container: HTMLElement,
+    stillValid: () => boolean = () => true,
+  ): Promise<boolean> {
     let entries: DirEntry[];
     try {
       entries = await hooks.list(path);
     } catch {
       return false;
     }
+    if (!stillValid()) return false;
 
     const rows = entries
       .slice()
@@ -52,8 +60,17 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
     return true;
   }
 
+  // `parentPath` may end in "/" (a root of "/", or a caller-supplied
+  // trailing slash) — a plain template join would then hand `hooks.list` and
+  // `hooks.choose` a path with a doubled slash, and a consumer that
+  // string-matches paths (the sidebar's dedupe, the containment check a
+  // later task resolves them against) would silently miss it.
+  function joinPath(parentPath: string, name: string): string {
+    return `${parentPath}/${name}`.replace(/\/{2,}/g, "/");
+  }
+
   function buildRow(parentPath: string, entry: DirEntry): HTMLElement {
-    const path = `${parentPath}/${entry.name}`;
+    const path = joinPath(parentPath, entry.name);
 
     const row = document.createElement("div");
     row.className = "file-tree-row";
@@ -87,10 +104,21 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
     // also empties `children`'s actual child nodes; `cached` is what makes
     // that safe to do.
     let cached: ChildNode[] | undefined;
+    // `cached` is only set once `listInto` has actually returned, so a
+    // second click landing while the first expansion's `list()` is still in
+    // flight would otherwise see `cached === undefined` too and fire a
+    // second `list()` call for the same folder — `loading` closes that
+    // window: a click that arrives mid-expansion is ignored rather than
+    // starting a second one.
+    let loading = false;
     row.addEventListener("click", () => {
       void (async () => {
         if (cached === undefined) {
-          if (!(await listInto(path, children))) return;
+          if (loading) return;
+          loading = true;
+          const ok = await listInto(path, children);
+          loading = false;
+          if (!ok) return;
           cached = [...children.childNodes];
           children.hidden = false;
           return;
@@ -103,13 +131,22 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
     return wrapper;
   }
 
+  // Bumped on every setRoot call (not on every resolution), so the call
+  // holding the *highest* generation when its listing settles is always the
+  // most recently *called* one — last-called wins, regardless of the order
+  // two overlapping calls happen to resolve in. A caller re-roots this tree
+  // on every cwd event, so two calls overlapping (a fast `cd; cd ..`) is not
+  // hypothetical.
+  let generation = 0;
+
   return {
     element,
     async setRoot(path: string): Promise<void> {
-      // root() only moves once the listing actually succeeds — a rejected
-      // setRoot must leave both the drawn tree and root() exactly as they
-      // were, never a re-rooted tree with stale rows underneath it.
-      if (await listInto(path, element)) root = path;
+      const gen = ++generation;
+      // root() only moves once the listing actually succeeds *and* is still
+      // the most recent call by the time it resolves — an overlapping later
+      // setRoot must never be clobbered by an earlier one settling after it.
+      if (await listInto(path, element, () => gen === generation)) root = path;
     },
     root(): string | undefined {
       return root;

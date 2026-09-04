@@ -16,6 +16,16 @@ function tree(overrides: Partial<Parameters<typeof createFileTree>[0]> = {}) {
   return { list, choose, tree: createFileTree({ list, choose, ...overrides }) };
 }
 
+/** A promise this test controls the settlement of, for asserting what
+ *  happens while a `list()` call is still in flight. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe("the file tree", () => {
   it("lists its root and nothing deeper", async () => {
     const { tree: t, list } = tree();
@@ -46,6 +56,46 @@ describe("the file tree", () => {
     folder()?.click();
     await new Promise((r) => setTimeout(r, 0));
     expect(t.element.textContent).toContain("main.ts");
+    // The whole point of caching the built rows is that a collapse/expand
+    // cycle never asks for the listing again: one call for the root, one
+    // for the one real expansion — not one per expand.
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fire a second list() call for a folder double-clicked before the first resolves", async () => {
+    const d = deferred<{ name: string; directory: boolean }[]>();
+    const list = vi.fn((path: string) => (path === "/proj/src" ? d.promise : Promise.resolve(listing[path] ?? [])));
+    const t = createFileTree({ list, choose: vi.fn() });
+    await t.setRoot("/proj");
+
+    const folder = t.element.querySelector<HTMLElement>('[data-path="/proj/src"]');
+    folder?.click();
+    folder?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    // One call for the root, and only one for "/proj/src" despite the
+    // second click landing while the first was still in flight.
+    expect(list).toHaveBeenCalledTimes(2);
+
+    d.resolve(listing["/proj/src"] ?? []);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(t.element.textContent).toContain("main.ts");
+  });
+
+  it("keeps the previous state when a folder's expansion listing throws", async () => {
+    let fail = false;
+    const { tree: t } = tree({
+      list: async (p: string) => {
+        if (p === "/proj/src" && fail) throw new Error("nope");
+        return listing[p] ?? [];
+      },
+    });
+    await t.setRoot("/proj");
+    fail = true;
+    t.element.querySelector<HTMLElement>('[data-path="/proj/src"]')?.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(t.element.textContent).not.toContain("main.ts");
+    expect(t.element.textContent).toContain("src");
   });
 
   it("hands a chosen file's full path to its caller and opens nothing", async () => {
@@ -70,6 +120,33 @@ describe("the file tree", () => {
     await t.setRoot("/nothing");
     expect(t.element.textContent).toBe("");
     expect(t.root()).toBe("/nothing");
+  });
+
+  it("lets the most recently called setRoot win even when an earlier one resolves later", async () => {
+    const first = deferred<{ name: string; directory: boolean }[]>();
+    const second = deferred<{ name: string; directory: boolean }[]>();
+    const answers = [first.promise, second.promise];
+    let calls = 0;
+    const list = vi.fn(() => {
+      const answer = answers[calls] ?? Promise.resolve([]);
+      calls += 1;
+      return answer;
+    });
+    const t = createFileTree({ list, choose: vi.fn() });
+
+    const p1 = t.setRoot("/a");
+    const p2 = t.setRoot("/b");
+
+    // The later call (/b) resolves first; the earlier call (/a) resolves
+    // after it. Last *called* must still win, not last *resolved*.
+    second.resolve([{ name: "b-child", directory: false }]);
+    await p2;
+    first.resolve([{ name: "a-child", directory: false }]);
+    await p1;
+
+    expect(t.root()).toBe("/b");
+    expect(t.element.textContent).toContain("b-child");
+    expect(t.element.textContent).not.toContain("a-child");
   });
 
   it("keeps the previous tree when a listing throws", async () => {
