@@ -1,5 +1,6 @@
 import type { Session } from "electron";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { WorkspaceTab } from "@jarvis/core";
 import {
   BrowserHost,
   bridgeEvents,
@@ -503,6 +504,232 @@ class FakeContents implements WebContentsLike {
 // The personal browser is a project key with no directory behind it (see
 // personal.ts). To the host it is simply a project: nothing here knows the
 // difference, and these pin that.
+// A Chromium renderer is 80-150 MB and MAX_TABS only fires when a ninth tab
+// is opened, so eight tabs opened across a morning were held all day for the
+// one being read. These cover what reclaims the other seven, and — far more
+// important — what brings them back.
+describe("BrowserHost idle suspension", () => {
+  let views: FakeView[];
+  let now: number;
+
+  const hostWith = (options: {
+    suspendAfterMs?: number;
+    resumeUrl?: (tab: WorkspaceTab) => Promise<string | undefined>;
+  }): BrowserHost => {
+    views = [];
+    return new BrowserHost(
+      () => {
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      },
+      { suspendAfterMs: 1000, now: () => now, ...options },
+    );
+  };
+
+  beforeEach(() => {
+    now = 0;
+  });
+
+  it("suspends a hidden tab once it has been idle, and never the active one", () => {
+    const host = hostWith({});
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+
+    now = 5000;
+    host.sweepIdle();
+
+    expect(views[0]?.destroyed).toBe(true);
+    expect(views[1]?.destroyed).toBe(false);
+
+    const tabs = host.state().tabs;
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]?.suspended).toBe(true);
+    expect(tabs[0]?.url).toBe("https://one.example");
+    expect(tabs[1]?.suspended).toBe(false);
+  });
+
+  // The tab you left playing on purpose is the last one you meant to reclaim,
+  // and suspending it stops the sound.
+  it("does not suspend a tab that is playing video", async () => {
+    const host = hostWith({});
+    host.setVisible(true);
+    host.open("p", "https://video.example");
+    host.open("p", "https://other.example");
+
+    // Chromium's media event only prompts the question; the page answers it.
+    views[0]!.videoPlaying = true;
+    views[0]?.emit({ kind: "media", playing: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(host.state().tabs[0]?.hasPlayingVideo).toBe(true);
+
+    now = 5000;
+    host.sweepIdle();
+
+    expect(views[0]?.destroyed).toBe(false);
+    expect(host.state().tabs[0]?.suspended).toBe(false);
+  });
+
+  it("suspends nothing when suspendAfterMs is 0", () => {
+    const host = hostWith({ suspendAfterMs: 0 });
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+
+    now = 10_000_000;
+    host.sweepIdle();
+
+    expect(views[0]?.destroyed).toBe(false);
+  });
+
+  // The idle clock is "hidden for this long", not "opened this long ago".
+  it("restarts the clock when a tab is looked at again", () => {
+    const host = hostWith({});
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+    const first = host.state().tabs[0]!.id;
+
+    now = 900;
+    host.activate(first);       // one is visible again, two starts its clock
+    now = 1500;
+    host.sweepIdle();
+
+    expect(views[0]?.destroyed).toBe(false);
+    expect(views[1]?.destroyed).toBe(false);
+  });
+
+  it("rebuilds the view at the same URL when a suspended tab is activated", async () => {
+    const host = hostWith({});
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+    const first = host.state().tabs[0]!.id;
+
+    now = 5000;
+    host.sweepIdle();
+    host.activate(first);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(views).toHaveLength(3);
+    expect(views[2]?.loaded).toEqual(["https://one.example"]);
+    expect(views[2]?.visible).toBe(true);
+    expect(host.state().tabs[0]?.suspended).toBe(false);
+  });
+
+  // The failure this exists to prevent: a code-server stopped underneath a
+  // suspended tab comes back on a different free port, and reloading the
+  // stored URL would land on nothing.
+  it("asks resumeUrl for a hosted app's URL, since its sidecar may have moved", async () => {
+    const host = hostWith({
+      resumeUrl: async (tab) =>
+        tab.kind === "editor" ? "http://127.0.0.1:9999/?folder=%2Fp" : undefined,
+    });
+    host.setVisible(true);
+    host.open("p", "http://127.0.0.1:1111/?folder=%2Fp", "editor");
+    host.open("p", "https://other.example");
+    const editor = host.state().tabs[0]!.id;
+
+    now = 5000;
+    host.sweepIdle();
+    host.activate(editor);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(views[2]?.loaded).toEqual(["http://127.0.0.1:9999/?folder=%2Fp"]);
+    expect(host.state().tabs[0]?.url).toBe("http://127.0.0.1:9999/?folder=%2Fp");
+  });
+
+  // A sidecar that refuses to restart must not leave a tab that does nothing
+  // when clicked.
+  it("falls back to the stored URL when resumeUrl fails", async () => {
+    const host = hostWith({
+      resumeUrl: async () => {
+        throw new Error("code-server did not become ready");
+      },
+    });
+    host.setVisible(true);
+    host.open("p", "http://127.0.0.1:1111/?folder=%2Fp", "editor");
+    host.open("p", "https://other.example");
+    const editor = host.state().tabs[0]!.id;
+
+    now = 5000;
+    host.sweepIdle();
+    host.activate(editor);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(views[2]?.loaded).toEqual(["http://127.0.0.1:1111/?folder=%2Fp"]);
+    expect(host.state().tabs[0]?.suspended).toBe(false);
+  });
+
+  // Two clicks while a slow sidecar starts must not leave a leaked view
+  // floating over the window with nothing tracking it.
+  it("builds one view when a suspended tab is activated twice in a row", async () => {
+    const host = hostWith({ resumeUrl: async () => undefined });
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+    const first = host.state().tabs[0]!.id;
+
+    now = 5000;
+    host.sweepIdle();
+    host.activate(first);
+    host.activate(first);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(views).toHaveLength(3);
+  });
+
+  it("builds nothing for a tab closed while its sidecar was starting", async () => {
+    const host = hostWith({ resumeUrl: async () => undefined });
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+    const first = host.state().tabs[0]!.id;
+
+    now = 5000;
+    host.sweepIdle();
+    host.activate(first);
+    host.close(first);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(views).toHaveLength(2);
+    expect(host.state().tabs).toHaveLength(1);
+  });
+
+  // A suspended tab holds no renderer, so it is not what the cap is for and
+  // evicting it would free nothing while closing a tab the user still has.
+  it("leaves suspended tabs out of the view cap", () => {
+    views = [];
+    const host = new BrowserHost(
+      () => {
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      },
+      { suspendAfterMs: 1000, now: () => now, maxTabs: 2 },
+    );
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    host.open("p", "https://two.example");
+
+    now = 5000;
+    host.sweepIdle();          // one is suspended; only two holds a view
+    host.open("p", "https://three.example");
+
+    // Three tabs, two views: the suspended one was not closed to make room.
+    expect(host.state().tabs).toHaveLength(3);
+    expect(host.state().tabs[0]?.suspended).toBe(true);
+  });
+});
+
 describe("BrowserHost and the personal pseudo-project", () => {
   let views: FakeView[];
   let partitions: string[];
