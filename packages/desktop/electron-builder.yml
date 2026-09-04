@@ -82,13 +82,32 @@ files:
 # Unpacking the whole node-pty directory keeps node-pty's own loader happy:
 # lib/utils.js walks `build/Release`, `build/Debug`, then
 # `prebuilds/<platform>-<arch>`, relative to both `..` and `.`, and those
-# lookups all have to land on the same side of the archive boundary.
+# lookups all have to land on the same side of the archive boundary. It also
+# keeps unixTerminal.js's `helperPath.replace('app.asar', 'app.asar.unpacked')`
+# pointing at a helper that is really there.
 #
 # The binding itself needs no electron-rebuild: node-pty 1.1.0 is built on
 # node-addon-api, so its prebuilt binary is Node-API and ABI-stable across
 # both Node and Electron. Rebuilding it would be a no-op at best.
 asarUnpack:
   - "**/node_modules/node-pty/**"
+
+# ...and because that is true, the rebuild is turned off rather than merely
+# described as unnecessary.
+#
+# Leaving it on is not harmless. @electron/rebuild does not build into a
+# scratch directory — it writes `build/Release/{pty.node,spawn-helper}` into
+# the pnpm store's own copy of node-pty, and lib/utils.js searches
+# `build/Release` *before* `prebuilds/<platform>-<arch>`. So the first
+# packaging run on a machine silently changes which binary every later run
+# ships, and a clean clone (which has no `build/`) produces a different
+# bundle from a machine that has packaged before. That is a reproducibility
+# hole that only opens months later, on somebody else's laptop.
+#
+# With this false, the shipped binary is always the checked-in prebuild —
+# the same bytes on every machine, and the same bytes a plain `pnpm start`
+# runs during development.
+npmRebuild: false
 
 # ---------------------------------------------------------------------------
 # mac
