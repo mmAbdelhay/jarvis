@@ -104,6 +104,12 @@ export type PaneHooks = {
    *  what keeps it dismissable. Absent means the tab has no sidebar, and
    *  the action is left out entirely rather than doing nothing. */
   toggleExplorer?: (() => void) | undefined;
+  /** Re-lists the tab's file sidebar where it stands. Offered as a palette
+   *  action, the same way `toggleExplorer` is, and absent the same way for
+   *  a tab with no sidebar. Nothing watches the filesystem, so this is the
+   *  only way to see a file a command just created or removed without
+   *  leaving the directory and coming back. */
+  refreshExplorer?: (() => void) | undefined;
 };
 
 export type { BlockView };
@@ -635,6 +641,14 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         id: "toggle-explorer",
         label: "Toggle file sidebar",
         run: () => attempt(() => toggleExplorer()),
+      });
+    }
+    const refreshExplorer = hooks.refreshExplorer;
+    if (refreshExplorer !== undefined) {
+      actions.push({
+        id: "refresh-explorer",
+        label: "Refresh file sidebar",
+        run: () => attempt(() => refreshExplorer()),
       });
     }
     if (hooks.workflows !== undefined && editor !== undefined) {

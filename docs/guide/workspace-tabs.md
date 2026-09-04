@@ -421,17 +421,21 @@ boundary, not an incidental limit.
 
 It is dismissable from **⌘P → "Toggle file sidebar"** — there is no keyboard
 chord for it, only the palette entry. It does not watch the filesystem: the
-tree refreshes when the directory changes, when you expand a folder, and on
-an explicit refresh, and nothing else. It cannot rename, delete, create or
-drag a file — it is a way to see and open, not a file manager.
+tree re-lists when the pane's directory changes, when you expand a folder,
+and on **⌘P → "Refresh file sidebar"**, and nothing else. So a file a command
+just created, deleted or renamed — a `git checkout` of a branch with
+different files — is not there until you refresh (expanded folders collapse
+when you do; a refresh is a fresh listing of the root). It cannot rename,
+delete, create or drag a file — it is a way to see and open, not a file
+manager.
 
 ### The command palette
 
 **⌘P** opens a filterable list of everything the focused pane can do: copy or
 re-run the selected block, collapse every block, jump to the next failed one,
 toggle the failed-only filter, split right / split down / close pane, clear
-the terminal, run a saved workflow, generate or explain a command with the
-AI, and history search. The list is built for the pane as it is right now, so
+the terminal, toggle or refresh the file sidebar, run a saved workflow,
+generate or explain a command with the AI, and history search. The list is built for the pane as it is right now, so
 an action with nothing to act on — re-run with no block selected, splits on
 the Session route's terminal — is left out rather than offered and ignored.
 (Blocks themselves are turned on and off in configuration, not from here: see

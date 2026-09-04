@@ -253,6 +253,10 @@ function ensurePane(
         },
         // The sidebar's only way out: no chord, one palette action.
         () => explorer.toggle(),
+        // And its only way to notice a file a command just created,
+        // deleted or renamed: nothing watches the filesystem, and a root
+        // that has not changed is not re-listed.
+        () => explorer.refresh(),
       ),
     tabId,
     {
@@ -297,6 +301,7 @@ function makePane(
   settings: typeof terminalSettings,
   onCwd: (path: string) => void,
   toggleExplorer: () => void,
+  refreshExplorer: () => void,
 ): TerminalPane {
   // A split pane's shell has to exist before the pane can attach to it, so
   // the attach below waits on this. The tab's own pane has had a shell
@@ -403,6 +408,9 @@ function makePane(
     // to the tab, not to the pane, so every pane's action toggles the same
     // one — which is the point: whichever pane you are in can dismiss it.
     toggleExplorer,
+    // "Refresh file sidebar" in the same palette, and the sidebar's only
+    // refresh trigger besides a `cd` and expanding a folder.
+    refreshExplorer,
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;

@@ -1717,7 +1717,7 @@ describe("notifications", () => {
 // The tab's file sidebar has no chord of its own, so the palette is the
 // only way out of it: a panel that cannot be dismissed is not a panel.
 describe("the file sidebar's palette action", () => {
-  function paneWithSidebar(toggleExplorer?: () => void) {
+  function paneWithSidebar(toggleExplorer?: () => void, refreshExplorer?: () => void) {
     const host = document.createElement("div");
     document.body.append(host);
     const p = createPane(host, {
@@ -1727,6 +1727,7 @@ describe("the file sidebar's palette action", () => {
       settings: { blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x" },
       notify: vi.fn(),
       toggleExplorer,
+      refreshExplorer,
     });
     return p;
   }
@@ -1756,6 +1757,22 @@ describe("the file sidebar's palette action", () => {
     expect(toggleExplorer).toHaveBeenCalledTimes(1);
   });
 
+  // Nothing watches the filesystem, and the sidebar does not re-list a
+  // root that has not changed — so a file a command just created, or a
+  // `git checkout` of a branch with different files, leaves the tree
+  // lying until this action is run.
+  it("offers the sidebar refresh and runs it", () => {
+    const refreshExplorer = vi.fn();
+    const p = paneWithSidebar(vi.fn(), refreshExplorer);
+    p.write(`${A}$ ${B}`);
+
+    p.openPalette();
+    expect(palette(p)?.textContent).toContain("Refresh file sidebar");
+    run(p, "Refresh file sidebar");
+
+    expect(refreshExplorer).toHaveBeenCalledTimes(1);
+  });
+
   // The same rule every other optional action follows: absent hook, absent
   // action — never an entry that does nothing.
   it("offers nothing when the pane has no sidebar", () => {
@@ -1765,5 +1782,6 @@ describe("the file sidebar's palette action", () => {
     p.openPalette();
 
     expect(palette(p)?.textContent).not.toContain("Toggle file sidebar");
+    expect(palette(p)?.textContent).not.toContain("Refresh file sidebar");
   });
 });

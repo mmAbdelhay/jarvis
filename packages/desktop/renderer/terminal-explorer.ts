@@ -25,6 +25,13 @@ export type TerminalExplorer = {
   element: HTMLElement;
   /** The focused pane changed, or its shell moved. */
   setRoot(paneKey: string, path: string): void;
+  /** Lists the current root again, whatever it is. Nothing here watches
+   *  the filesystem and `setRoot` dedupes on `(paneKey, path)`, so a file
+   *  a command just created, deleted or renamed — a `git checkout` of a
+   *  branch with different files — is invisible until this is called (or
+   *  until a `cd` away and back). No-op when there is no root: a sidebar
+   *  showing nothing has nothing to re-read. */
+  refresh(): void;
   /** There is no directory to show any more — the pane it was following
    *  is gone. Empties it; the next root brings it back. */
   clear(): void;
@@ -112,6 +119,23 @@ export function createTerminalExplorer(
       // column for one round trip is the honest thing to show instead.
       attempt(() => tree.element.replaceChildren());
       attempt(() => void tree.setRoot(path));
+    },
+
+    refresh() {
+      if (disposed) return;
+      const current = rooted;
+      // Nothing rooted is nothing to re-list. The palette offers this
+      // action before a pane's first prompt too, and it must do nothing
+      // there rather than list some remembered directory.
+      if (current === undefined) return;
+      // The rows go first, exactly as in setRoot: the tree leaves its
+      // container alone until a listing resolves, so a refresh whose
+      // listing fails would otherwise leave the stale rows this action
+      // exists to replace, indistinguishable from a successful refresh of
+      // a directory that had not changed. Expanded folders collapse — a
+      // refresh is a fresh listing of the root, not a walk of the tree.
+      attempt(() => tree.element.replaceChildren());
+      attempt(() => void tree.setRoot(current.path));
     },
 
     clear() {

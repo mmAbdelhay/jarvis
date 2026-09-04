@@ -154,6 +154,58 @@ describe("the terminal explorer", () => {
     await settle();
     expect(view.element.textContent).toBe("");
   });
+
+  // Nothing watches the filesystem and `setRoot` dedupes on
+  // `(paneKey, path)`, so a file a command just created is invisible until
+  // something re-lists the root. This is that something — the third of the
+  // three refresh triggers the design named, the two others being a `cd`
+  // and expanding a folder.
+  it("re-lists the current root on an explicit refresh", async () => {
+    const { view, list } = explorer();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    expect(view.element.textContent).not.toContain("new.ts");
+
+    // A command created a file. Without a refresh the tree cannot know.
+    listing["/proj"] = [
+      { name: "src", directory: true },
+      { name: "new.ts", directory: false },
+    ];
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    expect(list).toHaveBeenCalledTimes(1);
+
+    view.refresh();
+    await settle();
+
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenLastCalledWith("tab-1", "/proj");
+    expect(view.element.textContent).toContain("new.ts");
+
+    listing["/proj"] = [
+      { name: "src", directory: true },
+      { name: "read me.md", directory: false },
+    ];
+  });
+
+  // The palette offers the action before a pane's first prompt, and after a
+  // ⌘W that cleared the sidebar. Neither has a directory to re-list, and
+  // re-listing a remembered one would be a tree nobody is looking at.
+  it("does nothing when there is no root to refresh", async () => {
+    const { view, list } = explorer();
+
+    expect(() => view.refresh()).not.toThrow();
+    await settle();
+    expect(list).not.toHaveBeenCalled();
+
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    view.clear();
+    view.refresh();
+    await settle();
+
+    expect(list).toHaveBeenCalledTimes(1);
+  });
 });
 
 // The window between a re-root and its listing. FileTree does not touch
