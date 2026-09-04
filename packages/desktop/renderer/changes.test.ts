@@ -64,6 +64,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     suggestCompletions: vi.fn(async () => []),
     terminalHistory: vi.fn(async () => []),
     listTerminalDir: vi.fn(async () => []),
+    openTerminalFile: vi.fn(async () => notStubbed),
     terminalSettings: vi.fn(async () => ({
       blocks: true,
       inputEditor: true,

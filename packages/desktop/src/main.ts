@@ -708,6 +708,16 @@ app.whenReady().then(async () => {
           })),
         realPath: (path) => realpathSync(path),
       },
+      // The file sidebar's route into the Editor tab — see
+      // TerminalHandlerDeps.editor. `open` is codeServer.open bound
+      // directly rather than routed through createEditorHandlers' named
+      // roots: openFile's folder is a per-file directory, already proven
+      // inside the project by resolveWithin, not one of the project's
+      // declared `editors:` roots.
+      editor: {
+        open: (projectPath, folderPath) => codeServer.open(projectPath, folderPath),
+        openTab: (project, url) => workspace.open(project, url, "editor"),
+      },
       workflows: {
         readDir: (path) => readdirSync(path),
         readFile: (path) => readFileSync(path, "utf8"),
@@ -1366,6 +1376,9 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("terminal:listDir", (_event, paneKey: unknown, path: unknown) =>
       terminal.listDir(paneKey as string, path as string),
+    );
+    ipcMain.handle("terminal:openFile", (_event, paneKey: unknown, path: unknown) =>
+      terminal.openFile(paneKey as string, path as string),
     );
     ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
       terminal.input(tabId as string, data as string);

@@ -2643,6 +2643,174 @@ describe("terminal handlers", () => {
     });
   });
 
+  describe("openFile", () => {
+    const files = {
+      readDir: () => [],
+      realPath: (path: string) => path.replace(/\/$/, ""),
+    };
+
+    function opener(
+      overrides: Partial<Pick<TerminalHandlerDeps, "projects" | "files" | "editor">> = {},
+    ): {
+      handlers: ReturnType<typeof createTerminalHandlers>;
+      opened: { projectPath: string; folderPath: string }[];
+      tabs: { project: string; url: string }[];
+    } {
+      const opened: { projectPath: string; folderPath: string }[] = [];
+      const tabs: { project: string; url: string }[] = [];
+      const editor = {
+        open: async (projectPath: string, folderPath: string) => {
+          opened.push({ projectPath, folderPath });
+          return { ok: true as const, url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}` };
+        },
+        openTab: (project: string, url: string) => {
+          tabs.push({ project, url });
+        },
+      };
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: overrides.projects ?? { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+        files: "files" in overrides ? overrides.files : files,
+        editor: "editor" in overrides ? overrides.editor : editor,
+      });
+      return { handlers, opened, tabs };
+    }
+
+    it("opens the file's containing folder as an editor tab, carrying an openFile payload", async () => {
+      const { handlers, opened, tabs } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj/src/a.ts")).resolves.toEqual({
+        ok: true,
+        value: undefined,
+      });
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj/src" }]);
+      expect(tabs).toEqual([
+        {
+          project: "p",
+          url:
+            "http://127.0.0.1:9999/?folder=%2Fproj%2Fsrc&payload=" +
+            encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/src/a.ts"]])),
+        },
+      ]);
+    });
+
+    // Spaces, "#", "?" and a non-ASCII character all have special meaning in
+    // a URI or a query string; none of them may reach the workbench raw.
+    it("percent-encodes a file path with spaces, #, ? and non-ASCII characters", async () => {
+      const { handlers, tabs } = opener();
+      handlers.open("p");
+
+      const path = "/proj/a b#c?d/résumé.txt";
+      await handlers.openFile("tab-1", path);
+
+      const expectedUri = "vscode-remote://remote/proj/a%20b%23c%3Fd/r%C3%A9sum%C3%A9.txt";
+      const expectedPayload = encodeURIComponent(JSON.stringify([["openFile", expectedUri]]));
+      expect(tabs).toEqual([
+        {
+          project: "p",
+          url: `http://127.0.0.1:9999/?folder=${encodeURIComponent("/proj/a b#c?d")}&payload=${expectedPayload}`,
+        },
+      ]);
+    });
+
+    it("refuses a path outside the project root, opening nothing", async () => {
+      const { handlers, opened, tabs } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/etc/passwd")).resolves.toEqual({
+        ok: false,
+        text: MESSAGES.editorUnavailable("en"),
+        language: "en",
+      });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    // "/proj-secrets" starts with "/proj" as a string but is a sibling on
+    // disk — the classic prefix-test escape, and the same one listDir's
+    // own containment test guards.
+    it("refuses a sibling path whose name merely starts with the root's", async () => {
+      const { handlers, opened } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj-secrets/x.ts")).resolves.toMatchObject({ ok: false });
+      expect(opened).toEqual([]);
+    });
+
+    it("refuses a non-string argument and an unknown pane", async () => {
+      const { handlers, opened, tabs } = opener();
+
+      await expect(handlers.openFile(7 as unknown as string, "/proj/a.ts")).resolves.toMatchObject({
+        ok: false,
+      });
+      await expect(handlers.openFile("nope", "/proj/a.ts")).resolves.toMatchObject({ ok: false });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("opens nothing with no file access configured", async () => {
+      const { handlers, opened, tabs } = opener({ files: undefined });
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj/a.ts")).resolves.toMatchObject({ ok: false });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("opens nothing with no editor integration configured", async () => {
+      const { handlers, opened, tabs } = opener({ editor: undefined });
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj/a.ts")).resolves.toMatchObject({ ok: false });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("does not open a tab when code-server fails to start", async () => {
+      const failing = {
+        open: async () => ({ ok: false as const }),
+        openTab: vi.fn(),
+      };
+      const { handlers, tabs } = opener({ editor: failing });
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj/a.ts")).resolves.toMatchObject({ ok: false });
+      expect(failing.openTab).not.toHaveBeenCalled();
+      expect(tabs).toEqual([]);
+    });
+
+    // What gets rooted and opened is exactly the path the containment check
+    // approved, never the caller's string — the same invariant listDir's own
+    // "reads the resolved path it approved" test pins.
+    it("opens the resolved real path it approved, not the caller's string", async () => {
+      const linked = {
+        readDir: () => [],
+        realPath: (p: string) => (p === "/proj/link" ? "/proj/real/a.ts" : p),
+      };
+      const { handlers, opened, tabs } = opener({ files: linked });
+      handlers.open("p");
+
+      await handlers.openFile("tab-1", "/proj/link");
+
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj/real" }]);
+      expect(tabs[0]?.url).toContain(encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/real/a.ts"]])));
+    });
+
+    it("attributes the tab to the pane's own project, not another whose path is a prefix", async () => {
+      const { handlers, tabs } = opener({ projects: { other: "/pro", p: "/proj" } });
+      handlers.open("p");
+
+      await handlers.openFile("tab-1", "/proj/a.ts");
+
+      expect(tabs).toEqual([{ project: "p", url: expect.any(String) }]);
+    });
+  });
+
   describe("chips", () => {
     function baseDeps(): TerminalHandlerDeps {
       const { manager } = shells();

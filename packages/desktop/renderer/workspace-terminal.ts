@@ -214,9 +214,19 @@ function ensurePane(
         return [];
       }
     },
-    // Opening a file is the next task's; the sidebar already knows which
-    // shell a click came from, and that is all this hook records today.
-    choose: () => {},
+    // Fire-and-forget, exactly like `list` above: main does the whole of
+    // "open this file" — containment, code-server, the tab itself — and
+    // never rejects, so there is nothing here to await or to show. A
+    // refusal (outside the project, no editor integration, code-server
+    // failing to start) leaves the terminal exactly as it was, with no
+    // dialog over it.
+    choose: (paneKey, path) => {
+      try {
+        void window.jarvis.openTerminalFile(paneKey, path).catch(() => {});
+      } catch {
+        // A preload without the channel. Same fallback as `list` above.
+      }
+    },
   });
 
   /** Where each pane's shell last said it was. Read on a focus change:

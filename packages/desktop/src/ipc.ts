@@ -17,7 +17,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState } from "@jarvis/core";
 import {
   awsLoginCommand,
@@ -481,6 +481,11 @@ export type RendererApi = {
    *  listing: a path outside that project comes back empty, exactly as an
    *  unreadable directory does. */
   listTerminalDir(paneKey: string, path: string): Promise<DirEntry[]>;
+  /** A file chosen in that sidebar, opened as the pane's project's Editor
+   *  tab — see TerminalHandlers.openFile. Never rejects and never shows a
+   *  dialog: the renderer fires this and forgets it, exactly as it already
+   *  does for the file listing. */
+  openTerminalFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** What the renderer needs to know about how terminals behave. Read once
    *  per pane; a change to jarvis.yaml takes effect on restart, like every
    *  other terminal setting. */
@@ -1245,6 +1250,18 @@ export type TerminalHandlers = {
    *  directory, an untyped argument and an unknown pane are all a folder
    *  the tree draws as empty, never an error in a terminal. */
   listDir(paneKey: string, path: string): Promise<DirEntry[]>;
+  /** A file chosen in the sidebar, opened as the pane's project's Editor
+   *  tab. `paneKey` is resolved the same way `listDir` resolves it, and the
+   *  file goes through the exact same `resolveWithin` containment check —
+   *  a path outside that project opens nothing. code-server is rooted at
+   *  the file's own containing folder (not the project root, and not a
+   *  configured `editors:` root — a per-file folder is not shaped for
+   *  either), and the URL carries a `payload` alongside `folder` asking the
+   *  workbench to open the file itself; see `withOpenFilePayload`. Never
+   *  rejects and never surfaces a dialog: an unknown pane, no `files` or
+   *  `editor` integration configured, or a code-server that fails to start
+   *  are all a click that opens nothing. */
+  openFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
@@ -1310,6 +1327,24 @@ export type TerminalHandlerDeps = {
         readDir: (path: string) => DirEntry[];
         /** Resolves symlinks and `..`; `realpathSync` in production. */
         realPath: (path: string) => string;
+      }
+    | undefined;
+  /** The file sidebar's route into the Editor tab — see `openFile`. Absent
+   *  means no editor integration at all: a click on a file opens nothing,
+   *  same as `files` absent means no sidebar to click in. */
+  editor?:
+    | {
+        /** Ensures code-server is running at `folderPath` and returns its
+         *  URL. `folderPath` has already been proven inside `projectPath`
+         *  by `resolveWithin` before this is ever called, so this is
+         *  `CodeServerManager.open` bound directly — not routed through
+         *  `createEditorHandlers`' named-root resolution, which a per-file
+         *  folder (arbitrary, not declared in `editors:`) is not shaped
+         *  for. */
+        open: (projectPath: string, folderPath: string) => Promise<{ ok: true; url: string } | { ok: false }>;
+        /** Opens the URL as `project`'s Editor tab — `BrowserHost.open`,
+         *  injected the same way `openTerminalTab` is. */
+        openTab: (project: string, url: string) => void;
       }
     | undefined;
   /** Saved workflows. Absent means no workflow source at all — `workflows()`
@@ -1396,6 +1431,35 @@ function isExplainPayload(value: unknown): value is ExplainPayload {
   );
 }
 
+/**
+ * The `vscode-remote://` URI for `filePath` — what the pinned code-server
+ * build's workbench reads out of an `openFile` payload entry. `remote` is
+ * the authority every code-server instance resolves such a URI against; it
+ * is not host:port, which is the guess an earlier version of this plan
+ * made before the spike this task's brief records. Encoded per path
+ * segment, not with one `encodeURIComponent` over the whole string, so the
+ * `/` between segments survives while a space, `#`, `?` or a non-ASCII
+ * character inside a segment does not break the URI the workbench parses
+ * back.
+ */
+function vscodeRemoteUri(filePath: string): string {
+  return `vscode-remote://remote${filePath.split(sep).map(encodeURIComponent).join("/")}`;
+}
+
+/**
+ * `baseUrl` (code-server's own `?folder=…`) with an `openFile` payload for
+ * `filePath` appended. One URL carrying both — not two requests and not a
+ * fallback branch: if the pinned build's workbench honours `payload`, the
+ * file opens; if it does not, `folder` alone still opens the containing
+ * directory, and there is nothing further this code needs to do either
+ * way.
+ */
+function withOpenFilePayload(baseUrl: string, filePath: string): string {
+  const payload = JSON.stringify([["openFile", vscodeRemoteUri(filePath)]]);
+  const joiner = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${joiner}payload=${encodeURIComponent(payload)}`;
+}
+
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
   // Which directory each tab's shell was started in. The renderer knows
   // only a tab id, and both directory affinity and path completion are
@@ -1413,6 +1477,28 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     for (const [key, cwd] of directories) if (key.startsWith(prefix)) return cwd;
     return undefined;
   };
+
+  /**
+   * The pane's own configured project — its name and its absolute
+   * directory, from `paneCwd`. The project's configured directory is what
+   * a path is later checked against, never the pane's current directory
+   * (which a `cd` moves) and never a repository root (which a project need
+   * not have). The **longest** configured directory containing the pane's
+   * cwd wins: with a project nested inside another, a shortest- or
+   * first-match would quietly widen the boundary to the parent. Shared by
+   * `listDir` and `openFile` — both need "which project owns this pane";
+   * `openFile` needs the name too, to attribute the editor tab it opens.
+   */
+  function projectFor(paneCwd: string): { name: string; dir: string } | undefined {
+    let found: { name: string; dir: string } | undefined;
+    for (const [name, dir] of Object.entries(deps.projects)) {
+      if (!isString(dir) || !isAbsolute(dir)) continue;
+      const within = paneCwd === dir || paneCwd.startsWith(`${dir}${sep}`);
+      if (!within) continue;
+      if (found === undefined || dir.length > found.dir.length) found = { name, dir };
+    }
+    return found;
+  }
 
   // The runtime probe's result, per directory — not per pane, so two panes
   // (or a pane revisited across chips() calls) sharing a directory cost at
@@ -1545,28 +1631,49 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // An unknown key is a shell this process never started, and it gets
       // nothing.
       if (paneCwd === undefined) return [];
-      // The project's configured directory is what the path is checked
-      // against — never the pane's current directory, which a `cd` moves,
-      // and never the repository root, which a project need not have. The
-      // longest configured directory containing the pane's cwd is the
-      // pane's own project: with a project nested inside another, a
-      // shortest- or first-match would quietly widen the boundary to the
-      // parent.
-      let root: string | undefined;
-      for (const dir of Object.values(deps.projects)) {
-        if (!isString(dir) || !isAbsolute(dir)) continue;
-        const within = paneCwd === dir || paneCwd.startsWith(`${dir}${sep}`);
-        if (!within) continue;
-        if (root === undefined || dir.length > root.length) root = dir;
-      }
-      if (root === undefined) return [];
-      const target = resolveWithin(root, path, files.realPath);
+      const project = projectFor(paneCwd);
+      if (project === undefined) return [];
+      const target = resolveWithin(project.dir, path, files.realPath);
       if (target === undefined) return [];
       try {
         return files.readDir(target);
       } catch {
         // An unreadable directory is an empty folder, not an error dialog.
         return [];
+      }
+    },
+
+    async openFile(paneKey, path) {
+      const fail = (): GitViewResult<void> => ({
+        ok: false,
+        text: MESSAGES.editorUnavailable(deps.language),
+        language: deps.language,
+      });
+      // Both arguments cross an untyped IPC boundary, checked before
+      // anything else — same discipline as listDir.
+      if (!isString(paneKey) || !isString(path)) return fail();
+      const files = deps.files;
+      const editor = deps.editor;
+      if (files === undefined || editor === undefined) return fail();
+      const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (paneCwd === undefined) return fail();
+      const project = projectFor(paneCwd);
+      if (project === undefined) return fail();
+      // The exact same containment check listDir applies — resolveWithin
+      // is the shared boundary, not a second copy of it — and the exact
+      // real path it approves is what gets rooted and opened, never the
+      // caller's own string.
+      const target = resolveWithin(project.dir, path, files.realPath);
+      if (target === undefined) return fail();
+      try {
+        const result = await editor.open(project.dir, dirname(target));
+        if (!result.ok) return fail();
+        editor.openTab(project.name, withOpenFilePayload(result.url, target));
+        return { ok: true, value: undefined };
+      } catch {
+        // A code-server that failed to start is a click that opens
+        // nothing, never an error dialog over a terminal.
+        return fail();
       }
     },
 

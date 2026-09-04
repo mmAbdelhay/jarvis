@@ -955,6 +955,60 @@ describe("the terminal tab's file sidebar", () => {
 
     expect(sidebar()).toBeNull();
   });
+
+  // Clicking a file is choose()'s whole job — see terminal-explorer.ts and
+  // file-tree.ts, both wired and tested on their own already. What is under
+  // test here is only that this tab's wiring reaches the real IPC call,
+  // tagged with the pane the click came from.
+  it("opens a chosen file through the editor IPC, tagged with the pane's key", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () =>
+      Promise.resolve([{ name: "a.ts", directory: false }]);
+    const opened: [string, string][] = [];
+    jarvis["openTerminalFile"] = (paneKey: string, path: string) => {
+      opened.push([paneKey, path]);
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    sidebar()?.querySelector<HTMLElement>('.file-tree-row[data-directory="false"]')?.click();
+    await settle();
+
+    expect(opened).toEqual([["tab-1", "/proj/a.ts"]]);
+  });
+
+  // A refusal — no editor integration, the file outside the project,
+  // code-server failing to start — is not this wiring's business to
+  // notice: main never rejects, and the terminal must be untouched either
+  // way.
+  it("leaves the terminal untouched when the editor IPC refuses", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () =>
+      Promise.resolve([{ name: "a.ts", directory: false }]);
+    jarvis["openTerminalFile"] = () =>
+      Promise.resolve({ ok: false, text: "nope", language: "en" });
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+
+    expect(() =>
+      sidebar()?.querySelector<HTMLElement>('.file-tree-row[data-directory="false"]')?.click(),
+    ).not.toThrow();
+    await settle();
+
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(false);
+  });
 });
 
 // Dismissing the sidebar, and what a closed pane leaves behind. Same
