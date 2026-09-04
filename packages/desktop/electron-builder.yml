@@ -135,5 +135,11 @@ mac:
   # signature it only buys refusals.
   hardenedRuntime: false
 
+# Widevine signing. See scripts/vmp-sign.cjs for why this runs here and not
+# in afterSign: on macOS the VMP signature must be inside the bundle before
+# the code signature covers it. Without this the packaged app plays no DRM —
+# Netflix answers a development-signed client with E100.
+afterPack: scripts/vmp-sign.cjs
+
 # Nothing here is published anywhere.
 publish: null
