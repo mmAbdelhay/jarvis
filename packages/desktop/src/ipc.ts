@@ -509,7 +509,8 @@ export type RendererApi = {
    *  never started; a chip with no data of its own (no repository, no
    *  `package.json`) is simply absent from what comes back, never guessed.
    *  `path` is the pane's live OSC 7 directory — see TerminalHandlers.chips
-   *  for why the renderer, not main, is the one that knows it. */
+   *  for why the renderer, not main, is the one that knows it, and why a
+   *  path that cannot be validated means no chips rather than stale ones. */
   terminalChips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
@@ -1291,9 +1292,11 @@ export type TerminalHandlers = {
    *
    *  `path` is where the shell says it is *now* — the renderer's own live
    *  OSC 7 value, the same one that re-roots the file sidebar. It is
-   *  honoured only if it resolves inside the pane's project; anything else
-   *  (absent, untyped, outside) falls back to the shell's starting
-   *  directory, which is all this process knows on its own. */
+   *  honoured only if it resolves inside the pane's project; a path that
+   *  was supplied and refused yields `undefined` — no chips — rather than
+   *  a row describing the directory the shell was started in, which would
+   *  be wrong rather than absent. Only a path that was never supplied
+   *  falls back to that starting directory. */
   chips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
 };
 
@@ -1613,10 +1616,16 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
    * The directory the renderer says its shell is in, if it can be believed:
    * a string, inside the project that owns the pane's own starting
    * directory, resolved by the same `resolveWithin` every other path in
-   * this feature goes through. `undefined` for anything else — no path
-   * supplied, no `files` integration to resolve one with, a pane whose
-   * project cannot be found, or a path outside it — and the caller falls
-   * back to the map.
+   * this feature goes through.
+   *
+   * `undefined` means "this pane cannot be described" — not "use the map
+   * instead". A path that was supplied and could not be validated (outside
+   * the project, unresolvable, untyped, or with no `files` integration to
+   * check it with) must produce **no chips at all**: answering it from the
+   * shell's start directory would name a directory the user is not in and
+   * a repository they are not looking at, which is the "wrong, not absent"
+   * failure this whole feature forbids. Only a path that was never
+   * supplied falls back to the map — see `chips`.
    */
   function liveCwd(start: string, path: unknown): string | undefined {
     if (!isString(path)) return undefined;
@@ -1966,9 +1975,28 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // feature is built on, and only for a pane whose project can be
       // found: a renderer-supplied path decides which repository gets a
       // `git status` run in it, and it is not trusted further than a
-      // sidebar listing is. Anything else falls back to the map — the
-      // behaviour before this argument existed.
-      const cwd = liveCwd(start, path) ?? start;
+      // sidebar listing is.
+      //
+      // Three cases, and the third is the one worth stating: a path that
+      // was *checked and refused* produces no chips at all — not the map's
+      // answer. Falling back there would draw a path chip naming a
+      // directory the user is not in and branch/± chips describing a
+      // repository they are not looking at, which is precisely the
+      // confidently-wrong row this fix exists to remove. Nothing is asked
+      // of git or the runtime probe either: an unknown directory is an
+      // unknown directory, exactly as an unknown pane is above. The map is
+      // the fallback only for a path that was never supplied — an older
+      // renderer, or a pane before its first prompt — where the start
+      // directory is the best answer available and is inside the project
+      // by construction.
+      let cwd: string;
+      if (path === undefined) {
+        cwd = start;
+      } else {
+        const live = liveCwd(start, path);
+        if (live === undefined) return undefined;
+        cwd = live;
+      }
 
       const [changes, runtime] = await Promise.all([changesFor(cwd), runtimeFor(cwd)]);
 

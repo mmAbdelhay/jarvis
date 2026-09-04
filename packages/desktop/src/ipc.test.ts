@@ -3220,35 +3220,66 @@ describe("terminal handlers", () => {
       });
 
       // A renderer-supplied path decides which repository a `git status`
-      // runs in. It goes through the same containment check every other
-      // path in this feature does, and a refusal is the old answer — the
-      // shell's start directory — never a read outside the project.
-      it("falls back to the start directory for a path outside the project", async () => {
+      // runs in, so it goes through the same containment check every other
+      // path in this feature does. What a refusal must NOT do is answer
+      // from the shell's start directory: a shell that has `cd`-ed out of
+      // the project would then get a path chip naming a directory it is
+      // not in and branch/± chips describing a repository nobody is
+      // looking at — wrong rather than absent, the one thing this feature
+      // forbids. No chips at all is the honest answer.
+      it("reports nothing at all for a path outside the project", async () => {
         const { handlers, git } = moved();
 
-        await expect(handlers.chips("tab-1", "/etc")).resolves.toMatchObject({ cwd: "/proj" });
-        expect(git.changes).toHaveBeenCalledWith("/proj");
-        expect(git.changes).not.toHaveBeenCalledWith("/etc");
+        await expect(handlers.chips("tab-1", "/etc")).resolves.toBeUndefined();
+        // And nothing is asked about any directory — absence proved by
+        // what was never invoked, not only by what came back.
+        expect(git.changes).not.toHaveBeenCalled();
       });
 
-      it("falls back to the start directory for a non-string path and for none at all", async () => {
+      it("spawns no runtime probe for a path outside the project either", async () => {
+        const runtimeVersion = vi.fn(async () => "v22.11.0");
+        const { handlers } = moved({ runtimeVersion });
+
+        await expect(handlers.chips("tab-1", "/etc")).resolves.toBeUndefined();
+
+        expect(runtimeVersion).not.toHaveBeenCalled();
+      });
+
+      // A sibling whose name merely starts with the root's — the classic
+      // prefix-test escape listDir and openFile both guard.
+      it("reports nothing for a sibling directory whose name starts with the root's", async () => {
         const { handlers, git } = moved();
 
-        await expect(handlers.chips("tab-1", 7 as unknown as string)).resolves.toMatchObject({
-          cwd: "/proj",
-        });
-        await expect(handlers.chips("tab-1")).resolves.toMatchObject({ cwd: "/proj" });
-        expect(git.changes).toHaveBeenCalledWith("/proj");
+        await expect(handlers.chips("tab-1", "/proj-secrets")).resolves.toBeUndefined();
+        expect(git.changes).not.toHaveBeenCalled();
+      });
+
+      // An argument that is not a path at all cannot be checked against
+      // the project, so it is refused like any other unvalidated path.
+      it("reports nothing for a non-string path", async () => {
+        const { handlers, git } = moved();
+
+        await expect(handlers.chips("tab-1", 7 as unknown as string)).resolves.toBeUndefined();
+        expect(git.changes).not.toHaveBeenCalled();
       });
 
       // No `files` means no realPath to resolve a path with, and an
       // unresolved path is one that was never proven inside the project.
-      it("falls back to the start directory with no file integration to check the path", async () => {
+      it("reports nothing when there is no file integration to check the path with", async () => {
         const { handlers, git } = moved({ files: undefined });
 
-        await expect(handlers.chips("tab-1", "/proj/packages/desktop")).resolves.toMatchObject({
-          cwd: "/proj",
-        });
+        await expect(handlers.chips("tab-1", "/proj/packages/desktop")).resolves.toBeUndefined();
+        expect(git.changes).not.toHaveBeenCalled();
+      });
+
+      // The one case that still falls back: no path supplied at all — an
+      // older renderer, or a pane before its first prompt. The start
+      // directory is inside the project by construction, so it is the best
+      // answer available rather than a guess.
+      it("falls back to the start directory when no path is supplied", async () => {
+        const { handlers, git } = moved();
+
+        await expect(handlers.chips("tab-1")).resolves.toMatchObject({ cwd: "/proj" });
         expect(git.changes).toHaveBeenCalledWith("/proj");
       });
 

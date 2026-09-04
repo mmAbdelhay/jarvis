@@ -368,7 +368,10 @@ A chip that does not apply is **absent, not empty**: no git repository means
 no branch chip and no `±` chip, not a blank one; no `package.json` means no
 runtime chip; a detached HEAD shows its short SHA in place of a branch name.
 Without the zsh shell integration the pane's directory isn't known at all,
-so there are no chips whatsoever, rather than a guessed one.
+so there are no chips whatsoever, rather than a guessed one. The same holds
+for a shell that has left the project — `cd /`, or into another checkout:
+the directory can no longer be checked against the project root, so the row
+empties rather than going on describing the project you started in.
 
 **These chips are drawn by Jarvis, above the editor — your shell's own
 `PS1` still renders inside it.** If your prompt already prints a branch,
