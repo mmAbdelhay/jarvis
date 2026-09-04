@@ -356,7 +356,13 @@ own input:
 Runtime version, the pane's directory (`$HOME` collapsed to `~`), the git
 branch, and a `±` count of insertions and deletions. They refresh once per
 prompt — the same moment the file sidebar re-roots — never on a timer, so a
-slow repository shows a beat-old row rather than blocking the input.
+slow repository shows a beat-old row rather than blocking the input. The
+directory they name is the pane's own live directory, so a `cd` moves the
+path chip and the branch and `±` chips with it, exactly as it moves the
+sidebar. A burst of prompts (a held Enter, a pasted script) does not mean a
+burst of `git` reads: one read is in flight per pane at a time, and one
+answer per directory is shared for a second, so the row you end up with is
+the one for the last prompt.
 
 A chip that does not apply is **absent, not empty**: no git repository means
 no branch chip and no `±` chip, not a blank one; no `package.json` means no

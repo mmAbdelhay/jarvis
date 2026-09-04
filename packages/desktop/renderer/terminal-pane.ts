@@ -937,7 +937,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    * until this resolves, so a slow repository never means an input the
    * user cannot type into. A rejected read leaves the previous row exactly
    * as it was — `chipRow.render` is only ever called with a result that
-   * actually came back, and only from the most recently started read.
+   * actually came back.
+   *
+   * `path` is the directory that prompt reported. It travels with the read
+   * because main knows only where the shell was *started*.
    */
   function refreshChips(path: string): void {
     const read = hooks.chips;
