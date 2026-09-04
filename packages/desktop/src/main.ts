@@ -135,6 +135,12 @@ function setDockIcon(): void {
   }
 }
 
+/** How long the chip row's runtime probe waits for `node -v` before giving
+ *  up on it. A hung shim (a broken version manager, a stalled
+ *  network-mounted directory) must resolve `undefined`, not leave chips()
+ *  pending forever — an absent chip beats one that never appears. */
+const NODE_VERSION_PROBE_TIMEOUT_MS = 2000;
+
 /**
  * `node -v` run inside `cwd` — the chip row's runtime probe. Spawned with
  * an explicit `cwd` rather than through the shared `runCommand` (which has
@@ -142,21 +148,42 @@ function setDockIcon(): void {
  * every pane): a version manager whose `node` shim reads the directory
  * (Volta, an `.nvmrc`-aware wrapper) only answers correctly when the
  * working directory it sees is the pane's, not Jarvis's. Resolves
- * `undefined` on a non-zero exit or any spawn failure — never an error
- * surfaced in a terminal.
+ * `undefined` on a non-zero exit, any spawn failure, or a timeout — never
+ * an error surfaced in a terminal, and never a promise left pending.
  */
 function nodeVersionIn(cwd: string): Promise<string | undefined> {
   return new Promise((resolvePromise) => {
+    let settled = false;
+    const finish = (result: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      resolvePromise(result);
+    };
+
     try {
       const child = spawn("node", ["-v"], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+      const timer = setTimeout(() => {
+        // Kill it rather than leave it running unattended: a stuck probe
+        // is not this pane's business to keep alive once it has stopped
+        // being worth waiting for.
+        child.kill();
+        finish(undefined);
+      }, NODE_VERSION_PROBE_TIMEOUT_MS);
+
       let stdout = "";
       child.stdout.on("data", (data: Buffer) => {
         stdout += data.toString();
       });
-      child.on("error", () => resolvePromise(undefined));
-      child.on("close", (code) => resolvePromise(code === 0 ? stdout.trim() : undefined));
+      child.on("error", () => {
+        clearTimeout(timer);
+        finish(undefined);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        finish(code === 0 ? stdout.trim() : undefined);
+      });
     } catch {
-      resolvePromise(undefined);
+      finish(undefined);
     }
   });
 }

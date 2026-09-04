@@ -1425,7 +1425,13 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     const probe = deps.runtimeVersion;
     if (probe === undefined) return undefined;
     if (runtimeCache.has(cwd)) return runtimeCache.get(cwd);
-    const version = await probe(cwd);
+    // `runtimeVersion` is a public typed extension point — nothing in its
+    // signature stops a future or alternate implementation from rejecting,
+    // and an uncaught rejection here would take the whole Promise.all below
+    // (and so all of chips()) down with it. Caught here, the same way the
+    // git call beside it is, so a bad probe degrades to "no runtime chip"
+    // rather than a rejected chips() call.
+    const version = await probe(cwd).catch(() => undefined);
     runtimeCache.set(cwd, version);
     return version;
   }

@@ -2729,6 +2729,23 @@ describe("terminal handlers", () => {
       expect(runtimeVersion).not.toHaveBeenCalled();
     });
 
+    // deps.runtimeVersion is a public typed extension point: its signature
+    // (`Promise<string | undefined>`) does not forbid a rejecting
+    // implementation, and an uncaught rejection here would take the whole
+    // Promise.all in chips() down with it — chips() rejecting instead of
+    // resolving is exactly "an error surfaced in a terminal", the thing
+    // every other failure path in this handler refuses to do.
+    it("resolves with no runtime chip rather than rejecting when the probe itself rejects", async () => {
+      const deps = baseDeps();
+      const runtimeVersion = vi.fn(async () => {
+        throw new Error("boom");
+      });
+      const handlers = createTerminalHandlers({ ...deps, runtimeVersion });
+      handlers.open("p");
+
+      await expect(handlers.chips("tab-1")).resolves.toMatchObject({ runtime: undefined });
+    });
+
     it("has no branch and no runtime when neither dep is configured", async () => {
       const deps = baseDeps();
       const handlers = createTerminalHandlers(deps);
@@ -2744,7 +2761,7 @@ describe("terminal handlers", () => {
       });
     });
 
-    it("resolves a split pane to its own directory, not its tab's", async () => {
+    it("resolves a split pane to its own directory when it has one, not its tab's", async () => {
       const deps = baseDeps();
       const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
       const handlers = createTerminalHandlers({
@@ -2756,6 +2773,29 @@ describe("terminal handlers", () => {
       handlers.split("tab-1", "p1");
 
       await handlers.chips("tab-1:p1");
+
+      // "tab-1:p1" has its own exact entry (split() registers one), so this
+      // alone cannot tell the exact-key lookup apart from the tab fallback
+      // — see the next test for that.
+      expect(git.changes).toHaveBeenCalledWith("/proj");
+    });
+
+    // The pane-key resolution is "exact key first, tab as fallback" — see
+    // `listDir`'s own note. A pane key with no exact entry of its own (never
+    // split, or split before this process started) must still fall back to
+    // its tab's directory, which is the one branch the test above cannot
+    // reach: "tab-1:p1" there already has its own exact entry from split(),
+    // so deleting the `directoryOf` fallback would not fail it.
+    it("falls back to the tab's directory for a pane key with no exact entry of its own", async () => {
+      const deps = baseDeps();
+      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const handlers = createTerminalHandlers({ ...deps, git: git as unknown as GitProvider });
+      handlers.open("p");
+
+      // "tab-1:ghost" was never split — only "tab-1" itself is in the
+      // directory map — so directories.get("tab-1:ghost") is undefined and
+      // only the directoryOf("tab-1") fallback can answer.
+      await handlers.chips("tab-1:ghost");
 
       expect(git.changes).toHaveBeenCalledWith("/proj");
     });
