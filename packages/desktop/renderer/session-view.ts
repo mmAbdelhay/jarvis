@@ -3,9 +3,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { showView } from "./views.js";
 import { detectLanguage, projectLabel } from "./format.js";
 import { enhanceTerminal } from "./terminal-addons.js";
-import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
-import { FitAddon } from "./vendor/addon-fit.mjs";
-import { Terminal } from "./vendor/xterm.mjs";
+import { createPane, type TerminalPane } from "./terminal-pane.js";
 
 // The Session view: one agent process's real terminal.
 //
@@ -15,16 +13,42 @@ import { Terminal } from "./vendor/xterm.mjs";
 // keystroke goes back to the pty untouched. Nothing in here parses or
 // rewrites the stream: an agent's own UI owns what the session looks like,
 // which is the whole point of running it this way.
+//
+// The screen itself is a terminal pane (terminal-pane.ts), the same one the
+// Workspace's Terminal tabs are built from, so the two surfaces are the same
+// terminal down to the last keystroke. In practice a session looks almost
+// exactly as it did before that move: an agent holds the alternate screen
+// for nearly the whole of its run, and a pane suppresses its blocks — and
+// its editor with them — for as long as anything does. What changes is that
+// a session which *does* drop back to a shell prompt with the integration
+// marks on it now gets the same blocks everything else does, rather than a
+// second, lesser terminal.
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
-let terminal: Terminal | undefined;
-let fit: FitAddon | undefined;
+let pane: TerminalPane | undefined;
 let currentId: string | undefined;
 /** The open session's project, for links clicked in its terminal. */
 let currentProject: string | undefined;
-/** Guards against sending a resize before a terminal has been opened. */
-let attached = false;
+
+/** How terminals behave. Read once for the module, exactly as
+ *  workspace-terminal.ts reads it and for the same reason: a change to
+ *  jarvis.yaml takes effect on restart anyway. Until it resolves — and if
+ *  it never does — the pane is built with these, which are the terminal
+ *  Jarvis drew before blocks existed. */
+let terminalSettings = { blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "" };
+try {
+  void window.jarvis
+    .terminalSettings()
+    .then((settings) => {
+      terminalSettings = settings;
+    })
+    .catch(() => {
+      // Today's terminal. Nothing else about the session is affected.
+    });
+} catch {
+  // A preload without the channel — the same fallback.
+}
 
 /** Which session the terminal is showing, if any. */
 export function openSessionId(): string | undefined {
@@ -67,60 +91,93 @@ export function renderVoiceTarget(active: boolean, listening: boolean): void {
     : MESSAGES.voiceGoesHere(PRIMARY_LANGUAGE);
 }
 
-function ensureTerminal(): Terminal | undefined {
-  if (terminal !== undefined) return terminal;
+/** Bytes to whichever session is on screen. Nothing to send them to before
+ *  one has been opened, which is the same guard the module has always had
+ *  around every one of these channels. */
+function sendInput(data: string): void {
+  if (currentId === undefined) return;
+  void window.jarvis.sendSessionInput(currentId, data);
+}
+
+function ensurePane(): TerminalPane | undefined {
+  if (pane !== undefined) return pane;
   const host = $("session-terminal");
   if (host === null) return undefined;
 
-  const term = new Terminal({
-    scrollback: SCROLLBACK_LINES,
-    ...TERMINAL_FONT,
-    theme: TERMINAL_THEME,
-    cursorBlink: true,
-    // The agent owns the window title and the bell; neither has anywhere
-    // sensible to go inside a panel, so both are left alone.
-    allowProposedApi: true,
-  });
-  const fitAddon = new FitAddon();
-  term.loadAddon(fitAddon);
-  term.open(host);
-
-  // Every keystroke, verbatim — control bytes included, which is what makes
-  // Ctrl-C, arrow keys, Escape and shift+tab work rather than only plain
-  // text. `onData` already gives the encoded sequence the pty expects.
-  term.onData((data) => {
-    if (currentId === undefined) return;
-    void window.jarvis.sendSessionInput(currentId, data);
+  // The pane's terminal, on exactly the terms every other terminal gets it.
+  // What differs is only where the bytes go: an agent's pty through
+  // sendSessionInput/resizeSession, rather than a shell through the
+  // terminal channels.
+  const view = createPane(host, {
+    // Every keystroke, verbatim — control bytes included, which is what
+    // makes Ctrl-C, arrow keys, Escape and shift+tab work rather than only
+    // plain text.
+    sendInput,
+    // The pty's size must track the pane's, or the agent draws its UI to a
+    // width that does not exist and the result is visibly mangled.
+    resize: (cols, rows) => {
+      if (currentId === undefined) return;
+      void window.jarvis.resizeSession(currentId, cols, rows);
+    },
+    // Nothing to replay: a session's backlog is per-session and belongs to
+    // openSession, which reads it fresh (and races it against the user
+    // clicking a different session) every time one is opened. The pane
+    // outlives any one session, so it has no prologue of its own.
+    attach: () => Promise.resolve(""),
+    settings: terminalSettings,
+    notify: (title, body) => {
+      try {
+        new Notification(title, { body });
+      } catch {
+        // Notification unsupported or denied: no less a working terminal.
+      }
+    },
+    // What ⌘P's "Run workflow…" offers — the open session's project's saved
+    // workflows. Guarded the same way workspace-terminal.ts guards it: a
+    // channel that fails leaves the action with nothing to offer, never a
+    // terminal that throws.
+    workflows: async () => {
+      if (currentProject === undefined) return [];
+      try {
+        return await window.jarvis.terminalWorkflows(currentProject);
+      } catch {
+        return [];
+      }
+    },
+    // The two AI actions' route to the brain, unchanged from a Terminal tab.
+    terminalAi: (kind, text) => window.jarvis.terminalAi(kind, text),
+    // No `history`: Jarvis's command log is keyed by *shell*, and a session
+    // is an agent's pty rather than a shell of Jarvis's. Absent means the
+    // editor's arrows leave the line alone and ⌘P offers no history search
+    // — the documented meaning of the hook being missing, not a special
+    // case for this route.
+    //
+    // No `splitKeys` either: the Session view is one agent's terminal and
+    // has no tree to split, so the palette leaves those three actions out
+    // rather than offering an action that does nothing.
   });
 
   // Addons, key bindings and the find bar — shared with the Workspace's
   // terminal tabs so the two behave identically. After open(): WebGL needs a
   // real element to attach a context to.
-  enhanceTerminal(term, host, {
-    sendInput: (data) => {
-      if (currentId === undefined) return;
-      void window.jarvis.sendSessionInput(currentId, data);
-    },
+  enhanceTerminal(view.terminal, view.element, {
+    sendInput,
     // A link clicked in an agent's output opens as a Workspace browser tab in
     // that agent's own project, rather than being handed to the OS.
     openLink: (url) => {
       if (currentProject === undefined) return;
       void window.jarvis.openTab(currentProject, url);
     },
+    // Undefined with blocks switched off, which leaves ⌘↑/⌘↓/⌘⇧F behaving
+    // exactly as they do today rather than claiming a key and doing
+    // nothing with it.
+    blockNav: view.blockNav,
+    openPalette: () => view.openPalette(),
   });
 
-  // The pty's size must track the pane's, or the agent draws its UI to a
-  // width that does not exist and the result is visibly mangled.
-  term.onResize(({ cols, rows }) => {
-    if (currentId === undefined) return;
-    void window.jarvis.resizeSession(currentId, cols, rows);
-  });
-
-  terminal = term;
-  fit = fitAddon;
-  attached = true;
+  pane = view;
   observeSize(host);
-  return term;
+  return view;
 }
 
 /** Re-fits on any change to the pane's box — window resize, view switch,
@@ -131,17 +188,10 @@ function observeSize(host: HTMLElement): void {
 }
 
 function refit(): void {
-  if (!attached || fit === undefined) return;
   // A pane with no layout yet (the view is hidden, or the window is
-  // minimised) measures as zero and would make the addon throw.
-  const host = $("session-terminal");
-  if (host === null || host.clientWidth === 0 || host.clientHeight === 0) return;
-  try {
-    fit.fit();
-  } catch {
-    // A fit racing a layout change is not worth surfacing; the next
-    // observation will correct it.
-  }
+  // minimised) measures as zero, which the pane's own refit already
+  // declines to fit at.
+  pane?.refit();
 }
 
 /**
@@ -160,8 +210,12 @@ export async function openSession(session: Session): Promise<void> {
   showView("session");
   setVoiceTarget(session.id);
 
-  const term = ensureTerminal();
-  term?.reset();
+  const view = ensurePane();
+  // A different agent's screen must not be drawn over the last one's. The
+  // live terminal is what carries a session's screen — an agent holds the
+  // alternate screen throughout, so there are no frozen blocks to clear in
+  // any session anyone will actually see.
+  view?.terminal.reset();
   // The view was hidden until showView above, so the pane only has a real
   // size now — fit before writing so the backlog is laid out at the width
   // it will be read at.
@@ -181,8 +235,11 @@ export async function openSession(session: Session): Promise<void> {
   // session's terminal.
   if (currentId !== session.id) return;
 
-  if (backlog !== "") term?.write(backlog);
-  term?.focus();
+  // Through the pane rather than straight to xterm: the backlog can carry
+  // the same integration marks the live stream does, and a block whose
+  // command finished before the view was opened is still a block.
+  if (backlog !== "") view?.write(backlog);
+  view?.focus();
 }
 
 /** One chunk from the "session:output" channel. Ignored unless it belongs
@@ -190,7 +247,7 @@ export async function openSession(session: Session): Promise<void> {
  *  since the main process has no idea which one is open. */
 export function appendSessionOutput(output: SessionOutput): void {
   if (output.sessionId !== currentId) return;
-  terminal?.write(output.chunk);
+  pane?.write(output.chunk);
 }
 
 /** Keeps the header's state honest as the session progresses, and is how a
@@ -210,12 +267,12 @@ export function wireSessionView(): void {
     showView("session");
     claimVoice();
     refit();
-    terminal?.focus();
+    pane?.focus();
   });
 
   // Clicking anywhere in the pane focuses the terminal, so typing goes to
   // the agent without hunting for a cursor.
-  $("session-terminal")?.addEventListener("click", () => terminal?.focus());
+  $("session-terminal")?.addEventListener("click", () => pane?.focus());
 
   window.addEventListener("resize", () => refit());
 }

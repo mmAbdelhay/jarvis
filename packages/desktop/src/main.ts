@@ -95,6 +95,7 @@ import {
   createFileReader,
 } from "./completion-source.js";
 import { DEFAULT_CONFIG_PATH, defaultWorkflowsDir, loadConfig } from "./config.js";
+import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
@@ -664,7 +665,9 @@ app.whenReady().then(async () => {
       checkAwsSession,
       awaitAwsSession,
       openTerminal: (project: string, cwd: string) => {
-        const tabId = workspace.openTerminal(project);
+        // Marked as the login terminal, which is what tells the renderer to
+        // draw it without blocks — see LOGIN_TERMINAL_DETAIL.
+        const tabId = workspace.openTerminal(project, LOGIN_TERMINAL_DETAIL);
         // The tab exists before the shell does. If the pty never starts, the
         // caller reports a failure and the tab would otherwise be left behind
         // empty — a terminal with nothing in it and no explanation, next to a

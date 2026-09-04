@@ -7,6 +7,7 @@
 // keystrokes go, and what happens when a tab goes away.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceTab } from "@jarvis/core";
+import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
@@ -312,6 +313,28 @@ describe("workspace terminals", () => {
     );
 
     expect(pane?.querySelectorAll(".block")).toHaveLength(1);
+  });
+
+  // The one deliberate opt-out in the whole design: the AWS login tab Jarvis
+  // opens for itself runs `saml2aws login` and is then closed, so a block
+  // would be a frame around the only command there will ever be.
+  it("draws the AWS login terminal without blocks, whatever the settings say", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    renderWorkspaceTerminals([tab({ detail: LOGIN_TERMINAL_DETAIL })], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.dataset["state"]).toBe("plain");
+
+    dataListener?.(
+      "tab-1",
+      `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C;ls\u0007a b\r\n\u001b]133;D;0\u0007`,
+    );
+
+    expect(pane?.querySelectorAll(".block")).toHaveLength(0);
   });
 });
 

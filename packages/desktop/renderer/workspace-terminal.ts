@@ -1,4 +1,5 @@
 import type { WorkspaceTab } from "@jarvis/core";
+import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
@@ -135,7 +136,11 @@ export function renderWorkspaceTerminals(
     active?.kind === "terminal" && active.project === selectedProject ? active.id : undefined;
   host.hidden = showing === undefined;
 
-  if (showing !== undefined) ensurePane(showing, selectedProject, host);
+  // The AWS login tab is the one terminal in Jarvis drawn without blocks —
+  // see paneSettings.
+  if (showing !== undefined) {
+    ensurePane(showing, selectedProject, host, active?.detail === LOGIN_TERMINAL_DETAIL);
+  }
   for (const [tabId, pane] of panes) pane.element.hidden = tabId !== showing;
 
   if (showing === undefined) return;
@@ -147,7 +152,27 @@ export function renderWorkspaceTerminals(
   pane.tree.focused().focus();
 }
 
-function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
+/**
+ * How this tab's panes behave.
+ *
+ * Every terminal in Jarvis gets the configured settings, with exactly one
+ * deliberate exception: the AWS login tab (see LOGIN_TERMINAL_DETAIL). That
+ * tab is opened by Jarvis itself to run one command — `saml2aws login` —
+ * and is closed once the login is done; there is never a second command, so
+ * a block would be a frame around the only thing on screen. It is the one
+ * place this design opts out of blocks, and it opts out here rather than
+ * anywhere deeper so that nothing in the pane itself has to know why.
+ */
+function paneSettings(isLoginTerminal: boolean): typeof terminalSettings {
+  return isLoginTerminal ? { ...terminalSettings, blocks: false } : terminalSettings;
+}
+
+function ensurePane(
+  tabId: string,
+  project: string,
+  host: HTMLElement,
+  isLoginTerminal: boolean,
+): Pane {
   const existing = panes.get(tabId);
   if (existing !== undefined) return existing;
 
@@ -170,7 +195,8 @@ function ensurePane(tabId: string, project: string, host: HTMLElement): Pane {
 
   const built = createSplitTree(
     element,
-    (paneKey, paneHost) => makePane(tabId, paneKey, project, paneHost, splitKeys),
+    (paneKey, paneHost) =>
+      makePane(tabId, paneKey, project, paneHost, splitKeys, paneSettings(isLoginTerminal)),
     tabId,
   );
   tree = built;
@@ -192,6 +218,7 @@ function makePane(
   project: string,
   element: HTMLElement,
   splitKeys: SplitKeys,
+  settings: typeof terminalSettings,
 ): TerminalPane {
   // A split pane's shell has to exist before the pane can attach to it, so
   // the attach below waits on this. The tab's own pane has had a shell
@@ -243,7 +270,7 @@ function makePane(
       started === undefined
         ? window.jarvis.attachTerminal(paneKey)
         : started.then(() => window.jarvis.attachTerminal(paneKey)),
-    settings: terminalSettings,
+    settings,
     // What the command editor's arrows walk: Jarvis's own command log,
     // never zsh's line editor. Guarded because a preload without the
     // channel must still be a terminal, with arrows that do nothing rather
@@ -294,7 +321,7 @@ function makePane(
   // anchor hook changes how the dropdown positions itself even over a bare
   // terminal. Today's cell-under-the-cursor placement has to stay exactly
   // what it was for a pane that never asked for an editor.
-  const editorCompletionHooks = terminalSettings.inputEditor
+  const editorCompletionHooks = settings.inputEditor
     ? {
         readInput: () => view.readInput(),
         applyInput: (line: string) => view.applyInput(line),

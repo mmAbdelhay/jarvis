@@ -99,11 +99,18 @@ describe("openSession", () => {
     );
   });
 
+  // The terminal is opened into the pane's own live element rather than
+  // straight into #session-terminal — terminal-pane.ts builds the block
+  // list, the sticky header and the live terminal inside the host it is
+  // given. What matters here is unchanged: the emulator lives inside the
+  // view's pane, and it has the keys.
   it("mounts the terminal into the view's own pane", async () => {
     const { openSession } = await import("./session-view.js");
     await openSession(makeSession());
 
-    expect(term().opened).toBe(document.getElementById("session-terminal"));
+    const host = document.getElementById("session-terminal");
+    expect(host?.querySelector(".terminal-pane")).not.toBeNull();
+    expect(host?.contains(term().opened as Node)).toBe(true);
     expect(term().focused).toBeGreaterThan(0);
   });
 
@@ -162,6 +169,42 @@ describe("openSession", () => {
     await first;
 
     expect(term().text).toBe("second agent\r\n");
+  });
+
+  // Almost every session is an agent holding the alternate screen from its
+  // first byte to its last, and a pane suppresses blocks for as long as
+  // anything does — which is why the Session view looks unchanged. But the
+  // machinery is the same machinery: a session that drops back to a shell
+  // prompt carrying the integration marks gets the blocks every other
+  // terminal gets, rather than a second, lesser terminal.
+  it("draws blocks for a session that prints the integration marks", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { openSession, appendSessionOutput } = await import("./session-view.js");
+    // The settings arrive on a promise; a pane built before it resolves is
+    // deliberately the plain terminal, so the pane under test comes after.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await openSession(makeSession({ id: "s1" }));
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.dataset["state"]).toBe("blocks");
+
+    // Two runs between prompts, exactly as they arrive from the pty.
+    appendSessionOutput({
+      sessionId: "s1",
+      chunk:
+        `\u001b]133;A\u0007$ \u001b]133;B\u0007pnpm test\r\n` +
+        `\u001b]133;C;pnpm test\u0007ok\r\n\u001b]133;D;0\u0007`,
+    });
+    appendSessionOutput({
+      sessionId: "s1",
+      chunk:
+        `\u001b]133;A\u0007$ \u001b]133;B\u0007false\r\n` +
+        `\u001b]133;C;false\u0007\u001b]133;D;1\u0007`,
+    });
+
+    expect(pane?.querySelectorAll(".block")).toHaveLength(2);
   });
 
   it("keeps the terminal live when the backlog read fails", async () => {

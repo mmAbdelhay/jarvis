@@ -1684,18 +1684,21 @@
 
   .session-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
 
-  /* The terminal host. xterm.js paints into this and manages its own
-     scrolling, selection and scrollback, so nothing here may set overflow
-     or line-height — the emulator measures the box and lays out character
-     cells to fit. `dir=ltr` is pinned in the markup: this is a terminal
-     grid, and an Arabic word inside it must not flip the whole screen. */
+  /* The terminal host — the slot a .terminal-pane draws inside, exactly as
+     .workspace-terminal-pane is for a Terminal tab. xterm.js paints in
+     there and manages its own scrolling, selection and scrollback, so
+     nothing here may set overflow or line-height: the emulator measures the
+     box and lays out character cells to fit. `dir=ltr` is pinned in the
+     markup: this is a terminal grid, and an Arabic word inside it must not
+     flip the whole screen. The padding lives on .terminal-pane inside this,
+     which is the element that scrolls — the same reason the Workspace's own
+     slot carries none. */
   .session-terminal {
     flex-grow: 1;
     min-width: 0;
     min-height: 0;
-    padding: 10px 14px;
     background: var(--ground);
-    /* The find bar is absolutely positioned inside this box. */
+    /* The pane fills this box, and the find bar is positioned inside it. */
     position: relative;
   }
 
