@@ -7,3 +7,6 @@ design/jarvis-voice-orchestrator.html
 
 # Agent worktrees — transient, one per background agent
 .claude/worktrees/
+
+# Packaged app output (electron-builder)
+release/

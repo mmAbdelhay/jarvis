@@ -1,0 +1,120 @@
+# How Jarvis is turned into a real macOS .app.
+#
+# This lives beside package.json rather than inside it because every
+# decision below needs a reason attached, and package.json is JSON — it
+# cannot hold one. The whole point of this file is the comments.
+#
+# Run it with `pnpm --filter @jarvis/desktop package`, which builds first
+# (tsc + copy-vendor.mjs) and then packages the result.
+
+appId: com.jarvis.desktop
+productName: Jarvis
+copyright: Jarvis
+
+directories:
+  # Build output. Ignored by git — a packaged app is never committed.
+  output: release
+  buildResources: assets
+
+# ---------------------------------------------------------------------------
+# What goes inside the bundle
+# ---------------------------------------------------------------------------
+#
+# The renderer is not a single tree. `dist/renderer/app.js` is compiled
+# output, but `renderer/index.html` is *not* compiled — main.ts loads it
+# straight from the source directory:
+#
+#     window.loadFile(new URL("../../renderer/index.html", import.meta.url))
+#
+# From `dist/src/main.js` that resolves to `renderer/index.html`, so the
+# source `renderer/` directory is a runtime asset, not a build input. And
+# because index.html sits there, its own relative links resolve there too:
+# `vendor/xterm.css` and `./styles.css` are read from `renderer/`, while
+# the script it loads (`../dist/renderer/app.js`) imports
+# `./vendor/xterm.mjs` from `dist/renderer/`. That is why copy-vendor.mjs
+# duplicates the vendor directory into both trees — and why both copies
+# have to be in here. A missing vendor file is not a crash; it is a blank
+# terminal, which is far harder to notice.
+#
+# The .ts sources under renderer/ are deliberately excluded: they are build
+# inputs, they include the test files, and nothing at runtime reads them.
+files:
+  - "dist/**/*"
+  - "renderer/index.html"
+  - "renderer/styles.css"
+  - "renderer/vendor/**/*"
+  - "package.json"
+  # Test output and TypeScript declarations are dead weight in a shipped
+  # app — every renderer/*.test.js and every .d.ts in the tree.
+  - "!dist/**/*.test.js"
+  - "!dist/**/*.test.js.map"
+  - "!dist/**/*.test.d.ts"
+  - "!dist/**/*.d.ts"
+  - "!**/*.tsbuildinfo"
+  # The same for the two workspace packages, which arrive through
+  # node_modules (as pnpm symlinks that electron-builder follows and
+  # materialises into the archive) and so escape the globs above.
+  - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
+  - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
+  # @anthropic-ai/claude-agent-sdk declares one optional package per
+  # platform, each carrying a ~200 MB bundled runtime, and pnpm installs
+  # every one of them. Only the host's own is ever loaded; the other seven
+  # are a gigabyte of dead weight in the bundle. This build is macOS
+  # arm64-only, so keep exactly that one.
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{linux,win32}-*/**"
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**"
+
+# ---------------------------------------------------------------------------
+# node-pty must live outside the asar archive
+# ---------------------------------------------------------------------------
+#
+# node-pty is the load-bearing native module: every agent session and every
+# Terminal tab is a pty. Two things inside it cannot survive being sealed
+# in an asar archive:
+#
+#   1. `prebuilds/darwin-arm64/pty.node` — a native binding. dlopen() needs
+#      a real path on disk; it cannot read out of a virtual archive.
+#   2. `prebuilds/darwin-arm64/spawn-helper` — an executable that the
+#      darwin build *execs* to hand the child its controlling terminal.
+#      Same problem, plus it needs its execute bit (see
+#      ensureSpawnHelperExecutable() in packages/platform/src/pty.ts).
+#
+# Unpacking the whole node-pty directory keeps node-pty's own loader happy:
+# lib/utils.js walks `build/Release`, `build/Debug`, then
+# `prebuilds/<platform>-<arch>`, relative to both `..` and `.`, and those
+# lookups all have to land on the same side of the archive boundary.
+#
+# The binding itself needs no electron-rebuild: node-pty 1.1.0 is built on
+# node-addon-api, so its prebuilt binary is Node-API and ABI-stable across
+# both Node and Electron. Rebuilding it would be a no-op at best.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+# ---------------------------------------------------------------------------
+# mac
+# ---------------------------------------------------------------------------
+#
+# `dir` rather than `dmg`: the deliverable is Jarvis.app, installed by
+# copying it to /Applications. A disk image would add a step and a
+# dependency for nothing.
+#
+# identity: null skips code signing during the build. There is no Developer
+# ID here, and electron-builder's own ad-hoc handling is inconsistent
+# across versions; signing is done afterwards, deliberately and visibly,
+# with `codesign --force --deep --sign -` on the installed app.
+mac:
+  target:
+    - target: dir
+      arch:
+        - arm64
+  category: public.app-category.developer-tools
+  icon: assets/icon.icns
+  identity: null
+  # Jarvis spawns agents and shells that read the user's files, and its
+  # renderer talks to local services. The hardened runtime would need
+  # entitlements and a real signing identity to allow that; with an ad-hoc
+  # signature it only buys refusals.
+  hardenedRuntime: false
+
+# Nothing here is published anywhere.
+publish: null

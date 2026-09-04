@@ -1,12 +1,13 @@
 {
   "name": "@jarvis/desktop",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -b ../../tsconfig.json && node scripts/copy-vendor.mjs",
-    "start": "pnpm run build && electron ."
+    "start": "pnpm run build && electron .",
+    "package": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml"
   },
   "dependencies": {
     "@jarvis/core": "workspace:*",
@@ -22,6 +23,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "electron": "^44.0.0"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
   }
 }
