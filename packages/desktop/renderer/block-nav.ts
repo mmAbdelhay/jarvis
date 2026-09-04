@@ -17,6 +17,10 @@ type Filter = { kind: "none" } | { kind: "failed" } | { kind: "command"; command
 
 export type BlockNav = {
   move(delta: number): void;
+  /** Selects one specific block — what clicking its header does. A block
+   *  this nav does not know about, or one a filter is currently hiding, is
+   *  ignored: a selection the user cannot see is not a selection. */
+  select(view: BlockView): void;
   selected(): BlockView | undefined;
   clear(): void;
   toggleFailedFilter(): void;
@@ -154,6 +158,10 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
             : candidates.length - 1
           : Math.max(0, Math.min(candidates.length - 1, index + delta));
       select(candidates[next]);
+    },
+    select(view: BlockView): void {
+      if (!visible().includes(view)) return;
+      select(view);
     },
     selected: () => selected,
     clear(): void {

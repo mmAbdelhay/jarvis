@@ -54,6 +54,40 @@ beforeEach(() => {
   nextId = 1;
 });
 
+// What clicking a block's header does — the pointer route to the selection
+// the palette's copy and re-run actions work on.
+describe("selecting one block directly", () => {
+  it("selects the block it is given, and unselects the previous one", () => {
+    const { nav: n } = nav();
+    const views = [fakeView("a", 0), fakeView("b", 0)];
+    n.sync(views);
+
+    n.select(views[1] as BlockView);
+    expect(n.selected()).toBe(views[1]);
+    expect(views[1]?.element.classList.contains("selected")).toBe(true);
+
+    n.select(views[0] as BlockView);
+    expect(n.selected()).toBe(views[0]);
+    expect(views[1]?.element.classList.contains("selected")).toBe(false);
+  });
+
+  // A block a filter is hiding is not something the user can have clicked,
+  // and a selection they cannot see is not a selection — the same rule
+  // applyFilter() already follows when a filter hides the selected block.
+  it("ignores a block this nav does not know, or one a filter is hiding", () => {
+    const { nav: n } = nav();
+    const views = [fakeView("ok", 0), fakeView("bad", 1)];
+    n.sync(views);
+    n.toggleFailedFilter();
+
+    n.select(views[0] as BlockView);
+    expect(n.selected()).toBeUndefined();
+
+    n.select(fakeView("stranger", 0));
+    expect(n.selected()).toBeUndefined();
+  });
+});
+
 describe("moving the selection", () => {
   it("moves forward and clamps at the last block", () => {
     const { nav: n } = nav();

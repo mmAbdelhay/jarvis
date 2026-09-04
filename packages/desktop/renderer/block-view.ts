@@ -21,6 +21,12 @@ export type BlockViewHooks = {
   /** The more menu's "Filter to this command" — narrows the block list down
    *  to blocks that ran this exact command. Wired to the pane's BlockNav. */
   filterToCommand: (command: string) => void;
+  /** Makes this block the selected one — what clicking its header does,
+   *  and the only pointer route to the palette's "Copy output" and
+   *  "Re-run command", which act on the selection. Wired to the pane's
+   *  BlockNav; absent for a pane with no nav (blocks switched off), where
+   *  there is no selection to make. */
+  select?: ((view: BlockView) => void) | undefined;
 };
 
 export type BlockView = {
@@ -84,6 +90,12 @@ function actionButton(className: string, label: string, title: string): HTMLElem
 function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView): HTMLElement {
   const header = document.createElement("div");
   header.className = "block-header";
+  // Clicking a header selects the block, as the design and the guide both
+  // say it does. Without it the selection is reachable only from ⌘↑/⌘↓ and
+  // there is no pointer route at all to the palette actions that act on it.
+  // Every control inside the header stops propagation, so this never fires
+  // for a click on collapse, copy, re-run or more.
+  header.addEventListener("click", () => hooks.select?.(view));
 
   const command = document.createElement("span");
   command.className = "block-command";
@@ -235,7 +247,10 @@ export function createBlockView(record: BlockRecord, hooks: BlockViewHooks): Blo
   if (record.truncated) {
     const elided = document.createElement("div");
     elided.className = "block-elided";
-    elided.textContent = "… output past 2 MB elided";
+    // The middle, not the end: the splitter keeps the head and the tail of
+    // anything past 2 MB and marks the gap between them inline (a build
+    // log's failure is at its end, so the tail is the half that matters).
+    elided.textContent = "… capped at 2 MB — the middle of this output is elided above";
     element.append(elided);
   }
 

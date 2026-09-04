@@ -37,6 +37,36 @@ describe("a block", () => {
     expect(view.isCollapsed()).toBe(false);
   });
 
+  // "Clicking a header selects a block" — the design's Navigation section
+  // and the workspace guide both say so, and without it the selection was
+  // reachable only from ⌘↑/⌘↓: there was no pointer route at all to the
+  // palette actions that act on the selected block.
+  it("selects itself when its header is clicked", () => {
+    const select = vi.fn();
+    const view = createBlockView(record(), { ...hooks(), select });
+    view.element.querySelector<HTMLElement>(".block-header")?.click();
+    expect(select).toHaveBeenCalledWith(view);
+  });
+
+  // A control inside the header is not the header: clicking copy must copy,
+  // not also select. Every control already stops propagation — this is what
+  // keeps that true.
+  it("does not select when a control inside the header is clicked", () => {
+    const select = vi.fn();
+    const h = { ...hooks(), select };
+    const view = createBlockView(record(), h);
+    view.element.querySelector<HTMLElement>(".block-copy")?.click();
+    expect(h.copy).toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  // A pane with blocks switched off has no nav and passes no `select` —
+  // clicking a header is then simply a click on some text.
+  it("does not throw when clicked with no select hook wired up", () => {
+    const view = createBlockView(record(), hooks());
+    expect(() => view.element.querySelector<HTMLElement>(".block-header")?.click()).not.toThrow();
+  });
+
   it("copies the output, not the command, from the copy control", () => {
     const h = hooks();
     const view = createBlockView(record(), h);
