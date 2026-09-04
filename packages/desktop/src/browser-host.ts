@@ -161,9 +161,15 @@ export class BrowserHost {
    * Opens a terminal tab: a tab in the same store as every other, with no
    * hosted view behind it. Its pty lives in the main process and its screen
    * is drawn by the renderer's own xterm instance.
+   *
+   * `detail` names a terminal Jarvis opened for a purpose of its own rather
+   * than because the user asked for a shell — the AWS login tab, and
+   * nothing else today (see LOGIN_TERMINAL_DETAIL). It rides in the title
+   * so the tab strip says which terminal this is, and stays on the tab so
+   * the renderer can tell it apart from an ordinary one.
    */
-  openTerminal(project: string): TabId {
-    return this.#openViewless(project, "terminal");
+  openTerminal(project: string, detail?: string): TabId {
+    return this.#openViewless(project, "terminal", detail);
   }
 
   /**
@@ -195,11 +201,17 @@ export class BrowserHost {
    * Returns the new tab's id: main needs it to key whatever it is about to
    * start for this tab.
    */
-  #openViewless(project: string, kind: "terminal" | "api" | "docker"): TabId {
+  #openViewless(project: string, kind: "terminal" | "api" | "docker", detail?: string): TabId {
     this.#evictIfFull();
     this.#suppressed = false;
     const tab = this.#store.open(project, "", kind);
-    this.#store.update(tab.id, { title: `${project} — ${HOSTED_APP_LABELS[kind]}` });
+    const label = HOSTED_APP_LABELS[kind];
+    this.#store.update(tab.id, {
+      // Same shape as open()'s own labelling of a hosted app: the detail
+      // rides in the title, and stays on the tab for the renderer to match.
+      title: detail === undefined ? `${project} — ${label}` : `${project} — ${label} · ${detail}`,
+      ...(detail === undefined ? {} : { detail }),
+    });
     this.#syncVisibility();
     return tab.id;
   }

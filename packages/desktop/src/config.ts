@@ -13,6 +13,7 @@ import type {
   DbGateEngine,
   DockerConfig,
   EditorsConfig,
+  WorkflowsConfig,
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, defaultHeadlampBinary, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
@@ -57,6 +58,13 @@ export type TerminalConfig = {
      *  working directory and directory affinity needs one. */
     commandLogPath: string;
   };
+  /** Blocks, and the DOM input editor that only exists inside them. Two
+   *  switches rather than one: the editor is the invasive half, and turning
+   *  it off must not cost the user their blocks. */
+  blocks: { enabled: boolean; inputEditor: boolean };
+  /** A command that finishes after this many seconds with its pane
+   *  unfocused raises a notification. 0 disables it. */
+  notifyAfterSeconds: number;
 };
 
 export type JarvisConfig = {
@@ -82,6 +90,12 @@ export type JarvisConfig = {
    *  project name. An absent `chat:` section parses to {} — that project's
    *  Chat button is disabled, like Personal's. */
   chat: ChatConfig;
+  /** Per-project saved-workflow directories, keyed by project name, on top
+   *  of the always-read `~/.config/jarvis/workflows/`. An absent
+   *  `workflows:` section parses to {} — every project still gets the
+   *  always-read directory, which is what every project had before this
+   *  existed. */
+  workflows: WorkflowsConfig;
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
@@ -106,6 +120,13 @@ export type JarvisConfig = {
 // isolation directory below.
 export function defaultSessionsDbPath(): string {
   return join(homedir(), ".config/jarvis/sessions.db");
+}
+
+// The always-read workflow directory, on top of whatever `workflows:`
+// names for the current project — every project gets these, which is why
+// it lives beside jarvis.yaml rather than under a project root.
+export function defaultWorkflowsDir(): string {
+  return join(homedir(), ".config/jarvis/workflows");
 }
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
@@ -179,6 +200,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const clusters = parseClusters(root["clusters"], projects);
   const docker = parseDocker(root["docker"], projects);
   const chat = parseChat(root["chat"], projects);
+  const workflows = parseWorkflows(root["workflows"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
   const whisper = parseWhisper(root["whisper"]);
@@ -211,6 +233,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     clusters,
     docker,
     chat,
+    workflows,
     headlamp,
     terminal,
     brain: {
@@ -703,6 +726,35 @@ function parseChat(rawChat: unknown, projects: Record<string, string>): ChatConf
   return result;
 }
 
+/**
+ * The `workflows:` section — a project name to a single directory of
+ * workflow files, on top of the always-read
+ * `~/.config/jarvis/workflows/`. The section is optional and an absent one
+ * is not an error: most projects will never have an entry, and every
+ * project still gets the always-read directory.
+ *
+ *     workflows:
+ *       acme: ./.jarvis/workflows
+ */
+function parseWorkflows(rawWorkflows: unknown, projects: Record<string, string>): WorkflowsConfig {
+  if (rawWorkflows === undefined) return {};
+  if (typeof rawWorkflows !== "object" || rawWorkflows === null || Array.isArray(rawWorkflows)) {
+    throw new Error("Config `workflows` must be an object");
+  }
+
+  const result: WorkflowsConfig = {};
+  for (const [project, rawDir] of Object.entries(rawWorkflows as Record<string, unknown>)) {
+    if (projects[project] === undefined) {
+      throw new Error(`Config \`workflows\` names no configured project: "${project}"`);
+    }
+    if (typeof rawDir !== "string" || rawDir === "") {
+      throw new Error(`Config \`workflows.${project}\` must be a non-empty string`);
+    }
+    result[project] = expandTilde(rawDir);
+  }
+  return result;
+}
+
 // The user's history, read and never written. zsh's default HISTFILE, and
 // the file this design's frequency analysis was built from.
 const DEFAULT_HISTORY_PATH = join(homedir(), ".zsh_history");
@@ -723,13 +775,26 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
       historyPath: DEFAULT_HISTORY_PATH,
       commandLogPath: DEFAULT_COMMAND_LOG_PATH,
     },
+    blocks: { enabled: true, inputEditor: true },
+    notifyAfterSeconds: 30,
   };
   if (rawTerminal === undefined) return defaults;
   if (typeof rawTerminal !== "object" || rawTerminal === null || Array.isArray(rawTerminal)) {
     throw new Error("Config `terminal` must be an object");
   }
+  const terminal = rawTerminal as Record<string, unknown>;
 
-  const rawCompletion = (rawTerminal as Record<string, unknown>)["completion"];
+  return {
+    completion: parseTerminalCompletion(terminal["completion"], defaults.completion),
+    blocks: parseTerminalBlocks(terminal["blocks"], defaults.blocks),
+    notifyAfterSeconds: parseNotifyAfterSeconds(terminal["notifyAfterSeconds"], defaults.notifyAfterSeconds),
+  };
+}
+
+function parseTerminalCompletion(
+  rawCompletion: unknown,
+  defaults: TerminalConfig["completion"],
+): TerminalConfig["completion"] {
   if (rawCompletion === undefined) return defaults;
   if (
     typeof rawCompletion !== "object" ||
@@ -754,12 +819,43 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
   };
 
   return {
-    completion: {
-      enabled: enabled ?? true,
-      historyPath: path("historyPath", DEFAULT_HISTORY_PATH),
-      commandLogPath: path("commandLogPath", DEFAULT_COMMAND_LOG_PATH),
-    },
+    enabled: enabled ?? defaults.enabled,
+    historyPath: path("historyPath", defaults.historyPath),
+    commandLogPath: path("commandLogPath", defaults.commandLogPath),
   };
+}
+
+function parseTerminalBlocks(
+  rawBlocks: unknown,
+  defaults: TerminalConfig["blocks"],
+): TerminalConfig["blocks"] {
+  if (rawBlocks === undefined) return defaults;
+  if (typeof rawBlocks !== "object" || rawBlocks === null || Array.isArray(rawBlocks)) {
+    throw new Error("Config `terminal.blocks` must be an object");
+  }
+  const blocks = rawBlocks as Record<string, unknown>;
+
+  const enabled = blocks["enabled"];
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("Config `terminal.blocks.enabled` must be true or false");
+  }
+  const inputEditor = blocks["inputEditor"];
+  if (inputEditor !== undefined && typeof inputEditor !== "boolean") {
+    throw new Error("Config `terminal.blocks.inputEditor` must be true or false");
+  }
+
+  return {
+    enabled: enabled ?? defaults.enabled,
+    inputEditor: inputEditor ?? defaults.inputEditor,
+  };
+}
+
+function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
+  if (rawValue === undefined) return fallback;
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue) || rawValue < 0) {
+    throw new Error("Config `terminal.notifyAfterSeconds` must be a number of seconds, or 0");
+  }
+  return rawValue;
 }
 
 /** The `headlamp:` section. One key, with a per-OS default, so an absent

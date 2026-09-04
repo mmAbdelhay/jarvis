@@ -843,3 +843,108 @@ describe("terminal completion", () => {
     expect(() => parseConfig({ ...base, terminal: "on" })).toThrow(/`terminal`/);
   });
 });
+
+describe("terminal blocks and notifications", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  it("defaults blocks and the input editor on, and notifications to thirty seconds", () => {
+    const config = parseConfig(base);
+    expect(config.terminal.blocks).toEqual({ enabled: true, inputEditor: true });
+    expect(config.terminal.notifyAfterSeconds).toBe(30);
+  });
+
+  it("takes blocks off without touching completion", () => {
+    const raw = { ...base, terminal: { blocks: { enabled: false } } };
+
+    const config = parseConfig(raw);
+    expect(config.terminal.blocks.enabled).toBe(false);
+    expect(config.terminal.completion.enabled).toBe(true);
+  });
+
+  it("takes completion off without touching blocks", () => {
+    const raw = { ...base, terminal: { completion: { enabled: false } } };
+
+    const config = parseConfig(raw);
+    expect(config.terminal.completion.enabled).toBe(false);
+    expect(config.terminal.blocks).toEqual({ enabled: true, inputEditor: true });
+  });
+
+  it("rejects a non-boolean blocks switch", () => {
+    const raw = { ...base, terminal: { blocks: { enabled: "sometimes" } } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.blocks\.enabled/);
+  });
+
+  it("rejects a non-boolean input editor switch", () => {
+    const raw = { ...base, terminal: { blocks: { inputEditor: "sometimes" } } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.blocks\.inputEditor/);
+  });
+
+  it("rejects a negative notification threshold", () => {
+    const raw = { ...base, terminal: { notifyAfterSeconds: -1 } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.notifyAfterSeconds/);
+  });
+
+  it("accepts 0 to disable notifications", () => {
+    const raw = { ...base, terminal: { notifyAfterSeconds: 0 } };
+
+    expect(parseConfig(raw).terminal.notifyAfterSeconds).toBe(0);
+  });
+
+  it("rejects a non-number notification threshold", () => {
+    const raw = { ...base, terminal: { notifyAfterSeconds: "soon" } };
+
+    expect(() => parseConfig(raw)).toThrow(/terminal\.notifyAfterSeconds/);
+  });
+});
+
+describe("workflows", () => {
+  const base = {
+    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    brain: { cwd: "/tmp/brain" },
+    projects: { acme: "/p/acme" },
+  };
+
+  it("defaults to an empty record when the section is absent — a jarvis.yaml written before workflows existed keeps loading", () => {
+    expect(parseConfig(base).workflows).toEqual({});
+  });
+
+  it("parses a project's workflow directory", () => {
+    const config = parseConfig({
+      ...base,
+      workflows: { acme: "/p/acme/.jarvis/workflows" },
+    });
+
+    expect(config.workflows["acme"]).toBe("/p/acme/.jarvis/workflows");
+  });
+
+  it("expands a leading ~ the same way other paths in config do", () => {
+    const config = parseConfig({ ...base, workflows: { acme: "~/workflows" } });
+
+    expect(config.workflows["acme"]).toBe(join(homedir(), "workflows"));
+  });
+
+  it("rejects a key naming no configured project", () => {
+    expect(() => parseConfig({ ...base, workflows: { nope: "/x" } })).toThrow(
+      'Config `workflows` names no configured project: "nope"',
+    );
+  });
+
+  it("rejects a non-string directory", () => {
+    expect(() => parseConfig({ ...base, workflows: { acme: 7 } })).toThrow(
+      "Config `workflows.acme` must be a non-empty string",
+    );
+  });
+
+  it("rejects a workflows section that is not an object", () => {
+    expect(() => parseConfig({ ...base, workflows: ["nope"] })).toThrow(
+      "Config `workflows` must be an object",
+    );
+  });
+});

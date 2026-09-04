@@ -20,8 +20,17 @@ export class FakeTerminal {
   static instances: FakeTerminal[] = [];
 
   readonly options: FakeTerminalOptions;
-  /** Every chunk written, in order — the terminal's whole input stream. */
+  /** Every chunk written, in order — the terminal's whole input stream,
+   *  including what a later reset() wiped off the screen. A pane freezing a
+   *  finished command resets the live terminal as it goes, so this is the
+   *  only place a test can still see that no byte was swallowed on the way. */
   written: string[] = [];
+  /** What is on the screen: everything *parsed* since the last reset(). */
+  #screen: string[] = [];
+  /** Written but not parsed yet — xterm's write buffer, modelled. See
+   *  `write` and `flush` below for why this exists. */
+  #pending: { data: string; done: (() => void) | undefined }[] = [];
+  #draining = false;
   resets = 0;
   focused = 0;
   opened: unknown;
@@ -106,9 +115,50 @@ export class FakeTerminal {
     FakeTerminal.instances.push(this);
   }
 
-  /** Everything written, joined — what the screen would be showing. */
+  /**
+   * What the screen is showing: everything *parsed* since the last reset,
+   * joined.
+   *
+   * Reading it drains the write buffer first — the screen a test asks about
+   * is the screen once the parser has caught up, which is the only screen a
+   * user ever sees. That is what keeps every existing `text` assertion
+   * meaning what it always meant while the queue underneath them became
+   * real.
+   */
   get text(): string {
-    return this.written.join("");
+    this.flush();
+    return this.#screen.join("");
+  }
+
+  /**
+   * Parses everything queued, in order, running each write's callback as
+   * that write is parsed.
+   *
+   * This is the whole point of the queue. `Terminal.write()` defers parsing
+   * to a macrotask, and `reset()` neither drains nor discards what is
+   * queued — so a reset called straight after a write clears the screen and
+   * then lets the very bytes it was clearing paint over it, while a reset
+   * ordered *behind* the queue (`write("", () => reset())`) lands after
+   * them. A double that applied writes synchronously could not tell those
+   * two apart, which is why this class of bug survived sixteen tasks and
+   * two review passes.
+   *
+   * Callbacks may write again; the loop keeps going, exactly as the real
+   * parser would.
+   */
+  flush(): void {
+    if (this.#draining) return;
+    this.#draining = true;
+    try {
+      let next = this.#pending.shift();
+      while (next !== undefined) {
+        this.#screen.push(next.data);
+        next.done?.();
+        next = this.#pending.shift();
+      }
+    } finally {
+      this.#draining = false;
+    }
   }
 
   open(host: unknown): void {
@@ -117,12 +167,27 @@ export class FakeTerminal {
   loadAddon(addon: unknown): void {
     this.addons.push(addon);
   }
-  write(data: string): void {
+  /**
+   * xterm's `write(data, callback)`.
+   *
+   * The bytes are recorded in `written` synchronously — that array is "what
+   * was handed to the terminal", and the tests that read it are asserting
+   * that no byte was swallowed on the way, which is true the moment it is
+   * handed over. Everything else is queued: the data reaches the *screen*,
+   * and the callback runs, only when the buffer is parsed — on a macrotask,
+   * or the moment something reads the screen, whichever comes first.
+   */
+  write(data: string, done?: () => void): void {
     this.written.push(data);
+    this.#pending.push({ data, done });
+    setTimeout(() => this.flush(), 0);
   }
+  /** Clears the screen — and, exactly like the real one, neither drains nor
+   *  discards the write buffer: bytes queued before this still parse after
+   *  it. Ordering a reset behind them is the caller's job. */
   reset(): void {
     this.resets += 1;
-    this.written = [];
+    this.#screen = [];
   }
   focus(): void {
     this.focused += 1;

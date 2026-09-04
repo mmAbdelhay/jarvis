@@ -890,6 +890,17 @@ describe("BrowserHost terminal tabs", () => {
     expect(host.state().tabs[0]?.title).toBe("acme — Terminal");
   });
 
+  // The AWS login tab is the one terminal Jarvis opens for a purpose of its
+  // own. The mark stays on the tab because the renderer draws that terminal
+  // without blocks — one command, run once — and it rides in the title so
+  // the tab strip says which terminal this is.
+  it("marks and names a terminal opened for a purpose of Jarvis's own", () => {
+    host.openTerminal("acme", "AWS login");
+
+    expect(host.state().tabs[0]?.detail).toBe("AWS login");
+    expect(host.state().tabs[0]?.title).toBe("acme — Terminal · AWS login");
+  });
+
   it("makes the new terminal the active tab", () => {
     host.openTerminal("acme");
 

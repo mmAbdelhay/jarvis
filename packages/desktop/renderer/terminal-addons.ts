@@ -1,3 +1,5 @@
+import type { BlockNav } from "./block-nav.js";
+import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
 import { LigaturesAddon } from "./vendor/addon-ligatures.mjs";
 import { SearchAddon } from "./vendor/addon-search.mjs";
@@ -28,7 +30,124 @@ export type TerminalHooks = {
    *  Cmd+F, Cmd+V and Shift+Enter with it. Returning false means the key
    *  was claimed. Absent for a terminal with no autocomplete. */
   interceptKey?: ((event: KeyboardEvent) => boolean) | undefined;
+  /** Selection, jumping and filtering over a pane's frozen blocks — ⌘↑/⌘↓
+   *  move the selection, ⌘⇧F toggles the failed-only filter. Absent for a
+   *  terminal with no blocks (the Session route today, or a pane with
+   *  blocks switched off), which is exactly why every key below guards on
+   *  it: those keys must behave exactly as they do today when it is
+   *  missing, not silently claim a keystroke and do nothing with it. */
+  blockNav?: BlockNav | undefined;
+  /** Opens the command palette over this pane's actions — ⌘P, claimed
+   *  unconditionally, in every pane state. Unlike `^R` (see
+   *  terminal-pane.ts's own capture-phase listener, which is where that
+   *  one is claimed, and only while the editor is showing), a Cmd chord is
+   *  never a byte a running program could want: the OS and the browser
+   *  already keep it away from anything a pty could receive, so there is
+   *  no state in which claiming it costs a program its keystroke. Absent
+   *  for a terminal with no palette (the Session route today), which is
+   *  exactly why this key is left alone below when it is missing rather
+   *  than claimed and made to do nothing. */
+  openPalette?: (() => void) | undefined;
 };
+
+/** What the split keys act on — the tab's tree of panes, plus the tab
+ *  itself, because ⌘W closes the focused pane and falls through to closing
+ *  the tab when there was no other pane to fall back to. */
+export type SplitKeys = {
+  split(direction: "row" | "column"): void;
+  /** False when the focused pane was the last one and nothing was closed. */
+  closeFocused(): boolean;
+  focus(delta: -1 | 1): void;
+  closeTab(): void;
+};
+
+/**
+ * The split chords: ⌘D beside, ⌘⇧D below, ⌘W closes the pane (or the tab,
+ * when it was the pane's last), ⌥⌘←/→ move the focus.
+ *
+ * Returns false when the key was claimed — the same contract as
+ * `TerminalHooks.interceptKey`, and it is chained through exactly that
+ * rather than through xterm's key handler alone, because a pane with the
+ * command editor live never lets a keystroke reach xterm at all: the event
+ * targets the editor's own field. Both paths consult interceptKey, so this
+ * is the one place both can see.
+ */
+export function handleSplitKey(event: KeyboardEvent, keys: SplitKeys): boolean {
+  if (event.type !== "keydown" || !event.metaKey) return true;
+
+  // ⌥⌘←/→ before anything else, and only with Option held: ⌘←/⌘→ are
+  // start-of-line and end-of-line, which no split may take.
+  if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    attempt(() => keys.focus(event.key === "ArrowRight" ? 1 : -1));
+    return claim(event);
+  }
+
+  // Shift makes it "D": one key, two directions.
+  if (event.key === "d" || event.key === "D") {
+    attempt(() => keys.split(event.shiftKey ? "column" : "row"));
+    return claim(event);
+  }
+
+  if (event.key === "w") {
+    // The last pane is the tab, so closing it is closing the tab — which is
+    // also what reaps whatever shells the tab still has.
+    attempt(() => {
+      if (!keys.closeFocused()) keys.closeTab();
+    });
+    return claim(event);
+  }
+
+  return true;
+}
+
+/** What ⌘P and `^R` act on: the palette itself, the (freshly assembled,
+ *  each time it opens) action list ⌘P shows, and history search's own
+ *  flow — a promise, not a plain action list, since `^R`'s choice fills
+ *  the editor rather than running anything. */
+export type PaletteKeys = {
+  palette: Palette;
+  /** Built fresh on every ⌘P — the selected block, the filter state and
+   *  what is worth re-running can all have changed since the palette last
+   *  opened. */
+  actions: () => readonly PaletteAction[];
+  /** `^R`'s whole flow: ask the palette over history, and put whatever was
+   *  chosen in the editor. Fire-and-forget from here — the key is claimed
+   *  the moment the palette opens, and the editor is filled once the user
+   *  has actually chosen something, or never, on Escape. */
+  historySearch: () => void;
+};
+
+/**
+ * The palette's two opening chords: ⌘P shows the action list, `^R` opens
+ * history search. Once the palette is open, every other key goes straight
+ * to `palette.handleKey` — filtering, ↑/↓, Enter, Escape — which is also
+ * where "closed, every key comes back true" lives, so a plain `return true`
+ * below is exactly as safe as the completion dropdown's.
+ *
+ * `^R` is the one control byte this module claims: everywhere else Ctrl is
+ * deliberately left to the shell, but zsh's own reverse-i-search is
+ * superseded by this — the palette already searches the same command log,
+ * against the same history the editor's own ↑/↓ walk, so `^R` finding
+ * nothing here would only be zsh's line editor doing a worse job of the
+ * feature the app now owns.
+ */
+export function handlePaletteKey(event: KeyboardEvent, keys: PaletteKeys): boolean {
+  if (event.type !== "keydown") return true;
+
+  if (keys.palette.isOpen()) return keys.palette.handleKey(event);
+
+  if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
+    keys.palette.open(keys.actions(), "Actions");
+    return claim(event);
+  }
+
+  if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r") {
+    keys.historySearch();
+    return claim(event);
+  }
+
+  return true;
+}
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
  *  Enter, so nothing downstream can tell "newline" from "run this". This is
@@ -43,7 +162,7 @@ const SHIFT_ENTER = "\u001b\r";
  */
 export function enhanceTerminal(terminal: Terminal, host: HTMLElement, hooks: TerminalHooks): void {
   loadAddons(terminal, hooks);
-  const search = attachSearch(terminal, host);
+  const search = attachSearch(terminal, host, hooks);
   attachKeys(terminal, hooks, search);
 }
 
@@ -90,6 +209,17 @@ function attempt(load: () => void): void {
   }
 }
 
+/** Like `attempt`, but for the search addon's findNext/findPrevious, whose
+ *  boolean result decides whether the frozen blocks get scanned too — a
+ *  throw here must read as "no match", not crash the find bar. */
+function attemptFind(search: () => boolean): boolean {
+  try {
+    return search();
+  } catch {
+    return false;
+  }
+}
+
 type Search = { open(): void; close(): void; isOpen(): boolean };
 
 /**
@@ -98,7 +228,7 @@ type Search = { open(): void; close(): void; isOpen(): boolean };
  * so it travels with the pane it belongs to — no innerHTML, same discipline
  * as every other renderer module.
  */
-function attachSearch(terminal: Terminal, host: HTMLElement): Search {
+function attachSearch(terminal: Terminal, host: HTMLElement, hooks: TerminalHooks): Search {
   const addon = new SearchAddon();
   attempt(() => terminal.loadAddon(addon));
 
@@ -123,9 +253,14 @@ function attachSearch(terminal: Terminal, host: HTMLElement): Search {
   const options = { caseSensitive: false, regex: false, wholeWord: false };
   const find = (forward: boolean): void => {
     if (input.value === "") return;
-    attempt(() =>
+    // The live terminal first — it is where the user is looking. Only once
+    // the search addon itself reports no match does the frozen list above
+    // it get scanned; a pane with no blocks (hooks.blockNav undefined)
+    // simply stops here, same as today.
+    const matched = attemptFind(() =>
       forward ? addon.findNext(input.value, options) : addon.findPrevious(input.value, options),
     );
+    if (!matched) attempt(() => hooks.blockNav?.findText(input.value));
   };
 
   const hide = (): void => {
@@ -199,6 +334,38 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
 
     if (event.key === "f") {
       search.open();
+      return claim(event);
+    }
+
+    // The command palette. Claimed here, unconditionally, rather than
+    // guarded by pane state the way `^R` is: a command running, or the
+    // alternate screen held, is exactly when a user most wants to reach
+    // for "copy this block's output" or "jump to next failed" — a palette
+    // that went inert the moment a command started would deny both at
+    // precisely the wrong moment.
+    //
+    // !ctrlKey && !altKey, matching handlePaletteKey's own guard for the
+    // same chord at the editor-visible listener — the two must agree on
+    // exactly which modifiers claim ⌘P, or ⌥⌘P would be claimed in one
+    // pane state and not another.
+    if (!event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
+      if (hooks.openPalette === undefined) return true;
+      hooks.openPalette();
+      return claim(event);
+    }
+
+    // Jump the selection between blocks. Undefined blockNav (no blocks in
+    // this pane) leaves the key to xterm exactly as before this existed.
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (hooks.blockNav === undefined) return true;
+      hooks.blockNav.move(event.key === "ArrowDown" ? 1 : -1);
+      return claim(event);
+    }
+
+    // Failed-only filter.
+    if (event.key === "F" && event.shiftKey) {
+      if (hooks.blockNav === undefined) return true;
+      hooks.blockNav.toggleFailedFilter();
       return claim(event);
     }
 

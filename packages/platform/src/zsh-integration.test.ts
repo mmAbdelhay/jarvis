@@ -88,6 +88,11 @@ describe("zshWrapperFiles", () => {
     expect(files[".zshrc"]).toContain("[[ -o interactive ]]");
   });
 
+  it("carries the command text on the C mark and the cwd on OSC 7", () => {
+    expect(files[".zshrc"]).toContain("__jarvis_osc7");
+    expect(files[".zshrc"]).toContain('"C;${1}"');
+  });
+
   it("logs each command with its directory, for the affinity boost", () => {
     expect(files[".zshrc"]).toContain("$JARVIS_COMMAND_LOG");
     expect(files[".zshrc"]).toContain("${PWD}");

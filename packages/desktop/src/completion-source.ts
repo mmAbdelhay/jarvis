@@ -22,6 +22,11 @@ export type CompletionSource = {
   /** The values to offer for `input` typed at a prompt in `cwd`. Each one
    *  is a whole replacement line. */
   suggest(cwd: string, input: string): Promise<string[]>;
+  /** The most recent commands Jarvis's own log holds, newest first and
+   *  deduplicated — what ↑/↓ in the command editor walk. Reading Jarvis's
+   *  log rather than reaching into zsh's line editor is what keeps the line
+   *  the DOM composed and the line zsh believes it is editing the same line. */
+  history(limit: number): Promise<string[]>;
 };
 
 export type CompletionSourceDeps = {
@@ -101,6 +106,24 @@ export function createCompletionSource(deps: CompletionSourceDeps): CompletionSo
         // The engine works in epoch seconds, as zsh's history does.
         now: Math.floor(deps.now() / 1000),
       }).map((suggestion) => suggestion.value);
+    },
+
+    async history(limit) {
+      if (limit <= 0) return [];
+      // Read fresh, past the suggestion cache: the command you just ran is
+      // the one you are most likely to want back, and a five-second-old
+      // snapshot would not have it yet. It costs one read per prompt.
+      const log = await readOr(deps.readCommandLog);
+      const entries = parseCommandLog(log);
+      const seen = new Set<string>();
+      const commands: string[] = [];
+      for (let i = entries.length - 1; i >= 0 && commands.length < limit; i -= 1) {
+        const command = entries[i]?.command;
+        if (command === undefined || command === "" || seen.has(command)) continue;
+        seen.add(command);
+        commands.push(command);
+      }
+      return commands;
     },
   };
 }

@@ -201,7 +201,7 @@ describe("createDropdown", () => {
 });
 
 describe("attachCompletion", () => {
-  function attached(suggestions: string[] = ["git status"]) {
+  function attached(suggestions: string[] = ["git status"], extraHooks: Partial<CompletionHooks> = {}) {
     const terminal = new FakeTerminal();
     const host = document.createElement("div");
     const sent: string[] = [];
@@ -212,6 +212,7 @@ describe("attachCompletion", () => {
         return suggestions;
       },
       sendInput: (data) => sent.push(data),
+      ...extraHooks,
     };
     const completion = attachCompletion(terminal as never, host, hooks);
     // The dropdown never attaches a key handler of its own — xterm keeps
@@ -360,5 +361,113 @@ describe("attachCompletion", () => {
         sendInput: () => {},
       }),
     ).not.toThrow();
+  });
+});
+
+// With an editor live, the xterm buffer still shows the bare prompt — the
+// pty never saw a byte of what the user typed — so the buffer scrape is
+// looking at the wrong line entirely. readInput/applyInput are how the
+// dropdown is told to trust the editor's own value instead.
+describe("attachCompletion with an editor", () => {
+  function attachedWithEditor(
+    suggestions: string[] = ["git status"],
+    editorLine = "git sta",
+  ) {
+    const terminal = new FakeTerminal();
+    const host = document.createElement("div");
+    const sent: string[] = [];
+    const applied: string[] = [];
+    const asked: string[] = [];
+    let value = editorLine;
+    const hooks: CompletionHooks = {
+      suggest: async (input) => {
+        asked.push(input);
+        return suggestions;
+      },
+      sendInput: (data) => sent.push(data),
+      readInput: () => value,
+      applyInput: (line) => {
+        applied.push(line);
+        value = line;
+      },
+    };
+    const completion = attachCompletion(terminal as never, host, hooks);
+    const press = (init: { key: string; ctrlKey?: boolean; metaKey?: boolean }): boolean =>
+      completion.handleKey({ type: "keydown", preventDefault: () => {}, ...init } as never);
+    return { terminal, host, sent, applied, asked, press, setValue: (v: string) => (value = v) };
+  }
+
+  /** Marks the shell at an idle prompt — the one state completion ever
+   *  opens in — without putting anything into the xterm buffer, exactly
+   *  as the real screen looks while the editor holds the line instead. */
+  function markPrompt(terminal: FakeTerminal, prompt = "~/p > "): void {
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine(prompt);
+    terminal.parser.emitOsc(133, "B");
+  }
+
+  it("suggests from the editor's value even though the xterm buffer shows the bare prompt", async () => {
+    const { terminal, asked, press } = attachedWithEditor(["git status"], "git sta");
+    markPrompt(terminal);
+
+    // Nothing is typed into the xterm buffer at all — the prompt line is
+    // exactly what markPrompt left it at — yet the editor holds "git sta".
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual(["git sta"]);
+    expect(press({ key: "Tab" })).toBe(false);
+  });
+
+  it("accepts by calling applyInput with the full line, sending nothing to the pty", async () => {
+    const { terminal, sent, applied, press } = attachedWithEditor(["git status"], "git sta");
+    markPrompt(terminal);
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    press({ key: "Tab" });
+
+    expect(applied).toEqual(["git status"]);
+    // No backspaces — that is the bug this replaces. The pty never saw the
+    // typed line in the first place, so erasing it there erases nothing
+    // the shell has, or worse, eats real input.
+    expect(sent).toEqual([]);
+  });
+
+  it("refreshes as the editor's own value changes, with no pty traffic to trigger it", async () => {
+    const { terminal, asked, press, setValue } = attachedWithEditor(["git status"], "git");
+    markPrompt(terminal);
+
+    // Opens the dropdown for "git" via the ordinary onData-triggered path.
+    terminal.emitData("t");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toEqual(["git"]);
+
+    // The user keeps typing in the editor — the pty never hears about it —
+    // but a keystroke still reaches attachCompletion through handleKey.
+    setValue("git sta");
+    press({ key: "a" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual(["git", "git sta"]);
+  });
+
+  it("positions the dropdown at the anchor hook's box, not a buffer cell", async () => {
+    const terminal = new FakeTerminal();
+    const host = document.createElement("div");
+    attachCompletion(terminal as never, host, {
+      suggest: async () => ["git status"],
+      sendInput: () => {},
+      readInput: () => "git sta",
+      applyInput: () => {},
+      anchor: () => ({ x: 12, y: 34 }),
+    });
+    markPrompt(terminal);
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const dropdown = host.querySelector<HTMLElement>(".terminal-completion");
+    expect(dropdown?.style.left).toBe("12px");
+    expect(dropdown?.style.top).toBe("34px");
   });
 });

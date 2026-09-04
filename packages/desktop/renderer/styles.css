@@ -1034,6 +1034,84 @@
   }
   .terminal-completion-item.selected { color: var(--text); background: var(--accent-quiet); }
 
+  /* The command palette — ⌘P over the focused pane, ^R for history search.
+     Centered over its own pane rather than anchored to a caret cell: unlike
+     the completion dropdown it is not completing anything typed, so there
+     is no cell to sit under. Same positioned-host assumption as the find
+     bar and the completion dropdown. */
+  .terminal-palette {
+    position: absolute;
+    top: 12%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    width: min(480px, 80%);
+    max-height: 60%;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+    overflow: hidden;
+  }
+  .terminal-palette[hidden] { display: none; }
+  .terminal-palette-input {
+    padding: 10px 12px;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    outline: none;
+    font-size: 13px;
+  }
+  .terminal-palette-list {
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .terminal-palette-item {
+    padding: 4px 12px;
+    color: var(--text-muted);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .terminal-palette-item.selected { color: var(--text); background: var(--accent-quiet); }
+
+  /* The command-line editor: a transparent <textarea> for the value (so
+     selection, IME and Arabic input keep working) with a painted <div>
+     behind it for syntax highlighting. Font and padding must match exactly
+     between the two layers or the highlight drifts from the caret. The
+     prompt is a flex sibling of .terminal-input-field (not a parent of the
+     painted layer or the textarea), so its width is ordinary flex space
+     taken out of the row — both layers inside .terminal-input-field see the
+     same remaining width and start at the same x, with nobody computing an
+     offset to apply to each of them separately. */
+  .terminal-input { position: relative; display: flex; align-items: flex-start;
+    /* It is a flex child of .terminal-pane: the prompt row, under a block
+       list that scrolls. Never stretched, never squeezed. */
+    flex: 0 0 auto;
+    font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; }
+  .terminal-input-prompt { flex: 0 0 auto; white-space: pre; color: var(--text-muted); }
+  .terminal-input-field { position: relative; flex: 1 1 auto; min-width: 0; }
+  /* Chromium's UA stylesheet gives <textarea> non-zero default padding (and
+     browsers vary on border/overflow too); a plain <div>'s defaults are all
+     zero/visible. Left alone, the textarea's text renders inset from the
+     painted layer's and the caret drifts from the highlight. Pin every
+     box-model property both elements share so their defaults cannot differ,
+     not only the ones this stylesheet happens to set. */
+  .terminal-input-paint { position: absolute; inset: 0; margin: 0; padding: 0; border: 0;
+    overflow: hidden; pointer-events: none; white-space: pre-wrap; }
+  .terminal-input-text { width: 100%; margin: 0; padding: 0; overflow: hidden;
+    background: transparent; color: transparent;
+    caret-color: var(--accent); border: 0; outline: 0; resize: none; white-space: pre-wrap;
+    font: inherit; }
+  .tok-command { color: var(--accent); }
+  .tok-flag { color: var(--text-muted); }
+  .tok-path { color: var(--good); }
+
   /* The terminal shares the page slot's region rather than sitting beside
      it: exactly one of the two is ever showing, since a terminal tab has no
      hosted view and a hosted tab has no terminal. */
@@ -1285,7 +1363,10 @@
 
   .workspace-terminal { flex-grow: 1; min-height: 0; position: relative; }
   .workspace-terminal[hidden] { display: none; }
-  .workspace-terminal-pane { position: absolute; inset: 0; padding: 10px 14px; background: var(--ground); }
+  /* The tab's slot. The padding lives on .terminal-pane inside it, which is
+     the element that scrolls — padding here would stay put while the blocks
+     scrolled under it. */
+  .workspace-terminal-pane { position: absolute; inset: 0; background: var(--ground); }
   .workspace-terminal-pane[hidden] { display: none; }
 
   /* The Docker tab, laid out as the design specifies: a left column of
@@ -1433,6 +1514,117 @@
     color: var(--text-muted);
     opacity: 0.7;
   }
+
+  /* A tab's panes. The tree is nested flex boxes: a branch lays its two
+     children out along its own direction (set inline by terminal-splits.ts,
+     the only thing that file writes to a style), and a leaf is the box one
+     whole .terminal-pane draws inside. min-width/min-height: 0 is what
+     stops a flex child refusing to shrink below its content — without it a
+     long line in one pane would push the other off screen. */
+  .terminal-split { position: absolute; inset: 0; display: flex; }
+  .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
+  .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
+    overflow: hidden; }
+  /* Which pane the keys go to. Quiet — it is a hint, not a frame — and
+     drawn as an inset shadow so it costs the pane no layout at all. */
+  .terminal-split-leaf.focused { box-shadow: inset 0 0 0 1px var(--border); }
+  /* The grab handle between two panes. Wide enough to hit, drawn as a hair
+     line, and with the cursor the direction it actually resizes. */
+  .terminal-split-divider { flex: 0 0 6px; background: var(--ground);
+    border-left: 1px solid var(--border); }
+  .terminal-split-divider[data-direction="row"] { cursor: col-resize; }
+  .terminal-split-divider[data-direction="column"] { flex-basis: 6px; cursor: row-resize;
+    border-left: none; border-top: 1px solid var(--border); }
+  .terminal-split-divider:hover { background: var(--border); }
+
+  /* One terminal as the user sees it: frozen blocks stacked above a live
+     xterm. data-state is set by terminal-pane.ts and is the only thing that
+     lays this out, so that module measures nothing. */
+  .terminal-pane { position: absolute; inset: 0; display: flex; flex-direction: column;
+    overflow: hidden; background: var(--ground); padding: 10px 14px; }
+  /* The block list is what scrolls, not the pane. A flex child cannot shrink
+     below its own content unless it is told to (min-height: auto is the
+     default), so with the pane scrolling instead, a list of blocks taller
+     than the pane squeezed .terminal-live down to its min-height — about
+     seven rows — and xterm, whose only cue to refit is a ResizeObserver,
+     spilled its old grid over the blocks above. min-height: 0 plus its own
+     overflow is what makes the list give way instead, and max-height keeps
+     it from taking more than its share while a command is running. */
+  .terminal-blocks { display: flex; flex-direction: column; gap: 6px;
+    flex: 0 1 auto; min-height: 0; max-height: 40%; overflow-y: auto; }
+  .terminal-live { flex: 1 1 auto; min-height: 120px; min-width: 0; }
+  /* At an idle prompt the blocks are the whole pane: the editor is the
+     prompt line (see below), so nothing is competing with the list. */
+  .terminal-pane[data-state="blocks"] .terminal-blocks { flex: 1 1 auto; max-height: none; }
+  /* The prompt, once. The editor draws the prompt it read out of the live
+     terminal's own buffer, so with both on screen the user saw the prompt
+     twice with a tall empty terminal between them. The editor is the prompt
+     line whenever it is actually showing — data-editor is set by
+     terminal-pane.ts's applyState and is "on" only then, so a pane with no
+     editor, one whose shell has no integration yet, or one with a command
+     running keeps the live terminal it has always had. */
+  .terminal-pane[data-state="blocks"][data-editor="on"] .terminal-live { display: none; }
+  /* Which block the user has scrolled past — block-nav.ts fills it in and
+     shows/hides it as the list scrolls. It sits above the list rather than
+     inside it, so with the list as the scroller it is simply pinned at the
+     pane's top; `position: sticky` is kept because it costs nothing and
+     still holds should the pane itself ever scroll again. */
+  .terminal-sticky-header { position: sticky; top: 0; z-index: 2;
+    background: var(--ground); border-bottom: 1px solid var(--border);
+    padding: 2px 0 4px; margin-bottom: 2px;
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-sticky-header[hidden] { display: none; }
+  /* A full-screen program gets the whole pane, exactly as it would in any
+     other terminal — no blocks above it, no padding around it. */
+  .terminal-pane[data-state="alt"] .terminal-blocks,
+  .terminal-pane[data-state="alt"] .terminal-sticky-header { display: none; }
+  .terminal-pane[data-state="alt"] { overflow: hidden; padding: 0; }
+  /* Blocks off, or a shell with no integration: today's terminal. */
+  .terminal-pane[data-state="plain"] .terminal-blocks,
+  .terminal-pane[data-state="plain"] .terminal-sticky-header { display: none; }
+  /* A block's border-left is its status at a glance, so data-status carries
+     the colour rather than a class — a block with no exit code is drawn
+     failed, never mistaken for a quiet success. */
+  .block { border-left: 2px solid var(--border); padding: 2px 0 2px 8px; }
+  .block[data-status="failed"] { border-left-color: var(--del); }
+  .block[data-status="ok"] { border-left-color: var(--good); }
+  .block-header { display: flex; gap: 10px; align-items: baseline; color: var(--text-muted);
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; cursor: default; }
+  .block-command { color: var(--text); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .block-actions { display: flex; gap: 6px; }
+  /* Controls stay out of the way until the block is worth acting on: under
+     the pointer, or already selected (Task 8 sets .selected). */
+  .block-header [role="button"] { cursor: pointer; opacity: 0; }
+  .block:hover .block-header [role="button"], .block.selected .block-header [role="button"] { opacity: 1; }
+  .block.selected { background: var(--accent-quiet); }
+  .block.collapsed .block-output { display: none; }
+  /* The find bar's fallback: ⌘F's own match on a frozen block, shown for
+     one second (block-nav.ts owns the timing) since there is no live
+     cursor to land on inside frozen text the way there is in the live
+     terminal. */
+  .block.found { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* The anchor the dropdown positions against — without this the menu
+     would float relative to the pane (or the page) instead of the button
+     that opened it. */
+  .block-header-wrap { position: relative; }
+  .block-more-menu { position: absolute; top: 100%; right: 0; z-index: 1; margin-top: 2px;
+    display: flex; flex-direction: column; gap: 2px; padding: 4px;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-control);
+    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; width: max-content;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
+  .block-more-menu[hidden] { display: none; }
+  .block-more-item { color: var(--text); cursor: pointer; padding: 2px 6px; }
+  .block-more-item[aria-disabled="true"] { color: var(--text-muted); cursor: default; }
+  .block-output { font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; white-space: pre; }
+  .block-line { min-height: 1.35em; }
+  .block-elided { color: var(--text-muted); font-style: italic; }
+  /* "Explain this failure"'s answer, inside the block it explains — a
+     brain's prose next to the raw output it was asked about, not a
+     separate surface the user has to go find. */
+  .block-explanation { margin-top: 6px; padding: 6px 8px; border-left: 2px solid var(--accent);
+    background: var(--accent-quiet); color: var(--text); white-space: pre-wrap;
+    font: 12px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
 
   /* padding-bottom stays 0 deliberately: an open tab chip has
      border-bottom: none specifically so it sits flush against .workspace-bar
@@ -1793,18 +1985,21 @@
 
   .session-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
 
-  /* The terminal host. xterm.js paints into this and manages its own
-     scrolling, selection and scrollback, so nothing here may set overflow
-     or line-height — the emulator measures the box and lays out character
-     cells to fit. `dir=ltr` is pinned in the markup: this is a terminal
-     grid, and an Arabic word inside it must not flip the whole screen. */
+  /* The terminal host — the slot a .terminal-pane draws inside, exactly as
+     .workspace-terminal-pane is for a Terminal tab. xterm.js paints in
+     there and manages its own scrolling, selection and scrollback, so
+     nothing here may set overflow or line-height: the emulator measures the
+     box and lays out character cells to fit. `dir=ltr` is pinned in the
+     markup: this is a terminal grid, and an Arabic word inside it must not
+     flip the whole screen. The padding lives on .terminal-pane inside this,
+     which is the element that scrolls — the same reason the Workspace's own
+     slot carries none. */
   .session-terminal {
     flex-grow: 1;
     min-width: 0;
     min-height: 0;
-    padding: 10px 14px;
     background: var(--ground);
-    /* The find bar is absolutely positioned inside this box. */
+    /* The pane fills this box, and the find bar is positioned inside it. */
     position: relative;
   }
 

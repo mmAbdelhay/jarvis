@@ -7,6 +7,7 @@
 // keystrokes go, and what happens when a tab goes away.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceTab } from "@jarvis/core";
+import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
@@ -68,6 +69,18 @@ function harness(buffered = ""): void {
     suggestCompletions: (tabId: string, input: string) => {
       calls.push({ call: "suggestCompletions", args: [tabId, input] });
       return Promise.resolve(["git status"]);
+    },
+    splitTerminal: (tabId: string, paneId: string) => {
+      calls.push({ call: "splitTerminal", args: [tabId, paneId] });
+      return Promise.resolve();
+    },
+    closeTerminalPane: (paneKey: string) => {
+      calls.push({ call: "closeTerminalPane", args: [paneKey] });
+      return Promise.resolve();
+    },
+    closeTab: (id: string) => {
+      calls.push({ call: "closeTab", args: [id] });
+      return Promise.resolve();
     },
   };
 }
@@ -275,6 +288,54 @@ describe("workspace terminals", () => {
     expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(0);
     expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
   });
+
+  // Settings are read once for the module, not once per pane, and every other
+  // test in this file runs with that read failing — so without this one the
+  // wiring is only ever exercised in the "blocks off" direction, and a
+  // regression (a value captured at import, a rebinding no pane ever sees)
+  // would ship blocks silently disabled for everyone with nothing failing.
+  it("builds a pane of blocks when the settings say so", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    // The settings arrive on a promise; a pane built before it resolves is
+    // deliberately the plain terminal, so the pane under test comes after.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.dataset["state"]).toBe("blocks");
+
+    dataListener?.(
+      "tab-1",
+      `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C;ls\u0007a b\r\n\u001b]133;D;0\u0007`,
+    );
+
+    expect(pane?.querySelectorAll(".block")).toHaveLength(1);
+  });
+
+  // The one deliberate opt-out in the whole design: the AWS login tab Jarvis
+  // opens for itself runs `saml2aws login` and is then closed, so a block
+  // would be a frame around the only command there will ever be.
+  it("draws the AWS login terminal without blocks, whatever the settings say", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    renderWorkspaceTerminals([tab({ detail: LOGIN_TERMINAL_DETAIL })], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.dataset["state"]).toBe("plain");
+
+    dataListener?.(
+      "tab-1",
+      `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C;ls\u0007a b\r\n\u001b]133;D;0\u0007`,
+    );
+
+    expect(pane?.querySelectorAll(".block")).toHaveLength(0);
+  });
 });
 
 describe("terminal key bindings and addons", () => {
@@ -339,6 +400,22 @@ describe("terminal key bindings and addons", () => {
 
     expect(FakeTerminal.instances[0]?.pressKey({ key: "c", ctrlKey: true })).toBe(true);
     expect(FakeTerminal.instances[0]?.pressKey({ key: "k", ctrlKey: true })).toBe(true);
+  });
+
+  // A pane with blocks switched off (this describe block's default
+  // settings) has no BlockNav, and the key handler's undefined guards are
+  // what keeps ⌘↑/⌘↓/⌘⇧F behaving exactly as they did before blocks
+  // existed — left to xterm — rather than claiming the key and doing
+  // nothing with it.
+  it("leaves the block-navigation keys to xterm when the pane has no blocks", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    expect(terminal.pressKey({ key: "ArrowDown", metaKey: true })).toBe(true);
+    expect(terminal.pressKey({ key: "ArrowUp", metaKey: true })).toBe(true);
+    expect(terminal.pressKey({ key: "F", shiftKey: true, metaKey: true })).toBe(true);
   });
 
   it("opens the find bar on Cmd+F and closes it on Escape", async () => {
@@ -420,5 +497,329 @@ describe("terminal key bindings and addons", () => {
     renderWorkspaceTerminals(tabs, "tab-2", "acme");
 
     expect(document.querySelectorAll(".terminal-completion")).toHaveLength(2);
+  });
+});
+
+describe("moving around a pane's blocks", () => {
+  beforeEach(() => harness());
+
+  async function paneWithBlocks(): Promise<HTMLElement> {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    // See "builds a pane of blocks when the settings say so" above: the
+    // settings arrive on a promise, so the pane has to be built after it
+    // resolves or it falls back to the plain terminal.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    if (pane === null) throw new Error("expected a pane");
+    return pane;
+  }
+
+  function finishCommand(command: string, exitCode: number): void {
+    dataListener?.(
+      "tab-1",
+      `]133;A$ ]133;B${command}\r\n` +
+        `]133;C;${command}ok\r\n]133;D;${exitCode}`,
+    );
+  }
+
+  it("selects the next and previous block on Cmd+ArrowDown/Up, clamping at both ends", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("a", 0);
+    finishCommand("b", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+    const blocks = () => Array.from(pane.querySelectorAll(".block"));
+
+    expect(terminal.pressKey({ key: "ArrowDown", metaKey: true })).toBe(false);
+    expect(blocks()[0]?.classList.contains("selected")).toBe(true);
+
+    terminal.pressKey({ key: "ArrowDown", metaKey: true });
+    expect(blocks()[1]?.classList.contains("selected")).toBe(true);
+    expect(blocks()[0]?.classList.contains("selected")).toBe(false);
+
+    // Past the last block: stays there rather than wrapping.
+    terminal.pressKey({ key: "ArrowDown", metaKey: true });
+    expect(blocks()[1]?.classList.contains("selected")).toBe(true);
+
+    terminal.pressKey({ key: "ArrowUp", metaKey: true });
+    expect(blocks()[0]?.classList.contains("selected")).toBe(true);
+  });
+
+  it("hides ok blocks on Cmd+Shift+F and restores them on a second press", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("git status", 0);
+    finishCommand("git push", 1);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+    const blocks = () => Array.from(pane.querySelectorAll<HTMLElement>(".block"));
+
+    const handled = terminal.pressKey({ key: "F", shiftKey: true, metaKey: true });
+    expect(handled).toBe(false);
+    expect(blocks()[0]?.hidden).toBe(true); // ok — hidden
+    expect(blocks()[1]?.hidden).toBe(false); // failed — stays
+
+    terminal.pressKey({ key: "F", shiftKey: true, metaKey: true });
+    expect(blocks().every((b) => !b.hidden)).toBe(true);
+  });
+
+  // The live terminal is where the user is looking, so its own match — if
+  // it has one — wins; only once it comes up empty does the frozen list get
+  // scanned. FakeTerminal never actually activates the real search addon
+  // (loadAddon here only records it), so findNext/findPrevious throw and
+  // this exercises the "no match" branch on every call — which is exactly
+  // the case this feature exists for.
+  it("flags the first frozen block that matches once the live terminal has no match", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("ls", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.pressKey({ key: "f", metaKey: true });
+    const input = document.querySelector<HTMLInputElement>(".terminal-find-input");
+    if (input === null) throw new Error("expected the find bar's input");
+    input.value = "ok";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(pane.querySelector(".block")?.classList.contains("found")).toBe(true);
+  });
+
+  it("does not flag anything when nothing frozen matches either", async () => {
+    const pane = await paneWithBlocks();
+    finishCommand("ls", 0);
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    terminal.pressKey({ key: "f", metaKey: true });
+    const input = document.querySelector<HTMLInputElement>(".terminal-find-input");
+    if (input === null) throw new Error("expected the find bar's input");
+    input.value = "no-such-text-anywhere";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(pane.querySelector(".block.found")).toBeNull();
+  });
+});
+
+// Task 10: with the command editor live, completion reads and writes it
+// instead of the xterm buffer, which shows nothing but the bare prompt
+// while the editor holds the line.
+describe("completion with the command editor live", () => {
+  beforeEach(() => harness());
+
+  async function editorPane() {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["terminalHistory"] = () => Promise.resolve(["ls -la"]);
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    const terminal = FakeTerminal.instances[0];
+    if (terminal === undefined) throw new Error("expected a terminal");
+
+    // Drives the pane's own block/editor state machine — real bytes, the
+    // way xterm's own parser would hand them to the splitter. The editor
+    // only shows once the pane has seen a prompt this way.
+    dataListener?.("tab-1", "]133;A~/p > ]133;B");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Drives attachCompletion's own OSC tracking separately: the FakeTerminal
+    // double's write() does not parse escape sequences the way real xterm
+    // does, so the registered OSC handler needs feeding directly — the same
+    // way the plain-terminal completion tests above do.
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+
+    const field = document.querySelector<HTMLTextAreaElement>("textarea.terminal-input-text");
+    if (field === null) throw new Error("expected the editor's textarea");
+    if (field.closest(".terminal-input")?.hasAttribute("hidden")) {
+      throw new Error("expected the editor to be visible");
+    }
+    return { terminal, field };
+  }
+
+  it("suggests from the editor's value, not the bare prompt still on screen", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The xterm buffer never moved past "~/p > " — nothing reached the pty
+    // — so a call asking about that would prove the bug this task fixes.
+    expect(calls).toContainEqual({ call: "suggestCompletions", args: ["tab-1", "git sta"] });
+  });
+
+  it("accepts into the editor and sends nothing to the pty", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+
+    expect(field.value).toBe("git status");
+    expect(calls.some((c) => c.call === "sendTerminalInput")).toBe(false);
+  });
+
+  // The dropdown's own keys — here, ArrowDown — must not also run the
+  // editor's own handling of the same keystroke: the capture-phase
+  // consultation in terminal-pane.ts has to see it first and stop it there.
+  it("does not let the editor's own history walk run on a key the dropdown claimed", async () => {
+    const { field } = await editorPane();
+    field.value = "git sta";
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+
+    // Had the editor's own handling also run on the same keystroke, this
+    // would have walked Jarvis's command log to "ls -la" instead of moving
+    // the dropdown's own selection.
+    expect(field.value).toBe("git sta");
+  });
+});
+
+// Task 11: a tab holds a tree of panes. Every leaf is a whole pane with its
+// own shell, keyed "<tabId>:<paneId>" — which is what makes autocomplete and
+// the command editor's history work inside a split without main having to
+// know a split exists.
+describe("splitting a terminal tab", () => {
+  beforeEach(() => harness());
+
+  async function split(key: string, shift = false): Promise<void> {
+    const terminal = FakeTerminal.instances.at(-1);
+    terminal?.pressKey({ key, metaKey: true, shiftKey: shift });
+    // The pane's shell has to be started before the pane attaches to it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("starts a second shell in the same tab on Cmd+D and draws a pane for it", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    await split("d");
+
+    expect(calls).toContainEqual({ call: "splitTerminal", args: ["tab-1", "p1"] });
+    expect(calls).toContainEqual({ call: "attachTerminal", args: ["tab-1:p1"] });
+    expect(FakeTerminal.instances).toHaveLength(2);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(2);
+  });
+
+  it("splits down on Cmd+Shift+D", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    await split("d", true);
+
+    const branch = document.querySelector<HTMLElement>(".terminal-split-branch");
+    expect(branch?.style.flexDirection).toBe("column");
+  });
+
+  // The renderer routes the pty stream by shell key, not by tab: the wrong
+  // answer here would put one shell's output into another shell's pane.
+  it("writes each pane's output into that pane and no other", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    dataListener?.("tab-1:p1", "in the split");
+    dataListener?.("tab-1", "in the first");
+
+    expect(FakeTerminal.instances[0]?.text).toBe("in the first");
+    expect(FakeTerminal.instances[1]?.text).toBe("in the split");
+  });
+
+  it("says which pane's shell exited, in that pane", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    exitListener?.("tab-1:p1", 130);
+
+    expect(FakeTerminal.instances[1]?.text).toContain("[process exited with code 130]");
+    expect(FakeTerminal.instances[0]?.text).toBe("");
+  });
+
+  it("sends a split pane's keystrokes to its own shell", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    FakeTerminal.instances[1]?.emitData(CTRL_C);
+
+    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1:p1", CTRL_C] });
+  });
+
+  // Completion resolves its key through the same directories map main
+  // registered the split in, so a split pane completes like any other.
+  it("asks for completions against the split pane's own key", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+    const terminal = FakeTerminal.instances[1];
+    if (terminal === undefined) throw new Error("expected the split pane's terminal");
+
+    terminal.parser.emitOsc(133, "A");
+    terminal.typeLine("~/p > ");
+    terminal.parser.emitOsc(133, "B");
+    terminal.typeLine("~/p > git sta");
+    terminal.emitData("a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toContainEqual({ call: "suggestCompletions", args: ["tab-1:p1", "git sta"] });
+  });
+
+  it("closes the focused pane on Cmd+W and kills its shell, keeping the tab", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    FakeTerminal.instances[1]?.pressKey({ key: "w", metaKey: true });
+
+    expect(calls).toContainEqual({ call: "closeTerminalPane", args: ["tab-1:p1"] });
+    expect(calls.some((entry) => entry.call === "closeTab")).toBe(false);
+    expect(FakeTerminal.instances[1]?.disposed).toBe(true);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(1);
+  });
+
+  // The last pane is the tab: closing it closes the tab, which is what
+  // reaps whatever shells are left.
+  it("closes the tab when Cmd+W has no other pane to fall back to", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    FakeTerminal.instances[0]?.pressKey({ key: "w", metaKey: true });
+
+    expect(calls).toContainEqual({ call: "closeTab", args: ["tab-1"] });
+    expect(calls.some((entry) => entry.call === "closeTerminalPane")).toBe(false);
+  });
+
+  it("moves the focus between panes on Alt+Cmd+Arrow", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+    const focusedBefore = FakeTerminal.instances[0]?.focused ?? 0;
+
+    FakeTerminal.instances[1]?.pressKey({ key: "ArrowLeft", metaKey: true, altKey: true });
+
+    expect(FakeTerminal.instances[0]?.focused).toBe(focusedBefore + 1);
+  });
+
+  it("disposes every pane of a split tab when the tab is closed", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await split("d");
+
+    renderWorkspaceTerminals([], undefined, "acme");
+
+    expect(FakeTerminal.instances.every((terminal) => terminal.disposed)).toBe(true);
+    expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(0);
   });
 });

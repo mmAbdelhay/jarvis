@@ -21,8 +21,13 @@ const draft: JarvisConfig = {
   clusters: {},
   docker: {},
   chat: {},
+  workflows: {},
   headlamp: { binary: "/some/path" },
-  terminal: { completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" } },
+  terminal: {
+    completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
+    blocks: { enabled: true, inputEditor: true },
+    notifyAfterSeconds: 30,
+  },
   voice: {
     engine: "say" as const,
     piperBinary: "/opt/piper",

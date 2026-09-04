@@ -79,6 +79,13 @@ terminal:
     enabled: true             # the Terminal tab's autocomplete dropdown
     historyPath: ~/.zsh_history                      # read, never written
     commandLogPath: ~/.config/jarvis/terminal-commands.log
+  blocks:
+    enabled: true              # group commands into collapsible blocks
+    inputEditor: true          # the multiline command editor at an idle prompt
+  notifyAfterSeconds: 30       # notify when an unfocused pane's command runs this long; 0 disables it
+
+workflows:                      # optional; per project, on top of ~/.config/jarvis/workflows/
+  acme: ./.jarvis/workflows
 
 brain:
   accountId: claude-mm          # which agent answers voice; needs a configDir
@@ -128,6 +135,39 @@ and never modified. `commandLogPath` is Jarvis's own file: it records
 which is the only way to rank a command higher in the directory it belongs to —
 zsh's history does not record a directory. Delete it whenever you like; it
 refills.
+
+**`terminal.blocks.enabled` and `terminal.blocks.inputEditor` are two
+switches, not one**, and both default to `true`. `enabled` turns off the
+block model entirely — every command and its output go back to being one
+undifferentiated scroll, the terminal Jarvis shipped before blocks existed.
+`inputEditor` can be turned off on its own, keeping blocks but going back to
+typing straight into the live shell; there is no way to have the editor with
+blocks off, since the editor's own idle-prompt detection is a block-model
+concept. Either switch is one config line away from today's terminal if
+anything about the new terminal misbehaves.
+
+**`terminal.notifyAfterSeconds` guards a block finishing in a pane you are
+not looking at**, and defaults to `30`. Set it to `0` to turn these
+notifications off entirely; a lower number just notifies sooner.
+
+**`workflows` maps a project name to one directory of workflow files**, read
+in addition to the always-read `~/.config/jarvis/workflows/` — every project
+gets the global directory whether or not it has an entry here, and a key
+naming no configured project is rejected at load, the same rule `databases`
+and `editors` follow. A workflow file is YAML with a `name`, a `description`
+and a `command` that can contain `{{placeholder}}` slots, e.g.:
+
+```yaml
+name: Deploy to staging
+description: Build and push the current branch to the staging cluster
+command: pnpm build && kubectl rollout restart deployment/{{service}} -n staging
+```
+
+Choosing "Run workflow…" from the Terminal tab's palette prompts for each
+placeholder and fills the input editor with the result — it never runs the
+command itself. When the same workflow name exists in both directories, the
+project's own directory wins: it shadows the global one, rather than the two
+somehow merging or the palette listing the name twice.
 
 **`databases` is keyed by project name**, and a key that names no configured
 project is rejected at load. There is deliberately no `password:` field —

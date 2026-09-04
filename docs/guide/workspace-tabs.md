@@ -270,6 +270,134 @@ makes it mean *newline* to Claude Code and every other agent UI. **⌘F** finds,
 **⌘C** copies the selection, **⌘V** pastes, **⌘K** clears. Ctrl chords are left
 alone — those are real control bytes a program may want.
 
+### Blocks
+
+With a zsh shell (see *Autocomplete*, below — the same shell integration this
+needs), the terminal groups each command and its output into a block: an
+addressable thing you can collapse, copy, re-run and jump between, instead of
+an undifferentiated scroll of text.
+
+```
+┌ ✔ pnpm test                    2.4s   ~/projects/jarvis   ▾ ⧉ ↻ ⋯
+│ 42 passed
+└
+```
+
+The header shows the exit status, how long the command took, and the
+directory it ran in. Its controls:
+
+| Control | Does |
+| --- | --- |
+| ▾ | Collapse the block's output (it becomes ▸, which expands it again) |
+| ⧉ | Copy the output |
+| ↻ | Fill the input with this command |
+| ⋯ | Copy command, copy both, filter the list to this command |
+
+**The one thing to know about every one of these: none of them run anything.**
+Re-run does not re-run — it fills the input editor (or, with the editor off,
+types the command at the prompt) and stops there. A stray click on a block
+whose command was `rm -rf build` must not fire it. You always press Enter
+yourself. Workflows, history search and the AI's generated command all follow
+the same rule — see below.
+
+Dragging across a block's frozen text is ordinary text selection, so ⌘C works
+on it with nothing special going on; the live terminal at the bottom of the
+pane keeps its own selection behaviour, as before.
+
+**Navigating blocks.** Clicking a header selects it. **⌘↑** / **⌘↓** move the
+selection between blocks and scroll it into view. **⌘⇧F** toggles a filter
+that narrows the list to failed blocks. **⌘F** — the same find bar as
+always — searches the live screen first and, only if that finds nothing,
+searches the frozen blocks above it too, so one find covers what is running
+and what already finished.
+
+**A full-screen program takes the whole pane.** `top`, `vim`, `git rebase -i`,
+a `sudo` password prompt, an agent's TUI — anything that switches to the
+terminal's alternate screen — gets the pane back exactly as before blocks
+existed: the block list and the input editor step aside until it exits. This
+is also why the Session route's agent terminal looks unchanged most of the
+time — an agent holds the alternate screen for as long as it runs, and blocks
+only appear for the shell moments between agent runs.
+
+**Blocks need the zsh integration.** Without it — any other shell, or the
+integration failing to install — nothing above happens and the tab is exactly
+today's terminal. To turn blocks off deliberately, see
+`terminal.blocks.enabled` in **[configuration](configuration.md)**.
+
+### The input editor
+
+At an idle prompt — a command just finished or the tab just opened, nothing
+running, the primary screen — the typed line lives in a small editor rather
+than going straight to the pty: multiline editing (Shift+Enter for a newline,
+Enter to run) and lightweight syntax highlighting of the command word, flags
+and paths. It is visible only there. The moment a command starts, or the
+alternate screen takes over, it hides and every keystroke goes to the pty raw
+again, exactly as it always did — so a `sudo` prompt, an interactive rebase or
+a `^C` for a hung command are untouched.
+
+↑ and ↓ in an empty editor walk Jarvis's own command log, not zsh's history.
+`^R` opens the palette's history search (below). To turn the editor off on
+its own, keeping blocks, see `terminal.blocks.inputEditor` in
+**[configuration](configuration.md)**.
+
+### Splits
+
+A Terminal tab holds a tree of panes rather than a single shell. **⌘D** splits
+the focused pane to the right, **⌘⇧D** splits it down, **⌥⌘←** / **⌥⌘→** move
+focus between panes. Each pane is a full terminal in its own right — its own
+blocks, its own editor, its own autocomplete. Drag the divider between two
+panes to resize them.
+
+To close a pane, use **⌘P → "Close pane"**; closing the last pane closes the
+tab. (⌘W is the window's own Close Window shortcut and never reaches the page,
+so there is no keyboard chord for this.) Closing a pane kills its shell;
+closing the tab kills every shell under it.
+
+### The command palette
+
+**⌘P** opens a filterable list of everything the focused pane can do: copy or
+re-run the selected block, collapse every block, jump to the next failed one,
+toggle the failed-only filter, split right / split down / close pane, clear
+the terminal, run a saved workflow, generate or explain a command with the
+AI, and history search. The list is built for the pane as it is right now, so
+an action with nothing to act on — re-run with no block selected, splits on
+the Session route's terminal — is left out rather than offered and ignored.
+(Blocks themselves are turned on and off in configuration, not from here: see
+`terminal.blocks.enabled`.)
+
+**`^R`** jumps straight to history search — Jarvis's own command log, the same
+one the editor's ↑/↓ walk, not zsh's. Picking a history line **fills the input
+editor**; it does not run it.
+
+### Workflows
+
+A saved workflow is a YAML file with a name, a description, and a command
+that can carry `{{placeholder}}` slots. "Run workflow…" in the palette lists
+them, asks for each placeholder in turn, and **fills the editor** with the
+result — never runs it. See `workflows:` in
+**[configuration](configuration.md)** for where the files live.
+
+### Notifications
+
+A block that takes longer than `terminal.notifyAfterSeconds` (30s by default)
+to finish, in a pane that is not the one you're looking at, raises a
+notification naming the command and whether it succeeded. Set it to `0` to
+turn this off.
+
+### AI, strictly on demand
+
+Two actions in the ⌘P palette, and nothing else — there is no AI while you
+type. The user declined that twice while this terminal was being designed,
+and it stays declined: nothing here is sent anywhere unless you choose one of
+these two actions yourself.
+
+- **Generate command…** — describe what you want in plain language; the
+  result is written into the input editor for you to read, exactly like a
+  re-run or a workflow. It does not run.
+- **Explain this failure** — offered only on a selected block that actually
+  failed. Sends that block's command, exit code and the tail of its output to
+  Jarvis's brain, and shows the answer inside the block itself.
+
 ### Autocomplete
 
 As you type, a dropdown appears under the cursor with the commands you

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -101,7 +101,8 @@ import {
   createDirectoryLister,
   createFileReader,
 } from "./completion-source.js";
-import { DEFAULT_CONFIG_PATH, loadConfig } from "./config.js";
+import { DEFAULT_CONFIG_PATH, defaultWorkflowsDir, loadConfig } from "./config.js";
+import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { defaultRecorderDeps, Recorder } from "./recorder.js";
@@ -319,11 +320,16 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Shared with the terminal's two AI actions below (TerminalHandlerDeps.brain)
+    // — one brain, one account attribution, rather than a second SDK session
+    // with its own onUsage wiring.
+    const brain = createBrain({
+      ...config.brain,
+      onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
+    });
+
     const orchestrator = new Orchestrator({
-      brain: createBrain({
-        ...config.brain,
-        onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
-      }),
+      brain,
       registry,
       sessions,
       git,
@@ -636,6 +642,17 @@ app.whenReady().then(async () => {
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
+      terminal: config.terminal,
+      workflows: {
+        readDir: (path) => readdirSync(path),
+        readFile: (path) => readFileSync(path, "utf8"),
+        config: config.workflows,
+        defaultDir: defaultWorkflowsDir(),
+      },
+      // The two AI actions' only route to the brain — see
+      // TerminalHandlerDeps.brain's own note on why nothing else in ipc.ts
+      // calls it.
+      brain,
     });
 
     // Constructed here, not beside headlamp above, because opening the
@@ -659,7 +676,9 @@ app.whenReady().then(async () => {
       checkAwsSession,
       awaitAwsSession,
       openTerminal: (project: string, cwd: string) => {
-        const tabId = workspace.openTerminal(project);
+        // Marked as the login terminal, which is what tells the renderer to
+        // draw it without blocks — see LOGIN_TERMINAL_DETAIL.
+        const tabId = workspace.openTerminal(project, LOGIN_TERMINAL_DETAIL);
         // The tab exists before the shell does. If the pty never starts, the
         // caller reports a failure and the tab would otherwise be left behind
         // empty — a terminal with nothing in it and no explanation, next to a
@@ -1249,16 +1268,27 @@ app.whenReady().then(async () => {
     );
     // The renderer's xterm for this tab is ready: hand over whatever the
     // shell printed before it existed, then stream the rest.
-    ipcMain.handle("terminal:attach", (_event, tabId: unknown) => {
-      if (typeof tabId !== "string") return "";
+    ipcMain.handle("terminal:attach", (_event, paneKey: unknown) => {
+      if (typeof paneKey !== "string") return "";
       return shells.attach(
-        tabId,
-        (chunk) => window.webContents.send("terminal:data", { tabId, chunk }),
-        (code) => window.webContents.send("terminal:exit", { tabId, code }),
+        paneKey,
+        (chunk) => window.webContents.send("terminal:data", { paneKey, chunk }),
+        (code) => window.webContents.send("terminal:exit", { paneKey, code }),
       );
+    });
+    // A tab's second (and third…) shell, and the one kill that is not the
+    // tab's own — see TerminalHandlers.split/closePane.
+    ipcMain.handle("terminal:split", (_event, tabId: unknown, paneId: unknown) => {
+      terminal.split(tabId as string, paneId as string);
+    });
+    ipcMain.handle("terminal:closePane", (_event, paneKey: unknown) => {
+      terminal.closePane(paneKey as string);
     });
     ipcMain.handle("terminal:suggest", (_event, tabId: unknown, input: unknown) =>
       terminal.suggest(tabId as string, input as string),
+    );
+    ipcMain.handle("terminal:history", (_event, paneKey: unknown, limit: unknown) =>
+      terminal.history(paneKey as string, limit as number),
     );
     ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
       terminal.input(tabId as string, data as string);
@@ -1266,6 +1296,13 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:resize", (_event, tabId: unknown, cols: unknown, rows: unknown) => {
       terminal.resize(tabId as string, cols as number, rows as number);
     });
+    ipcMain.handle("terminal:settings", () => terminal.settings());
+    ipcMain.handle("terminal:workflows", (_event, project: unknown) =>
+      terminal.workflows(typeof project === "string" ? project : ""),
+    );
+    ipcMain.handle("terminal:ai", (_event, kind: unknown, text: unknown) =>
+      terminal.terminalAi(kind as "generate" | "explain", text as string),
+    );
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );
