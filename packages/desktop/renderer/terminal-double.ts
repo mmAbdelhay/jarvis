@@ -123,9 +123,20 @@ export class FakeTerminal {
   loadAddon(addon: unknown): void {
     this.addons.push(addon);
   }
-  write(data: string): void {
+  /**
+   * xterm's `write(data, callback)`. The bytes are recorded synchronously —
+   * every test that asserts on `written` or `text` predates this and reads
+   * them the instant they are handed over — but the *callback* is deferred
+   * to a macrotask, which is the half of xterm's real contract that
+   * matters: `Terminal.write()` always defers its parsing (see
+   * block-render.ts), so anything ordered behind a write happens a tick
+   * later, never in the same turn. A test that wants to see what a
+   * write-ordered callback did must let the timers run.
+   */
+  write(data: string, done?: () => void): void {
     this.written.push(data);
     this.#screen.push(data);
+    if (done !== undefined) setTimeout(done, 0);
   }
   reset(): void {
     this.resets += 1;

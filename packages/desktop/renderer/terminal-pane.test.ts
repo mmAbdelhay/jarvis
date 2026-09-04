@@ -83,12 +83,35 @@ describe("a terminal pane", () => {
     expect(p.blocks()[0]?.record.command).toBe("ls");
   });
 
-  it("freezes a finished command into a block and clears the live terminal", () => {
+  // The reset is ordered *behind* xterm's write buffer, not fired from the
+  // event loop that handled block-done. Terminal.write() always defers its
+  // parsing to a macrotask and reset() neither drains nor discards what is
+  // queued, so a synchronous reset clears the screen and then lets the very
+  // bytes it was clearing paint over it: for `ls`, whose output and D mark
+  // arrive in one pty read, the whole output was redrawn into the live
+  // terminal directly under the frozen block already showing it — every
+  // finished command, every time.
+  //
+  // This is the assertion that bites. The double records writes
+  // synchronously (every other test reads `written` the instant it is
+  // handed over), so no assertion on the *screen* can see the double
+  // drawing; what it can see, and what the fix is, is that the reset does
+  // not happen in the turn that handled the event and does happen once the
+  // write callback has run.
+  it("freezes a finished command into a block and clears the live terminal behind the write buffer", async () => {
     const p = pane();
     p.write(`${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}`);
     expect(p.blocks()).toHaveLength(1);
     expect(p.blocks()[0]?.record.command).toBe("ls");
-    expect(FakeTerminal.instances[0]?.resets).toBeGreaterThan(0);
+    // Not yet: the output above is still queued in xterm's parser.
+    expect(FakeTerminal.instances[0]?.resets).toBe(0);
+    // The state flip travels with the clear, for the same reason.
+    expect(p.element.dataset["state"]).toBe("running");
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(FakeTerminal.instances[0]?.resets).toBe(1);
+    expect(p.element.dataset["state"]).toBe("blocks");
   });
 
   it("keeps the live terminal alone while a command is still running", () => {
@@ -150,6 +173,11 @@ describe("a terminal pane", () => {
     // scroll fired now would land short.
     expect(p.element.scrollTop).not.toBe(500);
 
+    // Two ticks, not one: the scroll now sits inside the write callback that
+    // orders the live terminal's reset behind xterm's parser (one macrotask),
+    // and is still deferred from there behind the block's own painting
+    // (another). Timing only — where the scroll lands has not changed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(painted).toBe(true);
     expect(p.element.scrollTop).toBe(500);
@@ -185,6 +213,20 @@ describe("a terminal pane", () => {
     expect(p.element.querySelector(".terminal-blocks")?.children).toHaveLength(0);
     expect(p.blockNav?.selected()).toBeUndefined();
     expect(FakeTerminal.instances[0]?.written).toHaveLength(written);
+  });
+
+  // The pointer route to the selection, and through it to the palette's
+  // "Copy output" / "Re-run command", which act on the selected block and
+  // are left out of the list entirely when there is none.
+  it("selects a block when its header is clicked", () => {
+    const p = pane();
+    p.write(`${A}$ ${B}a\r\n${C("a")}1\r\n${D(0)}`);
+    p.write(`${A}$ ${B}b\r\n${C("b")}2\r\n${D(0)}`);
+    expect(p.blockNav?.selected()).toBeUndefined();
+
+    p.blocks()[1]?.element.querySelector<HTMLElement>(".block-header")?.click();
+
+    expect(p.blockNav?.selected()?.record.command).toBe("b");
   });
 
   // A filter left over from the last thing the pane showed would hide the
@@ -273,6 +315,33 @@ describe("the command editor in a pane", () => {
     expect(editorEl(p)?.hidden).toBe(false);
   });
 
+  // The prompt, once. The editor draws the prompt it read out of the live
+  // terminal's own buffer, so with both on screen the user saw it twice with
+  // a tall empty terminal between them. The stylesheet hides the live
+  // terminal off this attribute — and only where the editor really is the
+  // prompt line, which is why it tracks the editor's own visibility rather
+  // than the pane's state.
+  it("says the editor is the prompt line only while it is actually showing", () => {
+    const { p } = editorPane();
+    // Blocks, but no integration proved yet: no editor, so the live terminal
+    // is still the only prompt there is.
+    expect(p.element.dataset["state"]).toBe("blocks");
+    expect(p.element.dataset["editor"]).toBe("off");
+
+    p.write(`${A}$ ${B}`);
+    expect(p.element.dataset["editor"]).toBe("on");
+
+    p.write(`ls\r\n${C("ls")}`);
+    expect(p.element.dataset["state"]).toBe("running");
+    expect(p.element.dataset["editor"]).toBe("off");
+  });
+
+  it("never claims the editor is the prompt line with no editor at all", () => {
+    const { p } = editorPane({ ...EDITOR_SETTINGS, inputEditor: false });
+    p.write(`${A}$ ${B}`);
+    expect(p.element.dataset["editor"]).toBe("off");
+  });
+
   it("hides the editor while a command is running and lets the pty have the keys", () => {
     const { p, sendInput } = editorPane();
     p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
@@ -336,6 +405,24 @@ describe("the command editor in a pane", () => {
     expect(sendInput).toHaveBeenCalledWith("ls -la\r");
     // Once. A line sent twice runs the command twice.
     expect(sendInput).toHaveBeenCalledTimes(1);
+  });
+
+  // One Enter, one command. zsh's line editor binds ^J to accept-line just
+  // as it binds ^M, so a Shift+Enter entry of two lines — or text pasted
+  // into the editor and submitted — sent raw ran every line as its own
+  // command and produced a block per line. Bracketed paste is what makes
+  // zsh take the newlines as text: the wrapped body is inserted, and the
+  // one trailing carriage return after it is the only Enter.
+  it("wraps a multi-line submission in bracketed paste so the shell runs it once", () => {
+    const { p, sendInput } = editorPane();
+    p.write(`${A}$ ${B}`);
+    const field = textarea(p);
+    if (field === null) throw new Error("no editor");
+    field.value = "echo one\necho two";
+    press(p, { key: "Enter" });
+
+    expect(sendInput).toHaveBeenCalledTimes(1);
+    expect(sendInput).toHaveBeenCalledWith("\u001b[200~echo one\necho two\u001b[201~\r");
   });
 
   // The two whose loss would make the terminal feel broken: ^C interrupts,
@@ -630,26 +717,100 @@ describe("the command editor in a pane", () => {
       expect(palette?.textContent).toContain("Collapse all blocks");
     });
 
-    // The pane's own capture-phase listener (this file's `press`, which
-    // targets the editor's textarea) defers Cmd+P once the editor is
-    // hidden — it is not the listener that claims it in that state.
-    // terminal-addons.ts's attachKeys is, unconditionally, via the
-    // `openPalette` hook exercised directly below and covered end to end
-    // in terminal-addons.test.ts.
-    it("the editor-gated listener leaves Cmd+P unclaimed once the editor is hidden", () => {
+    /** A key the way the browser delivers it while the palette is open: on
+     *  the palette's own <input>, which holds the DOM focus from the moment
+     *  it is shown. */
+    function pressInPalette(p: { element: HTMLElement }, init: KeyboardEventInit): KeyboardEvent {
+      const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      paletteEl(p)?.querySelector("input")?.dispatchEvent(event);
+      return event;
+    }
+
+    // Two halves of one contract, and the fix is the second.
+    //
+    // *Opening* on ⌘P is not this listener's job once the editor is hidden:
+    // terminal-addons.ts's attachKeys claims that chord unconditionally, via
+    // the `openPalette` hook exercised directly below.
+    //
+    // *Operating* the palette, though, is this listener's job in every pane
+    // state, because it is the only listener that can be: the palette's own
+    // <input> takes the DOM focus, so xterm's custom key handler never sees
+    // the keystroke either. Gated behind the editor, as it was, ⌘P opened a
+    // palette in which Escape, Enter and ↑/↓ all did nothing and every other
+    // key — ^C included — went into the filter box instead of the pty, with
+    // the pointer the only way out.
+    it("leaves Cmd+P to xterm's handler with the editor hidden, but owns the keys once the palette is open", () => {
       const { p } = editorPane();
       p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
 
-      const event = new KeyboardEvent("keydown", {
+      const opening = new KeyboardEvent("keydown", {
         bubbles: true,
         cancelable: true,
         key: "p",
         metaKey: true,
       });
-      p.element.dispatchEvent(event);
+      p.element.dispatchEvent(opening);
+      expect(paletteEl(p)?.hidden).toBe(true);
+      expect(opening.defaultPrevented).toBe(false);
+
+      // What attachKeys does with that same chord.
+      p.openPalette();
+      expect(paletteEl(p)?.hidden).toBe(false);
+
+      // ↑/↓ move the selection rather than falling through to nothing.
+      const down = pressInPalette(p, { key: "ArrowDown" });
+      expect(down.defaultPrevented).toBe(true);
+    });
+
+    // The state the bug was worst in: a command running, so the editor is
+    // hidden, so the old listener returned before the palette ever saw the
+    // key. Escape left the overlay on screen for good.
+    it("closes on Escape while a command is running", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+      p.openPalette();
+      expect(paletteEl(p)?.hidden).toBe(false);
+
+      const escape = pressInPalette(p, { key: "Escape" });
 
       expect(paletteEl(p)?.hidden).toBe(true);
-      expect(event.defaultPrevented).toBe(false);
+      expect(escape.defaultPrevented).toBe(true);
+    });
+
+    // And the keys come back to the pty with it. The palette's <input> held
+    // the focus while it was open; dismissing it must hand the focus back,
+    // or the next keystroke lands on a hidden field and ^C never reaches
+    // the command the user is trying to interrupt.
+    it("gives the keys back to the terminal after it is dismissed", () => {
+      const { p, sendInput } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+      const focusedBefore = FakeTerminal.instances[0]?.focused ?? 0;
+
+      p.openPalette();
+      pressInPalette(p, { key: "Escape" });
+
+      expect(FakeTerminal.instances[0]?.focused).toBeGreaterThan(focusedBefore);
+      FakeTerminal.instances[0]?.emitData("\u0003");
+      expect(sendInput).toHaveBeenCalledWith("\u0003");
+    });
+
+    // Escape is not the only way out: an action chosen with Enter closes
+    // the palette too, and the focus follows on that path as well.
+    it("gives the keys back after an action is chosen with Enter", () => {
+      const { p } = editorPane();
+      p.write(`${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+      const focusedBefore = FakeTerminal.instances[0]?.focused ?? 0;
+      p.openPalette();
+
+      const input = paletteEl(p)?.querySelector("input");
+      if (input === null || input === undefined) throw new Error("no palette input");
+      input.value = "Clear terminal";
+      input.dispatchEvent(new Event("input"));
+      pressInPalette(p, { key: "Enter" });
+
+      expect(paletteEl(p)?.hidden).toBe(true);
+      expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+      expect(FakeTerminal.instances[0]?.focused).toBeGreaterThan(focusedBefore);
     });
 
     // What actually claims ⌘P in every state that is not "the editor is

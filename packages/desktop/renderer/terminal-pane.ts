@@ -181,10 +181,30 @@ export function controlByte(event: KeyboardEvent): string | undefined {
   return String.fromCharCode(code - 64);
 }
 
+/**
+ * The bytes that run one submitted line.
+ *
+ * A single line is itself and a carriage return, exactly as it always was.
+ * A *multi-line* line is wrapped in bracketed paste first, because zsh's
+ * line editor binds `^J` to accept-line just as it binds `^M`: sent raw,
+ * every newline in a Shift+Enter entry (or in text pasted into the editor)
+ * is a second Enter, and the user who pressed Enter once watches several
+ * commands run, each becoming its own block. Inside the paste brackets zsh
+ * takes the newlines as text and the one trailing `\r` as the only Enter —
+ * which is what "typed it and pressed Enter" is supposed to mean.
+ */
+export function submitBytes(line: string): string {
+  if (!line.includes("\n")) return `${line}\r`;
+  return `\u001b[200~${line}\u001b[201~\r`;
+}
+
 export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   const element = document.createElement("div");
   element.className = "terminal-pane";
   element.dataset["state"] = hooks.settings.blocks ? "blocks" : "plain";
+  // Nothing is standing in front of the live terminal yet — see applyState,
+  // which is the only other thing that writes this.
+  element.dataset["editor"] = "off";
 
   // The sticky header lives above the block list so position: sticky can
   // hold it at the pane's own top as blocks scroll under it; block-nav.ts
@@ -345,6 +365,26 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   element.addEventListener(
     "keydown",
     (event) => {
+      // The open palette first, and before the editor gate below: ⌘P is
+      // claimed unconditionally (terminal-addons.ts's own key handler, in
+      // every pane state), so the palette can be open with no editor
+      // showing at all — a command running, the alternate screen held, or
+      // blocks switched off. Its own <input> holds the DOM focus in every
+      // one of those states, so xterm's custom key handler never sees the
+      // keystroke either: if this listener declined here, Escape, Enter
+      // and ↑/↓ would all do nothing and the overlay could only be
+      // dismissed with the pointer. Opening was made state-independent;
+      // this is operating it on the same terms.
+      if (palette.isOpen()) {
+        if (!palette.handleKey(event)) {
+          event.stopPropagation();
+          // The palette gave the keys back (Escape, or a chosen action):
+          // so must the focus, or the next keystroke would land on a
+          // hidden input and never reach the pty.
+          if (!palette.isOpen()) attempt(() => focusPane());
+        }
+        return;
+      }
       if (editor === undefined || !editor.isVisible()) return;
       if (!handlePaletteKey(event, paletteKeys)) {
         event.stopPropagation();
@@ -361,7 +401,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         // The one thing that runs a command, and only from a key the user
         // pressed: the line, then the carriage return the shell is waiting
         // for. Nothing else here writes a newline to the pty.
-        submit: (line) => attempt(() => hooks.sendInput(`${line}\r`)),
+        submit: (line) => attempt(() => hooks.sendInput(submitBytes(line))),
         // Not ours to eat — ^C interrupts, ^D ends the shell. The byte goes
         // to the pty and the browser is told to keep its hands off the key.
         passthrough: (event) =>
@@ -377,6 +417,35 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // No editor. The terminal underneath is untouched and takes the keys.
       return undefined;
     }
+  }
+
+  /** The newest block, at the bottom. The block list is the element that
+   *  scrolls (it is capped so the live terminal always keeps its share of
+   *  the pane), and the pane itself is scrolled too for the layouts —
+   *  "alt", "plain" — where the list is not on screen at all. */
+  function scrollToBottom(): void {
+    list.scrollTop = list.scrollHeight;
+    element.scrollTop = element.scrollHeight;
+  }
+
+  /** The keys go to the editor whenever it is on screen, and to the live
+   *  terminal every other moment. Both `focus()` and the palette's own
+   *  hand-back call this, so there is one answer to "who has the keys". */
+  function focusPane(): void {
+    if (editor !== undefined && editor.isVisible()) {
+      editor.focus();
+      return;
+    }
+    terminal.focus();
+  }
+
+  /** Re-measures the live terminal's cell grid. Guarded on the live
+   *  element rather than the pane: the live terminal is display:none at an
+   *  idle prompt (the editor is the prompt line there), and fitting a box
+   *  with no layout at all makes the addon measure nonsense. */
+  function refit(): void {
+    if (live.clientWidth === 0 || live.clientHeight === 0) return;
+    attempt(() => fit.fit());
   }
 
   /** Whether the shell is sitting at a prompt with nothing running: the one
@@ -399,7 +468,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   function applyState(state: "blocks" | "running" | "alt" | "plain"): void {
     element.dataset["state"] = state;
     const editorEl = editor;
-    if (editorEl === undefined) return;
+    if (editorEl === undefined) {
+      // No editor ever means no editor row: the live terminal is the prompt
+      // in every state, and the stylesheet must not hide it.
+      element.dataset["editor"] = "off";
+      return;
+    }
     attempt(() => {
       if (state === "blocks" && idle()) {
         resetHistoryCursor();
@@ -407,7 +481,20 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       } else {
         editorEl.hide();
       }
+      // Whether the editor is *actually* the prompt line right now. The
+      // stylesheet hides the live terminal only when it is — the editor
+      // draws the prompt it read out of that terminal's own buffer, so
+      // showing both is showing the prompt twice with a tall empty
+      // terminal between them. With the editor hidden (no integration yet,
+      // a command running, the alternate screen) the live terminal is the
+      // only prompt there is and must stay on screen.
+      element.dataset["editor"] = editorEl.isVisible() ? "on" : "off";
       refocus(editorEl);
+      // Showing or hiding the live terminal changes its box; xterm only
+      // learns a new cell grid from a fit. The ResizeObserver below catches
+      // this too where it exists, but a fit here is what makes the pty's
+      // rows right on the tick the state actually changed.
+      refit();
     });
   }
 
@@ -773,6 +860,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       copy,
       home: hooks.settings.home,
       filterToCommand: (command) => attempt(() => nav?.filterToCommand(command)),
+      select: (clicked) => attempt(() => nav?.select(clicked)),
     });
     views.push(view);
     list.append(view.element);
@@ -801,21 +889,36 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // on showing output the block above it is also showing.
       attempt(() => freeze(event.block));
       attempt(() => notifyIfUnwatched(event.block));
-      // The frozen block now holds what the live terminal was drawing.
-      terminal.reset();
-      attempt(() => applyState("blocks"));
-      // renderOutput() paints a block's output a macrotask after
-      // createBlockView() returns (see its own contract) — scrolling here,
-      // synchronously, would settle at a height that does not include that
-      // block's output yet. Deferred behind the same kind of macrotask so
-      // the pane lands at the true bottom once painting has actually
-      // happened, not before.
-      setTimeout(() => {
+      // The frozen block now holds what the live terminal was drawing — so
+      // the live terminal is cleared. Ordered *behind* xterm's write buffer,
+      // never called straight from here: Terminal.write() always defers its
+      // parsing to a macrotask (see block-render.ts, which states the same
+      // property), and reset() neither drains nor discards what is queued.
+      // A synchronous reset therefore clears the screen first and lets the
+      // bytes it was meant to clear paint after it — for `ls`, where the
+      // output and its D mark arrive in one pty read, the whole output was
+      // redrawn into the live terminal directly under the frozen block
+      // already showing it, every finished command, every time.
+      //
+      // An empty write is the queue's own "when everything before this has
+      // been parsed" signal, and the state flip goes inside it for the same
+      // reason: flipping to "blocks" before the clear would put the editor
+      // in front of a terminal still about to paint.
+      terminal.write("", () => {
         if (disposed) return;
-        attempt(() => {
-          element.scrollTop = element.scrollHeight;
-        });
-      }, 0);
+        attempt(() => terminal.reset());
+        attempt(() => applyState("blocks"));
+        // renderOutput() paints a block's output a macrotask after
+        // createBlockView() returns (see its own contract) — scrolling here,
+        // synchronously, would settle at a height that does not include that
+        // block's output yet. Deferred behind the same kind of macrotask so
+        // the pane lands at the true bottom once painting has actually
+        // happened, not before.
+        setTimeout(() => {
+          if (disposed) return;
+          attempt(() => scrollToBottom());
+        }, 0);
+      });
       return;
     }
     if (event.type === "prompt") {
@@ -856,6 +959,22 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     for (const event of events) handle(event);
   }
 
+  // The live terminal's own box, which changes size for reasons the pane's
+  // outer host never sees: blocks piling up above it, the editor taking
+  // over the prompt row, a state flip that hides or shows it. The hosts
+  // observe the *leaf*, which a growing block list never resizes — so
+  // without this xterm kept its old grid while its box shrank, and spilled
+  // visibly over the blocks above it.
+  let liveObserver: ResizeObserver | undefined;
+  attempt(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    liveObserver = new ResizeObserver(() => {
+      if (disposed) return;
+      refit();
+    });
+    liveObserver.observe(live);
+  });
+
   // Whatever the shell printed before this pane existed — its prompt,
   // usually. It goes through write() rather than straight to xterm because
   // it can carry the marks that say where the prompt is.
@@ -874,20 +993,17 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     write,
     // The editor has the keys whenever it is on screen; the terminal has
     // them every other moment.
-    focus: () => {
-      if (editor !== undefined && editor.isVisible()) {
-        editor.focus();
-        return;
-      }
-      terminal.focus();
-    },
-    refit: () => {
-      // A pane with no layout yet (hidden, or the window minimised) measures
-      // as zero and would make the addon throw.
-      if (element.clientWidth === 0 || element.clientHeight === 0) return;
-      attempt(() => fit.fit());
-    },
+    focus: focusPane,
+    // A pane with no layout yet (hidden, or the window minimised) measures
+    // as zero and would make the addon throw — refit() guards that.
+    refit,
     reset: () => {
+      // The pane is being pointed at something else entirely (the Session
+      // view switching agents), so what the *last* thing's shell proved
+      // about its integration says nothing about this one's: until the new
+      // one emits its own A mark there is no prompt to trust, and the
+      // editor must not stand in front of whatever is reading stdin now.
+      sawPrompt = false;
       // The nav first, so the selection is dropped while the block it is on
       // is still in the list — the same order sync() relies on.
       attempt(() => nav?.reset());
@@ -895,6 +1011,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     },
     dispose: () => {
       disposed = true;
+      // Before the terminal goes: an observer left connected outlives the
+      // pane and keeps its element (and this closure) alive.
+      attempt(() => liveObserver?.disconnect());
       terminal.dispose();
       for (const view of views.splice(0)) view.element.remove();
       element.remove();
