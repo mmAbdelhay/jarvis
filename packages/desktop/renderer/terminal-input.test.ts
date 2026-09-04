@@ -56,6 +56,22 @@ describe("the input editor", () => {
     expect(e.value()).toBe("");
   });
 
+  it("shows a hint while the line is empty", () => {
+    const { editor: e } = editor();
+    expect(e.element.querySelector(".terminal-input-hint")?.textContent).toBe(
+      "Type a command · ⌘P for actions",
+    );
+  });
+
+  it("hides the hint as soon as there is text, and brings it back", () => {
+    const { editor: e } = editor();
+    e.setValue("ls");
+    const hint = () => e.element.querySelector<HTMLElement>(".terminal-input-hint");
+    expect(hint()?.hidden).toBe(true);
+    e.setValue("");
+    expect(hint()?.hidden).toBe(false);
+  });
+
   it("hands ^C to the pty rather than eating it, leaving the value alone", () => {
     const { editor: e, hooks } = editor();
     e.setValue("sleep 10");

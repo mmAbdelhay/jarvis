@@ -1108,6 +1108,9 @@
     background: transparent; color: transparent;
     caret-color: var(--accent); border: 0; outline: 0; resize: none; white-space: pre-wrap;
     font: inherit; }
+  .terminal-input-hint { position: absolute; inset: 0; pointer-events: none;
+    color: var(--text-muted); opacity: 0.6; white-space: pre; }
+  .terminal-input-hint[hidden] { display: none; }
   .tok-command { color: var(--accent); }
   .tok-flag { color: var(--text-muted); }
   .tok-path { color: var(--good); }

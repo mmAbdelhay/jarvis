@@ -78,12 +78,21 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   const paint = document.createElement("div");
   paint.className = "terminal-input-paint";
 
+  // Text a caller's own e.element.textContent checks would otherwise pick
+  // up even while [hidden] — hidden only affects rendering, not the DOM
+  // tree — so the hint's text is cleared, not just hidden, once there's a
+  // line to show instead.
+  const HINT_TEXT = "Type a command · ⌘P for actions";
+  const hint = document.createElement("div");
+  hint.className = "terminal-input-hint";
+  hint.textContent = HINT_TEXT;
+
   const textarea = document.createElement("textarea");
   textarea.className = "terminal-input-text";
   textarea.spellcheck = false;
   textarea.rows = 1;
 
-  field.append(paint, textarea);
+  field.append(paint, hint, textarea);
   wrapper.append(promptEl, field);
   host.append(wrapper);
   // Starts hidden: the pane that owns this editor decides when it appears.
@@ -105,6 +114,9 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
     // something after it; keep the painted layer's wrapping matching the
     // textarea by appending a zero-width trailer when the value ends in \n.
     if (textarea.value.endsWith("\n")) paint.append(document.createTextNode(""));
+    const empty = textarea.value.length === 0;
+    hint.hidden = !empty;
+    hint.textContent = empty ? HINT_TEXT : "";
   }
 
   function setCursorToEnd() {
