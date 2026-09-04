@@ -499,6 +499,11 @@ export type RendererApi = {
    * brain configured at all, resolves "".
    */
   terminalAi(kind: "generate" | "explain", text: string): Promise<string>;
+  /** The chip row above `paneKey`'s prompt — its directory, git branch and
+   *  dirty counts, and runtime version. `undefined` for a pane this process
+   *  never started; a chip with no data of its own (no repository, no
+   *  `package.json`) is simply absent from what comes back, never guessed. */
+  terminalChips(paneKey: string): Promise<TerminalChips | undefined>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -1259,6 +1264,26 @@ export type TerminalHandlers = {
    * feature promises everywhere else a call might fail.
    */
   terminalAi(kind: "generate" | "explain", text: string): Promise<string>;
+  /** What the chip row above the prompt shows for `paneKey`'s shell: its
+   *  directory, git branch/dirty counts, and runtime version. `undefined`
+   *  for an unknown pane — never a chip guessed from partial information.
+   *  Git and the runtime probe are independent: either being absent (no
+   *  repository, no `package.json`) drops only that chip, never the rest. */
+  chips(paneKey: string): Promise<TerminalChips | undefined>;
+};
+
+/** The chip row above a terminal's prompt — a runtime version, the
+ *  directory, and the git branch with its dirty counts, the strip Warp
+ *  shows above its own input. `branch` is `undefined` when the directory is
+ *  not a git repository at all; `runtime` is `undefined` when it has no
+ *  `package.json` or no probe is configured. Neither ever guesses. */
+export type TerminalChips = {
+  cwd: string;
+  branch: string | undefined;
+  detached: boolean;
+  insertions: number;
+  deletions: number;
+  runtime: string | undefined;
 };
 
 export type TerminalHandlerDeps = {
@@ -1310,6 +1335,17 @@ export type TerminalHandlerDeps = {
    * being exactly one call site.
    */
   brain?: Brain;
+  /** The chip row's git half — see TerminalHandlers.chips. Reuses the same
+   *  GitProvider surface as the Changes view rather than a second git
+   *  integration; absent means no branch/dirty chip at all, and `changes`
+   *  failing (not a repository) is read as "no branch", never surfaced as
+   *  an error. */
+  git?: GitProvider | undefined;
+  /** `node -v` in a directory, injected so the handler's own tests spawn
+   *  nothing. Absent means no runtime chip at all; main wires this to run
+   *  only when `<cwd>/package.json` exists, and to resolve `undefined` on a
+   *  non-zero exit or a throw. */
+  runtimeVersion?: ((cwd: string) => Promise<string | undefined>) | undefined;
 };
 
 /** A failing build's output is not a prompt: only the last 4000 characters
@@ -1377,6 +1413,22 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     for (const [key, cwd] of directories) if (key.startsWith(prefix)) return cwd;
     return undefined;
   };
+
+  // The runtime probe's result, per directory — not per pane, so two panes
+  // (or a pane revisited across chips() calls) sharing a directory cost at
+  // most one `node -v` between them. A directory that comes back with no
+  // `package.json` still gets an entry (value `undefined`), so it is never
+  // re-probed either.
+  const runtimeCache = new Map<string, string | undefined>();
+
+  async function runtimeFor(cwd: string): Promise<string | undefined> {
+    const probe = deps.runtimeVersion;
+    if (probe === undefined) return undefined;
+    if (runtimeCache.has(cwd)) return runtimeCache.get(cwd);
+    const version = await probe(cwd);
+    runtimeCache.set(cwd, version);
+    return version;
+  }
 
   return {
     open(project) {
@@ -1613,6 +1665,40 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // follows.
         return "";
       }
+    },
+
+    async chips(paneKey) {
+      if (!isString(paneKey)) return undefined;
+      // The pane's own key first, the tab as the fallback — the same
+      // resolution listDir, suggest and history use, so a split pane
+      // answers for its own directory rather than its tab's.
+      const cwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (cwd === undefined) return undefined;
+
+      const git = deps.git;
+      const [changes, runtime] = await Promise.all([
+        git === undefined
+          ? Promise.resolve(undefined)
+          : git
+              .changes(cwd)
+              // GitProvider's contract says a failure is a GitOutcome, not a
+              // throw, but this handler does not trust that either way — a
+              // real-world throw (or a failed outcome, meaning "not a
+              // repository") both degrade to no branch and no counts, never
+              // an error surfaced in a terminal.
+              .then((outcome) => (outcome.ok ? outcome.value : undefined))
+              .catch(() => undefined),
+        runtimeFor(cwd),
+      ]);
+
+      return {
+        cwd,
+        branch: changes?.branch,
+        detached: changes?.detached ?? false,
+        insertions: changes?.insertions ?? 0,
+        deletions: changes?.deletions ?? 0,
+        runtime,
+      };
     },
   };
 }

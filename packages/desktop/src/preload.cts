@@ -76,6 +76,7 @@ const api: RendererApi = {
   terminalSettings: () => ipcRenderer.invoke("terminal:settings"),
   terminalWorkflows: (project) => ipcRenderer.invoke("terminal:workflows", project),
   terminalAi: (kind, text) => ipcRenderer.invoke("terminal:ai", kind, text),
+  terminalChips: (paneKey) => ipcRenderer.invoke("terminal:chips", paneKey),
   openDockerTab: (project) => ipcRenderer.invoke("docker:open", project),
   dockerNames: (project) => ipcRenderer.invoke("docker:names", project),
   dockerView: (project) => ipcRenderer.invoke("docker:view", project),

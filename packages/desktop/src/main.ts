@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -132,6 +133,32 @@ function setDockIcon(): void {
   } catch {
     // A missing or unreadable icon is not a reason to fail to start.
   }
+}
+
+/**
+ * `node -v` run inside `cwd` — the chip row's runtime probe. Spawned with
+ * an explicit `cwd` rather than through the shared `runCommand` (which has
+ * no cwd of its own and would report this process's own directory for
+ * every pane): a version manager whose `node` shim reads the directory
+ * (Volta, an `.nvmrc`-aware wrapper) only answers correctly when the
+ * working directory it sees is the pane's, not Jarvis's. Resolves
+ * `undefined` on a non-zero exit or any spawn failure — never an error
+ * surfaced in a terminal.
+ */
+function nodeVersionIn(cwd: string): Promise<string | undefined> {
+  return new Promise((resolvePromise) => {
+    try {
+      const child = spawn("node", ["-v"], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+      let stdout = "";
+      child.stdout.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
+      child.on("error", () => resolvePromise(undefined));
+      child.on("close", (code) => resolvePromise(code === 0 ? stdout.trim() : undefined));
+    } catch {
+      resolvePromise(undefined);
+    }
+  });
 }
 
 /** What a voice preview says. The greeting itself, so the sample is the
@@ -664,6 +691,15 @@ app.whenReady().then(async () => {
       // TerminalHandlerDeps.brain's own note on why nothing else in ipc.ts
       // calls it.
       brain,
+      // The chip row's git half — the same GitProvider the Changes view
+      // uses, not a second git integration.
+      git,
+      // The chip row's runtime half. Gated on a `package.json` existing so
+      // a directory with none is never spawned into for nothing; a
+      // non-zero exit or a throw is `undefined`, same as every other
+      // chip-data failure — never surfaced as an error in a terminal.
+      runtimeVersion: (cwd) =>
+        existsSync(join(cwd, "package.json")) ? nodeVersionIn(cwd) : Promise.resolve(undefined),
     });
 
     // Constructed here, not beside headlamp above, because opening the
@@ -1317,6 +1353,7 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:ai", (_event, kind: unknown, text: unknown) =>
       terminal.terminalAi(kind as "generate" | "explain", text as string),
     );
+    ipcMain.handle("terminal:chips", (_event, paneKey: unknown) => terminal.chips(paneKey as string));
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );

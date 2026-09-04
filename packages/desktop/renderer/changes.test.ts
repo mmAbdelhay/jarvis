@@ -72,6 +72,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     })),
     terminalWorkflows: vi.fn(async () => []),
     terminalAi: vi.fn(async () => ""),
+    terminalChips: vi.fn(async () => undefined),
     setDevTools: vi.fn(async () => {}),
     openDockerTab: vi.fn(async () => notStubbed),
     dockerNames: vi.fn(async () => notStubbed),

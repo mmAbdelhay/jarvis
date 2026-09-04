@@ -2642,6 +2642,124 @@ describe("terminal handlers", () => {
       await expect(handlers.listDir("ghost:p1", "/proj")).resolves.toEqual([]);
     });
   });
+
+  describe("chips", () => {
+    function baseDeps(): TerminalHandlerDeps {
+      const { manager } = shells();
+      return {
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+      };
+    }
+
+    it("reports the branch and counts from the git provider", async () => {
+      const deps = baseDeps();
+      const git = {
+        changes: vi.fn(async () => ({
+          ok: true as const,
+          value: {
+            repoPath: "/proj",
+            branch: "master",
+            detached: false,
+            files: [],
+            insertions: 3,
+            deletions: 1,
+          },
+        })),
+      };
+      const handlers = createTerminalHandlers({ ...deps, git: git as unknown as GitProvider });
+      handlers.open("p");
+
+      await expect(handlers.chips("tab-1")).resolves.toMatchObject({
+        cwd: "/proj",
+        branch: "master",
+        detached: false,
+        insertions: 3,
+        deletions: 1,
+      });
+      // Proves the branch/counts actually came from the git provider rather
+      // than being hardcoded: it was asked about this pane's own directory.
+      expect(git.changes).toHaveBeenCalledWith("/proj");
+    });
+
+    it("leaves branch undefined when the directory is not a repository", async () => {
+      const deps = baseDeps();
+      const git = {
+        changes: vi.fn(async () => ({ ok: false as const, text: "not a repo", language: "en" as const })),
+      };
+      const handlers = createTerminalHandlers({ ...deps, git: git as unknown as GitProvider });
+      handlers.open("p");
+
+      await expect(handlers.chips("tab-1")).resolves.toMatchObject({ branch: undefined });
+      // A failure result must still be a real call, not a chip that skips
+      // git entirely and reports "no branch" for every pane regardless.
+      expect(git.changes).toHaveBeenCalledWith("/proj");
+    });
+
+    it("probes the runtime once per directory and caches it", async () => {
+      const deps = baseDeps();
+      const runtimeVersion = vi.fn(async () => "v22.11.0");
+      const handlers = createTerminalHandlers({ ...deps, runtimeVersion });
+      handlers.open("p");
+
+      await expect(handlers.chips("tab-1")).resolves.toMatchObject({ runtime: "v22.11.0" });
+      await handlers.chips("tab-1");
+
+      expect(runtimeVersion).toHaveBeenCalledTimes(1);
+      expect(runtimeVersion).toHaveBeenCalledWith("/proj");
+    });
+
+    it("reports nothing at all for an unknown pane", async () => {
+      const deps = baseDeps();
+      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const runtimeVersion = vi.fn(async () => "v22.11.0");
+      const handlers = createTerminalHandlers({
+        ...deps,
+        git: git as unknown as GitProvider,
+        runtimeVersion,
+      });
+
+      await expect(handlers.chips("nope")).resolves.toBeUndefined();
+      // An unknown pane must never even ask git or the runtime probe about
+      // some default directory — the whole result is absent, not a guess.
+      expect(git.changes).not.toHaveBeenCalled();
+      expect(runtimeVersion).not.toHaveBeenCalled();
+    });
+
+    it("has no branch and no runtime when neither dep is configured", async () => {
+      const deps = baseDeps();
+      const handlers = createTerminalHandlers(deps);
+      handlers.open("p");
+
+      await expect(handlers.chips("tab-1")).resolves.toMatchObject({
+        cwd: "/proj",
+        branch: undefined,
+        detached: false,
+        insertions: 0,
+        deletions: 0,
+        runtime: undefined,
+      });
+    });
+
+    it("resolves a split pane to its own directory, not its tab's", async () => {
+      const deps = baseDeps();
+      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const handlers = createTerminalHandlers({
+        ...deps,
+        projects: { p: "/proj", q: "/other" },
+        git: git as unknown as GitProvider,
+      });
+      handlers.open("p");
+      handlers.split("tab-1", "p1");
+
+      await handlers.chips("tab-1:p1");
+
+      expect(git.changes).toHaveBeenCalledWith("/proj");
+    });
+  });
 });
 
 describe("api handlers", () => {
