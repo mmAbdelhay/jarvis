@@ -29,6 +29,7 @@ describe("TabStore", () => {
           canGoForward: false,
           error: undefined,
           hasPlayingVideo: false,
+          suspended: false,
         },
       ],
       activeTabId: "tab-1",
@@ -170,6 +171,15 @@ describe("TabStore", () => {
     tabs.open("b", "https://two.example");
 
     expect(calls).toBe(1);
+  });
+
+  it("opens a tab unsuspended, and lets a patch suspend it", () => {
+    const tabs = store();
+    const tab = tabs.open("acme", "https://example.com");
+    expect(tab.suspended).toBe(false);
+
+    tabs.update(tab.id, { suspended: true });
+    expect(tabs.snapshot().tabs[0]?.suspended).toBe(true);
   });
 
   // Same isolation rule ProviderStatusStore and ChangeTracker apply.

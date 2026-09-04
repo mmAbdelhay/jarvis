@@ -58,6 +58,12 @@ export type WorkspaceTab = {
    *  thing that puts the Picture-in-Picture button on screen, so that the
    *  button is never a dead control on a page with nothing to float. */
   hasPlayingVideo: boolean;
+  /** Whether this tab's hosted view has been reclaimed while it sat hidden
+   *  — see BrowserHost.sweepIdle. The tab, its URL and its place in the
+   *  strip are all still here; only the Chromium renderer behind it is
+   *  gone, and activating the tab builds a new one at the same URL. False
+   *  for every tab that never had a view to lose (terminal, api, docker). */
+  suspended: boolean;
 };
 
 export type WorkspaceState = {
