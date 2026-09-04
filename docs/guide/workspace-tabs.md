@@ -208,7 +208,7 @@ addressable thing you can collapse, copy, re-run and jump between, instead of
 an undifferentiated scroll of text.
 
 ```
-┌ ✔ pnpm test                    2.4s   ~/projects/jarvis   ⌄ ⧉ ↻ ⋯
+┌ ✔ pnpm test                    2.4s   ~/projects/jarvis   ▾ ⧉ ↻ ⋯
 │ 42 passed
 └
 ```
@@ -218,7 +218,7 @@ directory it ran in. Its controls:
 
 | Control | Does |
 | --- | --- |
-| ⌄ | Collapse or expand the block's output |
+| ▾ | Collapse the block's output (it becomes ▸, which expands it again) |
 | ⧉ | Copy the output |
 | ↻ | Fill the input with this command |
 | ⋯ | Copy command, copy both, filter the list to this command |
@@ -275,17 +275,29 @@ its own, keeping blocks, see `terminal.blocks.inputEditor` in
 A Terminal tab holds a tree of panes rather than a single shell. **⌘D** splits
 the focused pane to the right, **⌘⇧D** splits it down, **⌥⌘←** / **⌥⌘→** move
 focus between panes. Each pane is a full terminal in its own right — its own
-blocks, its own editor, its own autocomplete. Closing a pane kills its shell;
+blocks, its own editor, its own autocomplete. Drag the divider between two
+panes to resize them.
+
+To close a pane, use **⌘P → "Close pane"**; closing the last pane closes the
+tab. (⌘W is the window's own Close Window shortcut and never reaches the page,
+so there is no keyboard chord for this.) Closing a pane kills its shell;
 closing the tab kills every shell under it.
 
 ### The command palette
 
-**⌘P** opens a filterable list of everything the focused pane can do: every
-block action, split and close, clearing the terminal, toggling blocks,
-running a saved workflow, and history search. **`^R`** jumps straight to
-history search — Jarvis's own command log, the same one the editor's ↑/↓
-walk, not zsh's. Picking a history line **fills the input editor**; it does
-not run it.
+**⌘P** opens a filterable list of everything the focused pane can do: copy or
+re-run the selected block, collapse every block, jump to the next failed one,
+toggle the failed-only filter, split right / split down / close pane, clear
+the terminal, run a saved workflow, generate or explain a command with the
+AI, and history search. The list is built for the pane as it is right now, so
+an action with nothing to act on — re-run with no block selected, splits on
+the Session route's terminal — is left out rather than offered and ignored.
+(Blocks themselves are turned on and off in configuration, not from here: see
+`terminal.blocks.enabled`.)
+
+**`^R`** jumps straight to history search — Jarvis's own command log, the same
+one the editor's ↑/↓ walk, not zsh's. Picking a history line **fills the input
+editor**; it does not run it.
 
 ### Workflows
 
