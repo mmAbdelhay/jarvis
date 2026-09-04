@@ -19,6 +19,7 @@ import {
   createGitHandlers,
   createSettingsHandlers,
   isDeclaredContainer,
+  resolveWithin,
   type WiringDeps,
 } from "./ipc.js";
 import type {
@@ -2422,14 +2423,26 @@ describe("terminal handlers", () => {
   // same question: can a string reach a directory outside the project the
   // pane belongs to?
   describe("listDir", () => {
+    // Every path readDir was asked for. Asserting only on the return value
+    // cannot tell a refusal from a listing that happened to be empty — the
+    // fake answers [] for every path but "/proj" — so each refusal below
+    // asserts the disk was never touched, which is the property the
+    // boundary actually promises.
+    let read: string[] = [];
+    beforeEach(() => {
+      read = [];
+    });
+
     const files = {
-      readDir: (path: string) =>
-        path === "/proj"
+      readDir: (path: string) => {
+        read.push(path);
+        return path === "/proj"
           ? [
               { name: "src", directory: true },
               { name: "a.ts", directory: false },
             ]
-          : [],
+          : [];
+      },
       realPath: (path: string) => path.replace(/\/$/, ""),
     };
 
@@ -2458,22 +2471,11 @@ describe("terminal handlers", () => {
     });
 
     it("refuses a path outside the project root", async () => {
-      const read: string[] = [];
-      const handlers = listing({
-        files: {
-          ...files,
-          readDir: (path: string) => {
-            read.push(path);
-            return [];
-          },
-        },
-      });
+      const handlers = listing();
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/etc")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "/proj/../etc")).resolves.toEqual([]);
-      // Watched, not merely asserted empty: a listing of /etc that came
-      // back empty would read the same as a refusal.
       expect(read).toEqual([]);
     });
 
@@ -2483,21 +2485,15 @@ describe("terminal handlers", () => {
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/proj/link")).resolves.toEqual([]);
+      expect(read).toEqual([]);
     });
 
     // The escaping link is a *parent* of the path asked for, not its last
     // segment. realpathSync resolves every component, and this is what
     // would notice if the check were ever narrowed to the leaf.
-    // `readDir` is watched rather than only its answer asserted: the shared
-    // fake answers [] for every path but "/proj", so an escape that got
-    // through would look exactly like a refusal.
     it("refuses a path whose parent component is a symlink out of the project", async () => {
-      const read: string[] = [];
       const escaping = {
-        readDir: (path: string) => {
-          read.push(path);
-          return [];
-        },
+        ...files,
         realPath: (p: string) => (p.startsWith("/proj/link") ? p.replace("/proj/link", "/etc") : p),
       };
       const handlers = listing({ files: escaping });
@@ -2513,14 +2509,7 @@ describe("terminal handlers", () => {
     // string the renderer sent. Anything else is "checked one path, opened
     // another".
     it("reads the resolved path it approved, not the caller's string", async () => {
-      const read: string[] = [];
-      const linked = {
-        readDir: (path: string) => {
-          read.push(path);
-          return [];
-        },
-        realPath: (p: string) => (p === "/proj/link" ? "/proj/real" : p),
-      };
+      const linked = { ...files, realPath: (p: string) => (p === "/proj/link" ? "/proj/real" : p) };
       const handlers = listing({ files: linked });
       handlers.open("p");
 
@@ -2533,6 +2522,7 @@ describe("terminal handlers", () => {
 
       await expect(handlers.listDir(7 as unknown as string, "/proj")).resolves.toEqual([]);
       await expect(handlers.listDir("nope", "/proj")).resolves.toEqual([]);
+      expect(read).toEqual([]);
     });
 
     it("returns [] when the directory cannot be read", async () => {
@@ -2560,6 +2550,7 @@ describe("terminal handlers", () => {
       delete projects["p"];
 
       await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
+      expect(read).toEqual([]);
     });
 
     it("has nothing to list with no file access configured", async () => {
@@ -2577,6 +2568,7 @@ describe("terminal handlers", () => {
 
       await expect(handlers.listDir("tab-1", "/proj-secrets")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "/projX/deep")).resolves.toEqual([]);
+      expect(read).toEqual([]);
     });
 
     // Anything not absolute would resolve against whatever directory the
@@ -2588,6 +2580,23 @@ describe("terminal handlers", () => {
       await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "")).resolves.toEqual([]);
+      expect(read).toEqual([]);
+    });
+
+    // Through the handler, a relative path is refused by containment
+    // anyway, because this process's cwd is not inside the fake project —
+    // so that test alone does not pin the guard. Asked of the check
+    // directly, with the process's own cwd as the root, it does: the guard
+    // is the only thing standing between "src" and a listing of whatever
+    // directory Jarvis happens to have been launched from.
+    it("refuses a relative candidate even when the process cwd is the root", () => {
+      const identity = (p: string) => p;
+
+      expect(resolveWithin(process.cwd(), "src", identity)).toBeUndefined();
+      expect(resolveWithin(process.cwd(), "", identity)).toBeUndefined();
+      expect(resolveWithin("proj", "/proj/src", identity)).toBeUndefined();
+      // And still answers for the paths it should.
+      expect(resolveWithin("/proj", "/proj/src", identity)).toBe("/proj/src");
     });
 
     it("refuses a path carrying a NUL byte", async () => {
@@ -2595,6 +2604,7 @@ describe("terminal handlers", () => {
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/proj\u0000/../etc")).resolves.toEqual([]);
+      expect(read).toEqual([]);
     });
 
     // The root is the pane's *own* project, so the longest configured
@@ -2605,22 +2615,12 @@ describe("terminal handlers", () => {
       handlers.open("p");
 
       await expect(handlers.listDir("tab-1", "/pro/secret")).resolves.toEqual([]);
+      expect(read).toEqual([]);
       await expect(handlers.listDir("tab-1", "/proj")).resolves.toHaveLength(2);
     });
 
     it("keeps a nested project inside its own directory", async () => {
-      const read: string[] = [];
-      const recording = {
-        ...files,
-        readDir: (path: string) => {
-          read.push(path);
-          return [];
-        },
-      };
-      const handlers = listing({
-        projects: { outer: "/proj", inner: "/proj/inner" },
-        files: recording,
-      });
+      const handlers = listing({ projects: { outer: "/proj", inner: "/proj/inner" } });
       handlers.open("inner");
 
       await expect(handlers.listDir("tab-1", "/proj")).resolves.toEqual([]);
