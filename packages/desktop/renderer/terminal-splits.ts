@@ -138,9 +138,15 @@ export function createSplitTree(
     divider.className = "terminal-split-divider";
     divider.dataset["direction"] = branch.direction;
     divider.setAttribute("role", "separator");
-    divider.addEventListener("pointerdown", (event) => startDrag(branch, event));
+    divider.addEventListener("pointerdown", (event) => startDrag(branch, divider, event));
     return divider;
   };
+
+  /** The drag currently in progress, if any — its own `stop`. Held so a
+   *  tree disposed mid-drag (a tab closed with the button still down) takes
+   *  its window listeners with it instead of leaving them, and everything
+   *  they close over, alive for the life of the process. */
+  let stopDrag: (() => void) | undefined;
 
   /**
    * The divider drag. The size goes on the child before the divider — the
@@ -149,10 +155,20 @@ export function createSplitTree(
    *
    * The listeners live on the window rather than on the divider, so a
    * pointer that leaves the thin divider mid-drag (which it does
-   * immediately) goes on being followed.
+   * immediately) goes on being followed — and the divider *captures* the
+   * pointer, which is what makes that true outside the window as well.
+   * Without the capture, a button released past the edge of the Electron
+   * window never delivered a pointerup here at all: the drag stayed live,
+   * the divider went on following a cursor with no button held, and every
+   * pane it passed over was resized on hover, permanently, with the
+   * listeners leaked and the branch's panes and xterms retained.
    */
-  const startDrag = (branch: Branch, event: MouseEvent): void => {
+  const startDrag = (branch: Branch, divider: HTMLElement, event: PointerEvent): void => {
     event.preventDefault();
+    // A second pointerdown before the first drag ended (a second finger, a
+    // capture that never arrived) ends the first rather than stacking.
+    stopDrag?.();
+    attempt(() => divider.setPointerCapture(event.pointerId));
 
     const move = (moveEvent: MouseEvent): void => {
       // Read afresh on every move: a collapsing branch below this one can
@@ -171,15 +187,27 @@ export function createSplitTree(
     };
 
     const stop = (): void => {
+      if (stopDrag !== stop) return; // Already stopped; nothing to undo twice.
+      stopDrag = undefined;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      divider.removeEventListener("lostpointercapture", stop);
+      attempt(() => divider.releasePointerCapture(event.pointerId));
       // The cell grid changed under both panes: xterm only learns that
       // from a fit, and each pane's own refit guards its zero-size case.
       refitAll();
     };
 
+    stopDrag = stop;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
+    // Every other way a drag can end: the pointer cancelled (a touch turned
+    // into a scroll, the device gone), or the capture lost for any reason
+    // at all — including the window losing focus mid-drag, which is exactly
+    // the case a bare pointerup never covered.
+    window.addEventListener("pointercancel", stop);
+    divider.addEventListener("lostpointercapture", stop);
   };
 
   /** Puts `replacement` where `node` sits — in the tree and in the DOM. */
@@ -263,7 +291,11 @@ export function createSplitTree(
       attempt(() => target.pane.dispose());
       target.element.remove();
       // The pane is gone; its shell must go with it.
-      attempt(() => void window.jarvis.closeTerminalPane(target.key));
+      // .catch on top of attempt(): attempt only catches a *synchronous*
+      // throw, and this is the orphan-shell path (the design's Risk 4) —
+      // an unhandled rejection here would be the only signal that a shell
+      // outlived its pane, delivered as a console error nobody reads.
+      attempt(() => void window.jarvis.closeTerminalPane(target.key).catch(() => {}));
 
       const remaining = leaves();
       // The pane that took its place on screen, or the last one when the
@@ -287,6 +319,9 @@ export function createSplitTree(
     panes: () => leaves().map((leaf) => leaf.pane),
 
     dispose() {
+      // A drag in progress dies with the tree: its listeners live on the
+      // window and would otherwise outlive every element they act on.
+      stopDrag?.();
       for (const leaf of leaves()) {
         attempt(() => leaf.pane.dispose());
         leaf.element.remove();

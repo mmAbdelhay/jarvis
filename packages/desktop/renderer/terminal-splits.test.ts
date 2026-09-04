@@ -273,6 +273,57 @@ describe("the split tree", () => {
     expect(made.map((entry) => entry.refits)).toEqual(before.map((count) => count + 1));
   });
 
+  // A pointerup is not the only way a drag ends, and it is not even the
+  // reliable one: a button released outside the Electron window delivers no
+  // pointerup to the page at all. Without a capture (and something to catch
+  // its loss) the drag stayed live — the divider went on following a cursor
+  // with no button held, resizing panes on hover, for good, with the window
+  // listeners leaked and the branch's panes and xterms retained.
+  it("ends the drag when the pointer capture is lost rather than released", () => {
+    const { tree: split, host } = tree();
+    split.split("row");
+    const divider = host.querySelector(".terminal-split-divider");
+    if (divider === null) throw new Error("expected a divider");
+    pointer(divider, "pointerdown", 400, 10);
+    pointer(window, "pointermove", 300, 10);
+
+    divider.dispatchEvent(new Event("lostpointercapture"));
+    pointer(window, "pointermove", 120, 10);
+
+    expect(paneOf("tab-1").host.style.flexBasis).toBe("300px");
+  });
+
+  it("ends the drag when the pointer is cancelled", () => {
+    const { tree: split, host } = tree();
+    split.split("row");
+    const divider = host.querySelector(".terminal-split-divider");
+    if (divider === null) throw new Error("expected a divider");
+    pointer(divider, "pointerdown", 400, 10);
+    pointer(window, "pointermove", 300, 10);
+
+    pointer(window, "pointercancel", 300, 10);
+    pointer(window, "pointermove", 120, 10);
+
+    expect(paneOf("tab-1").host.style.flexBasis).toBe("300px");
+  });
+
+  // A tab closed with the button still down: the drag's listeners live on
+  // the window and would otherwise outlive every element they act on.
+  it("takes a drag in progress down with the tree", () => {
+    const { tree: split, host } = tree();
+    split.split("row");
+    const divider = host.querySelector(".terminal-split-divider");
+    if (divider === null) throw new Error("expected a divider");
+    pointer(divider, "pointerdown", 400, 10);
+    pointer(window, "pointermove", 300, 10);
+    const pane = paneOf("tab-1").host;
+
+    split.dispose();
+    pointer(window, "pointermove", 120, 10);
+
+    expect(pane.style.flexBasis).toBe("300px");
+  });
+
   // A drag that would leave one side too narrow to be a terminal is
   // clamped rather than obeyed.
   it("keeps a dragged pane wide enough to be a terminal", () => {
