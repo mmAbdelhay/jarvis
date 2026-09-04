@@ -58,3 +58,63 @@ describe("history overlay [hidden] cascade", () => {
     expect(body).toMatch(/display\s*:\s*flex/);
   });
 });
+
+// The same cascade trap, found again in `.session-empty` — and this time by
+// looking at the running app rather than at the CSS. The session view's
+// empty state set `display: flex` unconditionally, so `renderHeader`'s
+// `empty.hidden = true` never hid it: the panel sat on top of the terminal
+// and a session opened from history read "No session open." over its own
+// transcript. Measured in a real Chromium window, the element reported
+// `hidden: true` and `offsetParent !== null` at the same time.
+describe("session empty state [hidden] cascade", () => {
+  it("the base .session-empty rule does not set display", () => {
+    const body = ruleBodyFor(".session-empty", htmlSource);
+    expect(body).not.toMatch(/display\s*:/);
+  });
+
+  it("display: flex is gated on :not([hidden])", () => {
+    const body = ruleBodyFor(".session-empty:not([hidden])", htmlSource);
+    expect(body).toMatch(/display\s*:\s*flex/);
+  });
+});
+
+// jsdom cannot lay out a flex row, so the shape is pinned at the source in
+// the same way as the cascade rules above. The session header is a flex row
+// containing an absolute path; with nothing allowed to shrink it overflowed
+// its own padding and clipped the Resume button at the right edge.
+describe("session header overflow", () => {
+  it("lets the path truncate rather than pushing controls off the row", () => {
+    const body = ruleBodyFor("#session-view-path", htmlSource);
+    expect(body).toMatch(/min-width\s*:\s*0/);
+    expect(body).toMatch(/text-overflow\s*:\s*ellipsis/);
+  });
+
+  // .workspace-nav is a 28px icon square; this button carries a word, so it
+  // must size to its text or print clipped — the same override .api-bar
+  // button already needed for the same reason.
+  it("sizes the Resume button to its text and never shrinks it", () => {
+    const body = ruleBodyFor("#session-resume,\n  #session-back", htmlSource);
+    expect(body).toMatch(/width\s*:\s*auto/);
+    expect(body).toMatch(/flex-shrink\s*:\s*0/);
+    expect(body).toMatch(/white-space\s*:\s*nowrap/);
+  });
+});
+
+// Three separate rules in this file have now been written with an
+// unconditional `display` and a `hidden` attribute expected to hide them:
+// .history-overlay, .session-empty and .session-detail. Naming each one in
+// its own test only ever catches the ones already known, so this catches the
+// shape: whenever a selector has a `:not([hidden])` variant — the fixed
+// pattern — its base rule must not set `display`, or the variant is
+// pointless and the element renders while hidden.
+describe("[hidden] cascade, generally", () => {
+  it("no rule gated on :not([hidden]) also sets display unconditionally", () => {
+    const gated = [...htmlSource.matchAll(/([.#][A-Za-z0-9_-]+):not\(\[hidden\]\)\s*\{/g)].map(
+      (match) => match[1] as string,
+    );
+    expect(gated.length).toBeGreaterThan(0);
+    for (const selector of new Set(gated)) {
+      expect(ruleBodyFor(selector, htmlSource), `${selector} base rule`).not.toMatch(/display\s*:/);
+    }
+  });
+});

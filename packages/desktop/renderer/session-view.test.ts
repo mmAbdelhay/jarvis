@@ -27,9 +27,21 @@ function layoutDom(): void {
       <div id="session-view-path"></div>
       <div id="session-voice" hidden></div>
       <div id="session-view-state"></div>
+      <button id="session-resume" hidden></button>
       <div id="session-view-agent"></div>
+      <button id="session-back" hidden></button>
+      <div id="session-detail" hidden></div>
       <div id="session-terminal"></div>
+      <div id="session-transcript" hidden></div>
       <div id="session-empty" hidden></div>
+      <div id="session-table" hidden>
+        <input id="session-search" />
+        <select id="session-filter-project"></select>
+        <select id="session-filter-agent"></select>
+        <div id="session-count"></div>
+        <div id="session-table-status"></div>
+        <table><thead><tr><th data-sort="project"></th><th data-sort="lastActivityAt"></th></tr></thead><tbody id="session-table-body"></tbody></table>
+      </div>
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
@@ -39,12 +51,21 @@ function layoutDom(): void {
 
 type Jarvis = Pick<
   RendererApi,
-  "getSessionLog" | "sendSessionInput" | "resizeSession" | "setVoiceTarget"
+  | "getSessionLog"
+  | "getSessionTranscript"
+  | "resumeSession"
+  | "getHistory"
+  | "sendSessionInput"
+  | "resizeSession"
+  | "setVoiceTarget"
 >;
 
 function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
+    getSessionTranscript: vi.fn(async () => []),
+    resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
+    getHistory: vi.fn(async () => [] as Session[]),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -122,6 +143,96 @@ describe("openSession", () => {
     await openSession(makeSession());
 
     expect(term().text).toBe("welcome banner\r\n");
+  });
+
+  // A session started in a terminal has no pty backlog at all — only the
+  // transcript the importer recorded. Before this, clicking one opened a
+  // blank screen, which is what "clicking a session does nothing" was.
+  // A recorded conversation is not terminal output, so it is laid out as
+  // one instead of written into xterm.
+  it("shows the transcript as a conversation when there is no backlog", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "fetch all my bugs", tools: [] },
+        { role: "assistant" as const, text: "On it.", tools: ["Bash"] },
+      ]),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    const view = document.getElementById("session-transcript");
+    expect(view?.hidden).toBe(false);
+    expect(document.getElementById("session-terminal")?.hidden).toBe(true);
+    expect(view?.querySelectorAll(".transcript-turn")).toHaveLength(2);
+    expect(view?.textContent).toContain("fetch all my bugs");
+    expect(view?.querySelector(".transcript-tool")?.textContent).toBe("Bash");
+  });
+
+  it("tells a user turn from an assistant turn", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "hi", tools: [] },
+        { role: "assistant" as const, text: "hello", tools: [] },
+      ]),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    const turns = document.querySelectorAll(".transcript-turn");
+    expect(turns[0]?.className).toContain("transcript-turn--user");
+    expect(turns[1]?.className).toContain("transcript-turn--assistant");
+  });
+
+  // Transcript text is whatever was typed at an agent; it is displayed,
+  // never interpreted.
+  it("renders a turn as text, never as markup", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => [
+        { role: "user" as const, text: "<img src=x onerror=alert(1)>", tools: [] },
+      ]),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(document.querySelector("#session-transcript img")).toBeNull();
+    expect(document.getElementById("session-transcript")?.textContent).toContain("<img");
+  });
+
+  // A live session's output really is terminal output and keeps the emulator.
+  it("keeps the terminal for a session with a backlog", async () => {
+    stubJarvis({ getSessionLog: vi.fn(async () => "live output\r\n") });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(document.getElementById("session-transcript")?.hidden).toBe(true);
+    expect(term().text).toBe("live output\r\n");
+  });
+
+  // The backlog is the live truth for a session Jarvis owns; asking for a
+  // transcript it does not have would be a wasted round trip on every open.
+  it("does not ask for a transcript when a backlog exists", async () => {
+    const getSessionTranscript = vi.fn(async () => []);
+    stubJarvis({ getSessionLog: vi.fn(async () => "live output\r\n"), getSessionTranscript });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+
+    expect(getSessionTranscript).not.toHaveBeenCalled();
+    expect(term().text).toBe("live output\r\n");
+  });
+
+  // A transcript read that fails must leave the view usable, not throw.
+  it("survives a transcript that cannot be read", async () => {
+    stubJarvis({
+      getSessionLog: vi.fn(async () => ""),
+      getSessionTranscript: vi.fn(async () => {
+        throw new Error("nope");
+      }),
+    });
+    const { openSession } = await import("./session-view.js");
+    await expect(openSession(makeSession())).resolves.toBeUndefined();
   });
 
   // The bytes are a terminal's screen, not text: escape sequences must
@@ -468,5 +579,209 @@ describe("empty state", () => {
     const { wireSessionView, renderEmptyState } = await import("./session-view.js");
     expect(() => wireSessionView()).not.toThrow();
     expect(() => renderEmptyState()).not.toThrow();
+  });
+});
+
+describe("resume", () => {
+  // A session Jarvis is already running has a live process; resuming it
+  // would spawn a second agent against the same conversation.
+  it("offers resume only for a session that has ended", async () => {
+    stubJarvis();
+    const { openSession } = await import("./session-view.js");
+
+    await openSession(makeSession({ state: "done" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(false);
+
+    await openSession(makeSession({ state: "running" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(true);
+  });
+
+  it("resumes the session that is on screen", async () => {
+    const resumeSession = vi.fn(async () => ({ ok: true, language: "en" as const }));
+    stubJarvis({ resumeSession });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "past-1", state: "done" }));
+
+    document.getElementById("session-resume")?.click();
+    await Promise.resolve();
+
+    expect(resumeSession).toHaveBeenCalledWith("past-1", expect.anything());
+  });
+
+  // A refusal has to be visible: a button that silently does nothing is the
+  // bug this whole feature exists to fix.
+  it("says why when a resume is refused", async () => {
+    stubJarvis({
+      resumeSession: vi.fn(async () => ({
+        ok: false,
+        text: "This session cannot be resumed.",
+        language: "en" as const,
+      })),
+    });
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ state: "done" }));
+
+    document.getElementById("session-resume")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The refusal lands in the sessions view's own status line, which is
+    // where both Resume buttons report — a button that silently does nothing
+    // is the bug this whole view exists to fix.
+    expect(document.getElementById("session-table-status")?.textContent).toContain(
+      "cannot be resumed",
+    );
+  });
+});
+
+describe("session table", () => {
+  const rows = (): HTMLElement[] => [
+    ...document.querySelectorAll("#session-table-body > tr"),
+  ] as HTMLElement[];
+
+  it("lists every recorded session", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => [
+        makeSession({ id: "a", summary: "first" }),
+        makeSession({ id: "b", summary: "second" }),
+      ]),
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]?.textContent).toContain("first");
+  });
+
+  // The whole point of the table: every row can be picked back up.
+  it("gives every row a Resume button", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "a", state: "done" })]) });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(rows()[0]?.querySelector("button")?.textContent).toBe("Resume");
+  });
+
+  it("resumes the row's own session, naming the selected project", async () => {
+    const resumeSession = vi.fn(async () => ({ ok: true, project: "app", language: "en" as const }));
+    stubJarvis({
+      getHistory: vi.fn(async () => [makeSession({ id: "the-one" })]),
+      resumeSession,
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    rows()[0]?.querySelector("button")?.click();
+    await Promise.resolve();
+
+    expect(resumeSession).toHaveBeenCalledWith("the-one", expect.anything());
+  });
+
+  // A row is untrusted text: a summary is whatever the user typed into an
+  // agent, and it reaches this table straight from a transcript.
+  it("renders a summary as text, never as markup", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => [makeSession({ summary: "<img src=x onerror=alert(1)>" })]),
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(document.querySelector("#session-table-body img")).toBeNull();
+    expect(rows()[0]?.textContent).toContain("<img");
+  });
+
+  it("says so rather than showing an empty table when there are none", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => []) });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    expect(document.getElementById("session-table")?.textContent).toMatch(/no sessions/i);
+  });
+
+  // Opening a session hides the table; going back brings it out again.
+  it("swaps between the table and a session's terminal", async () => {
+    stubJarvis({ getHistory: vi.fn(async () => [makeSession()]) });
+    const { renderSessionTable, openSession } = await import("./session-view.js");
+    await renderSessionTable();
+    expect(document.getElementById("session-table")?.hidden).toBe(false);
+
+    await openSession(makeSession());
+    expect(document.getElementById("session-table")?.hidden).toBe(true);
+    expect(document.getElementById("session-back")?.hidden).toBe(false);
+
+    document.getElementById("session-back")?.click();
+    await Promise.resolve();
+    expect(document.getElementById("session-table")?.hidden).toBe(false);
+  });
+});
+
+describe("session filters", () => {
+  const rows = (): HTMLElement[] =>
+    [...document.querySelectorAll("#session-table-body > tr")] as HTMLElement[];
+
+  async function load(): Promise<void> {
+    stubJarvis({
+      getHistory: vi.fn(async () => [
+        makeSession({ id: "a", summary: "fetch all my bugs", lastActivityAt: 100 }),
+        makeSession({ id: "b", summary: "add a cluster tab", lastActivityAt: 300 }),
+      ]),
+    });
+    const { renderSessionTable, wireSessionView } = await import("./session-view.js");
+    wireSessionView();
+    await renderSessionTable();
+  }
+
+  it("narrows the table as the search box is typed into", async () => {
+    await load();
+    expect(rows()).toHaveLength(2);
+
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "cluster";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]?.textContent).toContain("cluster");
+  });
+
+  it("counts what is shown against the total once filtered", async () => {
+    await load();
+    expect(document.getElementById("session-count")?.textContent).toBe("2 sessions");
+
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "cluster";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(document.getElementById("session-count")?.textContent).toBe("1 of 2");
+  });
+
+  // An empty table has two very different causes and the reader deserves to
+  // know which one they are looking at.
+  it("distinguishes no sessions from no matches", async () => {
+    await load();
+    const search = document.getElementById("session-search") as HTMLInputElement;
+    search.value = "nothing matches this";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(document.getElementById("session-table")?.textContent).toMatch(/no sessions match/i);
+  });
+
+  it("reverses the order when the sorted column is clicked again", async () => {
+    await load();
+    expect(rows()[0]?.textContent).toContain("cluster");
+
+    (document.querySelector('#session-table th[data-sort="lastActivityAt"]') as HTMLElement).click();
+
+    expect(rows()[0]?.textContent).toContain("bugs");
+  });
+
+  // The header describes an open session; over the table it described
+  // nothing and rendered as an empty chip beside the title.
+  it("hides the open-session header while the table is showing", async () => {
+    await load();
+    expect(document.getElementById("session-detail")?.hidden).toBe(true);
+
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession());
+    expect(document.getElementById("session-detail")?.hidden).toBe(false);
   });
 });

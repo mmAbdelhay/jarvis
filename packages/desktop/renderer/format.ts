@@ -111,6 +111,31 @@ export function formatAgo(at: number, now: number, language: "ar" | "en" = "en")
   return language === "ar" ? `قبل ${arabicDaysAgo(days)}` : `${days}d ago`;
 }
 
+/**
+ * Which language a passage is *in*, rather than whether it contains any
+ * Arabic at all.
+ *
+ * `detectLanguage` answers the second question, which is the right one for a
+ * project name or a chip — a single Arabic word there means the label is
+ * Arabic. A paragraph is different: an English reply that quotes one Arabic
+ * string is still English, and laying the whole block out right-to-left
+ * moves its full stops to the front of every line, which is what a session
+ * transcript looked like before this existed.
+ *
+ * Letters only: digits, punctuation and code are shared between both and say
+ * nothing about direction. With no letters at all there is nothing to detect,
+ * and the app's own default is left-to-right.
+ */
+export function dominantLanguage(text: string): "ar" | "en" {
+  let arabic = 0;
+  let latin = 0;
+  for (const character of text) {
+    if (ARABIC_RANGE.test(character)) arabic += 1;
+    else if (/[A-Za-z]/.test(character)) latin += 1;
+  }
+  return arabic > latin ? "ar" : "en";
+}
+
 export function detectLanguage(text: string): "ar" | "en" {
   return ARABIC_RANGE.test(text) ? "ar" : "en";
 }

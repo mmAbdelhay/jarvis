@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -88,6 +88,8 @@ import {
   createDockerHandlers,
   createEditorHandlers,
   createTerminalHandlers,
+  createTranscriptHandler,
+  createResumeInTerminalHandler,
   createGitHandlers,
   createSettingsHandlers,
   isDeclaredContainer,
@@ -693,7 +695,7 @@ app.whenReady().then(async () => {
 
     const terminal = createTerminalHandlers({
       shells,
-      openTerminalTab: (project) => workspace.openTerminal(project),
+      openTerminalTab: (project, label) => workspace.openTerminal(project, label),
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
@@ -1027,6 +1029,53 @@ app.whenReady().then(async () => {
     // Jarvis did not itself start.
     ipcMain.handle("session:log", (_event, sessionId: string) =>
       typeof sessionId === "string" ? sessions.log(sessionId) : "",
+    );
+
+    // A session started in a terminal has no pty backlog — only the
+    // transcript the importer recorded a path to. Without this the session
+    // view opened blank for all 89 imported sessions.
+    const sessionTranscript = createTranscriptHandler({
+      history: () => sessionStore.history(),
+      readFile: (path) => readFile(path, "utf8"),
+    });
+    // (_event, id), never the bare handler: ipcMain.handle calls its
+    // listener with the invoke event first, so a handler taking the id as
+    // its first parameter silently receives the event instead and refuses
+    // every session.
+    ipcMain.handle("session:transcript", (_event, sessionId: unknown) =>
+      sessionTranscript(sessionId),
+    );
+
+    // Continuing a past session in a Workspace Terminal tab: Jarvis opens
+    // the tab in the directory the session ran in and types the resume
+    // command. The agent then runs as an ordinary terminal process that
+    // Jarvis does not own — a real shell, at the cost of no live state.
+    const sessionResume = createResumeInTerminalHandler({
+      history: () => sessionStore.history(),
+      agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
+      projects: config.projects,
+      directoryExists: async (path: string) => {
+        try {
+          return (await stat(path)).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      // Through the terminal handlers, never around them: they are what
+      // registers a tab's directory for path completion and history
+      // affinity, so a resumed terminal is a terminal like any other.
+      openTerminal: (project: string, cwd: string) => {
+        const opened = terminal.open(project, cwd);
+        if (!opened.ok) throw new Error(opened.text);
+        return opened.value;
+      },
+      sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
+      language: PRIMARY_LANGUAGE,
+    });
+    ipcMain.handle(
+      "session:resume",
+      (_event, sessionId: unknown, selectedProject: unknown) =>
+        sessionResume(sessionId, selectedProject),
     );
 
     // Keystrokes into a session's pty. Validated rather than trusted: the

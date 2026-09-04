@@ -221,14 +221,42 @@
       <div id="session-view-project" class="chip mono"></div>
       <div id="session-view-path" class="mono changes-muted"></div>
       <div class="spacer"></div>
-      <div id="session-voice" class="session-voice mono" hidden></div>
-      <div id="session-view-state" class="mono changes-dim"></div>
-      <div class="vrule"></div>
-      <div id="session-view-agent" class="mono changes-muted"></div>
+      <div id="session-detail" class="session-detail" hidden>
+        <div id="session-voice" class="session-voice mono" hidden></div>
+        <div id="session-view-state" class="mono changes-dim"></div>
+        <div class="vrule"></div>
+        <div id="session-view-agent" class="mono changes-muted"></div>
+      </div>
+      <button id="session-back" class="workspace-nav" type="button" hidden>← Sessions</button>
+      <button id="session-resume" class="workspace-nav" type="button" hidden>Resume</button>
+    </div>
+
+    <div id="session-table" class="session-table">
+      <div class="session-filters">
+        <input id="session-search" class="session-search" type="search" placeholder="Search sessions" />
+        <select id="session-filter-project" class="session-filter"></select>
+        <select id="session-filter-agent" class="session-filter"></select>
+        <div class="spacer"></div>
+        <div id="session-count" class="session-count mono"></div>
+      </div>
+      <div id="session-table-status" class="session-table-status mono"></div>
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="project" class="session-th--sortable">Session</th>
+            <th data-sort="agent" class="session-th--sortable">Agent</th>
+            <th data-sort="state" class="session-th--sortable">State</th>
+            <th data-sort="lastActivityAt" class="session-th--sortable">Last active</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="session-table-body"></tbody>
+      </table>
     </div>
 
     <div class="session-log-wrap">
       <div id="session-terminal" class="session-terminal" dir="ltr"></div>
+      <div id="session-transcript" class="session-transcript" hidden></div>
       <div id="session-empty" class="session-empty" hidden></div>
     </div>
 

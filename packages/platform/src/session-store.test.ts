@@ -9,7 +9,7 @@ import { createSqliteSessionStore } from "./session-store.js";
 
 // The version this build migrates to. Pinned here rather than repeated as a
 // literal in each migration test, so a bump changes one line.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const STORE_SOURCE_PATH = fileURLToPath(new URL("./session-store.ts", import.meta.url));
 
@@ -484,6 +484,54 @@ describe("createSqliteSessionStore", () => {
       // And the row that was already there survives untouched — a clean,
       // exact rollback of the whole transaction, not a partial one.
       expect(rowStillThere).toMatchObject({ id: "pre-crash" });
+    });
+
+    // Without a path stored, showing an imported session means scanning
+    // every agent directory for a file named after its id on every click.
+    it("keeps the transcript path an imported session was read from", () => {
+      const dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-transcript-"));
+      try {
+        const store = createSqliteSessionStore(join(dir, "sessions.db"));
+        store.upsertImported(
+          {
+            id: "imported-1",
+            project: null,
+            projectPath: "/home/u/app",
+            agentId: "claude-mm",
+            state: "done",
+            summary: "hello",
+            startedAt: 1,
+            lastActivityAt: 2,
+            transcriptPath: "/home/u/.claude/projects/-home-u-app/imported-1.jsonl",
+          },
+          { owned: false },
+        );
+        expect(store.history()[0]?.transcriptPath).toBe(
+          "/home/u/.claude/projects/-home-u-app/imported-1.jsonl",
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("leaves the transcript path unset for a session Jarvis spawned", () => {
+      const dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-transcript-"));
+      try {
+        const store = createSqliteSessionStore(join(dir, "sessions.db"));
+        store.upsert({
+          id: "spawned-1",
+          project: "app",
+          projectPath: "/home/u/app",
+          agentId: "claude-mm",
+          state: "running",
+          summary: "hello",
+          startedAt: 1,
+          lastActivityAt: 2,
+        });
+        expect(store.history()[0]?.transcriptPath).toBeUndefined();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it("never drops the sessions table without copying every row into its replacement", () => {

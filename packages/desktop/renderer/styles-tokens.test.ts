@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -20,6 +20,26 @@ const rules = css.slice(css.indexOf("}") + 1);
 describe("design tokens", () => {
   it("declares every colour used by a rule as a token", () => {
     expect([...rules.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((match) => match[0])).toEqual([]);
+  });
+
+  // A var() naming a token that was never declared resolves to nothing, and
+  // the property silently falls back to its initial value — a background
+  // becomes transparent, a colour becomes black, and nothing errors. The
+  // session state dot shipped invisible this way, painted with a var(--add)
+  // that does not exist in this file.
+  it("uses no token it does not declare", () => {
+    const declared = new Set(
+      [...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]),
+    );
+    // Set from JS per element rather than declared here — the renderer
+    // writes it inline as each tab's own accent.
+    const setAtRuntime = new Set(["--tab-color"]);
+    const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]));
+    const undeclared = [...used].filter(
+      (name) => !declared.has(name) && !setAtRuntime.has(name as string),
+    );
+
+    expect(undeclared).toEqual([]);
   });
 
   it("names three levels of surface and three of text", () => {
@@ -75,5 +95,44 @@ describe("the stylesheet's home", () => {
   it("is linked rather than inlined", () => {
     expect(html).toContain('href="./styles.css"');
     expect(html).not.toContain("<style>");
+  });
+});
+
+// A button the renderer builds and never styles falls back to the user
+// agent's own control — grey-on-white, square, wearing none of the design
+// system, and the one thing on the page that looks like it came from
+// somewhere else. The session table's Resume button shipped that way after
+// an edit dropped its appearance rules and left only its `opacity`, which is
+// why "has a rule at all" is not the property worth testing.
+describe("renderer buttons", () => {
+  const rendererDir = fileURLToPath(new URL(".", import.meta.url));
+
+  /** Every declaration block whose selector mentions this class. */
+  function declarationsFor(className: string): string {
+    const escaped = className.replaceAll("-", "\\-");
+    const rule = new RegExp(`[^{}]*\\.${escaped}\\b[^{}]*\\{([^}]*)\\}`, "g");
+    return [...css.matchAll(rule)].map((match) => match[1]).join(" ");
+  }
+
+  const created = readdirSync(rendererDir)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    .flatMap((name) => {
+      const source = readFileSync(`${rendererDir}${name}`, "utf8");
+      const pattern =
+        /const (\w+) = document\.createElement\("button"\);[\s\S]{0,400}?\1\.className = "([a-z0-9 _-]+)"/g;
+      return [...source.matchAll(pattern)].map((match) => ({ file: name, classes: match[2] }));
+    });
+
+  it("finds the buttons the renderer builds", () => {
+    expect(created.length).toBeGreaterThan(0);
+  });
+
+  it.each(created)("$file: .$classes is styled, not a browser default", ({ classes }) => {
+    const styled = (classes as string)
+      .split(/\s+/)
+      .filter(Boolean)
+      .some((className) => /background/.test(declarationsFor(className)));
+
+    expect(styled).toBe(true);
   });
 });

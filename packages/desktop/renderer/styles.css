@@ -2074,6 +2074,288 @@
     border-bottom: 1px solid var(--border);
   }
 
+  /* The one element in the header that may lose characters. A session's
+     path is an absolute one and can be arbitrarily long, and a flex row
+     whose items all refuse to shrink overflows its own padding — which cut
+     the Resume button in half at the right edge. Truncating the path
+     instead keeps every control reachable, and the path is the only item
+     here whose middle is not load-bearing. */
+  #session-view-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Search and filters above the table. They sit inside the scrolling
+     container but stick to its top, so they stay reachable through 96 rows. */
+  .session-filters {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 10px 10px;
+    background: var(--bg);
+  }
+
+  .session-search {
+    flex: 0 1 320px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 5px 10px;
+  }
+
+  .session-search:focus { outline: none; border-color: var(--accent); }
+
+  .session-filter {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 5px 8px;
+  }
+
+  .session-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+  /* A sortable header says so on hover and marks the column in use. */
+  .session-th--sortable { cursor: pointer; user-select: none; }
+  .session-th--sortable:hover { color: var(--text); }
+  .session-th--active { color: var(--accent); }
+  .session-th--active[data-direction="asc"]::after { content: " \2191"; }
+  .session-th--active[data-direction="desc"]::after { content: " \2193"; }
+
+  /* Only shown with an open session: over the table these describe nothing.
+     No `display` in the base rule — an author rule here outranks the UA
+     stylesheet's `[hidden] { display: none }` and would render the group
+     whatever the attribute says. Third time this file has met that trap. */
+  .session-detail { align-items: center; gap: 14px; }
+  .session-detail:not([hidden]) { display: flex; }
+
+  /* The Session view's default screen: every recorded session, newest
+     first. It scrolls on its own so the header stays put. */
+  .session-table {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 0 20px 20px;
+  }
+
+  .session-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .session-table thead th {
+    position: sticky;
+    top: 46px;
+    z-index: 1;
+    text-align: left;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 10px 10px 7px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .session-table td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .session-table-row { cursor: pointer; }
+  .session-table-row:hover { background: var(--surface-raised); }
+
+  /* The prompt carries the row. Everything that merely locates the session
+     sits under it at two-thirds the size, so scanning reads one line per
+     session instead of seven competing columns. */
+  .session-cell-main { max-width: 0; width: 100%; }
+
+  .session-summary {
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-summary--empty { color: var(--text-muted); font-style: italic; }
+
+  .session-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  /* The directory is the long part and the only one that may be cut. */
+  .session-detail-part { overflow: hidden; text-overflow: ellipsis; }
+
+  .session-chip {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+  }
+
+  .session-cell-agent,
+  .session-cell-state,
+  .session-cell-when {
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--text-muted);
+    vertical-align: middle;
+  }
+
+  .session-state { display: inline-flex; align-items: center; gap: 7px; }
+
+  /* A colour tells the exceptional rows apart from the 89 ordinary ones far
+     faster than reading the same word ninety-six times. */
+  .session-dot {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  .session-dot--running,
+  .session-dot--starting,
+  .session-dot--waiting { background: var(--accent); }
+  .session-dot--done { background: var(--good); }
+  .session-dot--dead { background: var(--del); }
+
+  .session-cell-actions { vertical-align: middle; text-align: right; }
+
+  /* Ninety-six buttons compete with the content they sit beside, so the
+     button waits for the row. Keyboard focus shows it too — hover is not a
+     thing every user has. */
+  /* A button, not a browser default: without these it renders as the UA's
+     own grey-on-white control, which is the one thing on the page wearing
+     none of the design system. */
+  .session-table-resume {
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 3px 10px;
+    white-space: nowrap;
+    cursor: pointer;
+    /* Ninety-six buttons compete with the content they sit beside, so it
+       waits for its row. Keyboard focus reveals it too — hover is not a
+       thing every user has. */
+    opacity: 0;
+    transition: opacity 90ms ease-out;
+  }
+
+  .session-table-resume:hover { color: var(--text); border-color: var(--border-strong); }
+
+  .session-table-row:hover .session-table-resume,
+  .session-table-resume:focus-visible { opacity: 1; }
+
+  .session-table-status {
+    min-height: 16px;
+    padding: 8px 10px 0;
+    font-size: 11px;
+    color: var(--del);
+  }
+
+  /* A recorded conversation, laid out as one. The terminal beside it is for
+     output that really is a terminal's; this is prose and reads as prose. */
+  .session-transcript {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 18px 24px 32px;
+  }
+
+  .transcript-turn {
+    max-width: 900px;
+    margin: 0 0 18px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* The user's own words, marked by a rule rather than a bubble: a
+     transcript is a document, and the eye only needs to find where each
+     turn begins. */
+  .transcript-turn--user .transcript-text {
+    padding: 8px 12px;
+    border-left: 2px solid var(--accent);
+    background: var(--surface-raised);
+    border-radius: 0 var(--r-control) var(--r-control) 0;
+    color: var(--text);
+  }
+
+  .transcript-turn--assistant .transcript-text {
+    padding: 0 0 0 14px;
+    color: var(--text-secondary);
+  }
+
+  /* Newlines are the author's; proportional type because a reply is prose,
+     not terminal output. */
+  .transcript-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .transcript-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 0 14px;
+  }
+
+  .transcript-tool {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    background: var(--surface-raised);
+  }
+
+  .session-table-empty {
+    padding: 24px 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* .workspace-nav is a 28px square built for an icon, and this button
+     carries a word — the same mismatch .api-bar button documents above,
+     which printed "Resume" half-clipped at the right edge of the header.
+     Sized to its text, and never shrunk: the path beside it is what gives
+     way when the row runs out of room. Both header buttons share the rule —
+     "← Sessions" was added later with the same class and the same clipping,
+     which is what a second copy of a fix always costs. */
+  #session-resume,
+  #session-back {
+    width: auto;
+    min-width: 0;
+    padding: 0 10px;
+    height: 28px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
   .session-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
 
   /* The terminal host — the slot a .terminal-pane draws inside, exactly as
@@ -2110,12 +2392,21 @@
   .session-empty {
     position: absolute;
     inset: 0;
-    display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
     color: var(--text-muted);
     pointer-events: none;
+  }
+
+  /* No `display` above: an author rule on `.session-empty` itself outranks
+     the UA stylesheet's `[hidden] { display: none }` whatever the cascade
+     order, so an unconditional `display: flex` there renders the panel
+     even while `hidden` is set — which is exactly what happened, and why a
+     session opened from history read "No session open." on top of its own
+     transcript. Same trap, same fix, as `.history-overlay` above. */
+  .session-empty:not([hidden]) {
+    display: flex;
   }
 
   /* Says where a spoken utterance will land while this view is open. It is

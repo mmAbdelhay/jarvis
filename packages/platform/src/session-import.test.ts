@@ -5,6 +5,7 @@ import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
+  parseTranscript,
   summaryOf,
   createFsImportDeps,
   createSessionImporter,
@@ -111,34 +112,142 @@ describe("resolveProject", () => {
   });
 });
 
-describe("summaryOf", () => {
-  // A slash command's prompt reaches the transcript as the CLI's own
-  // markup, not as what the user typed. Left raw it fills a quarter of the
-  // history rows with <command-name> tags — 22 of 89 on real data — and a
-  // row nobody can read is a row that does not do its job.
-  it("reads a slash command as the command and its arguments", () => {
-    expect(
-      summaryOf(
-        "<command-name>/plan</command-name> <command-message>plan</command-message>" +
-          " <command-args>add a cluster tab</command-args>",
-      ),
-    ).toBe("/plan add a cluster tab");
-  });
+describe("parseTranscript", () => {
+  const line = (record: unknown): string => JSON.stringify(record);
 
-  it("keeps the command alone when it was invoked with no arguments", () => {
-    expect(
-      summaryOf("<command-name>/init</command-name> <command-message>init</command-message>"),
-    ).toBe("/init");
-  });
-
-  it("leaves an ordinary prompt untouched", () => {
-    expect(summaryOf("read the docs and tell me what you find")).toBe(
-      "read the docs and tell me what you find",
+  it("returns the conversation as turns, each with its role", () => {
+    const out = parseTranscript(
+      [
+        line({ type: "user", message: { content: "fetch all my bugs" } }),
+        line({ type: "assistant", message: { content: [{ type: "text", text: "On it." }] } }),
+      ].join("\n"),
     );
+    expect(out).toEqual([
+      { role: "user", text: "fetch all my bugs", tools: [] },
+      { role: "assistant", text: "On it.", tools: [] },
+    ]);
   });
 
-  it("strips markup it does not recognise rather than showing tags", () => {
-    expect(summaryOf("<local-command-stdout>done</local-command-stdout>")).toBe("done");
+  // A transcript is mostly bookkeeping — attachments, mode switches, cost
+  // state — and rendering it would bury the conversation.
+  it("ignores records that are not part of the conversation", () => {
+    const out = parseTranscript(
+      [
+        line({ type: "attachment", content: "noise" }),
+        line({ type: "user", message: { content: "hello" } }),
+      ].join("\n"),
+    );
+    expect(out).toEqual([{ role: "user", text: "hello", tools: [] }]);
+  });
+
+  // Named, not dumped: which tools ran is the shape of a session, while
+  // their arguments are a whole file and their output is not here at all.
+  it("names the tools a turn used without their arguments", () => {
+    const out = parseTranscript(
+      line({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Looking." },
+            { type: "tool_use", name: "Bash", input: { command: "ls -la" } },
+            { type: "tool_use", name: "Edit", input: { path: "/a" } },
+          ],
+        },
+      }),
+    );
+    expect(out).toEqual([{ role: "assistant", text: "Looking.", tools: ["Bash", "Edit"] }]);
+  });
+
+  it("keeps a tool-only turn, since it still happened", () => {
+    const out = parseTranscript(
+      line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }] } }),
+    );
+    expect(out).toEqual([{ role: "assistant", text: "", tools: ["Bash"] }]);
+  });
+
+  // An agent's tool calls arrive one record each, so a run of them rendered
+  // as a dozen separate blocks stacked down the page with one chip apiece.
+  // They are one stretch of work and read as one.
+  it("folds a run of tool-only turns into the reply they belong to", () => {
+    const out = parseTranscript(
+      [
+        line({ type: "assistant", message: { content: [{ type: "text", text: "Looking." }] } }),
+        line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }] } }),
+        line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read" }] } }),
+      ].join("\n"),
+    );
+    expect(out).toEqual([{ role: "assistant", text: "Looking.", tools: ["Bash", "Read"] }]);
+  });
+
+  it("does not fold tools across the user's next turn", () => {
+    const out = parseTranscript(
+      [
+        line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }] } }),
+        line({ type: "user", message: { content: "and now this" } }),
+        line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read" }] } }),
+      ].join("\n"),
+    );
+    expect(out.map((entry) => entry.tools)).toEqual([["Bash"], [], ["Read"]]);
+  });
+
+  it("reads a slash command the way the user typed it", () => {
+    const out = parseTranscript(
+      line({
+        type: "user",
+        message: {
+          content:
+            "<command-name>/plan</command-name> <command-args>add a tab</command-args>",
+        },
+      }),
+    );
+    expect(out[0]?.text).toBe("/plan add a tab");
+  });
+
+  // The CLI injects content as "user" turns that nobody typed: a skill's
+  // whole instruction file, a system reminder. It marks them isMeta, so they
+  // are excluded by that flag rather than by matching their words. Without
+  // this a skill's manual is rendered as the user's own prompt and dwarfs
+  // the conversation around it.
+  it("drops a turn the CLI injected rather than the user typing it", () => {
+    const out = parseTranscript(
+      [
+        line({
+          type: "user",
+          isMeta: true,
+          message: { content: [{ type: "text", text: "Base directory for this skill: ..." }] },
+        }),
+        line({ type: "user", message: { content: "what I actually asked" } }),
+      ].join("\n"),
+    );
+    expect(out).toEqual([{ role: "user", text: "what I actually asked", tools: [] }]);
+  });
+
+  it("drops the CLI's own local-command boilerplate", () => {
+    const out = parseTranscript(
+      line({
+        type: "user",
+        message: { content: "<local-command-caveat>Caveat: ...</local-command-caveat>" },
+      }),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("keeps newlines, which the view needs to lay a reply out", () => {
+    const out = parseTranscript(
+      line({ type: "assistant", message: { content: [{ type: "text", text: "a\nb" }] } }),
+    );
+    expect(out[0]?.text).toBe("a\nb");
+  });
+
+  it("skips a malformed line rather than losing the rest", () => {
+    const out = parseTranscript(
+      ["{not json", line({ type: "user", message: { content: "survived" } })].join("\n"),
+    );
+    expect(out).toEqual([{ role: "user", text: "survived", tools: [] }]);
+  });
+
+  it("returns nothing for a transcript with no conversation", () => {
+    expect(parseTranscript(line({ type: "cost-state" }))).toEqual([]);
   });
 });
 

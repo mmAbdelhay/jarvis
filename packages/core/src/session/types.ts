@@ -33,6 +33,16 @@ export type Session = {
   // no process-reported exit code of its own, which is itself the signal
   // that distinguishes "the agent exited" from "the user stopped it".
   exitCode?: number;
+  /**
+   * Where the transcript this session was imported from lives, when it was
+   * imported at all.
+   *
+   * A session Jarvis spawned has a pty backlog to replay and leaves this
+   * unset. One started in a terminal has no backlog — only the file — so
+   * without the path, showing it would mean scanning every agent directory
+   * for a file named after its id on every click.
+   */
+  transcriptPath?: string;
   // Git metadata recorded via SessionStore.updateGit(), so a finished
   // session's changes stay visible in history after its worktree and any
   // live ChangeTracker snapshot are gone (see P21: the history panel shows
@@ -147,3 +157,4 @@ export type StartInput = {
   projectPath: string;
   agent: AgentConfig;
 };
+

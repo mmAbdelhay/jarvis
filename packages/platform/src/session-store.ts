@@ -6,7 +6,7 @@ import type { Session, SessionState, SessionStore } from "@jarvis/core";
 // Bumped whenever the table shape changes. Each bump adds a migration
 // branch below instead of dropping and recreating the table, so an
 // existing db always opens without losing rows.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SESSION_STATES: readonly SessionState[] = [
   "starting",
@@ -84,8 +84,8 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
   const importUnownedStmt = db.prepare(`
     INSERT INTO sessions (
       id, project, projectPath, agentId, model, state, summary,
-      startedAt, lastActivityAt, endedAt, exitCode, branch
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      startedAt, lastActivityAt, endedAt, exitCode, branch, transcriptPath
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       project = excluded.project,
       projectPath = excluded.projectPath,
@@ -94,13 +94,14 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       summary = excluded.summary,
       startedAt = excluded.startedAt,
       lastActivityAt = excluded.lastActivityAt,
-      branch = excluded.branch
+      branch = excluded.branch,
+      transcriptPath = excluded.transcriptPath
   `);
 
   const historyStmt = db.prepare(`
     SELECT id, project, projectPath, agentId, model, state, summary,
            startedAt, lastActivityAt, endedAt, exitCode,
-           branch, insertions, deletions, changed_files
+           branch, insertions, deletions, changed_files, transcriptPath
     FROM sessions
     ORDER BY lastActivityAt DESC
   `);
@@ -155,6 +156,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
         session.endedAt ?? null,
         session.exitCode ?? null,
         session.branch ?? "",
+        session.transcriptPath ?? null,
       );
     },
     history(): Session[] {
@@ -340,6 +342,19 @@ function migrate(db: DatabaseSync): void {
       db.exec("ALTER TABLE sessions_v3 RENAME TO sessions");
     }
 
+    if (version < 4) {
+      // Phase 4: where an imported session's transcript lives. Nullable
+      // because a session Jarvis spawned has no transcript of its own to
+      // point at — it has a pty backlog instead — so "unset" is the honest
+      // value rather than a placeholder path.
+      addColumnIfMissing(
+        db,
+        "sessions",
+        "ALTER TABLE sessions ADD COLUMN transcriptPath TEXT",
+        "transcriptPath",
+      );
+    }
+
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     db.exec("COMMIT");
   } catch (error) {
@@ -409,6 +424,10 @@ function rowToSession(raw: unknown): Session {
   const insertions = requireNumber(row, "insertions");
   const deletions = requireNumber(row, "deletions");
   const changedFiles = requireNumber(row, "changed_files");
+  // Nullable by design: a session Jarvis spawned has a pty backlog rather
+  // than a transcript, so unset is the honest value.
+  const transcriptRaw = row["transcriptPath"];
+  const transcriptPath = typeof transcriptRaw === "string" && transcriptRaw !== "" ? transcriptRaw : null;
 
   return {
     id,
@@ -426,6 +445,7 @@ function rowToSession(raw: unknown): Session {
     insertions,
     deletions,
     changedFiles,
+    ...(transcriptPath === null ? {} : { transcriptPath }),
   };
 }
 
