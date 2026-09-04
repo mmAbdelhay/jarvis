@@ -136,6 +136,34 @@ describe("openSession", () => {
     expect(term().text).toBe(banner);
   });
 
+  // The property, named: the clear is ordered behind the write buffer, so
+  // the previous agent's bytes are drawn *and then* wiped, never wiped and
+  // then drawn. Terminal.write() defers its parsing to a macrotask and
+  // reset() neither drains nor discards what is queued, so a reset called
+  // straight from openSession clears an empty screen and the last agent's
+  // still-queued output paints over it — the interleaving this route is
+  // supposed to prevent, arriving by the back door.
+  //
+  // The double models the queue (see terminal-double.ts), so the ordering is
+  // what decides this test rather than the timing of either write: with the
+  // reset synchronous, the first agent's screen survives into the second's.
+  it("clears the screen behind the write buffer, not in front of it", async () => {
+    const logs: Record<string, string> = { s1: "first agent\r\n", s2: "second agent\r\n" };
+    stubJarvis({ getSessionLog: vi.fn(async (id: string) => logs[id] ?? "") });
+    const { openSession } = await import("./session-view.js");
+
+    await openSession(makeSession({ id: "s1" }));
+    // Deliberately *not* reading term().text here: that would drain the
+    // buffer and hand the second open a screen that had already been
+    // parsed, which is the one situation in which the bug cannot show.
+    await openSession(makeSession({ id: "s2" }));
+    // Let the queue drain on its own macrotask, the way it does in a real
+    // window with nobody asking questions.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(term().text).toBe("second agent\r\n");
+  });
+
   it("clears the screen rather than interleaving when switching sessions", async () => {
     const logs: Record<string, string> = { s1: "first agent\r\n", s2: "second agent\r\n" };
     stubJarvis({ getSessionLog: vi.fn(async (id: string) => logs[id] ?? "") });

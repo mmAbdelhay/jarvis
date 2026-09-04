@@ -194,6 +194,27 @@ function refit(): void {
   pane?.refit();
 }
 
+/** Clears the live terminal's screen once everything already queued for its
+ *  parser has been drawn — see the call site for why the ordering matters.
+ *  Never throws: a terminal that will not take the write leaves the screen
+ *  as it is, which is a great deal better than an exception in the middle of
+ *  opening a session. */
+function clearLiveScreen(view: TerminalPane | undefined): void {
+  const terminal = view?.terminal;
+  if (terminal === undefined) return;
+  try {
+    terminal.write("", () => {
+      try {
+        terminal.reset();
+      } catch {
+        // A pane disposed while this was queued. Nothing to clear.
+      }
+    });
+  } catch {
+    // Nothing written, nothing cleared.
+  }
+}
+
 /**
  * Opens one session's terminal. The backlog is written first so a session
  * opened partway through a run shows what it already drew; every later
@@ -219,7 +240,18 @@ export async function openSession(session: Session): Promise<void> {
   // exec'd directly, with no shell stage to print the integration marks —
   // but nothing enforces that, and one agent's output under another's
   // terminal is not a failure worth leaving to an architectural accident.
-  view?.terminal.reset();
+  //
+  // The screen is cleared *behind* the write buffer, never straight from
+  // here. Terminal.write() always defers its parsing to a macrotask and
+  // reset() neither drains nor discards what is queued, so a synchronous
+  // reset clears the screen and then lets the previous agent's still-queued
+  // bytes paint over it — the interleaving this whole block exists to
+  // prevent, arriving by the back door. An empty write is the queue's own
+  // "everything before this has been parsed" signal, and the backlog below
+  // is written after it, so the parser takes the two in that order: clear,
+  // then draw. (The same fix terminal-pane.ts's block-done path carries,
+  // for the same reason.)
+  clearLiveScreen(view);
   view?.reset();
   // The view was hidden until showView above, so the pane only has a real
   // size now — fit before writing so the backlog is laid out at the width
