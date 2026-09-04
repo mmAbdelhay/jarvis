@@ -36,7 +36,17 @@ export type PaneHooks = {
   attach: () => Promise<string>;
   /** The full renderer-facing settings payload — see window.jarvis.terminalSettings()
    *  in src/ipc.ts, which is where `home` comes from. */
-  settings: { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  settings: {
+    blocks: boolean;
+    inputEditor: boolean;
+    notifyAfterSeconds: number;
+    home: string;
+    /** Lines of scrollback, from `performance.terminalScrollback`. Anything
+     *  that is not a positive number leaves the pane on SCROLLBACK_LINES —
+     *  this arrives over IPC, so it is not the type checker's to promise,
+     *  and 0 is what the renderer holds before the answer comes back. */
+    scrollback: number;
+  };
   /** Tells the outside world a block finished — the pane never calls
    *  `Notification` itself, since that is what makes the decision (and the
    *  guard around a constructor that can throw) testable at all. Called
@@ -261,7 +271,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   const nav = hooks.settings.blocks ? createBlockNav(list, sticky) : undefined;
 
   const terminal = new Terminal({
-    scrollback: SCROLLBACK_LINES,
+    scrollback:
+      Number.isFinite(hooks.settings.scrollback) && hooks.settings.scrollback > 0
+        ? hooks.settings.scrollback
+        : SCROLLBACK_LINES,
     ...TERMINAL_FONT,
     theme: TERMINAL_THEME,
     cursorBlink: true,

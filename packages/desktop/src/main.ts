@@ -760,6 +760,7 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
       terminal: config.terminal,
+      terminalScrollback: config.performance.terminalScrollback,
       // The file sidebar's disk access. Immediate children only, and
       // realpath is what the containment check compares against — see
       // resolveWithin.

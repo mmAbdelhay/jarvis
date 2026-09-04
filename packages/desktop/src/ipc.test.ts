@@ -1711,6 +1711,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     const result = handlers.open("acme");
@@ -1732,6 +1733,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     const result = handlers.open("nope");
@@ -1749,6 +1751,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     expect(handlers.open(undefined as unknown as string).ok).toBe(false);
@@ -1762,6 +1765,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.input("tab-7", "ls\r");
@@ -1778,6 +1782,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.input(undefined as unknown as string, "ls");
@@ -1795,6 +1800,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.resize("tab-7", "80" as unknown as number, 24);
@@ -1811,6 +1817,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.close("tab-7");
@@ -1829,6 +1836,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
 
@@ -1848,6 +1856,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
 
@@ -1915,6 +1924,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
       completion: { enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } },
     });
     handlers.open("acme");
@@ -1944,6 +1954,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.split("tab-7", "p1");
@@ -1966,6 +1977,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.open("acme");
@@ -1988,6 +2000,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.split("tab-7", "p1");
@@ -2008,6 +2021,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
       completion,
     });
   }
@@ -2232,6 +2246,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     expect(handlers.settings()).toEqual({
@@ -2239,6 +2254,9 @@ describe("terminal handlers", () => {
       inputEditor: true,
       notifyAfterSeconds: 30,
       home: homedir(),
+      // Not from the terminal: section — it is a memory setting — but it
+      // rides this payload because this is the one every pane already reads.
+      scrollback: 5000,
     });
   });
 
@@ -2250,6 +2268,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: { ...terminalConfig, blocks: { enabled: false, inputEditor: true } },
+      terminalScrollback: 5000,
     });
 
     expect(handlers.settings()).toMatchObject({ blocks: false, inputEditor: false });
@@ -2268,6 +2287,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         workflows: {
           defaultDir: "/home/.config/jarvis/workflows",
           config: overrides.config ?? {},
@@ -2318,6 +2338,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
       });
 
       expect(await handlers.workflows("acme")).toEqual([]);
@@ -2368,6 +2389,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         brain,
       });
     }
@@ -2677,6 +2699,7 @@ describe("terminal handlers", () => {
         projects: overrides.projects ?? { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         files: "files" in overrides ? overrides.files : files,
       });
     }
@@ -2895,6 +2918,7 @@ describe("terminal handlers", () => {
         projects: overrides.projects ?? { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         files: "files" in overrides ? overrides.files : files,
         editor: "editor" in overrides ? overrides.editor : editor,
       });
@@ -3236,6 +3260,7 @@ describe("terminal handlers", () => {
         projects: { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
       };
     }
 
@@ -4379,6 +4404,7 @@ describe("terminal open with an explicit directory", () => {
         blocks: { enabled: true, inputEditor: true },
         notifyAfterSeconds: 30,
       },
+      terminalScrollback: 5000,
     });
     return { handlers, started, labels };
   }

@@ -72,6 +72,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       inputEditor: true,
       notifyAfterSeconds: 30,
       home: "/home/x",
+      scrollback: 5000,
     })),
     terminalWorkflows: vi.fn(async () => []),
     terminalAi: vi.fn(async () => ""),

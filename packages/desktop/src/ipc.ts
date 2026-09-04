@@ -511,6 +511,11 @@ export type RendererApi = {
     inputEditor: boolean;
     notifyAfterSeconds: number;
     home: string;
+    /** Lines of scrollback a pane keeps, from
+     *  `performance.terminalScrollback`. Not part of the `terminal:` section
+     *  because it is a memory setting, not a terminal-behaviour one — but it
+     *  rides this payload because this is the one the panes already read. */
+    scrollback: number;
   }>;
   /** Every saved workflow the ⌘P palette's "Run workflow…" can offer for
    *  `project` — see TerminalHandlers.workflows above. */
@@ -1443,7 +1448,13 @@ export type TerminalHandlers = {
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
-  settings(): { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  settings(): {
+    blocks: boolean;
+    inputEditor: boolean;
+    notifyAfterSeconds: number;
+    home: string;
+    scrollback: number;
+  };
   /** Every saved workflow the palette can offer for `project` — the
    *  always-read `~/.config/jarvis/workflows/` plus that project's
    *  configured directory, if it has one. Never rejects: a workflow source
@@ -1503,6 +1514,9 @@ export type TerminalHandlerDeps = {
    *  suggestions at all, which is a terminal exactly as it was before the
    *  feature existed. */
   completion?: { source: CompletionSource; enabled: boolean } | undefined;
+  /** `performance.terminalScrollback`, which rides the terminal settings
+   *  payload because that is the one every pane already reads. */
+  terminalScrollback: number;
   /** The `terminal:` section of config, for the renderer-facing settings
    *  channel — see `settings()` above. */
   terminal: TerminalConfig;
@@ -2058,6 +2072,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       inputEditor: deps.terminal.blocks.enabled && deps.terminal.blocks.inputEditor,
       notifyAfterSeconds: deps.terminal.notifyAfterSeconds,
       home: homedir(),
+      scrollback: deps.terminalScrollback,
     }),
 
     async workflows(project) {
