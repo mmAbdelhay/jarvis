@@ -395,18 +395,22 @@ sidebar at all.
 
 Clicking a folder expands it, listing its immediate children only; nothing is
 listed before you ask. Clicking a file opens that file itself in the
-project's **Editor tab** — not just its folder. A second file clicked in a
-folder that already has an Editor tab open **reuses that tab rather than
-opening another**, since the Workspace caps hosted tabs and evicts the
-least-recently-used one once full, and browsing a file tree would otherwise
-close the user's other open tabs as a side effect. Reuse costs something of
-its own: code-server only honours the "open this file" instruction at page
-load, so opening a different file in an already-open folder means reloading
-that tab, and whatever the tab's own browser session held — an unsaved
-change made in that editor, say — is lost. The tab's title carries the
-folder it is rooted at, `· <folder relative to the project>`, or `· .` at
-the project root, so which tab a click will land on and reload is visible
-before you click.
+project's **Editor tab** — not just its folder.
+
+There is **one editor per project**, rooted at the project directory: the
+same code-server instance and the same tab the toolbar's Editor button opens
+for a project with no `editors:` roots. Every file you click lands in it. The
+editor is rooted at the project rather than at the clicked file's folder
+because rooting it deeper buys nothing — it is the "open this file"
+instruction in the URL that opens the file, not the root — while costing a
+whole Node process, a port and a cold start per folder you happen to click.
+
+Reuse costs something of its own: code-server only honours the "open this
+file" instruction at page load, so opening a second file means reloading that
+tab, and whatever the tab's own browser session held — an unsaved change made
+in that editor, say — is lost. The tab is the project's own Editor tab,
+titled `project — Editor`, so which tab a click will land on and reload is
+visible before you click.
 
 **The tree cannot show anything outside the project root** — the directory
 `projects:` gives for this project in `jarvis.yaml`, not wherever the shell

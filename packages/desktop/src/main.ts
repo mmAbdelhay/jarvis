@@ -90,9 +90,9 @@ import {
   createTerminalHandlers,
   createGitHandlers,
   createSettingsHandlers,
-  findEditorTab,
   isDeclaredContainer,
   PROVIDER_HEALTH_INTERVAL_MS,
+  showEditorTab,
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
@@ -723,18 +723,22 @@ app.whenReady().then(async () => {
         // DbGate tab with an unsaved query, say) as a side effect of
         // browsing the file tree. Reuse means navigating that tab to the
         // new URL — a real reload, since `payload` is only honoured at
-        // page load — so opening a second file in the same folder loses
-        // whatever the tab's own browser session held that code-server's
-        // server-side state did not. See findEditorTab.
-        openTab: (project, url, detail) => {
-          const existing = findEditorTab(workspace.state().tabs, project, detail);
-          if (existing !== undefined) {
-            workspace.navigate(existing, url);
-            workspace.activate(existing);
-            return;
-          }
-          workspace.open(project, url, "editor", detail);
-        },
+        // page load — so opening a second file loses whatever the tab's
+        // own browser session held that code-server's server-side state
+        // did not. The decision itself lives in showEditorTab, where it
+        // has a test; this is only the wiring.
+        openTab: (project, url, detail) =>
+          showEditorTab(
+            {
+              tabs: () => workspace.state().tabs,
+              navigate: (id, target) => workspace.navigate(id, target),
+              activate: (id) => workspace.activate(id),
+              open: (name, target, tabDetail) => workspace.open(name, target, "editor", tabDetail),
+            },
+            project,
+            url,
+            detail,
+          ),
       },
       workflows: {
         readDir: (path) => readdirSync(path),

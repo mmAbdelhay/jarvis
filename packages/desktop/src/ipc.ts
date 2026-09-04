@@ -17,7 +17,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import {
   awsLoginCommand,
@@ -1254,10 +1254,10 @@ export type TerminalHandlers = {
    *  tab. `paneKey` is resolved the same way `listDir` resolves it, and the
    *  file goes through the exact same `resolveWithin` containment check —
    *  a path outside that project opens nothing. code-server is rooted at
-   *  the file's own containing folder (not the project root, and not a
-   *  configured `editors:` root — a per-file folder is not shaped for
-   *  either), and the URL carries a `payload` alongside `folder` asking the
-   *  workbench to open the file itself; see `withOpenFilePayload`. Never
+   *  the **project's** own directory, so there is one editor process and
+   *  one editor tab per project however many files are clicked, and the
+   *  URL carries a `payload` alongside `folder` asking the workbench to
+   *  open the file itself; see `withOpenFilePayload`. Never
    *  rejects and never surfaces a dialog: an unknown pane, no `files` or
    *  `editor` integration configured, or a code-server that fails to start
    *  are all a click that opens nothing. */
@@ -1335,20 +1335,19 @@ export type TerminalHandlerDeps = {
   editor?:
     | {
         /** Ensures code-server is running at `folderPath` and returns its
-         *  URL. `folderPath` has already been proven inside `projectPath`
-         *  by `resolveWithin` before this is ever called, so this is
-         *  `CodeServerManager.open` bound directly — not routed through
-         *  `createEditorHandlers`' named-root resolution, which a per-file
-         *  folder (arbitrary, not declared in `editors:`) is not shaped
-         *  for. */
+         *  URL. `openFile` passes the project's own resolved directory as
+         *  both arguments — one editor per project, not one per clicked
+         *  folder — so this is `CodeServerManager.open` bound directly
+         *  rather than routed through `createEditorHandlers`' named-root
+         *  resolution, which answers for `editors:` names and not for a
+         *  path. */
         open: (projectPath: string, folderPath: string) => Promise<{ ok: true; url: string } | { ok: false }>;
-        /** Opens the URL as `project`'s Editor tab, rooted for `detail` (the
-         *  folder's path relative to the project — see `openFile`) — main
-         *  reuses an existing tab of the same `(project, detail)` rather
-         *  than opening a new one, via `findEditorTab`; a fresh tab is only
-         *  what `BrowserHost.open(project, url, "editor", detail)` does when
-         *  none is found. */
-        openTab: (project: string, url: string, detail: string) => void;
+        /** Opens the URL as `project`'s Editor tab for `detail` — always
+         *  `undefined` from `openFile`, the project's own editor tab, the
+         *  same one the toolbar's Editor button opens. main reuses an
+         *  existing tab of that `(project, detail)` rather than opening a
+         *  new one; see `showEditorTab`. */
+        openTab: (project: string, url: string, detail: string | undefined) => void;
       }
     | undefined;
   /** Saved workflows. Absent means no workflow source at all — `workflows()`
@@ -1480,17 +1479,58 @@ function withOpenFilePayload(baseUrl: string, filePath: string): string {
  * folder means navigating that tab (a real reload), which loses whatever
  * that tab's own browser session held that code-server's server-side state
  * did not — scroll position, an editor the user had open but never
- * touched. `detail === undefined` (the project-root button's own tab) is
- * deliberately never matched: it is not a per-file tab and must stay the
- * toolbar button's alone to reuse.
+ * touched.
+ *
+ * `detail` is matched exactly as given, `undefined` included: `undefined`
+ * is the *project's own* editor tab — what the toolbar's Editor button
+ * opens for a project that declares no `editors:` roots, and now what a
+ * file click reuses too, since a file click roots code-server at the
+ * project (see `openFile`). The two converging on one tab is the point;
+ * they would otherwise compete for the same code-server with two tabs and
+ * two titles.
  */
 export function findEditorTab(
   tabs: readonly Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[],
   project: string,
-  detail: string,
+  detail: string | undefined,
 ): string | undefined {
   return tabs.find((tab) => tab.kind === "editor" && tab.project === project && tab.detail === detail)
     ?.id;
+}
+
+/** The little of a `BrowserHost` that showing an editor tab needs. Named
+ *  as its own type so the composition below can be tested without one. */
+export type EditorTabHost = {
+  tabs: () => readonly Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[];
+  navigate: (id: string, url: string) => void;
+  activate: (id: string) => void;
+  open: (project: string, url: string, detail: string | undefined) => void;
+};
+
+/**
+ * Shows `url` as `project`'s Editor tab for `detail`: the existing tab
+ * navigated and activated if there is one, a fresh tab otherwise.
+ *
+ * This composition — not `findEditorTab` alone — is the whole of the
+ * decision "does a user's open tab get reloaded", so it lives here where
+ * it can be tested rather than inline in main.ts, which has no test file.
+ * Navigating *and* activating: a tab reused for a different file must both
+ * load the new payload URL (the workbench only honours `payload` at page
+ * load) and come to the front, or the click would appear to do nothing.
+ */
+export function showEditorTab(
+  host: EditorTabHost,
+  project: string,
+  url: string,
+  detail: string | undefined,
+): void {
+  const existing = findEditorTab(host.tabs(), project, detail);
+  if (existing !== undefined) {
+    host.navigate(existing, url);
+    host.activate(existing);
+    return;
+  }
+  host.open(project, url, detail);
 }
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
@@ -1692,35 +1732,38 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (paneCwd === undefined) return fail();
       const project = projectFor(paneCwd);
       if (project === undefined) return fail();
+      // The project's own directory, resolved. `project.dir` comes raw out
+      // of jarvis.yaml while everything below is a realpath, and
+      // CodeServerManager.open decides containment on the strings alone
+      // (code-server.ts's isInside) — so a project whose path runs through
+      // a symlink (anything under /tmp on macOS, an external volume, a
+      // linked parent) would have every click refused one layer down, with
+      // no message anywhere. Resolving the root here is what keeps the two
+      // sides comparable.
+      const root = resolveWithin(project.dir, project.dir, files.realPath);
+      if (root === undefined) return fail();
       // The exact same containment check listDir applies — resolveWithin
       // is the shared boundary, not a second copy of it — and the exact
-      // real path it approves is what gets rooted and opened, never the
-      // caller's own string.
-      const target = resolveWithin(project.dir, path, files.realPath);
+      // real path it approves is what gets opened, never the caller's own
+      // string.
+      const target = resolveWithin(root, path, files.realPath);
       if (target === undefined) return fail();
-      // dirname(target) is proven contained *again*, not assumed safe
-      // because `target` itself was: `target` passing means only that it
-      // is `project.dir` or something beneath it, and `target` itself can
-      // legitimately equal `project.dir` — a symlink at the project root
-      // pointing back to the project root is reported as a non-directory
-      // by readdirSync's own withFileTypes (it does not follow symlinks to
-      // decide isDirectory()), so the sidebar draws it as a clickable
-      // "file". dirname() of the project root is the project's *parent*,
-      // and that must be refused here, at the point the decision is made —
-      // not left to CodeServerManager's own belt-and-braces isInside check
-      // one layer down.
-      const folder = resolveWithin(project.dir, dirname(target), files.realPath);
-      if (folder === undefined) return fail();
-      // The folder's path relative to the project, both for the tab
-      // title and so the Editor toolbar button's own dedup (openEditorRoot
-      // in workspace.ts, matching `tab.detail === root`) can never mistake
-      // this tab for the project-root one it opens with no detail at all.
-      const rel = relative(project.dir, folder);
-      const detail = rel === "" ? "." : rel;
+      // Rooted at the *project*, not at the clicked file's folder. The
+      // `payload` opens the file; `folder=` only decides where a
+      // code-server process is rooted, and one process per clicked folder
+      // would be a full Node + VS Code server (a port, ~200MB, a cold
+      // start) per folder, never evicted before quit. One per project
+      // instead — the very process the toolbar's Editor button already
+      // starts, now reused.
+      //
+      // `detail` follows from that: `undefined` is the project's own
+      // editor tab, exactly what openEditorRoot in workspace.ts opens for
+      // a project with no `editors:` roots. A file click and the Editor
+      // button therefore converge on one tab rather than competing.
       try {
-        const result = await editor.open(project.dir, folder);
+        const result = await editor.open(root, root);
         if (!result.ok) return fail();
-        editor.openTab(project.name, withOpenFilePayload(result.url, target), detail);
+        editor.openTab(project.name, withOpenFilePayload(result.url, target), undefined);
         return { ok: true, value: undefined };
       } catch {
         // A code-server that failed to start is a click that opens

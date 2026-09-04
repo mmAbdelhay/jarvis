@@ -21,6 +21,7 @@ import {
   findEditorTab,
   isDeclaredContainer,
   resolveWithin,
+  showEditorTab,
   type WiringDeps,
 } from "./ipc.js";
 import type {
@@ -2655,16 +2656,16 @@ describe("terminal handlers", () => {
     ): {
       handlers: ReturnType<typeof createTerminalHandlers>;
       opened: { projectPath: string; folderPath: string }[];
-      tabs: { project: string; url: string; detail: string }[];
+      tabs: { project: string; url: string; detail: string | undefined }[];
     } {
       const opened: { projectPath: string; folderPath: string }[] = [];
-      const tabs: { project: string; url: string; detail: string }[] = [];
+      const tabs: { project: string; url: string; detail: string | undefined }[] = [];
       const editor = {
         open: async (projectPath: string, folderPath: string) => {
           opened.push({ projectPath, folderPath });
           return { ok: true as const, url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}` };
         },
-        openTab: (project: string, url: string, detail: string) => {
+        openTab: (project: string, url: string, detail: string | undefined) => {
           tabs.push({ project, url, detail });
         },
       };
@@ -2681,7 +2682,7 @@ describe("terminal handlers", () => {
       return { handlers, opened, tabs };
     }
 
-    it("opens the file's containing folder as an editor tab, carrying an openFile payload", async () => {
+    it("opens the project as an editor tab, carrying an openFile payload for the file", async () => {
       const { handlers, opened, tabs } = opener();
       handlers.open("p");
 
@@ -2689,16 +2690,59 @@ describe("terminal handlers", () => {
         ok: true,
         value: undefined,
       });
-      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj/src" }]);
+      // The project, not dirname(the file): `folder=` only decides where a
+      // code-server process is rooted, and a process per clicked folder is
+      // a Node + VS Code server, a port and a cold start each, never
+      // reaped before quit. The payload is what opens the file.
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
       expect(tabs).toEqual([
         {
           project: "p",
-          detail: "src",
+          detail: undefined,
           url:
-            "http://127.0.0.1:9999/?folder=%2Fproj%2Fsrc&payload=" +
+            "http://127.0.0.1:9999/?folder=%2Fproj&payload=" +
             encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/src/a.ts"]])),
         },
       ]);
+    });
+
+    // Ten files clicked in ten folders is still one code-server: the pair
+    // CodeServerManager keys `running` by is (project, project) every
+    // time, and it never evicts before quit.
+    it("roots one editor for the project however many folders are clicked", async () => {
+      const { handlers, opened } = opener();
+      handlers.open("p");
+
+      await handlers.openFile("tab-1", "/proj/src/a.ts");
+      await handlers.openFile("tab-1", "/proj/docs/deep/b.md");
+      await handlers.openFile("tab-1", "/proj/c.ts");
+
+      expect(opened).toEqual([
+        { projectPath: "/proj", folderPath: "/proj" },
+        { projectPath: "/proj", folderPath: "/proj" },
+        { projectPath: "/proj", folderPath: "/proj" },
+      ]);
+    });
+
+    // project.dir comes raw out of jarvis.yaml; everything else here is a
+    // realpath, and CodeServerManager decides containment on the strings
+    // alone. Unresolved, a project under a symlinked parent (anything in
+    // /tmp on macOS, an external volume) would have relative() yield a
+    // ".." path and every click refused one layer down with no message.
+    it("passes the project's resolved real path as the editor root", async () => {
+      const linkedRoot = {
+        readDir: () => [],
+        realPath: (p: string) => (p === "/link" || p.startsWith("/link/") ? `/real${p.slice(5)}` : p),
+      };
+      const { handlers, opened, tabs } = opener({ files: linkedRoot, projects: { p: "/link" } });
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/link/src/a.ts")).resolves.toMatchObject({ ok: true });
+
+      expect(opened).toEqual([{ projectPath: "/real", folderPath: "/real" }]);
+      expect(tabs[0]?.url).toContain(
+        encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/real/src/a.ts"]])),
+      );
     });
 
     // Spaces, "#", "?", "&" and a non-ASCII character all have special
@@ -2716,36 +2760,26 @@ describe("terminal handlers", () => {
       expect(tabs).toEqual([
         {
           project: "p",
-          detail: "a b#c?d&e",
-          url: `http://127.0.0.1:9999/?folder=${encodeURIComponent("/proj/a b#c?d&e")}&payload=${expectedPayload}`,
+          detail: undefined,
+          url: `http://127.0.0.1:9999/?folder=${encodeURIComponent("/proj")}&payload=${expectedPayload}`,
         },
       ]);
     });
 
     // The Editor toolbar button's own dedup (workspace.ts's openEditorRoot)
     // matches an existing tab on `tab.detail === root`, where `root` is
-    // `undefined` for the project's own directory. Without a detail here,
-    // a file-opened tab would satisfy that predicate by accident and the
-    // toolbar button would activate a deep-rooted tab instead of opening
-    // the project root — the tab strip would also show every editor tab
-    // with the same title. The folder's path relative to the project both
-    // reads well in the tab title and can never equal `undefined`.
-    it("carries a detail naming the file's folder relative to the project, never undefined", async () => {
+    // `undefined` for the project's own directory. Now that a click roots
+    // code-server at the project, that IS the tab this should land on: a
+    // detail of its own would mean two tabs and two titles competing for
+    // one code-server.
+    it("carries no detail — the project's own editor tab, the toolbar button's too", async () => {
       const { handlers, tabs } = opener();
       handlers.open("p");
 
       await handlers.openFile("tab-1", "/proj/src/deep/a.ts");
-
-      expect(tabs[0]?.detail).toBe("src/deep");
-    });
-
-    it("uses \".\" as the detail for a file at the project's own root", async () => {
-      const { handlers, tabs } = opener();
-      handlers.open("p");
-
       await handlers.openFile("tab-1", "/proj/a.ts");
 
-      expect(tabs[0]?.detail).toBe(".");
+      expect(tabs.map((tab) => tab.detail)).toEqual([undefined, undefined]);
     });
 
     it("refuses a path outside the project root, opening nothing", async () => {
@@ -2827,7 +2861,7 @@ describe("terminal handlers", () => {
 
       await handlers.openFile("tab-1", "/proj/link");
 
-      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj/real" }]);
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
       expect(tabs[0]?.url).toContain(encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/real/a.ts"]])));
     });
 
@@ -2837,29 +2871,28 @@ describe("terminal handlers", () => {
 
       await handlers.openFile("tab-1", "/proj/a.ts");
 
-      expect(tabs).toEqual([{ project: "p", detail: ".", url: expect.any(String) }]);
+      expect(tabs).toEqual([{ project: "p", detail: undefined, url: expect.any(String) }]);
     });
 
     // A symlink at the project root pointing back to the project root is
     // reported as a "file" by readdirSync's withFileTypes (it does not
     // follow symlinks to decide isDirectory()), so the sidebar draws it as
-    // a clickable row. Its resolved real path IS the project root — a
-    // legitimate answer for the file check alone — but dirname() of that is
-    // the project's *parent*. The containment check must be applied again
-    // to the containing folder, not trusted just because the file passed
-    // it: today this is only saved by CodeServerManager's own belt-and-
-    // braces isInside check one layer down, which this fake does not model.
-    it("refuses a self-referencing symlink whose containing folder would escape the project", async () => {
+    // a clickable row, and its resolved real path IS the project root.
+    // Rooting used to take dirname() of that — the project's *parent* —
+    // and had to refuse it; rooting at the project cannot reach outside
+    // the project at all, which is the stronger property and the one
+    // pinned here.
+    it("cannot root the editor above the project, even for a self-referencing symlink", async () => {
       const selfLink = {
         readDir: () => [],
         realPath: (p: string) => (p === "/proj/selflink" ? "/proj" : p),
       };
-      const { handlers, opened, tabs } = opener({ files: selfLink });
+      const { handlers, opened } = opener({ files: selfLink });
       handlers.open("p");
 
-      await expect(handlers.openFile("tab-1", "/proj/selflink")).resolves.toMatchObject({ ok: false });
-      expect(opened).toEqual([]);
-      expect(tabs).toEqual([]);
+      await handlers.openFile("tab-1", "/proj/selflink");
+
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
     });
   });
 
@@ -2897,12 +2930,80 @@ describe("terminal handlers", () => {
       expect(findEditorTab([tab({ detail: "other" })], "p", "src")).toBeUndefined();
     });
 
-    it("misses an editor tab with no detail at all — the project-root button's own tab", () => {
-      expect(findEditorTab([tab({ detail: undefined })], "p", "src")).toBeUndefined();
+    it("misses a detailed tab when asked for the project's own", () => {
+      expect(findEditorTab([tab({ detail: "src" })], "p", undefined)).toBeUndefined();
+    });
+
+    // The project's own editor tab — what the toolbar's Editor button
+    // opens for a project with no `editors:` roots, and what a file click
+    // now reuses, since a click roots code-server at the project.
+    it("finds the project's own editor tab, the one with no detail", () => {
+      expect(findEditorTab([tab({ detail: undefined })], "p", undefined)).toBe("t1");
     });
 
     it("finds nothing among no tabs", () => {
       expect(findEditorTab([], "p", "src")).toBeUndefined();
+    });
+  });
+
+  // The composition main.ts wires the file sidebar's openTab to — the only
+  // thing deciding whether a user's open tab gets reloaded, which is why it
+  // lives in ipc.ts and not inline in main.ts, where nothing tests it.
+  describe("showEditorTab", () => {
+    function host(tabs: Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[]) {
+      const calls: string[] = [];
+      return {
+        calls,
+        host: {
+          tabs: () => tabs,
+          navigate: (id: string, url: string) => calls.push(`navigate ${id} ${url}`),
+          activate: (id: string) => calls.push(`activate ${id}`),
+          open: (project: string, url: string, detail: string | undefined) =>
+            calls.push(`open ${project} ${url} ${String(detail)}`),
+        },
+      };
+    }
+
+    it("opens a fresh tab when the project has no editor tab yet", () => {
+      const { calls, host: h } = host([]);
+
+      showEditorTab(h, "p", "http://x/1", undefined);
+
+      expect(calls).toEqual(["open p http://x/1 undefined"]);
+    });
+
+    // Navigate *and* activate: the workbench only honours `payload` at page
+    // load, so a reused tab has to actually load the new URL, and it has to
+    // come to the front or the click looks like it did nothing.
+    it("navigates and activates the existing tab rather than opening a second", () => {
+      const { calls, host: h } = host([
+        { id: "t1", kind: "editor", project: "p", detail: undefined },
+      ]);
+
+      showEditorTab(h, "p", "http://x/2", undefined);
+
+      expect(calls).toEqual(["navigate t1 http://x/2", "activate t1"]);
+    });
+
+    it("opens a fresh tab when the only editor tab belongs to another project", () => {
+      const { calls, host: h } = host([
+        { id: "t1", kind: "editor", project: "q", detail: undefined },
+      ]);
+
+      showEditorTab(h, "p", "http://x/3", undefined);
+
+      expect(calls).toEqual(["open p http://x/3 undefined"]);
+    });
+
+    it("reuses the tab of a named root when that is what was asked for", () => {
+      const { calls, host: h } = host([
+        { id: "t1", kind: "editor", project: "p", detail: undefined },
+        { id: "t2", kind: "editor", project: "p", detail: "api" },
+      ]);
+
+      showEditorTab(h, "p", "http://x/4", "api");
+
+      expect(calls).toEqual(["navigate t2 http://x/4", "activate t2"]);
     });
   });
 
