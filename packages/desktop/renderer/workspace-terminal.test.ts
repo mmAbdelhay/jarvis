@@ -956,3 +956,96 @@ describe("the terminal tab's file sidebar", () => {
     expect(sidebar()).toBeNull();
   });
 });
+
+// Dismissing the sidebar, and what a closed pane leaves behind. Same
+// harness as the block above; kept apart because both are about the
+// sidebar's visibility rather than its root.
+describe("dismissing the terminal tab's file sidebar", () => {
+  beforeEach(() => harness());
+
+  const CWD = (path: string) => `]7;file://${path}`;
+  const settle = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 0));
+  const sidebar = () => document.querySelector<HTMLElement>(".terminal-explorer");
+
+  async function tabWithSidebar(): Promise<
+    typeof import("./workspace-terminal.js") & { listed: string[][] }
+  > {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/h" });
+    const listed: string[][] = [];
+    jarvis["listTerminalDir"] = (paneKey: string, path: string) => {
+      listed.push([paneKey, path]);
+      return Promise.resolve([{ name: "src", directory: true }]);
+    };
+    const module = await load();
+    await settle();
+    return Object.assign(module, { listed });
+  }
+
+  /** The palette's own entry, run the way a user runs it. */
+  function runAction(label: string): void {
+    const palette = document.querySelector<HTMLElement>(".terminal-palette");
+    const input = palette?.querySelector("input");
+    if (input === null || input === undefined) throw new Error("no palette input");
+    input.value = label;
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+  }
+
+  it("closes the sidebar from the command palette", async () => {
+    const { renderWorkspaceTerminals } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    expect(sidebar()?.hidden).toBe(false);
+
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle file sidebar");
+
+    expect(sidebar()?.hidden).toBe(true);
+  });
+
+  // A sidebar the user dismissed stays dismissed through every later
+  // prompt — and comes back only when they ask for it again.
+  it("keeps it closed across a cd, and re-opens it on a second toggle", async () => {
+    const { renderWorkspaceTerminals } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle file sidebar");
+
+    dataListener?.("tab-1", CWD("/proj/src"));
+    await settle();
+    expect(sidebar()?.hidden).toBe(true);
+
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle file sidebar");
+
+    expect(sidebar()?.hidden).toBe(false);
+    expect(sidebar()?.textContent).toContain("src");
+  });
+
+  // Closing the pane the sidebar was following leaves it rooted for a dead
+  // shell. If the pane that takes the focus has never said where it is,
+  // there is nothing honest to show.
+  it("clears the sidebar when the pane that takes the focus has no directory", async () => {
+    const { renderWorkspaceTerminals } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    FakeTerminal.instances[0]?.pressKey({ key: "d", metaKey: true });
+    await settle();
+    // Only the split pane ever reports a directory.
+    dataListener?.("tab-1:p1", CWD("/proj/split"));
+    await settle();
+    expect(sidebar()?.hidden).toBe(false);
+
+    FakeTerminal.instances[1]?.pressKey({ key: "w", metaKey: true });
+    await settle();
+
+    expect(sidebar()?.textContent).toBe("");
+    expect(sidebar()?.hidden).toBe(true);
+  });
+});

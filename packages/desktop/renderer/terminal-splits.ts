@@ -37,6 +37,16 @@ export type SplitTree = {
   dispose(): void;
 };
 
+/** What a tab wants from its tree beyond the panes themselves. A bag
+ *  rather than more positional arguments: everything else in this area
+ *  takes one, and the next thing a tab needs would otherwise be a fifth. */
+export type SplitTreeOptions = {
+  /** The focus moved to this pane. Called wherever it moves — a split, a
+   *  close, ⌥⌘arrow, a click on a pane — which is why it lives here rather
+   *  than being reconstructed from the callers of those. */
+  onFocus?: ((paneKey: string) => void) | undefined;
+};
+
 /** How narrow a dragged pane may get. Below this a terminal is no longer
  *  one — the divider stops rather than following the pointer. */
 const MIN_PANE_PX = 80;
@@ -73,8 +83,9 @@ export function createSplitTree(
   host: HTMLElement,
   makePane: (paneKey: string, host: HTMLElement) => TerminalPane,
   tabId: string,
-  onFocus?: (paneKey: string) => void,
+  options: SplitTreeOptions = {},
 ): SplitTree {
+  const { onFocus } = options;
   const element = document.createElement("div");
   element.className = "terminal-split";
   host.append(element);

@@ -86,6 +86,11 @@ export type PaneHooks = {
    *  a file sidebar follow a `cd` the moment it finishes rather than when
    *  the next command starts. Absent means nothing follows it. */
   onCwd?: ((path: string) => void) | undefined;
+  /** Shows or hides the tab's file sidebar. Offered as a palette action
+   *  and nowhere else — the sidebar has no chord of its own, and this is
+   *  what keeps it dismissable. Absent means the tab has no sidebar, and
+   *  the action is left out entirely rather than doing nothing. */
+  toggleExplorer?: (() => void) | undefined;
 };
 
 export type { BlockView };
@@ -604,6 +609,14 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       run: () => attempt(() => views.forEach((view) => view.collapse(true))),
     });
     actions.push({ id: "clear", label: "Clear terminal", run: () => attempt(() => terminal.clear()) });
+    const toggleExplorer = hooks.toggleExplorer;
+    if (toggleExplorer !== undefined) {
+      actions.push({
+        id: "toggle-explorer",
+        label: "Toggle file sidebar",
+        run: () => attempt(() => toggleExplorer()),
+      });
+    }
     if (hooks.workflows !== undefined && editor !== undefined) {
       actions.push({ id: "run-workflow", label: "Run workflow…", run: runWorkflow });
     }

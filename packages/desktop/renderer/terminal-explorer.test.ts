@@ -155,3 +155,102 @@ describe("the terminal explorer", () => {
     expect(view.element.textContent).toBe("");
   });
 });
+
+// The window between a re-root and its listing. FileTree does not touch
+// its container until the new listing resolves, so without the sidebar
+// clearing it first the old pane's rows stay clickable under the new
+// pane's key — one IPC round trip wide, and `choose` is about to open
+// files for real.
+describe("the terminal explorer mid-re-root", () => {
+  /** A promise this test controls the settlement of. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("shows no row it could attribute to the wrong shell while re-rooting", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const pending = deferred<{ name: string; directory: boolean }[]>();
+    const seen: string[][] = [];
+    const choose = vi.fn();
+    const list = vi.fn(async (paneKey: string, path: string) => {
+      seen.push([paneKey, path]);
+      if (path === "/proj") return [{ name: "read me.md", directory: false }];
+      return await pending.promise;
+    });
+    const view = createTerminalExplorer(host, { list, choose });
+
+    view.setRoot("tab-1", "/proj");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(view.element.textContent).toContain("read me.md");
+
+    // The focus moves to another pane; its listing has not answered yet.
+    view.setRoot("tab-1:p1", "/other");
+    const stale = view.element.querySelector<HTMLElement>('[data-path="/proj/read me.md"]');
+    expect(stale).toBeNull();
+    expect(view.element.textContent).toBe("");
+
+    pending.resolve([{ name: "there.md", directory: false }]);
+    await new Promise((r) => setTimeout(r, 0));
+    view.element.querySelector<HTMLElement>('[data-path="/other/there.md"]')?.click();
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(choose).toHaveBeenCalledWith("tab-1:p1", "/other/there.md");
+  });
+});
+
+// A pane closed with ⌘W leaves the sidebar rooted for a shell that is
+// gone. The tab clears it rather than showing a directory nobody is in.
+describe("clearing the terminal explorer", () => {
+  it("empties and hides when there is no directory to show", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async () => [{ name: "src", directory: true }]);
+    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    view.setRoot("tab-1", "/proj");
+    await new Promise((r) => setTimeout(r, 0));
+
+    view.clear();
+
+    expect(view.element.textContent).toBe("");
+    expect(view.isOpen()).toBe(false);
+  });
+
+  // Cleared is "nothing to show", not "the user closed it": the next
+  // directory brings the sidebar back.
+  it("comes back on the next directory", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async () => [{ name: "src", directory: true }]);
+    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    view.setRoot("tab-1", "/proj");
+    await new Promise((r) => setTimeout(r, 0));
+    view.clear();
+
+    view.setRoot("tab-1", "/proj");
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(view.isOpen()).toBe(true);
+    expect(view.element.textContent).toContain("src");
+  });
+
+  // …unless the user closed it. A clear must not undo a dismissal.
+  it("stays closed through a clear and a re-root when the user closed it", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async () => [{ name: "src", directory: true }]);
+    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    view.setRoot("tab-1", "/proj");
+    await new Promise((r) => setTimeout(r, 0));
+    view.toggle();
+
+    view.clear();
+    view.setRoot("tab-1", "/elsewhere");
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(view.isOpen()).toBe(false);
+  });
+});

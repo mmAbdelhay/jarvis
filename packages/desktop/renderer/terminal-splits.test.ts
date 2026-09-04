@@ -384,12 +384,9 @@ describe("telling its owner which pane has the focus", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const focused: string[] = [];
-    const built = createSplitTree(
-      host,
-      makePane,
-      "tab-1",
-      onFocus ?? ((key) => focused.push(key)),
-    );
+    const built = createSplitTree(host, makePane, "tab-1", {
+      onFocus: onFocus ?? ((key) => focused.push(key)),
+    });
     return { tree: built, focused };
   }
 

@@ -1501,3 +1501,57 @@ describe("notifications", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+// The tab's file sidebar has no chord of its own, so the palette is the
+// only way out of it: a panel that cannot be dismissed is not a panel.
+describe("the file sidebar's palette action", () => {
+  function paneWithSidebar(toggleExplorer?: () => void) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const p = createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: { blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x" },
+      notify: vi.fn(),
+      toggleExplorer,
+    });
+    return p;
+  }
+
+  const palette = (p: { element: HTMLElement }) =>
+    p.element.querySelector<HTMLElement>(".terminal-palette");
+
+  function run(p: { element: HTMLElement }, label: string): void {
+    const input = palette(p)?.querySelector("input");
+    if (input === null || input === undefined) throw new Error("no palette input");
+    input.value = label;
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+  }
+
+  it("offers the sidebar toggle and runs it", () => {
+    const toggleExplorer = vi.fn();
+    const p = paneWithSidebar(toggleExplorer);
+    p.write(`${A}$ ${B}`);
+
+    p.openPalette();
+    expect(palette(p)?.textContent).toContain("Toggle file sidebar");
+    run(p, "Toggle file sidebar");
+
+    expect(toggleExplorer).toHaveBeenCalledTimes(1);
+  });
+
+  // The same rule every other optional action follows: absent hook, absent
+  // action — never an entry that does nothing.
+  it("offers nothing when the pane has no sidebar", () => {
+    const p = paneWithSidebar();
+    p.write(`${A}$ ${B}`);
+
+    p.openPalette();
+
+    expect(palette(p)?.textContent).not.toContain("Toggle file sidebar");
+  });
+});

@@ -200,10 +200,13 @@ function ensurePane(
   // focus. Appended before the tree so it sits left of the panes.
   const explorer = createTerminalExplorer(element, {
     // Guarded: a preload without the channel leaves a sidebar with nothing
-    // to draw, never a terminal that throws. The pane key is the sidebar's
-    // own, and main resolves the path against *that* shell's directory —
-    // which is the containment check, and the reason the key travels with
-    // every listing rather than being assumed from the tab.
+    // to draw, never a terminal that throws. The pane key travels with
+    // every listing rather than being assumed from the tab because it is
+    // what tells main which shell asked: main resolves the path against
+    // that pane's own working directory, and uses it to pick which
+    // configured project the request belongs to. The containment check
+    // itself is against that project's directory, not against the cwd —
+    // see ipc.ts's listDir.
     list: async (paneKey, path) => {
       try {
         return await window.jarvis.listTerminalDir(paneKey, path);
@@ -238,13 +241,22 @@ function ensurePane(
           lastCwd.set(paneKey, path);
           if (focusedKey() === paneKey) explorer.setRoot(paneKey, path);
         },
+        // The sidebar's only way out: no chord, one palette action.
+        () => explorer.toggle(),
       ),
     tabId,
-    (paneKey) => {
-      const path = lastCwd.get(paneKey);
-      // A pane that has never reported a directory leaves the sidebar
-      // showing what it had — there is nothing truer to show.
-      if (path !== undefined) explorer.setRoot(paneKey, path);
+    {
+      onFocus: (paneKey) => {
+        const path = lastCwd.get(paneKey);
+        // A pane that has never said where it is — a shell with no
+        // integration, or one that has not drawn its first prompt yet —
+        // leaves nothing honest to show. Going on showing the previous
+        // pane's directory would be worst of all after a ⌘W, where that
+        // pane's shell is gone and every listing under its key would fall
+        // back to the tab's own.
+        if (path === undefined) explorer.clear();
+        else explorer.setRoot(paneKey, path);
+      },
     },
   );
   tree = built;
@@ -274,6 +286,7 @@ function makePane(
   splitKeys: SplitKeys,
   settings: typeof terminalSettings,
   onCwd: (path: string) => void,
+  toggleExplorer: () => void,
 ): TerminalPane {
   // A split pane's shell has to exist before the pane can attach to it, so
   // the attach below waits on this. The tab's own pane has had a shell
@@ -361,6 +374,10 @@ function makePane(
     // Where this pane's shell is, as of the prompt it is about to draw —
     // what the tab's file sidebar follows.
     onCwd,
+    // "Toggle file sidebar" in the pane's own palette. The sidebar belongs
+    // to the tab, not to the pane, so every pane's action toggles the same
+    // one — which is the point: whichever pane you are in can dismiss it.
+    toggleExplorer,
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;
