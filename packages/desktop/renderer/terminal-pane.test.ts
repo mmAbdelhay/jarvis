@@ -38,7 +38,7 @@ function pane(
   settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" },
   hooks: {
     onCwd?: (path: string) => void;
-    chips?: () => Promise<import("../src/ipc.js").TerminalChips | undefined>;
+    chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
   } = {},
 ) {
   const host = document.createElement("div");
@@ -371,60 +371,113 @@ describe("the chip row in a pane", () => {
     expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
   });
 
-  // `cwd` fires on every prompt, and each firing starts its own `git`-backed
-  // read; there is no reason the earlier of two in-flight reads has to
-  // resolve first. If the row applied whatever resolved most recently
-  // instead of whatever was *asked for* most recently, a slow first read
-  // finishing after a fast second one would revert the row to stale data
-  // right after the correct data was already on screen. This is the
-  // out-of-order interleaving — resolving the *second* read before the
-  // first — the in-order test above cannot exercise.
-  it("does not let a stale read overwrite a fresher one that already resolved", async () => {
-    let resolveFirst: ((value: unknown) => void) | undefined;
-    let resolveSecond: ((value: unknown) => void) | undefined;
-    const chips = vi
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          }),
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveSecond = resolve;
-          }),
-      );
-    const p = pane(undefined, { chips });
-    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
-    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
-    await settle();
-    expect(chips).toHaveBeenCalledTimes(2);
-
-    // The second (newer) read resolves first...
-    resolveSecond?.({
-      cwd: "/Users/x/proj",
-      branch: "feature",
-      detached: false,
-      insertions: 0,
-      deletions: 0,
-      runtime: undefined,
-    });
-    await settle();
-    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("feature");
-
-    // ...then the first (older, stale) read resolves late. It must not win.
-    resolveFirst?.({
-      cwd: "/Users/x/proj",
+  // The chip read is what tells main where the shell is: main's own record
+  // is the directory the shell was *started* in, written at open() and
+  // never again, so a chip read that did not carry the prompt's own path
+  // would describe the project root's repository after any `cd` — the same
+  // OSC 7 value that re-roots the file sidebar, so the two would disagree
+  // on screen.
+  it("reads chips for the directory the prompt reported, not the one before it", async () => {
+    const chips = vi.fn(async (path: string) => ({
+      cwd: path,
       branch: "main",
       detached: false,
       insertions: 0,
       deletions: 0,
       runtime: undefined,
+    }));
+    const p = pane(undefined, { chips });
+
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(chips).toHaveBeenLastCalledWith("/Users/x/proj");
+
+    p.write(`${CWD("/Users/x/proj/packages/desktop")}${A}$ ${B}`);
+    await settle();
+    expect(chips).toHaveBeenLastCalledWith("/Users/x/proj/packages/desktop");
+    expect(p.element.querySelector(".terminal-chip--path")?.textContent).toBe(
+      "~/proj/packages/desktop",
+    );
+  });
+
+  // One read is four `git` subprocesses in main. `cwd` fires on every
+  // prompt — a held Enter, a pasted 200-line script — and starting a read
+  // per prompt is hundreds of concurrent `git status` runs against a large
+  // repository, times the panes in a split. At most one read is out at a
+  // time; a burst collapses to that read plus one more for the last prompt.
+  it("keeps one chip read in flight however many prompts arrive", async () => {
+    type Chips = import("../src/ipc.js").TerminalChips | undefined;
+    const pending: { path: string; resolve: (value: Chips) => void }[] = [];
+    const chips = vi.fn(
+      (path: string) =>
+        new Promise<Chips>((resolve) => {
+          pending.push({ path, resolve });
+        }),
+    );
+    const p = pane(undefined, { chips });
+
+    for (let i = 0; i < 50; i += 1) p.write(`${CWD(`/Users/x/proj/d${i}`)}${A}$ ${B}`);
+    await settle();
+
+    // Fifty prompts, one read — for the first prompt, the one that started
+    // it.
+    expect(chips).toHaveBeenCalledTimes(1);
+    expect(pending[0]?.path).toBe("/Users/x/proj/d0");
+
+    pending[0]?.resolve({
+      cwd: "/Users/x/proj/d0",
+      branch: "stale",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
     });
     await settle();
-    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("feature");
+
+    // ...and exactly one more when it lands, for the *last* prompt of the
+    // burst: every prompt in between named a directory the shell has
+    // already left.
+    expect(chips).toHaveBeenCalledTimes(2);
+    expect(pending[1]?.path).toBe("/Users/x/proj/d49");
+
+    pending[1]?.resolve({
+      cwd: "/Users/x/proj/d49",
+      branch: "current",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
+    });
+    await settle();
+
+    // The last state wins, and the queue is empty — no third read.
+    expect(chips).toHaveBeenCalledTimes(2);
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("current");
+  });
+
+  // A read that rejects must still release the guard, or one failed `git`
+  // call would freeze the row for the life of the pane.
+  it("goes on reading after a read rejects mid-burst", async () => {
+    const chips = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("read failed"))
+      .mockResolvedValue({
+        cwd: "/Users/x/proj",
+        branch: "main",
+        detached: false,
+        insertions: 0,
+        deletions: 0,
+        runtime: undefined,
+      });
+    const p = pane(undefined, { chips });
+
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    await settle();
+
+    expect(chips).toHaveBeenCalledTimes(2);
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
   });
 });
 

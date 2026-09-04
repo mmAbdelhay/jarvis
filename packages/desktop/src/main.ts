@@ -1415,7 +1415,12 @@ app.whenReady().then(async () => {
     ipcMain.handle("terminal:ai", (_event, kind: unknown, text: unknown) =>
       terminal.terminalAi(kind as "generate" | "explain", text as string),
     );
-    ipcMain.handle("terminal:chips", (_event, paneKey: unknown) => terminal.chips(paneKey as string));
+    ipcMain.handle("terminal:chips", (_event, paneKey: unknown, path: unknown) =>
+      // `path` is the renderer's live OSC 7 directory, passed through
+      // untyped exactly like every other argument on this boundary —
+      // chips() decides what to believe about it (see liveCwd).
+      terminal.chips(paneKey as string, path as string | undefined),
+    );
     ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
       bookmarks.list(typeof project === "string" ? project : ""),
     );

@@ -65,7 +65,11 @@ export function createChipRow(host: HTMLElement, home: string): ChipRow {
       element.replaceChildren();
       if (chips === undefined) return;
       if (chips.runtime !== undefined) element.append(chip(chips.runtime));
-      element.append(chip(formatCwd(chips.cwd, home)));
+      // Classed, unlike the runtime chip: it is the one chip that has to
+      // give way when the row cannot fit (a deep path in a three-way
+      // split), because the branch and the ± counts carry what the shell's
+      // own prompt does not. See `.terminal-chip--path` in styles.css.
+      element.append(chip(formatCwd(chips.cwd, home), "terminal-chip--path"));
       if (chips.branch !== undefined) {
         // A detached HEAD's "branch" is a short SHA, not a name — wrapped
         // in parentheses so it never reads as an ordinary branch.

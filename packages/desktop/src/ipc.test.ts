@@ -3163,6 +3163,193 @@ describe("terminal handlers", () => {
 
       expect(git.changes).toHaveBeenCalledWith("/proj");
     });
+
+    // The `directories` map holds the shell's *starting* directory and
+    // nothing writes it again, so every test above — every test that
+    // existed before this one — asks about a shell that never moved. A
+    // shell that has moved is the whole point of a path chip: after
+    // `cd packages/desktop` the sidebar re-roots (it uses the renderer's
+    // own OSC 7 path) while the chips described the project root's
+    // repository, confidently wrong. The fakes cannot move a shell, so the
+    // renderer's path is what stands in for one here.
+    describe("the shell's live directory", () => {
+      const files = { readDir: () => [], realPath: (path: string) => path };
+
+      function moved(overrides: Partial<TerminalHandlerDeps> = {}) {
+        const git = {
+          changes: vi.fn(async (repoPath: string) => ({
+            ok: true as const,
+            value: {
+              repoPath,
+              branch: repoPath === "/proj/packages/desktop" ? "feature" : "master",
+              detached: false,
+              files: [],
+              insertions: 0,
+              deletions: 0,
+            },
+          })),
+        };
+        const handlers = createTerminalHandlers({
+          ...baseDeps(),
+          files,
+          git: git as unknown as GitProvider,
+          ...overrides,
+        });
+        handlers.open("p");
+        return { handlers, git };
+      }
+
+      it("describes the directory the shell moved to, not the one it started in", async () => {
+        const { handlers, git } = moved();
+
+        await expect(handlers.chips("tab-1", "/proj/packages/desktop")).resolves.toMatchObject({
+          cwd: "/proj/packages/desktop",
+          branch: "feature",
+        });
+        expect(git.changes).toHaveBeenCalledWith("/proj/packages/desktop");
+        expect(git.changes).not.toHaveBeenCalledWith("/proj");
+      });
+
+      it("probes the runtime in the directory the shell moved to", async () => {
+        const runtimeVersion = vi.fn(async () => "v22.11.0");
+        const { handlers } = moved({ runtimeVersion });
+
+        await handlers.chips("tab-1", "/proj/packages/desktop");
+
+        expect(runtimeVersion).toHaveBeenCalledWith("/proj/packages/desktop");
+      });
+
+      // A renderer-supplied path decides which repository a `git status`
+      // runs in. It goes through the same containment check every other
+      // path in this feature does, and a refusal is the old answer — the
+      // shell's start directory — never a read outside the project.
+      it("falls back to the start directory for a path outside the project", async () => {
+        const { handlers, git } = moved();
+
+        await expect(handlers.chips("tab-1", "/etc")).resolves.toMatchObject({ cwd: "/proj" });
+        expect(git.changes).toHaveBeenCalledWith("/proj");
+        expect(git.changes).not.toHaveBeenCalledWith("/etc");
+      });
+
+      it("falls back to the start directory for a non-string path and for none at all", async () => {
+        const { handlers, git } = moved();
+
+        await expect(handlers.chips("tab-1", 7 as unknown as string)).resolves.toMatchObject({
+          cwd: "/proj",
+        });
+        await expect(handlers.chips("tab-1")).resolves.toMatchObject({ cwd: "/proj" });
+        expect(git.changes).toHaveBeenCalledWith("/proj");
+      });
+
+      // No `files` means no realPath to resolve a path with, and an
+      // unresolved path is one that was never proven inside the project.
+      it("falls back to the start directory with no file integration to check the path", async () => {
+        const { handlers, git } = moved({ files: undefined });
+
+        await expect(handlers.chips("tab-1", "/proj/packages/desktop")).resolves.toMatchObject({
+          cwd: "/proj",
+        });
+        expect(git.changes).toHaveBeenCalledWith("/proj");
+      });
+
+      // The path is a realpath before it is used, exactly as listDir's is:
+      // a symlinked directory must not have its link name reach `git`.
+      it("reads the resolved real path, not the renderer's string", async () => {
+        const linked = {
+          readDir: () => [],
+          realPath: (path: string) => (path === "/proj/link" ? "/proj/real" : path),
+        };
+        const { handlers, git } = moved({ files: linked });
+
+        await expect(handlers.chips("tab-1", "/proj/link")).resolves.toMatchObject({
+          cwd: "/proj/real",
+        });
+        expect(git.changes).toHaveBeenCalledWith("/proj/real");
+      });
+    });
+
+    // One "git call" is four subprocesses (checkIsRepo, status, and two
+    // diffSummary runs), asked for once per prompt per pane — a bare Enter
+    // included. Held Enter, or a pasted script, must not mean a hundred of
+    // them, and three panes in one repository must not mean three.
+    describe("coalescing the git read", () => {
+      const files = { readDir: () => [], realPath: (path: string) => path };
+
+      function counted() {
+        const git = {
+          changes: vi.fn(async (repoPath: string) => ({
+            ok: true as const,
+            value: {
+              repoPath,
+              branch: "master",
+              detached: false,
+              files: [],
+              insertions: 0,
+              deletions: 0,
+            },
+          })),
+        };
+        const handlers = createTerminalHandlers({
+          ...baseDeps(),
+          files,
+          git: git as unknown as GitProvider,
+        });
+        handlers.open("p");
+        handlers.split("tab-1", "p1");
+        return { handlers, git };
+      }
+
+      it("answers many rapid reads of one directory with a single git call", async () => {
+        const { handlers, git } = counted();
+
+        const rows = await Promise.all(
+          Array.from({ length: 20 }, () => handlers.chips("tab-1", "/proj/packages")),
+        );
+
+        expect(git.changes).toHaveBeenCalledTimes(1);
+        // Bounded, and every caller still gets the answer — a shared read
+        // that only the first caller sees would be worse than no cache.
+        expect(rows.every((row) => row?.branch === "master")).toBe(true);
+      });
+
+      it("shares one read between two panes sitting in the same directory", async () => {
+        const { handlers, git } = counted();
+
+        await handlers.chips("tab-1", "/proj/packages");
+        await handlers.chips("tab-1:p1", "/proj/packages");
+
+        expect(git.changes).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not answer one directory with another's read", async () => {
+        const { handlers, git } = counted();
+
+        await handlers.chips("tab-1", "/proj/packages");
+        await handlers.chips("tab-1:p1", "/proj/docs");
+
+        expect(git.changes.mock.calls.map(([path]) => path)).toEqual([
+          "/proj/packages",
+          "/proj/docs",
+        ]);
+      });
+
+      // The cache is a burst-coalescer, not a memo: the row drawn after a
+      // command has to reflect what that command did to the working tree.
+      it("reads again once the cached answer has aged out", async () => {
+        vi.useFakeTimers();
+        try {
+          const { handlers, git } = counted();
+
+          await handlers.chips("tab-1", "/proj/packages");
+          vi.setSystemTime(Date.now() + 5_000);
+          await handlers.chips("tab-1", "/proj/packages");
+
+          expect(git.changes).toHaveBeenCalledTimes(2);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
   });
 });
 

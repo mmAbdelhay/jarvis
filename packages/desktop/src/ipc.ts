@@ -507,8 +507,10 @@ export type RendererApi = {
   /** The chip row above `paneKey`'s prompt — its directory, git branch and
    *  dirty counts, and runtime version. `undefined` for a pane this process
    *  never started; a chip with no data of its own (no repository, no
-   *  `package.json`) is simply absent from what comes back, never guessed. */
-  terminalChips(paneKey: string): Promise<TerminalChips | undefined>;
+   *  `package.json`) is simply absent from what comes back, never guessed.
+   *  `path` is the pane's live OSC 7 directory — see TerminalHandlers.chips
+   *  for why the renderer, not main, is the one that knows it. */
+  terminalChips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
   /** Opens (or reuses) the project's API tab. Unlike a terminal there is one
    *  per project: a collection tree is a view of the filesystem, not a
    *  session, so a second tab would be a duplicate. */
@@ -1285,8 +1287,14 @@ export type TerminalHandlers = {
    *  directory, git branch/dirty counts, and runtime version. `undefined`
    *  for an unknown pane — never a chip guessed from partial information.
    *  Git and the runtime probe are independent: either being absent (no
-   *  repository, no `package.json`) drops only that chip, never the rest. */
-  chips(paneKey: string): Promise<TerminalChips | undefined>;
+   *  repository, no `package.json`) drops only that chip, never the rest.
+   *
+   *  `path` is where the shell says it is *now* — the renderer's own live
+   *  OSC 7 value, the same one that re-roots the file sidebar. It is
+   *  honoured only if it resolves inside the pane's project; anything else
+   *  (absent, untyped, outside) falls back to the shell's starting
+   *  directory, which is all this process knows on its own. */
+  chips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
 };
 
 /** The chip row above a terminal's prompt — a runtime version, the
@@ -1392,6 +1400,12 @@ export type TerminalHandlerDeps = {
  *  point every explain call passes through regardless of what the renderer
  *  sent. */
 const EXPLAIN_OUTPUT_CAP = 4000;
+
+/** How long one directory's git read answers for every chip row asking
+ *  about it. Long enough that a held Enter, a pasted script or three panes
+ *  in one repository share a single read; short enough that the row after
+ *  a real command still reflects what that command did. */
+const CHIPS_TTL_MS = 1000;
 
 type ExplainPayload = { command: string; exitCode: number; output: string };
 
@@ -1593,6 +1607,62 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     const version = await probe(cwd).catch(() => undefined);
     runtimeCache.set(cwd, version);
     return version;
+  }
+
+  /**
+   * The directory the renderer says its shell is in, if it can be believed:
+   * a string, inside the project that owns the pane's own starting
+   * directory, resolved by the same `resolveWithin` every other path in
+   * this feature goes through. `undefined` for anything else — no path
+   * supplied, no `files` integration to resolve one with, a pane whose
+   * project cannot be found, or a path outside it — and the caller falls
+   * back to the map.
+   */
+  function liveCwd(start: string, path: unknown): string | undefined {
+    if (!isString(path)) return undefined;
+    const files = deps.files;
+    if (files === undefined) return undefined;
+    const project = projectFor(start);
+    if (project === undefined) return undefined;
+    return resolveWithin(project.dir, path, files.realPath);
+  }
+
+  /**
+   * `GitProvider.changes` for a directory, shared for `CHIPS_TTL_MS`.
+   *
+   * One "git call" is four subprocesses — checkIsRepo, status and two
+   * diffSummary runs — and the chip row asks for one per prompt per pane,
+   * a bare Enter included. The cache is keyed by directory, not by pane, so
+   * the three panes of a split sitting in one repository share one read,
+   * and a burst of prompts inside the TTL shares one too. The promise is
+   * cached rather than its result, so calls that arrive while a read is
+   * still running join it instead of starting a second.
+   */
+  const changesCache = new Map<string, { at: number; result: Promise<GitChanges | undefined> }>();
+
+  function changesFor(cwd: string): Promise<GitChanges | undefined> {
+    const git = deps.git;
+    if (git === undefined) return Promise.resolve(undefined);
+    const now = Date.now();
+    const hit = changesCache.get(cwd);
+    if (hit !== undefined && now - hit.at < CHIPS_TTL_MS) return hit.result;
+    const result = git
+      .changes(cwd)
+      // GitProvider's contract says a failure is a GitOutcome, not a
+      // throw, but this handler does not trust that either way — a
+      // real-world throw (or a failed outcome, meaning "not a
+      // repository") both degrade to no branch and no counts, never
+      // an error surfaced in a terminal.
+      .then((outcome) => (outcome.ok ? outcome.value : undefined))
+      .catch(() => undefined);
+    // Expired entries go before the new one lands, so a shell walked
+    // through a hundred directories leaves a map the size of the ones it
+    // was in within the last second, not of every one it ever visited.
+    for (const [key, entry] of changesCache) {
+      if (now - entry.at >= CHIPS_TTL_MS) changesCache.delete(key);
+    }
+    changesCache.set(cwd, { at: now, result });
+    return result;
   }
 
   return {
@@ -1875,29 +1945,32 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       }
     },
 
-    async chips(paneKey) {
+    async chips(paneKey, path) {
       if (!isString(paneKey)) return undefined;
       // The pane's own key first, the tab as the fallback — the same
       // resolution listDir, suggest and history use, so a split pane
-      // answers for its own directory rather than its tab's.
-      const cwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
-      if (cwd === undefined) return undefined;
+      // answers for its own directory rather than its tab's. This is the
+      // shell's *starting* directory: `directories` is written at open()
+      // and split() and never again.
+      const start = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (start === undefined) return undefined;
+      // …which is why the renderer passes where the shell actually is. It
+      // is the same OSC 7 value that re-roots the file sidebar, so the
+      // sidebar and the chip row 220px away can no longer disagree about
+      // the same shell: after `cd packages/desktop` the sidebar re-rooted
+      // while the branch and ± chips still described the project root's
+      // repository — a chip that is confidently wrong, against this
+      // feature's own "absent, never wrong" rule.
+      //
+      // Accepted only through the containment check the rest of this
+      // feature is built on, and only for a pane whose project can be
+      // found: a renderer-supplied path decides which repository gets a
+      // `git status` run in it, and it is not trusted further than a
+      // sidebar listing is. Anything else falls back to the map — the
+      // behaviour before this argument existed.
+      const cwd = liveCwd(start, path) ?? start;
 
-      const git = deps.git;
-      const [changes, runtime] = await Promise.all([
-        git === undefined
-          ? Promise.resolve(undefined)
-          : git
-              .changes(cwd)
-              // GitProvider's contract says a failure is a GitOutcome, not a
-              // throw, but this handler does not trust that either way — a
-              // real-world throw (or a failed outcome, meaning "not a
-              // repository") both degrade to no branch and no counts, never
-              // an error surfaced in a terminal.
-              .then((outcome) => (outcome.ok ? outcome.value : undefined))
-              .catch(() => undefined),
-        runtimeFor(cwd),
-      ]);
+      const [changes, runtime] = await Promise.all([changesFor(cwd), runtimeFor(cwd)]);
 
       return {
         cwd,

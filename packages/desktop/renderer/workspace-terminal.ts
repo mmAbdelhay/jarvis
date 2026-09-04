@@ -374,9 +374,13 @@ function makePane(
     // way `history` and `workflows` are: a channel that fails (or a preload
     // without it) leaves the row showing whatever it already had rather
     // than throwing into the pane.
-    chips: async () => {
+    chips: async (path) => {
       try {
-        return await window.jarvis.terminalChips(paneKey);
+        // The pane's live directory travels with the request: main's own
+        // record of where a shell is was written when the shell started
+        // and never again, so after a `cd` it would answer for the wrong
+        // repository — see TerminalHandlers.chips.
+        return await window.jarvis.terminalChips(paneKey, path);
       } catch {
         return undefined;
       }

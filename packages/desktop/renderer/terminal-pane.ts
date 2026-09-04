@@ -91,10 +91,14 @@ export type PaneHooks = {
   /** The chip row's data for this pane, read fresh on every `cwd` event —
    *  the same trigger `onCwd` fires on, since a prompt returning is exactly
    *  when the directory, the branch and the dirty counts can all have
-   *  changed. Absent means no chip row is ever populated (it stays empty);
+   *  changed. Called with the pane's live OSC 7 directory — the very path
+   *  `onCwd` just carried — because main knows only where the shell was
+   *  started, and a chip describing that after a `cd` is wrong rather than
+   *  absent. Absent means no chip row is ever populated (it stays empty);
    *  a read that rejects leaves the row showing whatever it already had —
-   *  a slow or broken repository must never block the input. */
-  chips?: (() => Promise<TerminalChips | undefined>) | undefined;
+   *  a slow or broken repository must never block the input. At most one
+   *  call is ever outstanding per pane; see `refreshChips`. */
+  chips?: ((path: string) => Promise<TerminalChips | undefined>) | undefined;
   /** Shows or hides the tab's file sidebar. Offered as a palette action
    *  and nowhere else — the sidebar has no chord of its own, and this is
    *  what keeps it dismissable. Absent means the tab has no sidebar, and
@@ -902,14 +906,15 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     attempt(() => nav?.sync(views));
   }
 
-  /** Which call to `refreshChips` is the most recent — `cwd` fires on every
-   *  prompt, and each firing starts its own `git`-backed read with no
-   *  guarantee the earlier of two in-flight reads resolves first. Bumped at
-   *  the start of every call and captured by that call's own closure, so a
-   *  read that resolves after a newer one already landed can tell it is
-   *  stale and decline to overwrite it — the read that answers the most
-   *  recent question wins, not the read that merely finishes last. */
-  let chipsGeneration = 0;
+  /** Whether a chip read is outstanding, and the directory of the most
+   *  recent prompt that arrived while it was. `cwd` fires on every prompt —
+   *  a bare Enter included — and one read is four `git` subprocesses in
+   *  main; starting one per prompt means hundreds of concurrent `git
+   *  status` runs from a held Enter or a pasted script, times the number of
+   *  panes. At most one read is in flight per pane, and a burst collapses
+   *  to that read plus one more for whatever the last prompt said. */
+  let chipsPending = false;
+  let chipsQueued: string | undefined;
 
   /**
    * Re-reads and re-draws the chip row for whatever prompt just arrived.
@@ -920,20 +925,35 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    * as it was — `chipRow.render` is only ever called with a result that
    * actually came back, and only from the most recently started read.
    */
-  function refreshChips(): void {
+  function refreshChips(path: string): void {
     const read = hooks.chips;
     if (read === undefined) return;
-    const generation = ++chipsGeneration;
-    void read()
+    // A read is already out. Remember the directory this prompt was in and
+    // re-read once, when that one lands — never start a second beside it.
+    // With only ever one read in flight, results also land in the order
+    // they were asked for: there is no stale answer that can overwrite a
+    // fresher one, and so no generation counter either.
+    if (chipsPending) {
+      chipsQueued = path;
+      return;
+    }
+    chipsPending = true;
+    void read(path)
       .then((chips) => {
         if (disposed) return;
-        // A newer read has already started (and may already have landed):
-        // this one is stale, regardless of which resolved first.
-        if (generation !== chipsGeneration) return;
         chipRow.render(chips);
       })
       .catch(() => {
         // The previous row stands.
+      })
+      .finally(() => {
+        chipsPending = false;
+        const queued = chipsQueued;
+        chipsQueued = undefined;
+        // The last prompt of the burst is the one still worth answering:
+        // every prompt in between described a directory the shell has
+        // already left.
+        if (queued !== undefined && !disposed) refreshChips(queued);
       });
   }
 
@@ -954,7 +974,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     }
     if (event.type === "cwd") {
       attempt(() => hooks.onCwd?.(event.path));
-      attempt(() => refreshChips());
+      // The same OSC 7 path the sidebar re-roots on, handed to the chip
+      // read: main knows only where the shell *started*, so without this
+      // the sidebar and the chip row describe two different directories.
+      attempt(() => refreshChips(event.path));
       return;
     }
     if (event.type === "block-done") {
