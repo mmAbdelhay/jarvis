@@ -164,6 +164,54 @@ describe("a terminal pane", () => {
     // trimmed the array would leak a DOM node per command forever.
     expect(p.element.querySelector(".terminal-blocks")?.children).toHaveLength(500);
   });
+
+  // For a pane that outlives what it is showing — the Session view points
+  // one pane at whichever agent is open. The elements go with the records,
+  // for the same reason the cap removes them: a list that only forgot them
+  // would leave one agent's output on the page under another's terminal.
+  // The live terminal is not this call's business, and resetting it is the
+  // caller's separate decision.
+  it("drops every block, its element and its selection on reset", () => {
+    const p = pane();
+    p.write(`${A}$ ${B}a\r\n${C("a")}1\r\n${D(0)}`);
+    p.write(`${A}$ ${B}b\r\n${C("b")}2\r\n${D(1)}`);
+    p.blockNav?.move(1);
+    expect(p.blockNav?.selected()).toBeDefined();
+    const written = FakeTerminal.instances[0]?.written.length ?? 0;
+
+    p.reset();
+
+    expect(p.blocks()).toHaveLength(0);
+    expect(p.element.querySelector(".terminal-blocks")?.children).toHaveLength(0);
+    expect(p.blockNav?.selected()).toBeUndefined();
+    expect(FakeTerminal.instances[0]?.written).toHaveLength(written);
+  });
+
+  // A filter left over from the last thing the pane showed would hide the
+  // next thing's blocks the moment they arrived — a pane that looks empty
+  // with nothing to say why.
+  it("clears a filter on reset, so the next block is visible", () => {
+    const p = pane();
+    p.write(`${A}$ ${B}a\r\n${C("a")}1\r\n${D(0)}`);
+    p.blockNav?.toggleFailedFilter();
+    expect(p.blockNav?.isFiltered()).toBe(true);
+
+    p.reset();
+    p.write(`${A}$ ${B}b\r\n${C("b")}2\r\n${D(0)}`);
+
+    expect(p.blockNav?.isFiltered()).toBe(false);
+    expect(p.blocks()[0]?.element.hidden).toBe(false);
+  });
+
+  // Nothing to reset, and nothing to throw: the same rule every other part
+  // of the block machinery follows.
+  it("resets a pane with blocks switched off without complaint", () => {
+    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    p.write("hello");
+
+    expect(() => p.reset()).not.toThrow();
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("hello");
+  });
 });
 
 // The command editor: a DOM line that stands in front of the shell, but

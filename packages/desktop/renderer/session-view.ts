@@ -211,11 +211,16 @@ export async function openSession(session: Session): Promise<void> {
   setVoiceTarget(session.id);
 
   const view = ensurePane();
-  // A different agent's screen must not be drawn over the last one's. The
-  // live terminal is what carries a session's screen — an agent holds the
-  // alternate screen throughout, so there are no frozen blocks to clear in
-  // any session anyone will actually see.
+  // A different agent's screen must not be drawn over the last one's — and
+  // neither must its blocks. The pane outlives any one session (it is
+  // pointed at whichever agent is open), so both halves of what it shows
+  // are cleared here: the live terminal's screen, and the frozen blocks
+  // above it. Today no agent produces blocks at all — an agent binary is
+  // exec'd directly, with no shell stage to print the integration marks —
+  // but nothing enforces that, and one agent's output under another's
+  // terminal is not a failure worth leaving to an architectural accident.
   view?.terminal.reset();
+  view?.reset();
   // The view was hidden until showView above, so the pane only has a real
   // size now — fit before writing so the backlog is laid out at the width
   // it will be read at.

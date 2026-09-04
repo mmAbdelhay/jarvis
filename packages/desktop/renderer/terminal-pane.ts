@@ -91,6 +91,17 @@ export type TerminalPane = {
   write(chunk: string): void;
   focus(): void;
   refit(): void;
+  /** Drops every frozen block — the elements, not merely their visibility —
+   *  along with any selection and any filter over them, and leaves the live
+   *  terminal exactly as it is (its own `reset()` is a separate decision the
+   *  caller makes beside this one).
+   *
+   *  For a pane that outlives what it is showing: the Session view keeps one
+   *  pane and points it at whichever agent is open, so switching sessions
+   *  must not leave one agent's blocks sitting under another's terminal. A
+   *  Terminal tab never needs this — its pane and its shell begin and end
+   *  together. */
+  reset(): void;
   dispose(): void;
   /** The frozen blocks, oldest first — what Tasks 6, 7 and 12 act on. */
   blocks(): readonly BlockView[];
@@ -875,6 +886,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // as zero and would make the addon throw.
       if (element.clientWidth === 0 || element.clientHeight === 0) return;
       attempt(() => fit.fit());
+    },
+    reset: () => {
+      // The nav first, so the selection is dropped while the block it is on
+      // is still in the list — the same order sync() relies on.
+      attempt(() => nav?.reset());
+      for (const view of views.splice(0)) attempt(() => view.element.remove());
     },
     dispose: () => {
       disposed = true;

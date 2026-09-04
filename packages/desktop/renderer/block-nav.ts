@@ -39,6 +39,13 @@ export type BlockNav = {
    *  view" needs — `searchText()` alone has no block boundaries to scroll
    *  to, only concatenated text. */
   findText(query: string): boolean;
+  /** Back to a nav over nothing: no blocks, no selection, no filter and no
+   *  sticky header. What a pane calls when the *thing* it is showing has
+   *  been replaced — the Session view switching from one agent to another —
+   *  as opposed to `sync`, which is one block arriving or being dropped
+   *  from the same list. Leaves the listener in place: the nav goes on
+   *  living, and `dispose` is still the only thing that ends it. */
+  reset(): void;
   /** Releases the sticky header's document-level scroll listener. Call once,
    *  when the pane that owns this nav is disposed — without it, the
    *  listener (and everything it closes over: `views`, `selected`, `list`,
@@ -192,6 +199,20 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
         setTimeout(() => attempt(() => match.element.classList.remove("found")), 1000);
       });
       return true;
+    },
+    reset(): void {
+      // Through select(), for the same reason sync() goes through it: a
+      // selection dropped by reassignment would leave .selected behind.
+      select(undefined);
+      filter = { kind: "none" };
+      views = [];
+      // The header stands in for a block that has scrolled out of view, and
+      // there is no longer a block for it to stand in for. Cleared here
+      // rather than waiting for the next scroll, which may never come.
+      attempt(() => {
+        sticky.hidden = true;
+        sticky.textContent = "";
+      });
     },
     dispose(): void {
       attempt(() => document.removeEventListener("scroll", onScroll, true));

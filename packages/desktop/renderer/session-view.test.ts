@@ -207,6 +207,34 @@ describe("openSession", () => {
     expect(pane?.querySelectorAll(".block")).toHaveLength(2);
   });
 
+  // The pane outlives any one session — it is pointed at whichever agent is
+  // open — so the blocks have to be cleared with the screen. No agent
+  // produces blocks today (an agent binary is exec'd directly, with no shell
+  // stage to print the marks), which is exactly why this needs a test rather
+  // than a comment: the day that stops being true, one agent's output must
+  // not appear under another agent's terminal.
+  it("clears the previous session's blocks when another session is opened", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const { openSession, appendSessionOutput } = await import("./session-view.js");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await openSession(makeSession({ id: "s1" }));
+    appendSessionOutput({
+      sessionId: "s1",
+      chunk:
+        `\u001b]133;A\u0007$ \u001b]133;B\u0007first agent\r\n` +
+        `\u001b]133;C;first agent\u0007ok\r\n\u001b]133;D;0\u0007`,
+    });
+    const pane = document.querySelector<HTMLElement>(".terminal-pane");
+    expect(pane?.querySelectorAll(".block")).toHaveLength(1);
+
+    await openSession(makeSession({ id: "s2" }));
+
+    expect(pane?.querySelectorAll(".block")).toHaveLength(0);
+  });
+
   it("keeps the terminal live when the backlog read fails", async () => {
     stubJarvis({
       getSessionLog: vi.fn(async () => {
