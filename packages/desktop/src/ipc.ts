@@ -17,8 +17,8 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import type { Brain, WorkspaceState } from "@jarvis/core";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import {
   awsLoginCommand,
   chatUrl,
@@ -1342,9 +1342,13 @@ export type TerminalHandlerDeps = {
          *  folder (arbitrary, not declared in `editors:`) is not shaped
          *  for. */
         open: (projectPath: string, folderPath: string) => Promise<{ ok: true; url: string } | { ok: false }>;
-        /** Opens the URL as `project`'s Editor tab — `BrowserHost.open`,
-         *  injected the same way `openTerminalTab` is. */
-        openTab: (project: string, url: string) => void;
+        /** Opens the URL as `project`'s Editor tab, rooted for `detail` (the
+         *  folder's path relative to the project — see `openFile`) — main
+         *  reuses an existing tab of the same `(project, detail)` rather
+         *  than opening a new one, via `findEditorTab`; a fresh tab is only
+         *  what `BrowserHost.open(project, url, "editor", detail)` does when
+         *  none is found. */
+        openTab: (project: string, url: string, detail: string) => void;
       }
     | undefined;
   /** Saved workflows. Absent means no workflow source at all — `workflows()`
@@ -1438,9 +1442,12 @@ function isExplainPayload(value: unknown): value is ExplainPayload {
  * is not host:port, which is the guess an earlier version of this plan
  * made before the spike this task's brief records. Encoded per path
  * segment, not with one `encodeURIComponent` over the whole string, so the
- * `/` between segments survives while a space, `#`, `?` or a non-ASCII
- * character inside a segment does not break the URI the workbench parses
- * back.
+ * `/` between segments survives while a space, `#`, `?`, `&` or a
+ * non-ASCII character inside a segment does not break the URI the
+ * workbench parses back. Splits on `sep`, the platform's own separator —
+ * correct for the POSIX paths this file otherwise assumes (Jarvis today
+ * only ships for macOS); a Windows path's drive letter would need its own
+ * handling this does not attempt.
  */
 function vscodeRemoteUri(filePath: string): string {
   return `vscode-remote://remote${filePath.split(sep).map(encodeURIComponent).join("/")}`;
@@ -1458,6 +1465,32 @@ function withOpenFilePayload(baseUrl: string, filePath: string): string {
   const payload = JSON.stringify([["openFile", vscodeRemoteUri(filePath)]]);
   const joiner = baseUrl.includes("?") ? "&" : "?";
   return `${baseUrl}${joiner}payload=${encodeURIComponent(payload)}`;
+}
+
+/**
+ * The id of `project`'s existing Editor tab already rooted at `detail`, if
+ * one is open. What lets clicking around the file sidebar reuse a tab
+ * instead of opening a new one on every click: `BrowserHost` caps hosted
+ * views at `MAX_TABS` and evicts the least-recently-active one once full
+ * (see browser-host.ts's `#evictIfFull`), so with no reuse, browsing a file
+ * tree would silently close a user's *other* open tabs — a DbGate tab with
+ * an unsaved query, say — as a side effect of clicking around. Reusing a
+ * tab still costs something: the `payload` query is only honoured by the
+ * workbench at page load, so opening a different file in an already-open
+ * folder means navigating that tab (a real reload), which loses whatever
+ * that tab's own browser session held that code-server's server-side state
+ * did not — scroll position, an editor the user had open but never
+ * touched. `detail === undefined` (the project-root button's own tab) is
+ * deliberately never matched: it is not a per-file tab and must stay the
+ * toolbar button's alone to reuse.
+ */
+export function findEditorTab(
+  tabs: readonly Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[],
+  project: string,
+  detail: string,
+): string | undefined {
+  return tabs.find((tab) => tab.kind === "editor" && tab.project === project && tab.detail === detail)
+    ?.id;
 }
 
 export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandlers {
@@ -1665,10 +1698,29 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // caller's own string.
       const target = resolveWithin(project.dir, path, files.realPath);
       if (target === undefined) return fail();
+      // dirname(target) is proven contained *again*, not assumed safe
+      // because `target` itself was: `target` passing means only that it
+      // is `project.dir` or something beneath it, and `target` itself can
+      // legitimately equal `project.dir` — a symlink at the project root
+      // pointing back to the project root is reported as a non-directory
+      // by readdirSync's own withFileTypes (it does not follow symlinks to
+      // decide isDirectory()), so the sidebar draws it as a clickable
+      // "file". dirname() of the project root is the project's *parent*,
+      // and that must be refused here, at the point the decision is made —
+      // not left to CodeServerManager's own belt-and-braces isInside check
+      // one layer down.
+      const folder = resolveWithin(project.dir, dirname(target), files.realPath);
+      if (folder === undefined) return fail();
+      // The folder's path relative to the project, both for the tab
+      // title and so the Editor toolbar button's own dedup (openEditorRoot
+      // in workspace.ts, matching `tab.detail === root`) can never mistake
+      // this tab for the project-root one it opens with no detail at all.
+      const rel = relative(project.dir, folder);
+      const detail = rel === "" ? "." : rel;
       try {
-        const result = await editor.open(project.dir, dirname(target));
+        const result = await editor.open(project.dir, folder);
         if (!result.ok) return fail();
-        editor.openTab(project.name, withOpenFilePayload(result.url, target));
+        editor.openTab(project.name, withOpenFilePayload(result.url, target), detail);
         return { ok: true, value: undefined };
       } catch {
         // A code-server that failed to start is a click that opens

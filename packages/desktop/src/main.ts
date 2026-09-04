@@ -90,6 +90,7 @@ import {
   createTerminalHandlers,
   createGitHandlers,
   createSettingsHandlers,
+  findEditorTab,
   isDeclaredContainer,
   PROVIDER_HEALTH_INTERVAL_MS,
 } from "./ipc.js";
@@ -716,7 +717,24 @@ app.whenReady().then(async () => {
       // declared `editors:` roots.
       editor: {
         open: (projectPath, folderPath) => codeServer.open(projectPath, folderPath),
-        openTab: (project, url) => workspace.open(project, url, "editor"),
+        // Reuses an already-open tab at the same (project, detail) rather
+        // than opening a new one every click — BrowserHost's MAX_TABS cap
+        // would otherwise silently evict a user's other hosted tabs (a
+        // DbGate tab with an unsaved query, say) as a side effect of
+        // browsing the file tree. Reuse means navigating that tab to the
+        // new URL — a real reload, since `payload` is only honoured at
+        // page load — so opening a second file in the same folder loses
+        // whatever the tab's own browser session held that code-server's
+        // server-side state did not. See findEditorTab.
+        openTab: (project, url, detail) => {
+          const existing = findEditorTab(workspace.state().tabs, project, detail);
+          if (existing !== undefined) {
+            workspace.navigate(existing, url);
+            workspace.activate(existing);
+            return;
+          }
+          workspace.open(project, url, "editor", detail);
+        },
       },
       workflows: {
         readDir: (path) => readdirSync(path),

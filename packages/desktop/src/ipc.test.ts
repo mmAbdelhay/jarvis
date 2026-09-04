@@ -18,6 +18,7 @@ import {
   type TerminalHandlerDeps,
   createGitHandlers,
   createSettingsHandlers,
+  findEditorTab,
   isDeclaredContainer,
   resolveWithin,
   type WiringDeps,
@@ -36,7 +37,7 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import type { AgentHealth, Brain, WorkspaceState } from "@jarvis/core";
+import type { AgentHealth, Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
@@ -2654,17 +2655,17 @@ describe("terminal handlers", () => {
     ): {
       handlers: ReturnType<typeof createTerminalHandlers>;
       opened: { projectPath: string; folderPath: string }[];
-      tabs: { project: string; url: string }[];
+      tabs: { project: string; url: string; detail: string }[];
     } {
       const opened: { projectPath: string; folderPath: string }[] = [];
-      const tabs: { project: string; url: string }[] = [];
+      const tabs: { project: string; url: string; detail: string }[] = [];
       const editor = {
         open: async (projectPath: string, folderPath: string) => {
           opened.push({ projectPath, folderPath });
           return { ok: true as const, url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}` };
         },
-        openTab: (project: string, url: string) => {
-          tabs.push({ project, url });
+        openTab: (project: string, url: string, detail: string) => {
+          tabs.push({ project, url, detail });
         },
       };
       const { manager } = shells();
@@ -2692,6 +2693,7 @@ describe("terminal handlers", () => {
       expect(tabs).toEqual([
         {
           project: "p",
+          detail: "src",
           url:
             "http://127.0.0.1:9999/?folder=%2Fproj%2Fsrc&payload=" +
             encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/src/a.ts"]])),
@@ -2699,23 +2701,51 @@ describe("terminal handlers", () => {
       ]);
     });
 
-    // Spaces, "#", "?" and a non-ASCII character all have special meaning in
-    // a URI or a query string; none of them may reach the workbench raw.
-    it("percent-encodes a file path with spaces, #, ? and non-ASCII characters", async () => {
+    // Spaces, "#", "?", "&" and a non-ASCII character all have special
+    // meaning in a URI or a query string; none of them may reach the
+    // workbench raw.
+    it("percent-encodes a file path with spaces, #, ?, & and non-ASCII characters", async () => {
       const { handlers, tabs } = opener();
       handlers.open("p");
 
-      const path = "/proj/a b#c?d/résumé.txt";
+      const path = "/proj/a b#c?d&e/résumé.txt";
       await handlers.openFile("tab-1", path);
 
-      const expectedUri = "vscode-remote://remote/proj/a%20b%23c%3Fd/r%C3%A9sum%C3%A9.txt";
+      const expectedUri = "vscode-remote://remote/proj/a%20b%23c%3Fd%26e/r%C3%A9sum%C3%A9.txt";
       const expectedPayload = encodeURIComponent(JSON.stringify([["openFile", expectedUri]]));
       expect(tabs).toEqual([
         {
           project: "p",
-          url: `http://127.0.0.1:9999/?folder=${encodeURIComponent("/proj/a b#c?d")}&payload=${expectedPayload}`,
+          detail: "a b#c?d&e",
+          url: `http://127.0.0.1:9999/?folder=${encodeURIComponent("/proj/a b#c?d&e")}&payload=${expectedPayload}`,
         },
       ]);
+    });
+
+    // The Editor toolbar button's own dedup (workspace.ts's openEditorRoot)
+    // matches an existing tab on `tab.detail === root`, where `root` is
+    // `undefined` for the project's own directory. Without a detail here,
+    // a file-opened tab would satisfy that predicate by accident and the
+    // toolbar button would activate a deep-rooted tab instead of opening
+    // the project root — the tab strip would also show every editor tab
+    // with the same title. The folder's path relative to the project both
+    // reads well in the tab title and can never equal `undefined`.
+    it("carries a detail naming the file's folder relative to the project, never undefined", async () => {
+      const { handlers, tabs } = opener();
+      handlers.open("p");
+
+      await handlers.openFile("tab-1", "/proj/src/deep/a.ts");
+
+      expect(tabs[0]?.detail).toBe("src/deep");
+    });
+
+    it("uses \".\" as the detail for a file at the project's own root", async () => {
+      const { handlers, tabs } = opener();
+      handlers.open("p");
+
+      await handlers.openFile("tab-1", "/proj/a.ts");
+
+      expect(tabs[0]?.detail).toBe(".");
     });
 
     it("refuses a path outside the project root, opening nothing", async () => {
@@ -2807,7 +2837,72 @@ describe("terminal handlers", () => {
 
       await handlers.openFile("tab-1", "/proj/a.ts");
 
-      expect(tabs).toEqual([{ project: "p", url: expect.any(String) }]);
+      expect(tabs).toEqual([{ project: "p", detail: ".", url: expect.any(String) }]);
+    });
+
+    // A symlink at the project root pointing back to the project root is
+    // reported as a "file" by readdirSync's withFileTypes (it does not
+    // follow symlinks to decide isDirectory()), so the sidebar draws it as
+    // a clickable row. Its resolved real path IS the project root — a
+    // legitimate answer for the file check alone — but dirname() of that is
+    // the project's *parent*. The containment check must be applied again
+    // to the containing folder, not trusted just because the file passed
+    // it: today this is only saved by CodeServerManager's own belt-and-
+    // braces isInside check one layer down, which this fake does not model.
+    it("refuses a self-referencing symlink whose containing folder would escape the project", async () => {
+      const selfLink = {
+        readDir: () => [],
+        realPath: (p: string) => (p === "/proj/selflink" ? "/proj" : p),
+      };
+      const { handlers, opened, tabs } = opener({ files: selfLink });
+      handlers.open("p");
+
+      await expect(handlers.openFile("tab-1", "/proj/selflink")).resolves.toMatchObject({ ok: false });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+  });
+
+  describe("findEditorTab", () => {
+    function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
+      return {
+        id: "t1",
+        project: "p",
+        url: "http://x",
+        kind: "editor",
+        title: "",
+        detail: "src",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: undefined,
+        hasPlayingVideo: false,
+        ...overrides,
+      };
+    }
+
+    it("finds the editor tab already open for this project and folder", () => {
+      expect(findEditorTab([tab()], "p", "src")).toBe("t1");
+    });
+
+    it("misses a tab of a different kind", () => {
+      expect(findEditorTab([tab({ kind: "web" })], "p", "src")).toBeUndefined();
+    });
+
+    it("misses a tab of a different project", () => {
+      expect(findEditorTab([tab({ project: "q" })], "p", "src")).toBeUndefined();
+    });
+
+    it("misses a tab whose detail names a different folder", () => {
+      expect(findEditorTab([tab({ detail: "other" })], "p", "src")).toBeUndefined();
+    });
+
+    it("misses an editor tab with no detail at all — the project-root button's own tab", () => {
+      expect(findEditorTab([tab({ detail: undefined })], "p", "src")).toBeUndefined();
+    });
+
+    it("finds nothing among no tabs", () => {
+      expect(findEditorTab([], "p", "src")).toBeUndefined();
     });
   });
 
