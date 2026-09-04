@@ -25,13 +25,37 @@ src/ipc.ts           every handler, as pure functions over injected deps
 src/preload.cts      the only bridge; contextIsolation is on
 src/browser-host.ts  the Workspace's tabs, Electron-free and unit tested
 src/electron-view.ts the one file that constructs a WebContentsView
+src/sidecar-reaper.ts when a sidecar nobody is looking at should be stopped
 renderer/            the UI. No Node. Type-only imports from the packages.
 ```
 
 **`browser-host.ts` contains no Electron import.** Tab lifecycle — partitions,
-eviction, visibility, which tab is active — is ordinary logic, and keeping
-Electron behind `ViewFactory` is what lets all of it run in plain Vitest.
-`electron-view.ts` is the only place a view is constructed.
+eviction, visibility, suspension, which tab is active — is ordinary logic, and
+keeping Electron behind `ViewFactory` is what lets all of it run in plain
+Vitest. `electron-view.ts` is the only place a view is constructed.
+
+**Suspension is the host destroying a view and keeping its tab.**
+`sweepIdle()` — driven by a once-a-minute timer in `main.ts` — destroys the
+`HostedView` behind any tab that has sat hidden past
+`performance.suspendTabsAfterMinutes` and marks the tab `suspended`. The row
+in `TabStore` is untouched, so nothing about the tab strip changes; `activate`
+sees the flag and builds a new view before showing it.
+
+Rebuilding needs one thing the host cannot know. A hosted app's sidecar may
+have been stopped underneath it and restarted on a different free port, so the
+address the tab was suspended holding points at nothing. `resumeUrl` is
+injected for exactly that: `main.ts` routes the answer through the same
+handler the tab's own button uses, so "reuse if running, start if not" is
+decided in one place.
+
+**Stopping a sidecar is decided outside the managers.** Nothing calls
+`CodeServerManager.open()` again while you type in the editor, so a "last
+used" stamp kept manager-side goes stale on the instance actually in use.
+Only the workspace's tabs know what is needed, so `main.ts` computes that set
+each sweep and `sidecar-reaper.ts` holds the grace period over it; the
+managers only learn `stop(key)` and `runningKeys()`. `codeServerKey` is
+exported and shared because the reaper builds its keys from config, from the
+other end entirely.
 
 **The renderer may import only *types*** from a workspace package. A value
 import is a bare specifier that survives compilation and 404s at runtime in the

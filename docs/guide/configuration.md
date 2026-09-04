@@ -109,7 +109,32 @@ whisper:
 
 sessions:                       # optional; the whole section defaults
   importWindowDays: 30          # how far back the transcript import reaches
+
+performance:                    # optional; the whole section defaults
+  suspendTabsAfterMinutes: 15   # 0 keeps every tab's renderer alive
+  stopSidecarsAfterMinutes: 10  # 0 keeps every sidecar until quit
+  terminalScrollback: 5000      # lines each terminal keeps
 ```
+
+## `performance:` — what Jarvis gives back while you are not looking
+
+Three numbers that trade a little freshness for a lot of memory. Every one has
+a default that is the recommended setting, the whole section is optional, and
+`0` turns each off — restoring exactly what Jarvis did before they existed.
+
+| Key | Default | What it does |
+|---|---|---|
+| `suspendTabsAfterMinutes` | `15` | A Workspace tab hidden this long loses the Chromium renderer behind it. Each is 80–150 MB, and eight tabs is most of a gigabyte. The tab keeps its place in the strip and its address; clicking it rebuilds the page. A tab that is playing video is never suspended. |
+| `stopSidecarsAfterMinutes` | `10` | A `code-server`, `dbgate-serve` or `headlamp-server` instance that no open, unsuspended tab still needs is stopped. code-server alone is 150–250 MB. It starts again on the next open — about a second warm, and see [troubleshooting](troubleshooting.md) for cold. |
+| `terminalScrollback` | `5000` | Lines each terminal keeps. xterm stores a line as `Uint32Array(cols × 3)` — 12 bytes a cell — so at 200 columns every 1000 lines is about 2.4 MB **per pane**, and a split tab has one pane per leaf. This was 20 000 (~48 MB a pane) before; set it back if you scroll that far. |
+
+These are the only settings in the file that can make the app *lose*
+something to save memory — a page reload, a sidecar restart — which is why
+turning each off is one number rather than a mode.
+
+The suspend and stop timers are checked once a minute, so anything can outlive
+its timeout by up to a minute. `terminalScrollback` is read when a pane is
+built, so a change reaches new terminals rather than open ones.
 
 ## Notes that are easy to get wrong
 

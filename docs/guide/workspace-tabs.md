@@ -63,6 +63,34 @@ Tabs from other projects collapse into a counted, coloured pill; the selected
 project's tabs expand. Eight hosted pages is the cap — each is a Chromium
 process — and terminal and API tabs are exempt, since they are neither.
 
+## Tabs you are not looking at
+
+A hosted page is 80–150 MB of Chromium, and the eight-tab cap only fires when
+you open a ninth. A tab left alone for **fifteen minutes** therefore gives its
+renderer back: the tab keeps its place in the strip, its title and its
+address, and clicking it builds the page again. What you see is a reload.
+
+Two tabs are never given back. The one you are looking at, and one whose page
+is playing video — the tab you left playing is the last one anybody meant to
+reclaim.
+
+A hosted app is more than its address, so resuming one is not just a reload.
+Its sidecar may have been stopped underneath it (below) and come back on a
+different port, so Jarvis asks the manager where it went and loads *that*.
+A Cluster tab resumes without ever starting an AWS login: a resume happens
+because Jarvis reclaimed memory, not because you asked to sign in, and a login
+is a real `saml2aws` and an MFA push to your phone. If the session has expired
+the page says so and the Cluster button is right there.
+
+**The sidecars stop too.** A `code-server`, `dbgate-serve` or
+`headlamp-server` that no open, unsuspended tab still needs is stopped after
+**ten minutes** — code-server alone is 150–250 MB — and started again the next
+time something opens it. Nothing about a running instance is state you own,
+which is what makes stopping it safe.
+
+Both timings are [`performance:` in jarvis.yaml](configuration.md), and `0`
+turns either off.
+
 ## Personal — the browser that belongs to no project
 
 The last entry in the project selector is **Personal**: somewhere to keep tabs
