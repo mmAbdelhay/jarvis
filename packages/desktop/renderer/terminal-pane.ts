@@ -902,6 +902,15 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     attempt(() => nav?.sync(views));
   }
 
+  /** Which call to `refreshChips` is the most recent — `cwd` fires on every
+   *  prompt, and each firing starts its own `git`-backed read with no
+   *  guarantee the earlier of two in-flight reads resolves first. Bumped at
+   *  the start of every call and captured by that call's own closure, so a
+   *  read that resolves after a newer one already landed can tell it is
+   *  stale and decline to overwrite it — the read that answers the most
+   *  recent question wins, not the read that merely finishes last. */
+  let chipsGeneration = 0;
+
   /**
    * Re-reads and re-draws the chip row for whatever prompt just arrived.
    *
@@ -909,14 +918,19 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    * until this resolves, so a slow repository never means an input the
    * user cannot type into. A rejected read leaves the previous row exactly
    * as it was — `chipRow.render` is only ever called with a result that
-   * actually came back.
+   * actually came back, and only from the most recently started read.
    */
   function refreshChips(): void {
     const read = hooks.chips;
     if (read === undefined) return;
+    const generation = ++chipsGeneration;
     void read()
       .then((chips) => {
-        if (!disposed) chipRow.render(chips);
+        if (disposed) return;
+        // A newer read has already started (and may already have landed):
+        // this one is stale, regardless of which resolved first.
+        if (generation !== chipsGeneration) return;
+        chipRow.render(chips);
       })
       .catch(() => {
         // The previous row stands.

@@ -370,6 +370,62 @@ describe("the chip row in a pane", () => {
     await settle();
     expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("main");
   });
+
+  // `cwd` fires on every prompt, and each firing starts its own `git`-backed
+  // read; there is no reason the earlier of two in-flight reads has to
+  // resolve first. If the row applied whatever resolved most recently
+  // instead of whatever was *asked for* most recently, a slow first read
+  // finishing after a fast second one would revert the row to stale data
+  // right after the correct data was already on screen. This is the
+  // out-of-order interleaving — resolving the *second* read before the
+  // first — the in-order test above cannot exercise.
+  it("does not let a stale read overwrite a fresher one that already resolved", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    let resolveSecond: ((value: unknown) => void) | undefined;
+    const chips = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const p = pane(undefined, { chips });
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
+    await settle();
+    expect(chips).toHaveBeenCalledTimes(2);
+
+    // The second (newer) read resolves first...
+    resolveSecond?.({
+      cwd: "/Users/x/proj",
+      branch: "feature",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
+    });
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("feature");
+
+    // ...then the first (older, stale) read resolves late. It must not win.
+    resolveFirst?.({
+      cwd: "/Users/x/proj",
+      branch: "main",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
+    });
+    await settle();
+    expect(p.element.querySelector(".terminal-chip--branch")?.textContent).toBe("feature");
+  });
 });
 
 // The command editor: a DOM line that stands in front of the shell, but

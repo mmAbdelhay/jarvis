@@ -27,12 +27,20 @@ export type ChipRow = {
  *  prefix. A cwd that merely starts with the same characters as home
  *  ("/Users/xavier" against home "/Users/x") is not under it and is left
  *  alone; the prefix has to end at a path separator, or be the whole
- *  string. */
+ *  string.
+ *
+ *  `home` is normalised first (a trailing slash trimmed, unless it is the
+ *  whole string — a root home of "/" is real on some minimal systems).
+ *  `os.homedir()` is not guaranteed to come back without one, and without
+ *  this the separator itself got sliced away along with the prefix:
+ *  `formatCwd("/Users/x/foo", "/Users/x/")` came back "~foo" instead of
+ *  "~/foo". */
 function formatCwd(cwd: string, home: string): string {
   if (home === "") return cwd;
-  if (cwd === home) return "~";
-  const prefix = home.endsWith("/") ? home : `${home}/`;
-  if (cwd.startsWith(prefix)) return `~${cwd.slice(home.length)}`;
+  const normalized = home.length > 1 && home.endsWith("/") ? home.slice(0, -1) : home;
+  if (cwd === normalized) return "~";
+  const prefix = normalized.endsWith("/") ? normalized : `${normalized}/`;
+  if (cwd.startsWith(prefix)) return `~/${cwd.slice(prefix.length)}`;
   return cwd;
 }
 

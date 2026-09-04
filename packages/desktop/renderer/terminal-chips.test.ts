@@ -50,7 +50,13 @@ describe("the chip row", () => {
   // any substring check on their text.
   it("renders no branch chip and no dirty chip when there is no branch", () => {
     const { element, render } = row();
-    render({ ...FULL, branch: undefined, insertions: 0, deletions: 0 });
+    // Insertions and deletions stay non-zero here on purpose: this test
+    // isolates "no ± chip because there is no branch" from "no ± chip
+    // because the count is zero" (a separate case, covered below). A
+    // mutant tying ± visibility to insertions + deletions > 0 instead of
+    // to branch presence would still pass a version of this test that
+    // zeroed the counts.
+    render({ ...FULL, branch: undefined });
     expect(chipTexts(element)).toEqual(["v22.11.0", "~/projects/jarvis"]);
     expect(element.querySelectorAll(".terminal-chip").length).toBe(2);
     expect(element.querySelector(".terminal-chip--branch")).toBeNull();
@@ -81,6 +87,22 @@ describe("the chip row", () => {
     render({ ...FULL, cwd: "/Users/xavier/work" });
     expect(chipTexts(element)).toContain("/Users/xavier/work");
     expect(chipTexts(element)).not.toContain("~avier/work");
+  });
+
+  // os.homedir() is not guaranteed to come back without a trailing slash —
+  // the separator must not be eaten along with the home prefix.
+  it("collapses correctly when home itself ends in a slash", () => {
+    const { element, render } = row("/Users/x/");
+    render({ ...FULL, cwd: "/Users/x/foo" });
+    expect(chipTexts(element)).toContain("~/foo");
+  });
+
+  // A root homedir ("/", real on some minimal systems/containers) is the
+  // degenerate case of the same prefix rule.
+  it("collapses correctly for a root home", () => {
+    const { element, render } = row("/");
+    render({ ...FULL, cwd: "/etc" });
+    expect(chipTexts(element)).toContain("~/etc");
   });
 
   // Untrusted text from the repository — a branch name is never markup.
