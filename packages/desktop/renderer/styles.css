@@ -959,6 +959,9 @@
      same remaining width and start at the same x, with nobody computing an
      offset to apply to each of them separately. */
   .terminal-input { position: relative; display: flex; align-items: flex-start;
+    /* It is a flex child of .terminal-pane: the prompt row, under a block
+       list that scrolls. Never stretched, never squeezed. */
+    flex: 0 0 auto;
     font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace; }
   .terminal-input-prompt { flex: 0 0 auto; white-space: pre; color: var(--text-muted); }
   .terminal-input-field { position: relative; flex: 1 1 auto; min-width: 0; }
@@ -1261,13 +1264,34 @@
      xterm. data-state is set by terminal-pane.ts and is the only thing that
      lays this out, so that module measures nothing. */
   .terminal-pane { position: absolute; inset: 0; display: flex; flex-direction: column;
-    overflow-y: auto; background: var(--ground); padding: 10px 14px; }
-  .terminal-blocks { display: flex; flex-direction: column; gap: 6px; }
-  .terminal-live { flex: 1 1 auto; min-height: 120px; }
+    overflow: hidden; background: var(--ground); padding: 10px 14px; }
+  /* The block list is what scrolls, not the pane. A flex child cannot shrink
+     below its own content unless it is told to (min-height: auto is the
+     default), so with the pane scrolling instead, a list of blocks taller
+     than the pane squeezed .terminal-live down to its min-height — about
+     seven rows — and xterm, whose only cue to refit is a ResizeObserver,
+     spilled its old grid over the blocks above. min-height: 0 plus its own
+     overflow is what makes the list give way instead, and max-height keeps
+     it from taking more than its share while a command is running. */
+  .terminal-blocks { display: flex; flex-direction: column; gap: 6px;
+    flex: 0 1 auto; min-height: 0; max-height: 40%; overflow-y: auto; }
+  .terminal-live { flex: 1 1 auto; min-height: 120px; min-width: 0; }
+  /* At an idle prompt the blocks are the whole pane: the editor is the
+     prompt line (see below), so nothing is competing with the list. */
+  .terminal-pane[data-state="blocks"] .terminal-blocks { flex: 1 1 auto; max-height: none; }
+  /* The prompt, once. The editor draws the prompt it read out of the live
+     terminal's own buffer, so with both on screen the user saw the prompt
+     twice with a tall empty terminal between them. The editor is the prompt
+     line whenever it is actually showing — data-editor is set by
+     terminal-pane.ts's applyState and is "on" only then, so a pane with no
+     editor, one whose shell has no integration yet, or one with a command
+     running keeps the live terminal it has always had. */
+  .terminal-pane[data-state="blocks"][data-editor="on"] .terminal-live { display: none; }
   /* Which block the user has scrolled past — block-nav.ts fills it in and
-     shows/hides it as the pane scrolls. position: sticky holds it at the
-     pane's own top, since .terminal-pane (not .terminal-blocks) is what
-     actually scrolls. */
+     shows/hides it as the list scrolls. It sits above the list rather than
+     inside it, so with the list as the scroller it is simply pinned at the
+     pane's top; `position: sticky` is kept because it costs nothing and
+     still holds should the pane itself ever scroll again. */
   .terminal-sticky-header { position: sticky; top: 0; z-index: 2;
     background: var(--ground); border-bottom: 1px solid var(--border);
     padding: 2px 0 4px; margin-bottom: 2px;
