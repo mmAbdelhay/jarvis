@@ -187,4 +187,19 @@ describe("the splitter", () => {
     const next = splitter.push(`${A}$ ${B}echo hi\r\n${C("echo hi")}hi\r\n${D(0)}`);
     expect(done(next)[0]).toMatchObject({ command: "echo hi", output: "hi\r\n" });
   });
+
+  it("announces the working directory when the shell reports it", () => {
+    const splitter = createSplitter({ now: clock() });
+    const events = splitter.push(`${CWD("/repo/src")}${A}$ ${B}`);
+    expect(events).toContainEqual({ type: "cwd", path: "/repo/src" });
+  });
+
+  it("announces it again when the directory changes", () => {
+    const splitter = createSplitter({ now: clock() });
+    splitter.push(`${CWD("/repo")}${A}$ ${B}cd src\r\n${C("cd src")}${D(0)}`);
+    const events = splitter.push(`${CWD("/repo/src")}${A}$ ${B}`);
+    expect(events.filter((e) => e.type === "cwd")).toEqual([
+      { type: "cwd", path: "/repo/src" },
+    ]);
+  });
 });

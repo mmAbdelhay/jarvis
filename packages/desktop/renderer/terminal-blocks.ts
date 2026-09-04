@@ -33,7 +33,13 @@ export type BlockEvent =
   | { type: "prompt" }
   | { type: "command-start"; id: number; command: string; cwd: string | undefined }
   | { type: "block-done"; block: BlockRecord }
-  | { type: "alt-screen"; active: boolean };
+  | { type: "alt-screen"; active: boolean }
+  /** The shell's working directory, as of the prompt about to be drawn.
+   *  Emitted from OSC 7, which the wrapper prints in precmd — so it lands
+   *  when a `cd` has finished, not when the next command starts, which is
+   *  the difference between a sidebar that follows you and one that lags a
+   *  command behind. */
+  | { type: "cwd"; path: string };
 
 export type Splitter = {
   push(chunk: string): BlockEvent[];
@@ -136,6 +142,7 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
   function handleMark(payload: string, events: BlockEvent[]): void {
     if (payload.startsWith("7;file://")) {
       cwd = payload.slice("7;file://".length);
+      events.push({ type: "cwd", path: cwd });
       return;
     }
     if (!payload.startsWith("133;")) return;

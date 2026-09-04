@@ -81,6 +81,11 @@ export type PaneHooks = {
    * workflow…".
    */
   terminalAi?: ((kind: "generate" | "explain", text: string) => Promise<string>) | undefined;
+  /** The shell's working directory, as of the prompt about to be drawn —
+   *  called every time the splitter sees a fresh OSC 7, which is what lets
+   *  a file sidebar follow a `cd` the moment it finishes rather than when
+   *  the next command starts. Absent means nothing follows it. */
+  onCwd?: ((path: string) => void) | undefined;
 };
 
 export type { BlockView };
@@ -881,6 +886,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     }
     if (event.type === "command-start") {
       attempt(() => applyState("running"));
+      return;
+    }
+    if (event.type === "cwd") {
+      attempt(() => hooks.onCwd?.(event.path));
       return;
     }
     if (event.type === "block-done") {

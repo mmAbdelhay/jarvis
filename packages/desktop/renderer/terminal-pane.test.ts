@@ -32,7 +32,12 @@ const B = "\u001b]133;B\u0007";
 const C = (c: string) => `\u001b]133;C;${c}\u0007`;
 const D = (n: number) => `\u001b]133;D;${n}\u0007`;
 
-function pane(settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" }) {
+const CWD = (path: string) => `]7;file://${path}`;
+
+function pane(
+  settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" },
+  hooks: { onCwd?: (path: string) => void } = {},
+) {
   const host = document.createElement("div");
   document.body.append(host);
   return createPane(host, {
@@ -41,6 +46,7 @@ function pane(settings = { blocks: true, inputEditor: false, notifyAfterSeconds:
     attach: async () => "",
     settings,
     notify: vi.fn(),
+    ...hooks,
   });
 }
 
@@ -253,6 +259,13 @@ describe("a terminal pane", () => {
 
     expect(() => p.reset()).not.toThrow();
     expect(FakeTerminal.instances[0]?.written.join("")).toBe("hello");
+  });
+
+  it("tells its owner when the shell's directory changes", () => {
+    const onCwd = vi.fn();
+    const p = pane(undefined, { onCwd });
+    p.write(`${CWD("/repo/src")}${A}$ ${B}`);
+    expect(onCwd).toHaveBeenCalledWith("/repo/src");
   });
 });
 
