@@ -163,17 +163,37 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
           .executeJavaScript(
             `(async () => {
                const video = ${FIND_PLAYING_VIDEO};
-               if (video === undefined) return false;
+               if (video === undefined) return "no-video";
                if (document.pictureInPictureElement !== null) {
                  await document.exitPictureInPicture();
-                 return false;
+                 return "exited";
                }
+               // Netflix and Prime Video ship their players with Picture-in-
+               // Picture switched off at the element — the attribute and the
+               // property both, re-applied as the player rebuilds its video
+               // tag. requestPictureInPicture() rejects with InvalidStateError
+               // while either is set, which is why PiP appeared to do nothing
+               // on exactly the two sites the CDM was added for.
+               //
+               // Clearing it is the same thing every "enable PiP everywhere"
+               // extension does. It is cleared per request rather than once
+               // per page because the player puts it back: the flag is read
+               // by the browser only at the moment of the call, so the value
+               // that matters is the one in place on this line.
+               video.disablePictureInPicture = false;
+               video.removeAttribute("disablePictureInPicture");
                await video.requestPictureInPicture();
-               return true;
+               return "entered";
              })()`,
             true,
           )
-          .catch(() => undefined);
+          // Silence here is what made this hard to diagnose: a rejected
+          // request looked exactly like a working one. The failure is not
+          // worth a dialog — the user can press the button again — but it
+          // belongs in the log.
+          .catch((error: unknown) => {
+            console.error(`Picture-in-Picture failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
       },
       onEvent: (listener) => {
         bridgeEvents(

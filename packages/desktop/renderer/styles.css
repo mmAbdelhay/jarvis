@@ -857,6 +857,18 @@
   }
   .workspace-essential:hover .workspace-essential-unpin,
   .workspace-essential .workspace-essential-unpin:focus-visible { opacity: 1; }
+  /* The pencil takes the opposite corner from the unpin mark: two controls
+     on one 40px tile can share it only by not overlapping, and the bottom
+     start corner is the one the icon's own padding already leaves clear. */
+  .workspace-essential .workspace-essential-rename {
+    position: absolute;
+    bottom: 0;
+    inset-inline-start: 0;
+    opacity: 0;
+    padding: 1px 3px;
+  }
+  .workspace-essential:hover .workspace-essential-rename,
+  .workspace-essential .workspace-essential-rename:focus-visible { opacity: 1; }
   /* A favicon is drawn for any background, light or dark — an unbacked
      dark mark (GitHub's, for one) all but disappears against the tile's
      own dark surface. A light neutral plate behind the image, the way
@@ -966,6 +978,26 @@
   .workspace-bookmark:hover .workspace-bookmark-action { opacity: 0.7; }
   .workspace-bookmark-action:hover,
   .workspace-bookmark-action:focus-visible { opacity: 1; color: var(--accent); }
+
+  /* One line under the grid, for an essential's rename. Hidden and empty
+     the rest of the time, so the bar keeps its height. */
+  .workspace-ask { display: flex; padding: 2px 0; }
+
+  /* The rename field, in both places it appears. It inherits the label's
+     own type and sits on the chip's own surface, so editing looks like the
+     label became editable rather than like a form opened on top of it. */
+  .workspace-rename-input {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-control);
+    padding: 0 4px;
+  }
+  .workspace-rename-input:focus { outline: none; }
 
   .workspace-bookmark-remove { flex-shrink: 0; opacity: 0.35; color: var(--text-muted); }
   .workspace-bookmark:hover .workspace-bookmark-remove { opacity: 0.7; }

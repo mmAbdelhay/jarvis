@@ -1511,6 +1511,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("bookmarks:setPinned", (_event, project: unknown, url: unknown, pinned: unknown) =>
       bookmarks.setPinned(project as string, url as string, pinned as boolean),
     );
+    ipcMain.handle("bookmarks:rename", (_event, project: unknown, url: unknown, title: unknown) =>
+      bookmarks.rename(project as string, url as string, title as string),
+    );
     ipcMain.handle("bookmarks:reorder", (_event, project: unknown, urls: unknown) =>
       bookmarks.reorder(project as string, urls as string[]),
     );

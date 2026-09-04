@@ -277,6 +277,11 @@ function openBookmark(url: string): void {
  *  tooltip — where it is the more useful half anyway. Its icon is the same
  *  cached-icon-or-monogram choice the grid makes, at list-row size rather
  *  than the grid's tile size. */
+/** U+270E with a variation selector forcing *text* presentation. Without
+ *  it the font substitutes the emoji pencil, which renders fat and coloured
+ *  beside the hairline \u229E and \u00D7 it sits next to. */
+const RENAME_GLYPH = "\u270E\uFE0E";
+
 function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   const chip = document.createElement("div");
   chip.className = "workspace-bookmark";
@@ -313,6 +318,11 @@ function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   const pin = glyphControl("⊞", MESSAGES.pinBookmark(PRIMARY_LANGUAGE), () => void pinBookmark(bookmark.url, true));
   pin.classList.add("workspace-bookmark-pin");
 
+  const rename = glyphControl(RENAME_GLYPH, MESSAGES.renameBookmark(PRIMARY_LANGUAGE), () =>
+    editChipTitle(title, bookmark, label),
+  );
+  rename.classList.add("workspace-bookmark-rename");
+
   const remove = document.createElement("span");
   remove.className = "workspace-bookmark-remove";
   remove.textContent = "×";
@@ -323,7 +333,7 @@ function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
     void removeBookmark(bookmark.url);
   });
 
-  chip.append(icon, title, pin, remove);
+  chip.append(icon, title, rename, pin, remove);
   return chip;
 }
 
@@ -360,6 +370,113 @@ function monogramTile(bookmark: BookmarkView): HTMLElement {
  *  both `title` and `aria-label` with the glyph itself hidden from the
  *  accessibility tree. `stopPropagation` because every one of these sits
  *  inside something that is itself clickable. */
+/**
+ * The field a rename is typed into.
+ *
+ * Editing happens in place — the chip's own label becomes this input —
+ * rather than through a prompt row, because the bookmarks bar is a narrow
+ * column and a row of input-plus-buttons pushed the whole list down for
+ * something that should not move the page at all.
+ *
+ * Electron has no window.prompt (it throws), and jsdom has one, so a test
+ * suite cannot warn you off it. That trap cost the API pane every rename it
+ * had; this avoids the question entirely by never asking outside the DOM.
+ *
+ * Enter and blur commit, Escape abandons. `settled` is the guard that keeps
+ * those from firing twice: committing on Enter moves focus, which fires
+ * blur, which would otherwise commit a second time.
+ */
+function titleEditor(current: string, commit: (title: string) => void, done: () => void): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "workspace-rename-input";
+  input.spellcheck = false;
+  input.value = current;
+
+  let settled = false;
+  const accept = (): void => {
+    if (settled) return;
+    settled = true;
+    const title = input.value.trim();
+    // An empty field means "leave it alone", not "name it nothing" — the
+    // store would refuse the blank anyway, and a refusal message for an
+    // empty box the user clicked away from is noise.
+    if (title === "" || title === current) done();
+    else commit(title);
+  };
+  const abandon = (): void => {
+    if (settled) return;
+    settled = true;
+    done();
+  };
+
+  input.addEventListener("keydown", (event) => {
+    // A text field inside a pane that binds bare keys to tab and address-bar
+    // shortcuts: its keys are its own.
+    event.stopPropagation();
+    if (event.key === "Enter") accept();
+    else if (event.key === "Escape") abandon();
+  });
+  input.addEventListener("blur", accept);
+  // The chip underneath opens the bookmark on click; typing in the field is
+  // not a request to navigate.
+  input.addEventListener("click", (event) => event.stopPropagation());
+  return input;
+}
+
+/** Retitles one bookmark. The store keeps the url, the pin and the order,
+ *  so an essential renamed from its tile stays in the tile it was in —
+ *  only its label and its monogram change. */
+async function renameBookmark(url: string, title: string): Promise<void> {
+  const result = await window.jarvis.renameBookmark(selectedProject(), url, title);
+  if (result.ok) bookmarks = result.value;
+  else showToolStatus(result.text);
+  renderBookmarks();
+}
+
+/** Swaps a chip's label for the field, in place. Redrawing the bar would
+ *  destroy the input mid-edit, so nothing is re-rendered until the edit
+ *  settles: cancelling just puts the label back. */
+function editChipTitle(label: HTMLElement, bookmark: BookmarkView, current: string): void {
+  const input = titleEditor(
+    current,
+    (title) => void renameBookmark(bookmark.url, title),
+    () => {
+      input.replaceWith(label);
+    },
+  );
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+/** A pinned bookmark has no label to edit — the tile is an icon and a
+ *  monogram — so its rename appears as one line under the grid. Which is
+ *  where the name matters most: the monogram is built from it. */
+function editEssentialTitle(bookmark: BookmarkView, current: string): void {
+  const row = $("workspace-ask");
+  row.replaceChildren();
+  // Closed on both paths, not just on cancel: committing redraws the grid
+  // but not this row, which would otherwise stay open under it holding the
+  // name it had already saved.
+  const close = (): void => {
+    row.hidden = true;
+    row.replaceChildren();
+  };
+  const input = titleEditor(
+    current,
+    (title) => {
+      close();
+      void renameBookmark(bookmark.url, title);
+    },
+    close,
+  );
+  row.append(input);
+  row.hidden = false;
+  input.focus();
+  input.select();
+}
+
 function glyphControl(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -411,7 +528,16 @@ function renderEssential(bookmark: BookmarkView): HTMLElement {
   );
   unpin.classList.add("workspace-essential-unpin");
 
-  tile.append(open, unpin);
+  // A pinned bookmark is not in the chip list — the list is the unpinned
+  // ones — so without this the essentials grid would be the one place a
+  // bookmark could not be renamed. Which is exactly where the names matter
+  // most: the tile shows a monogram built from the title.
+  const rename = glyphControl(RENAME_GLYPH, MESSAGES.renameBookmark(PRIMARY_LANGUAGE), () =>
+    editEssentialTitle(bookmark, label),
+  );
+  rename.classList.add("workspace-essential-rename");
+
+  tile.append(open, unpin, rename);
   wireDrag(tile, bookmark);
   return tile;
 }

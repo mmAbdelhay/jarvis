@@ -602,6 +602,7 @@ export type RendererApi = {
   addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<BookmarkView[]>>;
   removeBookmark(project: string, url: string): Promise<GitViewResult<BookmarkView[]>>;
   setBookmarkPinned(project: string, url: string, pinned: boolean): Promise<GitViewResult<BookmarkView[]>>;
+  renameBookmark(project: string, url: string, title: string): Promise<GitViewResult<BookmarkView[]>>;
   reorderBookmarks(project: string, urls: string[]): Promise<GitViewResult<BookmarkView[]>>;
   getSettings(): Promise<JarvisConfig>;
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
@@ -2611,6 +2612,7 @@ export type BookmarksHandlers = {
   remove(project: string, url: string): Promise<GitViewResult<BookmarkView[]>>;
   setPinned(project: string, url: string, pinned: boolean): Promise<GitViewResult<BookmarkView[]>>;
   reorder(project: string, urls: string[]): Promise<GitViewResult<BookmarkView[]>>;
+  rename(project: string, url: string, title: string): Promise<GitViewResult<BookmarkView[]>>;
 };
 
 export type BookmarksHandlerDeps = {
@@ -2669,9 +2671,9 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
    *  detail other than the tokens named here is an IO failure, which the
    *  user can do nothing about beyond knowing bookmarks are unavailable. */
   function translate(detail: string): { ok: false; text: string; language: "ar" | "en" } {
-    return detail === "pin-limit"
-      ? fail(MESSAGES.bookmarkPinLimit(MAX_PINNED, deps.language))
-      : fail(MESSAGES.bookmarksUnavailable(deps.language));
+    if (detail === "pin-limit") return fail(MESSAGES.bookmarkPinLimit(MAX_PINNED, deps.language));
+    if (detail === "blank-title") return fail(MESSAGES.bookmarkBlankTitle(deps.language));
+    return fail(MESSAGES.bookmarksUnavailable(deps.language));
   }
 
   return {
@@ -2692,6 +2694,14 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
     async remove(project, url) {
       if (!isString(project) || !isString(url)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.remove(project, url);
+      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+    },
+
+    async rename(project, url, title) {
+      if (!isString(project) || !isString(url) || !isString(title)) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      const result = await deps.store.rename(project, url, title);
       return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
     },
 
