@@ -395,9 +395,18 @@ sidebar at all.
 
 Clicking a folder expands it, listing its immediate children only; nothing is
 listed before you ask. Clicking a file opens that file itself in the
-project's **Editor tab** — not just its folder. Each click opens a new Editor
-tab, with no check for one already open on the same file, so ten files
-clicked over a session is ten tabs.
+project's **Editor tab** — not just its folder. A second file clicked in a
+folder that already has an Editor tab open **reuses that tab rather than
+opening another**, since the Workspace caps hosted tabs and evicts the
+least-recently-used one once full, and browsing a file tree would otherwise
+close the user's other open tabs as a side effect. Reuse costs something of
+its own: code-server only honours the "open this file" instruction at page
+load, so opening a different file in an already-open folder means reloading
+that tab, and whatever the tab's own browser session held — an unsaved
+change made in that editor, say — is lost. The tab's title carries the
+folder it is rooted at, `· <folder relative to the project>`, or `· .` at
+the project root, so which tab a click will land on and reload is visible
+before you click.
 
 **The tree cannot show anything outside the project root** — the directory
 `projects:` gives for this project in `jarvis.yaml`, not wherever the shell
