@@ -15,7 +15,7 @@ function explorer() {
   document.body.append(host);
   const list = vi.fn(async (_paneKey: string, path: string) => listing[path] ?? []);
   const choose = vi.fn();
-  return { host, list, choose, view: createTerminalExplorer(host, { list, choose }) };
+  return { host, list, choose, view: createTerminalExplorer(host, "", { list, choose }) };
 }
 
 /** A microtask turn — the tree's own listings resolve on promises. */
@@ -149,10 +149,12 @@ describe("the terminal explorer", () => {
     const list = vi.fn(() => {
       throw new Error("no");
     });
-    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
     expect(() => view.setRoot("tab-1", "/proj")).not.toThrow();
     await settle();
-    expect(view.element.textContent).toBe("");
+    // The header still says where the shell is — that came from the pane's
+    // own cwd report, not from the listing — but there is nothing to list.
+    expect(view.element.querySelectorAll(".file-tree-row").length).toBe(0);
   });
 
   // Nothing watches the filesystem and `setRoot` dedupes on
@@ -234,7 +236,7 @@ describe("the terminal explorer mid-re-root", () => {
       if (path === "/proj") return [{ name: "read me.md", directory: false }];
       return await pending.promise;
     });
-    const view = createTerminalExplorer(host, { list, choose });
+    const view = createTerminalExplorer(host, "", { list, choose });
 
     view.setRoot("tab-1", "/proj");
     await new Promise((r) => setTimeout(r, 0));
@@ -244,7 +246,7 @@ describe("the terminal explorer mid-re-root", () => {
     view.setRoot("tab-1:p1", "/other");
     const stale = view.element.querySelector<HTMLElement>('[data-path="/proj/read me.md"]');
     expect(stale).toBeNull();
-    expect(view.element.textContent).toBe("");
+    expect(view.element.querySelectorAll(".file-tree-row").length).toBe(0);
 
     pending.resolve([{ name: "there.md", directory: false }]);
     await new Promise((r) => setTimeout(r, 0));
@@ -261,7 +263,7 @@ describe("clearing the terminal explorer", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const list = vi.fn(async () => [{ name: "src", directory: true }]);
-    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
     view.setRoot("tab-1", "/proj");
     await new Promise((r) => setTimeout(r, 0));
 
@@ -277,7 +279,7 @@ describe("clearing the terminal explorer", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const list = vi.fn(async () => [{ name: "src", directory: true }]);
-    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
     view.setRoot("tab-1", "/proj");
     await new Promise((r) => setTimeout(r, 0));
     view.clear();
@@ -294,7 +296,7 @@ describe("clearing the terminal explorer", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const list = vi.fn(async () => [{ name: "src", directory: true }]);
-    const view = createTerminalExplorer(host, { list, choose: vi.fn() });
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
     view.setRoot("tab-1", "/proj");
     await new Promise((r) => setTimeout(r, 0));
     view.toggle();
@@ -319,7 +321,7 @@ describe("toggling the terminal explorer with nothing to show", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const list = vi.fn(async () => [{ name: "src", directory: true }]);
-    return { view: createTerminalExplorer(host, { list, choose: vi.fn() }), list };
+    return { view: createTerminalExplorer(host, "", { list, choose: vi.fn() }), list };
   }
 
   it("opens on its first directory even after a toggle before it had one", async () => {
@@ -360,5 +362,65 @@ describe("toggling the terminal explorer with nothing to show", () => {
     await settleOnce();
 
     expect(view.isOpen()).toBe(false);
+  });
+});
+
+// Nothing on screen said which directory the tree was rooted at before
+// this header existed — a tab re-roots on every `cd`, silently. It reuses
+// terminal-chips.ts's own $HOME collapse, so the edge cases that module
+// already covers (a trailing-slash home, a root home of "/", a cwd that
+// only shares a prefix with home) are not re-proven here — only that the
+// header actually calls it, and moves on a re-root.
+describe("the terminal explorer's header", () => {
+  function build(home: string) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async (_paneKey: string, path: string) => listing[path] ?? []);
+    return { host, view: createTerminalExplorer(host, home, { list, choose: vi.fn() }) };
+  }
+
+  const settleOnce = (): Promise<unknown> => new Promise((r) => setTimeout(r, 0));
+
+  it("shows the root with $HOME collapsed to ~", async () => {
+    const { view } = build("/Users/x");
+    view.setRoot("tab-1", "/Users/x/projects/jarvis");
+    await settleOnce();
+
+    const header = view.element.querySelector(".terminal-explorer-header");
+    expect(header?.textContent).toBe("~/projects/jarvis");
+  });
+
+  it("updates the header when the tree re-roots", async () => {
+    const { view } = build("/Users/x");
+    view.setRoot("tab-1", "/proj");
+    await settleOnce();
+    view.setRoot("tab-1", "/proj/src");
+    await settleOnce();
+
+    const header = view.element.querySelector(".terminal-explorer-header");
+    expect(header?.textContent).toBe("/proj/src");
+  });
+
+  it("clears the header along with the tree", async () => {
+    const { view } = build("/Users/x");
+    view.setRoot("tab-1", "/proj");
+    await settleOnce();
+
+    view.clear();
+
+    const header = view.element.querySelector(".terminal-explorer-header");
+    expect(header?.textContent).toBe("");
+  });
+
+  // The one edge case worth re-checking here: a root that only shares a
+  // text prefix with home must not collapse, which is exactly what the
+  // reused function exists to get right.
+  it("does not collapse a root that only shares a prefix with home", async () => {
+    const { view } = build("/Users/x");
+    view.setRoot("tab-1", "/Users/xavier/work");
+    await settleOnce();
+
+    const header = view.element.querySelector(".terminal-explorer-header");
+    expect(header?.textContent).toBe("/Users/xavier/work");
   });
 });

@@ -1,4 +1,5 @@
 import { createFileTree } from "./file-tree.js";
+import { formatCwd } from "./terminal-chips.js";
 import type { DirEntry } from "../src/ipc.js";
 
 // The Terminal tab's file sidebar.
@@ -52,10 +53,20 @@ function attempt(work: () => void): void {
 
 export function createTerminalExplorer(
   host: HTMLElement,
+  /** Same `home` the chip row is handed, from the `terminal:settings`
+   *  payload — what the header collapses the root against. */
+  home: string,
   hooks: TerminalExplorerHooks,
 ): TerminalExplorer {
   const element = document.createElement("div");
   element.className = "terminal-explorer";
+
+  // Says which directory is on screen — nothing else did, and the tree
+  // re-roots silently on every `cd`. Reuses terminal-chips.ts's own
+  // $HOME collapse rather than a second copy of it.
+  const header = document.createElement("div");
+  header.className = "terminal-explorer-header";
+  element.append(header);
   // Nothing to show until a shell has said where it is. A pane without
   // shell integration never reports a directory, and its tab stays exactly
   // what it was before this sidebar existed: no column, no listing, no
@@ -110,6 +121,9 @@ export function createTerminalExplorer(
       if (rooted?.paneKey === paneKey && rooted.path === path) return;
       rooted = { paneKey, path };
       applyVisibility();
+      attempt(() => {
+        header.textContent = formatCwd(path, home);
+      });
       // The rows go before the new listing does, not when it answers.
       // FileTree leaves its container alone until its `list` resolves —
       // deliberately, so a failed listing never blanks the tree — but that
@@ -146,6 +160,9 @@ export function createTerminalExplorer(
       // directory nobody is in.
       rooted = undefined;
       applyVisibility();
+      attempt(() => {
+        header.textContent = "";
+      });
       attempt(() => tree.element.replaceChildren());
     },
 

@@ -1382,12 +1382,55 @@
   .terminal-explorer { flex: 0 0 220px; overflow: auto; border-right: 1px solid var(--border);
     padding: 8px; font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; }
   .terminal-explorer[hidden] { display: none; }
-  /* white-space: pre keeps a file name with two spaces in it looking like
-     what is on disk. */
-  .file-tree-row { cursor: pointer; white-space: pre; color: var(--text-muted); }
-  .file-tree-row:hover { color: var(--text); }
+
+  /* The current root, $HOME collapsed to ~ by the same logic the chip row
+     uses (terminal-chips.ts's formatCwd) — nothing else says which
+     directory the tree below is rooted at, and it re-roots silently on
+     every `cd`. */
+  .terminal-explorer-header {
+    padding: 0 4px 8px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* A fixed-height row with a chevron/spacer column and a truncating name
+     column is what makes this read as a tree rather than an unindented
+     list of names. */
+  .file-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 4px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-muted);
+  }
   .file-tree-row[data-directory="true"] { color: var(--text); }
-  .file-tree-children { padding-left: 12px; }
+  .file-tree-row:hover { color: var(--text); background: var(--accent-quiet); }
+  .file-tree-row:focus-visible { outline: 1px solid var(--accent-quiet); outline-offset: -1px; }
+
+  /* Same width on both, so a directory's name and a file's name always
+     start in the same column. */
+  .file-tree-chevron, .file-tree-spacer {
+    flex: 0 0 14px;
+    width: 14px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+
+  .file-tree-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The indent guide: a hairline down each nested level. */
+  .file-tree-children { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 11px; }
 
   /* The Docker tab, laid out as the design specifies: a left column of
      configured containers with the compose controls above them, and the log

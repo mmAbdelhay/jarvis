@@ -74,12 +74,31 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
 
     const row = document.createElement("div");
     row.className = "file-tree-row";
+    row.tabIndex = 0;
     row.dataset["path"] = path;
     row.dataset["directory"] = String(entry.directory);
+
+    // Every row's name starts in the same column: a directory gets a
+    // chevron, a file an equal-width blank in its place. That alignment is
+    // most of what makes the list read as a tree.
+    let chevron: HTMLElement | undefined;
+    if (entry.directory) {
+      chevron = document.createElement("span");
+      chevron.className = "file-tree-chevron";
+      chevron.textContent = "▸";
+      row.append(chevron);
+    } else {
+      const spacer = document.createElement("span");
+      spacer.className = "file-tree-spacer";
+      row.append(spacer);
+    }
 
     const name = document.createElement("span");
     name.className = "file-tree-name";
     name.textContent = entry.name;
+    // An attribute, not markup: a long name is clipped with an ellipsis in
+    // CSS, and this is what still identifies it on hover.
+    name.title = entry.name;
     row.append(name);
 
     if (!entry.directory) {
@@ -121,10 +140,12 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
           if (!ok) return;
           cached = [...children.childNodes];
           children.hidden = false;
+          if (chevron !== undefined) chevron.textContent = "▾";
           return;
         }
         children.hidden = !children.hidden;
         children.replaceChildren(...(children.hidden ? [] : cached));
+        if (chevron !== undefined) chevron.textContent = children.hidden ? "▸" : "▾";
       })();
     });
 

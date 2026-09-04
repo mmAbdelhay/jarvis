@@ -162,4 +162,51 @@ describe("the file tree", () => {
     await t.setRoot("/proj/src");
     expect(t.element.textContent).toContain("src");
   });
+
+  // Chevrons and the equal-width spacer are most of what makes the sidebar
+  // read as a tree rather than a flat, unindented list of names.
+  describe("chevrons", () => {
+    it("shows a collapsed chevron on a folder row, and flips it on expand and collapse", async () => {
+      const { tree: t } = tree();
+      await t.setRoot("/proj");
+
+      const chevron = t.element.querySelector<HTMLElement>(
+        '[data-path="/proj/src"] .file-tree-chevron',
+      );
+      expect(chevron?.textContent).toBe("▸");
+
+      chevron?.closest<HTMLElement>(".file-tree-row")?.click();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(chevron?.textContent).toBe("▾");
+
+      chevron?.closest<HTMLElement>(".file-tree-row")?.click();
+      expect(chevron?.textContent).toBe("▸");
+    });
+
+    it("gives a file row a spacer, not a chevron", async () => {
+      const { tree: t } = tree();
+      await t.setRoot("/proj");
+
+      const fileRow = t.element.querySelector<HTMLElement>('[data-path="/proj/read me.md"]');
+      expect(fileRow?.querySelector(".file-tree-chevron")).toBeNull();
+      expect(fileRow?.querySelector(".file-tree-spacer")).not.toBeNull();
+    });
+  });
+
+  // A truncated name (styles.css clips overflow with an ellipsis) still
+  // needs to be identifiable on hover — the full name goes on as a `title`
+  // attribute, not into any markup.
+  it("carries the full name as a title attribute, on both a file and a folder", async () => {
+    const { tree: t } = tree();
+    await t.setRoot("/proj");
+
+    const fileName = t.element.querySelector<HTMLElement>(
+      '[data-path="/proj/read me.md"] .file-tree-name',
+    );
+    const folderName = t.element.querySelector<HTMLElement>(
+      '[data-path="/proj/src"] .file-tree-name',
+    );
+    expect(fileName?.getAttribute("title")).toBe("read me.md");
+    expect(folderName?.getAttribute("title")).toBe("src");
+  });
 });

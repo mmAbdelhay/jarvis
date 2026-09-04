@@ -198,7 +198,7 @@ function ensurePane(
   // The tab's file sidebar, on the left — one for the whole tab, however
   // many panes it is split into, following whichever of them has the
   // focus. Appended before the tree so it sits left of the panes.
-  const explorer = createTerminalExplorer(element, {
+  const explorer = createTerminalExplorer(element, terminalSettings.home, {
     // Guarded: a preload without the channel leaves a sidebar with nothing
     // to draw, never a terminal that throws. The pane key travels with
     // every listing rather than being assumed from the tab because it is

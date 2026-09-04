@@ -35,7 +35,7 @@ export type ChipRow = {
  *  this the separator itself got sliced away along with the prefix:
  *  `formatCwd("/Users/x/foo", "/Users/x/")` came back "~foo" instead of
  *  "~/foo". */
-function formatCwd(cwd: string, home: string): string {
+export function formatCwd(cwd: string, home: string): string {
   if (home === "") return cwd;
   const normalized = home.length > 1 && home.endsWith("/") ? home.slice(0, -1) : home;
   if (cwd === normalized) return "~";
