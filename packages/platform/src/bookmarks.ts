@@ -37,6 +37,14 @@ export type BookmarkStore = {
    *  ignored: the renderer's list and the file can disagree if a bookmark
    *  was removed mid-drag. */
   reorder(project: string, urls: string[]): Promise<BookmarkOutcome<Bookmark[]>>;
+  /** Retitles one bookmark, keeping its url, pin and order — the whole
+   *  point is that a renamed essential does not move out of its tile. The
+   *  title is trimmed; an empty or whitespace-only one is refused with
+   *  detail "blank-title", because the chip falls back to showing the raw
+   *  url when the title is empty and a rename that silently blanks the
+   *  label looks like the bookmark broke. Renaming a url the project does
+   *  not have is a no-op, like remove. */
+  rename(project: string, url: string, title: string): Promise<BookmarkOutcome<Bookmark[]>>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,6 +155,26 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
           return { ok: false, detail: "pin-limit" };
         }
         const next = existing.map((b) => (b.url === url ? { ...b, pinned } : b));
+        all[project] = next;
+        try {
+          await writeAll(all);
+        } catch (error) {
+          return { ok: false, detail: errorMessage(error) };
+        }
+        return { ok: true, value: sorted(next) };
+      });
+    },
+
+    rename(project, url, title) {
+      return enqueue(async () => {
+        const wanted = title.trim();
+        if (wanted === "") return { ok: false, detail: "blank-title" };
+        const all = await readAll();
+        const existing = all[project] ?? [];
+        if (!existing.some((b) => b.url === url)) {
+          return { ok: true, value: sorted(existing) };
+        }
+        const next = existing.map((b) => (b.url === url ? { ...b, title: wanted } : b));
         all[project] = next;
         try {
           await writeAll(all);

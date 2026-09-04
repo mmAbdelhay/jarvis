@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8">
+<video id="v" autoplay muted width="320"></video>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.11.2/shaka-player.compiled.js"></script>
+<script>
+const MANIFEST = "https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine/dash.mpd";
+const LICENSE  = "https://cwip-shaka-proxy.appspot.com/no_auth";
+(async () => {
+  const log = (m) => console.log("[SPIKE] " + m);
+  try {
+    shaka.polyfill.installAll();
+    const v = document.getElementById("v");
+    const player = new shaka.Player();
+    await player.attach(v);
+    player.configure({ drm: { servers: { "com.widevine.alpha": LICENSE } } });
+    player.addEventListener("drmsessionupdate", () => log("drm session update (license accepted)"));
+    await player.load(MANIFEST);
+    log("manifest loaded, keySystem=" + player.keySystem());
+    await v.play();
+    const start = v.currentTime;
+    await new Promise((r) => setTimeout(r, 4000));
+    log("RESULT " + JSON.stringify({
+      keySystem: player.keySystem(), startTime: start, nowTime: v.currentTime,
+      advanced: v.currentTime > start + 0.5, readyState: v.readyState,
+      decoded: v.getVideoPlaybackQuality().totalVideoFrames,
+    }));
+  } catch (e) { log("RESULT FAILED " + (e && (e.code || e.message || e))); }
+})();
+</script>

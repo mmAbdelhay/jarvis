@@ -270,3 +270,72 @@ describe("a file written before pinning existed", () => {
     expect(result.ok && result.value.every((b) => b.pinned !== true)).toBe(true);
   });
 });
+
+describe("renaming", () => {
+  it("changes the title and leaves the url alone", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.rename("p", "https://a.test/", "Netflix");
+
+    expect(result.ok && result.value[0]).toMatchObject({
+      url: "https://a.test/",
+      title: "Netflix",
+    });
+  });
+
+  it("keeps the pin and the order, so a renamed essential stays put", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.add("p", { url: "https://b.test/", title: "B" });
+    await store.setPinned("p", "https://b.test/", true);
+    await store.reorder("p", ["https://b.test/"]);
+
+    const result = await store.rename("p", "https://b.test/", "Renamed");
+
+    expect(result.ok && result.value[0]).toMatchObject({
+      url: "https://b.test/",
+      title: "Renamed",
+      pinned: true,
+      order: 0,
+    });
+  });
+
+  it("survives a reload, so the new title is really on disk", async () => {
+    const file = await tempFile();
+    const store = createBookmarkStore(file);
+    await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.rename("p", "https://a.test/", "Renamed");
+
+    const reopened = await createBookmarkStore(file).list("p");
+
+    expect(reopened.ok && reopened.value[0]?.title).toBe("Renamed");
+  });
+
+  it("is a no-op for a url the project does not have, like remove", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.rename("p", "https://gone.test/", "Nope");
+
+    expect(result.ok && result.value.map((b) => b.title)).toEqual(["A"]);
+  });
+
+  it("refuses a blank title rather than writing a nameless bookmark", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.rename("p", "https://a.test/", "   ");
+
+    expect(result).toEqual({ ok: false, detail: "blank-title" });
+  });
+
+  it("trims the title, so a stray space cannot pad the chip", async () => {
+    const store = createBookmarkStore(await tempFile());
+    await store.add("p", { url: "https://a.test/", title: "A" });
+
+    const result = await store.rename("p", "https://a.test/", "  Netflix  ");
+
+    expect(result.ok && result.value[0]?.title).toBe("Netflix");
+  });
+});

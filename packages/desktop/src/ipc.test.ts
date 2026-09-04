@@ -892,6 +892,7 @@ describe("bookmarks handlers", () => {
       remove: () => Promise.resolve({ ok: true, value: [] }),
       setPinned: () => Promise.resolve({ ok: true, value: [] }),
       reorder: () => Promise.resolve({ ok: true, value: [] }),
+      rename: () => Promise.resolve({ ok: true, value: [] }),
       ...overrides,
     };
   }
@@ -986,6 +987,62 @@ describe("bookmarks handlers", () => {
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.text.length).toBeGreaterThan(0);
+  });
+
+  it("renames a bookmark and returns the list with icons attached", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({
+        rename: (_project, url, title) => Promise.resolve({ ok: true, value: [{ url, title }] }),
+      }),
+      favicons: {
+        get: async () => ({ ok: true, value: { dataUri: "data:image/png;base64,AQ==" } }),
+        put: async () => ({ ok: true, value: undefined }),
+        putMiss: async () => ({ ok: true, value: undefined }),
+        shouldFetch: async () => ({ ok: true, value: false }),
+      },
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.rename("acme", "https://a.test/", "Netflix");
+
+    expect(result).toEqual({
+      ok: true,
+      value: [{ url: "https://a.test/", title: "Netflix", icon: "data:image/png;base64,AQ==" }],
+    });
+  });
+
+  it("refuses a non-string title rather than passing it to the store", async () => {
+    let called = false;
+    const handlers = createBookmarksHandlers({
+      store: store({
+        rename: () => {
+          called = true;
+          return Promise.resolve({ ok: true, value: [] });
+        },
+      }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.rename("acme", "https://a.test/", 7 as unknown as string);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+
+  it("turns the store's blank-title refusal into its own words, not the generic failure", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store({ rename: () => Promise.resolve({ ok: false, detail: "blank-title" }) }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+    });
+
+    const result = await handlers.rename("acme", "https://a.test/", " ");
+
+    expect(!result.ok && result.text).toBe(MESSAGES.bookmarkBlankTitle("en"));
   });
 
   it("attaches each bookmark's cached icon", async () => {

@@ -4,7 +4,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, session } from "electron";
+import { BrowserWindow, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
 import type { Session } from "electron";
 import {
   AgentRegistry,
@@ -202,8 +202,37 @@ const VOICE_SAMPLE = {
   ar: "مساء الخير يا سيدي، كيف أقدر أساعدك اليوم؟",
 };
 
+/**
+ * The Widevine CDM install, started at launch and awaited only by the tabs
+ * that need it.
+ *
+ * `components` is the one API Electron for Content Security adds over stock
+ * Electron: Chromium's component updater downloads the CDM into the user
+ * data directory on first launch, and DRM playback fails until it lands.
+ * castLabs' own example awaits it before creating the window; ruling R35
+ * forbids that here, because it is a network fetch on the path between
+ * app-ready and the window existing — a first launch would sit on a blank
+ * screen for as long as the download takes.
+ *
+ * So it is started unawaited and the promise kept. A hosted tab that needs
+ * DRM awaits this; every other tab, and the window itself, ignores it. The
+ * cost of the split is that the very first DRM page after a fresh install
+ * may load before the CDM does. Every later launch already has it on disk.
+ */
+export let widevineReady: Promise<void> | undefined;
+
 app.whenReady().then(async () => {
   setDockIcon();
+
+  widevineReady = components
+    .whenReady()
+    .then(() => {
+      console.log(`Widevine components ready: ${JSON.stringify(components.status())}`);
+    })
+    .catch((error: unknown) => {
+      // Not fatal: everything in Jarvis except DRM playback works without it.
+      console.error(`Widevine component install failed: ${errorMessage(error)}`);
+    });
   try {
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
@@ -1481,6 +1510,9 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("bookmarks:setPinned", (_event, project: unknown, url: unknown, pinned: unknown) =>
       bookmarks.setPinned(project as string, url as string, pinned as boolean),
+    );
+    ipcMain.handle("bookmarks:rename", (_event, project: unknown, url: unknown, title: unknown) =>
+      bookmarks.rename(project as string, url as string, title as string),
     );
     ipcMain.handle("bookmarks:reorder", (_event, project: unknown, urls: unknown) =>
       bookmarks.reorder(project as string, urls as string[]),

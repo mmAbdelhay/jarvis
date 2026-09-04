@@ -50,6 +50,7 @@ function harness(): Recorded[] {
         <div id="workspace-body">
           <div id="workspace-bookmarks">
             <div id="workspace-essentials"></div>
+            <div id="workspace-ask" hidden></div>
             <div id="workspace-bookmark-list"></div>
           </div>
           <div id="workspace-page"></div>
@@ -200,6 +201,10 @@ function harness(): Recorded[] {
     },
     reorderBookmarks: (...args: unknown[]) => {
       calls.push({ call: "reorderBookmarks", args });
+      return Promise.resolve({ ok: true, value: [] });
+    },
+    renameBookmark: (...args: unknown[]) => {
+      calls.push({ call: "renameBookmark", args });
       return Promise.resolve({ ok: true, value: [] });
     },
   };
@@ -974,6 +979,165 @@ describe("the bookmarks sidebar", () => {
 // unreachable from the state every existing install upgrades into — nothing
 // pinned, so an empty grid with no tile to drop on — and offered a keyboard
 // user no path at all.
+// Renaming a bookmark. Editing is in place — the chip's label becomes the
+// field — so these drive the real input rather than a prompt. Note that
+// jsdom *does* have window.prompt while Electron throws on it, so a test
+// that mocked a prompt would have passed against code the app cannot run.
+describe("renaming a bookmark", () => {
+  function field(): HTMLInputElement | null {
+    return document.querySelector<HTMLInputElement>(".workspace-rename-input");
+  }
+
+  function type(value: string): void {
+    const input = field();
+    if (input === null) return;
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
+
+  it("sends the new title, and does not open the bookmark it renamed", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    type("Netflix");
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "renameBookmark",
+      args: ["acme", "https://b.test/", "Netflix"],
+    });
+    expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
+  });
+
+  // The point of editing in place: the list must not move, and the field
+  // must arrive holding what it is replacing.
+  it("replaces the label in place, carrying the current title", async () => {
+    harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+
+    expect(field()?.value).toBe("B");
+    expect(document.querySelector(".workspace-bookmark-title")).toBeNull();
+    expect(document.querySelector("#workspace-ask")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("Escape restores the label without calling the store", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    field()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "renameBookmark")).toBe(false);
+    expect(document.querySelector(".workspace-bookmark-title")?.textContent).toBe("B");
+    expect(field()).toBeNull();
+  });
+
+  // Enter moves focus, which fires blur, which commits again — the bug this
+  // guards is a second rename call for one edit.
+  it("commits once when Enter is followed by the blur it causes", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    const input = field();
+    if (input !== null) input.value = "Netflix";
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    input?.dispatchEvent(new FocusEvent("blur"));
+    await flush();
+
+    expect(calls.filter((entry) => entry.call === "renameBookmark")).toHaveLength(1);
+  });
+
+  it("leaves the title alone when the field is emptied rather than naming it nothing", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    type("   ");
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "renameBookmark")).toBe(false);
+  });
+
+  // The essentials grid is the one place the name is all there is: the tile
+  // draws a monogram from it. A pinned bookmark is absent from the chip
+  // list, so without its own control it could not be renamed at all.
+  it("renames from an essential tile, on a line of its own under the grid", async () => {
+    const calls = harness();
+    stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-essential-rename")?.click();
+    await flush();
+    expect(document.querySelector("#workspace-ask")?.hasAttribute("hidden")).toBe(false);
+    type("Prime Video");
+    await flush();
+
+    expect(calls).toContainEqual({
+      call: "renameBookmark",
+      args: ["acme", "https://a.test/", "Prime Video"],
+    });
+    expect(document.querySelector("#workspace-ask")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("redraws the label from the store's answer, not from what was typed", async () => {
+    harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark = async () => ({
+      ok: true as const,
+      value: [{ url: "https://b.test/", title: "Netflix" }],
+    });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    type("  Netflix  ");
+    await flush();
+
+    expect(document.querySelector(".workspace-bookmark-title")?.textContent).toBe("Netflix");
+  });
+
+  it("surfaces the store's refusal in the tool status", async () => {
+    harness();
+    stubBookmarks([{ url: "https://b.test/", title: "B" }]);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark = async () => ({
+      ok: false as const,
+      text: "A bookmark needs a name.",
+      language: "en" as const,
+    });
+    initWorkspace(["acme"]);
+    await flush();
+
+    document.querySelector<HTMLElement>(".workspace-bookmark-rename")?.click();
+    await flush();
+    type("anything");
+    await flush();
+
+    expect(document.querySelector("#workspace-tool-status")?.textContent).toBe("A bookmark needs a name.");
+  });
+});
+
 describe("the pin and unpin controls", () => {
   it("pins a listed bookmark from its own pin control, without opening it", async () => {
     const calls = harness();

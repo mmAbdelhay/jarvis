@@ -232,6 +232,16 @@ export const MESSAGES = {
   // never echoes the store's own developer-facing detail.
   bookmarksUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر حفظ العلامات المرجعية." : "Could not save bookmarks.",
+  /** The pencil on a bookmark chip and on an essential tile, and the label
+   *  on the row it opens. */
+  renameBookmark: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادة تسمية الإشارة المرجعية" : "Rename bookmark",
+  /** The store refuses a rename to nothing; this is the only place that
+   *  turns its "blank-title" token into words. The chip shows the raw url
+   *  when a title is empty, so a blank rename would read as a broken
+   *  bookmark rather than as a rename that did what it was told. */
+  bookmarkBlankTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "اسم الإشارة المرجعية لا يمكن أن يكون فارغًا." : "A bookmark needs a name.",
   /** The store refuses a thirteenth pin; this is the only place that turns
    *  its "pin-limit" token into words. */
   bookmarkPinLimit: (limit: number, language: "ar" | "en"): string =>
