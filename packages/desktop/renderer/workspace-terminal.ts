@@ -446,15 +446,21 @@ function makePane(
     ? {
         readInput: () => view.readInput(),
         applyInput: (line: string) => view.applyInput(line),
-        // Left-aligned to the editor's own box, one editor-height below its
-        // top — not a caret cell, since the buffer never moves while the
-        // editor is live to compute one from.
+        // Left-aligned to the editor's own box, and handing over its
+        // vertical span — not a caret cell, since the buffer never moves
+        // while the editor is live to compute one from. Direction (above
+        // the box or below it) is attachCompletion's call, made from the
+        // room actually available in `element`.
         anchor: () => {
           const editorEl = view.editorElement();
-          if (editorEl === undefined) return { x: 0, y: 0 };
+          if (editorEl === undefined) return { x: 0, top: 0, bottom: 0 };
           const editorBox = editorEl.getBoundingClientRect();
           const hostBox = element.getBoundingClientRect();
-          return { x: editorBox.left - hostBox.left, y: editorBox.bottom - hostBox.top };
+          return {
+            x: editorBox.left - hostBox.left,
+            top: editorBox.top - hostBox.top,
+            bottom: editorBox.bottom - hostBox.top,
+          };
         },
       }
     : {};

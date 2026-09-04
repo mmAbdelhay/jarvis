@@ -220,13 +220,18 @@ export type CompletionHooks = {
    *  worse, whatever real input arrives next. Absent, acceptance falls
    *  back to the backspace-and-retype dance against the pty. */
   applyInput?: (line: string) => void;
-  /** Where to put the dropdown when there is an editor: a pixel position,
-   *  relative to `host`, rather than the buffer-cell math `mark` drives.
+  /** Where to put the dropdown when there is an editor: the anchor box's
+   *  left edge and its vertical span (`top`/`bottom`), all in pixels
+   *  relative to `host` — rather than the buffer-cell math `mark` drives.
    *  The editor draws over the terminal, so there is no caret cell to
    *  compute the dropdown's position from — the caller hands over the
-   *  editor's own bounding box instead. Absent, the dropdown positions
-   *  itself under the prompt mark's cell, as it always has. */
-  anchor?: () => { x: number; y: number };
+   *  editor's own bounding box instead. `top`/`bottom` (not a single `y`)
+   *  is what lets `show` open the list upward when the box sits near the
+   *  bottom of `host` — as the pinned input editor does — rather than
+   *  driving it off the pane on the assumption the box is always near the
+   *  top. Absent, the dropdown positions itself under the prompt mark's
+   *  cell, as it always has. */
+  anchor?: () => { x: number; top: number; bottom: number };
 };
 
 /** DEL, the byte a terminal sends for Backspace and the one zsh's line
@@ -359,11 +364,24 @@ export function attachCompletion(
     dropdown.show(items, mark, cell.x, cell.y);
     // An editor in front of the shell has no caret cell to be under — the
     // buffer never moves while it is live — so its own bounding box wins
-    // over the cell math `show` just did.
+    // over the cell math `show` just did. Direction is decided from the
+    // room actually measured in `host`, not from an assumption that the
+    // box sits at the top: today the input editor is pinned at the
+    // pane's bottom, where "just below the box" is at or past the pane's
+    // own bottom edge — invisible, or a sliver.
     if (hooks.anchor !== undefined && dropdown.isOpen()) {
       const box = hooks.anchor();
+      const hostHeight = host.clientHeight;
+      const spaceAbove = box.top;
+      const spaceBelow = hostHeight - box.bottom;
       dropdown.element.style.left = `${box.x}px`;
-      dropdown.element.style.top = `${box.y}px`;
+      if (spaceBelow >= spaceAbove) {
+        dropdown.element.style.top = `${box.bottom}px`;
+        dropdown.element.style.bottom = "";
+      } else {
+        dropdown.element.style.top = "";
+        dropdown.element.style.bottom = `${hostHeight - box.top}px`;
+      }
     }
     openFor = dropdown.isOpen() ? input : undefined;
   }

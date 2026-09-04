@@ -253,6 +253,19 @@ describe("attachCompletion", () => {
     expect(host.textContent).toContain("git status");
   });
 
+  // A pane with no editor supplies no `anchor` hook and must keep the
+  // exact property set today's cell-under-the-cursor placement produces —
+  // never a `bottom`, which is what an upward-opening dropdown needs.
+  it("positions from the cursor cell alone, setting only left and top, with no anchor hook", async () => {
+    const { terminal, host } = attached();
+
+    await typeAt(terminal, "~/p > ", "git sta");
+
+    const dropdown = host.querySelector<HTMLElement>(".terminal-completion");
+    expect(dropdown?.style.cssText.replace(/\s/g, "")).toBe("left:48px;top:17px;");
+    expect(dropdown?.style.bottom).toBe("");
+  });
+
   it("does not open at a bare prompt, and does not even ask", async () => {
     const { terminal, host, asked, press } = attached();
 
@@ -452,22 +465,50 @@ describe("attachCompletion with an editor", () => {
     expect(asked).toEqual(["git", "git sta"]);
   });
 
-  it("positions the dropdown at the anchor hook's box, not a buffer cell", async () => {
+  /** jsdom lays nothing out, so `host.clientHeight` reads 0 unless a test
+   *  stubs it — this is what lets a test choose how much room the dropdown
+   *  has to open into. */
+  function withHostHeight(host: HTMLElement, height: number): void {
+    Object.defineProperty(host, "clientHeight", { value: height, configurable: true });
+  }
+
+  async function openWithAnchor(
+    box: { x: number; top: number; bottom: number },
+    hostHeight: number,
+  ): Promise<HTMLElement | null> {
     const terminal = new FakeTerminal();
     const host = document.createElement("div");
+    withHostHeight(host, hostHeight);
     attachCompletion(terminal as never, host, {
       suggest: async () => ["git status"],
       sendInput: () => {},
       readInput: () => "git sta",
       applyInput: () => {},
-      anchor: () => ({ x: 12, y: 34 }),
+      anchor: () => box,
     });
     markPrompt(terminal);
     terminal.emitData("a");
     await new Promise((resolve) => setTimeout(resolve, 0));
+    return host.querySelector<HTMLElement>(".terminal-completion");
+  }
 
-    const dropdown = host.querySelector<HTMLElement>(".terminal-completion");
+  it("opens downward, at the anchor box's bottom edge, when there is more room below", async () => {
+    // Anchor sits near the top of a tall host: plenty of room below it.
+    const dropdown = await openWithAnchor({ x: 12, top: 20, bottom: 40 }, 500);
+
     expect(dropdown?.style.left).toBe("12px");
-    expect(dropdown?.style.top).toBe("34px");
+    expect(dropdown?.style.top).toBe("40px");
+    expect(dropdown?.style.bottom).toBe("");
+  });
+
+  it("opens upward, at the anchor box's top edge, when there is not enough room below", async () => {
+    // Anchor sits at the bottom of the host — exactly where the pinned
+    // input editor puts it — so opening downward would put the list at or
+    // past the pane's bottom edge.
+    const dropdown = await openWithAnchor({ x: 12, top: 460, bottom: 480 }, 500);
+
+    expect(dropdown?.style.left).toBe("12px");
+    expect(dropdown?.style.bottom).toBe("40px"); // hostHeight (500) - box.top (460)
+    expect(dropdown?.style.top).toBe("");
   });
 });
