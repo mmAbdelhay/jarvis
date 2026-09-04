@@ -345,6 +345,42 @@ describe("createDbGateManager", () => {
   });
 });
 
+describe("createDbGateManager stopping one instance", () => {
+  it("kills that project's instance, forgets it, and leaves the others alone", async () => {
+    const { instance, processes } = manager();
+
+    await instance.open("acme");
+    await instance.open("storefront");
+    expect(instance.runningKeys().sort()).toEqual(["acme", "storefront"]);
+
+    instance.stop("acme");
+
+    expect(processes[0]?.killed).toBe(true);
+    expect(processes[1]?.killed).toBe(false);
+    expect(instance.runningKeys()).toEqual(["storefront"]);
+  });
+
+  it("ignores a project it is not running", () => {
+    const { instance, processes } = manager();
+    instance.stop("acme");
+    expect(processes).toHaveLength(0);
+  });
+
+  // Stopping is only safe because open() starts it again. A restarted DbGate
+  // mints a new password, which is exactly why open() is the only way back in.
+  it("starts a fresh process for a project it stopped", async () => {
+    const { instance, processes } = manager();
+
+    await instance.open("acme");
+    instance.stop("acme");
+    const result = await instance.open("acme");
+
+    expect(result.ok).toBe(true);
+    expect(processes).toHaveLength(2);
+    expect(instance.runningKeys()).toEqual(["acme"]);
+  });
+});
+
 describe("randomPassword", () => {
   it("returns 32 hex characters", () => {
     expect(randomPassword()).toMatch(/^[0-9a-f]{32}$/);

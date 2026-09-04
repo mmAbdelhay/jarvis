@@ -51,7 +51,15 @@ let currentProject: string | undefined;
  *  jarvis.yaml takes effect on restart anyway. Until it resolves — and if
  *  it never does — the pane is built with these, which are the terminal
  *  Jarvis drew before blocks existed. */
-let terminalSettings = { blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "" };
+let terminalSettings = {
+  blocks: false,
+  inputEditor: false,
+  notifyAfterSeconds: 0,
+  home: "",
+  // 0 is right as the "not answered yet" value: a pane reads anything that
+  // is not a positive number as "keep the default".
+  scrollback: 0,
+};
 try {
   void window.jarvis
     .terminalSettings()

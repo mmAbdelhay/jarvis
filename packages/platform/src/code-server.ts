@@ -34,12 +34,37 @@ export type CodeServerResult =
   | { ok: true; url: string }
   | { ok: false; detail: string };
 
+/**
+ * The key one code-server instance is filed under: the project *and* the
+ * folder it is rooted at, since two roots of one project are two processes.
+ *
+ * Exported because the sidecar reaper has to name the instances a project's
+ * open editor tabs still need, and it builds those names from config — from
+ * the other end entirely. Two hand-rolled copies of this join is precisely
+ * the drift that would have the reaper stop the editor you are typing in.
+ *
+ * NUL is the separator because it is the one byte a path cannot contain.
+ */
+export function codeServerKey(projectPath: string, folderPath: string): string {
+  return `${projectPath}\u0000${folderPath}`;
+}
+
 export type CodeServerManager = {
   /** Starts (or reuses) a code-server instance rooted at `folderPath` (the
    *  project directory when omitted) and returns the URL once it is
    *  actually accepting connections. A `folderPath` outside `projectPath`
    *  is refused rather than opened. */
   open(projectPath: string, folderPath?: string): Promise<CodeServerResult>;
+  /** Kills one instance and forgets it, so the next open() starts a fresh
+   *  one. The key is the one `runningKeys` hands back — the
+   *  (project, root) pair, since two roots of one project are two processes. An unknown key is a no-op.
+   *
+   *  Stopping is safe precisely because open() restarts: nothing about a
+   *  running instance is state the user owns. createSidecarReaper is what
+   *  decides an instance has gone unneeded for long enough. */
+  stop(key: string): void;
+  /** Every key `stop` would act on — what the reaper sweeps. */
+  runningKeys(): string[];
   /** Kills every running instance — called on app quit. Each instance is a
    *  live child process; it does not go away with the window on its own. */
   stopAll(): void;
@@ -100,7 +125,7 @@ export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServer
       return { ok: false, detail: "code-server did not become ready in time" };
     }
 
-    const key = `${projectPath}\u0000${folderPath}`;
+    const key = codeServerKey(projectPath, folderPath);
     running.set(key, { url, process });
     process.onExit(() => running.delete(key));
     return { ok: true, url };
@@ -116,7 +141,7 @@ export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServer
       // editors, and each needs its own process rooted where it belongs.
       // It is also the key the in-flight map must use, or a start for one
       // root would be handed back as the answer for another.
-      const key = `${projectPath}\u0000${folderPath}`;
+      const key = codeServerKey(projectPath, folderPath);
 
       const existing = running.get(key);
       if (existing !== undefined) return Promise.resolve({ ok: true, url: existing.url });
@@ -133,6 +158,17 @@ export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServer
         () => starting.delete(key),
       );
       return attempt;
+    },
+
+    stop(key) {
+      const instance = running.get(key);
+      if (instance === undefined) return;
+      running.delete(key);
+      instance.process.kill();
+    },
+
+    runningKeys() {
+      return [...running.keys()];
     },
 
     stopAll() {

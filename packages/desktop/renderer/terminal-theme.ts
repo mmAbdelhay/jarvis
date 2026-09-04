@@ -38,9 +38,16 @@ export const TERMINAL_FONT = {
   lineHeight: 1.35,
 };
 
-/** The scrollback is the record of what you did — the same figure both
- *  terminals used before this file existed. */
-export const SCROLLBACK_LINES = 20_000;
+/**
+ * How much scrollback a terminal keeps when jarvis.yaml says nothing.
+ *
+ * xterm stores a line as `Uint32Array(cols * 3)` — 12 bytes a cell — so at
+ * 200 columns this is ~12 MB per pane once filled, and a split tab has one
+ * pane per leaf beside the Session route's own. It was 20 000 (~48 MB each)
+ * until the memory pass of 2026-09-05; `performance.terminalScrollback` is
+ * how you ask for that back.
+ */
+export const SCROLLBACK_LINES = 5_000;
 
 const ANSI_16 = [
   TERMINAL_THEME.black, TERMINAL_THEME.red, TERMINAL_THEME.green, TERMINAL_THEME.yellow,

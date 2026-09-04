@@ -24,6 +24,12 @@ than a frozen app.
 and the click joins it; it turns a five-second wait into about a tenth of a
 second. Nothing is spawned twice — the manager shares one start per project.
 
+An instance no open tab has needed for ten minutes is stopped, so a tab you
+come back to in the afternoon pays a start again — a warm one, since its files
+are still in the page cache. `performance.stopSidecarsAfterMinutes` is the
+number, and `0` keeps every instance until Jarvis quits. See
+[configuration](configuration.md).
+
 If DbGate genuinely never answers, its instance is killed after sixty seconds
 and the status line says so.
 

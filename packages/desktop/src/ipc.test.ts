@@ -111,6 +111,63 @@ describe("buildWiring", () => {
     expect(send).toHaveBeenCalledWith("metrics:update", expect.objectContaining({ cpuPercent: 10 }));
   });
 
+  // A hidden Jarvis has nobody to show a metric to, and refreshChanges
+  // spawns two git processes per repo every tick.
+  it("skips the metrics and changes ticks while the window is hidden", async () => {
+    let awake = true;
+    const readMetrics = vi.fn(async () => ({
+      cpuPercent: 10, memoryUsedBytes: 1, memoryTotalBytes: 2,
+      diskUsedBytes: 1, diskTotalBytes: 2, networkDownMbps: 0,
+      networkUpMbps: 0, uptimeSeconds: 1,
+    }));
+    const refreshChanges = vi.fn(async () => {});
+
+    const wiring = buildWiring({
+      ...baseDeps([]),
+      readMetrics,
+      refreshChanges,
+      intervalMs: 10,
+      changesIntervalMs: 10,
+      isAwake: () => awake,
+    });
+
+    wiring.start();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(readMetrics).toHaveBeenCalledTimes(1);
+    expect(refreshChanges).toHaveBeenCalledTimes(1);
+
+    awake = false;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(readMetrics).toHaveBeenCalledTimes(1);
+    expect(refreshChanges).toHaveBeenCalledTimes(1);
+
+    awake = true;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(readMetrics).toHaveBeenCalledTimes(2);
+    expect(refreshChanges).toHaveBeenCalledTimes(2);
+
+    wiring.stop();
+  });
+
+  // The status pages are free, the poll is five-minutely, and its whole
+  // value is being current the moment the dashboard is looked at again.
+  it("keeps polling provider health while the window is hidden", async () => {
+    const refreshHealth = vi.fn(async () => {});
+
+    const wiring = buildWiring({
+      ...baseDeps([]),
+      refreshHealth,
+      healthIntervalMs: 10,
+      isAwake: () => false,
+    });
+
+    wiring.start();
+    await vi.advanceTimersByTimeAsync(30);
+    wiring.stop();
+
+    expect(refreshHealth.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("forwards session changes", () => {
     const send = vi.fn();
     let emit: ((sessions: unknown[]) => void) | undefined;
@@ -699,6 +756,8 @@ describe("editor handlers", () => {
   function codeServer(overrides: Partial<CodeServerManager> = {}): CodeServerManager {
     return {
       open: () => Promise.resolve({ ok: true, url: "http://127.0.0.1:9001/?folder=%2Fp" }),
+      stop: () => {},
+      runningKeys: () => [],
       stopAll: () => {},
       ...overrides,
     };
@@ -1156,6 +1215,7 @@ const sampleConfig: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
+  performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/tmp/sessions.db",
 };
@@ -1272,6 +1332,8 @@ describe("database handlers", () => {
     return {
       open: () =>
         Promise.resolve({ ok: true, url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" }),
+      stop: () => {},
+      runningKeys: () => [],
       stopAll: () => {},
       ...overrides,
     };
@@ -1425,7 +1487,7 @@ users:
       opened,
       typed,
       handlers: createClusterHandlers({
-        headlamp: { open, stopAll: vi.fn() },
+        headlamp: { open, stop: vi.fn(), runningKeys: () => [], stopAll: vi.fn() },
         projects,
         clusters,
         readKubeconfig: async () => KUBECONFIG,
@@ -1649,6 +1711,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     const result = handlers.open("acme");
@@ -1670,6 +1733,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     const result = handlers.open("nope");
@@ -1687,6 +1751,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     expect(handlers.open(undefined as unknown as string).ok).toBe(false);
@@ -1700,6 +1765,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.input("tab-7", "ls\r");
@@ -1716,6 +1782,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.input(undefined as unknown as string, "ls");
@@ -1733,6 +1800,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.resize("tab-7", "80" as unknown as number, 24);
@@ -1749,6 +1817,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     handlers.close("tab-7");
@@ -1767,6 +1836,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
 
@@ -1786,6 +1856,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
 
@@ -1853,6 +1924,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
       completion: { enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } },
     });
     handlers.open("acme");
@@ -1882,6 +1954,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.split("tab-7", "p1");
@@ -1904,6 +1977,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.open("acme");
@@ -1926,6 +2000,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
     handlers.open("acme");
     handlers.split("tab-7", "p1");
@@ -1946,6 +2021,7 @@ describe("terminal handlers", () => {
       projects: { acme: "/p/acme" },
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
       completion,
     });
   }
@@ -2170,6 +2246,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: terminalConfig,
+      terminalScrollback: 5000,
     });
 
     expect(handlers.settings()).toEqual({
@@ -2177,6 +2254,9 @@ describe("terminal handlers", () => {
       inputEditor: true,
       notifyAfterSeconds: 30,
       home: homedir(),
+      // Not from the terminal: section — it is a memory setting — but it
+      // rides this payload because this is the one every pane already reads.
+      scrollback: 5000,
     });
   });
 
@@ -2188,6 +2268,7 @@ describe("terminal handlers", () => {
       projects: {},
       language: "en",
       terminal: { ...terminalConfig, blocks: { enabled: false, inputEditor: true } },
+      terminalScrollback: 5000,
     });
 
     expect(handlers.settings()).toMatchObject({ blocks: false, inputEditor: false });
@@ -2206,6 +2287,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         workflows: {
           defaultDir: "/home/.config/jarvis/workflows",
           config: overrides.config ?? {},
@@ -2256,6 +2338,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
       });
 
       expect(await handlers.workflows("acme")).toEqual([]);
@@ -2306,6 +2389,7 @@ describe("terminal handlers", () => {
         projects: { acme: "/p/acme" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         brain,
       });
     }
@@ -2615,6 +2699,7 @@ describe("terminal handlers", () => {
         projects: overrides.projects ?? { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         files: "files" in overrides ? overrides.files : files,
       });
     }
@@ -2833,6 +2918,7 @@ describe("terminal handlers", () => {
         projects: overrides.projects ?? { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
         files: "files" in overrides ? overrides.files : files,
         editor: "editor" in overrides ? overrides.editor : editor,
       });
@@ -3067,6 +3153,7 @@ describe("terminal handlers", () => {
         canGoForward: false,
         error: undefined,
         hasPlayingVideo: false,
+        suspended: false,
         ...overrides,
       };
     }
@@ -3173,6 +3260,7 @@ describe("terminal handlers", () => {
         projects: { p: "/proj" },
         language: "en",
         terminal: terminalConfig,
+        terminalScrollback: 5000,
       };
     }
 
@@ -4316,6 +4404,7 @@ describe("terminal open with an explicit directory", () => {
         blocks: { enabled: true, inputEditor: true },
         notifyAfterSeconds: 30,
       },
+      terminalScrollback: 5000,
     });
     return { handlers, started, labels };
   }

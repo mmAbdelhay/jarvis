@@ -6,6 +6,7 @@ import {
   type TabId,
   type TabKind,
   type WorkspaceState,
+  type WorkspaceTab,
 } from "@jarvis/core";
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -91,6 +92,13 @@ export class BrowserHost {
    *  route". This means "nothing to show right now" while the route itself
    *  stays visible: the renderer's selected project has no open tab. */
   #suppressed = false;
+  /** When each view stopped being the visible one, by #now(). Absent means
+   *  "visible right now": #syncVisibility deletes the active tab's entry and
+   *  stamps one for every other view it hides. */
+  readonly #hiddenSince = new Map<TabId, number>();
+  readonly #suspendAfterMs: number;
+  readonly #now: () => number;
+  readonly #resumeUrl: (tab: WorkspaceTab) => Promise<string | undefined>;
 
   /** Fetches `iconUrl` through `from` and caches it against `pageUrl`'s
    *  origin. Injected rather than imported: browser-host owns views, not
@@ -105,12 +113,25 @@ export class BrowserHost {
       maxTabs?: number;
       store?: TabStore;
       cacheFavicon?(pageUrl: string, iconUrl: string, from: Session): Promise<void>;
+      /** How long a hosted tab may sit hidden before sweepIdle reclaims its
+       *  renderer. 0 — the default — never suspends anything, which is
+       *  exactly what Jarvis did before suspension existed. */
+      suspendAfterMs?: number;
+      now?(): number;
+      /** Where a suspended tab should be rebuilt, asked at activation. Only
+       *  main can answer for a hosted app, whose sidecar may have been
+       *  stopped underneath it and come back on a different port; undefined
+       *  means "reuse the URL the tab was suspended holding". */
+      resumeUrl?(tab: WorkspaceTab): Promise<string | undefined>;
     },
   ) {
     this.#createView = createView;
     this.#store = options?.store ?? new TabStore();
     this.#maxTabs = options?.maxTabs ?? MAX_TABS;
     this.#cacheFavicon = options?.cacheFavicon ?? (async () => undefined);
+    this.#suspendAfterMs = options?.suspendAfterMs ?? 0;
+    this.#now = options?.now ?? Date.now;
+    this.#resumeUrl = options?.resumeUrl ?? (async () => undefined);
   }
 
   state(): WorkspaceState {
@@ -144,16 +165,7 @@ export class BrowserHost {
         ...(detail === undefined ? {} : { detail }),
       });
     }
-    // The partition is what makes a project's logins its own.
-    // encodeURIComponent because a project name is user-supplied config and
-    // a partition name with a slash or a space in it is not addressable.
-    const view = this.#createView(`persist:project-${encodeURIComponent(project)}`);
-    this.#views.set(tab.id, view);
-
-    view.onEvent((event) => this.#onViewEvent(tab.id, project, event));
-    if (this.#bounds !== undefined) view.setBounds(this.#bounds);
-    if (this.#devToolsBounds !== undefined) view.setDevToolsBounds(this.#devToolsBounds);
-    view.loadURL(target.url);
+    this.#attachView(tab.id, project, target.url);
     this.#syncVisibility();
   }
 
@@ -285,12 +297,22 @@ export class BrowserHost {
   activate(id: TabId): void {
     this.#store.activate(id);
     this.#suppressed = false;
+    // A tab whose view was reclaimed gets a new one, at the address it was
+    // suspended holding — except a hosted app, whose sidecar may have been
+    // stopped underneath it and come back on a different port. Only main can
+    // answer that, which is what resumeUrl is for.
+    const tab = this.#store.snapshot().tabs.find((candidate) => candidate.id === id);
+    if (tab?.suspended === true) {
+      void this.#resume(tab);
+      return;
+    }
     this.#syncVisibility();
   }
 
   close(id: TabId): void {
     this.#views.get(id)?.destroy();
     this.#views.delete(id);
+    this.#hiddenSince.delete(id);
     this.#store.close(id);
     this.#syncVisibility();
   }
@@ -367,6 +389,7 @@ export class BrowserHost {
   destroy(): void {
     for (const view of this.#views.values()) view.destroy();
     this.#views.clear();
+    this.#hiddenSince.clear();
   }
 
   #onViewEvent(id: TabId, project: string, event: HostedViewEvent): void {
@@ -426,6 +449,95 @@ export class BrowserHost {
     }
   }
 
+  /**
+   * Builds this tab's view and wires it, at `url`.
+   *
+   * The partition is what makes a project's logins its own.
+   * encodeURIComponent because a project name is user-supplied config and a
+   * partition name with a slash or a space in it is not addressable.
+   *
+   * A function rather than the six lines open() used to hold inline, because
+   * #resume needs the same six: two copies of "create, subscribe, place,
+   * load" is exactly the divergence that leaves a resumed tab without its
+   * bounds, painting at 0x0 over the corner of the window.
+   */
+  #attachView(tabId: TabId, project: string, url: string): void {
+    const view = this.#createView(`persist:project-${encodeURIComponent(project)}`);
+    this.#views.set(tabId, view);
+    view.onEvent((event) => this.#onViewEvent(tabId, project, event));
+    if (this.#bounds !== undefined) view.setBounds(this.#bounds);
+    if (this.#devToolsBounds !== undefined) view.setDevToolsBounds(this.#devToolsBounds);
+    view.loadURL(url);
+  }
+
+  /**
+   * Reclaims the renderer process behind every hosted tab that has sat
+   * hidden longer than the configured idle. The tab stays: its row, its URL
+   * and its place in the strip are untouched, and activating it builds a new
+   * view at the same address.
+   *
+   * A Chromium renderer is 80-150 MB, and #evictIfFull only ever fires when
+   * a ninth tab is opened — so eight tabs opened across a morning were all
+   * held until the app quit, for the sake of the one being read. This is
+   * what gives the other seven back.
+   *
+   * Two tabs are never suspended. The active one, obviously. And one whose
+   * page is playing video: reclaiming it stops the sound, and a tab left
+   * playing on purpose is the last one anybody meant to reclaim.
+   */
+  sweepIdle(): void {
+    if (this.#suspendAfterMs <= 0) return;
+    const now = this.#now();
+    const { tabs, activeTabId } = this.#store.snapshot();
+
+    for (const tab of tabs) {
+      if (tab.id === activeTabId) continue;
+      if (tab.hasPlayingVideo) continue;
+      if (!this.#views.has(tab.id)) continue;
+      const since = this.#hiddenSince.get(tab.id);
+      if (since === undefined || now - since < this.#suspendAfterMs) continue;
+
+      this.#views.get(tab.id)?.destroy();
+      this.#views.delete(tab.id);
+      this.#hiddenSince.delete(tab.id);
+      this.#store.update(tab.id, {
+        suspended: true,
+        // A suspended tab can go nowhere: there is no session history left to
+        // walk. Claiming otherwise leaves two dead buttons in the toolbar
+        // until the page is rebuilt.
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      });
+    }
+  }
+
+  /**
+   * Rebuilds a suspended tab's view. Nothing else in the class awaits, so
+   * activate() fires this and returns — the tab is already active, and the
+   * page arrives when it arrives, exactly as it does on a first open.
+   */
+  async #resume(tab: WorkspaceTab): Promise<void> {
+    let url = tab.url;
+    try {
+      url = (await this.#resumeUrl(tab)) ?? tab.url;
+    } catch {
+      // A sidecar that refuses to restart is no reason to leave the user
+      // with a tab that does nothing when clicked. The stored URL is the
+      // honest fallback, and the page's own failed load then says so.
+    }
+    // Activated twice before this resolved: the first call already built the
+    // view, and a second would leak a native overlay nothing is tracking.
+    if (this.#views.has(tab.id)) return;
+    // Closed while the sidecar was starting.
+    if (!this.#store.snapshot().tabs.some((candidate) => candidate.id === tab.id)) return;
+
+    this.#evictIfFull();
+    this.#store.update(tab.id, { suspended: false, url, loading: true, error: undefined });
+    this.#attachView(tab.id, tab.project, url);
+    this.#syncVisibility();
+  }
+
   #evictIfFull(): void {
     while (this.#views.size >= this.#maxTabs) {
       // Only a tab that actually holds a view. The cap exists to bound
@@ -444,8 +556,15 @@ export class BrowserHost {
 
   #syncVisibility(): void {
     const activeId = this.#store.snapshot().activeTabId;
+    const now = this.#now();
     for (const [id, view] of this.#views) {
-      view.setVisible(this.#visible && !this.#suppressed && id === activeId);
+      const visible = this.#visible && !this.#suppressed && id === activeId;
+      view.setVisible(visible);
+      // The idle clock starts when a view stops being seen and is cleared the
+      // moment it is seen again, so "hidden for fifteen minutes" means that
+      // and not "opened fifteen minutes ago".
+      if (visible) this.#hiddenSince.delete(id);
+      else if (!this.#hiddenSince.has(id)) this.#hiddenSince.set(id, now);
     }
   }
 }

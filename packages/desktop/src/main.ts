@@ -16,6 +16,7 @@ import {
   greetingText,
   scanDirtyProjects,
 } from "@jarvis/core";
+import type { TabKind, WorkspaceTab } from "@jarvis/core";
 import {
   MacSpeech,
   PiperSpeech,
@@ -24,6 +25,7 @@ import {
   createBrain,
   createCapacityReader,
   createCodeServerManager,
+  codeServerKey,
   createDbGateManager,
   createFaviconStore,
   createFsImportDeps,
@@ -97,6 +99,7 @@ import {
   showEditorTab,
 } from "./ipc.js";
 import { BrowserHost, type Rect } from "./browser-host.js";
+import { createSidecarReaper } from "./sidecar-reaper.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
 import { isAllowedNavigation } from "./navigation.js";
@@ -137,6 +140,18 @@ function setDockIcon(): void {
     // A missing or unreadable icon is not a reason to fail to start.
   }
 }
+
+/** The `performance:` section states its timeouts in minutes, because that is
+ *  the unit anybody reasons about "leave a tab alone for a while" in. Every
+ *  consumer wants milliseconds. */
+const MINUTE_MS = 60_000;
+
+/** How often the idle sweeps run. Both are cheap — one walks the tab list,
+ *  the other a map of at most a handful of child processes — so a minute is
+ *  frequent enough to be responsive and rare enough to be invisible. It also
+ *  bounds how far past its timeout anything can live: a tab set to suspend
+ *  after fifteen minutes goes at fifteen, plus up to one. */
+const SWEEP_INTERVAL_MS = 60_000;
 
 /** How long the chip row's runtime probe waits for `node -v` before giving
  *  up on it. A hung shim (a broken version manager, a stalled
@@ -455,10 +470,26 @@ app.whenReady().then(async () => {
 
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
+    // Rebuilding a suspended tab is not always just reloading its URL. A
+    // hosted app's sidecar may have been stopped underneath it by the reaper
+    // below and will come back on a different free port, so the address it
+    // was suspended holding points at nothing. Only the handler that owns
+    // that manager can say where it went.
+    //
+    // Assigned rather than passed, because every one of those handlers is
+    // built from `workspace` and so cannot exist before it. The host only
+    // ever calls this from a click, long after startup has finished.
+    let resumeHostedApp: ((tab: WorkspaceTab) => Promise<string | undefined>) | undefined;
+
     // The Workspace's hosted browser tabs. Each is a native WebContentsView
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
-    const workspace = new BrowserHost(createElectronViewFactory(window), { cacheFavicon });
+    const workspace = new BrowserHost(createElectronViewFactory(window), {
+      cacheFavicon,
+      suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
+      resumeUrl: (tab) =>
+        resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
+    });
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
@@ -729,6 +760,7 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       completion: { source: completionSource, enabled: completionEnabled },
       terminal: config.terminal,
+      terminalScrollback: config.performance.terminalScrollback,
       // The file sidebar's disk access. Immediate children only, and
       // realpath is what the containment check compares against — see
       // resolveWithin.
@@ -957,8 +989,106 @@ app.whenReady().then(async () => {
       onWorkspaceChange: (cb) => workspace.onChange(cb),
       refreshHealth: () => providers.refreshHealth(),
       healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
+      // Minimised, or behind the screen lock. Not `isVisible()` alone: a
+      // full-screen window on a background Space still reports visible, and
+      // refreshChanges spawns two git processes per repo every tick.
+      isAwake: () => window.isVisible() && !window.isMinimized(),
     });
     wiring.start();
+
+    // Where a suspended hosted-app tab should be rebuilt — see the
+    // declaration of resumeHostedApp above the BrowserHost. Every branch goes
+    // through the same handler the tab's own button uses, so "reuse if
+    // running, start if not" is decided in exactly one place.
+    resumeHostedApp = async (tab) => {
+      switch (tab.kind) {
+        case "editor": {
+          const result = await editor.open(tab.project, tab.detail);
+          return result.ok ? result.value : undefined;
+        }
+        case "database": {
+          const result = await database.open(tab.project);
+          return result.ok ? result.value.url : undefined;
+        }
+        case "cluster": {
+          if (tab.detail === undefined) return undefined;
+          // `background: true` because this resume is a consequence of Jarvis
+          // reclaiming memory, not of anybody asking to sign in. A foreground
+          // call may start a real `saml2aws` in a terminal tab and push MFA
+          // to the user's phone; clicking a tab you already had open is not
+          // consent to that. With the session gone the tab reloads its stored
+          // URL and says so, and the Cluster button is right there.
+          const result = await cluster.open(tab.project, tab.detail, { background: true });
+          return result.ok ? result.value : undefined;
+        }
+        default:
+          // A web or chat tab is its URL and nothing else.
+          return undefined;
+      }
+    };
+
+    /** Projects whose `kind` tab is open and not suspended. DbGate and
+     *  Headlamp both key by project name, so this is their whole answer. */
+    const neededProjects = (kind: TabKind): Set<string> =>
+      new Set(
+        workspace
+          .state()
+          .tabs.filter((tab) => tab.kind === kind && !tab.suspended)
+          .map((tab) => tab.project),
+      );
+
+    /** code-server keys by the (project, folder) pair rather than by project,
+     *  so a project with two editor roots has two processes and only one of
+     *  them may still be needed. `detail` is the root's declared name, and
+     *  resolving it exactly as createEditorHandlers does is what keeps this
+     *  in step with what was actually started — codeServerKey is shared for
+     *  the same reason. */
+    const neededEditorKeys = (): Set<string> => {
+      const keys = new Set<string>();
+      for (const tab of workspace.state().tabs) {
+        if (tab.kind !== "editor" || tab.suspended) continue;
+        const projectPath = config.projects[tab.project];
+        if (projectPath === undefined) continue;
+        if (tab.detail === undefined) {
+          keys.add(codeServerKey(projectPath, projectPath));
+          continue;
+        }
+        const root = config.editors[tab.project]?.find((entry) => entry.name === tab.detail);
+        if (root !== undefined) keys.add(codeServerKey(projectPath, join(projectPath, root.path)));
+      }
+      return keys;
+    };
+
+    const sidecarIdleMs = config.performance.stopSidecarsAfterMinutes * MINUTE_MS;
+    const editorReaper = createSidecarReaper({
+      runningKeys: () => codeServer.runningKeys(),
+      stop: (key) => codeServer.stop(key),
+      now: Date.now,
+      idleMs: sidecarIdleMs,
+    });
+    const databaseReaper = createSidecarReaper({
+      runningKeys: () => dbgate.runningKeys(),
+      stop: (key) => dbgate.stop(key),
+      now: Date.now,
+      idleMs: sidecarIdleMs,
+    });
+    const clusterReaper = createSidecarReaper({
+      runningKeys: () => headlamp.runningKeys(),
+      stop: (key) => headlamp.stop(key),
+      now: Date.now,
+      idleMs: sidecarIdleMs,
+    });
+
+    // The order matters: sweepIdle runs first, so a tab suspended on this
+    // very tick is already out of `needed` when the reapers read it, and its
+    // sidecar starts its own grace period from here rather than a minute
+    // later.
+    const sweepTimer = setInterval(() => {
+      workspace.sweepIdle();
+      editorReaper.sweep(neededEditorKeys());
+      databaseReaper.sweep(neededProjects("database"));
+      clusterReaper.sweep(neededProjects("cluster"));
+    }, SWEEP_INTERVAL_MS);
 
     // Every child this process started, released exactly once.
     //
@@ -986,6 +1116,9 @@ app.whenReady().then(async () => {
         }
       };
       safely("wiring", () => wiring.stop());
+      // The idle sweeps. A live interval keeps the event loop open, so a
+      // quit that got this far would otherwise sit there ticking.
+      safely("idle sweeps", () => clearInterval(sweepTimer));
       // Each hosted view is a live Chromium process; they do not go away
       // with the window on their own.
       safely("hosted views", () => workspace.destroy());

@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workflow } from "@jarvis/platform";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
+import { SCROLLBACK_LINES } from "./terminal-theme.js";
 
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
@@ -35,7 +36,13 @@ const D = (n: number) => `\u001b]133;D;${n}\u0007`;
 const CWD = (path: string) => `]7;file://${path}`;
 
 function pane(
-  settings = { blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" },
+  settings = {
+    blocks: true,
+    inputEditor: false,
+    notifyAfterSeconds: 0,
+    home: "/Users/x",
+    scrollback: 0,
+  },
   hooks: {
     onCwd?: (path: string) => void;
     chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
@@ -56,6 +63,44 @@ function pane(
 beforeEach(() => {
   FakeTerminal.instances = [];
   document.body.replaceChildren();
+});
+
+describe("a terminal pane's scrollback", () => {
+  // xterm stores a line as Uint32Array(cols * 3) — 12 bytes a cell — so at
+  // 200 columns this number is ~2.4 MB per 1000 lines, per pane.
+  it("uses the configured scrollback", () => {
+    pane({
+      blocks: true,
+      inputEditor: false,
+      notifyAfterSeconds: 0,
+      home: "/Users/x",
+      scrollback: 1234,
+    });
+    expect(FakeTerminal.instances[0]?.options["scrollback"]).toBe(1234);
+  });
+
+  // The value arrives over IPC, so it is not the type checker's to promise —
+  // and 0 is what the renderer holds before the answer comes back.
+  it("falls back to the default for a value that is not a positive number", () => {
+    pane({
+      blocks: true,
+      inputEditor: false,
+      notifyAfterSeconds: 0,
+      home: "/Users/x",
+      scrollback: 0,
+    });
+    expect(FakeTerminal.instances[0]?.options["scrollback"]).toBe(SCROLLBACK_LINES);
+
+    FakeTerminal.instances = [];
+    pane({
+      blocks: true,
+      inputEditor: false,
+      notifyAfterSeconds: 0,
+      home: "/Users/x",
+      scrollback: Number.NaN,
+    });
+    expect(FakeTerminal.instances[0]?.options["scrollback"]).toBe(SCROLLBACK_LINES);
+  });
 });
 
 describe("a terminal pane", () => {
@@ -147,7 +192,7 @@ describe("a terminal pane", () => {
   // exactly as it arrived, marks and all, which is the terminal Jarvis
   // shipped before blocks existed.
   it("builds no blocks at all when blocks are off", () => {
-    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x" });
+    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 });
     const chunk = `${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}`;
     p.write(chunk);
     expect(p.blocks()).toHaveLength(0);
@@ -257,7 +302,7 @@ describe("a terminal pane", () => {
   // Nothing to reset, and nothing to throw: the same rule every other part
   // of the block machinery follows.
   it("resets a pane with blocks switched off without complaint", () => {
-    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/h", scrollback: 0 });
     p.write("hello");
 
     expect(() => p.reset()).not.toThrow();
@@ -278,7 +323,7 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 
 describe("the chip row in a pane", () => {
   it("mounts a chip row above the editor", () => {
-    const p = pane({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x" });
+    const p = pane({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 });
     const chipsEl = p.element.querySelector(".terminal-chips");
     const editorEl = p.element.querySelector(".terminal-input");
     expect(chipsEl).not.toBeNull();
@@ -493,10 +538,12 @@ describe("the command editor in a pane", () => {
     inputEditor: true,
     notifyAfterSeconds: 0,
     home: "/Users/x",
+    scrollback: 0,
   };
 
   function editorPane(
     settings: {
+      scrollback: number;
       blocks: boolean;
       inputEditor: boolean;
       notifyAfterSeconds: number;
@@ -1651,7 +1698,7 @@ describe("notifications", () => {
       sendInput: vi.fn(),
       resize: vi.fn(),
       attach: async () => "",
-      settings: { blocks: true, inputEditor: false, notifyAfterSeconds, home: "/Users/x" },
+      settings: { blocks: true, inputEditor: false, notifyAfterSeconds, home: "/Users/x", scrollback: 0 },
       notify,
     });
     return { p, notify };
@@ -1724,7 +1771,7 @@ describe("the file sidebar's palette action", () => {
       sendInput: vi.fn(),
       resize: vi.fn(),
       attach: async () => "",
-      settings: { blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x" },
+      settings: { blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 },
       notify: vi.fn(),
       toggleExplorer,
       refreshExplorer,

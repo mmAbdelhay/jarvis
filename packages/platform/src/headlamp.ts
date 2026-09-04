@@ -94,6 +94,16 @@ export type HeadlampManager = {
    *  `context` within it. A context the project does not declare in
    *  `clusters:` is refused rather than opened. */
   open(project: string, context: string): Promise<HeadlampResult>;
+  /** Kills one instance and forgets it, so the next open() starts a fresh
+   *  one. The key is the project name: one
+   *  headlamp-server serves every context that project declares. An unknown key is a no-op.
+   *
+   *  Stopping is safe precisely because open() restarts: nothing about a
+   *  running instance is state the user owns. createSidecarReaper is what
+   *  decides an instance has gone unneeded for long enough. */
+  stop(key: string): void;
+  /** Every key `stop` would act on — what the reaper sweeps. */
+  runningKeys(): string[];
   /** Kills every running instance — called on app quit. */
   stopAll(): void;
 };
@@ -206,6 +216,17 @@ export function createHeadlampManager(deps: HeadlampManagerDeps): HeadlampManage
 
       const result = await attempt;
       return result.ok ? { ok: true, url: urlFor(result.url, context) } : result;
+    },
+
+    stop(key) {
+      const instance = running.get(key);
+      if (instance === undefined) return;
+      running.delete(key);
+      instance.process.kill();
+    },
+
+    runningKeys() {
+      return [...running.keys()];
     },
 
     stopAll() {

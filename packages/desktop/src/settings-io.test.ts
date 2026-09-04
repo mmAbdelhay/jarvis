@@ -38,6 +38,7 @@ const draft: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
+  performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
@@ -94,6 +95,26 @@ describe("toRawConfig", () => {
     expect(raw["agents"]).toEqual(draft.registry.agents);
     expect(raw["routing"]).toEqual(draft.registry.routing);
     expect(raw).not.toHaveProperty("registry");
+  });
+
+  // toRawConfig is the sole allowlist of keys that reach the file, so a
+  // section left out of it is deleted on the next save.
+  it("writes performance only when it differs from the defaults", () => {
+    expect(toRawConfig(draft)).not.toHaveProperty("performance");
+
+    const raw = toRawConfig({
+      ...draft,
+      performance: {
+        suspendTabsAfterMinutes: 0,
+        stopSidecarsAfterMinutes: 10,
+        terminalScrollback: 5000,
+      },
+    }) as Record<string, unknown>;
+    expect(raw["performance"]).toEqual({
+      suspendTabsAfterMinutes: 0,
+      stopSidecarsAfterMinutes: 10,
+      terminalScrollback: 5000,
+    });
   });
 
   it("drops sessionsDbPath — the file has no key for it", () => {

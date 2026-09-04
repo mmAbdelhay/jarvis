@@ -511,6 +511,11 @@ export type RendererApi = {
     inputEditor: boolean;
     notifyAfterSeconds: number;
     home: string;
+    /** Lines of scrollback a pane keeps, from
+     *  `performance.terminalScrollback`. Not part of the `terminal:` section
+     *  because it is a memory setting, not a terminal-behaviour one — but it
+     *  rides this payload because this is the one the panes already read. */
+    scrollback: number;
   }>;
   /** Every saved workflow the ⌘P palette's "Run workflow…" can offer for
    *  `project` — see TerminalHandlers.workflows above. */
@@ -629,9 +634,20 @@ export type WiringDeps = {
   /** Free public status pages only. Never a capacity read. */
   refreshHealth(): Promise<void>;
   healthIntervalMs: number;
+  /** Whether the window is on screen. A hidden Jarvis has nobody to show a
+   *  metric or a change count to, and refreshChanges spawns two git
+   *  processes per repo every tick — the most expensive recurring thing the
+   *  main process does.
+   *
+   *  Optional, and true by default, so a caller that does not care keeps the
+   *  behaviour it had. The health poll is deliberately *not* gated by it: it
+   *  is a five-minute read of free status pages, it costs nothing, and its
+   *  whole value is being current the moment you look. */
+  isAwake?(): boolean;
 };
 
 export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
+  const isAwake = deps.isAwake ?? (() => true);
   let timer: ReturnType<typeof setInterval> | undefined;
   let changesTimer: ReturnType<typeof setInterval> | undefined;
   let healthTimer: ReturnType<typeof setInterval> | undefined;
@@ -658,6 +674,7 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
       }, deps.healthIntervalMs);
 
       timer = setInterval(() => {
+        if (!isAwake()) return;
         deps.readMetrics()
           .then((metrics) => deps.send("metrics:update", metrics))
           .catch(() => {
@@ -666,6 +683,7 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
       }, deps.intervalMs);
 
       changesTimer = setInterval(() => {
+        if (!isAwake()) return;
         void deps.refreshChanges();
       }, deps.changesIntervalMs);
     },
@@ -1430,7 +1448,13 @@ export type TerminalHandlers = {
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
-  settings(): { blocks: boolean; inputEditor: boolean; notifyAfterSeconds: number; home: string };
+  settings(): {
+    blocks: boolean;
+    inputEditor: boolean;
+    notifyAfterSeconds: number;
+    home: string;
+    scrollback: number;
+  };
   /** Every saved workflow the palette can offer for `project` — the
    *  always-read `~/.config/jarvis/workflows/` plus that project's
    *  configured directory, if it has one. Never rejects: a workflow source
@@ -1490,6 +1514,9 @@ export type TerminalHandlerDeps = {
    *  suggestions at all, which is a terminal exactly as it was before the
    *  feature existed. */
   completion?: { source: CompletionSource; enabled: boolean } | undefined;
+  /** `performance.terminalScrollback`, which rides the terminal settings
+   *  payload because that is the one every pane already reads. */
+  terminalScrollback: number;
   /** The `terminal:` section of config, for the renderer-facing settings
    *  channel — see `settings()` above. */
   terminal: TerminalConfig;
@@ -2045,6 +2072,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       inputEditor: deps.terminal.blocks.enabled && deps.terminal.blocks.inputEditor,
       notifyAfterSeconds: deps.terminal.notifyAfterSeconds,
       home: homedir(),
+      scrollback: deps.terminalScrollback,
     }),
 
     async workflows(project) {

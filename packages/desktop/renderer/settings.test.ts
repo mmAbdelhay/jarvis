@@ -37,6 +37,7 @@ function sample(): JarvisConfig {
     },
     brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-mm" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
+    performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
     sessions: { importWindowDays: 30 },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };

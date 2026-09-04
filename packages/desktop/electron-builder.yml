@@ -135,6 +135,25 @@ mac:
   # signature it only buys refusals.
   hardenedRuntime: false
 
+# ---------------------------------------------------------------------------
+# Which Electron gets packaged
+# ---------------------------------------------------------------------------
+#
+# Electron for Content Security is not published on electron/electron's
+# releases, so electron-builder's usual "download the version in
+# package.json" step 404s on `v44.1.0+wvcus`. Both of these are needed:
+# electronDist points it at the binary that `node_modules/electron/install.js`
+# already fetched from castLabs, and electronVersion gives it the plain
+# semver it expects to parse, since the `+wvcus` build metadata is not
+# something it can resolve to a download.
+#
+# The consequence worth knowing: the packaged app is whatever is currently in
+# node_modules/electron/dist. A `pnpm install` that re-fetched stock Electron
+# there would silently produce a build with no CDM — which the VMP signing
+# hook below would then fail on, deliberately.
+electronDist: node_modules/electron/dist
+electronVersion: 44.1.0
+
 # Widevine signing. See scripts/vmp-sign.cjs for why this runs here and not
 # in afterSign: on macOS the VMP signature must be inside the bundle before
 # the code signature covers it. Without this the packaged app plays no DRM —

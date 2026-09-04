@@ -23,6 +23,92 @@ type Style = {
   dim: boolean;
 };
 
+/** The rows the shared terminal is built with. Output taller than this lives
+ *  in its scrollback, which paint() walks all of — see SCROLLBACK. */
+const ROWS = 24;
+
+/** Every block's output has to survive in the buffer long enough to be walked
+ *  cell by cell, and a long block is thousands of lines. This is not a memory
+ *  figure: reset() frees the lines between blocks, and xterm allocates them
+ *  only as they are written. */
+const SCROLLBACK = 100_000;
+
+/**
+ * One terminal, reused for every block.
+ *
+ * Each block is painted once, at a fixed height, and never scrolled — so
+ * constructing a whole xterm per block (500 per pane at MAX_BLOCKS, plus
+ * every one that scrolled off) was pure churn in the process that also draws
+ * the UI. `reset()` clears the screen, the scrollback and every mode between
+ * blocks, which is what makes one instance safe to share.
+ *
+ * Undefined until the first render, and left in place after: a pane with
+ * blocks switched off never builds one at all.
+ */
+let shared: Terminal | undefined;
+
+/**
+ * Why the renders are queued rather than simply sharing the instance.
+ *
+ * `Terminal.write()` defers its parsing to a macrotask, and `reset()` neither
+ * drains nor discards what is already queued. So a second block that reset
+ * the terminal while the first block's bytes were still pending would clear
+ * the screen and then let those very bytes paint into it — one block's output
+ * appearing under another's, which is the worst thing this module could do.
+ *
+ * One job at a time. A job's reset happens only once the previous job's write
+ * callback has fired, which is the only moment nothing is pending.
+ */
+type Job = { ansi: string; width: number; element: HTMLElement };
+const queue: Job[] = [];
+let painting = false;
+
+function pump(): void {
+  if (painting) return;
+  const job = queue.shift();
+  if (job === undefined) return;
+  painting = true;
+
+  const finish = (): void => {
+    painting = false;
+    pump();
+  };
+
+  try {
+    if (shared === undefined) {
+      shared = new Terminal({
+        cols: job.width,
+        rows: ROWS,
+        scrollback: SCROLLBACK,
+        allowProposedApi: true,
+      });
+    } else {
+      shared.reset();
+      // Resized rather than rebuilt: `cols` varies per block, and a resize is
+      // cheap where a construction is not. A block painted at the previous
+      // block's width would wrap where the program never wrapped.
+      if (shared.cols !== job.width) shared.resize(job.width, ROWS);
+    }
+    const terminal = shared;
+    terminal.write(job.ansi, () => {
+      try {
+        paint(terminal, job.element);
+      } catch {
+        fallBackToText(job.ansi, job.element);
+      } finally {
+        finish();
+      }
+    });
+  } catch {
+    // A terminal that could not be built or reset takes this block down to
+    // plain text, and must not take the queue with it — every block behind
+    // this one would otherwise never paint at all.
+    fallBackToText(job.ansi, job.element);
+    shared = undefined;
+    finish();
+  }
+}
+
 export function renderOutput(ansi: string, cols: number): HTMLElement {
   const element = document.createElement("div");
   element.className = "block-output";
@@ -34,35 +120,17 @@ export function renderOutput(ansi: string, cols: number): HTMLElement {
   // renderOutput() therefore returns its (initially empty) element right
   // away; the caller appends it, and its children arrive a tick later.
   // That is invisible to a user and is a documented part of this
-  // function's contract (see the test that pins it).
+  // function's contract (see the test that pins it). Queueing behind an
+  // earlier block only widens a gap that was always there.
   //
-  // Constructing the terminal is inside this same try: a bad `cols` (NaN,
-  // say) or any internal xterm failure must still leave a block with its
-  // text on the page, never an uncaught throw out of renderOutput().
-  let terminal: Terminal | undefined;
-  try {
-    const width = Number.isFinite(cols) ? Math.max(cols, 20) : 80;
-    terminal = new Terminal({
-      cols: width,
-      rows: 24,
-      scrollback: 100_000,
-      allowProposedApi: true,
-    });
-    terminal.write(ansi, () => {
-      try {
-        paint(terminal as Terminal, element);
-      } catch {
-        fallBackToText(ansi, element);
-      } finally {
-        dispose(terminal as Terminal);
-      }
-    });
-  } catch {
-    // A block that cannot be frozen shows its text without styling rather
-    // than nothing at all.
-    fallBackToText(ansi, element);
-    if (terminal !== undefined) dispose(terminal);
-  }
+  // A bad `cols` (NaN, say) is normalised here rather than left to xterm,
+  // which is the one thing about a job that can be wrong before it runs.
+  queue.push({
+    ansi,
+    width: Number.isFinite(cols) ? Math.max(cols, 20) : 80,
+    element,
+  });
+  pump();
 
   return element;
 }
@@ -73,15 +141,6 @@ function fallBackToText(ansi: string, element: HTMLElement): void {
   fallback.className = "block-line";
   fallback.textContent = ansi.replace(/\[[0-9;]*[A-Za-z]/g, "");
   element.append(fallback);
-}
-
-function dispose(terminal: Terminal): void {
-  try {
-    terminal.dispose();
-  } catch {
-    // Disposing a terminal that never opened can throw; nothing depends on
-    // it having worked.
-  }
 }
 
 function paint(terminal: Terminal, element: HTMLElement): void {

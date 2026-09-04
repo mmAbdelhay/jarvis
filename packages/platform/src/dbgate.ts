@@ -82,6 +82,16 @@ export type DbGateManager = {
   /** Starts (or reuses) the DbGate instance for `project` and returns its
    *  URL plus the credential that instance is guarded with. */
   open(project: string): Promise<DbGateResult>;
+  /** Kills one instance and forgets it, so the next open() starts a fresh
+   *  one. The key is the project name, which is what
+   *  `running` is keyed by: one DbGate serves all of a project's connections. An unknown key is a no-op.
+   *
+   *  Stopping is safe precisely because open() restarts: nothing about a
+   *  running instance is state the user owns. createSidecarReaper is what
+   *  decides an instance has gone unneeded for long enough. */
+  stop(key: string): void;
+  /** Every key `stop` would act on — what the reaper sweeps. */
+  runningKeys(): string[];
   /** Kills every running instance — called on app quit. Each instance is a
    *  live child process; it does not go away with the window on its own. */
   stopAll(): void;
@@ -203,6 +213,17 @@ export function createDbGateManager(deps: DbGateManagerDeps): DbGateManager {
         () => starting.delete(project),
       );
       return attempt;
+    },
+
+    stop(key) {
+      const instance = running.get(key);
+      if (instance === undefined) return;
+      running.delete(key);
+      instance.process.kill();
+    },
+
+    runningKeys() {
+      return [...running.keys()];
     },
 
     stopAll() {
