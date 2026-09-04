@@ -69,12 +69,43 @@ describe("the splitter", () => {
     expect(done(splitter.push(`${D(0)}${A}$ ${B}`))).toEqual([]);
   });
 
-  it("caps a block's output and says that it did", () => {
-    const splitter = createSplitter({ now: clock(), maxOutputBytes: 10 });
-    const events = splitter.push(`${A}$ ${B}yes\r\n${C("yes")}${"y".repeat(50)}${D(0)}`);
+  // The cap keeps the head *and the tail*, with the gap between them stated
+  // — the design's Bounds section, and the reason it is written that way: a
+  // build log's failure is at its end. Truncating forward kept the banner
+  // and threw the error away, and "Explain this failure", which sends the
+  // last 4 KB of `output`, then sent the brain the last 4 KB of the
+  // *beginning* of a log it was asked to explain the end of.
+  it("caps a block's output to its head and its tail, and says what fell out", () => {
+    const splitter = createSplitter({ now: clock(), maxOutputBytes: 20 });
+    const lines = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
+    const events = splitter.push(`${A}$ ${B}build\r\n${C("build")}${lines}FAILED${D(1)}`);
     const block = done(events)[0];
-    expect(block?.output.length).toBeLessThanOrEqual(10);
     expect(block?.truncated).toBe(true);
+    // The head is what the command started with, the tail is what it ended
+    // with — the half a failing build is read for.
+    expect(block?.output.startsWith("1\n2\n")).toBe(true);
+    expect(block?.output.endsWith("FAILED")).toBe(true);
+    expect(block?.output).toContain("lines elided");
+    // The two kept halves together stay inside the cap; the marker between
+    // them is the visible extra that says they are two halves at all.
+    expect(block?.output.replace(/\r\n… \d+ lines elided\r\n/, "").length).toBeLessThanOrEqual(20);
+  });
+
+  // Everything under the cap is untouched: no marker, no truncation flag.
+  it("leaves a block that fits well inside the cap exactly as it was", () => {
+    const splitter = createSplitter({ now: clock(), maxOutputBytes: 100 });
+    const events = splitter.push(`${A}$ ${B}echo\r\n${C("echo")}hi\r\n${D(0)}`);
+    expect(done(events)[0]).toMatchObject({ output: "hi\r\n", truncated: false });
+  });
+
+  // The tail belongs to the block that produced it. A shell that dies
+  // mid-command leaves an overflowing block that never closes, and the next
+  // command's block must not inherit its leftovers.
+  it("does not carry one block's elided tail into the next block", () => {
+    const splitter = createSplitter({ now: clock(), maxOutputBytes: 10 });
+    splitter.push(`${A}$ ${B}yes\r\n${C("yes")}${"y".repeat(50)}`);
+    const events = splitter.push(`${A}$ ${B}echo\r\n${C("echo")}hi${D(0)}`);
+    expect(done(events)[0]).toMatchObject({ output: "hi", truncated: false });
   });
 
   it("reports the alternate screen and stops building blocks inside it", () => {

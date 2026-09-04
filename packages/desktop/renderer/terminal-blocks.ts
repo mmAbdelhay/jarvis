@@ -75,19 +75,62 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
     return { payload, end: end + (end === st ? ST.length : BEL.length) };
   }
 
+  /**
+   * What is kept past the cap, for the block being built: the tail, and how
+   * many lines fell out between it and the head.
+   *
+   * Undefined until the head fills. The head is `current.output` itself,
+   * frozen at `headBytes` once it is full; everything after that goes here,
+   * with the front dropped as it overflows. The two are joined by
+   * `finishOutput` when the block closes.
+   */
+  let overflow: { tail: string; elidedLines: number } | undefined;
+  const headBytes = Math.ceil(maxOutputBytes / 2);
+  const tailBytes = maxOutputBytes - headBytes;
+
+  /**
+   * Head and tail, not head alone.
+   *
+   * A build log's failure is at its *end* — truncating forward kept the
+   * banner and threw away the error, and "Explain this failure" then sent
+   * the brain the last 4 KB of the beginning of a log it was asked to
+   * explain the end of. So the head is kept for context, the tail is kept
+   * for the answer, and what fell out between them is stated rather than
+   * silently dropped (the design's Bounds section: "the head and tail are
+   * kept with a `… N lines elided` marker between them").
+   */
   function appendOutput(text: string): void {
-    if (current === undefined || alt) return;
-    const room = maxOutputBytes - current.output.length;
-    if (room <= 0) {
-      if (text.length > 0) current.truncated = true;
-      return;
-    }
-    if (text.length > room) {
+    if (current === undefined || alt || text === "") return;
+    if (overflow === undefined) {
+      const room = headBytes - current.output.length;
+      if (text.length <= room) {
+        current.output += text;
+        return;
+      }
+      // The head is full: keep what fits, and open the tail with the rest.
       current.output += text.slice(0, room);
       current.truncated = true;
-      return;
+      overflow = { tail: "", elidedLines: 0 };
+      text = text.slice(room);
     }
-    current.output += text;
+    overflow.tail += text;
+    const excess = overflow.tail.length - tailBytes;
+    if (excess <= 0) return;
+    const dropped = overflow.tail.slice(0, excess);
+    overflow.tail = overflow.tail.slice(excess);
+    // Newlines in what fell out — a run of bytes with no newline in it at
+    // all is still a piece of a line, so nothing ever elides "0 lines".
+    const newlines = dropped.split("\n").length - 1;
+    overflow.elidedLines += Math.max(1, newlines);
+  }
+
+  /** Joins the kept head to the kept tail, with the marker between them.
+   *  Called once, as the block closes: until then `output` is the head and
+   *  the tail is still moving. */
+  function finishOutput(record: BlockRecord): void {
+    if (overflow === undefined) return;
+    record.output = `${record.output}\r\n… ${overflow.elidedLines} lines elided\r\n${overflow.tail}`;
+    overflow = undefined;
   }
 
   function handleMark(payload: string, events: BlockEvent[]): void {
@@ -107,6 +150,9 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
       // "C" or "C;<command>" — the wrapper sends the command, an older
       // wrapper (or another terminal's integration) sends neither.
       const command = body.startsWith("C;") ? body.slice(2) : "";
+      // A block that never closed (a shell that died mid-command) must not
+      // leave its tail to be joined onto the next one's head.
+      overflow = undefined;
       current = {
         id: nextId++,
         command,
@@ -125,6 +171,9 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
       const code = Number.parseInt(body.slice(2), 10);
       current.exitCode = Number.isNaN(code) ? undefined : code;
       current.endedAt = now();
+      // Head, marker, tail — the block is closing, so the tail has stopped
+      // moving and the two halves can finally be joined.
+      finishOutput(current);
       // A full-screen program can die (a signal, say) without ever writing
       // [?1049l. Left set, `alt` would silently swallow every later
       // command's output forever — so a block closing while it is held
