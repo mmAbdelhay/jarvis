@@ -254,3 +254,59 @@ describe("clearing the terminal explorer", () => {
     expect(view.isOpen()).toBe(false);
   });
 });
+
+// A toggle that changes nothing on screen must change nothing later
+// either. The sidebar is hidden for two quite different reasons — the
+// user closed it, and there is nothing to show — and a toggle aimed at
+// the second was silently arming the first: the next directory would
+// then be swallowed, and the sidebar would never open by itself again.
+describe("toggling the terminal explorer with nothing to show", () => {
+  const settleOnce = (): Promise<unknown> => new Promise((r) => setTimeout(r, 0));
+
+  function build() {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async () => [{ name: "src", directory: true }]);
+    return { view: createTerminalExplorer(host, { list, choose: vi.fn() }), list };
+  }
+
+  it("opens on its first directory even after a toggle before it had one", async () => {
+    const { view } = build();
+
+    view.toggle();
+    view.setRoot("tab-1", "/proj");
+    await settleOnce();
+
+    expect(view.isOpen()).toBe(true);
+    expect(view.element.textContent).toContain("src");
+  });
+
+  // The ⌘W case: the sidebar was cleared because the surviving pane has
+  // no directory, not because anyone dismissed it.
+  it("opens again after a clear, a toggle and a new directory", async () => {
+    const { view } = build();
+    view.setRoot("tab-1", "/proj");
+    await settleOnce();
+    view.clear();
+
+    view.toggle();
+    view.setRoot("tab-1:p1", "/other");
+    await settleOnce();
+
+    expect(view.isOpen()).toBe(true);
+  });
+
+  // The real dismissal still holds — this is the behaviour the fix must
+  // not trade away.
+  it("stays closed when the user dismissed it while it had something to show", async () => {
+    const { view } = build();
+    view.setRoot("tab-1", "/proj");
+    await settleOnce();
+
+    view.toggle();
+    view.setRoot("tab-1", "/other");
+    await settleOnce();
+
+    expect(view.isOpen()).toBe(false);
+  });
+});

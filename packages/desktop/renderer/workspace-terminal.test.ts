@@ -1048,4 +1048,23 @@ describe("dismissing the terminal tab's file sidebar", () => {
     expect(sidebar()?.textContent).toBe("");
     expect(sidebar()?.hidden).toBe(true);
   });
+
+  // The palette offers the toggle before any pane has reported a
+  // directory, so this order is one keypress away in a fresh tab: a
+  // toggle there must not arm a dismissal the first prompt then runs into.
+  it("still opens on the first directory after a toggle in a tab that had none", async () => {
+    const { renderWorkspaceTerminals } = await tabWithSidebar();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    // A prompt with no OSC 7: the palette opens, the sidebar has nothing.
+    dataListener?.("tab-1", `]133;A$ ]133;B`);
+    await settle();
+    expect(sidebar()?.hidden).toBe(true);
+
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle file sidebar");
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    expect(sidebar()?.hidden).toBe(false);
+  });
 });

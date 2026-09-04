@@ -63,9 +63,10 @@ export function createTerminalExplorer(
    *  pane that has since taken the focus, and never to none at all. */
   let rooted: { paneKey: string; path: string } | undefined;
   /** Whether the user has closed it. Separate from `hidden`, which is also
-   *  false when there is simply nothing to show: a sidebar hidden for want
+   *  true when there is simply nothing to show: a sidebar hidden for want
    *  of a directory comes back with the next one, and one the user closed
-   *  does not. */
+   *  does not. Only ever moved by a toggle that had something to toggle —
+   *  see `toggle`. */
   let dismissed = false;
   let disposed = false;
 
@@ -125,6 +126,13 @@ export function createTerminalExplorer(
     },
 
     toggle() {
+      // Nothing to show is nothing to toggle. Without this, a toggle that
+      // changed nothing on screen — the palette offers the action before a
+      // pane's first prompt, and again after a ⌘W that cleared the
+      // sidebar — would still record a dismissal, and the next directory
+      // would be swallowed: the sidebar would never open by itself again.
+      // A toggle with no visible effect must have no later effect either.
+      if (rooted === undefined) return;
       dismissed = !dismissed;
       applyVisibility();
     },
