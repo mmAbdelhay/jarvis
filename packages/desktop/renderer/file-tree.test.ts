@@ -56,7 +56,9 @@ describe("the file tree", () => {
   });
 
   it("renders a name containing markup as text", async () => {
-    const nasty = { "/proj": [{ name: "<img src=x onerror=alert(1)>", directory: false }] };
+    const nasty: Record<string, { name: string; directory: boolean }[]> = {
+      "/proj": [{ name: "<img src=x onerror=alert(1)>", directory: false }],
+    };
     const { tree: t } = tree({ list: async (p: string) => nasty[p] ?? [] });
     await t.setRoot("/proj");
     expect(t.element.querySelector("img")).toBeNull();
