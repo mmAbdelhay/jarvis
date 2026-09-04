@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import type { JarvisConfig } from "./config.js";
-import { parseConfig } from "./config.js";
+import { DEFAULT_PERFORMANCE, parseConfig } from "./config.js";
 
 export type SettingsWriteResult = { ok: true } | { ok: false; detail: string };
 
@@ -48,6 +48,19 @@ export function validateDraft(
  * redundant at best and stale at worst, the moment an agent's configDir
  * changes without brain.accountId also being re-saved.
  */
+/** Whether this section says anything the defaults do not. Guarded against
+ *  an absent section because validateDraft hands toRawConfig
+ *  renderer-supplied data cast to JarvisConfig, and an older renderer may
+ *  never have filled it in. */
+function isDefaultPerformance(performance: JarvisConfig["performance"]): boolean {
+  if (performance === undefined) return true;
+  return (
+    performance.suspendTabsAfterMinutes === DEFAULT_PERFORMANCE.suspendTabsAfterMinutes &&
+    performance.stopSidecarsAfterMinutes === DEFAULT_PERFORMANCE.stopSidecarsAfterMinutes &&
+    performance.terminalScrollback === DEFAULT_PERFORMANCE.terminalScrollback
+  );
+}
+
 export function toRawConfig(config: JarvisConfig): unknown {
   return {
     agents: config.registry.agents,
@@ -79,6 +92,13 @@ export function toRawConfig(config: JarvisConfig): unknown {
     ...(config.headlamp?.binary === undefined
       ? {}
       : { headlamp: { binary: config.headlamp.binary } }),
+    // Written only when it says something the defaults do not, by the same
+    // rule as `databases:` above — but present here for the reason the
+    // `chat:` comment gives: this function is the sole allowlist of keys
+    // that reach the file, so a section left out of it is deleted on the
+    // next save. A `performance:` block silently wiped by opening Settings
+    // is exactly that bug.
+    ...(isDefaultPerformance(config.performance) ? {} : { performance: config.performance }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

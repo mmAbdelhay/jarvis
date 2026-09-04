@@ -132,6 +132,56 @@ describe("parseConfig", () => {
     expect(() => parseConfig({ ...valid, sessions: [] })).toThrow(/sessions/);
   });
 
+  // The three numbers of the memory pass. Every one has a default, and 0
+  // restores exactly what Jarvis did before the section existed.
+  it("defaults the performance section when it is absent", () => {
+    expect(parseConfig(valid).performance).toEqual({
+      suspendTabsAfterMinutes: 15,
+      stopSidecarsAfterMinutes: 10,
+      terminalScrollback: 5000,
+    });
+  });
+
+  it("reads the performance section, and takes 0 as off", () => {
+    expect(
+      parseConfig({
+        ...valid,
+        performance: {
+          suspendTabsAfterMinutes: 0,
+          stopSidecarsAfterMinutes: 30,
+          terminalScrollback: 20000,
+        },
+      }).performance,
+    ).toEqual({
+      suspendTabsAfterMinutes: 0,
+      stopSidecarsAfterMinutes: 30,
+      terminalScrollback: 20000,
+    });
+  });
+
+  it("keeps the defaults for the performance keys a config does not name", () => {
+    expect(
+      parseConfig({ ...valid, performance: { terminalScrollback: 100 } }).performance,
+    ).toEqual({
+      suspendTabsAfterMinutes: 15,
+      stopSidecarsAfterMinutes: 10,
+      terminalScrollback: 100,
+    });
+  });
+
+  it("throws when a performance value is negative or not a number", () => {
+    expect(() =>
+      parseConfig({ ...valid, performance: { suspendTabsAfterMinutes: -1 } }),
+    ).toThrow(/performance\.suspendTabsAfterMinutes/);
+    expect(() => parseConfig({ ...valid, performance: { terminalScrollback: "lots" } })).toThrow(
+      /performance\.terminalScrollback/,
+    );
+  });
+
+  it("throws when performance is not an object", () => {
+    expect(() => parseConfig({ ...valid, performance: [] })).toThrow(/performance/);
+  });
+
   it("defaults the whisper paths when the section is absent", () => {
     const config = parseConfig(valid);
     expect(config.whisper.binaryPath).toContain("whisper-cli");

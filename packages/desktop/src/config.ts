@@ -67,6 +67,31 @@ export type TerminalConfig = {
   notifyAfterSeconds: number;
 };
 
+/**
+ * The `performance:` section — the three numbers that trade a little
+ * freshness for a lot of memory.
+ *
+ * Every one has a default that is the recommended setting, and 0 means
+ * "never do this", which restores exactly the behaviour Jarvis had before
+ * the section existed. That escape hatch is the point: these are the only
+ * settings in the file that can make the app *lose* something (a page
+ * reload, a sidecar restart) to save resident memory, so turning each off
+ * has to be one number.
+ */
+export type PerformanceConfig = {
+  /** A Workspace tab hidden this long loses the Chromium renderer behind it
+   *  — 80-150 MB each. The tab stays; clicking it rebuilds the page. */
+  suspendTabsAfterMinutes: number;
+  /** A code-server, DbGate or Headlamp instance no live tab needs any more
+   *  is stopped after this long, and starts again on the next open. */
+  stopSidecarsAfterMinutes: number;
+  /** Lines of scrollback each terminal keeps. xterm stores a line as
+   *  `Uint32Array(cols * 3)` — 12 bytes per cell — so at 200 columns every
+   *  1000 lines is ~2.4 MB *per pane*, and a split tab has one pane per
+   *  leaf. */
+  terminalScrollback: number;
+};
+
 export type JarvisConfig = {
   registry: RegistryConfig;
   projects: Record<string, string>;
@@ -101,6 +126,7 @@ export type JarvisConfig = {
    *  declared path like `voice.piperBinary`, with a per-OS default. */
   headlamp: { binary: string };
   terminal: TerminalConfig;
+  performance: PerformanceConfig;
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -203,6 +229,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const workflows = parseWorkflows(root["workflows"], projects);
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
+  const performance = parsePerformance(root["performance"]);
   const whisper = parseWhisper(root["whisper"]);
   const sessions = parseSessions(root["sessions"]);
   const voice = parseVoice(root["voice"]);
@@ -236,6 +263,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     workflows,
     headlamp,
     terminal,
+    performance,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -768,6 +796,51 @@ const DEFAULT_COMMAND_LOG_PATH = join(homedir(), ".config/jarvis/terminal-comman
  * loading and gets the feature — this is preference, not configuration the
  * app cannot run without.
  */
+/**
+ * The three numbers of the `performance:` section, with the measurements
+ * behind each. Absent section, or an absent key, means the default.
+ */
+export const DEFAULT_PERFORMANCE: PerformanceConfig = {
+  // Long enough that switching between two tabs you are working across never
+  // pays a reload; short enough that a morning's tabs are not still resident
+  // at lunch.
+  suspendTabsAfterMinutes: 15,
+  // A code-server restart is ~1.2s warm. Ten minutes of nothing needing it is
+  // not an accident, and 1.2s to get 200 MB back is the right trade.
+  stopSidecarsAfterMinutes: 10,
+  // Was 20000, which at 200 columns is ~48 MB of Uint32Array per pane once
+  // filled — and a split tab has one pane per leaf, beside the Session
+  // route's own. 5000 is ~12 MB and still further back than anyone scrolls.
+  terminalScrollback: 5000,
+};
+
+function parsePerformance(rawPerformance: unknown): PerformanceConfig {
+  if (rawPerformance === undefined || rawPerformance === null) {
+    return { ...DEFAULT_PERFORMANCE };
+  }
+  if (typeof rawPerformance !== "object" || Array.isArray(rawPerformance)) {
+    throw new Error("Config `performance` must be an object");
+  }
+  const performance = rawPerformance as Record<string, unknown>;
+
+  const read = (key: keyof PerformanceConfig): number => {
+    const value = performance[key];
+    if (value === undefined) return DEFAULT_PERFORMANCE[key];
+    // 0 is meaningful here — it is how each of these is turned off — so the
+    // floor is 0 rather than the 1 `sessions.importWindowDays` insists on.
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Config \`performance.${key}\` must be a number of 0 or more`);
+    }
+    return value;
+  };
+
+  return {
+    suspendTabsAfterMinutes: read("suspendTabsAfterMinutes"),
+    stopSidecarsAfterMinutes: read("stopSidecarsAfterMinutes"),
+    terminalScrollback: read("terminalScrollback"),
+  };
+}
+
 function parseTerminal(rawTerminal: unknown): TerminalConfig {
   const defaults: TerminalConfig = {
     completion: {

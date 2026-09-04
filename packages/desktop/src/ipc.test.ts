@@ -111,6 +111,63 @@ describe("buildWiring", () => {
     expect(send).toHaveBeenCalledWith("metrics:update", expect.objectContaining({ cpuPercent: 10 }));
   });
 
+  // A hidden Jarvis has nobody to show a metric to, and refreshChanges
+  // spawns two git processes per repo every tick.
+  it("skips the metrics and changes ticks while the window is hidden", async () => {
+    let awake = true;
+    const readMetrics = vi.fn(async () => ({
+      cpuPercent: 10, memoryUsedBytes: 1, memoryTotalBytes: 2,
+      diskUsedBytes: 1, diskTotalBytes: 2, networkDownMbps: 0,
+      networkUpMbps: 0, uptimeSeconds: 1,
+    }));
+    const refreshChanges = vi.fn(async () => {});
+
+    const wiring = buildWiring({
+      ...baseDeps([]),
+      readMetrics,
+      refreshChanges,
+      intervalMs: 10,
+      changesIntervalMs: 10,
+      isAwake: () => awake,
+    });
+
+    wiring.start();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(readMetrics).toHaveBeenCalledTimes(1);
+    expect(refreshChanges).toHaveBeenCalledTimes(1);
+
+    awake = false;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(readMetrics).toHaveBeenCalledTimes(1);
+    expect(refreshChanges).toHaveBeenCalledTimes(1);
+
+    awake = true;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(readMetrics).toHaveBeenCalledTimes(2);
+    expect(refreshChanges).toHaveBeenCalledTimes(2);
+
+    wiring.stop();
+  });
+
+  // The status pages are free, the poll is five-minutely, and its whole
+  // value is being current the moment the dashboard is looked at again.
+  it("keeps polling provider health while the window is hidden", async () => {
+    const refreshHealth = vi.fn(async () => {});
+
+    const wiring = buildWiring({
+      ...baseDeps([]),
+      refreshHealth,
+      healthIntervalMs: 10,
+      isAwake: () => false,
+    });
+
+    wiring.start();
+    await vi.advanceTimersByTimeAsync(30);
+    wiring.stop();
+
+    expect(refreshHealth.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("forwards session changes", () => {
     const send = vi.fn();
     let emit: ((sessions: unknown[]) => void) | undefined;
@@ -1158,6 +1215,7 @@ const sampleConfig: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
+  performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/tmp/sessions.db",
 };

@@ -629,9 +629,20 @@ export type WiringDeps = {
   /** Free public status pages only. Never a capacity read. */
   refreshHealth(): Promise<void>;
   healthIntervalMs: number;
+  /** Whether the window is on screen. A hidden Jarvis has nobody to show a
+   *  metric or a change count to, and refreshChanges spawns two git
+   *  processes per repo every tick — the most expensive recurring thing the
+   *  main process does.
+   *
+   *  Optional, and true by default, so a caller that does not care keeps the
+   *  behaviour it had. The health poll is deliberately *not* gated by it: it
+   *  is a five-minute read of free status pages, it costs nothing, and its
+   *  whole value is being current the moment you look. */
+  isAwake?(): boolean;
 };
 
 export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
+  const isAwake = deps.isAwake ?? (() => true);
   let timer: ReturnType<typeof setInterval> | undefined;
   let changesTimer: ReturnType<typeof setInterval> | undefined;
   let healthTimer: ReturnType<typeof setInterval> | undefined;
@@ -658,6 +669,7 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
       }, deps.healthIntervalMs);
 
       timer = setInterval(() => {
+        if (!isAwake()) return;
         deps.readMetrics()
           .then((metrics) => deps.send("metrics:update", metrics))
           .catch(() => {
@@ -666,6 +678,7 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
       }, deps.intervalMs);
 
       changesTimer = setInterval(() => {
+        if (!isAwake()) return;
         void deps.refreshChanges();
       }, deps.changesIntervalMs);
     },
