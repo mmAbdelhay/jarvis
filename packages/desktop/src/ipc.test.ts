@@ -699,6 +699,8 @@ describe("editor handlers", () => {
   function codeServer(overrides: Partial<CodeServerManager> = {}): CodeServerManager {
     return {
       open: () => Promise.resolve({ ok: true, url: "http://127.0.0.1:9001/?folder=%2Fp" }),
+      stop: () => {},
+      runningKeys: () => [],
       stopAll: () => {},
       ...overrides,
     };
@@ -1272,6 +1274,8 @@ describe("database handlers", () => {
     return {
       open: () =>
         Promise.resolve({ ok: true, url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" }),
+      stop: () => {},
+      runningKeys: () => [],
       stopAll: () => {},
       ...overrides,
     };
@@ -1425,7 +1429,7 @@ users:
       opened,
       typed,
       handlers: createClusterHandlers({
-        headlamp: { open, stopAll: vi.fn() },
+        headlamp: { open, stop: vi.fn(), runningKeys: () => [], stopAll: vi.fn() },
         projects,
         clusters,
         readKubeconfig: async () => KUBECONFIG,

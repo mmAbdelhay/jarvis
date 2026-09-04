@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  codeServerKey,
   createCodeServerManager,
   createRealCodeServerSpawner,
   type CodeServerProcess,
@@ -267,6 +268,43 @@ describe("createCodeServerManager rooted at a sub-folder", () => {
     instance.stopAll();
 
     expect(processes[0]?.killed).toBe(true);
+  });
+});
+
+describe("createCodeServerManager stopping one instance", () => {
+  it("kills that instance, forgets it, and leaves the others alone", async () => {
+    const { instance, processes } = manager();
+
+    await instance.open("/p", "/p");
+    await instance.open("/p", "/p/web");
+    expect(instance.runningKeys()).toHaveLength(2);
+    expect(instance.runningKeys()).toContain(codeServerKey("/p", "/p"));
+
+    instance.stop(codeServerKey("/p", "/p"));
+
+    expect(processes[0]?.killed).toBe(true);
+    expect(processes[1]?.killed).toBe(false);
+    expect(instance.runningKeys()).toEqual([codeServerKey("/p", "/p/web")]);
+  });
+
+  it("ignores a key it is not running", () => {
+    const { instance, processes } = manager();
+    instance.stop(codeServerKey("/p", "/p"));
+    expect(processes).toHaveLength(0);
+  });
+
+  // Stopping is only safe because open() starts it again — that is what makes
+  // an idle editor's 200 MB worth giving back.
+  it("starts a fresh process for a root it stopped", async () => {
+    const { instance, processes } = manager();
+
+    await instance.open("/p", "/p");
+    instance.stop(codeServerKey("/p", "/p"));
+    const result = await instance.open("/p", "/p");
+
+    expect(result.ok).toBe(true);
+    expect(processes).toHaveLength(2);
+    expect(instance.runningKeys()).toEqual([codeServerKey("/p", "/p")]);
   });
 });
 

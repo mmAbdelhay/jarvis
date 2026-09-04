@@ -254,6 +254,41 @@ describe("createHeadlampManager", () => {
   });
 });
 
+describe("createHeadlampManager stopping one instance", () => {
+  it("kills that project's server, forgets it, and leaves the others alone", async () => {
+    const { manager, processes } = harness();
+
+    await manager.open("opf", "ctx-a");
+    await manager.open("other", "ctx-b");
+    expect(manager.runningKeys().sort()).toEqual(["opf", "other"]);
+
+    manager.stop("opf");
+
+    expect(processes[0]?.killed).toBe(true);
+    expect(processes[1]?.killed).toBe(false);
+    expect(manager.runningKeys()).toEqual(["other"]);
+  });
+
+  it("ignores a project it is not running", () => {
+    const { manager, processes } = harness();
+    manager.stop("opf");
+    expect(processes).toHaveLength(0);
+  });
+
+  // A restarted server binds a new free port, so the URL changes — which is
+  // the whole reason BrowserHost asks main where a resumed tab should go.
+  it("starts a fresh server, on a new port, for a project it stopped", async () => {
+    const { manager, processes } = harness();
+
+    await manager.open("opf", "ctx-a");
+    manager.stop("opf");
+    const result = await manager.open("opf", "ctx-a");
+
+    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:5001/#/c/ctx-a" });
+    expect(processes).toHaveLength(2);
+  });
+});
+
 describe("parseKubeContexts", () => {
   it("reads every context name in order", () => {
     expect(
