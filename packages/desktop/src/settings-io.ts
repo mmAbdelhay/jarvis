@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import type { JarvisConfig } from "./config.js";
-import { DEFAULT_PERFORMANCE, parseConfig } from "./config.js";
+import { DEFAULT_PERFORMANCE, DEFAULT_SESSIONS, DEFAULT_TERMINAL, parseConfig } from "./config.js";
 
 export type SettingsWriteResult = { ok: true } | { ok: false; detail: string };
 
@@ -48,17 +48,33 @@ export function validateDraft(
  * redundant at best and stale at worst, the moment an agent's configDir
  * changes without brain.accountId also being re-saved.
  */
-/** Whether this section says anything the defaults do not. Guarded against
- *  an absent section because validateDraft hands toRawConfig
- *  renderer-supplied data cast to JarvisConfig, and an older renderer may
- *  never have filled it in. */
-function isDefaultPerformance(performance: JarvisConfig["performance"]): boolean {
-  if (performance === undefined) return true;
-  return (
-    performance.suspendTabsAfterMinutes === DEFAULT_PERFORMANCE.suspendTabsAfterMinutes &&
-    performance.stopSidecarsAfterMinutes === DEFAULT_PERFORMANCE.stopSidecarsAfterMinutes &&
-    performance.terminalScrollback === DEFAULT_PERFORMANCE.terminalScrollback
-  );
+/**
+ * Whether a whole-config section says anything its defaults do not.
+ *
+ * Structural rather than field-by-field: a section that grows a field would
+ * otherwise keep comparing equal on the fields this function happened to
+ * know about, and stop being written the moment the user set only the new
+ * one. Both sides come from parseConfig or from a draft parseConfig
+ * validated, so both are plain data with no ordering to worry about — but
+ * the keys are sorted anyway, because "same JSON" must not depend on which
+ * order two objects were built in.
+ *
+ * `undefined` counts as default: validateDraft hands toRawConfig
+ * renderer-supplied data cast to JarvisConfig, and an older renderer may
+ * never have filled a section in.
+ */
+function isDefault<T>(section: T | undefined, defaults: T): boolean {
+  if (section === undefined) return true;
+  return stableJson(section) === stableJson(defaults);
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (inner === null || typeof inner !== "object" || Array.isArray(inner)) return inner;
+    return Object.fromEntries(
+      Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
+    );
+  });
 }
 
 export function toRawConfig(config: JarvisConfig): unknown {
@@ -98,7 +114,18 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // that reach the file, so a section left out of it is deleted on the
     // next save. A `performance:` block silently wiped by opening Settings
     // is exactly that bug.
-    ...(isDefaultPerformance(config.performance) ? {} : { performance: config.performance }),
+    ...(isDefault(config.performance, DEFAULT_PERFORMANCE)
+      ? {}
+      : { performance: config.performance }),
+    // The three sections below were missing from this list until 2026-09-06,
+    // which meant every save through the Settings route silently deleted
+    // them from the user's jarvis.yaml — recoverable only from the
+    // timestamped backup, and only if you noticed. settings-io.test.ts now
+    // derives the expected key list from JarvisConfig itself, so a section
+    // added later cannot be forgotten the same way.
+    ...(Object.keys(config.workflows ?? {}).length === 0 ? {} : { workflows: config.workflows }),
+    ...(isDefault(config.terminal, DEFAULT_TERMINAL) ? {} : { terminal: config.terminal }),
+    ...(isDefault(config.sessions, DEFAULT_SESSIONS) ? {} : { sessions: config.sessions }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

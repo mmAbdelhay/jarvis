@@ -841,16 +841,27 @@ function parsePerformance(rawPerformance: unknown): PerformanceConfig {
   };
 }
 
+/** The `terminal:` section as it stands with nothing in jarvis.yaml.
+ *  Exported so settings-io can tell "the user never wrote this section"
+ *  from "the user wrote it and it happens to match" — the difference
+ *  between growing a key in a hand-edited file and losing one. */
+export const DEFAULT_TERMINAL: TerminalConfig = {
+  completion: {
+    enabled: true,
+    historyPath: DEFAULT_HISTORY_PATH,
+    commandLogPath: DEFAULT_COMMAND_LOG_PATH,
+  },
+  blocks: { enabled: true, inputEditor: true },
+  notifyAfterSeconds: 30,
+};
+
+/** The same, for `sessions:`. */
+export const DEFAULT_SESSIONS: JarvisConfig["sessions"] = {
+  importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS,
+};
+
 function parseTerminal(rawTerminal: unknown): TerminalConfig {
-  const defaults: TerminalConfig = {
-    completion: {
-      enabled: true,
-      historyPath: DEFAULT_HISTORY_PATH,
-      commandLogPath: DEFAULT_COMMAND_LOG_PATH,
-    },
-    blocks: { enabled: true, inputEditor: true },
-    notifyAfterSeconds: 30,
-  };
+  const defaults: TerminalConfig = DEFAULT_TERMINAL;
   if (rawTerminal === undefined) return defaults;
   if (typeof rawTerminal !== "object" || rawTerminal === null || Array.isArray(rawTerminal)) {
     throw new Error("Config `terminal` must be an object");

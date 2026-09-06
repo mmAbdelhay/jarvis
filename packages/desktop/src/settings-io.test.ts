@@ -43,6 +43,101 @@ const draft: JarvisConfig = {
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
 
+
+/**
+ * Every section that is *not* the default, so that every "written only when
+ * there is something to write" rule in toRawConfig actually fires. A draft
+ * sitting on the defaults would let a missing section pass unnoticed —
+ * which is exactly how `terminal:`, `workflows:` and `sessions:` came to be
+ * dropped on save without anyone seeing it.
+ */
+const fullDraft: JarvisConfig = {
+  ...draft,
+  databases: { acme: [{ id: "db1", engine: "mysql" }] },
+  editors: { acme: [{ name: "web", path: "packages/web" }] },
+  clusters: { acme: [{ name: "dev", context: "ctx-a" }] },
+  docker: { acme: [{ name: "api", container: "api-1" }] },
+  chat: { acme: [{ name: "Team", driver: "slack" as const }] },
+  workflows: { acme: "/Users/x/projects/acme/.jarvis/workflows" },
+  terminal: {
+    completion: { enabled: false, historyPath: "/h", commandLogPath: "/l" },
+    blocks: { enabled: false, inputEditor: false },
+    notifyAfterSeconds: 90,
+  },
+  performance: {
+    suspendTabsAfterMinutes: 0,
+    stopSidecarsAfterMinutes: 45,
+    terminalScrollback: 20000,
+  },
+  sessions: { importWindowDays: 90 },
+};
+
+/**
+ * What each JarvisConfig key must become in jarvis.yaml, or null for one the
+ * file deliberately has no key for.
+ *
+ * Typed as `Record<keyof JarvisConfig, ...>` on purpose: TypeScript refuses
+ * to compile this file until a newly added section appears here, and the
+ * test below then refuses to pass until toRawConfig actually writes it.
+ * toRawConfig is the sole allowlist of keys that reach the file, so a
+ * section missing from it is *deleted from the user's config on the next
+ * save* — silently, and with only a timestamped backup to recover from.
+ * That had already happened to three sections when this table was written.
+ */
+const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
+  // The file has never had a `registry:` key; it holds these two instead.
+  registry: ["agents", "routing"],
+  projects: ["projects"],
+  databases: ["databases"],
+  editors: ["editors"],
+  clusters: ["clusters"],
+  docker: ["docker"],
+  chat: ["chat"],
+  workflows: ["workflows"],
+  headlamp: ["headlamp"],
+  terminal: ["terminal"],
+  performance: ["performance"],
+  brain: ["brain"],
+  voice: ["voice"],
+  whisper: ["whisper"],
+  sessions: ["sessions"],
+  // Computed by parseConfig from the config directory, never a source of
+  // truth. See toRawConfig's own note.
+  sessionsDbPath: null,
+};
+
+describe("toRawConfig covers every section", () => {
+  const raw = toRawConfig(fullDraft) as Record<string, unknown>;
+
+  for (const [field, fileKeys] of Object.entries(FILE_KEYS)) {
+    if (fileKeys === null) {
+      it(`deliberately never writes ${field}`, () => {
+        expect(raw).not.toHaveProperty(field);
+      });
+      continue;
+    }
+    it(`writes ${field} as ${fileKeys.join(" + ")}`, () => {
+      for (const key of fileKeys) expect(raw[key]).toBeDefined();
+    });
+  }
+
+  // The round trip is the claim that actually matters to a user: open
+  // Settings, save, and the file still says what it said.
+  it("survives a full round trip through parseConfig", () => {
+    const reparsed = parseConfig(raw);
+
+    expect(reparsed.terminal).toEqual(fullDraft.terminal);
+    expect(reparsed.workflows).toEqual(fullDraft.workflows);
+    expect(reparsed.sessions).toEqual(fullDraft.sessions);
+    expect(reparsed.performance).toEqual(fullDraft.performance);
+    expect(reparsed.databases).toEqual(fullDraft.databases);
+    expect(reparsed.editors).toEqual(fullDraft.editors);
+    expect(reparsed.clusters).toEqual(fullDraft.clusters);
+    expect(reparsed.docker).toEqual(fullDraft.docker);
+    expect(reparsed.chat).toEqual(fullDraft.chat);
+  });
+});
+
 describe("validateDraft", () => {
   it("accepts a draft that already matches JarvisConfig's own shape", () => {
     const result = validateDraft(draft);
@@ -164,6 +259,49 @@ describe("writeSettingsFile", () => {
     const written = parse(await readFile(path, "utf8"));
     expect(written.agents["claude-mm"].command).toBe("claude-mm");
     expect(written.routing[0].agent).toBe("claude-mm");
+  });
+
+  // The bug this exists to prevent, spelled out end to end: open Settings,
+  // change one thing, save — and the sections you never touched are still
+  // in the file. Three of them were not, for months.
+  it("keeps every section a save did not touch", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "placeholder: true");
+
+    const result = await writeSettingsFile(path, fullDraft);
+    expect(result).toEqual({ ok: true });
+
+    const written = parse(await readFile(path, "utf8"));
+    expect(written.terminal.notifyAfterSeconds).toBe(90);
+    expect(written.terminal.blocks).toEqual({ enabled: false, inputEditor: false });
+    expect(written.workflows).toEqual(fullDraft.workflows);
+    expect(written.sessions).toEqual({ importWindowDays: 90 });
+    expect(written.performance.terminalScrollback).toBe(20000);
+
+    // And the file loads back as the same config, which is the only claim
+    // that really matters.
+    const reloaded = parseConfig(written);
+    expect(reloaded.terminal).toEqual(fullDraft.terminal);
+    expect(reloaded.workflows).toEqual(fullDraft.workflows);
+    expect(reloaded.sessions).toEqual(fullDraft.sessions);
+  });
+
+  // The other half of the rule: a section the user never wrote does not
+  // appear just because they opened Settings once. jarvis.yaml is still
+  // hand-edited, and an empty `sessions: {importWindowDays: 30}` growing out
+  // of nowhere is noise.
+  it("does not grow a section that is sitting on its defaults", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "placeholder: true");
+
+    await writeSettingsFile(path, draft);
+
+    const written = parse(await readFile(path, "utf8"));
+    expect(written).not.toHaveProperty("sessions");
+    expect(written).not.toHaveProperty("performance");
+    expect(written).not.toHaveProperty("workflows");
   });
 
   it("backs up the previous file before overwriting it", async () => {
