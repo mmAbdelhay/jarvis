@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   codeServerKey,
   createCodeServerManager,
@@ -330,6 +334,47 @@ describe("createRealCodeServerSpawner", () => {
       expect(code).toBeNull();
     } finally {
       process.env["PATH"] = path;
+    }
+  });
+});
+
+describe("createRealCodeServerSpawner PATH", () => {
+  // The bug this covers: launched from Finder, a GUI app's PATH is
+  // /usr/bin:/bin:/usr/sbin:/sbin — Homebrew's bin is not on it, so
+  // `code-server` was never found and the Editor button failed silently in
+  // the installed build while working perfectly from `pnpm start`. The
+  // spawner therefore has to take the environment it is given (main.ts
+  // hands it a login shell's) rather than inherit this process's.
+  it("resolves the binary on the PATH it is handed, not the ambient one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-server-path-"));
+    const marker = join(dir, "ran");
+    await writeFile(
+      join(dir, "code-server"),
+      // Redirection rather than `touch`: the fake runs with only `dir` on
+      // its PATH, so it cannot call out to /usr/bin for anything.
+      `#!/bin/sh\n: > ${marker}\n`,
+      { mode: 0o755 },
+    );
+
+    // Emptied, so a machine that really has code-server installed cannot
+    // pass this test by accident.
+    const ambient = process.env["PATH"];
+    process.env["PATH"] = "";
+    try {
+      const spawned = createRealCodeServerSpawner({ PATH: dir })({
+        port: 4455,
+        userDataDir: join(dir, "user-data"),
+        extensionsDir: join(dir, "extensions"),
+        folderPath: dir,
+      });
+
+      const code = await new Promise<number | null>((resolve) => {
+        spawned.onExit(resolve);
+      });
+      expect(code).toBe(0);
+      expect(existsSync(marker)).toBe(true);
+    } finally {
+      process.env["PATH"] = ambient;
     }
   });
 });

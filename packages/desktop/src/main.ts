@@ -491,12 +491,23 @@ app.whenReady().then(async () => {
         resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
     });
 
+    // Asked once, at startup: every sidecar below is a binary resolved on
+    // PATH — `code-server`, `dbgate-serve`, `docker`, and the exec
+    // credential plugin a kubeconfig names (aws, gcloud, kubelogin). A GUI
+    // app's PATH is `/usr/bin:/bin:/usr/sbin:/sbin`, so none of them are
+    // findable in an installed build; from a terminal they all are, which
+    // is why this only ever broke for the packaged app. Undefined when the
+    // shell could not be asked, in which case the inherited environment
+    // stands — right for a Jarvis launched from a terminal.
+    const shellPath = await loginShellPath();
+    const env = shellPath === undefined ? process.env : { ...process.env, PATH: shellPath };
+
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
     // from anywhere the user's own VS Code (if any) keeps its own settings.
     const codeServerRoot = join(homedir(), ".config/jarvis/code-server");
     const codeServer = createCodeServerManager({
-      spawn: createRealCodeServerSpawner(),
+      spawn: createRealCodeServerSpawner(env),
       findFreePort,
       waitUntilReady,
       userDataDir: join(codeServerRoot, "user-data"),
@@ -515,7 +526,7 @@ app.whenReady().then(async () => {
     // connections declared in jarvis.yaml are seeded into it at spawn.
     const dbgateRoot = join(homedir(), ".config/jarvis/dbgate");
     const dbgate = createDbGateManager({
-      spawn: createRealDbGateSpawner(),
+      spawn: createRealDbGateSpawner(env),
       findFreePort,
       waitUntilReady,
       ensureDir: async (path) => {
@@ -523,7 +534,7 @@ app.whenReady().then(async () => {
       },
       workspaceRoot: dbgateRoot,
       connectionsFor: (project) => config.databases[project] ?? [],
-      env: process.env,
+      env,
       randomPassword,
     });
     const database = createDatabaseHandlers({
@@ -532,13 +543,6 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
     });
 
-    // Asked once, at startup: the exec credential plugin a kubeconfig names
-    // (aws, gcloud, kubelogin) is resolved on PATH, and a GUI app's PATH is
-    // not the user's. Undefined when the shell could not be asked, in which
-    // case the inherited environment stands — right for a Jarvis launched
-    // from a terminal.
-    const shellPath = await loginShellPath();
-    const env = shellPath === undefined ? process.env : { ...process.env, PATH: shellPath };
     const headlamp = createHeadlampManager({
       spawn: createRealHeadlampSpawner(env),
       findFreePort,
