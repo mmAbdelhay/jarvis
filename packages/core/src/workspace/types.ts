@@ -58,6 +58,13 @@ export type WorkspaceTab = {
    *  thing that puts the Picture-in-Picture button on screen, so that the
    *  button is never a dead control on a page with nothing to float. */
   hasPlayingVideo: boolean;
+  /** Whether the page has taken full screen for itself (a video's full
+   *  screen button, or any requestFullscreen). The renderer hides its own
+   *  chrome and gives the view the whole window while this is true; without
+   *  it the page went "full screen" inside the tab slot, which looked like
+   *  Jarvis going full screen rather than the video. Only ever true for the
+   *  active tab: Chromium drops full screen when a page is hidden. */
+  pageFullscreen: boolean;
   /** Whether this tab's hosted view has been reclaimed while it sat hidden
    *  — see BrowserHost.sweepIdle. The tab, its URL and its place in the
    *  strip are all still here; only the Chromium renderer behind it is

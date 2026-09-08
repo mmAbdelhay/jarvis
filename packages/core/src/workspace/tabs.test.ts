@@ -29,6 +29,7 @@ describe("TabStore", () => {
           canGoForward: false,
           error: undefined,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
         },
       ],

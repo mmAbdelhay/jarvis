@@ -1861,6 +1861,22 @@
      hosted view is a native overlay, not a DOM child (see views.ts). */
   .workspace-page { flex-grow: 1; min-height: 0; }
 
+  /* Full screen belongs to the page, not to Jarvis.
+
+     A hosted view is a native overlay positioned over .workspace-page, so
+     when a video asks Chromium for full screen the page can only ever fill
+     that slot — the topbar and the workspace head stay put above it, and
+     the result reads as the app going full screen around a video that did
+     not. These rules take the furniture away so the slot measures the whole
+     window; workspace.ts adds the class from the active tab's
+     pageFullscreen flag and remeasures, and the view follows.
+
+     Scoped to body rather than set on .topbar directly so the base rules
+     stay the single place each element's own layout is described, and so
+     leaving full screen is a class removal with nothing to restore. */
+  body.page-fullscreen .topbar,
+  body.page-fullscreen .workspace-head { display: none; }
+
   /* The Editor button's root picker. Anchored to the button rather than
      placed in the head's flex row, so opening it moves nothing. */
   .workspace-menu-anchor { position: relative; display: flex; }

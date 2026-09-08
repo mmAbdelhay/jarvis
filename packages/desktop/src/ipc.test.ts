@@ -3153,6 +3153,7 @@ describe("terminal handlers", () => {
         canGoForward: false,
         error: undefined,
         hasPlayingVideo: false,
+        pageFullscreen: false,
         suspended: false,
         ...overrides,
       };
