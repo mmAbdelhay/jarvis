@@ -49,6 +49,10 @@ async function loadApp(
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
+    <button id="running-pill" hidden>
+      <span id="running-orbs"></span>
+      <span id="running-count"></span>
+    </button>
     <button id="mic-button"></button>
     <span id="cpu-value"></span>
     <div id="cpu-bar"></div>
@@ -930,5 +934,87 @@ describe("the agent's presence", () => {
     onTurn?.({ role: "user", text: "hello", language: "en", at: Date.now() });
 
     expect(presence()).toContain("presence--thinking");
+  });
+});
+
+describe("the running-sessions indicator", () => {
+  const pill = (): HTMLElement => {
+    const element = document.getElementById("running-pill");
+    if (element === null) throw new Error("no #running-pill");
+    return element;
+  };
+
+  // Nothing running is the state the dashboard is in most of the time, and
+  // a pill reading "0 running" would be permanent furniture reporting
+  // nothing. It earns its place by only being there when there is something
+  // to say.
+  it("is not there when nothing is running", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+
+    expect(pill().hidden).toBe(true);
+  });
+
+  it("counts what is actually live", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([
+      makeSession({ id: "s1", state: "running" }),
+      makeSession({ id: "s2", state: "waiting" }),
+      makeSession({ id: "s3", state: "starting" }),
+      makeSession({ id: "s4", state: "done" }),
+      makeSession({ id: "s5", state: "dead" }),
+    ]);
+
+    expect(pill().hidden).toBe(false);
+    expect(document.getElementById("running-count")?.textContent).toBe("3 running");
+  });
+
+  it("says it in the singular for one", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ state: "running" })]);
+
+    expect(document.getElementById("running-count")?.textContent).toBe("1 running");
+  });
+
+  // One orb per session, so two sessions read as two at a glance rather
+  // than as a number to stop and parse. Past three the orbs stop being
+  // countable and a remainder is the honest way to say so.
+  it("draws an orb per session, up to three", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([
+      makeSession({ id: "s1" }),
+      makeSession({ id: "s2" }),
+    ]);
+    expect(document.getElementById("running-orbs")?.childElementCount).toBe(2);
+
+    onSessions?.([
+      makeSession({ id: "s1" }),
+      makeSession({ id: "s2" }),
+      makeSession({ id: "s3" }),
+      makeSession({ id: "s4" }),
+      makeSession({ id: "s5" }),
+    ]);
+    expect(document.getElementById("running-orbs")?.childElementCount).toBe(3);
+    expect(document.getElementById("running-count")?.textContent).toBe("5 running");
+  });
+
+  // What each orb stands for, for anyone who wants the detail without
+  // leaving the dashboard.
+  it("names the live sessions in its tooltip", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([
+      makeSession({ id: "s1", project: "acme", agentId: "claude-mm" }),
+      makeSession({ id: "s2", project: "storefront", agentId: "copilot", state: "waiting" }),
+    ]);
+
+    expect(pill().title).toBe("acme · claude-mm\nstorefront · copilot");
+  });
+
+  it("goes to the Session view when clicked", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ state: "running" })]);
+    pill().click();
+
+    expect(document.getElementById("view-session")?.hidden).toBe(false);
   });
 });

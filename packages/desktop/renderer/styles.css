@@ -197,6 +197,51 @@
     flex-shrink: 0;
   }
 
+  /* The running-sessions pill. Same shape as the voice pill beside it —
+     they report the same kind of thing, facts the app knows about itself —
+     but this one is a button, so it also carries the accent the rest of the
+     app uses for "live" and a hover state to say it can be pressed. */
+  .pill--running {
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    color: var(--accent-text);
+    border-color: var(--accent-quiet);
+    background: var(--panel);
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .pill--running:hover { border-color: var(--accent); }
+  .pill--running:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* One orb per live session, overlapped a little so a group reads as a
+     cluster rather than a row of separate dots. */
+  .running-orbs {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .running-orb {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--panel);
+    animation: running-breathe 2.4s ease-in-out infinite;
+  }
+  .running-orb + .running-orb { margin-left: -2px; }
+
+  /* Deliberately the presence orb's own rhythm: this is the same fact about
+     the same agent, reported in a smaller place. Each orb is given its own
+     delay in app.ts — pulsing in step would read as one wide light and lose
+     the count the orbs exist to show. */
+  @keyframes running-breathe {
+    0%, 100% { opacity: 0.45; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+
   .spacer { flex-grow: 1; }
 
   /* Ambient: the time, the network and the machine are facts you glance at,
@@ -3061,7 +3106,8 @@
 @media (prefers-reduced-motion: reduce) {
   .presence__ring,
   .presence__arc,
-  .presence__core {
+  .presence__core,
+  .running-orb {
     animation: none !important;
   }
 }

@@ -31,6 +31,15 @@
          under a wordmark in the middle of the screen. It is ambient
          information about the app, which is what this strip is for. -->
     <div class="pill"><span class="pill-dot"></span><span id="voice-state">Online</span></div>
+    <!-- What is running, from wherever you are. The dashboard lists the
+         sessions, but this strip is the only thing on screen in every view,
+         so a session started in the Workspace was invisible until you went
+         back to look. Hidden while nothing is running: a pill reading
+         "0 running" would be furniture reporting nothing. -->
+    <button id="running-pill" class="pill pill--running" type="button" hidden>
+      <span id="running-orbs" class="running-orbs" aria-hidden="true"></span>
+      <span id="running-count" class="mono"></span>
+    </button>
     <div class="spacer"></div>
     <div class="clock mono">
       <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
