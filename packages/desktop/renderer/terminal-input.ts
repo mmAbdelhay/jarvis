@@ -77,6 +77,10 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
 
   const paint = document.createElement("div");
   paint.className = "terminal-input-paint";
+  // See the textarea below: the two layers are drawn on top of each other
+  // and must agree about direction, or the colouring lands on the wrong
+  // characters.
+  paint.dir = "auto";
 
   // Text a caller's own e.element.textContent checks would otherwise pick
   // up even while [hidden] — hidden only affects rendering, not the DOM
@@ -91,6 +95,16 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   textarea.className = "terminal-input-text";
   textarea.spellcheck = false;
   textarea.rows = 1;
+  // The line takes its direction from what is actually in it. Arabic typed
+  // here ran left to right like the Latin around it, which puts a word's
+  // letters on screen in the wrong order; "auto" reads the first strong
+  // character and leaves an English line exactly as it was.
+  //
+  // This is the one place in a terminal that can do this at all: the
+  // editor is Jarvis's own DOM. The grid underneath is xterm.js, which has
+  // no bidirectional text support, so the shell's echo of the same line —
+  // and anything a program prints — is still laid out logically.
+  textarea.dir = "auto";
 
   field.append(paint, hint, textarea);
   wrapper.append(promptEl, field);

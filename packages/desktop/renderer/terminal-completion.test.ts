@@ -385,6 +385,7 @@ describe("attachCompletion with an editor", () => {
   function attachedWithEditor(
     suggestions: string[] = ["git status"],
     editorLine = "git sta",
+    extra: Partial<CompletionHooks> = {},
   ) {
     const terminal = new FakeTerminal();
     const host = document.createElement("div");
@@ -403,6 +404,7 @@ describe("attachCompletion with an editor", () => {
         applied.push(line);
         value = line;
       },
+      ...extra,
     };
     const completion = attachCompletion(terminal as never, host, hooks);
     const press = (init: { key: string; ctrlKey?: boolean; metaKey?: boolean }): boolean =>
@@ -430,6 +432,40 @@ describe("attachCompletion with an editor", () => {
 
     expect(asked).toEqual(["git sta"]);
     expect(press({ key: "Tab" })).toBe(false);
+  });
+
+  // The bug this covers, found in the running app: with blocks on, the
+  // pane never writes the raw stream to xterm — terminal-pane's write()
+  // feeds the splitter and writes only the text it emits, and the splitter
+  // eats every "133;" payload as its own. So xterm's parser sees no marks,
+  // tracker.mark() stays undefined, and refresh() returned on its first
+  // line for every keystroke. Autocomplete was dead in exactly the mode
+  // that has an editor to complete into, and silently: no error, just no
+  // dropdown, ever. The pane knows a prompt is live — the splitter is what
+  // told it so — and promptActive is how it says so.
+  it("suggests with no OSC ever reaching xterm, when the pane says a prompt is live", async () => {
+    let promptLive = true;
+    const { asked, press } = attachedWithEditor(["git status"], "git sta", {
+      promptActive: () => promptLive,
+    });
+
+    // Deliberately no markPrompt(): in blocks mode nothing marks the
+    // parser, which is the whole failure.
+    press({ key: "a" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual(["git sta"]);
+  });
+
+  it("offers nothing while the pane says no prompt is waiting", async () => {
+    const { asked, press } = attachedWithEditor(["git status"], "git sta", {
+      promptActive: () => false,
+    });
+
+    press({ key: "a" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual([]);
   });
 
   it("accepts by calling applyInput with the full line, sending nothing to the pty", async () => {

@@ -22,6 +22,24 @@ describe("the input editor", () => {
     expect(e.value()).toBe("");
   });
 
+  // Arabic typed here used to run left to right like the Latin around it,
+  // which puts the letters of a word in the wrong order on screen. The
+  // editor is Jarvis's own DOM, so it can do what the terminal grid
+  // underneath it cannot: dir="auto" takes the direction from the first
+  // strong character, leaving English lines exactly as they were.
+  //
+  // Both layers carry it, and that is the point: the highlighted paint
+  // sits directly under the textarea's own text, so a direction on one and
+  // not the other would print the colouring over the wrong characters.
+  it("lets the typed line pick its own direction, on both layers", () => {
+    const { editor: e } = editor();
+    const textarea = e.element.querySelector(".terminal-input-text");
+    const paint = e.element.querySelector(".terminal-input-paint");
+
+    expect(textarea?.getAttribute("dir")).toBe("auto");
+    expect(paint?.getAttribute("dir")).toBe("auto");
+  });
+
   it("adds a newline on Shift+Enter instead of submitting", () => {
     const { editor: e, hooks } = editor();
     e.setValue("for i in 1 2 3; do");
