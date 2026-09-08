@@ -288,7 +288,28 @@ app.whenReady().then(async () => {
     // the outer try/catch has already run dialog.showErrorBox/app.quit()
     // for an unrelated startup failure, it cannot surface as an unhandled
     // rejection; checkAgent itself never rejects, so this is a safety net.
-    const reportPromise = startupReport(registry, runCommand).catch((error) => {
+    // An agent's command is resolved on PATH, and a GUI app's PATH is
+    // /usr/bin:/bin:/usr/sbin:/sbin — not where Homebrew or npm put
+    // `claude`. Left inherited, every agent was reported broken here and no
+    // session could start, in installed builds only; from a terminal it all
+    // worked, which is exactly why it hid for so long.
+    //
+    // Started, never awaited: asking a login shell for its PATH costs a
+    // shell start, and a heavy .zshrc between app-ready and the window is
+    // its own regression (ruling R35). Both readers below take the answer
+    // late — the spawner when somebody starts a session, the health check
+    // by awaiting this promise, which it can afford because its own line is
+    // already deferred behind the greeting.
+    let agentEnv: NodeJS.ProcessEnv = process.env;
+    const agentEnvReady = loginShellPath()
+      .then((path) => {
+        if (path !== undefined) agentEnv = { ...process.env, PATH: path };
+      })
+      .catch(() => undefined);
+
+    const reportPromise = agentEnvReady
+      .then(() => startupReport(registry, (command, args) => runCommand(command, args, agentEnv)))
+      .catch((error) => {
       console.error(`Startup health check failed: ${errorMessage(error)}`);
       return { healthy: [], broken: [], message: "" };
     });
@@ -300,7 +321,7 @@ app.whenReady().then(async () => {
     // A pty, not pipes: an interactive coding agent checks whether stdin is
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
-    const sessions = new SessionManager(createPtySpawner(), sessionStore);
+    const sessions = new SessionManager(createPtySpawner(() => agentEnv), sessionStore);
 
     // Sessions Jarvis did not spawn — the ones started by typing an agent
     // into a terminal, which on this machine outnumber the recorded ones
@@ -512,8 +533,10 @@ app.whenReady().then(async () => {
     // is why this only ever broke for the packaged app. Undefined when the
     // shell could not be asked, in which case the inherited environment
     // stands — right for a Jarvis launched from a terminal.
-    const shellPath = await loginShellPath();
-    const env = shellPath === undefined ? process.env : { ...process.env, PATH: shellPath };
+    // The same lookup the agents above started; awaited here because the
+    // sidecars are wired now and want a concrete environment.
+    await agentEnvReady;
+    const env = agentEnv;
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
