@@ -1224,7 +1224,24 @@
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
-  .api-sidebar-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  /* The collection picker is this sidebar's title, not one control among
+     four, so it gets the width and the weight to say so. */
+  .workspace-api-sidebar .workspace-project {
+    width: 100%;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  /* Two items now, not four wrapped onto two rows — the three creates live
+     behind the "+" menu. */
+  .api-sidebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .api-sidebar-actions .workspace-menu { min-width: 132px; }
   .workspace-api-main {
     display: flex;
     flex-direction: column;
@@ -1233,14 +1250,19 @@
     min-height: 0;
   }
   .api-tree { display: flex; flex-direction: column; gap: 2px; }
-  .api-group { padding-left: 10px; border-left: 1px solid var(--border); }
+  /* One indent step, drawn by the guide rather than by padding alone, so a
+     nested folder lines up with the rows above it instead of drifting. */
+  .api-group { margin-left: 7px; padding-left: 9px; border-left: 1px solid var(--border); }
   .api-folder {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 11px;
     color: var(--text-muted);
-    padding: 4px 0;
+    /* The same box as .api-request, so a folder and the requests under it
+       sit on one left edge and hover the same width. */
+    padding: 4px 6px;
+    border-radius: 4px;
   }
   .api-request {
     display: flex;
@@ -1300,6 +1322,41 @@
   /* The URL is the one thing that should absorb the leftover width, and the
      one thing allowed to shrink when there is none to absorb. */
   .api-bar .workspace-address { flex: 1 1 220px; min-width: 120px; }
+  /* One button in this bar is the point of it. Everything else is either an
+     action on the request (Save) or a panel to open, and giving them all the
+     same weight is what made the row read as a wall. */
+  .workspace-nav--primary {
+    color: var(--accent-text);
+    border-color: var(--accent);
+    background: var(--accent-quiet);
+  }
+  .workspace-nav--primary:hover { color: var(--text); border-color: var(--accent); }
+
+  /* Separates acting on the request from looking at a panel. A rule rather
+     than a gap: the gap is already the bar's rhythm and would say nothing. */
+  .api-bar-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  /* The panel toggles, as icons. They were five words of the same weight as
+     Send; each keeps its title, which is both the tooltip and its
+     accessible name. */
+  .api-bar-tools { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .api-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    padding: 0;
+    color: var(--text-muted);
+  }
+  .api-icon-btn svg { width: 15px; height: 15px; }
+  .api-icon-btn:hover { color: var(--accent-text); }
+  .api-icon-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
   .api-status-line { font-size: 11px; color: var(--text-muted); }
   .api-dirty { color: var(--accent); margin-left: 4px; }
 
@@ -1426,8 +1483,37 @@
   }
   .api-response-bar .api-tab-strip { border-bottom: none; }
   .api-response-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .api-status { font-size: 12px; color: var(--good); }
-  .api-status--bad, .api-status--failed { color: var(--del); }
+  /* The status code as a chip. It carries its own ground rather than only a
+     text colour, because it is the one thing in this pane read at a glance
+     and colour alone was doing all the work. One class per class of code:
+     a 404 is the API answering and a 500 is it breaking, and a single red
+     for both said less than the number already did. */
+  .api-status {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .api-status--ok { color: var(--good); border-color: var(--good); background: var(--good-quiet); }
+  .api-status--redirect { color: var(--accent-text); border-color: var(--accent); background: var(--accent-quiet); }
+  .api-status--client { color: var(--warn); border-color: var(--warn); background: var(--warn-quiet); }
+  .api-status--server { color: var(--del); border-color: var(--del); background: var(--bad-quiet); }
+  .api-status--info { color: var(--text-muted); border-color: var(--border); background: var(--panel); }
+  /* A request that never got an answer has no code to colour, so it keeps
+     the plain red line it always had rather than pretending to be a chip. */
+  .api-status--failed {
+    color: var(--del);
+    padding: 0;
+    border: 0;
+    background: none;
+    border-radius: 0;
+    font-size: 12px;
+  }
+  /* How long and how much: worth having, never worth reading first. */
+  .api-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
   .api-note { font-size: 11px; color: var(--text-muted); }
   .api-response { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; }
   .api-response-body { margin-top: 8px; white-space: pre-wrap; word-break: break-word; }

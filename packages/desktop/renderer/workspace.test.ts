@@ -60,6 +60,8 @@ function harness(): Recorded[] {
         <div id="workspace-terminal" hidden></div>
         <div id="workspace-api" hidden>
           <select id="api-collection"></select>
+          <button id="api-new"></button>
+          <div id="api-new-menu" hidden></div>
           <button id="api-new-request"></button>
           <button id="api-new-folder"></button>
           <button id="api-new-collection"></button>
