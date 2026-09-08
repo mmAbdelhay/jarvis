@@ -1813,11 +1813,20 @@
      inside it, so with the list as the scroller it is simply pinned at the
      pane's top; `position: sticky` is kept because it costs nothing and
      still holds should the pane itself ever scroll again. */
+  /* The sticky header holds a real .block-header now, built by the block it
+     stands for, so the font, the spacing and the truncation are the header's
+     own — this rule sets only where the strip sits and what it sits on.
+     `overflow` is deliberately not hidden: the more menu opens inside this
+     element, and clipping it would leave the ⋯ button opening nothing.
+     .block-command does the ellipsis it used to do here. */
   .terminal-sticky-header { position: sticky; top: 0; z-index: 2;
     background: var(--ground); border-bottom: 1px solid var(--border);
-    padding: 2px 0 4px; margin-bottom: 2px;
-    font: 12px/1.6 "IBM Plex Mono", ui-monospace, monospace; color: var(--text-muted);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    padding: 2px 0 4px; margin-bottom: 2px; color: var(--text-muted); }
+  /* The block's own rule reveals its controls on .block:hover, and nothing
+     here is inside a .block — without this the actions would be present,
+     correct and permanently invisible. Hovering the strip is the same
+     gesture, against the thing that is actually on screen. */
+  .terminal-sticky-header:hover .block-header [role="button"] { opacity: 1; }
   .terminal-sticky-header[hidden] { display: none; }
   /* The chip row above the input — a runtime version, the directory, the
      git branch and its dirty counts, naming where the shell is. */

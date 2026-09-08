@@ -110,6 +110,10 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
    *  the one the sticky header should be standing in for. Blocks are in top
    *  to bottom DOM order, so the search can stop at the first one still
    *  below the boundary; everything after it is further below still. */
+  /** Which block the sticky header currently stands for, so it is rebuilt
+   *  when that changes and left alone when it has not. */
+  let stickyFor: BlockView | undefined;
+
   function updateSticky(): void {
     const container = list.parentElement;
     if (container === null) return;
@@ -121,15 +125,28 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
       current = view;
     }
     if (current === undefined) {
+      stickyFor = undefined;
       sticky.hidden = true;
-      sticky.textContent = "";
+      sticky.replaceChildren();
       return;
     }
-    // textContent only, and read fresh from the block's own header rather
-    // than cloning it — cloning would duplicate the header's action
-    // handlers (collapse, copy, re-run, more) onto a second, live-looking
-    // element that does nothing when clicked.
-    sticky.textContent = current.element.querySelector(".block-header")?.textContent ?? "";
+    // A header the block builds for this purpose, rather than a copy of the
+    // one it is already showing.
+    //
+    // It used to be `textContent`, which runs every span of the header
+    // together into a single string — "pnpm test✓2.4s~/projects/jarvis▾⧉↻⋯"
+    // — and turns the four actions into characters that look like controls
+    // and do nothing when clicked. Cloning the node would have fixed the
+    // spacing and kept the dead controls, and would have carried the more
+    // menu along to open against a header scrolled out of sight.
+    //
+    // Rebuilt only when the block changes: this runs on every scroll event,
+    // and replacing the header under the pointer on each one would drop an
+    // open more menu and fight whatever the user is clicking.
+    if (stickyFor !== current) {
+      stickyFor = current;
+      attempt(() => sticky.replaceChildren(current.createHeader()));
+    }
     sticky.hidden = false;
   }
   // Registered on `document`, in the capture phase: `scroll` does not
@@ -218,8 +235,9 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
       // there is no longer a block for it to stand in for. Cleared here
       // rather than waiting for the next scroll, which may never come.
       attempt(() => {
+        stickyFor = undefined;
         sticky.hidden = true;
-        sticky.textContent = "";
+        sticky.replaceChildren();
       });
     },
     dispose(): void {

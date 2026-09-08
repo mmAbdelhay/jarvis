@@ -23,6 +23,51 @@ describe("a block", () => {
     expect(view.element.dataset["status"]).toBe("ok");
   });
 
+  // The sticky header at the top of a pane used to be a copy of this
+  // header's textContent — every span run together into one string
+  // ("pnpm test✓2.4s~/projects/jarvis▾⧉↻⋯") and, because characters are not
+  // buttons, nothing happened when the arrows and glyphs in it were
+  // clicked. It looked like a header and behaved like a label. A block can
+  // now build a second, genuinely wired header for whoever needs to show
+  // one somewhere else.
+  it("builds a second header that is a real one, not a copy", () => {
+    const view = createBlockView(record(), hooks());
+    const header = view.createHeader();
+
+    // Structure, so the layout is the header's own rather than one long
+    // run of text.
+    expect(header.querySelector(".block-command")?.textContent).toBe("pnpm test");
+    expect(header.querySelector(".block-duration")?.textContent).toBe("2.4s");
+    expect(header.querySelector(".block-cwd")?.textContent).toBe("~/projects/jarvis");
+    expect(header.querySelector(".block-actions")).not.toBeNull();
+  });
+
+  it("acts on the same block from that second header", () => {
+    const h = hooks();
+    const view = createBlockView(record(), h);
+    const header = view.createHeader();
+
+    header.querySelector<HTMLElement>(".block-collapse")?.click();
+    expect(view.isCollapsed()).toBe(true);
+
+    header.querySelector<HTMLElement>(".block-rerun")?.click();
+    expect(h.fill).toHaveBeenCalledWith("pnpm test");
+
+    header.querySelector<HTMLElement>(".block-copy")?.click();
+    expect(h.copy).toHaveBeenCalledWith("42 passed\r\n");
+  });
+
+  // Built while the block is already collapsed, it must not claim to be an
+  // expanded one: the arrow is the only thing saying which way a click goes.
+  it("starts that header's arrow from the block's current state", () => {
+    const view = createBlockView(record(), hooks());
+    view.collapse(true);
+
+    const header = view.createHeader();
+
+    expect(header.querySelector(".block-collapse")?.textContent).toBe("▸");
+  });
+
   it("marks a failure with its exit code", () => {
     const view = createBlockView(record({ exitCode: 1, command: "git push" }), hooks());
     expect(view.element.dataset["status"]).toBe("failed");
