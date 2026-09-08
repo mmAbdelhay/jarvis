@@ -1,6 +1,6 @@
 import { watch as watchDir } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { AgentConfig, SessionStore } from "@jarvis/core";
 
 /**
@@ -50,14 +50,91 @@ export function isWithin(child: string, parent: string): boolean {
  * An agent with no `configDir` contributes nothing: there is no directory
  * to look in.
  */
+export type TranscriptFormat = "claude" | "copilot";
+
+/** Where each vendor keeps its history when the config does not say, and
+ *  what sits under that directory once you are there. Both CLIs put it in
+ *  the same place on every machine, which is what lets a fresh install
+ *  import anything at all. */
+const VENDOR_SOURCES: Record<string, { home: string; sessions: string; format: TranscriptFormat }> = {
+  anthropic: { home: ".claude", sessions: "projects", format: "claude" },
+  github: { home: ".copilot", sessions: "session-state", format: "copilot" },
+};
+
+/**
+ * One Copilot session, read from its `workspace.yaml`.
+ *
+ * Copilot writes a directory per session — `events.jsonl`, a `session.db`,
+ * checkpoints — and `workspace.yaml` is the only part of it a row needs. It
+ * is read as head bytes like a Claude transcript, so this parses the few
+ * top-level scalars it wants by hand rather than pulling a YAML parser into
+ * a function that must not throw: the file is machine-written, flat, and
+ * the fields are always at the left margin.
+ *
+ * `name` is the summary and is usually a block scalar (`name: |-`) whose
+ * first non-empty line is the closest thing to a title. No model: Copilot
+ * does not record one here, and a column that reads as fact is left empty
+ * rather than filled from somewhere it does not belong.
+ */
+export function sessionFromCopilotWorkspace(
+  text: string,
+  path: string,
+): TranscriptSession | null {
+  const lines = text.split("\n");
+  const scalar = (key: string): string | undefined => {
+    const line = lines.find((candidate) => candidate.startsWith(`${key}:`));
+    if (line === undefined) return undefined;
+    const value = line.slice(key.length + 1).trim();
+    return value === "" ? undefined : value;
+  };
+
+  const cwd = scalar("cwd");
+  if (cwd === undefined) return null;
+
+  const started = Date.parse(scalar("created_at") ?? "");
+  const updated = Date.parse(scalar("updated_at") ?? "");
+  if (!Number.isFinite(started)) return null;
+
+  // A block scalar leaves "|-" behind; the title is the first indented line
+  // under it. A plain `name: something` is taken as it stands.
+  const rawName = scalar("name");
+  const summary =
+    rawName === undefined || rawName.startsWith("|") || rawName.startsWith(">")
+      ? (lines
+          .slice(lines.findIndex((line) => line.startsWith("name:")) + 1)
+          .find((line) => line.startsWith(" ") && line.trim() !== "")
+          ?.trim() ?? "")
+      : rawName;
+
+  return {
+    // The directory name is the session id and matches `id:` inside; the
+    // field is read rather than the path parsed, same rule the Claude
+    // reader follows about never trusting a directory name.
+    id: scalar("id") ?? basename(dirname(path)),
+    cwd,
+    model: null,
+    branch: scalar("branch") ?? "",
+    startedAt: started,
+    lastActivityAt: Number.isFinite(updated) ? updated : started,
+    summary,
+  };
+}
+
 export function transcriptDirs(
   agents: readonly AgentConfig[],
-): { agentId: string; dir: string }[] {
-  return agents.flatMap((agent) =>
-    agent.vendor === "anthropic" && agent.configDir !== undefined
-      ? [{ agentId: agent.id, dir: join(agent.configDir, "projects") }]
-      : [],
-  );
+  home: string,
+): { agentId: string; dir: string; format: TranscriptFormat }[] {
+  return agents.flatMap((agent) => {
+    const source = agent.vendor === undefined ? undefined : VENDOR_SOURCES[agent.vendor];
+    if (source === undefined) return [];
+    // The configured directory when there is one, the vendor's own
+    // otherwise. Only the *import* falls back like this: capacity reading
+    // still keys off an explicit configDir, so an agent that has not
+    // declared one goes on reporting capacity as unknown rather than
+    // guessing at an account from a directory nobody named.
+    const base = agent.configDir ?? join(home, source.home);
+    return [{ agentId: agent.id, dir: join(base, source.sessions), format: source.format }];
+  });
 }
 
 /** What one transcript says about its session. Everything else a session
@@ -319,7 +396,7 @@ export type SessionImporterDeps = {
   /** Every `*.jsonl` under one transcripts directory, with mtimes. A
    *  missing or unreadable directory yields [] rather than throwing —
    *  though a rejection is survived too. */
-  listFiles: (dir: string) => Promise<TranscriptFile[]>;
+  listFiles: (dir: string, format: TranscriptFormat) => Promise<TranscriptFile[]>;
   /** At most the first few KB of a file, as text. Never the whole file. */
   readHead: (path: string) => Promise<string>;
   /** Calls back with a transcript that changed. May throw: a watch that
@@ -332,6 +409,10 @@ export type SessionImporterDeps = {
    *  the importer must never write live state for one of them. */
   ownedIds: () => ReadonlySet<string>;
   agents: readonly AgentConfig[];
+  /** The user's home directory — where an agent that names no configDir is
+   *  looked for, since both CLIs keep their history in the same place on
+   *  every machine. */
+  home: string;
   projects: Readonly<Record<string, string>>;
   /** Sessions at or under this path are the brain talking to itself. */
   brainCwd: string;
@@ -367,13 +448,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * `transcriptDirs` names. Nothing here polls.
  */
 export function createSessionImporter(deps: SessionImporterDeps): SessionImporter {
-  const dirs = transcriptDirs(deps.agents);
+  const dirs = transcriptDirs(deps.agents, deps.home);
   const watchers: ImportWatcher[] = [];
 
-  async function importFile(agentId: string, file: TranscriptFile): Promise<boolean> {
+  async function importFile(
+    agentId: string,
+    file: TranscriptFile,
+    format: TranscriptFormat,
+  ): Promise<boolean> {
     // Cheapest check first, and it is also what keeps the importer from
-    // reading the other things that live in these directories.
-    if (!file.path.endsWith(".jsonl")) return false;
+    // reading the other things that live in these directories — a Claude
+    // transcript is one .jsonl, a Copilot session is a directory whose
+    // workspace.yaml is the only part of it this reads.
+    const wanted = format === "claude" ? ".jsonl" : "workspace.yaml";
+    if (!file.path.endsWith(wanted)) return false;
 
     let head: string;
     try {
@@ -384,7 +472,10 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
       return false;
     }
 
-    const transcript = sessionFromTranscript(head, file.path, file.mtime);
+    const transcript =
+      format === "claude"
+        ? sessionFromTranscript(head, file.path, file.mtime)
+        : sessionFromCopilotWorkspace(head, file.path);
     if (transcript === null) return false;
 
     // By path, never by a directory name: the exclusion is "this is one of
@@ -430,10 +521,10 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     const oldest = deps.now() - deps.importWindowDays * DAY_MS;
     let imported = 0;
 
-    for (const { agentId, dir } of dirs) {
+    for (const { agentId, dir, format } of dirs) {
       let files: TranscriptFile[];
       try {
-        files = await deps.listFiles(dir);
+        files = await deps.listFiles(dir, format);
       } catch (error) {
         // An unreadable configDir means that agent contributes nothing —
         // never that the other agents' sessions are lost too.
@@ -443,7 +534,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
 
       for (const file of files) {
         if (file.mtime < oldest) continue;
-        if (await importFile(agentId, file)) imported += 1;
+        if (await importFile(agentId, file, format)) imported += 1;
       }
     }
 
@@ -456,14 +547,14 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     async start() {
       const imported = await backfill();
 
-      for (const { agentId, dir } of dirs) {
+      for (const { agentId, dir, format } of dirs) {
         try {
           watchers.push(
             deps.watch(dir, (file) => {
               // Fire and forget: a watch callback has nobody to return a
               // promise to, and a transcript that fails to import is one
               // row missing until the next launch, not a crash.
-              void importFile(agentId, file).catch((error) => {
+              void importFile(agentId, file, format).catch((error) => {
                 deps.log?.(`Session import: ${file.path} failed (${message(error)})`);
               });
             }),
@@ -624,7 +715,33 @@ export function createFsImportDeps(): Pick<
   "listFiles" | "readHead" | "watch"
 > {
   return {
-    async listFiles(dir) {
+    async listFiles(dir, format) {
+      // Copilot keeps a directory per session and the metadata in one file
+      // inside it, so the listing is one level deep and names that file
+      // rather than globbing for an extension.
+      if (format === "copilot") {
+        let sessions: string[];
+        try {
+          sessions = await readdir(dir);
+        } catch {
+          // Copilot not installed, or never run. Contributes nothing.
+          return [];
+        }
+        const found: TranscriptFile[] = [];
+        for (const session of sessions) {
+          const path = join(dir, session, "workspace.yaml");
+          try {
+            const info = await stat(path);
+            if (!info.isFile()) continue;
+            found.push({ path, mtime: info.mtimeMs });
+          } catch {
+            // A session directory with no workspace.yaml — a crash
+            // mid-write, or a shape this does not know. Skipped, not fatal.
+          }
+        }
+        return found;
+      }
+
       let entries: string[];
       try {
         // Recursive because transcripts sit one level down, in a directory
@@ -666,8 +783,12 @@ export function createFsImportDeps(): Pick<
 
     watch(dir, onChange) {
       const watcher = watchDir(dir, { recursive: true }, (_event, filename) => {
-        if (filename === null || !filename.toString().endsWith(".jsonl")) return;
-        const path = join(dir, filename.toString());
+        // Either format's metadata file. A Copilot session announces itself
+        // by its workspace.yaml the same way a Claude one does by its
+        // transcript; everything else under these directories is noise.
+        const name = filename?.toString() ?? "";
+        if (!name.endsWith(".jsonl") && !name.endsWith("workspace.yaml")) return;
+        const path = join(dir, name);
         // The stat is what dates the change; a watch event carries no
         // mtime of its own, and mtime is where lastActivityAt comes from.
         void stat(path)
