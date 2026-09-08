@@ -99,6 +99,7 @@ voice:
   piperModel: ~/.config/jarvis/voices/en-gb-alan-low.onnx
   englishVoice: Daniel        # used when engine is `say`
   arabicVoice: Majed          # always used for Arabic
+  speakGreeting: true         # false shows the greeting without saying it
   greeting:
     en: "Good {timeOfDay} sir, how can I help you today?"
     ar: "{timeOfDay} يا سيدي، كيف أقدر أساعدك اليوم؟"

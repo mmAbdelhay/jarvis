@@ -531,6 +531,17 @@
                     aria-label="Hear this voice">&#9654; play</button>
           </div>
         </div>
+        <!-- The launch greeting is the only thing Jarvis says without being
+             asked. This silences that speech and nothing else: the same
+             greeting still arrives in the conversation panel, because what
+             it reports is worth reading even when it is not worth hearing. -->
+        <div class="settings-field">
+          <label for="settings-speak-greeting">speak greeting</label>
+          <label class="settings-switch">
+            <input id="settings-speak-greeting" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
         <div class="settings-field settings-field--wide">
           <label for="settings-greeting-en">greeting (english)</label>
           <textarea id="settings-greeting-en" class="mono"></textarea>

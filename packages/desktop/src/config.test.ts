@@ -478,6 +478,20 @@ describe("voice", () => {
     expect(config.voice.greeting.en).toBe("Good {timeOfDay} sir, how can I help you today?");
   });
 
+  // The greeting is the one thing the app says without being asked, and
+  // someone who works next to other people needs it to stop talking without
+  // losing the greeting itself — the text still arrives in the panel.
+  it("speaks the greeting unless told not to", () => {
+    expect(parseConfig(base).voice.speakGreeting).toBe(true);
+    expect(parseConfig({ ...base, voice: { speakGreeting: false } }).voice.speakGreeting).toBe(false);
+  });
+
+  it("refuses a speakGreeting that is not a boolean", () => {
+    expect(() => parseConfig({ ...base, voice: { speakGreeting: "no" } })).toThrow(
+      "Config `voice.speakGreeting` must be a boolean",
+    );
+  });
+
   it("takes the configured voices and greetings", () => {
     const config = parseConfig({
       ...base,

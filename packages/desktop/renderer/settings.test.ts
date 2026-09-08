@@ -34,6 +34,7 @@ function sample(): JarvisConfig {
     englishVoice: "Daniel",
       arabicVoice: "Majed",
       greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
+      speakGreeting: true,
     },
     brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-mm" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
@@ -72,6 +73,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <select id="settings-voice-ar"></select>
     <button id="settings-voice-ar-play"></button>
     <div id="settings-voice-note"></div>
+    <input id="settings-speak-greeting" type="checkbox" />
     <textarea id="settings-greeting-en"></textarea>
     <textarea id="settings-greeting-ar"></textarea>
     <input id="settings-whisper-binary" />
@@ -783,6 +785,38 @@ describe("voice section", () => {
     await settle();
 
     expect(document.getElementById("settings-voice-note")?.textContent).toBe("");
+  });
+
+  // The greeting is the only thing the app says unprompted, so this is the
+  // switch for a room that has to stay quiet. It silences the speech alone —
+  // the text still reaches the conversation panel, which is why there is one
+  // toggle here and not two.
+  it("shows whether the greeting is spoken", async () => {
+    harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect((document.getElementById("settings-speak-greeting") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("saves the greeting silenced", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const toggle = document.getElementById("settings-speak-greeting") as HTMLInputElement;
+    toggle.checked = false;
+    change(toggle);
+
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.voice.speakGreeting).toBe(false);
+    // Silencing it must not touch the greeting itself.
+    expect(saved.voice.greeting.en).not.toBe("");
   });
 
   it("saves an edited voice and greeting", async () => {

@@ -2099,6 +2099,52 @@
     flex-grow: 1;
     max-width: 480px;
   }
+  /* The first switch in Settings. Built from a real checkbox so it keeps
+     the keyboard and the accessibility tree it was born with — the input
+     itself is what focus, space and a screen reader address, and the track
+     beside it is the only thing painted. Sized to sit on the same 11px
+     baseline as the labels around it rather than to be noticed. */
+  .settings-switch { position: relative; display: inline-flex; width: auto; }
+  .settings-switch input {
+    /* Not display:none, which takes it out of the focus order entirely. */
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .settings-switch-track {
+    display: block;
+    width: 34px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .settings-switch-track::after {
+    content: "";
+    display: block;
+    width: 12px;
+    height: 12px;
+    margin: 2px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 120ms ease, background 120ms ease;
+  }
+  .settings-switch input:checked + .settings-switch-track {
+    background: var(--accent-quiet);
+    border-color: var(--accent);
+  }
+  .settings-switch input:checked + .settings-switch-track::after {
+    transform: translateX(16px);
+    background: var(--accent);
+  }
+  .settings-switch input:focus-visible + .settings-switch-track {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .settings-field--wide { align-items: flex-start; }
   .settings-field--wide textarea {
     font: inherit;

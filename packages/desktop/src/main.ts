@@ -1857,7 +1857,12 @@ app.whenReady().then(async () => {
     //   Scanning four repositories for uncommitted work takes 0.9s, and the
     //   default greeting no longer mentions it. A template that asks for
     //   {uncommitted} still gets it; one that does not, does not pay for it.
-    if (!piperReady) await macSpeech.ready;
+    // Silent by request: voice.speakGreeting off means the panel still gets
+    // the greeting and nothing is said aloud. Asking `say` for its voice
+    // list costs 1.2s and only decides which macOS voice to speak with, so
+    // with nothing to speak there is nothing to wait for either.
+    const speakGreeting = config.voice.speakGreeting;
+    if (speakGreeting && !piperReady) await macSpeech.ready;
 
     const template = config.voice.greeting[PRIMARY_LANGUAGE] ?? "";
     const wantsUncommitted = template.includes("{uncommitted}");
@@ -1876,7 +1881,7 @@ app.whenReady().then(async () => {
       language: PRIMARY_LANGUAGE,
       at: Date.now(),
     });
-    void announceSpeaking(greeting, PRIMARY_LANGUAGE);
+    if (speakGreeting) void announceSpeaking(greeting, PRIMARY_LANGUAGE);
 
     const report = await reportPromise;
     console.log(report.message);
