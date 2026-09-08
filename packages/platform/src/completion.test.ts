@@ -172,7 +172,7 @@ describe("specSuggestions", () => {
   });
 
   it("offers nothing for a command it has no spec for", () => {
-    expect(specSuggestions("globex-dependabot u", specs)).toEqual([]);
+    expect(specSuggestions("orbit-dependabot u", specs)).toEqual([]);
   });
 
   it("offers nothing before the command name is complete", () => {

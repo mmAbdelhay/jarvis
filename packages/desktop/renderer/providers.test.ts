@@ -19,7 +19,7 @@ function layoutDom(): void {
 
 function status(overrides: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
-    id: "claude-mm",
+    id: "claude-main",
     vendor: "anthropic",
     capacity: {
       state: "known",
@@ -38,7 +38,7 @@ describe("renderProviders", () => {
   it("shows the account id and the percentage LEFT, not the percentage used", () => {
     renderProviders([status()], NOW);
     const row = document.querySelector(".provider");
-    expect(row?.textContent).toContain("claude-mm");
+    expect(row?.textContent).toContain("claude-main");
     expect(row?.textContent).toContain("38%");
     expect(row?.textContent).not.toContain("62%");
   });

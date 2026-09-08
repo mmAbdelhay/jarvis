@@ -113,9 +113,12 @@ npmRebuild: false
 # mac
 # ---------------------------------------------------------------------------
 #
-# `dir` rather than `dmg`: the deliverable is Jarvis.app, installed by
-# copying it to /Applications. A disk image would add a step and a
-# dependency for nothing.
+# `dir` and `dmg`. `dir` is what the local install script copies from and
+# what the packaging run leaves behind to inspect; `dmg` is the thing
+# somebody who is not you can download and open — a window with the app and
+# a link to /Applications, which is the install instruction every Mac user
+# already knows. Building both costs one extra step and keeps the local
+# workflow exactly as it was.
 #
 # identity: null skips code signing during the build. There is no Developer
 # ID here, and electron-builder's own ad-hoc handling is inconsistent
@@ -126,6 +129,12 @@ mac:
     - target: dir
       arch:
         - arm64
+    - target: dmg
+      arch:
+        - arm64
+  # Apple Silicon only, and stated rather than implied: electronDist below
+  # points at one downloaded castLabs build, and that build is arm64. An
+  # Intel Mac cannot run what this produces, which the README says too.
   category: public.app-category.developer-tools
   icon: assets/icon.icns
   identity: null
@@ -134,6 +143,21 @@ mac:
   # entitlements and a real signing identity to allow that; with an ad-hoc
   # signature it only buys refusals.
   hardenedRuntime: false
+
+# The disk image window: the app on the left, /Applications on the right,
+# which is the drag every Mac user has already done a hundred times. Nothing
+# custom beyond that — a background image would be one more asset to keep in
+# step with the icon for no instruction the layout does not already give.
+dmg:
+  title: Jarvis ${version}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
 
 # ---------------------------------------------------------------------------
 # Which Electron gets packaged

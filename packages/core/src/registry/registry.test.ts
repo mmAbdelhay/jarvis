@@ -4,7 +4,7 @@ import type { RegistryConfig } from "./types.js";
 
 const config: RegistryConfig = {
   agents: {
-    "claude-mm": { command: "claude-mm", model: "opus", default: true },
+    "claude-main": { command: "claude-main", model: "opus", default: true },
     "claude-acme": { command: "claude-acme", model: "sonnet" },
     copilot: { command: "copilot", args: ["-p"] },
   },
@@ -36,7 +36,7 @@ describe("AgentRegistry.resolve", () => {
 
   it("uses the default agent when nothing matches", () => {
     const registry = new AgentRegistry(config);
-    expect(registry.resolve({ project: "unknown-project" }).id).toBe("claude-mm");
+    expect(registry.resolve({ project: "unknown-project" }).id).toBe("claude-main");
   });
 
   it("takes the first matching rule when several match", () => {
@@ -75,6 +75,6 @@ describe("AgentRegistry.resolve", () => {
       agents: config.agents,
       routing: [{ match: {}, agent: "copilot" }],
     });
-    expect(registry.resolve({}).id).toBe("claude-mm");
+    expect(registry.resolve({}).id).toBe("claude-main");
   });
 });

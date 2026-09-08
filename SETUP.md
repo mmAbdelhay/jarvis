@@ -31,8 +31,12 @@ expected — there is no configuration file yet. Step 3 writes one.
 
 ## 3. The one file you must write
 
-Jarvis reads `~/.config/jarvis/jarvis.yaml` at startup and **refuses to start
-without it**. This is the smallest file that works:
+Jarvis reads `~/.config/jarvis/jarvis.yaml` at startup. **On first run it
+writes one for you** — a single agent and an empty brain — so a fresh install
+opens rather than refusing to start. What follows is that same file, written
+by hand, plus what to change in it.
+
+This is the smallest file that works:
 
 ```bash
 mkdir -p ~/.config/jarvis

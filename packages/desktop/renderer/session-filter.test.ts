@@ -43,10 +43,10 @@ describe("filterSessions", () => {
       project: null,
       projectPath: "/home/u/projects/jarvis",
       summary: "add a cluster tab",
-      agentId: "claude-mm",
+      agentId: "claude-main",
       branch: "feat/x",
     }),
-    session({ id: "c", project: "globex", summary: "deploy the thing", state: "dead" }),
+    session({ id: "c", project: "orbit", summary: "deploy the thing", state: "dead" }),
   ];
 
   it("returns everything when nothing is asked for", () => {
@@ -68,12 +68,12 @@ describe("filterSessions", () => {
   });
 
   it("matches the agent and the branch too", () => {
-    expect(filterSessions(all, { query: "claude-mm", project: "", agent: "" })).toHaveLength(1);
+    expect(filterSessions(all, { query: "claude-main", project: "", agent: "" })).toHaveLength(1);
     expect(filterSessions(all, { query: "feat/x", project: "", agent: "" })).toHaveLength(1);
   });
 
   it("filters by project", () => {
-    expect(filterSessions(all, { query: "", project: "globex", agent: "" }).map((s) => s.id)).toEqual([
+    expect(filterSessions(all, { query: "", project: "orbit", agent: "" }).map((s) => s.id)).toEqual([
       "c",
     ]);
   });
@@ -88,13 +88,13 @@ describe("filterSessions", () => {
 
   it("filters by agent", () => {
     expect(
-      filterSessions(all, { query: "", project: "", agent: "claude-mm" }).map((s) => s.id),
+      filterSessions(all, { query: "", project: "", agent: "claude-main" }).map((s) => s.id),
     ).toEqual(["b"]);
   });
 
   it("combines every criterion", () => {
     expect(
-      filterSessions(all, { query: "deploy", project: "globex", agent: "claude-acme" }),
+      filterSessions(all, { query: "deploy", project: "orbit", agent: "claude-acme" }),
     ).toHaveLength(1);
     expect(filterSessions(all, { query: "deploy", project: "acme", agent: "" })).toHaveLength(0);
   });

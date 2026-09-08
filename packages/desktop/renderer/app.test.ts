@@ -288,7 +288,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     id: "s1",
     project: "acme",
     projectPath: "/p/acme",
-    agentId: "claude-mm",
+    agentId: "claude-main",
     state: "running",
     summary: "",
     startedAt: 1000,
@@ -728,7 +728,7 @@ describe("opening a session", () => {
     const gitChanges = vi.fn(async () => ({
       ok: true,
       value: {
-        session: { id: "s1", project: "acme", projectPath: "/p", agentId: "claude-mm", lastActivityAt: 1000, endedAt: undefined },
+        session: { id: "s1", project: "acme", projectPath: "/p", agentId: "claude-main", lastActivityAt: 1000, endedAt: undefined },
         changes: { repoPath: "/p", branch: "main", detached: false, files: [], insertions: 3, deletions: 1 },
       },
     }));
@@ -1003,11 +1003,11 @@ describe("the running-sessions indicator", () => {
   it("names the live sessions in its tooltip", async () => {
     const { onSessions } = await loadApp();
     onSessions?.([
-      makeSession({ id: "s1", project: "acme", agentId: "claude-mm" }),
+      makeSession({ id: "s1", project: "acme", agentId: "claude-main" }),
       makeSession({ id: "s2", project: "storefront", agentId: "copilot", state: "waiting" }),
     ]);
 
-    expect(pill().title).toBe("acme · claude-mm\nstorefront · copilot");
+    expect(pill().title).toBe("acme · claude-main\nstorefront · copilot");
   });
 
   it("goes to the Session view when clicked", async () => {

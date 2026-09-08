@@ -364,7 +364,7 @@ describe("capacity piggyback", () => {
     const brain = createBrain({
       systemPrompt: "p",
       cwd: "/tmp/brain",
-      accountId: "claude-mm",
+      accountId: "claude-main",
       configDir: "/c/mm",
       onUsage,
       query: usageQuery(messages, usage),
@@ -372,7 +372,7 @@ describe("capacity piggyback", () => {
 
     await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
 
-    expect(onUsage).toHaveBeenCalledWith("claude-mm", {
+    expect(onUsage).toHaveBeenCalledWith("claude-main", {
       ok: true,
       fiveHour: { usedPercent: 12, resetsAt: "2026-08-31T14:30:00Z" },
       sevenDay: undefined,
@@ -398,7 +398,7 @@ describe("capacity piggyback", () => {
     const brain = createBrain({
       systemPrompt: "p",
       cwd: "/tmp/brain",
-      accountId: "claude-mm",
+      accountId: "claude-main",
       configDir: "/c/mm",
       onUsage,
       query: () => ({
@@ -420,7 +420,7 @@ describe("capacity piggyback", () => {
     // The assistant's answer is the product; the free reading is a bonus and
     // must never be able to break it.
     expect(reply.text).toBe("hi");
-    expect(onUsage).toHaveBeenCalledWith("claude-mm", { ok: false, reason: "unavailable" });
+    expect(onUsage).toHaveBeenCalledWith("claude-main", { ok: false, reason: "unavailable" });
     expect(onUsage).toHaveBeenCalledTimes(1);
   });
 
@@ -431,7 +431,7 @@ describe("capacity piggyback", () => {
     const brain = createBrain({
       systemPrompt: "p",
       cwd: "/tmp/brain",
-      accountId: "claude-mm",
+      accountId: "claude-main",
       configDir: "/c/mm",
       onUsage,
       query: usageQuery(messages, usage),
@@ -457,7 +457,7 @@ describe("capacity piggyback", () => {
     const brain = createBrain({
       systemPrompt: "p",
       cwd: "/tmp/brain",
-      accountId: "claude-mm",
+      accountId: "claude-main",
       configDir: "/c/mm",
       onUsage,
       query: () => ({
@@ -477,7 +477,7 @@ describe("capacity piggyback", () => {
     });
 
     expect(reply.text).toBe("hi");
-    expect(onUsage).toHaveBeenCalledWith("claude-mm", { ok: false, reason: "unavailable" });
+    expect(onUsage).toHaveBeenCalledWith("claude-main", { ok: false, reason: "unavailable" });
     expect(onUsage).toHaveBeenCalledTimes(1);
   });
 
@@ -486,7 +486,7 @@ describe("capacity piggyback", () => {
     const brain = createBrain({
       systemPrompt: "p",
       cwd: "/tmp/brain",
-      accountId: "claude-mm",
+      accountId: "claude-main",
       configDir: "/c/mm",
       onUsage,
       query: () =>
@@ -512,7 +512,7 @@ describe("capacity piggyback", () => {
       const brain = createBrain({
         systemPrompt: "p",
         cwd: "/tmp/brain",
-        accountId: "claude-mm",
+        accountId: "claude-main",
         configDir: "/c/mm",
         onUsage: vi.fn(),
         query: ({ options }) => {

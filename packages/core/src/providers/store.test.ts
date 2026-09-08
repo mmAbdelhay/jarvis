@@ -3,7 +3,7 @@ import type { AgentConfig } from "../registry/types.js";
 import { ProviderStatusStore } from "./store.js";
 
 const AGENTS: AgentConfig[] = [
-  { id: "claude-mm", command: "claude-mm", configDir: "/c/mm", vendor: "anthropic" },
+  { id: "claude-main", command: "claude-main", configDir: "/c/mm", vendor: "anthropic" },
   { id: "copilot", command: "copilot", vendor: "github" },
 ];
 
@@ -11,7 +11,7 @@ const AGENTS: AgentConfig[] = [
 // A fixture with only one account per vendor can prove cross-vendor
 // isolation but structurally cannot prove fan-out to siblings — this one can.
 const MULTI_ANTHROPIC_AGENTS: AgentConfig[] = [
-  { id: "claude-mm", command: "claude-mm", configDir: "/c/mm", vendor: "anthropic" },
+  { id: "claude-main", command: "claude-main", configDir: "/c/mm", vendor: "anthropic" },
   { id: "claude-acme", command: "claude-acme", configDir: "/c/acme", vendor: "anthropic" },
   { id: "copilot", command: "copilot", vendor: "github" },
 ];
@@ -30,7 +30,7 @@ describe("ProviderStatusStore", () => {
 
   it("keeps the account list and its order from the registry", () => {
     expect(new ProviderStatusStore(AGENTS).snapshot().map((s) => s.id)).toEqual([
-      "claude-mm",
+      "claude-main",
       "copilot",
     ]);
   });
@@ -38,7 +38,7 @@ describe("ProviderStatusStore", () => {
   it("records a successful capacity reading with the time it was read", () => {
     const store = new ProviderStatusStore(AGENTS);
     store.recordCapacity(
-      "claude-mm",
+      "claude-main",
       { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
       1_000,
     );
@@ -49,17 +49,17 @@ describe("ProviderStatusStore", () => {
       sevenDay: undefined,
       readAt: 1_000,
     });
-    expect(store.lastCapacityReadAt("claude-mm")).toBe(1_000);
+    expect(store.lastCapacityReadAt("claude-main")).toBe(1_000);
   });
 
   it("degrades to unavailable on a failed reading and forgets the old number", () => {
     const store = new ProviderStatusStore(AGENTS);
     store.recordCapacity(
-      "claude-mm",
+      "claude-main",
       { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
       1_000,
     );
-    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 2_000);
+    store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);
 
     // A stale number kept behind a failure would be a reading the user
     // cannot date — worse than saying we don't know (ruling P21's shape).
@@ -93,7 +93,7 @@ describe("ProviderStatusStore", () => {
     // Give both anthropic accounts a known capacity reading first, so a bug
     // that let recordHealth touch capacity would be visible as a change.
     store.recordCapacity(
-      "claude-mm",
+      "claude-main",
       { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
       1_000,
     );
@@ -139,31 +139,31 @@ describe("ProviderStatusStore", () => {
     it("reports the failure's own time, not undefined and not an earlier success", () => {
       const store = new ProviderStatusStore(AGENTS);
       store.recordCapacity(
-        "claude-mm",
+        "claude-main",
         { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
         1_000,
       );
-      store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 2_000);
+      store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);
 
-      expect(store.lastCapacityReadAt("claude-mm")).toBe(2_000);
+      expect(store.lastCapacityReadAt("claude-main")).toBe(2_000);
     });
 
     it("advances to the later failed attempt even though the reading itself reverts to unknown", () => {
       const store = new ProviderStatusStore(AGENTS);
       store.recordCapacity(
-        "claude-mm",
+        "claude-main",
         { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
         1_000,
       );
-      store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 2_000);
+      store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);
 
-      expect(store.lastCapacityReadAt("claude-mm")).toBe(2_000);
+      expect(store.lastCapacityReadAt("claude-main")).toBe(2_000);
       expect(store.snapshot()[0]?.capacity).toEqual({ state: "unknown", reason: "unavailable" });
     });
 
     it("returns undefined for an account that has never been read", () => {
       const store = new ProviderStatusStore(AGENTS);
-      expect(store.lastCapacityReadAt("claude-mm")).toBeUndefined();
+      expect(store.lastCapacityReadAt("claude-main")).toBeUndefined();
     });
   });
 
@@ -192,7 +192,7 @@ describe("ProviderStatusStore", () => {
     const listener = vi.fn();
     const off = store.onChange(listener);
 
-    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 1);
+    store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 1);
     expect(listener).toHaveBeenCalledTimes(1);
 
     off();
@@ -209,7 +209,7 @@ describe("ProviderStatusStore", () => {
     store.onChange(bad);
     store.onChange(good);
 
-    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 1);
+    store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 1);
 
     expect(bad).toHaveBeenCalledTimes(1);
     expect(good).toHaveBeenCalledTimes(1);

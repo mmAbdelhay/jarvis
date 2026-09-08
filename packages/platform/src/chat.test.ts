@@ -13,8 +13,8 @@ describe("chatUrl", () => {
   });
 
   test("opens Teams at a named tenant", () => {
-    expect(chatUrl({ name: "Globex", driver: "teams", account: "globex.com" })).toBe(
-      "https://teams.microsoft.com/?tenantId=globex.com",
+    expect(chatUrl({ name: "Globex", driver: "teams", account: "orbit.com" })).toBe(
+      "https://teams.microsoft.com/?tenantId=orbit.com",
     );
   });
 

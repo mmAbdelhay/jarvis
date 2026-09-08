@@ -12,8 +12,8 @@ async function tempDir(): Promise<string> {
 
 const draft: JarvisConfig = {
   registry: {
-    agents: { "claude-mm": { command: "claude-mm", model: "opus", default: true } },
-    routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
+    agents: { "claude-main": { command: "claude-main", model: "opus", default: true } },
+    routing: [{ match: { project: "acme" }, agent: "claude-main" }],
   },
   projects: { acme: "/Users/x/projects/acme" },
   databases: {},
@@ -151,7 +151,7 @@ describe("validateDraft", () => {
     // An agent with no command — genuinely invalid, unlike an empty agents
     // map (which is a valid, if pointless, config).
     const invalid = {
-      registry: { agents: { "claude-mm": {} }, routing: [] },
+      registry: { agents: { "claude-main": {} }, routing: [] },
       projects: {},
       brain: { cwd: "/tmp" },
       whisper: draft.whisper,
@@ -162,7 +162,7 @@ describe("validateDraft", () => {
 
     expect(result).toEqual({
       ok: false,
-      detail: "Config `agents.claude-mm.command` must be a string",
+      detail: "Config `agents.claude-main.command` must be a string",
     });
   });
 
@@ -222,13 +222,13 @@ describe("toRawConfig", () => {
   it("writes only accountId/cwd/systemPrompt under brain, not the computed configDir", () => {
     const withAccount: JarvisConfig = {
       ...draft,
-      brain: { ...draft.brain, accountId: "claude-mm", configDir: "/Users/x/.claude-mm" },
+      brain: { ...draft.brain, accountId: "claude-main", configDir: "/Users/x/.claude-main" },
     };
 
     const raw = toRawConfig(withAccount) as { brain: Record<string, unknown> };
 
     expect(raw.brain).toEqual({
-      accountId: "claude-mm",
+      accountId: "claude-main",
       cwd: "/Users/x/.config/jarvis/brain",
       systemPrompt: "You are Jarvis.",
     });
@@ -258,8 +258,8 @@ describe("writeSettingsFile", () => {
 
     expect(result).toEqual({ ok: true });
     const written = parse(await readFile(path, "utf8"));
-    expect(written.agents["claude-mm"].command).toBe("claude-mm");
-    expect(written.routing[0].agent).toBe("claude-mm");
+    expect(written.agents["claude-main"].command).toBe("claude-main");
+    expect(written.routing[0].agent).toBe("claude-main");
   });
 
   // The bug this exists to prevent, spelled out end to end: open Settings,
@@ -326,13 +326,13 @@ describe("writeSettingsFile", () => {
 
     const invalid = {
       ...draft,
-      registry: { agents: { "claude-mm": {} }, routing: [] },
+      registry: { agents: { "claude-main": {} }, routing: [] },
     } as unknown as JarvisConfig;
     const result = await writeSettingsFile(path, invalid);
 
     expect(result).toEqual({
       ok: false,
-      detail: "Config `agents.claude-mm.command` must be a string",
+      detail: "Config `agents.claude-main.command` must be a string",
     });
     expect(await readFile(path, "utf8")).toBe("original: true");
   });

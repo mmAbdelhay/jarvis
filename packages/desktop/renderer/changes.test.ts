@@ -340,7 +340,7 @@ describe("openChanges", () => {
             id: "s1",
             project: "متجر",
             projectPath: "~/مشاريع/متجر",
-            agentId: "claude-mm",
+            agentId: "claude-main",
             lastActivityAt: Date.now(),
             endedAt: undefined,
           },

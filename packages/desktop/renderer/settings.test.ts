@@ -9,10 +9,10 @@ function sample(): JarvisConfig {
   return {
     registry: {
       agents: {
-        "claude-mm": { command: "claude-mm", model: "opus", default: true, configDir: "/x/.claude-mm" },
+        "claude-main": { command: "claude-main", model: "opus", default: true, configDir: "/x/.claude-main" },
         copilot: { command: "copilot" },
       },
-      routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
+      routing: [{ match: { project: "acme" }, agent: "claude-main" }],
     },
     projects: { acme: "/x/projects/acme" },
     databases: {},
@@ -36,7 +36,7 @@ function sample(): JarvisConfig {
       greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
       speakGreeting: true,
     },
-    brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-mm" },
+    brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-main" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
     performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
     sessions: { importWindowDays: 30 },
@@ -180,7 +180,7 @@ describe("openSettings", () => {
       "You are Jarvis.",
     );
     expect((document.getElementById("settings-brain-account") as HTMLSelectElement).value).toBe(
-      "claude-mm",
+      "claude-main",
     );
   });
 
@@ -201,7 +201,7 @@ describe("openSettings", () => {
       .map((option) => option.value)
       .filter((value) => value !== "");
 
-    expect(options).toEqual(["claude-mm"]);
+    expect(options).toEqual(["claude-main"]);
   });
 
   it("populates the routing rule's agent select from the current agents", async () => {
@@ -211,7 +211,7 @@ describe("openSettings", () => {
       (option) => (option as HTMLOptionElement).value,
     );
 
-    expect(options).toContain("claude-mm");
+    expect(options).toContain("claude-main");
     expect(options).toContain("copilot");
   });
 });
@@ -225,7 +225,7 @@ describe("settings row editing", () => {
       "#settings-agents .settings-row input",
     )[1] as HTMLInputElement;
 
-    commandInput.value = "claude-mm-renamed-command";
+    commandInput.value = "claude-main-renamed-command";
     commandInput.dispatchEvent(new Event("input", { bubbles: true }));
     document.getElementById("settings-save")?.click();
     await Promise.resolve();
@@ -234,7 +234,7 @@ describe("settings row editing", () => {
     // so the draft actually sent to Save still has the original value.
     const saved = calls.find((entry) => entry.call === "saveSettings");
     const sent = saved?.args[0] as JarvisConfig | undefined;
-    expect(sent?.registry.agents["claude-mm"]?.command).toBe("claude-mm");
+    expect(sent?.registry.agents["claude-main"]?.command).toBe("claude-main");
   });
 
   it("adds a new blank agent row", async () => {
@@ -263,7 +263,7 @@ describe("settings row editing", () => {
     const removeButtons = document.querySelectorAll<HTMLElement>(
       "#settings-agents .settings-row-remove",
     );
-    // claude-mm is the first agent row and is targeted by the one routing
+    // claude-main is the first agent row and is targeted by the one routing
     // rule in the fixture.
     removeButtons[0]?.click();
 
@@ -1115,10 +1115,10 @@ describe("settings chat section", () => {
     await openSettings();
 
     const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
-    account.value = "globex.com";
+    account.value = "orbit.com";
     change(account);
 
-    expect((await saved(calls)).chat["acme"]?.[0]?.account).toBe("globex.com");
+    expect((await saved(calls)).chat["acme"]?.[0]?.account).toBe("orbit.com");
   });
 
   // An emptied account means "the provider's own picker", and parseConfig

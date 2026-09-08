@@ -1,4 +1,5 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
@@ -290,6 +291,63 @@ export function parseConfig(raw: unknown): JarvisConfig {
  *  exact same file `loadConfig` reads at startup, rather than duplicating
  *  this path as a second literal that could drift from this one. */
 export const DEFAULT_CONFIG_PATH = join(homedir(), ".config/jarvis/jarvis.yaml");
+
+/**
+ * The file a machine that has never run Jarvis starts from.
+ *
+ * Deliberately the smallest thing that parses and still does something: one
+ * agent, and the brain's own directory. No `projects:` — a new machine has
+ * nothing checked out, and a project pointing at a directory that is not
+ * there is worse than no project at all. Everything else in the file has a
+ * default worth having, and Settings writes the rest back in the user's own
+ * words once they change it.
+ *
+ * `claude` rather than one of the wrapper names this repo's example config
+ * uses: a wrapper is something you set up, and the plain CLI is what a new
+ * machine is most likely to have. A command that is not installed is
+ * reported as a broken agent in the startup line, which is a thing you can
+ * read and fix — unlike the dialog this exists to prevent.
+ */
+const FIRST_RUN_CONFIG = `# Written by Jarvis on first run. Yours to edit — by hand, or in Settings.
+# Every key, with worked examples: docs/guide/configuration.md
+agents:
+  claude:
+    command: claude
+    default: true
+    vendor: anthropic
+
+brain:
+  systemPrompt: You are Jarvis.
+
+# Projects Jarvis can open an editor, terminal, database or API tab for.
+# Add your own; the name is what you say to route work to it.
+# projects:
+#   my-app: ~/projects/my-app
+`;
+
+/**
+ * Makes sure there is a config to read, and says whether it had to write
+ * one. Never overwrites: the moment the file exists it is the user's, even
+ * when it is mid-edit and currently invalid.
+ *
+ * This is the whole of first run. Without it `loadConfig` below throws
+ * ENOENT on a machine that has never run Jarvis, and the startup handler
+ * turns that into "Jarvis failed to start" and quits — which is exactly
+ * what a downloaded build did on every machine but the one it was built on.
+ */
+export async function ensureConfigFile(path: string = DEFAULT_CONFIG_PATH): Promise<boolean> {
+  try {
+    await readFile(path, "utf8");
+    return false;
+  } catch {
+    // Unreadable for any reason is treated as absent, and the write below
+    // is what decides: a directory in the way, or a permission problem,
+    // throws from there and reaches the startup dialog with a real message.
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, FIRST_RUN_CONFIG, "utf8");
+    return true;
+  }
+}
 
 export async function loadConfig(path: string = DEFAULT_CONFIG_PATH): Promise<JarvisConfig> {
   const text = await readFile(path, "utf8");

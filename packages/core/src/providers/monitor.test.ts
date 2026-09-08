@@ -5,7 +5,7 @@ import type { ProviderMonitorDeps } from "./monitor.js";
 import { MIN_CAPACITY_REFRESH_MS, ProviderMonitor } from "./monitor.js";
 
 const AGENTS: AgentConfig[] = [
-  { id: "claude-mm", command: "claude-mm", configDir: "/c/mm", vendor: "anthropic" },
+  { id: "claude-main", command: "claude-main", configDir: "/c/mm", vendor: "anthropic" },
   { id: "claude-acme", command: "claude-acme", configDir: "/c/sd", vendor: "anthropic" },
   { id: "copilot", command: "copilot", vendor: "github" },
 ];
@@ -155,7 +155,7 @@ describe("ProviderMonitor.onChange", () => {
     const listener = vi.fn();
     const off = monitor.onChange(listener);
 
-    store.recordCapacity("claude-mm", { ok: false, reason: "unavailable" }, 1);
+    store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 1);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith(store.snapshot());
 
@@ -192,7 +192,7 @@ describe("ProviderMonitor.refreshHealth", () => {
 describe("ProviderMonitor.recordPiggyback", () => {
   it("records a free reading and resets the paid-refresh clock with it", async () => {
     const { monitor, store, readCapacity } = build();
-    monitor.recordPiggyback("claude-mm", OK);
+    monitor.recordPiggyback("claude-main", OK);
 
     expect(store.snapshot()[0]?.capacity.state).toBe("known");
 

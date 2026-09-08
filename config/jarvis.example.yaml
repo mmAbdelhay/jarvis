@@ -1,6 +1,6 @@
 agents:
-  claude-mm:
-    command: claude-mm
+  claude-main:
+    command: claude-main
     model: opus
     default: true
     # The CLAUDE_CONFIG_DIR this account's wrapper sets. Its presence is what
@@ -29,7 +29,7 @@ projects:
   acme: ~/projects/acme
   storefront: ~/projects/storefront
   atlas: ~/projects/atlas
-  globex: ~/projects/globex
+  orbit: ~/projects/orbit
 
 # Which folders inside a project the Editor button can open code-server at.
 # Optional, and most projects have no entry: without one the editor opens at
@@ -56,7 +56,7 @@ editors:
 chat:
   acme:
     - { name: Acme, driver: slack, account: acme }
-  globex:
+  orbit:
     - { name: Globex, driver: teams }
 
 brain:
@@ -65,7 +65,7 @@ brain:
   # brain's spend attributable, and lets its usage reading be credited to that
   # account for free — no extra billed query. Omit it and no capacity is
   # attributed to anyone (Jarvis will not guess which account paid).
-  accountId: claude-mm
+  accountId: claude-main
   systemPrompt: |
     You are Jarvis, a voice assistant that runs coding sessions.
     The user speaks Arabic and English. Always reply in the language they used.

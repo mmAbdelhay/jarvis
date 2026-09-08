@@ -36,7 +36,7 @@ function fakeGitProvider(overrides: Partial<GitProvider> = {}): GitProvider {
 
 const registry = new AgentRegistry({
   agents: {
-    "claude-mm": { command: "claude-mm", model: "opus", default: true },
+    "claude-main": { command: "claude-main", model: "opus", default: true },
     "claude-acme": { command: "claude-acme", model: "sonnet" },
   },
   routing: [{ match: { project: "acme" }, agent: "claude-acme" }],
@@ -176,11 +176,11 @@ describe("Orchestrator", () => {
     const orchestrator = build(
       brainReturning({
         text: "Using mm.",
-        toolCalls: [{ name: "session.start", input: { project: "acme", agent: "claude-mm" } }],
+        toolCalls: [{ name: "session.start", input: { project: "acme", agent: "claude-main" } }],
       }),
     );
     await orchestrator.handle("use my main account", "en");
-    expect(sessions.list()[0]?.agentId).toBe("claude-mm");
+    expect(sessions.list()[0]?.agentId).toBe("claude-main");
   });
 
   it("reports an unknown project without throwing", async () => {
@@ -321,7 +321,7 @@ describe("Orchestrator", () => {
         text: "Starting both.",
         toolCalls: [
           { name: "session.start", input: { project: "acme" } },
-          { name: "session.start", input: { project: "acme", agent: "claude-mm" } },
+          { name: "session.start", input: { project: "acme", agent: "claude-main" } },
         ],
       }),
     );
@@ -329,7 +329,7 @@ describe("Orchestrator", () => {
     expect(sessions.list()).toHaveLength(2);
     const second = sessions.list()[1];
     expect(turn.sessionId).toBe(second?.id);
-    expect(turn.agentId).toBe("claude-mm");
+    expect(turn.agentId).toBe("claude-main");
   });
 
   it("keeps a successful tool call's result when a later call in the same reply fails", async () => {
@@ -575,7 +575,7 @@ describe("Orchestrator", () => {
   it("does not let a stale model outlive its session across two session.start calls", async () => {
     const localRegistry = new AgentRegistry({
       agents: {
-        "claude-mm": { command: "claude-mm", model: "opus", default: true },
+        "claude-main": { command: "claude-main", model: "opus", default: true },
         "claude-plain": { command: "claude-plain" },
       },
     });
@@ -583,7 +583,7 @@ describe("Orchestrator", () => {
       brain: brainReturning({
         text: "Starting both.",
         toolCalls: [
-          { name: "session.start", input: { project: "a", agent: "claude-mm" } },
+          { name: "session.start", input: { project: "a", agent: "claude-main" } },
           { name: "session.start", input: { project: "a", agent: "claude-plain" } },
         ],
       }),
@@ -1184,7 +1184,7 @@ describe("git tools", () => {
   describe("providers.status", () => {
     const statuses: ProviderStatus[] = [
       {
-        id: "claude-mm",
+        id: "claude-main",
         vendor: "anthropic",
         capacity: {
           state: "known",
@@ -1214,7 +1214,7 @@ describe("git tools", () => {
 
       const turn = await orchestrator.handle("which account can I use", "en");
 
-      expect(turn.text).toContain("claude-mm");
+      expect(turn.text).toContain("claude-main");
       expect(turn.text).toContain("38%");
       expect(turn.text).toContain("copilot");
       // Reading the cache is free; a spoken question must not silently bill.
@@ -1256,7 +1256,7 @@ describe("git tools", () => {
       });
 
       const turn = await orchestrator.handle("check now", "en");
-      expect(turn.text).toContain("claude-mm");
+      expect(turn.text).toContain("claude-main");
     });
 
     it("answers in Arabic when the user spoke Arabic", async () => {
