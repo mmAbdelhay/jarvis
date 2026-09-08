@@ -414,9 +414,9 @@ describe("createSessionImporter", () => {
   const DAY = 24 * 60 * 60 * 1000;
 
   const AGENTS = [
-    { id: "claude-mm", command: "claude-mm", vendor: "anthropic" as const, configDir: "/h/.claude-mm" },
+    { id: "claude-main", command: "claude-main", vendor: "anthropic" as const, configDir: "/h/.claude-main" },
   ];
-  const DIR = "/h/.claude-mm/projects";
+  const DIR = "/h/.claude-main/projects";
 
   /** One transcript's worth of JSONL, in the shape a real one has. */
   function transcript(options: {
@@ -547,7 +547,7 @@ describe("createSessionImporter", () => {
       state: "done",
       project: null,
       projectPath: "/Users/u/work/notes",
-      agentId: "claude-mm",
+      agentId: "claude-main",
       summary: "rename the file",
       branch: "main",
       lastActivityAt: NOW - DAY,

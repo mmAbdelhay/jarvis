@@ -30,7 +30,7 @@ class FakeStore implements SessionStore {
   }
 }
 
-const agent: AgentConfig = { id: "claude-mm", command: "claude-mm", model: "opus" };
+const agent: AgentConfig = { id: "claude-main", command: "claude-main", model: "opus" };
 
 class FakeProcess implements ProcessHandle {
   written: string[] = [];
@@ -63,7 +63,7 @@ describe("SessionManager", () => {
     const session = manager.start({ project: "acme", projectPath: "/p/acme", agent });
     expect(session.state).toBe("starting");
     expect(session.project).toBe("acme");
-    expect(session.agentId).toBe("claude-mm");
+    expect(session.agentId).toBe("claude-main");
     expect(session.model).toBe("opus");
   });
 

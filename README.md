@@ -60,15 +60,37 @@ what is uncommitted. Re-run, workflows, history and the AI's suggestion all
 
 ## Getting started
 
+### Install the built app
+
+Grab the `.dmg` from the releases page, open it, and drag Jarvis to
+Applications. Two things are worth knowing before you do:
+
+- **Apple Silicon only.** The build is arm64; an Intel Mac cannot run it.
+- **It is not signed by an identified developer**, so the first launch is
+  refused with a warning that macOS cannot check it for malware. Open
+  System Settings → Privacy & Security and press **Open Anyway**, or run
+  `xattr -dr com.apple.quarantine /Applications/Jarvis.app`. This is what
+  ad-hoc signing costs; nothing about the app changes either way.
+
+Jarvis writes `~/.config/jarvis/jarvis.yaml` on first run and opens with it,
+so there is nothing to set up before the first launch. It will report the
+agent it cannot find until you install one — see
+**[installation](docs/guide/installation.md)** for the external tools each
+Workspace tab wants, all of them optional except the agent CLI itself.
+
+### Or run it from source
+
 New machine? **[SETUP.md](SETUP.md)** walks the whole thing, start to finish.
 
 ```bash
 pnpm install
 pnpm --filter @jarvis/desktop start      # builds, then opens the app
+pnpm --filter @jarvis/desktop package    # builds Jarvis.app and the .dmg
 ```
 
-Configuration lives at `~/.config/jarvis/jarvis.yaml`. Jarvis reads it at
-startup; the Settings route writes it back. See **[the configuration
+Configuration lives at `~/.config/jarvis/jarvis.yaml`. Jarvis writes a
+starting one on first run, reads it at startup, and the Settings route writes
+it back. See **[the configuration
 guide](docs/guide/configuration.md)** for what every key does, and
 **[installation](docs/guide/installation.md)** for the handful of external
 tools each Workspace tab needs.
@@ -135,5 +157,5 @@ close, including the ones that were wrong first.
 
 ## Licence
 
-Private. Third-party components keep their own licences — see
+[MIT](LICENSE). Third-party components keep their own licences — see
 [architecture](docs/develop/architecture.md#third-party-components).

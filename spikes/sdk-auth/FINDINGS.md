@@ -4,7 +4,7 @@
 - node v25.2.1, pnpm 10.28.2, npx 11.6.2
 - `@anthropic-ai/claude-agent-sdk` 0.3.251 (installed fresh, no cached version)
 - `~/.npmrc` has `ignore-scripts=true` (left untouched, as instructed)
-- Ran with `CLAUDE_CONFIG_DIR=$HOME/.claude-main` (the "you" account's config dir, matching wrapper script `~/.local/bin/claude-mm`)
+- Ran with `CLAUDE_CONFIG_DIR=$HOME/.claude-main` (the "you" account's config dir, matching wrapper script `~/.local/bin/claude-main`)
 - `/opt/homebrew/bin/claude --version` returned `2.1.251 (Claude Code)` cleanly before the probe ran — the native-binary-stub bug (see brief context #3) did **not** occur during this spike, so no repair via `install.cjs` was needed.
 
 ## Step 1: scaffold + install
@@ -58,11 +58,11 @@ The assistant's actual reply text was `"ok"` — the model complied with the "Re
 
 ## Chosen path
 
-**Path A**: the Agent SDK runs directly against the subscription. With `ANTHROPIC_API_KEY` explicitly unset and `CLAUDE_CONFIG_DIR` pointed at the `you` account's config directory (the same directory the `claude-mm` wrapper script uses), `query()` authenticated successfully, streamed a full session (hook events, init, assistant message, rate-limit event, result) and produced the expected `"ok"` reply — no `ANTHROPIC_API_KEY` was required. `rate_limit_event.rateLimitType: "five_hour"` and `overageDisabledReason: "org_level_disabled"` confirm this ran against the subscription's rate-limit pool, not a pay-per-token API key.
+**Path A**: the Agent SDK runs directly against the subscription. With `ANTHROPIC_API_KEY` explicitly unset and `CLAUDE_CONFIG_DIR` pointed at the `you` account's config directory (the same directory the `claude-main` wrapper script uses), `query()` authenticated successfully, streamed a full session (hook events, init, assistant message, rate-limit event, result) and produced the expected `"ok"` reply — no `ANTHROPIC_API_KEY` was required. `rate_limit_event.rateLimitType: "five_hour"` and `overageDisabledReason: "org_level_disabled"` confirm this ran against the subscription's rate-limit pool, not a pay-per-token API key.
 
 ## Reasoning
 
-The SDK reads and reuses the same on-disk OAuth/session credentials under `CLAUDE_CONFIG_DIR` that the `claude` CLI itself uses, so Task 5's orchestrator can call `@anthropic-ai/claude-agent-sdk`'s `query()` in-process per account (setting `CLAUDE_CONFIG_DIR` per call/subprocess env) instead of spawning the `claude-mm` / `claude-acme` / `claude-personal` wrapper CLIs as child processes — Path B (spawning wrapper CLIs) is not required, though it remains a viable fallback if a future SDK version changes this behavior.
+The SDK reads and reuses the same on-disk OAuth/session credentials under `CLAUDE_CONFIG_DIR` that the `claude` CLI itself uses, so Task 5's orchestrator can call `@anthropic-ai/claude-agent-sdk`'s `query()` in-process per account (setting `CLAUDE_CONFIG_DIR` per call/subprocess env) instead of spawning the `claude-main` / `claude-acme` / `claude-personal` wrapper CLIs as child processes — Path B (spawning wrapper CLIs) is not required, though it remains a viable fallback if a future SDK version changes this behavior.
 
 ## Surprises
 

@@ -79,7 +79,7 @@ The method name is **explicitly labeled `_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON
 
 This is a real number for a real account, fetched through a supported (if experimental) SDK call the app already depends on. `100 - utilization` = remaining %, `resets_at` = exact reset time.
 
-Note: the app already handles the failure mode indirectly — `SDKAssistantMessageError` includes a `'rate_limit'` variant, which is what the phase-1 `claude-mm` interruption would have surfaced as.
+Note: the app already handles the failure mode indirectly — `SDKAssistantMessageError` includes a `'rate_limit'` variant, which is what the phase-1 `claude-main` interruption would have surfaced as.
 
 ## 4. Public status pages — confirmed
 

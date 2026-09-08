@@ -5,7 +5,7 @@ import { capacityReport, startupReport } from "./startup.js";
 
 const registry = new AgentRegistry({
   agents: {
-    "claude-mm": { command: "claude-mm", default: true },
+    "claude-main": { command: "claude-main", default: true },
     copilot: { command: "copilot" },
   },
 });
@@ -21,12 +21,12 @@ describe("startupReport", () => {
 
   it("names the broken agent and the repair command", async () => {
     const report = await startupReport(registry, async (command) =>
-      command === "claude-mm"
+      command === "claude-main"
         ? { code: 0, stdout: "", stderr: "Error: claude native binary not installed." }
         : { code: 0, stdout: "1.0.0", stderr: "" },
     );
-    expect(report.broken.map((b) => b.id)).toEqual(["claude-mm"]);
-    expect(report.message).toContain("claude-mm");
+    expect(report.broken.map((b) => b.id)).toEqual(["claude-main"]);
+    expect(report.message).toContain("claude-main");
     expect(report.message).toContain("install.cjs");
   });
 
@@ -41,7 +41,7 @@ describe("startupReport", () => {
 
 describe("capacityReport", () => {
   const known: ProviderStatus = {
-    id: "claude-mm",
+    id: "claude-main",
     vendor: "anthropic",
     capacity: {
       state: "known",
@@ -54,7 +54,7 @@ describe("capacityReport", () => {
 
   it("returns the capacity lines in the user's own language", () => {
     const message = capacityReport([known], "ar");
-    expect(message).toContain("claude-mm");
+    expect(message).toContain("claude-main");
     expect(message).toContain("المتبقي 38%");
   });
 

@@ -3,7 +3,7 @@ import { checkAgent, checkAll } from "./health.js";
 import type { CommandRunner } from "./health.js";
 import type { AgentConfig } from "./types.js";
 
-const agent: AgentConfig = { id: "claude-mm", command: "claude-mm", model: "opus" };
+const agent: AgentConfig = { id: "claude-main", command: "claude-main", model: "opus" };
 
 const runner = (result: { code: number; stdout: string; stderr: string }): CommandRunner =>
   async () => result;
@@ -11,7 +11,7 @@ const runner = (result: { code: number; stdout: string; stderr: string }): Comma
 describe("checkAgent", () => {
   it("reports healthy when the command prints a version", async () => {
     const health = await checkAgent(agent, runner({ code: 0, stdout: "2.1.251 (Claude Code)", stderr: "" }));
-    expect(health).toEqual({ id: "claude-mm", ok: true, detail: "2.1.251 (Claude Code)" });
+    expect(health).toEqual({ id: "claude-main", ok: true, detail: "2.1.251 (Claude Code)" });
   });
 
   it("detects the native-binary stub even though it exits zero", async () => {
@@ -49,7 +49,7 @@ describe("checkAgent", () => {
     const health = await checkAgent(agent, async () => {
       throw "boom";
     });
-    expect(health).toEqual({ id: "claude-mm", ok: false, detail: "boom" });
+    expect(health).toEqual({ id: "claude-main", ok: false, detail: "boom" });
   });
 
   it("reports unhealthy when the command prints nothing at all", async () => {
@@ -76,7 +76,7 @@ describe("checkAgent", () => {
 
       expect(health.ok).toBe(false);
       expect(health.detail.toLowerCase()).toContain("timed out");
-      expect(health.detail).toContain("claude-mm");
+      expect(health.detail).toContain("claude-main");
     });
 
     it("does not leak the timer once the probe answers before the deadline", async () => {
@@ -89,7 +89,7 @@ describe("checkAgent", () => {
       await vi.advanceTimersByTimeAsync(500);
       const health = await pending;
 
-      expect(health).toEqual({ id: "claude-mm", ok: true, detail: "1.2.3" });
+      expect(health).toEqual({ id: "claude-main", ok: true, detail: "1.2.3" });
       // The probe's own 500ms setTimeout has fired and self-cleared; the
       // only timer that could still be pending is checkAgent's 5000ms
       // deadline timer. If it were not cleared on the success path, it

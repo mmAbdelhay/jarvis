@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
-import { defaultSessionsDbPath, loadConfig, parseConfig } from "./config.js";
+import { defaultSessionsDbPath, ensureConfigFile, loadConfig, parseConfig } from "./config.js";
 
 const valid = {
-  agents: { "claude-mm": { command: "claude-mm", model: "opus", default: true } },
-  routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
+  agents: { "claude-main": { command: "claude-main", model: "opus", default: true } },
+  routing: [{ match: { project: "acme" }, agent: "claude-main" }],
   projects: { acme: "~/projects/acme" },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain" },
 };
@@ -18,13 +18,13 @@ const valid = {
 describe("parseConfig", () => {
   it("maps agents and routing into a registry config", () => {
     const config = parseConfig(valid);
-    expect(config.registry.agents["claude-mm"]?.command).toBe("claude-mm");
-    expect(config.registry.routing?.[0]?.agent).toBe("claude-mm");
+    expect(config.registry.agents["claude-main"]?.command).toBe("claude-main");
+    expect(config.registry.routing?.[0]?.agent).toBe("claude-main");
   });
 
   it("rejects a routing rule whose agent names no configured agent", () => {
     const raw = {
-      agents: { "claude-mm": { command: "claude-mm" } },
+      agents: { "claude-main": { command: "claude-main" } },
       brain: { cwd: "/tmp/brain" },
       routing: [{ match: { project: "acme" }, agent: "claude-typo" }],
     };
@@ -36,9 +36,9 @@ describe("parseConfig", () => {
 
   it("accepts a routing rule whose agent matches a configured one", () => {
     const raw = {
-      agents: { "claude-mm": { command: "claude-mm" } },
+      agents: { "claude-main": { command: "claude-main" } },
       brain: { cwd: "/tmp/brain" },
-      routing: [{ match: { project: "acme" }, agent: "claude-mm" }],
+      routing: [{ match: { project: "acme" }, agent: "claude-main" }],
     };
 
     expect(() => parseConfig(raw)).not.toThrow();
@@ -254,11 +254,65 @@ describe("the shipped example config", () => {
   it("parses", () => {
     const config = parseConfig(parse(readFileSync(examplePath, "utf8")));
 
-    expect(Object.keys(config.projects)).toContain("globex");
+    expect(Object.keys(config.projects)).toContain("orbit");
     expect(config.chat["acme"]).toEqual([
       { name: "Acme", driver: "slack", account: "acme" },
     ]);
-    expect(config.chat["globex"]).toEqual([{ name: "Globex", driver: "teams" }]);
+    expect(config.chat["orbit"]).toEqual([{ name: "Globex", driver: "teams" }]);
+  });
+});
+
+describe("ensureConfigFile", () => {
+  let dir: string | undefined;
+
+  afterEach(async () => {
+    if (dir !== undefined) await rm(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  // Jarvis read jarvis.yaml with a plain readFile and let the startup catch
+  // turn a missing one into "Jarvis failed to start" and a quit. That is the
+  // right contract for a file the user wrote and then broke; it is the wrong
+  // one for a machine that has never run Jarvis, where it means a downloaded
+  // build opens a dialog and dies. First run now gets a working file, which
+  // Settings can then edit in place.
+  it("writes a starting config when there is none", async () => {
+    dir = await mkdtemp(join(tmpdir(), "jarvis-first-run-"));
+    const path = join(dir, "nested", "jarvis.yaml");
+
+    const created = await ensureConfigFile(path);
+
+    expect(created).toBe(true);
+    // Whatever is seeded has to survive the very parser about to read it,
+    // or first run trades one failure dialog for another.
+    expect(() => parseConfig(parse(readFileSync(path, "utf8")))).not.toThrow();
+  });
+
+  // The file is the user's the moment it exists — including one they cut
+  // down on purpose, and one that is invalid because they are mid-edit.
+  it("never touches a config that is already there", async () => {
+    dir = await mkdtemp(join(tmpdir(), "jarvis-first-run-"));
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "agents: {}\n", "utf8");
+
+    const created = await ensureConfigFile(path);
+
+    expect(created).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe("agents: {}\n");
+  });
+
+  // Nothing seeded may depend on a path existing: a new machine has no
+  // projects checked out, and a missing agent command is reported as a
+  // broken agent at startup rather than refusing to open.
+  it("seeds an agent and a brain, and no projects", async () => {
+    dir = await mkdtemp(join(tmpdir(), "jarvis-first-run-"));
+    const path = join(dir, "jarvis.yaml");
+    await ensureConfigFile(path);
+
+    const config = parseConfig(parse(readFileSync(path, "utf8")));
+
+    expect(Object.keys(config.registry.agents)).toContain("claude");
+    expect(config.projects).toEqual({});
   });
 });
 
@@ -278,8 +332,8 @@ describe("loadConfig", () => {
       configPath,
       [
         "agents:",
-        "  claude-mm:",
-        "    command: claude-mm",
+        "  claude-main:",
+        "    command: claude-main",
         "    default: true",
         "brain:",
         "  systemPrompt: You are Jarvis.",
@@ -299,12 +353,12 @@ describe("agent provider fields", () => {
   it("parses configDir and vendor, expanding a tilde in configDir", () => {
     const config = parseConfig({
       agents: {
-        "claude-mm": { command: "claude-mm", configDir: "~/.claude-main", vendor: "anthropic" },
+        "claude-main": { command: "claude-main", configDir: "~/.claude-main", vendor: "anthropic" },
       },
       brain: {},
     });
-    expect(config.registry.agents["claude-mm"]?.configDir).toBe(join(homedir(), ".claude-main"));
-    expect(config.registry.agents["claude-mm"]?.vendor).toBe("anthropic");
+    expect(config.registry.agents["claude-main"]?.configDir).toBe(join(homedir(), ".claude-main"));
+    expect(config.registry.agents["claude-main"]?.vendor).toBe("anthropic");
   });
 
   it("leaves both fields absent when the config omits them", () => {
@@ -329,16 +383,16 @@ describe("agent provider fields", () => {
 describe("brain.accountId", () => {
   it("resolves the named account's config dir onto the brain config", () => {
     const config = parseConfig({
-      agents: { "claude-mm": { command: "claude-mm", configDir: "/c/mm" } },
-      brain: { accountId: "claude-mm" },
+      agents: { "claude-main": { command: "claude-main", configDir: "/c/mm" } },
+      brain: { accountId: "claude-main" },
     });
-    expect(config.brain.accountId).toBe("claude-mm");
+    expect(config.brain.accountId).toBe("claude-main");
     expect(config.brain.configDir).toBe("/c/mm");
   });
 
   it("rejects an accountId that names no agent, rather than silently ignoring it", () => {
     expect(() =>
-      parseConfig({ agents: { "claude-mm": { command: "claude-mm" } }, brain: { accountId: "ghost" } }),
+      parseConfig({ agents: { "claude-main": { command: "claude-main" } }, brain: { accountId: "ghost" } }),
     ).toThrow(/accountId/);
   });
 
@@ -357,7 +411,7 @@ describe("brain.accountId", () => {
 
 describe("databases", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { "storefront": "/p/storefront" },
   };
@@ -558,7 +612,7 @@ describe("voice", () => {
 
 describe("editors", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { acme: "/p/acme" },
   };
@@ -670,7 +724,7 @@ describe("editors", () => {
 
 describe("clusters", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { acme: "/p/acme" },
   };
@@ -851,7 +905,7 @@ describe("clusters", () => {
 
 describe("terminal completion", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { acme: "/p/acme" },
   };
@@ -910,7 +964,7 @@ describe("terminal completion", () => {
 
 describe("terminal blocks and notifications", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { acme: "/p/acme" },
   };
@@ -970,7 +1024,7 @@ describe("terminal blocks and notifications", () => {
 
 describe("workflows", () => {
   const base = {
-    agents: { "claude-mm": { command: "claude-mm", default: true } },
+    agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
     projects: { acme: "/p/acme" },
   };

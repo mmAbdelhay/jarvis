@@ -9,11 +9,11 @@ A full example, with every section:
 
 ```yaml
 agents:
-  claude-mm:
-    command: claude-mm          # the executable, as you would type it
+  claude-main:
+    command: claude-main          # the executable, as you would type it
     model: opus                 # passed as --model
     default: true               # used when no routing rule matches
-    configDir: /Users/you/.claude-mm
+    configDir: /Users/you/.claude-main
     vendor: anthropic           # anthropic | github — decides capacity reporting
   copilot:
     command: copilot
@@ -48,7 +48,7 @@ editors:                        # optional; per project, for the Editor button
       path: api
 
 clusters:                       # optional; per project, for the Cluster tab
-  opf:
+  platform:
     - name: dev                 # what the Cluster menu shows
       context: arn:aws:eks:eu-west-1:123456789012:cluster/app_dev
     - name: chaos
@@ -66,10 +66,10 @@ chat:                           # optional; per project, for the Chat tab
     - name: Acme             # what the Chat menu shows
       driver: slack               # slack | teams
       account: acme          # the Slack subdomain
-  globex:
+  orbit:
     - name: Globex
       driver: teams
-      account: globex.com           # the Teams tenant domain or id
+      account: orbit.com           # the Teams tenant domain or id
 
 headlamp:
   binary: /Applications/Headlamp.app/Contents/Resources/headlamp-server
@@ -88,7 +88,7 @@ workflows:                      # optional; per project, on top of ~/.config/jar
   acme: ./.jarvis/workflows
 
 brain:
-  accountId: claude-mm          # which agent answers voice; needs a configDir
+  accountId: claude-main          # which agent answers voice; needs a configDir
   cwd: /Users/you/.config/jarvis/brain
   systemPrompt: |
     You are Jarvis, a voice assistant that runs coding sessions.

@@ -26,7 +26,7 @@ function clock(iso: string | number): string {
 
 /** Ordinary case: 62% used, 38% remaining. */
 const known: ProviderStatus = {
-  id: "claude-mm",
+  id: "claude-main",
   vendor: "anthropic",
   capacity: {
     state: "known",
@@ -128,10 +128,10 @@ const healthUnknown: ProviderStatus = {
 describe("providerStatusLine — capacity known", () => {
   it("renders the ordinary case exactly, in both languages", () => {
     expect(providerStatusLine(known, "en")).toBe(
-      `claude-mm — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
+      `claude-main — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
     );
     expect(providerStatusLine(known, "ar")).toBe(
-      `claude-mm — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
+      `claude-main — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
     );
   });
 
@@ -211,10 +211,10 @@ describe("providerStatusLine — health", () => {
     // rendering bug that appended a *different* trailing clause (or an extra
     // separator with nothing after it) would still pass a not.toContain check.
     expect(providerStatusLine(known, "en")).toBe(
-      `claude-mm — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
+      `claude-main — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
     );
     expect(providerStatusLine(known, "ar")).toBe(
-      `claude-mm — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
+      `claude-main — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
     );
   });
 
@@ -249,10 +249,10 @@ describe("providerStatusLine — health", () => {
 describe("providerReportText", () => {
   it("gives one line per provider, in registry order, rendered exactly", () => {
     expect(providerReportText([known, capUnsupported], "en")).toBe(
-      `claude-mm — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}\ncopilot-x — no capacity reading available`,
+      `claude-main — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}\ncopilot-x — no capacity reading available`,
     );
     expect(providerReportText([known, capUnsupported], "ar")).toBe(
-      `claude-mm — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}\ncopilot-x — لا يوفّر قراءة للسعة`,
+      `claude-main — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}\ncopilot-x — لا يوفّر قراءة للسعة`,
     );
   });
 
@@ -270,10 +270,10 @@ describe("capacityReportText", () => {
 
   it("renders the label plus only the accounts with a reading, exactly, in both languages", () => {
     expect(capacityReportText([known, capUnsupported], "en")).toBe(
-      `Capacity left:\nclaude-mm — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
+      `Capacity left:\nclaude-main — 38% left · resets ${clock("2026-08-31T14:30:00.000Z")} · as of ${clock("2026-08-31T12:12:00.000Z")}`,
     );
     expect(capacityReportText([known, capUnsupported], "ar")).toBe(
-      `السعة المتبقية:\nclaude-mm — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
+      `السعة المتبقية:\nclaude-main — المتبقي 38% · يتجدد ${clock("2026-08-31T14:30:00.000Z")} · حتى ${clock("2026-08-31T12:12:00.000Z")}`,
     );
   });
 });

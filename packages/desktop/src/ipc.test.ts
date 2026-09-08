@@ -592,7 +592,7 @@ describe("provider wiring", () => {
 
     const statuses: ProviderStatus[] = [
       {
-        id: "claude-mm",
+        id: "claude-main",
         vendor: "anthropic",
         capacity: { state: "unknown", reason: "never-read" },
         health: { state: "ok", detail: "ok", readAt: 1 },
@@ -653,7 +653,7 @@ describe("provider wiring", () => {
 describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not by renderer restraint", () => {
   it("a tight loop of forced refresh calls buys one billed read per account, not one per call", async () => {
     const agents = [
-      { id: "claude-mm", command: "claude", configDir: "/config/mm", vendor: "anthropic" as const },
+      { id: "claude-main", command: "claude", configDir: "/config/mm", vendor: "anthropic" as const },
       { id: "claude-personal", command: "claude", configDir: "/config/247", vendor: "anthropic" as const },
     ];
     const store = new ProviderStatusStore(agents);
@@ -1191,7 +1191,7 @@ describe("bookmarks handlers", () => {
 });
 
 const sampleConfig: JarvisConfig = {
-  registry: { agents: { "claude-mm": { command: "claude-mm" } }, routing: [] },
+  registry: { agents: { "claude-main": { command: "claude-main" } }, routing: [] },
   projects: { acme: "/p/acme" },
   databases: {},
   editors: {},
@@ -1300,10 +1300,10 @@ describe("createSettingsHandlers", () => {
       }),
     );
 
-    const health: AgentHealth = await handlers.testAgent({ id: "claude-mm", command: "claude-mm" });
+    const health: AgentHealth = await handlers.testAgent({ id: "claude-main", command: "claude-main" });
 
-    expect(health).toEqual({ id: "claude-mm", ok: true, detail: "1.2.3" });
-    expect(calls).toEqual([["claude-mm", ["--version"]]]);
+    expect(health).toEqual({ id: "claude-main", ok: true, detail: "1.2.3" });
+    expect(calls).toEqual([["claude-main", ["--version"]]]);
   });
 
   it("reports a broken agent as unhealthy rather than throwing", async () => {
@@ -1313,7 +1313,7 @@ describe("createSettingsHandlers", () => {
       }),
     );
 
-    const health = await handlers.testAgent({ id: "claude-mm", command: "claude-mm" });
+    const health = await handlers.testAgent({ id: "claude-main", command: "claude-main" });
 
     expect(health.ok).toBe(false);
   });
@@ -1443,12 +1443,12 @@ describe("database handlers", () => {
 
 describe("createClusterHandlers", () => {
   const clusters = {
-    opf: [
+    platform: [
       { name: "dev", context: "ctx-a" }, // unchanged — the six existing tests below still target this
       { name: "prod", context: "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev" }, // new
     ],
   };
-  const projects = { opf: "/tmp/opf" };
+  const projects = { platform: "/tmp/platform" };
 
   // A real kubeconfig: ctx-a isn't in it (so the six existing tests still
   // resolve no profile), the ARN context is, with AWS_PROFILE=saml.
@@ -1505,7 +1505,7 @@ users:
   }
 
   it("lists a project's cluster names in config order", async () => {
-    expect(await handlers().handlers.names("opf")).toEqual(["dev", "prod"]);
+    expect(await handlers().handlers.names("platform")).toEqual(["dev", "prod"]);
   });
 
   it("lists nothing for a project with no clusters", async () => {
@@ -1514,8 +1514,8 @@ users:
 
   it("resolves a cluster name to its context and returns the URL", async () => {
     const { handlers: h, open } = handlers();
-    expect(await h.open("opf", "dev")).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
-    expect(open).toHaveBeenCalledWith("opf", "ctx-a");
+    expect(await h.open("platform", "dev")).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+    expect(open).toHaveBeenCalledWith("platform", "ctx-a");
   });
 
   it("refuses a project it does not know", async () => {
@@ -1527,7 +1527,7 @@ users:
 
   it("refuses a cluster name the project does not declare", async () => {
     const { handlers: h, open } = handlers();
-    const result = await h.open("opf", "made-up");
+    const result = await h.open("platform", "made-up");
     expect(result.ok).toBe(false);
     expect(open).not.toHaveBeenCalled();
   });
@@ -1536,7 +1536,7 @@ users:
     const { handlers: h } = handlers({
       open: vi.fn().mockResolvedValue({ ok: false, detail: "did not become ready in time" }),
     });
-    const result = await h.open("opf", "dev");
+    const result = await h.open("platform", "dev");
     expect(result).toEqual({
       ok: false,
       text: "Could not open the cluster browser.",
@@ -1546,7 +1546,7 @@ users:
 
   it("survives a manager that throws", async () => {
     const { handlers: h } = handlers({ open: vi.fn().mockRejectedValue(new Error("boom")) });
-    expect((await h.open("opf", "dev")).ok).toBe(false);
+    expect((await h.open("platform", "dev")).ok).toBe(false);
   });
 
   it("opens straight away when the context has no AWS profile (unchanged path, e.g. ctx-a)", async () => {
@@ -1554,17 +1554,17 @@ users:
     // once more explicitly against the new deps so a future change to
     // ensureAwsSession's "nothing to check" branch fails a test that names it.
     const { handlers: h, checkAwsSession, opened } = handlers();
-    await h.open("opf", "dev");
+    await h.open("platform", "dev");
     expect(checkAwsSession).not.toHaveBeenCalled();
     expect(opened).toEqual([]);
   });
 
   it("opens straight away when the AWS session is already connected", async () => {
     const { handlers: h, open, checkAwsSession, opened } = handlers();
-    const result = await h.open("opf", "prod");
+    const result = await h.open("platform", "prod");
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
     expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
     expect(opened).toEqual([]);
   });
 
@@ -1572,8 +1572,8 @@ users:
     const { handlers: h, open, awaitAwsSession, opened, typed } = handlers({
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
-    const result = await h.open("opf", "prod");
-    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    const result = await h.open("platform", "prod");
+    expect(opened).toEqual([{ project: "platform", cwd: "/tmp/platform" }]);
     expect(typed).toEqual([
       {
         tabId: "tab-1",
@@ -1581,7 +1581,7 @@ users:
       },
     ]);
     expect(awaitAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
   });
 
@@ -1590,7 +1590,7 @@ users:
       checkAwsSession: vi.fn().mockResolvedValue(false),
       awaitAwsSession: vi.fn().mockResolvedValue(false),
     });
-    const result = await h.open("opf", "prod");
+    const result = await h.open("platform", "prod");
     expect(result).toEqual({
       ok: false,
       text: "AWS login did not finish in time. Check the terminal and try again.",
@@ -1608,7 +1608,7 @@ users:
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
 
-    const result = await h.open("opf", "prod", { background: true });
+    const result = await h.open("platform", "prod", { background: true });
 
     expect(opened).toEqual([]);
     expect(typed).toEqual([]);
@@ -1626,10 +1626,10 @@ users:
   it("still warms the cluster browser for a background call when AWS is connected", async () => {
     const { handlers: h, open, checkAwsSession, opened } = handlers();
 
-    const result = await h.open("opf", "prod", { background: true });
+    const result = await h.open("platform", "prod", { background: true });
 
     expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("opf", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
     expect(opened).toEqual([]);
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
   });
@@ -1642,10 +1642,10 @@ users:
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
 
-    await h.open("opf", "prod", { background: true });
-    await h.open("opf", "prod");
+    await h.open("platform", "prod", { background: true });
+    await h.open("platform", "prod");
 
-    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    expect(opened).toEqual([{ project: "platform", cwd: "/tmp/platform" }]);
     expect(typed).toHaveLength(1);
   });
 
@@ -1660,11 +1660,11 @@ users:
       checkAwsSession: vi.fn().mockResolvedValue(false),
       awaitAwsSession,
     });
-    const first = h.open("opf", "prod");
-    const second = h.open("opf", "prod");
+    const first = h.open("platform", "prod");
+    const second = h.open("platform", "prod");
     resolveAwait(true);
     await Promise.all([first, second]);
-    expect(opened).toEqual([{ project: "opf", cwd: "/tmp/opf" }]);
+    expect(opened).toEqual([{ project: "platform", cwd: "/tmp/platform" }]);
     expect(awaitAwsSession).toHaveBeenCalledTimes(1);
   });
 });
@@ -4328,7 +4328,7 @@ describe("createTranscriptHandler", () => {
     id: "s1",
     project: null,
     projectPath: "/home/u/app",
-    agentId: "claude-mm",
+    agentId: "claude-main",
     state: "done",
     summary: "hello",
     startedAt: 1,
@@ -4449,7 +4449,7 @@ describe("terminal open with an explicit directory", () => {
 
 describe("resumeCommandFor", () => {
   it("builds the CLI line that continues a session", () => {
-    expect(resumeCommandFor("claude-mm", "abc-123")).toBe("claude-mm --resume abc-123");
+    expect(resumeCommandFor("claude-main", "abc-123")).toBe("claude-main --resume abc-123");
   });
 
   // The command is typed into a live shell, so anything odd in it executes.
@@ -4461,7 +4461,7 @@ describe("resumeCommandFor", () => {
   });
 
   it("refuses a session id that is not a plain identifier", () => {
-    expect(resumeCommandFor("claude-mm", "abc; rm -rf /")).toBeUndefined();
+    expect(resumeCommandFor("claude-main", "abc; rm -rf /")).toBeUndefined();
   });
 });
 
@@ -4470,7 +4470,7 @@ describe("createResumeInTerminalHandler", () => {
     id: "11111111-2222-4333-8444-555555555555",
     project: null,
     projectPath: "/home/u/app",
-    agentId: "claude-mm",
+    agentId: "claude-main",
     state: "done",
     summary: "hello",
     startedAt: 1,
@@ -4483,7 +4483,7 @@ describe("createResumeInTerminalHandler", () => {
   });
 
   const agents: Record<string, AgentConfig> = {
-    "claude-mm": { id: "claude-mm", command: "claude-mm" },
+    "claude-main": { id: "claude-main", command: "claude-main" },
   };
 
   function harness(
@@ -4529,7 +4529,7 @@ describe("createResumeInTerminalHandler", () => {
     const { handler, typed } = harness(past({ project: "app" }));
     await handler(past().id, "app");
     expect(typed).toEqual([
-      { tabId: "tab-1", data: "claude-mm --resume 11111111-2222-4333-8444-555555555555\r" },
+      { tabId: "tab-1", data: "claude-main --resume 11111111-2222-4333-8444-555555555555\r" },
     ]);
   });
 

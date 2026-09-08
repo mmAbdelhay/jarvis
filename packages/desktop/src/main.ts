@@ -108,7 +108,12 @@ import {
   createDirectoryLister,
   createFileReader,
 } from "./completion-source.js";
-import { DEFAULT_CONFIG_PATH, defaultWorkflowsDir, loadConfig } from "./config.js";
+import {
+  DEFAULT_CONFIG_PATH,
+  defaultWorkflowsDir,
+  ensureConfigFile,
+  loadConfig,
+} from "./config.js";
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -249,6 +254,11 @@ app.whenReady().then(async () => {
       console.error(`Widevine component install failed: ${errorMessage(error)}`);
     });
   try {
+    // First run on a machine writes the file it is about to read. Without
+    // this, loadConfig throws ENOENT and the handler at the bottom of this
+    // block turns it into "Jarvis failed to start" — which is what every
+    // downloaded build did, on every machine but the one it was built on.
+    await ensureConfigFile(DEFAULT_CONFIG_PATH);
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
 

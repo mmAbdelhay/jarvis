@@ -231,7 +231,7 @@ describe("createPtySpawner", () => {
 // the CLI, and asserting them through a real pty proves the pty rather than
 // the argument list.
 describe("argsFor", () => {
-  const claude: AgentConfig = { id: "claude-mm", command: "claude-mm" };
+  const claude: AgentConfig = { id: "claude-main", command: "claude-main" };
 
   // Without this, a Jarvis-spawned session's transcript lands under an id
   // the CLI minted for itself, and the importer records the same
