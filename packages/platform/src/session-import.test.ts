@@ -37,28 +37,42 @@ describe("transcriptDirs", () => {
       { id: "claude-x", command: "claude-x", vendor: "anthropic", configDir: "/home/u/.claude-x" },
     ];
 
-    expect(transcriptDirs(agents)).toEqual([
-      { agentId: "claude-x", dir: "/home/u/.claude-x/projects" },
+    expect(transcriptDirs(agents, "/home/u")).toEqual([
+      { agentId: "claude-x", dir: "/home/u/.claude-x/projects", format: "claude" },
     ]);
   });
 
-  // v1 is Anthropic-only on purpose: Copilot keeps its sessions in another
-  // format entirely, and one importer serving both with exactly one of them
-  // written would be an abstraction built on a sample of one.
-  it("skips an agent of another vendor", () => {
+  // Copilot writes a session per directory, with its metadata in
+  // workspace.yaml — a second format, which is why the source now says
+  // which one it is rather than assuming.
+  it("maps a github agent to Copilot's session-state directory", () => {
     const agents: AgentConfig[] = [
       { id: "copilot", command: "copilot", vendor: "github", configDir: "/home/u/.copilot" },
     ];
 
-    expect(transcriptDirs(agents)).toEqual([]);
+    expect(transcriptDirs(agents, "/home/u")).toEqual([
+      { agentId: "copilot", dir: "/home/u/.copilot/session-state", format: "copilot" },
+    ]);
   });
 
-  it("skips an anthropic agent with no configDir", () => {
-    expect(transcriptDirs([{ id: "c", command: "c", vendor: "anthropic" }])).toEqual([]);
+  // The whole of first run: a machine that has just installed Jarvis has a
+  // config naming an agent and nothing else, and both CLIs keep their
+  // history exactly where they always do. Requiring configDir meant a fresh
+  // install imported nothing at all while the transcripts sat right there.
+  it("falls back to each vendor's own home when no configDir is set", () => {
+    const agents: AgentConfig[] = [
+      { id: "claude", command: "claude", vendor: "anthropic" },
+      { id: "copilot", command: "copilot", vendor: "github" },
+    ];
+
+    expect(transcriptDirs(agents, "/home/u")).toEqual([
+      { agentId: "claude", dir: "/home/u/.claude/projects", format: "claude" },
+      { agentId: "copilot", dir: "/home/u/.copilot/session-state", format: "copilot" },
+    ]);
   });
 
   it("skips an agent that declares no vendor at all", () => {
-    expect(transcriptDirs([{ id: "c", command: "c", configDir: "/home/u/.c" }])).toEqual([]);
+    expect(transcriptDirs([{ id: "c", command: "c", configDir: "/home/u/.c" }], "/home/u")).toEqual([]);
   });
 
   it("keeps one entry per agent when several qualify", () => {
@@ -67,7 +81,7 @@ describe("transcriptDirs", () => {
       { id: "b", command: "b", vendor: "anthropic", configDir: "/home/u/.b" },
     ];
 
-    expect(transcriptDirs(agents).map((entry) => entry.agentId)).toEqual(["a", "b"]);
+    expect(transcriptDirs(agents, "/home/u").map((entry) => entry.agentId)).toEqual(["a", "b"]);
   });
 });
 
@@ -482,7 +496,7 @@ describe("createSessionImporter", () => {
     const state = { closed: 0 };
 
     const deps: SessionImporterDeps = {
-      listFiles: async (dir) => {
+      listFiles: async (dir, _format) => {
         listed.push(dir);
         return Object.entries(files)
           .filter(([, file]) => (file.dir ?? DIR) === dir)
@@ -504,6 +518,7 @@ describe("createSessionImporter", () => {
       },
       now: () => NOW,
       store,
+      home: "/h",
       ownedIds: () => new Set(),
       agents: AGENTS,
       projects: { jarvis: "/Users/u/projects/jarvis" },
@@ -705,9 +720,9 @@ describe("createSessionImporter", () => {
       },
     );
     const inner = deps.listFiles;
-    deps.listFiles = async (dir) => {
+    deps.listFiles = async (dir, format) => {
       if (dir === DIR) throw new Error("ENOENT");
-      return inner(dir);
+      return inner(dir, format);
     };
 
     const imported = await createSessionImporter(deps).backfill();
@@ -716,15 +731,92 @@ describe("createSessionImporter", () => {
     expect(store.imported[0]?.session.agentId).toBe("claude-two");
   });
 
-  it("scans nothing for an agent that is not anthropic", async () => {
-    const { deps, listed } = world(
-      {},
+  // Copilot's own directory, in its own format. It used to be skipped
+  // outright, which is why a machine with 122 Copilot sessions on it showed
+  // none of them in the table.
+  it("imports a Copilot session from its workspace.yaml", async () => {
+    const { deps, store } = world(
+      {
+        "/h/.copilot/session-state/abc-123/workspace.yaml": {
+          dir: "/h/.copilot/session-state",
+          head: [
+            "id: abc-123",
+            "cwd: /Users/u/projects/jarvis",
+            "git_root: /Users/u/projects/jarvis",
+            "branch: main",
+            "name: |-",
+            "  add the importer",
+            "created_at: 2026-09-05T10:00:00.000Z",
+            "updated_at: 2026-09-05T10:20:00.000Z",
+          ].join("\n"),
+        },
+      },
+      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+    );
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(1);
+    const row = store.imported[0]?.session;
+    expect(row?.agentId).toBe("copilot");
+    expect(row?.id).toBe("abc-123");
+    expect(row?.project).toBe("jarvis");
+    expect(row?.branch).toBe("main");
+    expect(row?.summary).toBe("add the importer");
+    // No model in workspace.yaml, and none invented from anywhere else.
+    expect(row?.model).toBeUndefined();
+  });
+
+  // The majority shape on a real machine, not an edge case: of 122 sessions
+  // measured, 48 had no `name` key and 71 no `branch`. Both are absences to
+  // record as such, never reasons to drop the row.
+  it("imports a Copilot session that names neither a title nor a branch", async () => {
+    const { deps, store } = world(
+      {
+        "/h/.copilot/session-state/bare-1/workspace.yaml": {
+          dir: "/h/.copilot/session-state",
+          head: [
+            "id: bare-1",
+            "cwd: /Users/u/projects/jarvis",
+            "client_name: sdk",
+            "created_at: 2026-09-05T10:00:00.000Z",
+            "updated_at: 2026-09-05T10:05:00.000Z",
+          ].join("\n"),
+        },
+      },
+      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+    );
+
+    const imported = await createSessionImporter(deps).backfill();
+
+    expect(imported).toBe(1);
+    expect(store.imported[0]?.session.summary).toBe("");
+    expect(store.imported[0]?.session.branch).toBe("");
+  });
+
+  // Copilot is often run in a scratch checkout; those are still sessions,
+  // they just belong to no configured project.
+  it("keeps a Copilot session whose cwd is no project of ours", async () => {
+    const { deps, store } = world(
+      {
+        "/h/.copilot/session-state/tmp-1/workspace.yaml": {
+          dir: "/h/.copilot/session-state",
+          head: [
+            "id: tmp-1",
+            "cwd: /var/folders/tr/x/T/scratch",
+            "branch: main",
+            "name: poke at something",
+            "created_at: 2026-09-05T10:00:00.000Z",
+            "updated_at: 2026-09-05T10:00:30.000Z",
+          ].join("\n"),
+        },
+      },
       { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
     );
 
     await createSessionImporter(deps).backfill();
 
-    expect(listed).toEqual([]);
+    expect(store.imported[0]?.session.project).toBeNull();
   });
 
   it("closes every watcher on stop", async () => {
@@ -754,7 +846,7 @@ describe("createFsImportDeps", () => {
     // than take the scan down. This path is never created by this test.
     const { listFiles } = createFsImportDeps();
 
-    await expect(listFiles("/nonexistent-jarvis-session-import-test")).resolves.toEqual([]);
+    await expect(listFiles("/nonexistent-jarvis-session-import-test", "claude")).resolves.toEqual([]);
   });
 
   it("reads nothing from a file that does not exist", async () => {

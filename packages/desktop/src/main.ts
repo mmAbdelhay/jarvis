@@ -318,6 +318,9 @@ app.whenReady().then(async () => {
       // for one SessionManager is running.
       ownedIds: () => new Set(sessions.list().map((session) => session.id)),
       agents: registry.list(),
+      // Where an agent that names no configDir is looked for — which is
+      // every agent in the config Jarvis writes on first run.
+      home: homedir(),
       projects: config.projects,
       // Excluded by path: these are the brain talking to itself, and
       // imported they would outnumber real sessions two to one.
