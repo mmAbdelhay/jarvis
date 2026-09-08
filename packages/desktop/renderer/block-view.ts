@@ -32,6 +32,25 @@ export type BlockViewHooks = {
 export type BlockView = {
   element: HTMLElement;
   record: BlockRecord;
+  /**
+   * A second header for this same block, fully wired, for whoever needs to
+   * show one somewhere other than the block itself — today the pane's
+   * sticky header.
+   *
+   * It exists because the alternative both looks wrong and is wrong. The
+   * sticky header copied this header's `textContent`, which runs every span
+   * together into one string ("pnpm test✓2.4s~/projects/jarvis▾⧉↻⋯") and
+   * leaves the action glyphs as characters, so clicking them does nothing —
+   * a header in appearance and a label in behaviour. Cloning the node
+   * instead would keep the layout and still lose the handlers, and would
+   * take the more menu with it, opening it against a header that has
+   * scrolled out of sight.
+   *
+   * The collapse arrow is initialised from the block's current state, so a
+   * header built for a block that is already collapsed points the way a
+   * click on it would actually go.
+   */
+  createHeader(): HTMLElement;
   setSelected(selected: boolean): void;
   collapse(collapsed: boolean): void;
   isCollapsed(): boolean;
@@ -116,7 +135,14 @@ function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView
   const actions = document.createElement("span");
   actions.className = "block-actions";
 
-  const collapseButton = actionButton("block-collapse", "▾", "Collapse");
+  // Built from the block as it stands, not from an assumption that a header
+  // is only ever made for an expanded one — createHeader can be called at
+  // any time, including while the block is collapsed.
+  const collapseButton = actionButton(
+    "block-collapse",
+    view.isCollapsed() ? "▸" : "▾",
+    view.isCollapsed() ? "Expand" : "Collapse",
+  );
   collapseButton.addEventListener("click", (event) => {
     event.stopPropagation();
     const next = !view.isCollapsed();
@@ -207,6 +233,9 @@ export function createBlockView(record: BlockRecord, hooks: BlockViewHooks): Blo
   const view: BlockView = {
     element,
     record,
+    createHeader(): HTMLElement {
+      return buildHeader(record, hooks, view);
+    },
     setSelected(selected: boolean): void {
       element.classList.toggle("selected", selected);
     },

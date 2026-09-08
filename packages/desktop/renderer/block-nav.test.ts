@@ -31,12 +31,33 @@ function fakeView(command: string, exitCode: number | undefined, output = ""): B
     truncated: false,
   };
 
+  let collapsed = false;
   return {
     element,
     record,
+    // A stand-in for the real one: structured like the header block-view
+    // builds, with a control that actually acts on this view.
+    createHeader: () => {
+      const built = document.createElement("div");
+      built.className = "block-header";
+      const commandEl = document.createElement("span");
+      commandEl.className = "block-command";
+      commandEl.textContent = command;
+      const collapse = document.createElement("span");
+      collapse.className = "block-collapse";
+      collapse.textContent = collapsed ? "▸" : "▾";
+      collapse.addEventListener("click", () => {
+        collapsed = !collapsed;
+        collapse.textContent = collapsed ? "▸" : "▾";
+      });
+      built.append(commandEl, collapse);
+      return built;
+    },
     setSelected: (selected: boolean) => element.classList.toggle("selected", selected),
-    collapse: () => {},
-    isCollapsed: () => false,
+    collapse: (next: boolean) => {
+      collapsed = next;
+    },
+    isCollapsed: () => collapsed,
     text: () => `${command}\n${output}`,
     explain: () => {},
   };
@@ -352,7 +373,34 @@ describe("the sticky header", () => {
     container.dispatchEvent(new Event("scroll"));
 
     expect(sticky.hidden).toBe(false);
-    expect(sticky.textContent).toBe("a");
+    // The block's own header, built for this purpose — not its textContent
+    // flattened into one run ("a✓2.4s~/p▾⧉↻⋯") with dead glyphs where the
+    // actions should be.
+    expect(sticky.querySelector(".block-command")?.textContent).toBe("a");
+    expect(sticky.querySelector(".block-collapse")).not.toBeNull();
+  });
+
+  // The whole point of the rebuild: the controls in the sticky header are
+  // the block's own, so clicking one acts on the block it is standing in
+  // for rather than doing nothing at all.
+  it("acts on the block it stands in for", () => {
+    const { list, sticky, nav: n } = nav();
+    const container = document.createElement("div");
+    container.append(sticky, list);
+    document.body.append(container);
+    container.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+
+    const a = fakeView("a", 0);
+    const b = fakeView("b", 0);
+    list.append(a.element, b.element);
+    n.sync([a, b]);
+    a.element.getBoundingClientRect = () => ({ top: -40 }) as DOMRect;
+    b.element.getBoundingClientRect = () => ({ top: 20 }) as DOMRect;
+    container.dispatchEvent(new Event("scroll"));
+
+    sticky.querySelector<HTMLElement>(".block-collapse")?.click();
+
+    expect(a.isCollapsed()).toBe(true);
   });
 
   it("hides itself when no block has scrolled past the top yet", () => {
@@ -390,7 +438,7 @@ describe("the sticky header", () => {
 
     container.dispatchEvent(new Event("scroll"));
 
-    expect(sticky.textContent).toBe("a");
+    expect(sticky.querySelector(".block-command")?.textContent).toBe("a");
   });
 });
 
@@ -415,7 +463,7 @@ describe("dispose", () => {
     a.element.getBoundingClientRect = () => ({ top: -40 }) as DOMRect;
     b.element.getBoundingClientRect = () => ({ top: 20 }) as DOMRect;
     container.dispatchEvent(new Event("scroll"));
-    expect(sticky.textContent).toBe("a");
+    expect(sticky.querySelector(".block-command")?.textContent).toBe("a");
 
     // Now scrolled past both — if the listener still ran, this would flip
     // the header to "b". dispose() first, so it must not.
@@ -423,7 +471,7 @@ describe("dispose", () => {
     b.element.getBoundingClientRect = () => ({ top: -10 }) as DOMRect;
     container.dispatchEvent(new Event("scroll"));
 
-    expect(sticky.textContent).toBe("a");
+    expect(sticky.querySelector(".block-command")?.textContent).toBe("a");
   });
 
   it("does not throw when called twice", () => {
