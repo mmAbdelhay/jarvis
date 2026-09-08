@@ -210,6 +210,16 @@
     background: var(--panel);
     transition: border-color 140ms ease, background 140ms ease;
   }
+  /* The pill is hidden by its `hidden` attribute, and .pill sets `display:
+     flex` unconditionally. Both are AUTHOR rules, and an author rule always
+     beats the UA stylesheet's [hidden]{display:none} regardless of
+     specificity — so without this the empty pill rendered permanently
+     beside the voice pill, which is exactly what it did in the real window.
+     Same footgun as .main--changes and .history-overlay before it; see
+     view-display-css.test.ts. jsdom special-cases `hidden` outside the
+     cascade, so no renderer unit test can catch this — only the source
+     assertion in running-pill-css.test.ts and looking at the app can. */
+  .pill--running[hidden] { display: none; }
   .pill--running:hover { border-color: var(--accent); }
   .pill--running:focus-visible {
     outline: 1px solid var(--accent);
