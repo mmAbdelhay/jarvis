@@ -157,6 +157,23 @@ export function shellEnv(
     ...sanitizedShellEnv(env),
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
+    // Fig, Amazon Q and Kiro CLI ship one and the same zsh integration, and
+    // the first thing it does is re-exec the shell under its own pty
+    // wrapper (figterm) — unless Q_TERM says the session is already inside
+    // one. It is: node-pty below, xterm.js above. Saying so is honest, and
+    // it is the difference between a working terminal and a dead one.
+    //
+    // Unsaid, the wrapper launched inside the shell Jarvis spawns and
+    // panicked outright ("index out of bounds" in its bundled alacritty
+    // grid). With it went the ZDOTDIR hooks below: no OSC 133, so no block
+    // boundaries, no file sidebar (it opens on the shell's first directory
+    // report) and no chips — a plain terminal, with nothing said about why.
+    //
+    // Only ever in the installed build, which is what made it puzzling: a
+    // Jarvis started from a terminal inherits that session's own Q_TERM and
+    // so never triggered the wrapper. Same shape as the sidecars inheriting
+    // a GUI PATH rather than a login shell's.
+    Q_TERM: "1",
     ...(integration.zdotdir === undefined ? {} : { ZDOTDIR: integration.zdotdir }),
     ...(integration.commandLog === undefined
       ? {}

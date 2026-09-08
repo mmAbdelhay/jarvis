@@ -181,6 +181,24 @@ describe("shellEnv", () => {
     expect(env["JARVIS_COMMAND_LOG"]).toBe("/jarvis/commands.log");
   });
 
+  // Fig, Amazon Q and Kiro CLI all ship the same zsh integration: it
+  // re-execs the shell under their own pty wrapper (figterm) unless Q_TERM
+  // says something already did. Jarvis is that something — node-pty below,
+  // xterm.js above — and saying so is what stops the double wrap. Left
+  // unsaid, Kiro's wrapper launched inside a Finder-launched Jarvis and
+  // panicked ("index out of bounds" in its alacritty grid), taking the
+  // shell integration down with it: no OSC 133, so no blocks, no file
+  // sidebar and no chips, in the installed build only.
+  it("tells a Fig-family wrapper it is already inside a pty", () => {
+    expect(shellEnv({ HOME: "/home/me" }, {})["Q_TERM"]).toBe("1");
+  });
+
+  // Whatever the user's own shell had is not the point: this is about the
+  // shell Jarvis is spawning, and it is always inside Jarvis's pty.
+  it("says so even when the launching environment did not", () => {
+    expect(shellEnv({ HOME: "/home/me", Q_TERM: "" }, {})["Q_TERM"]).toBe("1");
+  });
+
   // No integration must mean no trace of it: a ZDOTDIR left pointing
   // anywhere would change which startup files the user's shell reads.
   it("leaves ZDOTDIR alone when there is no wrapper", () => {
