@@ -232,6 +232,23 @@ export type CompletionHooks = {
    *  top. Absent, the dropdown positions itself under the prompt mark's
    *  cell, as it always has. */
   anchor?: () => { x: number; top: number; bottom: number };
+  /** Whether a prompt is waiting, according to the caller rather than to
+   *  this module's own OSC handler.
+   *
+   *  It exists because the handler cannot see the marks in blocks mode.
+   *  terminal-pane's write() does not hand the raw stream to xterm there —
+   *  it pushes into the block splitter and writes only the text that comes
+   *  back, and the splitter consumes every "133;" payload as its own. So
+   *  the parser is never told a prompt started, tracker.mark() stays
+   *  undefined, and refresh() gave up on its first line for every
+   *  keystroke: no dropdown at all in the one mode that has an editor to
+   *  complete into.
+   *
+   *  The pane knows the answer — the splitter is what told it to show a
+   *  prompt — so it is the honest source here. Absent, the mark is the
+   *  source exactly as before, which is what a plain-mode terminal (raw
+   *  stream, real marks) still uses. */
+  promptActive?: () => boolean;
 };
 
 /** DEL, the byte a terminal sends for Backspace and the one zsh's line
@@ -322,9 +339,15 @@ export function attachCompletion(
     return { handleKey: () => true, close: () => {} };
   }
 
+  /** A prompt is waiting: either this module saw the mark, or the caller —
+   *  which in blocks mode is the only one that can — says so. */
+  function atPrompt(): boolean {
+    return tracker.mark() !== undefined || (hooks.promptActive?.() ?? false);
+  }
+
   async function refresh(): Promise<void> {
     const mark = tracker.mark();
-    if (mark === undefined) {
+    if (!atPrompt()) {
       dropdown.hide();
       openFor = undefined;
       return;
@@ -332,7 +355,12 @@ export function attachCompletion(
 
     let input: string | undefined;
     try {
-      input = hooks.readInput?.() ?? currentInput(terminal.buffer.active, mark);
+      // The buffer scrape needs a mark to read from. It is only ever
+      // reached with no editor in front of the shell, and that is exactly
+      // the case where the mark is the thing that got us here.
+      input =
+        hooks.readInput?.() ??
+        (mark === undefined ? undefined : currentInput(terminal.buffer.active, mark));
     } catch {
       input = undefined;
     }
@@ -350,18 +378,23 @@ export function attachCompletion(
     }
 
     // The user has typed on since this was asked for; the answer is stale.
+    // Still at a prompt, by whichever source answered before.
+    if (!atPrompt()) return;
     const latest = tracker.mark();
-    if (latest === undefined) return;
     let stillTyped: string | undefined;
     try {
-      stillTyped = hooks.readInput?.() ?? currentInput(terminal.buffer.active, latest);
+      stillTyped =
+        hooks.readInput?.() ??
+        (latest === undefined ? undefined : currentInput(terminal.buffer.active, latest));
     } catch {
       stillTyped = undefined;
     }
     if (stillTyped !== input) return;
 
     const cell = cellSize(host, terminal.cols, terminal.rows);
-    dropdown.show(items, mark, cell.x, cell.y);
+    // With no mark there is an editor, and `anchor` below replaces this
+    // placement outright — the origin is only somewhere for `show` to start.
+    dropdown.show(items, mark ?? { x: 0, y: 0 }, cell.x, cell.y);
     // An editor in front of the shell has no caret cell to be under — the
     // buffer never moves while it is live — so its own bounding box wins
     // over the cell math `show` just did. Direction is decided from the

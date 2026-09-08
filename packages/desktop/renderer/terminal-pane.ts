@@ -167,6 +167,15 @@ export type TerminalPane = {
    *  — undefined exactly when `readInput` and `applyInput` have nothing to
    *  work with either. */
   editorElement(): HTMLElement | undefined;
+  /** Whether the shell is sitting at a prompt with nothing running.
+   *
+   *  Completion needs this because it cannot see it for itself here: in
+   *  blocks mode the raw stream never reaches xterm (write() below feeds
+   *  the splitter and writes only what it emits), and the splitter eats
+   *  the "133;" marks completion's own OSC handler listens for. The
+   *  splitter is what told this pane a prompt is waiting, so the pane is
+   *  the one that can answer. */
+  atPrompt(): boolean;
   /** Opens the command palette over this pane's actions — what ⌘P calls,
    *  from terminal-addons.ts's own key handler, in every pane state:
    *  "blocks", "running", "alt" and "plain" alike. Never gated on the
@@ -1159,6 +1168,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     readInput: () => (editor !== undefined && editor.isVisible() ? editor.value() : undefined),
     applyInput: (line) => attempt(() => editor?.setValue(line)),
     editorElement: () => editor?.element,
+    atPrompt: () => idle(),
     // Unconditional — no state check here. That is the whole point: the
     // palette must open whether a command is running, the alt screen is
     // held, or there is no editor at all. Only the *actions* it offers

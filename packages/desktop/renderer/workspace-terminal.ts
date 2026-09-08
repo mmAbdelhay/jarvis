@@ -454,6 +454,11 @@ function makePane(
     ? {
         readInput: () => view.readInput(),
         applyInput: (line: string) => view.applyInput(line),
+        // The pane's answer, not the parser's: in blocks mode the marks
+        // are consumed by the block splitter and never reach xterm, so
+        // completion's own OSC handler never fires and every keystroke
+        // used to be dropped on refresh()'s first line.
+        promptActive: () => view.atPrompt(),
         // Left-aligned to the editor's own box, and handing over its
         // vertical span — not a caret cell, since the buffer never moves
         // while the editor is live to compute one from. Direction (above
