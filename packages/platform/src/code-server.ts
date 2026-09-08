@@ -251,12 +251,23 @@ export function waitUntilReady(url: string, timeoutMs = 15_000): Promise<boolean
  * on a port only Jarvis knows), pointed at one folder — a project, or a
  * configured root inside it.
  *
+ * `env` is not a detail: `code-server` is resolved on PATH, and a GUI app's
+ * PATH is `/usr/bin:/bin:/usr/sbin:/sbin` — not the login shell's, and not
+ * where Homebrew or npm put the binary. Inheriting this process's
+ * environment therefore worked from `pnpm start` and failed in the
+ * installed build, where the missing binary arrives as the "error" event
+ * below and is reported as an ordinary readiness failure: a dead Editor
+ * button with nothing said about why. main.ts hands this a login shell's
+ * PATH, the same one headlamp and docker already get.
+ *
  * `--auth none` is a real trade-off, not a default taken lightly: anything
  * already running as this user on this Mac could in principle reach the
  * port and use code-server's own terminal. Binding to loopback keeps it off
  * the network; there is currently no further access control beyond that.
  */
-export function createRealCodeServerSpawner(): CodeServerSpawner {
+export function createRealCodeServerSpawner(
+  env: NodeJS.ProcessEnv = process.env,
+): CodeServerSpawner {
   return ({ port, userDataDir, extensionsDir, folderPath }) => {
     const child = spawn(
       "code-server",
@@ -273,7 +284,7 @@ export function createRealCodeServerSpawner(): CodeServerSpawner {
         "--disable-update-check",
         folderPath,
       ],
-      { stdio: "ignore" },
+      { stdio: "ignore", env },
     );
 
     const exitListeners: ((code: number | null) => void)[] = [];

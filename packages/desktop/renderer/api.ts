@@ -143,9 +143,21 @@ export function initApi(): void {
   $("api-send").addEventListener("click", () => void send());
   $("api-save").addEventListener("click", () => void save());
   $("api-curl").addEventListener("click", () => void copyCurl());
-  $("api-new-request").addEventListener("click", () => void newRequest());
-  $("api-new-folder").addEventListener("click", () => void newFolder());
-  $("api-new-collection").addEventListener("click", () => void newCollection());
+  // The "+" menu. Each item still carries its own id and its own handler,
+  // so what the menu changed is where the buttons live, not what they do.
+  $("api-new").addEventListener("click", () => toggleNewMenu());
+  $("api-new-request").addEventListener("click", () => {
+    closeNewMenu();
+    void newRequest();
+  });
+  $("api-new-folder").addEventListener("click", () => {
+    closeNewMenu();
+    void newFolder();
+  });
+  $("api-new-collection").addEventListener("click", () => {
+    closeNewMenu();
+    void newCollection();
+  });
   $("api-import").addEventListener("click", () => void importPostman());
   $("api-env-edit").addEventListener("click", () => openEnvironmentEditor());
   $("api-env-add").addEventListener("click", () => addEnvironmentVariable());
@@ -945,4 +957,19 @@ function setStatus(text: string): void {
 
 export function activeEditorTab(): string {
   return currentTab();
+}
+
+/** The sidebar's "+" menu. Static markup rather than a built list — its
+ *  three items are fixed — so this only moves the hidden flag and keeps
+ *  aria-expanded honest for anything reading the button. */
+function toggleNewMenu(): void {
+  const menu = $("api-new-menu");
+  const open = menu.hidden;
+  menu.hidden = !open;
+  $("api-new").setAttribute("aria-expanded", String(open));
+}
+
+function closeNewMenu(): void {
+  $("api-new-menu").hidden = true;
+  $("api-new").setAttribute("aria-expanded", "false");
 }

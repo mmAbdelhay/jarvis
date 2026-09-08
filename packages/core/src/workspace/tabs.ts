@@ -47,6 +47,7 @@ export class TabStore {
       canGoForward: false,
       error: undefined,
       hasPlayingVideo: false,
+      pageFullscreen: false,
       suspended: false,
     };
     this.#tabs.push(tab);

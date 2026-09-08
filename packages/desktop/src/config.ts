@@ -37,6 +37,13 @@ export type VoiceConfig = {
    *  evening; `{ready}`, `{lastSession}` and `{uncommitted}` are available
    *  and left out of the default deliberately — see DEFAULT_GREETING. */
   greeting: { en: string; ar: string };
+  /** Whether the greeting is spoken as well as shown. The launch greeting
+   *  is the only thing Jarvis ever says unprompted, so this is the switch
+   *  for working somewhere that has to stay quiet. It silences the speech
+   *  alone: the same text still arrives in the conversation panel, because
+   *  what it reports (how long since the last session, what is ready) is
+   *  worth reading even when it is not worth hearing. */
+  speakGreeting: boolean;
 };
 
 /**
@@ -972,6 +979,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     englishVoice: DEFAULT_ENGLISH_VOICE,
     arabicVoice: DEFAULT_ARABIC_VOICE,
     greeting: { ...DEFAULT_GREETING },
+    speakGreeting: true,
   };
   if (rawVoice === undefined) return defaults;
   if (typeof rawVoice !== "object" || rawVoice === null || Array.isArray(rawVoice)) {
@@ -1006,6 +1014,11 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     throw new Error("Config `voice.engine` must be piper or say");
   }
 
+  const speakGreeting = voice["speakGreeting"];
+  if (speakGreeting !== undefined && typeof speakGreeting !== "boolean") {
+    throw new Error("Config `voice.speakGreeting` must be a boolean");
+  }
+
   return {
     engine: engine ?? DEFAULT_ENGINE,
     piperBinary: expandTilde(text("piperBinary", DEFAULT_PIPER_BINARY)),
@@ -1016,6 +1029,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
       en: typeof greeting["en"] === "string" ? greeting["en"] : DEFAULT_GREETING.en,
       ar: typeof greeting["ar"] === "string" ? greeting["ar"] : DEFAULT_GREETING.ar,
     },
+    speakGreeting: speakGreeting ?? true,
   };
 }
 

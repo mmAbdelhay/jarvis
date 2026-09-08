@@ -60,6 +60,8 @@ function harness(): Recorded[] {
         <div id="workspace-terminal" hidden></div>
         <div id="workspace-api" hidden>
           <select id="api-collection"></select>
+          <button id="api-new"></button>
+          <div id="api-new-menu" hidden></div>
           <button id="api-new-request"></button>
           <button id="api-new-folder"></button>
           <button id="api-new-collection"></button>
@@ -223,6 +225,7 @@ function tab(overrides: Partial<WorkspaceState["tabs"][number]> = {}) {
     canGoForward: false,
     error: undefined,
     hasPlayingVideo: false,
+    pageFullscreen: false,
     suspended: false,
     ...overrides,
   };
@@ -1509,6 +1512,7 @@ describe("open in editor", () => {
           canGoForward: false,
           error: undefined,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
         },
       ],
@@ -1539,6 +1543,7 @@ describe("open in editor", () => {
           canGoForward: false,
           error: undefined,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
         },
       ],
@@ -1659,6 +1664,7 @@ describe("open in editor, with configured roots", () => {
           detail: "portal-vue",
           loading: false,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
           canGoBack: false,
           canGoForward: false,
@@ -1688,6 +1694,7 @@ describe("open in editor, with configured roots", () => {
           detail: "portal-vue",
           loading: false,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
           canGoBack: false,
           canGoForward: false,
@@ -1722,6 +1729,7 @@ describe("open in editor, with configured roots", () => {
           title: "acme — Editor",
           loading: false,
           hasPlayingVideo: false,
+          pageFullscreen: false,
           suspended: false,
           canGoBack: false,
           canGoForward: false,
@@ -3002,3 +3010,52 @@ describe("the picture-in-picture button", () => {
     expect(pip().hidden).toBe(true);
   });
 });
+
+describe("a page taking full screen", () => {
+  beforeEach(() => {
+    harness();
+    initWorkspace(["acme"]);
+  });
+
+  // The bug: a video's full screen button made Jarvis's own window look
+  // like it went full screen while the video stayed exactly where it was,
+  // inside the tab slot. Chromium owns the page; the only thing left for
+  // the renderer to do is get its chrome out of the way so the slot the
+  // view is pinned to is the whole window.
+  it("marks the document so the chrome can stand down, and remeasures", () => {
+    renderWorkspace({
+      tabs: [tab({ pageFullscreen: true })],
+      activeTabId: "tab-1",
+    });
+
+    expect(document.body.classList.contains("page-fullscreen")).toBe(true);
+    expect(($("workspace-tabs") as HTMLElement).hidden).toBe(true);
+    expect(($("workspace-bar") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("puts the chrome back when the page gives full screen up", () => {
+    renderWorkspace({ tabs: [tab({ pageFullscreen: true })], activeTabId: "tab-1" });
+    renderWorkspace({ tabs: [tab({ pageFullscreen: false })], activeTabId: "tab-1" });
+
+    expect(document.body.classList.contains("page-fullscreen")).toBe(false);
+    expect(($("workspace-tabs") as HTMLElement).hidden).toBe(false);
+    expect(($("workspace-bar") as HTMLElement).hidden).toBe(false);
+  });
+
+  // A background tab's stale flag must not strip the chrome off the tab you
+  // are actually looking at.
+  it("ignores full screen on a tab that is not the active one", () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-1" }), tab({ id: "tab-2", pageFullscreen: true })],
+      activeTabId: "tab-1",
+    });
+
+    expect(document.body.classList.contains("page-fullscreen")).toBe(false);
+  });
+});
+
+function $(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (element === null) throw new Error(`no #${id}`);
+  return element;
+}

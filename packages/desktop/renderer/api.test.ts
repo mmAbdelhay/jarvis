@@ -33,6 +33,7 @@ function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
     canGoForward: false,
     error: undefined,
     hasPlayingVideo: false,
+    pageFullscreen: false,
     suspended: false,
     ...overrides,
   };
@@ -68,7 +69,9 @@ function markup(): string {
   return `
     <div id="workspace-api" hidden>
       <select id="api-collection"></select>
-      <button id="api-new-request"></button>
+      <button id="api-new"></button>
+          <div id="api-new-menu" hidden></div>
+          <button id="api-new-request"></button>
       <button id="api-new-folder"></button>
       <button id="api-new-collection"></button>
       <button id="api-import"></button>
@@ -546,10 +549,48 @@ describe("api request editor", () => {
   });
 });
 
+describe("the sidebar's new menu", () => {
+  beforeEach(() => harness());
+
+  // Three creates and an import, all the same weight, wrapped onto two rows
+  // and made the sidebar's head look like its own content. The menu is the
+  // fix; what it must not change is that each item still does its own job.
+  it("opens and closes, and says so", async () => {
+    const module = await load();
+    await show(module);
+
+    const button = document.getElementById("api-new") as HTMLButtonElement;
+    const menu = document.getElementById("api-new-menu") as HTMLElement;
+    expect(menu.hidden).toBe(true);
+
+    button.click();
+    expect(menu.hidden).toBe(false);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    button.click();
+    expect(menu.hidden).toBe(true);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("closes when an item is chosen", async () => {
+    const module = await load();
+    await show(module);
+
+    (document.getElementById("api-new") as HTMLButtonElement).click();
+    (document.getElementById("api-new-collection") as HTMLButtonElement).click();
+
+    expect((document.getElementById("api-new-menu") as HTMLElement).hidden).toBe(true);
+  });
+});
+
 describe("api response", () => {
   beforeEach(() => harness());
 
-  it("renders status, time, size and a pretty body", async () => {
+  // The status code is the first thing anyone looks for and it was buried
+  // mid-string in "200 OK · 12ms · 11 B", carrying one colour for every
+  // failure. It is now its own chip, coloured by class, with the timing and
+  // the size beside it as the quieter facts they are.
+  it("renders the status as a chip, with time and size beside it", async () => {
     const module = await load();
     await show(module);
     await openFirst();
@@ -557,8 +598,29 @@ describe("api response", () => {
     document.getElementById("api-send")?.click();
     await settle();
 
-    expect(document.querySelector(".api-status")?.textContent).toBe("200 OK · 12ms · 11 B");
+    expect(document.querySelector(".api-status")?.textContent).toBe("200 OK");
+    expect(document.querySelector(".api-status")?.classList.contains("api-status--ok")).toBe(true);
+    expect(document.querySelector(".api-meta")?.textContent).toBe("12ms · 11 B");
     expect(document.querySelector(".api-response-body")?.textContent).toBe('{\n  "ok": true\n}');
+  });
+
+  // A 404 is the API answering and a 500 is it breaking; one red for both
+  // said less than the code itself did.
+  it("colours the chip by class of status", async () => {
+    sendResult = {
+      response: { status: 404, statusText: "Not Found", headers: {}, body: "", timeMs: 3, bytes: 0, unresolved: [] },
+      assertions: [],
+    };
+    const module = await load();
+    await show(module);
+    await openFirst();
+
+    document.getElementById("api-send")?.click();
+    await settle();
+
+    const chip = document.querySelector(".api-status");
+    expect(chip?.classList.contains("api-status--client")).toBe(true);
+    expect(chip?.classList.contains("api-status--server")).toBe(false);
   });
 
   it("sends with the selected environment's variables", async () => {

@@ -33,6 +33,7 @@ const draft: JarvisConfig = {
     piperBinary: "/opt/piper",
     piperModel: "/voices/alan.onnx",
     englishVoice: "Daniel",
+    speakGreeting: true,
     arabicVoice: "Majed",
     greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
   },

@@ -1574,6 +1574,27 @@ export function renderWorkspace(state: WorkspaceState): void {
   for (const id of devToolsByTab) if (!liveTabs.has(id)) devToolsByTab.delete(id);
   renderDevTools();
 
+  // A page that has taken full screen gets the window, not the tab slot.
+  // Chromium has already put the page's own full screen element over its
+  // view; what it cannot do is move that view, which the renderer positions
+  // from #workspace-page. So the chrome stands down — the class hides the
+  // topbar, the workspace head and the bookmarks sidebar in CSS — and the
+  // slot grows to the whole window, which reportWorkspaceBounds below then
+  // hands to the view like any other layout change. Without this the video
+  // filled the rectangle under the tab strip and only Jarvis's own furniture
+  // disappeared, which is what "it full-screens Jarvis, not the video" was.
+  //
+  // Read from the active tab alone: a background tab cannot hold full
+  // screen (Chromium drops it when a page is hidden), and a stale flag on
+  // one must never strip the chrome off the tab actually on screen.
+  const pageFullscreen = tab?.pageFullscreen ?? false;
+  document.body.classList.toggle("page-fullscreen", pageFullscreen);
+  if (pageFullscreen) {
+    strip.hidden = true;
+    ($("workspace-bar") as HTMLElement).hidden = true;
+    renderBookmarksVisibility(true);
+  }
+
   // Hiding the address bar above the page, or the bookmarks sidebar beside
   // it, resizes the page slot the hosted view is pinned to, and nothing else
   // re-measures it — a resize is the only reflow the window itself

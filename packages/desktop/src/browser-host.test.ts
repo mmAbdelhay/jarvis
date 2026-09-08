@@ -807,6 +807,20 @@ describe("BrowserHost picture-in-picture", () => {
     expect(host.state().tabs[0]?.hasPlayingVideo).toBe(true);
   });
 
+  // The renderer draws its chrome from this flag, so it is the whole of
+  // Jarvis's side of full screen: Chromium owns the page, we own the layout.
+  it("records a page taking full screen, and giving it back", () => {
+    host.open("acme", "example.com");
+    const view = views[0];
+    if (view === undefined) throw new Error("no view");
+
+    view.emit({ kind: "fullscreen", fullscreen: true });
+    expect(host.state().tabs[0]?.pageFullscreen).toBe(true);
+
+    view.emit({ kind: "fullscreen", fullscreen: false });
+    expect(host.state().tabs[0]?.pageFullscreen).toBe(false);
+  });
+
   it("leaves the flag off when the page says it is only audio", async () => {
     host.open("acme", "example.com");
     const view = views[0];
@@ -927,6 +941,21 @@ describe("bridgeEvents", () => {
       { canGoBack: () => back, canGoForward: () => forward },
       (event) => events.push(event),
     );
+  });
+
+  // A page going full screen is Chromium's business, not ours — but the
+  // view it renders into is positioned by the renderer, which has to be
+  // told so it can give the page the whole window instead of the tab slot.
+  // Without this the video stayed exactly where it was and only Jarvis's
+  // own chrome went away, which reads as "the app went full screen".
+  it("reports a page entering and leaving full screen", () => {
+    contents.fire("enter-html-full-screen");
+    contents.fire("leave-html-full-screen");
+
+    expect(events).toEqual([
+      { kind: "fullscreen", fullscreen: true },
+      { kind: "fullscreen", fullscreen: false },
+    ]);
   });
 
   it("reports a title change", () => {

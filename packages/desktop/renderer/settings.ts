@@ -1047,6 +1047,7 @@ function renderVoice(): void {
   if (draft === undefined) return;
   fillVoiceSelect("settings-voice-en", "en", selectedEnglishVoice());
   fillVoiceSelect("settings-voice-ar", "ar", draft.voice.arabicVoice);
+  ($("settings-speak-greeting") as HTMLInputElement).checked = draft.voice.speakGreeting;
   ($("settings-greeting-en") as HTMLTextAreaElement).value = draft.voice.greeting.en;
   ($("settings-greeting-ar") as HTMLTextAreaElement).value = draft.voice.greeting.ar;
   renderVoiceNote();
@@ -1190,6 +1191,11 @@ function wireStaticFields(): void {
   });
   $("settings-voice-en-play").addEventListener("click", () => previewVoice("settings-voice-en", "en"));
   $("settings-voice-ar-play").addEventListener("click", () => previewVoice("settings-voice-ar", "ar"));
+  $("settings-speak-greeting").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.voice.speakGreeting = ($("settings-speak-greeting") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
   $("settings-greeting-en").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.voice.greeting.en = ($("settings-greeting-en") as HTMLTextAreaElement).value;

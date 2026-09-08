@@ -197,6 +197,61 @@
     flex-shrink: 0;
   }
 
+  /* The running-sessions pill. Same shape as the voice pill beside it —
+     they report the same kind of thing, facts the app knows about itself —
+     but this one is a button, so it also carries the accent the rest of the
+     app uses for "live" and a hover state to say it can be pressed. */
+  .pill--running {
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    color: var(--accent-text);
+    border-color: var(--accent-quiet);
+    background: var(--panel);
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  /* The pill is hidden by its `hidden` attribute, and .pill sets `display:
+     flex` unconditionally. Both are AUTHOR rules, and an author rule always
+     beats the UA stylesheet's [hidden]{display:none} regardless of
+     specificity — so without this the empty pill rendered permanently
+     beside the voice pill, which is exactly what it did in the real window.
+     Same footgun as .main--changes and .history-overlay before it; see
+     view-display-css.test.ts. jsdom special-cases `hidden` outside the
+     cascade, so no renderer unit test can catch this — only the source
+     assertion in running-pill-css.test.ts and looking at the app can. */
+  .pill--running[hidden] { display: none; }
+  .pill--running:hover { border-color: var(--accent); }
+  .pill--running:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* One orb per live session, overlapped a little so a group reads as a
+     cluster rather than a row of separate dots. */
+  .running-orbs {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .running-orb {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--panel);
+    animation: running-breathe 2.4s ease-in-out infinite;
+  }
+  .running-orb + .running-orb { margin-left: -2px; }
+
+  /* Deliberately the presence orb's own rhythm: this is the same fact about
+     the same agent, reported in a smaller place. Each orb is given its own
+     delay in app.ts — pulsing in step would read as one wide light and lose
+     the count the orbs exist to show. */
+  @keyframes running-breathe {
+    0%, 100% { opacity: 0.45; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+
   .spacer { flex-grow: 1; }
 
   /* Ambient: the time, the network and the machine are facts you glance at,
@@ -1179,7 +1234,24 @@
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
-  .api-sidebar-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  /* The collection picker is this sidebar's title, not one control among
+     four, so it gets the width and the weight to say so. */
+  .workspace-api-sidebar .workspace-project {
+    width: 100%;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  /* Two items now, not four wrapped onto two rows — the three creates live
+     behind the "+" menu. */
+  .api-sidebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .api-sidebar-actions .workspace-menu { min-width: 132px; }
   .workspace-api-main {
     display: flex;
     flex-direction: column;
@@ -1188,14 +1260,19 @@
     min-height: 0;
   }
   .api-tree { display: flex; flex-direction: column; gap: 2px; }
-  .api-group { padding-left: 10px; border-left: 1px solid var(--border); }
+  /* One indent step, drawn by the guide rather than by padding alone, so a
+     nested folder lines up with the rows above it instead of drifting. */
+  .api-group { margin-left: 7px; padding-left: 9px; border-left: 1px solid var(--border); }
   .api-folder {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 11px;
     color: var(--text-muted);
-    padding: 4px 0;
+    /* The same box as .api-request, so a folder and the requests under it
+       sit on one left edge and hover the same width. */
+    padding: 4px 6px;
+    border-radius: 4px;
   }
   .api-request {
     display: flex;
@@ -1255,6 +1332,41 @@
   /* The URL is the one thing that should absorb the leftover width, and the
      one thing allowed to shrink when there is none to absorb. */
   .api-bar .workspace-address { flex: 1 1 220px; min-width: 120px; }
+  /* One button in this bar is the point of it. Everything else is either an
+     action on the request (Save) or a panel to open, and giving them all the
+     same weight is what made the row read as a wall. */
+  .workspace-nav--primary {
+    color: var(--accent-text);
+    border-color: var(--accent);
+    background: var(--accent-quiet);
+  }
+  .workspace-nav--primary:hover { color: var(--text); border-color: var(--accent); }
+
+  /* Separates acting on the request from looking at a panel. A rule rather
+     than a gap: the gap is already the bar's rhythm and would say nothing. */
+  .api-bar-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  /* The panel toggles, as icons. They were five words of the same weight as
+     Send; each keeps its title, which is both the tooltip and its
+     accessible name. */
+  .api-bar-tools { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .api-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    padding: 0;
+    color: var(--text-muted);
+  }
+  .api-icon-btn svg { width: 15px; height: 15px; }
+  .api-icon-btn:hover { color: var(--accent-text); }
+  .api-icon-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
   .api-status-line { font-size: 11px; color: var(--text-muted); }
   .api-dirty { color: var(--accent); margin-left: 4px; }
 
@@ -1381,8 +1493,37 @@
   }
   .api-response-bar .api-tab-strip { border-bottom: none; }
   .api-response-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .api-status { font-size: 12px; color: var(--good); }
-  .api-status--bad, .api-status--failed { color: var(--del); }
+  /* The status code as a chip. It carries its own ground rather than only a
+     text colour, because it is the one thing in this pane read at a glance
+     and colour alone was doing all the work. One class per class of code:
+     a 404 is the API answering and a 500 is it breaking, and a single red
+     for both said less than the number already did. */
+  .api-status {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .api-status--ok { color: var(--good); border-color: var(--good); background: var(--good-quiet); }
+  .api-status--redirect { color: var(--accent-text); border-color: var(--accent); background: var(--accent-quiet); }
+  .api-status--client { color: var(--warn); border-color: var(--warn); background: var(--warn-quiet); }
+  .api-status--server { color: var(--del); border-color: var(--del); background: var(--bad-quiet); }
+  .api-status--info { color: var(--text-muted); border-color: var(--border); background: var(--panel); }
+  /* A request that never got an answer has no code to colour, so it keeps
+     the plain red line it always had rather than pretending to be a chip. */
+  .api-status--failed {
+    color: var(--del);
+    padding: 0;
+    border: 0;
+    background: none;
+    border-radius: 0;
+    font-size: 12px;
+  }
+  /* How long and how much: worth having, never worth reading first. */
+  .api-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
   .api-note { font-size: 11px; color: var(--text-muted); }
   .api-response { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; }
   .api-response-body { margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
@@ -1861,6 +2002,22 @@
      hosted view is a native overlay, not a DOM child (see views.ts). */
   .workspace-page { flex-grow: 1; min-height: 0; }
 
+  /* Full screen belongs to the page, not to Jarvis.
+
+     A hosted view is a native overlay positioned over .workspace-page, so
+     when a video asks Chromium for full screen the page can only ever fill
+     that slot — the topbar and the workspace head stay put above it, and
+     the result reads as the app going full screen around a video that did
+     not. These rules take the furniture away so the slot measures the whole
+     window; workspace.ts adds the class from the active tab's
+     pageFullscreen flag and remeasures, and the view follows.
+
+     Scoped to body rather than set on .topbar directly so the base rules
+     stay the single place each element's own layout is described, and so
+     leaving full screen is a class removal with nothing to restore. */
+  body.page-fullscreen .topbar,
+  body.page-fullscreen .workspace-head { display: none; }
+
   /* The Editor button's root picker. Anchored to the button rather than
      placed in the head's flex row, so opening it moves nothing. */
   .workspace-menu-anchor { position: relative; display: flex; }
@@ -2083,6 +2240,52 @@
     flex-grow: 1;
     max-width: 480px;
   }
+  /* The first switch in Settings. Built from a real checkbox so it keeps
+     the keyboard and the accessibility tree it was born with — the input
+     itself is what focus, space and a screen reader address, and the track
+     beside it is the only thing painted. Sized to sit on the same 11px
+     baseline as the labels around it rather than to be noticed. */
+  .settings-switch { position: relative; display: inline-flex; width: auto; }
+  .settings-switch input {
+    /* Not display:none, which takes it out of the focus order entirely. */
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .settings-switch-track {
+    display: block;
+    width: 34px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .settings-switch-track::after {
+    content: "";
+    display: block;
+    width: 12px;
+    height: 12px;
+    margin: 2px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 120ms ease, background 120ms ease;
+  }
+  .settings-switch input:checked + .settings-switch-track {
+    background: var(--accent-quiet);
+    border-color: var(--accent);
+  }
+  .settings-switch input:checked + .settings-switch-track::after {
+    transform: translateX(16px);
+    background: var(--accent);
+  }
+  .settings-switch input:focus-visible + .settings-switch-track {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .settings-field--wide { align-items: flex-start; }
   .settings-field--wide textarea {
     font: inherit;
@@ -2999,7 +3202,8 @@
 @media (prefers-reduced-motion: reduce) {
   .presence__ring,
   .presence__arc,
-  .presence__core {
+  .presence__core,
+  .running-orb {
     animation: none !important;
   }
 }

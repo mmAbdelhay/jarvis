@@ -31,6 +31,15 @@
          under a wordmark in the middle of the screen. It is ambient
          information about the app, which is what this strip is for. -->
     <div class="pill"><span class="pill-dot"></span><span id="voice-state">Online</span></div>
+    <!-- What is running, from wherever you are. The dashboard lists the
+         sessions, but this strip is the only thing on screen in every view,
+         so a session started in the Workspace was invisible until you went
+         back to look. Hidden while nothing is running: a pill reading
+         "0 running" would be furniture reporting nothing. -->
+    <button id="running-pill" class="pill pill--running" type="button" hidden>
+      <span id="running-orbs" class="running-orbs" aria-hidden="true"></span>
+      <span id="running-count" class="mono"></span>
+    </button>
     <div class="spacer"></div>
     <div class="clock mono">
       <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
@@ -356,10 +365,23 @@
       <div id="workspace-api" class="workspace-api" hidden>
         <div class="workspace-api-sidebar">
           <select id="api-collection" class="workspace-project mono"></select>
+          <!-- Four buttons of equal weight wrapped onto two rows above the
+               tree and made the sidebar's head look like its content. The
+               three that create something live behind one "+" now, the way
+               the Editor and Cluster root pickers already work; import is
+               the odd one out (it acts on a file, not on this collection)
+               and stays where it can be read. -->
           <div class="api-sidebar-actions">
-            <button id="api-new-request" class="settings-add" type="button">+ request</button>
-            <button id="api-new-folder" class="settings-add" type="button">+ folder</button>
-            <button id="api-new-collection" class="settings-add" type="button">+ collection</button>
+            <div class="workspace-menu-anchor">
+              <button id="api-new" class="settings-add" type="button"
+                      title="New request, folder or collection"
+                      aria-haspopup="true" aria-expanded="false">+ new</button>
+              <div id="api-new-menu" class="workspace-menu" hidden>
+                <button id="api-new-request" class="settings-add" type="button">request</button>
+                <button id="api-new-folder" class="settings-add" type="button">folder</button>
+                <button id="api-new-collection" class="settings-add" type="button">collection</button>
+              </div>
+            </div>
             <button id="api-import" class="settings-add" type="button">import</button>
           </div>
           <div id="api-tree" class="api-tree"></div>
@@ -370,13 +392,33 @@
             <input id="api-url" class="workspace-address mono" type="text" dir="ltr"
                    autocomplete="off" spellcheck="false" placeholder="https://" />
             <select id="api-environment" class="mono"></select>
-            <button id="api-env-edit" class="workspace-nav" type="button" title="Edit this environment">env</button>
-            <button id="api-send" class="workspace-nav" type="button">Send</button>
+            <!-- Send is the one thing this bar is for, so it is the one
+                 button carrying weight. Save sits beside it because it acts
+                 on the same request; everything after the divider is a panel
+                 to look at rather than an action on the request, which is
+                 why those became icons — five words of equal weight beside
+                 Send was the clutter. Each keeps its title, which is both
+                 the tooltip and the accessible name. -->
+            <button id="api-send" class="workspace-nav workspace-nav--primary" type="button">Send</button>
             <button id="api-save" class="workspace-nav" type="button" disabled>Save<span id="api-dirty" class="api-dirty" hidden>&#8226;</span></button>
-            <button id="api-curl" class="workspace-nav" type="button" title="Copy as cURL">cURL</button>
-            <button id="api-history-toggle" class="workspace-nav" type="button" title="Request history">hist</button>
-            <button id="api-cookies-toggle" class="workspace-nav" type="button" title="Cookies">cookies</button>
-            <button id="api-settings-toggle" class="workspace-nav" type="button" title="Proxy, TLS and timeout">net</button>
+            <span class="api-bar-divider" aria-hidden="true"></span>
+            <div class="api-bar-tools">
+              <button id="api-env-edit" class="workspace-nav api-icon-btn" type="button" title="Edit this environment" aria-label="Edit this environment">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+              </button>
+              <button id="api-curl" class="workspace-nav api-icon-btn" type="button" title="Copy as cURL" aria-label="Copy as cURL">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5"></path><path d="M12 19h8"></path></svg>
+              </button>
+              <button id="api-history-toggle" class="workspace-nav api-icon-btn" type="button" title="Request history" aria-label="Request history">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              </button>
+              <button id="api-cookies-toggle" class="workspace-nav api-icon-btn" type="button" title="Cookies" aria-label="Cookies">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9 9h.01M15 10h.01M10 15h.01M15 15h.01"></path></svg>
+              </button>
+              <button id="api-settings-toggle" class="workspace-nav api-icon-btn" type="button" title="Proxy, TLS and timeout" aria-label="Proxy, TLS and timeout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h10M18 8h2M4 16h4M12 16h8"></path><circle cx="16" cy="8" r="2"></circle><circle cx="10" cy="16" r="2"></circle></svg>
+              </button>
+            </div>
             <span id="api-status" class="mono api-status-line"></span>
           </div>
           <div id="api-env-panel" class="api-env-panel" hidden>
@@ -530,6 +572,17 @@
             <button id="settings-voice-ar-play" class="settings-add" type="button"
                     aria-label="Hear this voice">&#9654; play</button>
           </div>
+        </div>
+        <!-- The launch greeting is the only thing Jarvis says without being
+             asked. This silences that speech and nothing else: the same
+             greeting still arrives in the conversation panel, because what
+             it reports is worth reading even when it is not worth hearing. -->
+        <div class="settings-field">
+          <label for="settings-speak-greeting">speak greeting</label>
+          <label class="settings-switch">
+            <input id="settings-speak-greeting" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </label>
         </div>
         <div class="settings-field settings-field--wide">
           <label for="settings-greeting-en">greeting (english)</label>

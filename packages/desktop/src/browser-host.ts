@@ -27,7 +27,13 @@ export type HostedViewEvent =
    *  declares it in HTML rather than serving /favicon.ico. `session` is
    *  the view's own, carried on the event because BrowserHost otherwise has
    *  no route to it: HostedView deliberately exposes no WebContents. */
-  | { kind: "favicon"; pageUrl: string; iconUrl: string; session: Session };
+  | { kind: "favicon"; pageUrl: string; iconUrl: string; session: Session }
+  /** The page asked Chromium for full screen (a video's own button, or any
+   *  requestFullscreen call), or left it. Chromium handles the page's side;
+   *  this exists because the view is positioned by the renderer, which is
+   *  the only thing that can hand the page the whole window instead of the
+   *  rectangle under the tab strip. */
+  | { kind: "fullscreen"; fullscreen: boolean };
 
 /**
  * One page's worth of browser, as this host needs it. Electron is behind
@@ -403,6 +409,10 @@ export class BrowserHost {
           // The old page's video left with the old page. A flag carried
           // over would offer to float something that no longer exists.
           hasPlayingVideo: false,
+          // Same for full screen: Chromium drops it on navigation without
+          // firing leave-html-full-screen, and a stuck flag would leave the
+          // window with no chrome and no way to get it back.
+          pageFullscreen: false,
         });
         break;
       case "title":
@@ -439,6 +449,13 @@ export class BrowserHost {
             }
           })
           .catch(() => undefined);
+        break;
+      case "fullscreen":
+        // Chromium has already given the page full screen inside this view.
+        // All that is left is the layout: the renderer reads this flag,
+        // drops its own chrome and remeasures the slot as the whole window,
+        // and the view follows through the ordinary setBounds path.
+        this.#store.update(id, { pageFullscreen: event.fullscreen });
         break;
       case "popup":
         // What target=_blank means in a browser. The scheme gate inside
@@ -611,6 +628,18 @@ export function bridgeEvents(
   const on = (event: string, listener: (...args: never[]) => void): void => {
     contents.on(event, listener);
   };
+
+  // Chromium fires these on the WebContents whose page went full screen. It
+  // has already resized its own compositing; what it cannot know is that
+  // this WebContentsView is laid out by a renderer above it, so the page
+  // would otherwise fill the tab slot and nothing else.
+  on("enter-html-full-screen", (() => {
+    emit({ kind: "fullscreen", fullscreen: true });
+  }) as (...args: never[]) => void);
+
+  on("leave-html-full-screen", (() => {
+    emit({ kind: "fullscreen", fullscreen: false });
+  }) as (...args: never[]) => void);
 
   on("page-title-updated", ((_event: unknown, title: string) => {
     emit({ kind: "title", title });

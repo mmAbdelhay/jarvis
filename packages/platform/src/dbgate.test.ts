@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { connectionEnv, createDbGateManager, randomPassword, type DbGateProcess } from "./dbgate.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  connectionEnv,
+  createDbGateManager,
+  createRealDbGateSpawner,
+  randomPassword,
+  type DbGateProcess,
+} from "./dbgate.js";
 import type { DbGateConnection } from "./dbgate-types.js";
 
 describe("connectionEnv", () => {
@@ -388,5 +397,68 @@ describe("randomPassword", () => {
 
   it("does not repeat itself", () => {
     expect(randomPassword()).not.toBe(randomPassword());
+  });
+});
+
+describe("createRealDbGateSpawner", () => {
+  // The same GUI-PATH bug code-server had: `dbgate-serve` lives wherever
+  // npm or Homebrew put it, which is not on a Finder-launched app's PATH.
+  // The spawn failed as an async "error" event, which the manager reports
+  // as "exited before it started listening" — a silent dead Database
+  // button in the installed build only.
+  it("resolves the binary on the PATH it is handed, not the ambient one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dbgate-path-"));
+    await writeFile(
+      join(dir, "dbgate-serve"),
+      '#!/bin/sh\nprintf "DbGate API listening on port 3210\\n"\n',
+      { mode: 0o755 },
+    );
+
+    const ambient = process.env["PATH"];
+    process.env["PATH"] = "";
+    try {
+      const child = createRealDbGateSpawner({ PATH: dir })({
+        env: {},
+        workspaceDir: dir,
+      });
+
+      let output = "";
+      child.onStdout((chunk) => {
+        output += chunk;
+      });
+      await new Promise<number | null>((resolve) => {
+        child.onExit(resolve);
+      });
+      expect(output).toContain("DbGate API listening on port 3210");
+    } finally {
+      process.env["PATH"] = ambient;
+    }
+  });
+
+  // The per-spawn LOGIN/PASSWORD/CONNECTIONS must still reach the child,
+  // and must win over anything of the same name in the inherited
+  // environment — the credential the user is shown belongs to this spawn.
+  it("layers the instance environment over the one it inherits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dbgate-env-"));
+    await writeFile(
+      join(dir, "dbgate-serve"),
+      '#!/bin/sh\nprintf "PASSWORD=$PASSWORD MARKER=$MARKER\\n"\n',
+      { mode: 0o755 },
+    );
+
+    const child = createRealDbGateSpawner({ PATH: dir, MARKER: "inherited", PASSWORD: "stale" })({
+      env: { PASSWORD: "fresh" },
+      workspaceDir: dir,
+    });
+
+    let output = "";
+    child.onStdout((chunk) => {
+      output += chunk;
+    });
+    await new Promise<number | null>((resolve) => {
+      child.onExit(resolve);
+    });
+    expect(output).toContain("PASSWORD=fresh");
+    expect(output).toContain("MARKER=inherited");
   });
 });

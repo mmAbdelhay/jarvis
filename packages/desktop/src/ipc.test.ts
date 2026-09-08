@@ -1210,6 +1210,7 @@ const sampleConfig: JarvisConfig = {
     piperBinary: "/opt/piper",
     piperModel: "/voices/alan.onnx",
     englishVoice: "Daniel",
+    speakGreeting: true,
     arabicVoice: "Majed",
     greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
   },
@@ -3153,6 +3154,7 @@ describe("terminal handlers", () => {
         canGoForward: false,
         error: undefined,
         hasPlayingVideo: false,
+        pageFullscreen: false,
         suspended: false,
         ...overrides,
       };

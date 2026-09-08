@@ -70,7 +70,7 @@ export function renderResponse(): void {
     return;
   }
 
-  head.append(statusBadge(response), copyButton(response.body));
+  head.append(statusChip(response), responseMeta(response), copyButton(response.body));
   if (response.unresolved.length > 0) head.append(unresolvedNote(response.unresolved));
 
   for (const tab of RESPONSE_TABS) strip.append(tabButton(tab, response));
@@ -90,15 +90,44 @@ export function renderResponse(): void {
   panel.append(bodyView(response.body));
 }
 
-function statusBadge(response: ApiResponse): HTMLElement {
-  const badge = document.createElement("span");
-  badge.className = "api-status";
-  badge.classList.toggle("api-status--bad", response.status >= 400);
+/**
+ * The status code, on its own and coloured by its class.
+ *
+ * It used to be the head of a single string — "200 OK · 12ms · 11 B" — with
+ * one red variant for everything at 400 and above. The code is the first
+ * thing anyone looks for and the class is most of what it means: a 404 is
+ * the API answering, a 500 is it breaking, and a 302 is neither. Splitting
+ * the chip from the timing also stops the eye having to find the number
+ * inside a run of unrelated digits.
+ */
+function statusChip(response: ApiResponse): HTMLElement {
+  const chip = document.createElement("span");
+  chip.className = `api-status api-status--${statusClass(response.status)}`;
   // HTTP/2 sends no status text, so joining unconditionally would render
-  // "200  · 12ms", which reads as a word gone missing.
-  const status = [String(response.status), response.statusText].filter((part) => part !== "").join(" ");
-  badge.textContent = `${status} · ${response.timeMs}ms · ${formatBytes(response.bytes)}`;
-  return badge;
+  // "200 ", which reads as a word gone missing.
+  chip.textContent = [String(response.status), response.statusText]
+    .filter((part) => part !== "")
+    .join(" ");
+  return chip;
+}
+
+/** 1xx and anything unrecognised fall through to "info": a chip must always
+ *  get a colour, and an unknown code is not a failure to report as one. */
+function statusClass(status: number): "ok" | "redirect" | "client" | "server" | "info" {
+  if (status >= 200 && status < 300) return "ok";
+  if (status >= 300 && status < 400) return "redirect";
+  if (status >= 400 && status < 500) return "client";
+  if (status >= 500) return "server";
+  return "info";
+}
+
+/** How long it took and how much came back: worth having, never worth
+ *  reading first, so they sit beside the chip in the muted weight. */
+function responseMeta(response: ApiResponse): HTMLElement {
+  const meta = document.createElement("span");
+  meta.className = "api-meta mono";
+  meta.textContent = `${response.timeMs}ms · ${formatBytes(response.bytes)}`;
+  return meta;
 }
 
 function formatBytes(bytes: number): string {

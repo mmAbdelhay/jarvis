@@ -22,10 +22,12 @@ import {
 import { renderProviders, wireProvidersPanel } from "./providers.js";
 import {
   appendSessionOutput,
+  claimVoice,
   openSession,
   openSessionId,
   releaseVoice,
   renderEmptyState,
+  renderSessionTable,
   renderVoiceTarget,
   updateSessionHeader,
   wireSessionView,
@@ -113,6 +115,7 @@ window.jarvis.onSessions((sessions) => {
   const previous = latestSessions;
   latestSessions = sessions;
   renderSessions(latestSessions);
+  renderRunningPill(latestSessions);
   updateSessionHeader(latestSessions);
   autoOpenNewSession(previous, sessions);
 });
@@ -182,6 +185,13 @@ function wireNav(): void {
     const latest = [...latestSessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
     if (latest === undefined) return;
     void openChanges(latest.id);
+  });
+  // The pill is a shortcut to the thing it is reporting on: the same place
+  // the Session nav button goes, which is the table rather than any one
+  // session's terminal.
+  document.getElementById("running-pill")?.addEventListener("click", () => {
+    void renderSessionTable();
+    claimVoice();
   });
   document.getElementById("nav-workspace")?.addEventListener("click", () => {
     releaseVoice();
@@ -269,6 +279,61 @@ function setHeaderMetric(id: string, used: number, total: number): void {
 /** Sessions live in the Dashboard's centre now. They were also listed in a
  *  narrow card in the left rail, which meant rendering the same rows twice
  *  into two different widths; the card is gone. */
+/** The states a session is still doing something in. "waiting" is one of
+ *  them: a session waiting on input is live and wants an answer, which is
+ *  precisely when knowing it is there is worth something. */
+const LIVE_STATES: ReadonlySet<SessionState> = new Set<SessionState>([
+  "starting",
+  "running",
+  "waiting",
+]);
+
+/** How many orbs are drawn before they stop being countable at a glance.
+ *  Past this the count beside them is the honest way to say how many. */
+const MAX_ORBS = 3;
+
+/**
+ * The topbar's running-sessions indicator.
+ *
+ * The dashboard already lists what is running, but the topbar is the one
+ * strip that is on screen from every view — so a session started in the
+ * Workspace, or one that finished while Settings was open, was invisible
+ * until you went looking. This is the ambient version of that fact, next to
+ * the voice pill because it belongs to the same family: things the app
+ * knows about itself.
+ *
+ * Hidden at zero. A pill permanently reading "0 running" would be furniture
+ * reporting nothing, and the empty state is the common one.
+ */
+function renderRunningPill(sessions: Session[]): void {
+  const live = sessions.filter((session) => LIVE_STATES.has(session.state));
+  const pill = $("running-pill");
+
+  pill.hidden = live.length === 0;
+  if (live.length === 0) return;
+
+  $("running-count").textContent = `${live.length} running`;
+
+  // One orb per session so two read as two without parsing a number, each
+  // breathing on its own offset — in step they would look like one wide
+  // pulse and lose exactly the distinction they exist to draw.
+  const orbs = $("running-orbs");
+  orbs.replaceChildren(
+    ...live.slice(0, MAX_ORBS).map((_, index) => {
+      const orb = document.createElement("span");
+      orb.className = "running-orb";
+      orb.style.animationDelay = `${index * 0.45}s`;
+      return orb;
+    }),
+  );
+
+  // The whole list, not just the three with orbs: the tooltip is where
+  // someone goes for the detail the pill is too small to carry.
+  // projectLabel, not core's sessionLabel: a renderer module may import
+  // types from a workspace package but never a value — see format.ts.
+  pill.title = live.map((session) => `${projectLabel(session)} · ${session.agentId}`).join("\n");
+}
+
 function renderSessions(sessions: Session[]): void {
   renderCentre(sessions);
 }

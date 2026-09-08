@@ -276,12 +276,24 @@ function waitForPort(
  *
  * stdout is piped because the port is only knowable from it. stderr is
  * ignored, same as code-server's spawner.
+ *
+ * `baseEnv` carries the same PATH problem code-server's spawner documents:
+ * `dbgate-serve` is resolved on PATH, and a Finder-launched app's PATH does
+ * not include wherever npm or Homebrew installed it. The failed spawn
+ * arrives as the "error" event below, which the manager reports as
+ * "exited before it started listening" — so the Database button simply did
+ * not work in the installed build, and did work from a terminal.
  */
-export function createRealDbGateSpawner(): DbGateSpawner {
+export function createRealDbGateSpawner(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): DbGateSpawner {
   return ({ env, workspaceDir }) => {
     const child = spawn("dbgate-serve", [], {
       cwd: workspaceDir,
-      env: { ...process.env, ...env },
+      // The instance's own variables last: LOGIN, PASSWORD and the seeded
+      // CONNECTIONS belong to this spawn and must beat anything of the
+      // same name that happens to be in the inherited environment.
+      env: { ...baseEnv, ...env },
       stdio: ["ignore", "pipe", "ignore"],
     });
 
