@@ -42,6 +42,30 @@ describe("createPtySpawner", () => {
     expect(output).not.toContain("not a tty");
   });
 
+  // The bug: main.ts spawns agents with process.env, and a Finder-launched
+  // app's PATH is /usr/bin:/bin:/usr/sbin:/sbin — not where Homebrew or npm
+  // put `claude`. Every agent was reported broken at startup and no session
+  // could start, in installed builds only. The login shell's PATH is what
+  // fixes it, but asking for it costs a shell start, and blocking the window
+  // on a heavy .zshrc is its own regression — so the environment is resolved
+  // when a child is spawned, long after startup, not when the spawner is
+  // built.
+  it("reads its environment at spawn time when given a function", async () => {
+    let path = "/nowhere";
+    const spawn = createPtySpawner(() => ({ ...process.env, PATH: path, MARKER: path }));
+    // Resolved after the spawner was built, exactly as a login-shell lookup
+    // finishing in the background would be.
+    path = "/usr/bin:/bin";
+
+    const handle = spawn(
+      agent({ command: "/bin/sh", args: ["-c", "printf %s \"$MARKER\""] }),
+      process.cwd(),
+    );
+    const { output } = await collect(handle);
+
+    expect(output).toContain("/usr/bin:/bin");
+  });
+
   it("runs the child in the project directory", async () => {
     const spawn = createPtySpawner();
     const handle = spawn(agent({ command: "/bin/pwd" }), "/tmp");

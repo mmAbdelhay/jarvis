@@ -202,12 +202,28 @@ export function sanitizedShellEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * TERM of its own, and an agent that finds none falls back to a dumb
  * terminal with no colour and no cursor addressing.
  */
-export function createPtySpawner(env: NodeJS.ProcessEnv = process.env): Spawner {
+export function createPtySpawner(
+  /**
+   * The environment a child gets — or a function returning it, read at
+   * spawn time rather than when the spawner is built.
+   *
+   * The function form exists for PATH. An agent's command is resolved on
+   * it, and a Finder-launched app's PATH is `/usr/bin:/bin:/usr/sbin:/sbin`
+   * — not where Homebrew or npm put `claude`, so every agent was reported
+   * broken at startup and no session could start, in installed builds only.
+   * The login shell's PATH is the answer, but asking for it costs a shell
+   * start and a heavy .zshrc would then sit between app-ready and the
+   * window. Resolving late costs nothing: a child is spawned when somebody
+   * starts a session, long after that lookup has finished.
+   */
+  env: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv) = process.env,
+): Spawner {
   ensureSpawnHelperExecutable();
   const pty = require("node-pty") as PtyModule;
 
   return (agent: AgentConfig, projectPath: string, sessionId?: string): ProcessHandle => {
-    const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(env), TERM };
+    const resolved = typeof env === "function" ? env() : env;
+    const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(resolved), TERM };
 
     const child = pty.spawn(agent.command, argsFor(agent, sessionId), {
       name: TERM,
