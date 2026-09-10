@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createShellManager, shellEnv, type ShellProcess, type ShellSpawner } from "./shell.js";
+import {
+  createShellManager,
+  shellArgs,
+  shellCommand,
+  shellEnv,
+  type ShellProcess,
+  type ShellSpawner,
+} from "./shell.js";
 
 class FakeShell implements ShellProcess {
   written: string[] = [];
@@ -219,5 +226,68 @@ describe("shellEnv", () => {
 
     expect(env["TERM"]).toBe("xterm-256color");
     expect(env["COLORTERM"]).toBe("truecolor");
+  });
+});
+
+describe("shellCommand", () => {
+  it("uses $SHELL when the user has one", () => {
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "linux")).toBe("/usr/bin/fish");
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "darwin")).toBe("/usr/bin/fish");
+  });
+
+  it("falls back to zsh on macOS, its default since Catalina", () => {
+    expect(shellCommand({}, "darwin")).toBe("/bin/zsh");
+  });
+
+  it("falls back to bash on Linux, where zsh is often not installed at all", () => {
+    // A missing /bin/zsh is not a degraded terminal, it is no terminal: the
+    // pty spawn fails and the tab shows nothing.
+    expect(shellCommand({}, "linux")).toBe("/bin/bash");
+  });
+
+  it("treats an empty $SHELL as unset", () => {
+    expect(shellCommand({ SHELL: "" }, "linux")).toBe("/bin/bash");
+    expect(shellCommand({ SHELL: "" }, "darwin")).toBe("/bin/zsh");
+  });
+});
+
+describe("shellArgs", () => {
+  it("asks for a login shell when there is no integration", () => {
+    // Their profile, their PATH, their aliases, their prompt — the terminal
+    // they actually have.
+    expect(shellArgs({})).toEqual(["-l"]);
+  });
+
+  it("asks for a login shell under the zsh wrapper", () => {
+    // ZDOTDIR does the redirection; the shell is still a login shell.
+    expect(shellArgs({ zdotdir: "/cfg/zdotdir" })).toEqual(["-l"]);
+  });
+
+  it("asks for an interactive shell reading the wrapper under bash", () => {
+    // bash honours --rcfile only for an interactive NON-login shell, so the
+    // wrapper reads the profile files itself. See bash-integration.ts.
+    expect(shellArgs({ rcfile: "/cfg/bash/bashrc" })).toEqual([
+      "--rcfile",
+      "/cfg/bash/bashrc",
+      "-i",
+    ]);
+  });
+
+  it("never passes -l beside --rcfile, which would make bash ignore it", () => {
+    expect(shellArgs({ rcfile: "/cfg/bash/bashrc" })).not.toContain("-l");
+  });
+});
+
+describe("shellEnv under each wrapper", () => {
+  it("sets ZDOTDIR only for the zsh wrapper", () => {
+    expect(shellEnv({}, { zdotdir: "/z" })["ZDOTDIR"]).toBe("/z");
+    // bash's wrapper is an argument, not a variable; setting ZDOTDIR for it
+    // would change which startup files a zsh started later reads.
+    expect(shellEnv({}, { rcfile: "/b" })["ZDOTDIR"]).toBeUndefined();
+  });
+
+  it("sets the command log for either wrapper", () => {
+    expect(shellEnv({}, { zdotdir: "/z", commandLog: "/l" })["JARVIS_COMMAND_LOG"]).toBe("/l");
+    expect(shellEnv({}, { rcfile: "/b", commandLog: "/l" })["JARVIS_COMMAND_LOG"]).toBe("/l");
   });
 });
