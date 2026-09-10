@@ -210,16 +210,12 @@
     background: var(--panel);
     transition: border-color 140ms ease, background 140ms ease;
   }
-  /* The pill is hidden by its `hidden` attribute, and .pill sets `display:
-     flex` unconditionally. Both are AUTHOR rules, and an author rule always
-     beats the UA stylesheet's [hidden]{display:none} regardless of
-     specificity — so without this the empty pill rendered permanently
-     beside the voice pill, which is exactly what it did in the real window.
-     Same footgun as .main--changes and .history-overlay before it; see
-     view-display-css.test.ts. jsdom special-cases `hidden` outside the
-     cascade, so no renderer unit test can catch this — only the source
-     assertion in running-pill-css.test.ts and looking at the app can. */
-  .pill--running[hidden] { display: none; }
+  /* Nothing live: still on screen, but in the voice pill's own quiet colours
+     rather than the accent — "0 running" is an answer, not an alert. */
+  .pill--running.pill--idle {
+    color: var(--text-muted);
+    border-color: var(--border);
+  }
   .pill--running:hover { border-color: var(--accent); }
   .pill--running:focus-visible {
     outline: 1px solid var(--accent);
@@ -822,7 +818,7 @@
   .workspace-browser { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
   .workspace-browser[hidden] { display: none; }
 
-  .workspace-body { display: flex; flex-grow: 1; min-height: 0; }
+  .workspace-body { display: flex; flex-grow: 1; min-height: 0; min-width: 0; }
   /* Hidden in lockstep with #workspace-page (workspace.ts): otherwise an
      empty row would still claim its flex share and squeeze whatever
      renderer-drawn pane (terminal, API, Docker) is meant to fill it. */
@@ -1205,17 +1201,69 @@
   /* The terminal shares the page slot's region rather than sitting beside
      it: exactly one of the two is ever showing, since a terminal tab has no
      hosted view and a hosted tab has no terminal. */
-  /* The DevTools panel takes a share of the browser column's height, which
-     the renderer sets inline as it is dragged. No flex-grow: its size is the
-     drag's business, and the page slot above absorbs the rest. */
-  .workspace-devtools { flex-shrink: 0; min-height: 0; }
+  /* The page and its DevTools: stacked while they dock to the bottom, side by
+     side while they dock to a side. Left is the same row reversed, so the
+     markup never has to reorder. */
+  .workspace-stage { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; min-width: 0; }
+  .workspace-stage[hidden] { display: none; }
+  .workspace-stage--right { flex-direction: row; }
+  .workspace-stage--left { flex-direction: row-reverse; }
+
+  /* The DevTools panel takes a share of the stage — its height docked to the
+     bottom, its width docked to a side — which the renderer sets inline as it
+     is dragged. No flex-grow: its size is the drag's business, and the page
+     absorbs the rest. */
+  .workspace-devtools {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    min-height: 0;
+    min-width: 0;
+  }
   .workspace-devtools[hidden] { display: none; }
+
+  .workspace-devtools-head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    height: 26px;
+    padding: 0 6px;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--border);
+  }
+  .workspace-devtools-title { flex-grow: 1; font-size: 11px; color: var(--text-secondary); }
+  .workspace-devtools-button {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
+    cursor: pointer;
+  }
+  .workspace-devtools-button:hover { color: var(--text); border-color: var(--border-strong); }
+  .workspace-devtools-button--on { color: var(--accent); }
+  /* Where the DevTools view is positioned. It holds nothing itself. */
+  .workspace-devtools-slot { flex-grow: 1; min-height: 0; }
 
   .workspace-devtools-handle {
     flex-shrink: 0;
     height: 6px;
     cursor: row-resize;
     background: var(--border);
+  }
+  .workspace-stage--left .workspace-devtools-handle,
+  .workspace-stage--right .workspace-devtools-handle {
+    height: auto;
+    width: 6px;
+    cursor: col-resize;
   }
   .workspace-devtools-handle:hover { background: var(--accent); }
   .workspace-devtools-handle[hidden] { display: none; }

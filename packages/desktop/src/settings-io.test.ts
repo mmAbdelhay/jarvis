@@ -40,6 +40,7 @@ const draft: JarvisConfig = {
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
   performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+  browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
@@ -70,6 +71,7 @@ const fullDraft: JarvisConfig = {
     stopSidecarsAfterMinutes: 45,
     terminalScrollback: 20000,
   },
+  browser: { allowPopups: false },
   sessions: { importWindowDays: 90 },
 };
 
@@ -98,6 +100,7 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   headlamp: ["headlamp"],
   terminal: ["terminal"],
   performance: ["performance"],
+  browser: ["browser"],
   brain: ["brain"],
   voice: ["voice"],
   whisper: ["whisper"],
@@ -131,6 +134,7 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.workflows).toEqual(fullDraft.workflows);
     expect(reparsed.sessions).toEqual(fullDraft.sessions);
     expect(reparsed.performance).toEqual(fullDraft.performance);
+    expect(reparsed.browser).toEqual(fullDraft.browser);
     expect(reparsed.databases).toEqual(fullDraft.databases);
     expect(reparsed.editors).toEqual(fullDraft.editors);
     expect(reparsed.clusters).toEqual(fullDraft.clusters);

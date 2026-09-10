@@ -34,11 +34,11 @@
     <!-- What is running, from wherever you are. The dashboard lists the
          sessions, but this strip is the only thing on screen in every view,
          so a session started in the Workspace was invisible until you went
-         back to look. Hidden while nothing is running: a pill reading
-         "0 running" would be furniture reporting nothing. -->
-    <button id="running-pill" class="pill pill--running" type="button" hidden>
+         back to look. Always here, dimmed while nothing is running: hiding
+         it at zero made "nothing is running" look like "no indicator". -->
+    <button id="running-pill" class="pill pill--running pill--idle" type="button" title="No sessions running">
       <span id="running-orbs" class="running-orbs" aria-hidden="true"></span>
-      <span id="running-count" class="mono"></span>
+      <span id="running-count" class="mono">0 running</span>
     </button>
     <div class="spacer"></div>
     <div class="clock mono">
@@ -330,32 +330,58 @@
         <button id="workspace-pip" class="workspace-nav" type="button" hidden>&#9635;</button>
       </div>
       <div id="workspace-error" class="changes-error" hidden></div>
-      <!-- The row holding the bookmarks sidebar and the page slot. Hidden
-           in lockstep with #workspace-page (see workspace.ts): a terminal
-           or API tab draws over this same region, and an empty row here
-           would otherwise still claim its flex share and squeeze the pane
-           drawn below it. -->
-      <div id="workspace-body" class="workspace-body">
-        <!-- The bookmarks sidebar: a grid of pinned essentials above a
-             list of everything else. It sits beside the page slot rather
-             than above it, so #workspace-page measures narrower and the
-             hosted view follows without any change to the bounds
-             reporting. -->
-        <div id="workspace-bookmarks" class="workspace-bookmarks">
-          <div id="workspace-essentials" class="workspace-essentials"></div>
-          <!-- Where an essential tile's rename field goes. A tile has no
-               label to edit in place, unlike a chip, so its rename needs
-               one line of its own; it is empty and hidden until then. -->
-          <div id="workspace-ask" class="workspace-ask" hidden></div>
-          <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
+      <!-- The page and its DevTools. A column while DevTools dock to the
+           bottom, a row while they dock to a side — workspace.ts swaps the
+           modifier class, so changing sides never reorders the markup.
+           Hidden in lockstep with #workspace-body, for the same reason. -->
+      <div id="workspace-stage" class="workspace-stage workspace-stage--bottom">
+        <!-- The row holding the bookmarks sidebar and the page slot. Hidden
+             in lockstep with #workspace-page (see workspace.ts): a terminal
+             or API tab draws over this same region, and an empty row here
+             would otherwise still claim its flex share and squeeze the pane
+             drawn below it. -->
+        <div id="workspace-body" class="workspace-body">
+          <!-- The bookmarks sidebar: a grid of pinned essentials above a
+               list of everything else. It sits beside the page slot rather
+               than above it, so #workspace-page measures narrower and the
+               hosted view follows without any change to the bounds
+               reporting. -->
+          <div id="workspace-bookmarks" class="workspace-bookmarks">
+            <div id="workspace-essentials" class="workspace-essentials"></div>
+            <!-- Where an essential tile's rename field goes. A tile has no
+                 label to edit in place, unlike a chip, so its rename needs
+                 one line of its own; it is empty and hidden until then. -->
+            <div id="workspace-ask" class="workspace-ask" hidden></div>
+            <div id="workspace-bookmark-list" class="workspace-bookmark-list"></div>
+          </div>
+          <div id="workspace-page" class="workspace-page"></div>
         </div>
-        <div id="workspace-page" class="workspace-page"></div>
+        <!-- The DevTools panel: a head carrying Chrome's dock-side choices,
+             then a slot that, like the page slot, holds no content — a
+             hosted view is positioned over the rectangle it measures. The
+             handle between page and panel drags the split. Titles come from
+             MESSAGES at init. -->
+        <div id="workspace-devtools-handle" class="workspace-devtools-handle" hidden></div>
+        <div id="workspace-devtools" class="workspace-devtools" hidden>
+          <div class="workspace-devtools-head">
+            <span class="workspace-devtools-title">DevTools</span>
+            <button id="workspace-devtools-dock-undocked" class="workspace-devtools-button" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="4.5" y="1.5" width="10" height="9" rx="1"></rect><path d="M11.5 13.5h-9a1 1 0 0 1-1-1v-8"></path></svg>
+            </button>
+            <button id="workspace-devtools-dock-left" class="workspace-devtools-button" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"></rect><path d="M6 2.5v11"></path></svg>
+            </button>
+            <button id="workspace-devtools-dock-bottom" class="workspace-devtools-button" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"></rect><path d="M1.5 9.5h13"></path></svg>
+            </button>
+            <button id="workspace-devtools-dock-right" class="workspace-devtools-button" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"></rect><path d="M10 2.5v11"></path></svg>
+            </button>
+            <button id="workspace-devtools-close" class="workspace-devtools-button" type="button">&#215;</button>
+          </div>
+          <div id="workspace-devtools-slot" class="workspace-devtools-slot"></div>
+        </div>
       </div>
-      <!-- The DevTools panel. Like the page slot it holds no content: a
-           hosted view is positioned over the rectangle it measures. The
-           handle above it drags the split between the two. -->
-      <div id="workspace-devtools-handle" class="workspace-devtools-handle" hidden></div>
-      <div id="workspace-devtools" class="workspace-devtools" hidden></div>
       <!-- Terminal tabs have no hosted view, so their screen is drawn
            here, in the renderer's own DOM, over the same region a hosted
            page would occupy. Hidden unless a terminal tab is active. -->
@@ -597,6 +623,21 @@
           <code>{timeOfDay}</code> becomes morning, afternoon or evening.
           <code>{ready}</code>, <code>{lastSession}</code> and <code>{uncommitted}</code>
           are available; a line whose only placeholder has nothing to say is dropped.
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="lbl">BROWSER</div>
+        <!-- A page's window.open popup — a sign-in window, a Meet window —
+             opens as a real window that can still talk to the page that
+             opened it. Off, popups open as ordinary tabs instead, which
+             breaks exactly those flows. -->
+        <div class="settings-field">
+          <label for="settings-allow-popups">allow popups</label>
+          <label class="settings-switch">
+            <input id="settings-allow-popups" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </label>
         </div>
       </section>
 

@@ -302,16 +302,16 @@ const MAX_ORBS = 3;
  * the voice pill because it belongs to the same family: things the app
  * knows about itself.
  *
- * Hidden at zero. A pill permanently reading "0 running" would be furniture
- * reporting nothing, and the empty state is the common one.
+ * Always on screen, dimmed at zero. It used to hide when nothing was
+ * running, which made "nothing is running" indistinguishable from "there is
+ * no indicator" — the user went looking for it and could not find it. A
+ * quiet "0 running" answers the question without competing for attention.
  */
 function renderRunningPill(sessions: Session[]): void {
   const live = sessions.filter((session) => LIVE_STATES.has(session.state));
   const pill = $("running-pill");
 
-  pill.hidden = live.length === 0;
-  if (live.length === 0) return;
-
+  pill.classList.toggle("pill--idle", live.length === 0);
   $("running-count").textContent = `${live.length} running`;
 
   // One orb per session so two read as two without parsing a number, each
@@ -331,7 +331,10 @@ function renderRunningPill(sessions: Session[]): void {
   // someone goes for the detail the pill is too small to carry.
   // projectLabel, not core's sessionLabel: a renderer module may import
   // types from a workspace package but never a value — see format.ts.
-  pill.title = live.map((session) => `${projectLabel(session)} · ${session.agentId}`).join("\n");
+  pill.title =
+    live.length === 0
+      ? "No sessions running"
+      : live.map((session) => `${projectLabel(session)} · ${session.agentId}`).join("\n");
 }
 
 function renderSessions(sessions: Session[]): void {

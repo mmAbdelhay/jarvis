@@ -58,6 +58,14 @@ const api: RendererApi = {
   setWorkspaceBounds: (bounds) => ipcRenderer.invoke("workspace:bounds", bounds),
   setDevTools: (tabId, open) => ipcRenderer.invoke("workspace:devtools", tabId, open),
   setDevToolsBounds: (bounds) => ipcRenderer.invoke("workspace:devtoolsBounds", bounds),
+  setDevToolsDock: (dock) => ipcRenderer.invoke("workspace:devtoolsDock", dock),
+  showDevToolsDockMenu: (current) => ipcRenderer.invoke("workspace:devtoolsDockMenu", current),
+  onDevToolsDockChosen: (cb) => {
+    ipcRenderer.on("workspace:devtoolsDockChosen", (_e, dock) => cb(dock));
+  },
+  onDevToolsClosed: (cb) => {
+    ipcRenderer.on("workspace:devtoolsClosed", (_e, tabId) => cb(tabId));
+  },
   setWorkspaceVisible: (visible) => ipcRenderer.invoke("workspace:visible", visible),
   hideAllTabs: () => ipcRenderer.invoke("workspace:hideAll"),
   requestPictureInPicture: (tabId) => ipcRenderer.invoke("workspace:pip", tabId),

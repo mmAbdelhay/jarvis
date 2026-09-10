@@ -4,8 +4,9 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
+import { BrowserWindow, Menu, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
 import type { Session } from "electron";
+import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import {
   AgentRegistry,
   ChangeTracker,
@@ -518,7 +519,9 @@ app.whenReady().then(async () => {
     // The Workspace's hosted browser tabs. Each is a native WebContentsView
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
-    const workspace = new BrowserHost(createElectronViewFactory(window), {
+    const workspace = new BrowserHost(createElectronViewFactory(window, {
+      allowPopups: () => config.browser.allowPopups,
+    }), {
       cacheFavicon,
       suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
       resumeUrl: (tab) =>
@@ -1396,6 +1399,23 @@ app.whenReady().then(async () => {
         toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale()),
       ),
     );
+    ipcMain.handle("workspace:devtoolsDock", (_event, dock: unknown) => {
+      if (isDevToolsDock(dock)) workspace.setDevToolsDock(dock);
+    });
+    // A native menu rather than one the renderer draws: it opens from the
+    // address bar over the page, and a hosted page is a native view painted
+    // above anything in the renderer's DOM. The choice goes back to the
+    // renderer, which owns the layout and remembers it.
+    ipcMain.handle("workspace:devtoolsDockMenu", (_event, current: unknown) => {
+      const item = (dock: DevToolsDock): Electron.MenuItemConstructorOptions => ({
+        label: MESSAGES.devToolsDock(dock, PRIMARY_LANGUAGE),
+        type: "radio",
+        checked: current === dock,
+        click: () => window.webContents.send("workspace:devtoolsDockChosen", dock),
+      });
+      Menu.buildFromTemplate([item("undocked"), item("left"), item("bottom"), item("right")]).popup({ window });
+    });
+    workspace.onDevToolsClosed((tabId) => window.webContents.send("workspace:devtoolsClosed", tabId));
     ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
       workspace.setVisible(visible === true),
     );

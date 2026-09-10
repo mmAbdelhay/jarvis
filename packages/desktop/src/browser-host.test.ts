@@ -4,16 +4,26 @@ import type { WorkspaceTab } from "@jarvis/core";
 import {
   BrowserHost,
   bridgeEvents,
+  bridgePopupWindow,
   hostedUserAgent,
+  isDevToolsDock,
+  type DevToolsDock,
   type HostedView,
   type HostedViewEvent,
+  type PopupPolicy,
   type Rect,
   type WebContentsLike,
+  type WindowOpenDetails,
+  type WindowOpenResponse,
 } from "./browser-host.js";
 
 class FakeView implements HostedView {
   devToolsOpen = false;
   devToolsBounds: Rect | undefined;
+  devToolsDock: DevToolsDock | undefined;
+  setDevToolsDock(dock: DevToolsDock): void {
+    this.devToolsDock = dock;
+  }
   loaded: string[] = [];
   bounds: Rect | undefined;
   visible = false;
@@ -205,6 +215,35 @@ describe("BrowserHost", () => {
     views[0]?.emit({ kind: "popup", url: "file:///etc/passwd" });
 
     expect(host.state().tabs).toHaveLength(1);
+  });
+
+  // One dock side for every tab, as in Chrome: a tab opened after the
+  // choice must not come up docked somewhere else.
+  it("applies the DevTools dock side to every view, including later ones", () => {
+    host.open("acme", "one.example");
+    host.setDevToolsDock("right");
+    host.open("acme", "two.example");
+
+    expect(views.map((view) => view.devToolsDock)).toEqual(["right", "right"]);
+  });
+
+  // An undocked DevTools window closed by the user is DevTools closing
+  // without the renderer asking — which only the renderer can undo on its
+  // side, so it has to hear which tab.
+  it("reports DevTools that closed on their own, by tab", () => {
+    const closed: string[] = [];
+    host.onDevToolsClosed((id) => closed.push(id));
+    host.open("acme", "one.example");
+    const id = host.state().tabs[0]?.id ?? "";
+
+    views[0]?.emit({ kind: "devtoolsClosed" });
+
+    expect(closed).toEqual([id]);
+  });
+
+  it("recognises the four dock sides and nothing else", () => {
+    for (const dock of ["undocked", "left", "bottom", "right"]) expect(isDevToolsDock(dock)).toBe(true);
+    for (const other of ["top", "", undefined, 3]) expect(isDevToolsDock(other)).toBe(false);
   });
 
   it("shows only the active tab's view", () => {
@@ -472,9 +511,75 @@ describe("BrowserHost", () => {
   });
 });
 
+// A popup that opens as a tab loses window.opener, and a sign-in or Meet
+// window reports back through exactly that. So what asked to be a window
+// becomes one — unless the user turned popups off.
+describe("popup windows", () => {
+  const windowOptions = { width: 1 };
+  let contents: FakeContents;
+  let events: HostedViewEvent[];
+  let allowed: boolean;
+  const policy: PopupPolicy = { allow: () => allowed, windowOptions };
+  const open = (details: WindowOpenDetails): WindowOpenResponse | undefined => contents.popupHandler?.(details);
+
+  beforeEach(() => {
+    contents = new FakeContents();
+    events = [];
+    allowed = true;
+    bridgeEvents(contents, { canGoBack: () => false, canGoForward: () => false }, (event) => events.push(event), policy);
+  });
+
+  it("opens a window.open that asked for a window as a real window", () => {
+    expect(open({ url: "https://accounts.google.com/o/oauth2", disposition: "new-window" })).toEqual({
+      action: "allow",
+      overrideBrowserWindowOptions: windowOptions,
+    });
+    expect(events).toEqual([]);
+  });
+
+  // The usual sign-in pattern: open an empty window, then navigate it.
+  it("allows the empty window a sign-in opens first", () => {
+    expect(open({ url: "about:blank", disposition: "new-window" })).toMatchObject({ action: "allow" });
+  });
+
+  it("still opens target=_blank as a tab", () => {
+    expect(open({ url: "https://example.com/help", disposition: "foreground-tab" })).toEqual({ action: "deny" });
+    expect(events).toEqual([{ kind: "popup", url: "https://example.com/help" }]);
+  });
+
+  it("opens popups as tabs once the user turns them off", () => {
+    allowed = false;
+
+    expect(open({ url: "https://meet.google.com/x", disposition: "new-window" })).toEqual({ action: "deny" });
+    expect(events).toEqual([{ kind: "popup", url: "https://meet.google.com/x" }]);
+  });
+
+  it("never gives a non-web scheme a window", () => {
+    expect(open({ url: "file:///etc/passwd", disposition: "new-window" })).toEqual({ action: "deny" });
+  });
+
+  // A popup window gets no tab of its own, but it must not be a way around
+  // the navigation gate or the popup decision.
+  it("guards a popup window the same way as the page", () => {
+    const popup = new FakeContents();
+    bridgePopupWindow(popup, (event) => events.push(event), policy);
+
+    let prevented = false;
+    popup.fire("will-navigate", { preventDefault: () => (prevented = true) }, "file:///etc/passwd");
+    expect(prevented).toBe(true);
+    expect(popup.popupHandler?.({ url: "https://example.com", disposition: "new-window" })).toMatchObject({
+      action: "allow",
+    });
+    expect(popup.popupHandler?.({ url: "https://example.com/doc", disposition: "foreground-tab" })).toEqual({
+      action: "deny",
+    });
+    expect(events).toEqual([{ kind: "popup", url: "https://example.com/doc" }]);
+  });
+});
+
 class FakeContents implements WebContentsLike {
   #handlers = new Map<string, ((...args: never[]) => void)[]>();
-  popupHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
+  popupHandler: ((details: WindowOpenDetails) => WindowOpenResponse) | undefined;
   /** What getURL() answers — settable per test, the way real WebContents'
    *  current URL would vary. */
   url = "https://a.test/page";
@@ -488,7 +593,7 @@ class FakeContents implements WebContentsLike {
     this.#handlers.set(event, list);
     return this;
   }
-  setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void {
+  setWindowOpenHandler(handler: (details: WindowOpenDetails) => WindowOpenResponse): void {
     this.popupHandler = handler;
   }
   getURL(): string {
@@ -529,6 +634,25 @@ describe("BrowserHost idle suspension", () => {
 
   beforeEach(() => {
     now = 0;
+  });
+
+  // Reclaiming the tab destroys its DevTools with it — an undocked DevTools
+  // window vanishing a quarter of an hour after switching tabs.
+  it("never suspends a tab whose DevTools are open, until they close", () => {
+    const host = hostWith({});
+    host.setVisible(true);
+    host.open("p", "https://one.example");
+    const first = host.state().tabs[0]?.id ?? "";
+    host.setDevTools(first, true);
+    host.open("p", "https://two.example");
+
+    now = 5000;
+    host.sweepIdle();
+    expect(views[0]?.destroyed).toBe(false);
+
+    views[0]?.emit({ kind: "devtoolsClosed" });
+    host.sweepIdle();
+    expect(views[0]?.destroyed).toBe(true);
   });
 
   it("suspends a hidden tab once it has been idle, and never the active one", () => {

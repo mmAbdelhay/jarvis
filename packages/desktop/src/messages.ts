@@ -301,6 +301,19 @@ export const MESSAGES = {
   // video playing.
   pictureInPicture: (language: "ar" | "en"): string =>
     language === "ar" ? "شغّل الفيديو في نافذة عائمة" : "Float this video above everything",
+  // The DevTools toggle in the address bar. Right-click is the only way back
+  // from an undocked window, so the tooltip has to say it exists.
+  devToolsToggle: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أدوات المطوّر لهذه الصفحة — انقر بزر الفأرة الأيمن لاختيار مكانها"
+      : "DevTools for this page — right-click to choose where they dock",
+  devToolsDock: (side: "undocked" | "left" | "bottom" | "right", language: "ar" | "en"): string => {
+    const ar = { undocked: "في نافذة منفصلة", left: "على اليسار", bottom: "في الأسفل", right: "على اليمين" };
+    const en = { undocked: "Undock into a separate window", left: "Dock to left", bottom: "Dock to bottom", right: "Dock to right" };
+    return language === "ar" ? `ثبّت أدوات المطوّر ${ar[side]}` : en[side];
+  },
+  devToolsClose: (language: "ar" | "en"): string =>
+    language === "ar" ? "أغلق أدوات المطوّر" : "Close DevTools",
   // Settings' save flow. The headline is bilingual per the Global
   // Constraint every other view follows; parseConfig's own thrown message
   // (English, developer-facing — e.g. "Config `agents.x.command` must be a

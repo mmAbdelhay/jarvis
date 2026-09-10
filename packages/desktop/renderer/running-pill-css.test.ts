@@ -1,21 +1,26 @@
-// A CSS assertion reads styles.css. See view-display-css.test.ts for the
-// full account of why this is a source assertion rather than a computed
-// style: jsdom reports `display: none` for an element with the `hidden`
-// attribute whether or not an author rule out-cascades the UA rule, so a
-// getComputedStyle check here would pass against the broken stylesheet.
+// A source assertion over index.html and styles.css. See
+// view-display-css.test.ts for why: jsdom special-cases `hidden` outside the
+// cascade, so a computed-style check here would not see what the real
+// window renders.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
+const html = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 describe("the running-sessions pill", () => {
-  // Found by looking at the running app: the pill is a .pill, .pill sets
-  // `display: flex` in its base rule, and both are author-origin — so the
-  // UA's [hidden]{display:none} lost, and an empty pill sat in the topbar
-  // permanently with nothing running. app.test.ts proves the JS sets
-  // `hidden` correctly; this is the half of the fix it cannot see.
-  it("is actually hidden by its hidden attribute", () => {
-    expect(css).toMatch(/\.pill--running\[hidden\] \{ display: none; \}/);
+  // It used to be hidden at zero, which made "nothing is running" look like
+  // "there is no indicator". It must be on screen before the first sessions
+  // update arrives, too — that update only comes when something changes.
+  it("is in the topbar from the first paint, reading 0 running", () => {
+    const pill = html.match(/<button id="running-pill"[^>]*>/)?.[0] ?? "";
+    expect(pill).not.toBe("");
+    expect(pill).not.toMatch(/\shidden[\s>]/);
+    expect(html).toContain('<span id="running-count" class="mono">0 running</span>');
+  });
+
+  it("has a dimmed idle style", () => {
+    expect(css).toMatch(/\.pill--running\.pill--idle \{/);
   });
 });

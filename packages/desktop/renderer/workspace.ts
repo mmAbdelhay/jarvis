@@ -1,4 +1,5 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { DevToolsDock } from "../src/browser-host.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
 import { detectLanguage } from "./format.js";
@@ -246,11 +247,52 @@ const devToolsByTab = new Set<string>();
  *  siblings that both grow, so exactly one may be in the layout at a time. */
 const RENDERER_DRAWN: ReadonlySet<WorkspaceTab["kind"]> = new Set(["terminal", "api", "docker"]);
 
-/** The panel's share of the browser column's height. Dragged by the handle
- *  above it, clamped so neither the page nor the panel is squeezed away. */
+/** The panel's share of the stage — its height docked to the bottom, its
+ *  width docked to a side. Dragged by the handle between page and panel,
+ *  clamped so neither is squeezed away. Kept apart because a comfortable
+ *  height and a comfortable width are different numbers. */
 let devToolsFraction = 0.4;
+let devToolsSideFraction = 0.4;
 const MIN_DEVTOOLS_FRACTION = 0.15;
 const MAX_DEVTOOLS_FRACTION = 0.85;
+
+/** Where DevTools dock, for every tab, as in Chrome. The order is Chrome's
+ *  own dock-side row, which the panel head copies. */
+const DEVTOOLS_DOCKS: readonly DevToolsDock[] = ["undocked", "left", "bottom", "right"];
+let devToolsDock: DevToolsDock = "bottom";
+
+/** Remembered per machine rather than written to jarvis.yaml: where DevTools
+ *  sit is a habit, not configuration. */
+const DEVTOOLS_LAYOUT_KEY = "jarvis.devtools.layout";
+
+function clampDevToolsFraction(value: number): number {
+  return Math.min(MAX_DEVTOOLS_FRACTION, Math.max(MIN_DEVTOOLS_FRACTION, value));
+}
+
+function loadDevToolsLayout(): void {
+  try {
+    const raw = window.localStorage.getItem(DEVTOOLS_LAYOUT_KEY);
+    if (raw === null) return;
+    const saved = JSON.parse(raw) as { dock?: unknown; height?: unknown; width?: unknown };
+    const dock = DEVTOOLS_DOCKS.find((candidate) => candidate === saved.dock);
+    if (dock !== undefined) devToolsDock = dock;
+    if (typeof saved.height === "number") devToolsFraction = clampDevToolsFraction(saved.height);
+    if (typeof saved.width === "number") devToolsSideFraction = clampDevToolsFraction(saved.width);
+  } catch {
+    // Unreadable or unavailable storage is a first run: the defaults stand.
+  }
+}
+
+function saveDevToolsLayout(): void {
+  try {
+    window.localStorage.setItem(
+      DEVTOOLS_LAYOUT_KEY,
+      JSON.stringify({ dock: devToolsDock, height: devToolsFraction, width: devToolsSideFraction }),
+    );
+  } catch {
+    // Not remembering is not worth interrupting anyone over.
+  }
+}
 
 /** Refetches the *selected* project's bookmarks and redraws the bar —
  *  called on init and every project switch, never kept in sync with tabs
@@ -741,32 +783,61 @@ function toggleBookmarksSidebar(): void {
   reportWorkspaceBounds();
 }
 
-/** Shows or hides the DevTools panel for whatever tab is active, sizes it,
- *  and reports both rectangles — the panel's, and the page slot's, which
- *  just changed with it. */
+/** Shows or hides the DevTools panel for whatever tab is active, lays the
+ *  stage out for the dock side, sizes the panel, and reports its rectangle.
+ *  Undocked DevTools are a window of their own and take no room here, but
+ *  the toggle still reads as on. */
 function renderDevTools(): void {
   const tab = activeTab();
   const open = tab !== undefined && devToolsByTab.has(tab.id);
+  const docked = open && devToolsDock !== "undocked";
   const panel = $("workspace-devtools") as HTMLElement;
+  const stage = $("workspace-stage");
 
-  panel.hidden = !open;
-  ($("workspace-devtools-handle") as HTMLElement).hidden = !open;
+  const side = devToolsDock === "undocked" ? "bottom" : devToolsDock;
+  for (const candidate of ["left", "bottom", "right"] as const) {
+    stage.classList.toggle(`workspace-stage--${candidate}`, candidate === side);
+  }
+  panel.hidden = !docked;
+  ($("workspace-devtools-handle") as HTMLElement).hidden = !docked;
   $("workspace-toggle-devtools").classList.toggle("workspace-nav--on", open);
+  for (const dock of DEVTOOLS_DOCKS) {
+    $(`workspace-devtools-dock-${dock}`).classList.toggle("workspace-devtools-button--on", dock === devToolsDock);
+  }
 
-  if (!open) return;
+  if (!docked) return;
 
-  const available = panel.parentElement?.clientHeight ?? 0;
-  // A column with no layout yet measures zero; a percentage still lands
-  // correctly once it does, where a computed pixel height would not.
-  panel.style.height =
-    available === 0
-      ? `${Math.round(devToolsFraction * 100)}%`
-      : `${Math.round(available * devToolsFraction)}px`;
+  const bottom = devToolsDock === "bottom";
+  const available = bottom ? stage.clientHeight : stage.clientWidth;
+  const fraction = bottom ? devToolsFraction : devToolsSideFraction;
+  // A stage with no layout yet measures zero; a percentage still lands
+  // correctly once it does, where a computed pixel size would not.
+  const size = available === 0 ? `${Math.round(fraction * 100)}%` : `${Math.round(available * fraction)}px`;
+  panel.style.height = bottom ? size : "";
+  panel.style.width = bottom ? "" : size;
   reportDevToolsBounds();
 }
 
+/** Moves DevTools to another side, or out into their own window. Choosing
+ *  where DevTools go is asking for them, so a choice made from the
+ *  right-click menu while they are shut opens them there. */
+function chooseDevToolsDock(dock: DevToolsDock): void {
+  devToolsDock = dock;
+  saveDevToolsLayout();
+  // Before any setDevTools below, so main opens them where they now belong.
+  void window.jarvis.setDevToolsDock(dock);
+  const tab = activeTab();
+  if (tab !== undefined && !devToolsByTab.has(tab.id)) {
+    toggleDevTools();
+    return;
+  }
+  renderDevTools();
+  // The page slot just grew or shrank with the panel.
+  reportWorkspaceBounds();
+}
+
 function reportDevToolsBounds(): void {
-  const rect = $("workspace-devtools").getBoundingClientRect();
+  const rect = $("workspace-devtools-slot").getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
   void window.jarvis.setDevToolsBounds({
     x: Math.round(rect.x),
@@ -794,24 +865,29 @@ function toggleDevTools(): void {
   reportWorkspaceBounds();
 }
 
-/** Drags the split between the page and the DevTools panel. The pointer is
- *  tracked on the window rather than the handle, so a fast drag that leaves
- *  the 6px strip does not silently stop resizing. */
+/** Drags the split between the page and the DevTools panel — vertically
+ *  while they dock to the bottom, horizontally while they dock to a side.
+ *  The pointer is tracked on the window rather than the handle, so a fast
+ *  drag that leaves the 6px strip does not silently stop resizing. */
 function wireDevToolsHandle(): void {
   $("workspace-devtools-handle").addEventListener("mousedown", (event) => {
     event.preventDefault();
     const panel = $("workspace-devtools") as HTMLElement;
-    const column = panel.parentElement;
-    if (column === null) return;
+    const stage = $("workspace-stage");
 
     const onMove = (move: MouseEvent): void => {
-      const box = column.getBoundingClientRect();
-      if (box.height === 0) return;
-      devToolsFraction = Math.min(
-        MAX_DEVTOOLS_FRACTION,
-        Math.max(MIN_DEVTOOLS_FRACTION, (box.bottom - move.clientY) / box.height),
-      );
-      panel.style.height = `${Math.round(box.height * devToolsFraction)}px`;
+      const box = stage.getBoundingClientRect();
+      if (devToolsDock === "bottom") {
+        if (box.height === 0) return;
+        devToolsFraction = clampDevToolsFraction((box.bottom - move.clientY) / box.height);
+        panel.style.height = `${Math.round(box.height * devToolsFraction)}px`;
+      } else {
+        if (box.width === 0) return;
+        const share =
+          devToolsDock === "right" ? (box.right - move.clientX) / box.width : (move.clientX - box.left) / box.width;
+        devToolsSideFraction = clampDevToolsFraction(share);
+        panel.style.width = `${Math.round(box.width * devToolsSideFraction)}px`;
+      }
       reportDevToolsBounds();
       reportWorkspaceBounds();
     };
@@ -819,6 +895,7 @@ function wireDevToolsHandle(): void {
     const onUp = (): void => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      saveDevToolsLayout();
     };
 
     window.addEventListener("mousemove", onMove);
@@ -894,7 +971,12 @@ export function initWorkspace(projects: string[]): void {
 
   // The overlay does not move with the layout, so every reflow has to be
   // pushed. A resize is the only one the renderer can observe cheaply.
-  window.addEventListener("resize", reportWorkspaceBounds);
+  // The panel's size is a share of the stage, held as pixels; a resized
+  // window has to recompute it before the page slot is measured.
+  window.addEventListener("resize", () => {
+    renderDevTools();
+    reportWorkspaceBounds();
+  });
 
   $("workspace-open-editor").addEventListener("click", () => void openEditor());
   $("workspace-open-database").addEventListener("click", () => void openDatabase());
@@ -956,6 +1038,31 @@ export function initWorkspace(projects: string[]): void {
   ($("workspace-toggle-bookmarks") as HTMLButtonElement).title =
     MESSAGES.toggleBookmarksSidebar(PRIMARY_LANGUAGE);
   $("workspace-toggle-devtools").addEventListener("click", () => toggleDevTools());
+  // Right-click is the way back from an undocked window, which has no dock
+  // buttons of its own — so it works whether DevTools are open or not.
+  $("workspace-toggle-devtools").addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    void window.jarvis.showDevToolsDockMenu(devToolsDock);
+  });
+  ($("workspace-toggle-devtools") as HTMLButtonElement).title = MESSAGES.devToolsToggle(PRIMARY_LANGUAGE);
+  for (const dock of DEVTOOLS_DOCKS) {
+    const button = $(`workspace-devtools-dock-${dock}`) as HTMLButtonElement;
+    button.title = MESSAGES.devToolsDock(dock, PRIMARY_LANGUAGE);
+    button.addEventListener("click", () => chooseDevToolsDock(dock));
+  }
+  const closeDevToolsButton = $("workspace-devtools-close") as HTMLButtonElement;
+  closeDevToolsButton.title = MESSAGES.devToolsClose(PRIMARY_LANGUAGE);
+  closeDevToolsButton.addEventListener("click", () => toggleDevTools());
+  window.jarvis.onDevToolsDockChosen((dock) => chooseDevToolsDock(dock));
+  window.jarvis.onDevToolsClosed((tabId) => {
+    if (!devToolsByTab.delete(tabId)) return;
+    renderDevTools();
+    reportWorkspaceBounds();
+  });
+  loadDevToolsLayout();
+  // Main starts at its own default; this is what brings it in line with the
+  // side remembered from last time before any DevTools are opened.
+  void window.jarvis.setDevToolsDock(devToolsDock);
   wireDevToolsHandle();
   renderBookmarksVisibility(false);
   renderProjectTools();
@@ -1558,6 +1665,8 @@ export function renderWorkspace(state: WorkspaceState): void {
   // sit here empty yet still claim its flex share, squeezing whichever
   // renderer-drawn pane is meant to fill that space instead.
   ($("workspace-body") as HTMLElement).hidden = pageHidden;
+  // And the stage wrapping the body and DevTools, for the same reason.
+  ($("workspace-stage") as HTMLElement).hidden = pageHidden;
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
   renderApi(state.tabs, state.activeTabId, selected);
   renderDocker(state.tabs, state.activeTabId, selected);

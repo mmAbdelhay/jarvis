@@ -100,6 +100,19 @@ export type PerformanceConfig = {
   terminalScrollback: number;
 };
 
+/**
+ * The `browser:` section — how the Workspace's hosted pages behave.
+ */
+export type BrowserConfig = {
+  /** Whether a page's `window.open` popup (a sign-in window, a Meet
+   *  "present" window) opens as a real window that keeps its link back to
+   *  the page that opened it. Off, every popup opens as an ordinary tab
+   *  instead, which is what Jarvis always did — and which breaks any flow
+   *  that needs the popup to report back to its opener. Links with
+   *  target=_blank open as tabs either way. */
+  allowPopups: boolean;
+};
+
 export type JarvisConfig = {
   registry: RegistryConfig;
   projects: Record<string, string>;
@@ -135,6 +148,7 @@ export type JarvisConfig = {
   headlamp: { binary: string };
   terminal: TerminalConfig;
   performance: PerformanceConfig;
+  browser: BrowserConfig;
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -238,6 +252,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const headlamp = parseHeadlamp(root["headlamp"]);
   const terminal = parseTerminal(root["terminal"]);
   const performance = parsePerformance(root["performance"]);
+  const browser = parseBrowser(root["browser"]);
   const whisper = parseWhisper(root["whisper"]);
   const sessions = parseSessions(root["sessions"]);
   const voice = parseVoice(root["voice"]);
@@ -272,6 +287,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     headlamp,
     terminal,
     performance,
+    browser,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -469,6 +485,23 @@ function parseSessions(rawSessions: unknown): { importWindowDays: number } {
     throw new Error("Config `sessions.importWindowDays` must be a positive number");
   }
   return { importWindowDays: window };
+}
+
+/** The `browser:` section as it stands with nothing in jarvis.yaml. */
+export const DEFAULT_BROWSER: BrowserConfig = {
+  allowPopups: true,
+};
+
+function parseBrowser(rawBrowser: unknown): BrowserConfig {
+  if (rawBrowser === undefined || rawBrowser === null) return { ...DEFAULT_BROWSER };
+  if (typeof rawBrowser !== "object" || Array.isArray(rawBrowser)) {
+    throw new Error("Config `browser` must be an object");
+  }
+  const allowPopups = (rawBrowser as Record<string, unknown>)["allowPopups"];
+  if (allowPopups !== undefined && typeof allowPopups !== "boolean") {
+    throw new Error("Config `browser.allowPopups` must be a boolean");
+  }
+  return { allowPopups: allowPopups ?? DEFAULT_BROWSER.allowPopups };
 }
 
 function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: string } {

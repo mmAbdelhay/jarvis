@@ -57,7 +57,13 @@ function renderSettings(): void {
   renderChat();
   renderBrain();
   renderVoice();
+  renderBrowser();
   renderWhisper();
+}
+
+function renderBrowser(): void {
+  if (draft === undefined) return;
+  ($("settings-allow-popups") as HTMLInputElement).checked = draft.browser.allowPopups;
 }
 
 function clearSaveStatus(): void {
@@ -1191,6 +1197,11 @@ function wireStaticFields(): void {
   });
   $("settings-voice-en-play").addEventListener("click", () => previewVoice("settings-voice-en", "en"));
   $("settings-voice-ar-play").addEventListener("click", () => previewVoice("settings-voice-ar", "ar"));
+  $("settings-allow-popups").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.browser.allowPopups = ($("settings-allow-popups") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
   $("settings-speak-greeting").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.voice.speakGreeting = ($("settings-speak-greeting") as HTMLInputElement).checked;

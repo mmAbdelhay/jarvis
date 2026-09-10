@@ -115,6 +115,9 @@ performance:                    # optional; the whole section defaults
   suspendTabsAfterMinutes: 15   # 0 keeps every tab's renderer alive
   stopSidecarsAfterMinutes: 10  # 0 keeps every sidecar until quit
   terminalScrollback: 5000      # lines each terminal keeps
+
+browser:                        # optional; the whole section defaults
+  allowPopups: true             # false opens window.open popups as tabs instead
 ```
 
 ## `performance:` — what Jarvis gives back while you are not looking
