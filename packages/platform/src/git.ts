@@ -163,6 +163,29 @@ function isTimeout(error: unknown): boolean {
   return error instanceof GitPluginError && error.plugin === "timeout";
 }
 
+/**
+ * What a caught git error says.
+ *
+ * A tripped timeout is worth naming as one. Every git call below is bounded
+ * by the timeout plugin, and simple-git reports a tripped bound as "block
+ * timeout reached" — true, but it reads as an internal detail rather than as
+ * the one thing the reader can act on, which is that git did not answer in
+ * time.
+ *
+ * Which call trips first is not fixed. open()'s checkIsRepo() is the usual
+ * one on a slow filesystem, but on a fast machine it can return well inside
+ * the bound and a later call times out instead. Both paths have to say the
+ * same thing, or the message a user sees depends on their disk — which is
+ * exactly how this surfaced: as a test that passed on one machine and failed
+ * on another.
+ *
+ * open() keeps its own wording because it knows the repository path it was
+ * opening; these calls do not.
+ */
+function gitErrorDetail(error: unknown, timeoutMs: number): string {
+  return isTimeout(error) ? `git timed out after ${timeoutMs}ms` : errorMessage(error);
+}
+
 export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): GitProvider {
   async function open(repoPath: string): Promise<GitOutcome<SimpleGit>> {
     try {
@@ -193,7 +216,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
       try {
         return { ok: true, value: await readChanges(opened.value, repoPath) };
       } catch (error) {
-        return failure("failed", errorMessage(error));
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
 
@@ -258,7 +281,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         }
         return { ok: true, value: parseUnifiedDiff(filePath, raw) };
       } catch (error) {
-        return failure("failed", errorMessage(error));
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
 
@@ -276,7 +299,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         await opened.value.add(paths);
         return { ok: true, value: null };
       } catch (error) {
-        return failure("failed", errorMessage(error));
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
 
@@ -296,7 +319,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         await opened.value.reset(["--", ...paths]);
         return { ok: true, value: null };
       } catch (error) {
-        return failure("failed", errorMessage(error));
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
 
@@ -340,7 +363,7 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
           value: { sha, filesChanged: result.summary.changes },
         };
       } catch (error) {
-        return failure("failed", errorMessage(error));
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
   };
