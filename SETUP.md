@@ -5,9 +5,7 @@ account; nothing is assumed.
 
 ## 1. Prerequisites
 
-- **macOS.** Jarvis has only ever been run there. Nothing in it is
-  deliberately Apple-only, but the disk metric knows about APFS and the voices
-  come from `say`.
+- **macOS (Apple Silicon) or Linux (x64).** Both are built and run.
 - **Node 22 or newer** — `node --version` to check.
 - **pnpm** — the version is pinned in the repo, so let corepack pick it:
 
@@ -15,13 +13,31 @@ account; nothing is assumed.
 corepack enable
 ```
 
+**On Linux, one more thing.** node-pty ships prebuilt binaries for macOS and
+Windows only, so on Linux it is compiled during setup and wants a C++
+toolchain and Python:
+
+```bash
+sudo apt install -y build-essential python3     # Debian, Ubuntu
+sudo dnf install -y gcc-c++ make python3        # Fedora, RHEL
+sudo pacman -S --needed base-devel python       # Arch
+```
+
+Every agent session and every Terminal tab is a pty, so this is not optional.
+
 ## 2. Get it running
 
 ```bash
 git clone <this repo> jarvis && cd jarvis
 pnpm install
+pnpm bootstrap
 pnpm --filter @jarvis/desktop start
 ```
+
+`pnpm bootstrap` downloads the Electron binary and, on Linux, compiles
+node-pty. It is a required step, not a convenience: this workspace runs with
+install scripts disabled on purpose, so `pnpm install` leaves both undone.
+Re-run it after every `pnpm install`. It is idempotent and says what it did.
 
 `start` builds first and then opens the app. The first build takes a minute or
 two; after that it is seconds.
@@ -77,12 +93,12 @@ the API client. The Editor and Database tabs need one more install each.
 Each one is missing only the feature it belongs to, and the app says so in the
 toolbar rather than failing quietly. Install what you need, skip the rest.
 
-| Want | Install |
-|---|---|
-| **Editor** tab (VS Code in a tab) | `brew install code-server` |
-| **Database** tab (SQL client) | `npm i -g dbgate-serve` |
-| **Voice input** | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) + a model |
-| **A better voice** | `uv tool install piper-tts` |
+| Want | macOS | Linux |
+|---|---|---|
+| **Editor** tab (VS Code in a tab) | `brew install code-server` | `curl -fsSL https://code-server.dev/install.sh \| sh` |
+| **Database** tab (SQL client) | `npm i -g dbgate-serve` | `npm i -g dbgate-serve` |
+| **Voice input** | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) + a model, and `brew install ffmpeg` | the same, and `apt install ffmpeg` |
+| **A voice to speak with** | `uv tool install piper-tts` | `uv tool install piper-tts`, plus `pipewire-utils`, `pulseaudio-utils` or `alsa-utils` to play it |
 
 For voice input, add the two paths and restart:
 
@@ -94,6 +110,18 @@ whisper:
 
 Use the `large-v3-turbo` model, not `base`. `base` mis-transcribes Arabic
 project names badly enough to send an instruction to the wrong agent.
+
+**On Linux, speech needs two Piper models.** There is no `say`, so both
+languages go through Piper — and one Piper model speaks one language:
+
+```yaml
+voice:
+  piperModel: ~/.config/jarvis/voices/en-gb-alan-low.onnx
+  piperArabicModel: ~/.config/jarvis/voices/ar_JO-kareem-low.onnx
+```
+
+With neither, replies are shown and not spoken, and Jarvis says which key
+would fix it.
 
 ## 6. Check it works
 

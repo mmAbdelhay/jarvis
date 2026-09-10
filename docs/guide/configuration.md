@@ -94,15 +94,32 @@ brain:
     You are Jarvis, a voice assistant that runs coding sessions.
 
 voice:
-  engine: piper               # piper (neural, local) or say (macOS)
+  engine: piper               # piper (neural, local) or say (macOS only)
   piperBinary: ~/.local/bin/piper
   piperModel: ~/.config/jarvis/voices/en-gb-alan-low.onnx
-  englishVoice: Daniel        # used when engine is `say`
-  arabicVoice: Majed          # always used for Arabic
+  piperArabicModel: ~/.config/jarvis/voices/ar_JO-kareem-low.onnx
+  englishVoice: Daniel        # used when engine is `say`; macOS only
+  arabicVoice: Majed          # macOS only — a `say` voice
   speakGreeting: true         # false shows the greeting without saying it
   greeting:
     en: "Good {timeOfDay} sir, how can I help you today?"
     ar: "{timeOfDay} يا سيدي، كيف أقدر أساعدك اليوم؟"
+
+### `voice.piperArabicModel`
+
+A Piper model speaks one language, so bilingual speech takes two models.
+
+On macOS this key is unused: Arabic goes through `say -v <arabicVoice>`, which
+is a system voice and needs no download. On Linux there is no `say`, so this
+is the only thing that can speak an Arabic reply. Point it at an Arabic
+`.onnx` — `ar_JO-kareem-low` is the maintained one — and its `.json` beside
+it, exactly as `piperModel` wants for English.
+
+Without it, Arabic replies appear in the panel and are not spoken, and Jarvis
+says which key would fix that rather than appearing mute. Which message you
+get distinguishes the two cases: with Piper itself missing, the reply names
+Piper rather than sending you after an Arabic model you would then have
+nothing to play.
 
 whisper:
   binaryPath: /Users/you/.voicemode/services/whisper/build/bin/whisper-cli

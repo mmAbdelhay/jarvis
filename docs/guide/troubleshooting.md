@@ -139,6 +139,79 @@ declaration on your behalf.
 exist. If a hotkey is already taken by another app, Jarvis says so at startup
 rather than silently not listening.
 
+On Linux, recording also needs `ffmpeg` and a working PulseAudio or PipeWire
+server — `ffmpeg -f pulse -i default -t 2 /tmp/mic.wav` is the same call
+Jarvis makes, and it either produces a file or names the reason.
+
+## Alt+Space does nothing, and Jarvis said so at startup
+
+You are on Wayland. No application can register a system-wide shortcut there;
+the protocol does not offer one, so this is not something Jarvis can work
+around. `echo $XDG_SESSION_TYPE` confirms it.
+
+The microphone button and the composer work exactly as they always did. To get
+a hotkey back, either bind one in your desktop's own keyboard settings
+(pointing it at the Jarvis window), or log into an Xorg session, where the
+shortcut registers normally.
+
+## Replies are shown but never spoken
+
+No voice is installed that can speak them, and the message in the panel says
+which. On Linux both languages go through Piper, and a Piper model speaks one
+language — so English wants `voice.piperModel` and Arabic wants
+`voice.piperArabicModel`. See [configuration](configuration.md).
+
+Speaking also needs a player: `pw-play`, `paplay` or `aplay`, whichever your
+sound server provides. Jarvis probes for them in that order at startup.
+
+## The AppImage will not start
+
+Three things, in the order they bite:
+
+- **`libfuse.so.2: cannot open shared object file`** — an AppImage is a
+  mounted filesystem and Ubuntu 22.04 and later ship FUSE 3 only.
+  `sudo apt install libfuse2t64`, or run it as
+  `./Jarvis-*.AppImage --appimage-extract-and-run` and skip mounting entirely.
+- **A sandbox error naming `chrome-sandbox`** — run with `--no-sandbox`. On
+  Ubuntu 24.04 this is AppArmor restricting unprivileged user namespaces
+  rather than anything about the build.
+- **It starts and the window is blank** — open the devtools from the View menu
+  (`autoHideMenuBar` hides the bar; Alt reveals it) and read the console.
+
+## `pnpm bootstrap` fails building node-pty
+
+It needs a C++ toolchain and Python, which the error names:
+`build-essential` and `python3` on Debian and Ubuntu, `gcc-c++ make python3`
+on Fedora, `base-devel python` on Arch.
+
+This step is not optional on Linux. node-pty ships prebuilt binaries for macOS
+and Windows only, and every agent session and every Terminal tab is a pty.
+
+## `SyntaxError: The requested module 'electron' does not provide an export named 'BrowserWindow'`
+
+`ELECTRON_RUN_AS_NODE=1` is set in the environment you launched from, which
+tells the Electron binary to behave as plain Node — so there is no `electron`
+module to import from. Every Electron-based editor's integrated terminal sets
+it (VS Code, Cursor, Windsurf). `env -u ELECTRON_RUN_AS_NODE pnpm start`, or
+launch from a terminal that is not inside one.
+
+## A Terminal tab has no blocks, no file sidebar and no chips
+
+The shell integration is bash and zsh only, and `echo $SHELL` says which you
+have. Anything else — fish, nu, dash — gets a plain working terminal with no
+command blocks and no completion, exactly as it did before the feature
+existed. That is deliberate: the hooks are per-shell syntax, and a wrapper
+guessing at a shell it does not know is how a user loses their PATH.
+
+## `~/.bash_logout` stopped running
+
+The bash integration replaces `bash -l` with `bash --rcfile <wrapper> -i`,
+because bash honours `--rcfile` only for an interactive *non-login* shell —
+a login shell ignores it, and the hooks would never install. The wrapper reads
+the login files itself, in bash's own order, so the PATH and environment are
+the same; but the shell is not technically a login shell, so `.bash_logout`
+does not run and `shopt login_shell` is off.
+
 ## Settings saved, nothing changed
 
 Nothing is applied live. Use **Restart Jarvis** after saving — the button

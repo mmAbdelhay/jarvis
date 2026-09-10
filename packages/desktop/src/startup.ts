@@ -1,8 +1,21 @@
 import { capacityReportText, checkAll } from "@jarvis/core";
 import type { AgentHealth, AgentRegistry, CommandRunner, ProviderStatus } from "@jarvis/core";
 
+/**
+ * What to run when an agent CLI is installed but its native binary is not.
+ *
+ * The path is the one thing here that is not portable: it is wherever npm
+ * puts global packages, which is /opt/homebrew on a Homebrew Mac, /usr/lib or
+ * ~/.npm-global on Linux, and whatever `npm config set prefix` was told
+ * anywhere. Hard-coding Homebrew's sent every Linux user to a directory that
+ * does not exist on their machine.
+ *
+ * `npm root -g` answers exactly this, so the hint tells them to ask it rather
+ * than guessing on their behalf — one command either way, and this one is
+ * right everywhere.
+ */
 const REPAIR_HINT =
-  "Repair with: node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/install.cjs";
+  'Repair with: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"';
 
 export async function startupReport(
   registry: AgentRegistry,
