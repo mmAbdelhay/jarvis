@@ -12,62 +12,102 @@ import { join } from "node:path";
 export type RecordingResult = { error?: string };
 
 export type RecorderDeps = {
-  spawnRecorder(outputPath: string): { kill(): void; done: Promise<RecordingResult> };
+  spawnRecorder(outputPath: string): {
+    kill(): void;
+    done: Promise<RecordingResult>;
+  };
   tmpDir: string;
   deleteFile(path: string): Promise<void>;
 };
 
-// Records 16 kHz mono, which is what whisper.cpp expects.
-export const defaultRecorderDeps: RecorderDeps = {
-  tmpDir: tmpdir(),
-  spawnRecorder(outputPath: string) {
-    const child = spawn(
-      "ffmpeg",
-      ["-f", "avfoundation", "-i", ":default", "-ar", "16000", "-ac", "1", "-y", outputPath],
-      { stdio: "ignore" },
-    );
+/**
+ * How ffmpeg is asked for the microphone.
+ *
+ * This is the one thing about recording that is not portable: the input
+ * device is named by an OS capture framework, and there are two.
+ *
+ * On Linux `pulse` rather than `alsa`, because PipeWire — the default now on
+ * Fedora, Ubuntu and most of the rest — ships a PulseAudio shim, so the one
+ * spelling covers both sound servers. Raw ALSA would work only on the
+ * machines that have neither, and on the ones that do it takes the device
+ * away from the mixer for as long as it holds it.
+ *
+ * 16 kHz mono on both, which is what whisper.cpp expects.
+ */
+export function recorderCommand(
+  platform: NodeJS.Platform,
+  outputPath: string,
+): { command: string; args: string[] } {
+  const input =
+    platform === "darwin"
+      ? ["-f", "avfoundation", "-i", ":default"]
+      : ["-f", "pulse", "-i", "default"];
+  return {
+    command: "ffmpeg",
+    args: [...input, "-ar", "16000", "-ac", "1", "-y", outputPath],
+  };
+}
 
-    // A spawn that fails to start (missing binary, EAGAIN, bad argv) fires
-    // an "error" event; without a listener Node throws it as an uncaught
-    // exception the caller has no way to catch — exactly the bug
-    // defaultSpeechRunner (packages/platform/src/speech.ts) already guards
-    // against. A failed spawn can also fire a trailing "close", so settle
-    // from whichever event arrives first and ignore the other. Every
-    // normal stop() kills ffmpeg with SIGINT, which ffmpeg reports as a
-    // non-zero close code even on a fully successful recording, so unlike
-    // defaultSpeechRunner there is no exit code worth distinguishing on
-    // "close" — only "error" carries a real failure. The "error" message
-    // is captured here and handed back on the settled result so the
-    // caller (Recorder.stop()) can name the actual cause — a missing
-    // recorder binary or unreachable microphone — instead of silently
-    // returning a path to a wav that was never written.
-    let settled = false;
-    const done = new Promise<RecordingResult>((resolve) => {
-      const settle = (result: RecordingResult) => {
-        if (settled) return;
-        settled = true;
-        resolve(result);
-      };
-      child.on("error", (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        settle({ error: `Could not start the microphone recorder: ${message}` });
+/** The real recorder, for `platform`'s capture framework. A factory rather
+ *  than a constant because it now needs to be told which one. */
+export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
+  return {
+    tmpDir: tmpdir(),
+    spawnRecorder(outputPath: string) {
+      const { command, args } = recorderCommand(platform, outputPath);
+      const child = spawn(command, args, { stdio: "ignore" });
+
+      // A spawn that fails to start (missing binary, EAGAIN, bad argv) fires
+      // an "error" event; without a listener Node throws it as an uncaught
+      // exception the caller has no way to catch — exactly the bug
+      // defaultSpeechRunner (packages/platform/src/speech.ts) already guards
+      // against. A failed spawn can also fire a trailing "close", so settle
+      // from whichever event arrives first and ignore the other. Every
+      // normal stop() kills ffmpeg with SIGINT, which ffmpeg reports as a
+      // non-zero close code even on a fully successful recording, so unlike
+      // defaultSpeechRunner there is no exit code worth distinguishing on
+      // "close" — only "error" carries a real failure. The "error" message
+      // is captured here and handed back on the settled result so the
+      // caller (Recorder.stop()) can name the actual cause — a missing
+      // recorder binary or unreachable microphone — instead of silently
+      // returning a path to a wav that was never written.
+      let settled = false;
+      const done = new Promise<RecordingResult>((resolve) => {
+        const settle = (result: RecordingResult) => {
+          if (settled) return;
+          settled = true;
+          resolve(result);
+        };
+        child.on("error", (error) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          settle({
+            error: `Could not start the microphone recorder: ${message}`,
+          });
+        });
+        child.on("close", () => settle({}));
       });
-      child.on("close", () => settle({}));
-    });
 
-    return { kill: () => child.kill("SIGINT"), done };
-  },
-  deleteFile: (path: string) => unlink(path).then(
-    () => undefined,
-    () => undefined,
-  ),
-};
+      return { kill: () => child.kill("SIGINT"), done };
+    },
+    deleteFile: (path: string) =>
+      unlink(path).then(
+        () => undefined,
+        () => undefined,
+      ),
+  };
+}
 
 export class Recorder {
   readonly #deps: RecorderDeps;
-  #active: { path: string; process: { kill(): void; done: Promise<RecordingResult> } } | undefined;
+  #active:
+    | {
+        path: string;
+        process: { kill(): void; done: Promise<RecordingResult> };
+      }
+    | undefined;
 
-  constructor(deps: RecorderDeps = defaultRecorderDeps) {
+  constructor(deps: RecorderDeps) {
     this.#deps = deps;
   }
 

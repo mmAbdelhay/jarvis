@@ -124,7 +124,7 @@ import {
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
-import { defaultRecorderDeps, Recorder } from "./recorder.js";
+import { createRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ReportedRect } from "./ipc.js";
@@ -1762,7 +1762,7 @@ app.whenReady().then(async () => {
     // and this handler never rejects on a normal per-account failure.
     ipcMain.handle("providers:refresh", () => providers.refreshCapacity({ force: true }));
 
-    const recorder = new Recorder(defaultRecorderDeps);
+    const recorder = new Recorder(createRecorderDeps(process.platform));
 
     function startVoice(): void {
       recorder.start();
