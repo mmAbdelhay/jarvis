@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { runCommand } from "./spawn.js";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /** One entry of a project's `clusters:` list in jarvis.yaml: a kubeconfig
  *  context the Cluster button may open, and the name shown for it. */
@@ -297,13 +298,13 @@ export function createKubeContextLister(path: string): () => Promise<string[]> {
  * below is for.
  */
 export function createRealHeadlampSpawner(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvSource = process.env,
   log: (line: string) => void = (line) => console.error(line),
 ): HeadlampSpawner {
   return ({ binary, ...rest }) => {
     const child = spawn(binary, headlampArgs(rest), {
       stdio: ["ignore", "pipe", "pipe"],
-      env,
+      env: resolveEnv(env),
     });
 
     for (const stream of [child.stdout, child.stderr]) {

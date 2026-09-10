@@ -625,7 +625,24 @@ app.whenReady().then(async () => {
     // The same lookup the agents above started; awaited here because the
     // sidecars are wired now and want a concrete environment.
     await agentEnvReady;
-    const env = agentEnv;
+    // A getter, never `agentEnv` itself.
+    //
+    // agentEnv starts as process.env and is replaced when loginShellPath()
+    // answers — which happens after startup, deliberately, because asking
+    // costs a login shell and a heavy profile would sit between app-ready and
+    // the window. Capturing the value here captured whatever was there before
+    // that answer arrived, which for a launcher-started app is a PATH with no
+    // Homebrew, npm, nvm or ~/.local/bin in it. Every sidecar below then
+    // resolved its binary against that stripped-down PATH for the rest of the
+    // session, and the Editor, Database, Cluster and Docker tabs failed with
+    // "could not open" on a machine where the binary was installed and on
+    // PATH in every terminal.
+    //
+    // It was a race, which is why it looked intermittent: the same build
+    // worked when launched from a terminal (whose PATH is already the user's)
+    // and failed from a desktop launcher. createPtySpawner has taken a getter
+    // for exactly this reason since it was written; these did not.
+    const env = (): NodeJS.ProcessEnv => agentEnv;
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
@@ -659,7 +676,10 @@ app.whenReady().then(async () => {
       },
       workspaceRoot: dbgateRoot,
       connectionsFor: (project) => config.databases[project] ?? [],
-      env,
+      // Not the getter above: this one is read for `passwordEnv` lookups, not
+      // to resolve a binary, and the variables it reads are the same in both.
+      // Only PATH is late.
+      env: process.env,
       randomPassword,
     });
     const database = createDatabaseHandlers({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
-import { argsFor, createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS } from "./pty.js";
+import { argsFor, createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS, resolveEnv } from "./pty.js";
 
 // These run a real pty against real programs. That is the point: the bug
 // this module exists to fix (an agent seeing a pipe instead of a terminal,
@@ -310,5 +310,32 @@ describe("argsFor", () => {
       "--session-id",
       "sid-1",
     ]);
+  });
+});
+
+describe("resolveEnv", () => {
+  it("passes a plain environment straight through", () => {
+    const env = { PATH: "/usr/bin" };
+    expect(resolveEnv(env)).toBe(env);
+  });
+
+  it("reads a getter at the moment it is called, not when it was handed over", () => {
+    // The whole point. main.ts learns the login shell's PATH asynchronously,
+    // after the sidecars have been constructed. A spawner that captured the
+    // environment as a value captured the pre-answer one — a launcher-started
+    // app's PATH, with no Homebrew, npm, nvm or ~/.local/bin in it — and then
+    // resolved every binary against it for the rest of the session. The
+    // Editor, Database, Cluster and Docker tabs all failed with "could not
+    // open" on a machine where the binary was installed and on PATH in every
+    // terminal, and it looked intermittent because it was a race: launched
+    // from a terminal it inherited the right PATH and worked.
+    let current: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" };
+    const source = (): NodeJS.ProcessEnv => current;
+
+    expect(resolveEnv(source)["PATH"]).toBe("/usr/bin:/bin");
+
+    current = { PATH: "/home/u/.local/bin:/usr/bin:/bin" };
+
+    expect(resolveEnv(source)["PATH"]).toBe("/home/u/.local/bin:/usr/bin:/bin");
   });
 });

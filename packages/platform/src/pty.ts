@@ -176,6 +176,29 @@ export function ensureSpawnHelperExecutable(): void {
 }
 
 /**
+ * An environment, or a way to get one when it is next needed.
+ *
+ * The function form exists because the PATH a GUI-launched app inherits is
+ * not the user's: a Finder or desktop-launcher process gets
+ * `/usr/bin:/bin:/usr/sbin:/sbin`, which is not where Homebrew, npm, nvm or
+ * ~/.local/bin put anything. The real PATH costs a login shell to ask for
+ * (see loginShellPath), so Jarvis asks once at startup and lets the answer
+ * arrive late.
+ *
+ * "Late" is the whole point. Anything that captures the environment as a
+ * value at construction time captures whatever was there *before* that answer
+ * came back — and then resolves every binary against the stripped-down GUI
+ * PATH for the rest of the session. Taking a getter instead means the lookup
+ * happens when something is actually spawned, long after the shell replied.
+ */
+export type EnvSource = NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
+
+/** The environment an EnvSource stands for, read now. */
+export function resolveEnv(source: EnvSource): NodeJS.ProcessEnv {
+  return typeof source === "function" ? source() : source;
+}
+
+/**
  * A copy of `env` with the two classes of variable above removed: the
  * markers a Claude Code session leaves for its children, and the ambient
  * API key that would outrank an account wrapper's own credentials.
