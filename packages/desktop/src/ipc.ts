@@ -717,6 +717,30 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
   };
 }
 
+/**
+ * Records why a sidecar would not start, for the main process's console.
+ *
+ * The bilingual headline a user sees ("Could not open the database browser.")
+ * is deliberately one sentence with no diagnostics in it. The manager's own
+ * detail — "dbgate-serve exited before it started listening", "did not become
+ * ready in time" — is developer-facing, and the comments here said it rode
+ * underneath the headline. It did not: it was dropped on the floor, and every
+ * `catch` threw the exception away with it. A sidecar that would not start
+ * was undiagnosable from either side of the app.
+ *
+ * So it goes where main.ts already sends the renderer's own errors: the
+ * terminal that launched Jarvis, and the devtools console of a packaged one.
+ */
+function reportSidecarFailure(what: string, reason: unknown): void {
+  const detail =
+    typeof reason === "string"
+      ? reason
+      : reason instanceof Error
+        ? reason.message
+        : JSON.stringify(reason);
+  console.error(`[${what}] ${detail}`);
+}
+
 export type EditorHandlers = {
   /** Ensures a code-server instance is running for `project`, rooted at the
    *  configured editor root named `root` (the project directory itself when
@@ -768,11 +792,14 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
 
       try {
         const result = await deps.codeServer.open(projectPath, folder);
-        // The manager's own failure detail is developer-facing (e.g. "did
-        // not become ready in time") — same discipline as docFailureText:
-        // wrap it behind one bilingual headline rather than surface it raw.
-        return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.editorUnavailable(deps.language));
-      } catch {
+        // One bilingual headline for the user; the manager's own detail
+        // ("did not become ready in time") goes to the console rather than
+        // being surfaced raw — or, as it was, dropped entirely.
+        if (result.ok) return { ok: true, value: result.url };
+        reportSidecarFailure("editor", result.detail);
+        return fail(MESSAGES.editorUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("editor", error);
         return fail(MESSAGES.editorUnavailable(deps.language));
       }
     },
@@ -809,13 +836,16 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
       }
       try {
         const result = await deps.dbgate.open(project);
-        // The manager's own detail ("did not report a port in time") is
-        // developer-facing — wrapped behind one bilingual headline, same
-        // discipline as createEditorHandlers.
-        return result.ok
-          ? { ok: true, value: { url: result.url, login: result.login, password: result.password } }
-          : fail(MESSAGES.databaseUnavailable(deps.language));
-      } catch {
+        // One bilingual headline for the user; the manager's own detail
+        // ("did not report a port in time") goes to the console, which is
+        // where anyone diagnosing this will look. See reportSidecarFailure.
+        if (result.ok) {
+          return { ok: true, value: { url: result.url, login: result.login, password: result.password } };
+        }
+        reportSidecarFailure("database", result.detail);
+        return fail(MESSAGES.databaseUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("database", error);
         return fail(MESSAGES.databaseUnavailable(deps.language));
       }
     },
@@ -1140,10 +1170,11 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
         }
 
         const result = await deps.headlamp.open(project, declared.context);
-        return result.ok
-          ? { ok: true, value: result.url }
-          : fail(MESSAGES.clusterUnavailable(deps.language));
-      } catch {
+        if (result.ok) return { ok: true, value: result.url };
+        reportSidecarFailure("cluster", result.detail);
+        return fail(MESSAGES.clusterUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("cluster", error);
         return fail(MESSAGES.clusterUnavailable(deps.language));
       }
     },
