@@ -39,13 +39,13 @@ belongs to, and the feature says so rather than failing quietly.
 | Tool | Unlocks | macOS | Linux |
 |---|---|---|---|
 | A coding agent CLI (`claude`, `copilot`, …) | Sessions — the point of the app | per that tool | per that tool |
-| `code-server` | The **Editor** tab | `brew install code-server` | `curl -fsSL https://code-server.dev/install.sh \| sh` |
+| `code-server` | The **Editor** tab | `brew install code-server` | `curl -fsSL https://code-server.dev/install.sh \| sh` — **not** `npm i -g` |
 | `dbgate-serve` | The **Database** tab | `npm i -g dbgate-serve` | `npm i -g dbgate-serve` |
 | `headlamp-server` | The **Cluster** tab | `brew install --cask headlamp` | the `.deb`/`.rpm` from [headlamp.dev](https://headlamp.dev) |
 | `docker` | The **Docker** tab | Docker Desktop or OrbStack | your distribution's `docker.io` / `docker-ce` |
 | `whisper-cli` + a model | Voice input | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) |
 | `ffmpeg` | Voice input | `brew install ffmpeg` | `apt install ffmpeg` |
-| `piper` + a voice model | Speech out | [piper](https://github.com/rhasspy/piper) | [piper](https://github.com/rhasspy/piper) |
+| `piper` + a voice model | Speech out | [piper](https://github.com/rhasspy/piper) | the release tarball — see below |
 | An audio player | Speech out | built in (`afplay`) | `pipewire-utils`, `pulseaudio-utils` or `alsa-utils` |
 
 The **Terminal** and **API** tabs need nothing installed: the terminal is a
@@ -77,6 +77,23 @@ break routing, which decides *which agent* hears an instruction.
 PulseAudio on Linux. PipeWire ships a PulseAudio shim, so `-f pulse` covers
 both sound servers and there is nothing to choose.
 
+**Piper** is a single static binary plus one `.onnx` model per language. On
+Linux the release tarball is the least troublesome route, and it wants to land
+where `voice.piperBinary` already looks:
+
+```bash
+curl -fsSL https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz \
+  | tar xz -C /tmp
+mkdir -p ~/.local/lib/piper ~/.local/bin
+cp -r /tmp/piper/* ~/.local/lib/piper/
+ln -sf ~/.local/lib/piper/piper ~/.local/bin/piper
+```
+
+Voices come from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices);
+each is an `.onnx` and a `.json` that must sit beside each other. The defaults
+Jarvis looks for are `~/.config/jarvis/voices/en-gb-alan-low.onnx` and
+`~/.config/jarvis/voices/ar_JO-kareem-low.onnx`.
+
 **Speaking** differs by platform, because macOS has system voices and Linux
 does not.
 
@@ -94,6 +111,37 @@ application can register a system-wide shortcut at all, and Jarvis says so at
 startup. The microphone button and the composer still work; so does binding
 the shortcut in your desktop's own keyboard settings. An X11 (or XWayland)
 session has the hotkey as normal.
+
+### Why not `npm i -g code-server` on Linux
+
+It pulls `kerberos`, a native module, and building it against Node 22+ fails.
+The install script above ships a standalone build with its own Node and needs
+no compiler. `--method standalone --prefix "$HOME/.local"` keeps it entirely
+inside your home directory, which is enough — Jarvis resolves it on the login
+shell's PATH.
+
+## Putting Jarvis in your application launcher
+
+An AppImage is a single file and does not register itself, so until you tell
+your desktop about it there is no launcher entry and no icon — which is also
+why a window started from a terminal shows a generic one.
+
+[AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) does this
+for every AppImage you run. By hand it is two files:
+
+```bash
+./Jarvis-*.AppImage --appimage-extract > /dev/null
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/512x512/apps
+cp squashfs-root/usr/share/icons/hicolor/512x512/apps/jarvis.png \
+   ~/.local/share/icons/hicolor/512x512/apps/
+sed "s|^Exec=.*|Exec=$PWD/$(ls Jarvis-*.AppImage) --no-sandbox %U|" \
+   squashfs-root/jarvis.desktop > ~/.local/share/applications/jarvis.desktop
+update-desktop-database ~/.local/share/applications
+```
+
+The bundle sets `StartupWMClass=jarvis` and the window reports `WM_CLASS`
+`jarvis`, so once that entry exists the running window is matched to it and
+picks up the icon.
 
 ## Verifying the install
 

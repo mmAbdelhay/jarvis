@@ -154,7 +154,7 @@ a hotkey back, either bind one in your desktop's own keyboard settings
 (pointing it at the Jarvis window), or log into an Xorg session, where the
 shortcut registers normally.
 
-## Replies are shown but never spoken
+## Replies are shown but never spoken, and nothing is logged
 
 No voice is installed that can speak them, and the message in the panel says
 which. On Linux both languages go through Piper, and a Piper model speaks one
@@ -163,6 +163,20 @@ language — so English wants `voice.piperModel` and Arabic wants
 
 Speaking also needs a player: `pw-play`, `paplay` or `aplay`, whichever your
 sound server provides. Jarvis probes for them in that order at startup.
+
+## Jarvis has no icon in the launcher, the dock or alt-tab
+
+An AppImage does not register itself with the desktop, so there is no
+`.desktop` entry to take an icon from. The bundle carries both — see
+**Putting Jarvis in your application launcher** in
+[installation](installation.md), or install
+[AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher), which
+does it for every AppImage you run.
+
+Running from source has no entry either, for the same reason. Electron's
+`icon:` option sets `_NET_WM_ICON`, which several Linux desktops ignore in
+favour of matching `WM_CLASS` against an installed `.desktop` file — so the
+launcher entry is what actually decides the icon, on both.
 
 ## The AppImage will not start
 
