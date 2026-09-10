@@ -27,6 +27,21 @@ export const MESSAGES = {
     language === "ar"
       ? `تعذر تسجيل اختصار ${combo} — يبدو أن تطبيقًا آخر يستخدمه بالفعل.`
       : `Could not register the ${combo} shortcut — another app is probably already using it.`,
+  // Nothing is installed that can speak at all. Distinct from the Arabic-only
+  // case below: telling someone their Arabic voice is missing when no voice
+  // of any kind is installed sends them to fix the wrong thing.
+  noVoiceInstalled: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يوجد صوت مثبَّت — ثبِّت Piper وحمِّل نموذجًا، أو أوقف النطق من الإعدادات."
+      : "No voice is installed — install Piper and download a model, or turn speech off in Settings.",
+  // Linux has no `say`, so an Arabic reply needs an Arabic Piper model. The
+  // reply is already on screen; only the audio is missing, and the user is
+  // told which key would fix it rather than left with a voice that answers in
+  // one language and not the other.
+  arabicVoiceUnavailable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يوجد صوت عربي مثبَّت — حمِّل نموذج Piper عربيًا وحدِّد مساره في voice.piperArabicModel."
+      : "No Arabic voice is installed — download an Arabic Piper model and set voice.piperArabicModel.",
   recordingFailed: (message: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل الصوت: ${message}`

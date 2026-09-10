@@ -32,6 +32,7 @@ const draft: JarvisConfig = {
     engine: "say" as const,
     piperBinary: "/opt/piper",
     piperModel: "/voices/alan.onnx",
+    piperArabicModel: "/voices/ar.onnx",
     englishVoice: "Daniel",
     speakGreeting: true,
     arabicVoice: "Majed",

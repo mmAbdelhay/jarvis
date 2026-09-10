@@ -31,6 +31,7 @@ function sample(): JarvisConfig {
       engine: "say" as const,
     piperBinary: "/opt/piper",
     piperModel: "/voices/alan.onnx",
+    piperArabicModel: "/voices/ar.onnx",
     englishVoice: "Daniel",
       arabicVoice: "Majed",
       greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
@@ -83,6 +84,9 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
 
   const calls: Recorded[] = [];
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
+    // The voice section's note names a macOS preference pane, so these cases
+    // are written as a Mac user sees them; the Linux case sets its own.
+    platform: "darwin",
     getSettings: () => Promise.resolve(config),
     listVoices: () =>
       Promise.resolve([
@@ -778,6 +782,22 @@ describe("voice section", () => {
     await settle();
 
     expect(document.getElementById("settings-voice-note")?.textContent).toContain("Manage Voices");
+  });
+
+  it("says nothing about Manage Voices off macOS, where that screen does not exist", async () => {
+    // Every voice on the list there is a Piper model, which has no compact
+    // and enhanced versions to choose between. The advice would be directions
+    // to a preference pane the user does not have.
+    const { calls } = harness();
+    void calls;
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["platform"] = "linux";
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["listVoices"] = () =>
+      Promise.resolve([{ name: "Daniel", language: "en_GB", upgraded: false, engine: "say" }]);
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect(document.getElementById("settings-voice-note")?.textContent).toBe("");
   });
 
   it("says nothing when an upgraded voice is already installed", async () => {

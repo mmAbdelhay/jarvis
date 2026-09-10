@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { PiperSpeech, RoutedSpeech, type ProcessRunner } from "./piper.js";
+import {
+  audioPlayer,
+  onPath,
+  PiperSpeech,
+  RoutedSpeech,
+  silentSpeech,
+  type ProcessRunner,
+} from "./piper.js";
 
 type Spawned = { command: string; args: string[]; kill(): void; settle(code: number): void };
 
@@ -26,7 +33,7 @@ function harness(options: { autoSettle?: boolean } = {}) {
   };
 
   const speech = new PiperSpeech(
-    { binary: "/opt/piper", model: "/voices/alan.onnx" },
+    { binary: "/opt/piper", model: "/voices/alan.onnx", player: "afplay" },
     {
       run,
       makeTempDir: async () => "/tmp/utterance",
@@ -175,5 +182,105 @@ describe("RoutedSpeech", () => {
 
     expect(english.stops()).toBe(1);
     expect(other.stops()).toBe(1);
+  });
+});
+
+describe("audioPlayer", () => {
+  const all = (): boolean => true;
+  const none = (): boolean => false;
+
+  it("plays with afplay on macOS", () => {
+    expect(audioPlayer("darwin", all)).toBe("afplay");
+    expect(audioPlayer("darwin", none)).toBe("afplay");
+  });
+
+  it("prefers pw-play on Linux when PipeWire is there", () => {
+    expect(audioPlayer("linux", all)).toBe("pw-play");
+  });
+
+  it("falls back to paplay, then aplay", () => {
+    expect(audioPlayer("linux", (c) => c !== "pw-play")).toBe("paplay");
+    expect(audioPlayer("linux", (c) => c === "aplay")).toBe("aplay");
+  });
+
+  it("still names a player when none is installed, so the failure names itself", () => {
+    // Returning undefined would make every caller grow a second "no audio"
+    // branch. Spawning aplay and failing produces an error with a binary name
+    // in it, which is what the user needs to read.
+    expect(audioPlayer("linux", none)).toBe("aplay");
+  });
+});
+
+describe("onPath", () => {
+  it("finds an executable on PATH", () => {
+    expect(onPath("sh", { PATH: "/usr/bin:/bin" })).toBe(true);
+  });
+
+  it("does not find one that is not there", () => {
+    expect(onPath("definitely-not-a-real-binary", { PATH: "/usr/bin:/bin" })).toBe(false);
+  });
+
+  it("survives an unset or empty PATH", () => {
+    expect(onPath("sh", {})).toBe(false);
+    expect(onPath("sh", { PATH: "" })).toBe(false);
+  });
+
+  it("ignores an empty PATH entry rather than testing the working directory", () => {
+    expect(onPath("definitely-not-a-real-binary", { PATH: "::" })).toBe(false);
+  });
+});
+
+describe("silentSpeech", () => {
+  it("says nothing and reports the language it could not speak", async () => {
+    const asked: string[] = [];
+    const speech = silentSpeech((language) => asked.push(language));
+
+    await speech.speak("مرحبا", "ar");
+
+    expect(asked).toEqual(["ar"]);
+  });
+
+  it("does not report an empty utterance", async () => {
+    // Nothing was going to be said anyway, and a notice for it would be noise
+    // in the panel.
+    const asked: string[] = [];
+    const speech = silentSpeech((language) => asked.push(language));
+
+    await speech.speak("   ", "ar");
+
+    expect(asked).toEqual([]);
+  });
+
+  it("has a stopSpeaking that does nothing and does not throw", () => {
+    expect(() => silentSpeech(() => undefined).stopSpeaking()).not.toThrow();
+  });
+});
+
+describe("RoutedSpeech with a Piper voice on each side", () => {
+  it("sends each language to its own model", async () => {
+    // A Piper model speaks one language, so bilingual means two models. On a
+    // platform with no system voices this is the only way Arabic is spoken
+    // at all.
+    const spawned: { command: string; args: string[] }[] = [];
+    const run = (command: string, args: string[]) => {
+      spawned.push({ command, args });
+      return { kill: () => undefined, done: Promise.resolve({ code: 0 }) };
+    };
+    const deps = {
+      run,
+      makeTempDir: async () => "/tmp/utterance",
+      writeFile: async () => undefined,
+      removeDir: async () => undefined,
+    };
+    const speech = new RoutedSpeech(
+      new PiperSpeech({ binary: "/opt/piper", model: "/voices/en.onnx", player: "aplay" }, deps),
+      new PiperSpeech({ binary: "/opt/piper", model: "/voices/ar.onnx", player: "aplay" }, deps),
+    );
+
+    await speech.speak("hello", "en");
+    await speech.speak("مرحبا", "ar");
+
+    const models = spawned.filter((p) => p.command === "/opt/piper").map((p) => p.args[1]);
+    expect(models).toEqual(["/voices/en.onnx", "/voices/ar.onnx"]);
   });
 });

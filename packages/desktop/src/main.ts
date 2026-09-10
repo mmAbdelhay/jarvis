@@ -19,9 +19,12 @@ import {
 } from "@jarvis/core";
 import type { TabKind, WorkspaceTab } from "@jarvis/core";
 import {
+  audioPlayer,
   MacSpeech,
+  onPath,
   PiperSpeech,
   RoutedSpeech,
+  silentSpeech,
   createBookmarkStore,
   createBrain,
   createCapacityReader,
@@ -223,6 +226,10 @@ function nodeVersionIn(cwd: string): Promise<string | undefined> {
  *  line that hides how the voice handles it. */
 /** How the Piper engine appears in the voice picker. */
 const PIPER_VOICE = "Alan (neural)";
+/** And its Arabic model, which off darwin is the only Arabic voice there is.
+ *  Named for the picker the same way — the user is choosing a voice, not an
+ *  engine. */
+const PIPER_ARABIC_VOICE = "Kareem (neural)";
 
 const VOICE_SAMPLE = {
   en: "Good evening sir, how can I help you today?",
@@ -368,13 +375,24 @@ app.whenReady().then(async () => {
       .catch((error) => {
         console.error(`Session import failed: ${errorMessage(error)}`);
       });
-    // macOS's own voices, always — Arabic goes through these whichever engine
-    // English uses, because a Piper model speaks one language.
-    const macSpeech = new MacSpeech(
-      { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
-      defaultSpeechRunner,
-      defaultVoiceLister,
-    );
+    // What plays a synthesised WAV. Probed once here rather than per
+    // utterance — see audioPlayer.
+    const player = audioPlayer(process.platform, (command) => onPath(command, process.env));
+
+    // macOS's own voices. On darwin they are the fallback for anything Piper
+    // is not speaking; elsewhere there is no `say` to call, and constructing
+    // this would only produce a speech object whose every utterance rejects.
+    //
+    // That rejection was not theoretical: with Piper absent, the greeting hit
+    // `say`, and announceSpeaking awaited a promise nobody caught.
+    const macSpeech =
+      process.platform === "darwin"
+        ? new MacSpeech(
+            { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
+            defaultSpeechRunner,
+            defaultVoiceLister,
+          )
+        : undefined;
 
     // Piper only if it is actually installed. Configured-but-absent must fall
     // back rather than leave the app silent: the model is a 60MB download the
@@ -386,9 +404,44 @@ app.whenReady().then(async () => {
       existsSync(config.voice.piperModel);
     if (config.voice.engine === "piper" && !piperReady) {
       console.log(
-        `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel}) — using macOS voices.`,
+        `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel})` +
+          `${macSpeech === undefined ? " — nothing else here can speak." : " — using macOS voices."}`,
       );
     }
+
+    // Arabic. A Piper model speaks one language, so the Arabic voice is its
+    // own model — and on a platform with no system voices it is the only
+    // thing that can say an Arabic sentence at all.
+    const arabicPiperReady =
+      existsSync(config.voice.piperBinary) && existsSync(config.voice.piperArabicModel);
+    const arabicSpeech =
+      macSpeech ??
+      (arabicPiperReady
+        ? new PiperSpeech({
+            binary: config.voice.piperBinary,
+            model: config.voice.piperArabicModel,
+            player,
+          })
+        : silentSpeech(() => {
+            // Never silence with no explanation: the feature says why rather
+            // than appearing broken.
+            //
+            // Which explanation depends on what is actually missing. With
+            // Piper installed and only the Arabic model absent, the Arabic
+            // model is the thing to go and get. With Piper absent entirely
+            // this object is the whole of speech — English included — and
+            // naming the Arabic model would send the user to fix something
+            // that is not the problem.
+            const piperInstalled = existsSync(config.voice.piperBinary);
+            window.webContents.send("turn:new", {
+              role: "assistant",
+              text: piperInstalled
+                ? MESSAGES.arabicVoiceUnavailable(PRIMARY_LANGUAGE)
+                : MESSAGES.noVoiceInstalled(PRIMARY_LANGUAGE),
+              language: PRIMARY_LANGUAGE,
+              at: Date.now(),
+            });
+          }));
 
     /**
      * Speaks, and tells the renderer while it is happening.
@@ -403,6 +456,14 @@ app.whenReady().then(async () => {
       window.webContents.send("voice:speaking", true);
       try {
         await speech.speak(text, language);
+      } catch (error) {
+        // A voice that cannot speak is not a reason to take the process down.
+        // Every caller of this is fire-and-forget — the greeting, a reply, a
+        // capacity report — so a rejection here reached nobody's catch and
+        // surfaced as an UnhandledPromiseRejectionWarning, which under
+        // --unhandled-rejections=strict would be a crash. The turn is already
+        // on screen; only the audio is missing, and that is what is logged.
+        console.error(`Speech failed (${language}): ${errorMessage(error)}`);
       } finally {
         window.webContents.send("voice:speaking", false);
       }
@@ -410,10 +471,14 @@ app.whenReady().then(async () => {
 
     const speech = piperReady
       ? new RoutedSpeech(
-          new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel }),
-          macSpeech,
+          new PiperSpeech({
+            binary: config.voice.piperBinary,
+            model: config.voice.piperModel,
+            player,
+          }),
+          arabicSpeech,
         )
-      : macSpeech;
+      : (macSpeech ?? arabicSpeech);
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -1600,14 +1665,33 @@ app.whenReady().then(async () => {
       ),
     );
     ipcMain.handle("voice:list", async () => {
-      const installed = await listInstalledVoices();
+      // `say -v '?'` is the only source of system voices and it exists only on
+      // darwin. Asking elsewhere spawns a binary that is not there, waits for
+      // it to fail, and returns the same empty list this does immediately.
+      const installed = process.platform === "darwin" ? await listInstalledVoices() : [];
       // Piper is offered beside the system voices rather than in a separate
       // control: from where the user stands it is simply the best-sounding
       // English voice on the list.
       const system = installed.map((voice) => ({ ...voice, engine: "say" as const }));
-      return piperReady
-        ? [{ name: PIPER_VOICE, language: "en_GB", upgraded: true, engine: "piper" as const }, ...system]
-        : system;
+      const piperVoices = [
+        ...(piperReady
+          ? [{ name: PIPER_VOICE, language: "en_GB", upgraded: true, engine: "piper" as const }]
+          : []),
+        // Arabic is only ever a Piper model off darwin — there is no `say` to
+        // name a system voice with, so without this the Arabic picker would
+        // be an empty control on a bilingual app.
+        ...(arabicPiperReady && process.platform !== "darwin"
+          ? [
+              {
+                name: PIPER_ARABIC_VOICE,
+                language: "ar_JO",
+                upgraded: true,
+                engine: "piper" as const,
+              },
+            ]
+          : []),
+      ];
+      return [...piperVoices, ...system];
     });
     // The sample is spoken through the same MacSpeech the app uses, so a
     // preview sounds exactly like the thing being chosen — including the
@@ -1620,9 +1704,24 @@ app.whenReady().then(async () => {
       // being chosen, which is the one thing a preview must not do.
       const preview =
         name === PIPER_VOICE && piperReady
-          ? new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel })
-          : new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner);
-      void preview.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
+          ? new PiperSpeech({
+              binary: config.voice.piperBinary,
+              model: config.voice.piperModel,
+              player,
+            })
+          : name === PIPER_ARABIC_VOICE && arabicPiperReady
+            ? new PiperSpeech({
+                binary: config.voice.piperBinary,
+                model: config.voice.piperArabicModel,
+                player,
+              })
+            : process.platform === "darwin"
+              ? new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner)
+              : undefined;
+      // Off darwin there is no `say` to preview a named system voice with,
+      // and the Settings panel does not offer that list there — see
+      // renderer/settings.ts.
+      void preview?.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
     });
     ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
     ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
@@ -1956,7 +2055,7 @@ app.whenReady().then(async () => {
     // list costs 1.2s and only decides which macOS voice to speak with, so
     // with nothing to speak there is nothing to wait for either.
     const speakGreeting = config.voice.speakGreeting;
-    if (speakGreeting && !piperReady) await macSpeech.ready;
+    if (speakGreeting && !piperReady) await macSpeech?.ready;
 
     const template = config.voice.greeting[PRIMARY_LANGUAGE] ?? "";
     const wantsUncommitted = template.includes("{uncommitted}");

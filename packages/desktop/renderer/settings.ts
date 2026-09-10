@@ -1068,6 +1068,11 @@ function renderVoice(): void {
 function renderVoiceNote(): void {
   const note = $("settings-voice-note");
   note.replaceChildren();
+  // The advice below names a macOS preference pane. Elsewhere every voice on
+  // the list is a Piper model, which has no compact and enhanced versions to
+  // choose between, and the note would be directions to a screen that does
+  // not exist.
+  if (window.jarvis.platform !== "darwin") return;
   if (installedVoices.length === 0) return;
   if (installedVoices.some((voice) => voice.upgraded)) return;
 

@@ -30,6 +30,10 @@ export type VoiceConfig = {
    *  include ~/.local/bin. */
   piperBinary: string;
   piperModel: string;
+  /** The Arabic .onnx model. A Piper model speaks one language, and on a
+   *  platform with no system voices this is the only thing that can speak
+   *  Arabic — see RoutedSpeech. */
+  piperArabicModel: string;
   /** A `say -v` voice name. An unknown name makes macOS fall back to the
    *  system default silently rather than failing, so a typo here is quiet. */
   englishVoice: string;
@@ -202,6 +206,10 @@ const DEFAULT_ARABIC_VOICE = "Majed";
 const DEFAULT_ENGINE = "piper";
 const DEFAULT_PIPER_BINARY = join(homedir(), ".local/bin/piper");
 const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-low.onnx");
+const DEFAULT_PIPER_ARABIC_MODEL = join(
+  homedir(),
+  ".config/jarvis/voices/ar_JO-kareem-low.onnx",
+);
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
@@ -1077,6 +1085,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     engine: DEFAULT_ENGINE,
     piperBinary: DEFAULT_PIPER_BINARY,
     piperModel: DEFAULT_PIPER_MODEL,
+    piperArabicModel: DEFAULT_PIPER_ARABIC_MODEL,
     englishVoice: DEFAULT_ENGLISH_VOICE,
     arabicVoice: DEFAULT_ARABIC_VOICE,
     greeting: { ...DEFAULT_GREETING },
@@ -1124,6 +1133,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     engine: engine ?? DEFAULT_ENGINE,
     piperBinary: expandTilde(text("piperBinary", DEFAULT_PIPER_BINARY)),
     piperModel: expandTilde(text("piperModel", DEFAULT_PIPER_MODEL)),
+    piperArabicModel: expandTilde(text("piperArabicModel", DEFAULT_PIPER_ARABIC_MODEL)),
     englishVoice: text("englishVoice", DEFAULT_ENGLISH_VOICE),
     arabicVoice: text("arabicVoice", DEFAULT_ARABIC_VOICE),
     greeting: {
