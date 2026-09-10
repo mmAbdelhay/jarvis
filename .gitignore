@@ -10,3 +10,6 @@ design/jarvis-voice-orchestrator.html
 
 # Packaged app output (electron-builder)
 release/
+
+# Internal design specs and implementation plans — kept local, never published
+docs/superpowers/

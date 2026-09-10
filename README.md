@@ -114,11 +114,6 @@ tools each Workspace tab needs.
 - [Testing](docs/develop/testing.md) — what is tested where, and what tests cannot see
 - [Adding a Workspace tab](docs/develop/adding-a-tab.md) — the pattern, end to end
 
-**History** — [`docs/specs/`](docs/superpowers/specs) records why each feature is
-shaped the way it is; [`docs/plans/`](docs/superpowers/plans) records how it was
-built. They are not maintained as documentation, and where they disagree with
-the guides above, the guides are current.
-
 ## Commands
 
 | | |
@@ -148,12 +143,9 @@ and the code that spawns and reads is small and separate. What tests cannot
 see — how it looks, whether a terminal reflows, whether a real shell behaves —
 is written down in [testing](docs/develop/testing.md) rather than assumed.
 
-Features arrive by the same route each time: a design in
-[`docs/superpowers/specs/`](docs/superpowers/specs) argues for the shape,
-a plan in [`docs/superpowers/plans/`](docs/superpowers/plans) breaks it into
-reviewable pieces, and each piece is written test-first and read by a fresh
-reviewer before the next begins. The specs record the decisions that were
-close, including the ones that were wrong first.
+Features arrive by the same route each time: a design argues for the shape,
+a plan breaks it into reviewable pieces, and each piece is written test-first
+and read by a fresh reviewer before the next begins.
 
 ## Licence
 
