@@ -11,6 +11,7 @@ const source: MetricsSource = {
   ],
   networkStats: async () => [{ rx_sec: 10_525_000, tx_sec: 1_575_000 }],
   time: () => ({ uptime: 367_200 }),
+  cpuTemperature: async () => ({ main: 45 }),
 };
 
 describe("readMetrics", () => {
@@ -170,11 +171,22 @@ describe("readMetrics: what the numbers mean", () => {
 
 describe("cacheSource", () => {
   function counting() {
-    const calls = { currentLoad: 0, mem: 0, fsSize: 0, networkStats: 0, time: 0 };
+    const calls = {
+      currentLoad: 0,
+      mem: 0,
+      fsSize: 0,
+      networkStats: 0,
+      time: 0,
+      cpuTemperature: 0,
+    };
     const base: MetricsSource = {
       currentLoad: async () => {
         calls.currentLoad += 1;
         return { currentLoad: 10 };
+      },
+      cpuTemperature: async () => {
+        calls.cpuTemperature += 1;
+        return { main: 45 };
       },
       mem: async () => {
         calls.mem += 1;
@@ -259,5 +271,54 @@ describe("cacheSource", () => {
     const cached = await readMetrics(cacheSource(base, () => 0));
 
     expect(cached).toEqual(direct);
+  });
+});
+
+describe("cpu temperature", () => {
+  const base = {
+    currentLoad: async () => ({ currentLoad: 10 }),
+    mem: async () => ({ used: 1, total: 10, available: 4 }),
+    fsSize: async () => [{ mount: "/", used: 1, size: 10, available: 9 }],
+    networkStats: async () => [{ rx_sec: 0, tx_sec: 0 }],
+    time: () => ({ uptime: 60 }),
+  };
+
+  it("reports the reading when the machine has a sensor", async () => {
+    // A desktop Linux box answers from /sys/class/thermal with no privileges.
+    const metrics = await readMetrics({ ...base, cpuTemperature: async () => ({ main: 66.4 }) });
+    expect(metrics.cpuTemperatureC).toBe(66.4);
+  });
+
+  it("reports nothing at all when it has none", async () => {
+    // Apple Silicon without a privileged helper, and most VMs. Undefined, not
+    // zero — 0 °C is a reading, and the tile would show it as one.
+    const metrics = await readMetrics({ ...base, cpuTemperature: async () => ({ main: null }) });
+    expect(metrics.cpuTemperatureC).toBeUndefined();
+    expect("cpuTemperatureC" in metrics).toBe(false);
+  });
+
+  it("treats a non-finite reading as no reading", async () => {
+    const metrics = await readMetrics({
+      ...base,
+      cpuTemperature: async () => ({ main: Number.NaN }),
+    });
+    expect(metrics.cpuTemperatureC).toBeUndefined();
+  });
+
+  it("is not cached, because it is one of the readings that actually moves", async () => {
+    let reads = 0;
+    const source = cacheSource(
+      {
+        ...base,
+        cpuTemperature: async () => {
+          reads += 1;
+          return { main: 50 };
+        },
+      },
+      () => 0,
+    );
+    await source.cpuTemperature();
+    await source.cpuTemperature();
+    expect(reads).toBe(2);
   });
 });

@@ -257,6 +257,7 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("disk-value").textContent = disk.used;
   $("disk-total").textContent = disk.total;
   $("uptime-value").textContent = formatUptime(metrics.uptimeSeconds);
+  renderTemperature(metrics.cpuTemperatureC);
   $("net-down").textContent = `↓ ${metrics.networkDownMbps.toFixed(1)}`;
   $("net-up").textContent = `↑ ${metrics.networkUpMbps.toFixed(1)}`;
 
@@ -806,4 +807,32 @@ function labelShortcuts(): void {
   if (mic !== null) {
     mic.setAttribute("aria-label", `Start or stop voice input (${start} / ${stop})`);
   }
+}
+
+/**
+ * The temperature tile, and the note that says why it is empty.
+ *
+ * Whether the machine will answer at all is not a platform fact, it is a
+ * machine fact: a desktop Linux box reads it from /sys/class/thermal with no
+ * privileges, Apple Silicon reports nothing without a privileged helper, and
+ * a VM usually has no sensor to read. So the note is driven by whether a
+ * reading arrived, not by process.platform — the alternative was the note
+ * this replaces, which announced an Apple Silicon limitation to every Linux
+ * user while the reading sat there unused.
+ */
+function renderTemperature(celsius: number | undefined): void {
+  const value = document.getElementById("temp-value");
+  const note = document.getElementById("temp-note");
+  if (value === null || note === null) return;
+
+  if (celsius === undefined) {
+    value.textContent = "—";
+    value.style.color = "var(--text-muted)";
+    note.textContent = "No temperature sensor this process can read.";
+    return;
+  }
+
+  value.textContent = `${Math.round(celsius)}°`;
+  value.style.color = "";
+  note.textContent = "";
 }
