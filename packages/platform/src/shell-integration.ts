@@ -68,3 +68,20 @@ export async function installShellIntegration(
 
   return undefined;
 }
+
+/**
+ * Where the user's shell keeps its history, by default.
+ *
+ * Read and never written. zsh's HISTFILE is the file this feature's frequency
+ * analysis was built from; bash's is where the same information lives on a
+ * machine that runs bash — and reading one with the other's parser does not
+ * fail, it silently drops every timestamp and with it the recency half of the
+ * ranking.
+ *
+ * A shell neither installer knows gets zsh's path. Nothing else is known
+ * about them, and a file that does not exist reads as an empty history, which
+ * is what it already did.
+ */
+export function defaultHistoryPath(shell: string | undefined, home: string): string {
+  return isBash(shell) ? `${home}/.bash_history` : `${home}/.zsh_history`;
+}

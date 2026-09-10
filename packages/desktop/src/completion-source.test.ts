@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { parseBashHistory, parseZshHistory } from "@jarvis/platform";
 import { createCompletionSource, type CompletionSourceDeps } from "./completion-source.js";
 
 function source(overrides: Partial<CompletionSourceDeps> = {}) {
   return createCompletionSource({
     readHistory: async () => "",
+    // zsh's format unless a test says otherwise: it is the one every
+    // existing case here is written in.
+    parseHistory: parseZshHistory,
     readCommandLog: async () => "",
     listDirectory: async () => [],
     now: () => 0,
@@ -147,5 +151,30 @@ describe("createCompletionSource", () => {
     });
 
     await expect(instance.history(10)).resolves.toEqual([]);
+  });
+});
+
+describe("createCompletionSource under bash", () => {
+  it("ranks a bash-format history, timestamps and all", async () => {
+    // The same assertion as the zsh case above, in the other format. Reading
+    // a bash history with zsh's parser does not fail — it silently drops
+    // every timestamp, and with it the recency half of the ranking.
+    const instance = source({
+      readHistory: async () => "#100\nsaml2aws login\n",
+      parseHistory: parseBashHistory,
+      now: () => 100,
+    });
+
+    expect(await instance.suggest("/p", "saml")).toEqual(["saml2aws login"]);
+  });
+
+  it("still ranks a bash history that carries no timestamps at all", async () => {
+    const instance = source({
+      readHistory: async () => "saml2aws login\n",
+      parseHistory: parseBashHistory,
+      now: () => 100,
+    });
+
+    expect(await instance.suggest("/p", "saml")).toEqual(["saml2aws login"]);
   });
 });

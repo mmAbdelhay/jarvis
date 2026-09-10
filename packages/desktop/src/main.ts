@@ -33,6 +33,11 @@ import {
   createGitProvider,
   createHeadlampManager,
   defaultHeadlampBinary,
+  defaultHistoryPath,
+  installShellIntegration,
+  isBash,
+  parseBashHistory,
+  parseZshHistory,
   createKubeContextLister,
   createMetricsReader,
   createPtySpawner,
@@ -41,7 +46,6 @@ import {
   createRealShellSpawner,
   createSessionImporter,
   createShellManager,
-  installZshIntegration,
   createCollection,
   createFolder,
   apiFetch,
@@ -112,6 +116,7 @@ import {
 } from "./completion-source.js";
 import {
   DEFAULT_CONFIG_PATH,
+  DEFAULT_TERMINAL,
   defaultWorkflowsDir,
   ensureConfigFile,
   loadConfig,
@@ -604,22 +609,28 @@ app.whenReady().then(async () => {
     const dockerClient = createRealDockerClient(env);
 
     // Terminal autocomplete's shell integration, installed before the first
-    // shell can be started. It writes a Jarvis-owned ZDOTDIR whose files
-    // chain to the user's real dotfiles; ~/.zshrc and friends are read and
-    // never modified. Undefined means no integration — disabled, not zsh,
-    // or unwritable — and the terminal then behaves exactly as it did
-    // before this feature existed.
+    // shell can be started. It writes a Jarvis-owned wrapper — a ZDOTDIR
+    // directory for zsh, an rcfile for bash — whose contents chain to the
+    // user's real dotfiles; ~/.zshrc, ~/.profile and friends are read and
+    // never modified. Undefined means no integration — disabled, a shell
+    // neither wrapper knows, or unwritable — and the terminal then behaves
+    // exactly as it did before this feature existed.
     const completionEnabled = config.terminal.completion.enabled;
+    const shell = process.env["SHELL"];
     const zdotdir = join(homedir(), ".config/jarvis/zdotdir");
+    const bashDir = join(homedir(), ".config/jarvis/bash");
     await mkdir(zdotdir, { recursive: true }).catch(() => undefined);
+    await mkdir(bashDir, { recursive: true }).catch(() => undefined);
     await mkdir(dirname(config.terminal.completion.commandLogPath), { recursive: true }).catch(
       () => undefined,
     );
-    const installedZdotdir = await installZshIntegration({
-      shell: process.env["SHELL"],
+    const installedIntegration = await installShellIntegration({
+      shell,
       enabled: completionEnabled,
-      dir: zdotdir,
+      zdotdirDir: zdotdir,
+      bashDir,
       realZdotdir: process.env["ZDOTDIR"] ?? homedir(),
+      home: homedir(),
       write: (path, contents) => writeFile(path, contents, "utf8"),
     });
 
@@ -627,18 +638,40 @@ app.whenReady().then(async () => {
     // and the database this hosts no page and opens no port: the tab has no
     // view at all, and its screen is drawn by the renderer's own xterm.
     const shells = createShellManager({
-      spawn: createRealShellSpawner(process.env, {
-        zdotdir: installedZdotdir,
-        // Only worth writing when the wrapper that reads it is installed.
-        commandLog:
-          installedZdotdir === undefined
-            ? undefined
-            : config.terminal.completion.commandLogPath,
-      }),
+      spawn: createRealShellSpawner(
+        process.env,
+        {
+          ...(installedIntegration ?? {}),
+          // Only worth writing when a wrapper that reads it is installed.
+          commandLog:
+            installedIntegration === undefined
+              ? undefined
+              : config.terminal.completion.commandLogPath,
+        },
+        process.platform,
+      ),
     });
 
+    // The history file, and the parser that matches it.
+    //
+    // config.ts defaults this to zsh's HISTFILE and knows nothing about the
+    // host — deliberately, so its tests hold on both platforms. Comparing
+    // against DEFAULT_TERMINAL is how a caller tells "the user never wrote
+    // this key" from "the user wrote it and it happens to match", which is
+    // exactly what that export exists for. Only the former is overridden: a
+    // path the user actually chose is theirs.
+    //
+    // The parser has to follow the file. zsh's reads a bash history without
+    // failing and silently drops every timestamp, taking the recency half of
+    // the ranking with it.
+    const historyPath =
+      config.terminal.completion.historyPath === DEFAULT_TERMINAL.completion.historyPath
+        ? defaultHistoryPath(shell, homedir())
+        : config.terminal.completion.historyPath;
+
     const completionSource = createCompletionSource({
-      readHistory: createFileReader(config.terminal.completion.historyPath),
+      readHistory: createFileReader(historyPath),
+      parseHistory: isBash(shell) ? parseBashHistory : parseZshHistory,
       readCommandLog: createFileReader(config.terminal.completion.commandLogPath),
       listDirectory: createDirectoryLister(),
       now: () => Date.now(),

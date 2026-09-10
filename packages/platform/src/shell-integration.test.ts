@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { installShellIntegration } from "./shell-integration.js";
+import { defaultHistoryPath, installShellIntegration } from "./shell-integration.js";
 
 const base = {
   enabled: true,
@@ -92,5 +92,22 @@ describe("installShellIntegration", () => {
       },
     });
     expect(written.every((path) => path.startsWith("/cfg/bash/"))).toBe(true);
+  });
+});
+
+describe("defaultHistoryPath", () => {
+  it("reads zsh's HISTFILE for a zsh user", () => {
+    expect(defaultHistoryPath("/bin/zsh", "/home/u")).toBe("/home/u/.zsh_history");
+  });
+
+  it("reads bash's for a bash user", () => {
+    // Not cosmetic: zsh's parser reads a bash history without failing, and
+    // silently drops every timestamp — the recency half of the ranking.
+    expect(defaultHistoryPath("/bin/bash", "/home/u")).toBe("/home/u/.bash_history");
+  });
+
+  it("falls back to zsh's for a shell with no integration", () => {
+    expect(defaultHistoryPath("/usr/bin/fish", "/home/u")).toBe("/home/u/.zsh_history");
+    expect(defaultHistoryPath(undefined, "/home/u")).toBe("/home/u/.zsh_history");
   });
 });
