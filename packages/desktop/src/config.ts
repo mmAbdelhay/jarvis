@@ -16,7 +16,7 @@ import type {
   EditorsConfig,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import { DB_GATE_ENGINES, defaultHeadlampBinary, isChatDriver } from "@jarvis/platform";
+import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 
 /** What Jarvis sounds like, and what it says on opening. */
@@ -145,7 +145,11 @@ export type JarvisConfig = {
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
-  headlamp: { binary: string };
+  /** Where `headlamp-server` lives, when the user has said. Undefined means
+   *  they have not, and the per-OS default applies — resolved by main.ts
+   *  with `defaultHeadlampBinary`, not here. Config parsing is pure and
+   *  knows nothing about the host it is running on. */
+  headlamp: { binary: string | undefined };
   terminal: TerminalConfig;
   performance: PerformanceConfig;
   browser: BrowserConfig;
@@ -1040,11 +1044,17 @@ function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
   return rawValue;
 }
 
-/** The `headlamp:` section. One key, with a per-OS default, so an absent
- *  section is not an error — only a binary that turns out not to exist is,
- *  and that is the manager's failure to report, not this one's. */
-function parseHeadlamp(rawHeadlamp: unknown): { binary: string } {
-  const fallback = { binary: defaultHeadlampBinary(process.platform, process.env) };
+/** The `headlamp:` section. One optional key, so an absent section is not an
+ *  error — only a binary that turns out not to exist is, and that is the
+ *  manager's failure to report, not this one's.
+ *
+ *  An absent key yields undefined rather than the per-OS default it used to.
+ *  Resolving that default meant reading `process.platform` here, which made
+ *  every headlamp assertion in config.test.ts true only on the OS the test
+ *  ran on. The default now lives at main.ts's edge, where the host is
+ *  already known — see defaultHeadlampBinary. */
+function parseHeadlamp(rawHeadlamp: unknown): { binary: string | undefined } {
+  const fallback = { binary: undefined };
   if (rawHeadlamp === undefined) return fallback;
   if (typeof rawHeadlamp !== "object" || rawHeadlamp === null || Array.isArray(rawHeadlamp)) {
     throw new Error("Config `headlamp` must be an object");

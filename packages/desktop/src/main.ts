@@ -32,6 +32,7 @@ import {
   createFsImportDeps,
   createGitProvider,
   createHeadlampManager,
+  defaultHeadlampBinary,
   createKubeContextLister,
   createMetricsReader,
   createPtySpawner,
@@ -588,7 +589,11 @@ app.whenReady().then(async () => {
       waitUntilReady,
       listContexts: createKubeContextLister(join(homedir(), ".kube/config")),
       clusters: config.clusters,
-      binary: config.headlamp.binary,
+      // The per-OS default lives here rather than in config.ts: resolving it
+      // there would mean config parsing reading process.platform, and every
+      // headlamp assertion in its tests would then hold only on the OS the
+      // test happened to run on.
+      binary: config.headlamp.binary ?? defaultHeadlampBinary(process.platform, process.env),
       kubeconfigPath: join(homedir(), ".kube/config"),
     });
     const checkAwsSession = createAwsSessionChecker(env);
