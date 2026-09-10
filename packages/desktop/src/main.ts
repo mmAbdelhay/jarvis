@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
 import type { Session } from "electron";
+import { appMenuTemplate } from "./app-menu.js";
 import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import {
   AgentRegistry,
@@ -257,6 +258,16 @@ export let widevineReady: Promise<void> | undefined;
 
 app.whenReady().then(async () => {
   setDockIcon();
+
+  // Electron's default menu is the standard Mac menu bar on darwin — which is
+  // right, and where ⌘Q and the edit roles come from. Off darwin the same
+  // default draws a visible File/Edit/View bar inside the window, over a UI
+  // that opens full screen and has chrome of its own.
+  //
+  // So: a minimal role menu, hidden by autoHideMenuBar below. The roles are
+  // not decoration — without them copy and paste stop working in ordinary
+  // input fields, which is what makes "just remove the menu" the wrong fix.
+  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(process.platform)));
 
   widevineReady = components
     .whenReady()
@@ -557,6 +568,10 @@ app.whenReady().then(async () => {
       fullscreen: true,
       width: 1440,
       height: 900,
+      // Linux and Windows draw the menu bar inside the window; macOS never
+      // has and ignores this. See appMenuTemplate for what is in it and why
+      // it is not simply removed.
+      autoHideMenuBar: true,
       backgroundColor: "#060a0f",
       // Windows and Linux take the icon from the window; macOS takes it from
       // the bundle at package time and from the dock while developing, which
