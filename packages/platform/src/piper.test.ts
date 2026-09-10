@@ -37,7 +37,6 @@ function harness(options: { autoSettle?: boolean } = {}) {
     {
       run,
       makeTempDir: async () => "/tmp/utterance",
-      writeFile: async () => undefined,
       removeDir: async (path) => {
         removed.push(path);
       },
@@ -61,7 +60,7 @@ describe("PiperSpeech", () => {
 
     expect(spawned[0]).toMatchObject({
       command: "/opt/piper",
-      args: ["-m", "/voices/alan.onnx", "-i", "/tmp/utterance/line.txt", "-f", "/tmp/utterance/line.wav"],
+      args: ["-m", "/voices/alan.onnx", "-f", "/tmp/utterance/line.wav"],
     });
     expect(spawned[1]).toMatchObject({ command: "afplay", args: ["/tmp/utterance/line.wav"] });
   });
@@ -269,7 +268,6 @@ describe("RoutedSpeech with a Piper voice on each side", () => {
     const deps = {
       run,
       makeTempDir: async () => "/tmp/utterance",
-      writeFile: async () => undefined,
       removeDir: async () => undefined,
     };
     const speech = new RoutedSpeech(
@@ -282,5 +280,48 @@ describe("RoutedSpeech with a Piper voice on each side", () => {
 
     const models = spawned.filter((p) => p.command === "/opt/piper").map((p) => p.args[1]);
     expect(models).toEqual(["/voices/en.onnx", "/voices/ar.onnx"]);
+  });
+});
+
+describe("how the text reaches piper", () => {
+  function recording() {
+    const calls: { command: string; args: string[]; stdin?: string }[] = [];
+    const run: ProcessRunner = (command, args, stdin) => {
+      calls.push({ command, args, stdin });
+      return { kill: () => undefined, done: Promise.resolve({ code: 0 }) };
+    };
+    const speech = new PiperSpeech(
+      { binary: "/opt/piper", model: "/voices/alan.onnx", player: "aplay" },
+      {
+        run,
+        makeTempDir: async () => "/tmp/utterance",
+        removeDir: async () => undefined,
+      },
+    );
+    return { speech, calls };
+  }
+
+  it("writes the line to piper's stdin", async () => {
+    const { speech, calls } = recording();
+    await speech.speak("hello there", "en");
+    expect(calls[0]?.stdin).toBe("hello there");
+  });
+
+  it("passes no input-file flag, because piper has none", async () => {
+    // `-i <path>` was accepted silently, ignored, and left piper reading an
+    // empty stdin: it logged "Initialized piper", logged "Terminated piper",
+    // wrote no file and exited 0. Every utterance then failed at the player,
+    // complaining about a wav that had never been created.
+    const { speech, calls } = recording();
+    await speech.speak("hello there", "en");
+    expect(calls[0]?.args).not.toContain("-i");
+    expect(calls[0]?.args).toEqual(["-m", "/voices/alan.onnx", "-f", "/tmp/utterance/line.wav"]);
+  });
+
+  it("sends no stdin to the player, which takes a path", async () => {
+    const { speech, calls } = recording();
+    await speech.speak("hello there", "en");
+    expect(calls[1]?.command).toBe("aplay");
+    expect(calls[1]?.stdin).toBeUndefined();
   });
 });
