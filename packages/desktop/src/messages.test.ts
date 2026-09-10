@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, MESSAGES } from "./messages.js";
+import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
 // strings beside @jarvis/core's bilingual MESSAGES table — every string a
@@ -317,5 +317,47 @@ describe("the bookmarks sidebar", () => {
       expect(message("ar")).not.toBe(message("en"));
       expect(message("ar")).not.toBe("");
     }
+  });
+});
+
+describe("isWayland", () => {
+  it("recognises a Wayland session by either marker", () => {
+    // Neither is universal: XDG_SESSION_TYPE comes from the login manager and
+    // some do not set it; WAYLAND_DISPLAY comes from the compositor.
+    expect(isWayland({ XDG_SESSION_TYPE: "wayland" })).toBe(true);
+    expect(isWayland({ WAYLAND_DISPLAY: "wayland-0" })).toBe(true);
+  });
+
+  it("does not mistake X11 for it", () => {
+    // Including XWayland, where an X11 app's global shortcut does work — so
+    // saying it does not would be wrong in the other direction.
+    expect(isWayland({ XDG_SESSION_TYPE: "x11", DISPLAY: ":0" })).toBe(false);
+  });
+
+  it("does not mistake macOS, where neither variable exists", () => {
+    expect(isWayland({})).toBe(false);
+  });
+
+  it("treats an empty WAYLAND_DISPLAY as unset", () => {
+    expect(isWayland({ WAYLAND_DISPLAY: "" })).toBe(false);
+  });
+});
+
+describe("MESSAGES.hotkeyUnavailableWayland", () => {
+  it("names the combo in both languages", () => {
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "en")).toContain("Alt+Space");
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "ar")).toContain("Alt+Space");
+  });
+
+  it("is written in Arabic for an Arabic reader", () => {
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "ar")).toMatch(/[\u0600-\u06FF]/);
+  });
+
+  it("points at what still works rather than at a conflict that does not exist", () => {
+    // The collision message's advice — look for the app holding the combo —
+    // is a wild goose chase here: Wayland lets no application hold one.
+    const text = MESSAGES.hotkeyUnavailableWayland("Alt+Space", "en");
+    expect(text).toMatch(/microphone/i);
+    expect(text).not.toMatch(/another app/i);
   });
 });

@@ -127,7 +127,7 @@ import {
 } from "./config.js";
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
-import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
+import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { createRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
 import { toDeviceIndependent } from "./view-bounds.js";
@@ -2042,9 +2042,15 @@ app.whenReady().then(async () => {
       ["Alt+Shift+Space", stopRegistered],
     ] as const) {
       if (registered) continue;
+      // Two causes, two pieces of advice. A collision means another app holds
+      // the combo and the user can close it or pick another. Wayland means no
+      // application can hold one at all, and saying "another app is probably
+      // using it" would send them looking for something that does not exist.
       window.webContents.send("turn:new", {
         role: "assistant",
-        text: MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
+        text: isWayland(process.env)
+          ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
+          : MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
         language: PRIMARY_LANGUAGE,
         at: Date.now(),
       });

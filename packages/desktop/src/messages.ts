@@ -42,6 +42,14 @@ export const MESSAGES = {
     language === "ar"
       ? "لا يوجد صوت عربي مثبَّت — حمِّل نموذج Piper عربيًا وحدِّد مساره في voice.piperArabicModel."
       : "No Arabic voice is installed — download an Arabic Piper model and set voice.piperArabicModel.",
+  // A different cause from hotkeyCollision, and different advice. Wayland
+  // gives no application a way to grab a key system-wide at all, so telling a
+  // Wayland user to look for a conflicting app sends them hunting for
+  // something that does not exist.
+  hotkeyUnavailableWayland: (combo: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختصار ${combo} لا يعمل على Wayland — استخدم زر الميكروفون، أو اربط الاختصار من إعدادات لوحة المفاتيح في سطح المكتب.`
+      : `The ${combo} shortcut does not work on Wayland — use the microphone button, or bind it in your desktop's own keyboard settings.`,
   recordingFailed: (message: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل الصوت: ${message}`
@@ -508,4 +516,22 @@ function arabicSessionsCount(count: number): string {
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Whether this is a Wayland session.
+ *
+ * Only used to explain a failed globalShortcut registration, which is why it
+ * takes the environment rather than reading it: the message that comes out is
+ * a user-visible string, and messages.test.ts asserts both branches.
+ *
+ * Both variables are checked because neither is universal — XDG_SESSION_TYPE
+ * is set by the login manager and missing under some, while WAYLAND_DISPLAY is
+ * set by the compositor and missing when an app runs through XWayland (where
+ * the shortcut does in fact work, and this correctly says so).
+ */
+export function isWayland(env: NodeJS.ProcessEnv): boolean {
+  if (env["XDG_SESSION_TYPE"] === "wayland") return true;
+  const display = env["WAYLAND_DISPLAY"];
+  return display !== undefined && display !== "";
 }

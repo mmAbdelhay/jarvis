@@ -6,7 +6,7 @@
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -b ../../tsconfig.json && node scripts/copy-vendor.mjs",
-    "start": "pnpm run build && electron .",
+    "start": "pnpm run build && node scripts/start.mjs",
     "package": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml"
   },
   "dependencies": {
