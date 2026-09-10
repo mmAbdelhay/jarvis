@@ -61,6 +61,42 @@ export function parseZshHistory(text: string): CommandHistoryEntry[] {
   return entries;
 }
 
+/** `#<epoch>` on a line of its own — what bash writes above each command when
+ *  HISTTIMEFORMAT is set. No space after the hash: a line with one is a
+ *  comment the user typed, and bash's own marker never has one. */
+const BASH_TIMESTAMP_LINE = /^#(\d+)$/;
+
+/**
+ * bash history text to entries.
+ *
+ * Two formats, as with zsh: bare command lines, and — when HISTTIMEFORMAT is
+ * set — a `#<epoch>` line above each one. The timestamp belongs to the single
+ * command that follows it and is not carried further, which is how bash's own
+ * `history` reads them back.
+ *
+ * Unlike zsh, bash marks nothing when a command spans lines: it simply writes
+ * them consecutively, with no trailing backslash to rejoin on. There is no
+ * way to tell those apart from two separate commands, so they stay separate —
+ * the same choice bash's own history recall makes.
+ */
+export function parseBashHistory(text: string): CommandHistoryEntry[] {
+  const entries: CommandHistoryEntry[] = [];
+  let pending: number | undefined;
+
+  for (const line of text.split("\n")) {
+    if (line === "") continue;
+    const stamp = BASH_TIMESTAMP_LINE.exec(line);
+    if (stamp !== null) {
+      pending = Number(stamp[1]);
+      continue;
+    }
+    entries.push(pending === undefined ? { command: line } : { command: line, at: pending });
+    pending = undefined;
+  }
+
+  return entries;
+}
+
 /**
  * Jarvis's own command log — `<epoch>\t<cwd>\t<command>`, one line per
  * command, appended by the preexec hook the ZDOTDIR wrapper installs.
