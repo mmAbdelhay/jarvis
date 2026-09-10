@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { RendererApi } from "./ipc.js";
 
 const api: RendererApi = {
+  platform: process.platform,
   send: (text, language) => ipcRenderer.invoke("input:send", text, language),
   startVoice: () => ipcRenderer.invoke("voice:start"),
   stopVoice: () => ipcRenderer.invoke("voice:stop"),

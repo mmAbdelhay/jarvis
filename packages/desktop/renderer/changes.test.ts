@@ -23,6 +23,9 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     language: "en",
   };
   const defaults: RendererApi = {
+    // The tests in this file exercise the Changes route, which has no
+    // chords of its own; darwin keeps them reading as they always have.
+    platform: "darwin",
     send: vi.fn(async () => {}),
     startVoice: vi.fn(async () => {}),
     stopVoice: vi.fn(async () => {}),

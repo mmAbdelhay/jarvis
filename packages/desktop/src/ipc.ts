@@ -300,6 +300,14 @@ export type ReportedRect = {
 };
 
 export type RendererApi = {
+  /** The host OS, as `process.platform` spells it.
+   *
+   *  The renderer's chord table (renderer/keys.ts) is the consumer: the app
+   *  modifier is ⌘ on darwin and Ctrl+Shift everywhere else, and the visible
+   *  hints have to agree with whatever actually dispatches. A plain value
+   *  rather than an invoke, because it cannot change while the app runs and
+   *  every keystroke would otherwise pay for an IPC round trip. */
+  platform: NodeJS.Platform;
   send(text: string, language: "ar" | "en"): Promise<void>;
   // Drives the exact same start/stop path as the Alt+Space / Alt+Shift+Space
   // global hotkey — the renderer's mic button is a second control on one
