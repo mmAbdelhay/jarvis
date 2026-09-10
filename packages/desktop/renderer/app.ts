@@ -1,3 +1,4 @@
+import { hostPlatform, keyLabel } from "./keys.js";
 import type {
   Session,
   SessionChanges,
@@ -65,12 +66,21 @@ let knownProjects: string[] = [];
  */
 type Presence = "idle" | "listening" | "thinking" | "speaking";
 
-const PRESENCE_TEXT: Record<Presence, { state: string; hint: string }> = {
-  idle: { state: "Idle", hint: "⌥Space to talk" },
-  listening: { state: "Listening…", hint: "⌥⇧Space to stop" },
-  thinking: { state: "Thinking…", hint: "working on it" },
-  speaking: { state: "Speaking…", hint: "⌥Space to interrupt" },
-};
+/** The presence hints, spelled for the platform this is running on.
+ *
+ *  Built from keyLabel rather than written out, because a hint that names a
+ *  chord which does nothing is worse than no hint — and ⌥Space is not what
+ *  the hotkey is called anywhere but macOS. */
+function presenceText(platform: NodeJS.Platform): Record<Presence, { state: string; hint: string }> {
+  const start = keyLabel("voiceStart", platform);
+  const stop = keyLabel("voiceStop", platform);
+  return {
+    idle: { state: "Idle", hint: `${start} to talk` },
+    listening: { state: "Listening…", hint: `${stop} to stop` },
+    thinking: { state: "Thinking…", hint: "working on it" },
+    speaking: { state: "Speaking…", hint: `${start} to interrupt` },
+  };
+}
 
 let listening = false;
 let speaking = false;
@@ -85,7 +95,7 @@ function renderPresence(): void {
   if (element === null) return;
 
   element.className = `presence presence--${state}`;
-  const text = PRESENCE_TEXT[state];
+  const text = presenceText(hostPlatform())[state];
   const stateElement = document.getElementById("presence-state");
   const hintElement = document.getElementById("presence-hint");
   if (stateElement !== null) stateElement.textContent = text.state;
@@ -142,6 +152,7 @@ window.jarvis.onProviders((statuses) => renderProviders(statuses, Date.now()));
 window.jarvis.onSessionOutput((output) => appendSessionOutput(output));
 
 startClock();
+labelShortcuts();
 applyStaticChrome();
 wireComposer();
 wireMicButton();
@@ -765,4 +776,34 @@ function startClock(): void {
 
   tick();
   setInterval(tick, 1000);
+}
+
+/**
+ * The chords a user can read, written from the same table that dispatches
+ * them.
+ *
+ * index.html carries the macOS spelling as its literal text so a renderer
+ * that fails before this runs still shows something sensible; this replaces
+ * it. Two places spelling one shortcut is how a hint ends up advertising a
+ * key that does nothing on the machine reading it.
+ */
+function labelShortcuts(): void {
+  const platform = hostPlatform();
+  const start = keyLabel("voiceStart", platform);
+  const stop = keyLabel("voiceStop", platform);
+
+  const empty = document.getElementById("conversation-empty");
+  if (empty !== null) {
+    empty.textContent = `No conversation yet — type below, or press ${start} to start talking and ${stop} to stop.`;
+  }
+
+  const composer = document.getElementById("composer");
+  if (composer !== null) {
+    composer.setAttribute("placeholder", `Type, or press ${start} to talk, ${stop} to stop…`);
+  }
+
+  const mic = document.getElementById("mic-button");
+  if (mic !== null) {
+    mic.setAttribute("aria-label", `Start or stop voice input (${start} / ${stop})`);
+  }
 }

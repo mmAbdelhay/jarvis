@@ -224,7 +224,14 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
         return;
       }
 
-      if (event.ctrlKey && !event.metaKey && !event.altKey) {
+      // readline's own editing chords, which the line editor reimplements
+      // because the shell's is not the one receiving these keystrokes.
+      //
+      // !shiftKey is not decoration. On Linux the app's chords are Ctrl+Shift
+      // (see keys.ts), and Ctrl+Shift+W is "close this pane" — without this
+      // guard it would kill a word on its way there, and Ctrl+Shift+K would
+      // truncate the line before clearing the screen.
+      if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
         switch (event.key.toLowerCase()) {
           case "w":
             event.preventDefault();

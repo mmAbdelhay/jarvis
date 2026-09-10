@@ -1,3 +1,4 @@
+import { hostPlatform, matchChord } from "./keys.js";
 import type { WorkspaceTab } from "@jarvis/core";
 import type {
   ApiSettings,
@@ -167,16 +168,19 @@ export function initApi(): void {
   $("api-cookies-toggle").addEventListener("click", () => toggleSidePanel("cookies"));
   $("api-settings-toggle").addEventListener("click", () => toggleSidePanel("settings"));
 
-  // Cmd+Enter sends and Cmd+S saves, the two things a request editor is for.
-  // Scoped to the pane: these must not fire while the user is in a terminal
-  // or the Changes view.
+  // Send and save, the two things a request editor is for — ⌘Enter and ⌘S on
+  // a Mac, Ctrl+Enter and Ctrl+S elsewhere (see keys.ts).
+  //
+  // Scoped to the pane, and that scoping is what makes the plain-Ctrl
+  // spelling safe: Ctrl+S is XOFF to a terminal, and this listener returns
+  // before looking at the key unless the API tab is the thing on screen.
   document.addEventListener("keydown", (event) => {
     if (($("workspace-api") as HTMLElement).hidden) return;
-    if (!event.metaKey) return;
-    if (event.key === "Enter") {
+    const action = matchChord(event, hostPlatform());
+    if (action === "sendRequest") {
       event.preventDefault();
       void send();
-    } else if (event.key === "s") {
+    } else if (action === "saveRequest") {
       event.preventDefault();
       void save();
     }

@@ -211,3 +211,19 @@ export function matchChord(
 export function keyLabel(action: LabelledChord, platform: NodeJS.Platform): string {
   return BINDINGS[action].label[side(platform)];
 }
+
+/**
+ * The platform this renderer is running on, from the preload bridge.
+ *
+ * The chord handlers default to it so the platform does not have to be
+ * threaded through every pane, split and tab that owns a keystroke — but each
+ * of them still takes it as a parameter, which is what lets one test run
+ * assert both spellings of every chord.
+ *
+ * darwin when the bridge is absent, which is only ever a test that did not
+ * set one, and is the spelling those tests were written in.
+ */
+export function hostPlatform(): NodeJS.Platform {
+  const bridge = (globalThis as { jarvis?: { platform?: NodeJS.Platform } }).jarvis;
+  return bridge?.platform ?? "darwin";
+}
