@@ -3,6 +3,8 @@ export * from "./pty.js";
 export * from "./shell.js";
 export * from "./completion.js";
 export * from "./zsh-integration.js";
+export * from "./bash-integration.js";
+export * from "./shell-integration.js";
 export * from "./metrics.js";
 export * from "./speech.js";
 export * from "./piper.js";
