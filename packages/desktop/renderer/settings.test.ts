@@ -39,6 +39,7 @@ function sample(): JarvisConfig {
     brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-main" },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
     performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+    browser: { allowPopups: true },
     sessions: { importWindowDays: 30 },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };
@@ -76,6 +77,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-speak-greeting" type="checkbox" />
     <textarea id="settings-greeting-en"></textarea>
     <textarea id="settings-greeting-ar"></textarea>
+    <input id="settings-allow-popups" type="checkbox" />
     <input id="settings-whisper-binary" />
     <input id="settings-whisper-model" />`;
 
@@ -817,6 +819,32 @@ describe("voice section", () => {
     expect(saved.voice.speakGreeting).toBe(false);
     // Silencing it must not touch the greeting itself.
     expect(saved.voice.greeting.en).not.toBe("");
+  });
+
+  it("shows popups as allowed by default", async () => {
+    harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    expect((document.getElementById("settings-allow-popups") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("saves popups turned off", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const toggle = document.getElementById("settings-allow-popups") as HTMLInputElement;
+    toggle.checked = false;
+    change(toggle);
+
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.browser.allowPopups).toBe(false);
   });
 
   it("saves an edited voice and greeting", async () => {

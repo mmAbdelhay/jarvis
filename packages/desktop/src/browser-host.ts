@@ -33,7 +33,19 @@ export type HostedViewEvent =
    *  this exists because the view is positioned by the renderer, which is
    *  the only thing that can hand the page the whole window instead of the
    *  rectangle under the tab strip. */
-  | { kind: "fullscreen"; fullscreen: boolean };
+  | { kind: "fullscreen"; fullscreen: boolean }
+  /** This page's DevTools were closed by something other than the renderer
+   *  asking — the user closing their undocked window. The renderer is the
+   *  side that remembers which tabs have DevTools open, so it has to hear. */
+  | { kind: "devtoolsClosed" };
+
+/** Where a page's DevTools sit: beside the page in the Workspace layout, or
+ *  in a window of their own. One choice for every tab, as in Chrome. */
+export type DevToolsDock = "undocked" | "left" | "bottom" | "right";
+
+export function isDevToolsDock(value: unknown): value is DevToolsDock {
+  return value === "undocked" || value === "left" || value === "bottom" || value === "right";
+}
 
 /**
  * One page's worth of browser, as this host needs it. Electron is behind
@@ -57,6 +69,9 @@ export type HostedView = {
   /** Where the DevTools view sits, in window pixels — measured by the
    *  renderer exactly as the page slot is. */
   setDevToolsBounds(bounds: Rect): void;
+  /** Docked, the DevTools view lives in the main window at the bounds
+   *  above; undocked, it moves into a window of its own. */
+  setDevToolsDock(dock: DevToolsDock): void;
   /** Asks the page whether it has a <video> element that is genuinely
    *  playing — decoding frames, not merely present or merely audible.
    *  Answered by the page, because nothing outside it can tell. */
@@ -93,6 +108,12 @@ export class BrowserHost {
   readonly #maxTabs: number;
   #bounds: Rect | undefined;
   #devToolsBounds: Rect | undefined;
+  #devToolsDock: DevToolsDock = "bottom";
+  /** Tabs whose DevTools are open — kept so sweepIdle leaves them alone. An
+   *  undocked DevTools window vanishing fifteen minutes after switching tabs
+   *  would look like a crash. */
+  readonly #devToolsOpen = new Set<TabId>();
+  readonly #devToolsClosedListeners = new Set<(id: TabId) => void>();
   #visible = false;
   /** Set by hideAll — distinct from #visible, which means "leave the whole
    *  route". This means "nothing to show right now" while the route itself
@@ -319,6 +340,7 @@ export class BrowserHost {
     this.#views.get(id)?.destroy();
     this.#views.delete(id);
     this.#hiddenSince.delete(id);
+    this.#devToolsOpen.delete(id);
     this.#store.close(id);
     this.#syncVisibility();
   }
@@ -356,7 +378,23 @@ export class BrowserHost {
    * slot for them; this only routes it to the right view.
    */
   setDevTools(id: TabId, open: boolean): void {
+    if (open) this.#devToolsOpen.add(id);
+    else this.#devToolsOpen.delete(id);
     this.#views.get(id)?.setDevTools(open);
+  }
+
+  /** Which side DevTools dock to, or undocked. Applied to every view, same
+   *  as the bounds: it is one choice, and a tab opened later must follow it. */
+  setDevToolsDock(dock: DevToolsDock): void {
+    this.#devToolsDock = dock;
+    for (const view of this.#views.values()) view.setDevToolsDock(dock);
+  }
+
+  /** Told when a tab's DevTools close without the renderer asking — see
+   *  HostedViewEvent's "devtoolsClosed". */
+  onDevToolsClosed(listener: (id: TabId) => void): () => void {
+    this.#devToolsClosedListeners.add(listener);
+    return () => this.#devToolsClosedListeners.delete(listener);
   }
 
   /** Where the DevTools panel sits, measured by the renderer like every
@@ -457,6 +495,10 @@ export class BrowserHost {
         // and the view follows through the ordinary setBounds path.
         this.#store.update(id, { pageFullscreen: event.fullscreen });
         break;
+      case "devtoolsClosed":
+        this.#devToolsOpen.delete(id);
+        for (const listener of [...this.#devToolsClosedListeners]) listener(id);
+        break;
       case "popup":
         // What target=_blank means in a browser. The scheme gate inside
         // open() still applies, so a page cannot use a popup to reach a
@@ -484,6 +526,7 @@ export class BrowserHost {
     view.onEvent((event) => this.#onViewEvent(tabId, project, event));
     if (this.#bounds !== undefined) view.setBounds(this.#bounds);
     if (this.#devToolsBounds !== undefined) view.setDevToolsBounds(this.#devToolsBounds);
+    view.setDevToolsDock(this.#devToolsDock);
     view.loadURL(url);
   }
 
@@ -510,6 +553,7 @@ export class BrowserHost {
     for (const tab of tabs) {
       if (tab.id === activeTabId) continue;
       if (tab.hasPlayingVideo) continue;
+      if (this.#devToolsOpen.has(tab.id)) continue;
       if (!this.#views.has(tab.id)) continue;
       const since = this.#hiddenSince.get(tab.id);
       if (since === undefined || now - since < this.#suspendAfterMs) continue;
@@ -588,11 +632,36 @@ export class BrowserHost {
 
 export type NavigationFacts = { canGoBack(): boolean; canGoForward(): boolean };
 
+/** What a window.open asks for, as far as the popup decision reads it.
+ *  `disposition` is Chromium's: "new-window" for a window.open that asked
+ *  for a window, "foreground-tab"/"background-tab" for target=_blank and
+ *  modifier-clicks. */
+export type WindowOpenDetails = { url: string; disposition?: string };
+
+export type WindowOpenResponse =
+  | { action: "deny" }
+  | { action: "allow"; overrideBrowserWindowOptions?: Record<string, unknown> };
+
+/**
+ * Whether a page's popups become real windows. `allow` is asked on every
+ * popup rather than once, so it can follow a setting. `windowOptions` are
+ * handed to Electron untouched — this module only decides, it never builds
+ * a window.
+ */
+export type PopupPolicy = {
+  allow(): boolean;
+  windowOptions?: Record<string, unknown>;
+};
+
+/** The slice of Electron's WebContents a popup window needs guarding on. */
+export type PopupContentsLike = {
+  on(event: string, listener: (...args: never[]) => void): unknown;
+  setWindowOpenHandler(handler: (details: WindowOpenDetails) => WindowOpenResponse): void;
+};
+
 /** The slice of Electron's WebContents this module uses. Narrow on purpose:
  *  it is what makes the event mapping testable without a window. */
-export type WebContentsLike = {
-  on(event: string, listener: (...args: never[]) => void): unknown;
-  setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+export type WebContentsLike = PopupContentsLike & {
   /** The page's current URL — what a resolved favicon is cached against. */
   getURL(): string;
   /** This view's own session, so a favicon fetch goes through the same
@@ -615,6 +684,7 @@ export function bridgeEvents(
   contents: WebContentsLike,
   navigation: NavigationFacts,
   emit: (event: HostedViewEvent) => void,
+  popups?: PopupPolicy,
 ): void {
   const navigated = (url: string): void => {
     emit({
@@ -698,18 +768,55 @@ export function bridgeEvents(
     emit({ kind: "failed", detail: errorDescription });
   }) as (...args: never[]) => void);
 
+  guardPopups(contents, emit, popups);
+}
+
+/**
+ * What a page's popup window gets: the same navigation gate as the page,
+ * and the same popup decision for any popup it opens in turn. Nothing else
+ * is bridged — its title and loading state belong to no tab.
+ */
+export function bridgePopupWindow(
+  contents: PopupContentsLike,
+  emit: (event: HostedViewEvent) => void,
+  popups: PopupPolicy,
+): void {
+  guardPopups(contents, emit, popups);
+}
+
+function guardPopups(
+  contents: PopupContentsLike,
+  emit: (event: HostedViewEvent) => void,
+  popups: PopupPolicy | undefined,
+): void {
   // The third way a non-web scheme could be reached: not the address bar,
   // not BrowserHost.open, but the page navigating itself. isSafeHref is the
   // shared vocabulary; the explicit https? test is the decision, because
   // isSafeHref deliberately accepts relative and in-page links, which are
   // legitimate in a document but are not what arrives here.
-  on("will-navigate", ((event: { preventDefault(): void }, url: string) => {
+  contents.on("will-navigate", ((event: { preventDefault(): void }, url: string) => {
     const target = url.trim();
     if (isSafeHref(target) && /^https?:/i.test(target)) return;
     event.preventDefault();
   }) as (...args: never[]) => void);
 
-  contents.setWindowOpenHandler(({ url }) => {
+  contents.setWindowOpenHandler(({ url, disposition }) => {
+    // A real window only for what asked to be one. A sign-in or a Meet
+    // window has to stay a window: it reports back through window.opener,
+    // and a tab has none. target=_blank asked for a tab and gets one.
+    //
+    // about:blank because the common sign-in pattern opens an empty window
+    // first and navigates it afterwards — and that navigation then meets
+    // will-navigate's gate like any other.
+    if (
+      popups?.allow() === true &&
+      disposition === "new-window" &&
+      (/^https?:/i.test(url.trim()) || url === "about:blank")
+    ) {
+      return popups.windowOptions === undefined
+        ? { action: "allow" }
+        : { action: "allow", overrideBrowserWindowOptions: popups.windowOptions };
+    }
     emit({ kind: "popup", url });
     return { action: "deny" };
   });

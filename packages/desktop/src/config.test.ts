@@ -546,6 +546,22 @@ describe("voice", () => {
     );
   });
 
+  // A sign-in or Meet popup that opens as a tab loses its link back to the
+  // page that opened it, so real popups are the default; turning them off
+  // puts back the tab behaviour.
+  it("allows popups unless told not to", () => {
+    expect(parseConfig(base).browser.allowPopups).toBe(true);
+    expect(parseConfig({ ...base, browser: {} }).browser.allowPopups).toBe(true);
+    expect(parseConfig({ ...base, browser: { allowPopups: false } }).browser.allowPopups).toBe(false);
+  });
+
+  it("refuses an allowPopups that is not a boolean", () => {
+    expect(() => parseConfig({ ...base, browser: { allowPopups: "yes" } })).toThrow(
+      "Config `browser.allowPopups` must be a boolean",
+    );
+    expect(() => parseConfig({ ...base, browser: ["x"] })).toThrow("Config `browser` must be an object");
+  });
+
   it("takes the configured voices and greetings", () => {
     const config = parseConfig({
       ...base,

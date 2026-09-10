@@ -1,7 +1,13 @@
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import type { JarvisConfig } from "./config.js";
-import { DEFAULT_PERFORMANCE, DEFAULT_SESSIONS, DEFAULT_TERMINAL, parseConfig } from "./config.js";
+import {
+  DEFAULT_BROWSER,
+  DEFAULT_PERFORMANCE,
+  DEFAULT_SESSIONS,
+  DEFAULT_TERMINAL,
+  parseConfig,
+} from "./config.js";
 
 export type SettingsWriteResult = { ok: true } | { ok: false; detail: string };
 
@@ -117,6 +123,7 @@ export function toRawConfig(config: JarvisConfig): unknown {
     ...(isDefault(config.performance, DEFAULT_PERFORMANCE)
       ? {}
       : { performance: config.performance }),
+    ...(isDefault(config.browser, DEFAULT_BROWSER) ? {} : { browser: config.browser }),
     // The three sections below were missing from this list until 2026-09-06,
     // which meant every save through the Settings route silently deleted
     // them from the user's jarvis.yaml — recoverable only from the

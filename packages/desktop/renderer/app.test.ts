@@ -49,7 +49,7 @@ async function loadApp(
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
-    <button id="running-pill" hidden>
+    <button id="running-pill">
       <span id="running-orbs"></span>
       <span id="running-count"></span>
     </button>
@@ -944,15 +944,24 @@ describe("the running-sessions indicator", () => {
     return element;
   };
 
-  // Nothing running is the state the dashboard is in most of the time, and
-  // a pill reading "0 running" would be permanent furniture reporting
-  // nothing. It earns its place by only being there when there is something
-  // to say.
-  it("is not there when nothing is running", async () => {
+  // Hiding it at zero made "nothing is running" look like "there is no
+  // indicator". It stays, dimmed, and says so.
+  it("stays on screen, dimmed, when nothing is running", async () => {
     const { onSessions } = await loadApp();
     onSessions?.([]);
 
-    expect(pill().hidden).toBe(true);
+    expect(pill().hidden).toBe(false);
+    expect(pill().classList.contains("pill--idle")).toBe(true);
+    expect(document.getElementById("running-count")?.textContent).toBe("0 running");
+    expect(document.getElementById("running-orbs")?.childElementCount).toBe(0);
+  });
+
+  it("stops being dimmed once something is live", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    onSessions?.([makeSession({ state: "running" })]);
+
+    expect(pill().classList.contains("pill--idle")).toBe(false);
   });
 
   it("counts what is actually live", async () => {

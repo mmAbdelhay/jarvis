@@ -1217,6 +1217,7 @@ const sampleConfig: JarvisConfig = {
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
   performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+  browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/tmp/sessions.db",
 };

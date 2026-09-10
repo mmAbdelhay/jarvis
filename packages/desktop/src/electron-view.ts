@@ -1,7 +1,12 @@
-import { WebContentsView, type BrowserWindow } from "electron";
+import { BrowserWindow, WebContentsView, desktopCapturer, screen, type Session } from "electron";
 import {
   bridgeEvents,
+  bridgePopupWindow,
   hostedUserAgent,
+  type DevToolsDock,
+  type HostedViewEvent,
+  type PopupContentsLike,
+  type PopupPolicy,
   type Rect,
   type ViewFactory,
   type WebContentsLike,
@@ -36,7 +41,67 @@ const FIND_PLAYING_VIDEO =
   "Array.from(document.querySelectorAll('video')).find(" +
   "(v) => !v.paused && !v.ended && v.readyState >= 2 && v.videoWidth > 0)";
 
-export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
+export type ElectronViewOptions = {
+  /** Asked on every popup, so the setting is read where it is used. */
+  allowPopups(): boolean;
+};
+
+/** Sessions that already answer getDisplayMedia. A partition is shared by
+ *  every tab of a project, and a session takes one handler. */
+const screenShareSessions = new WeakSet<Session>();
+
+/**
+ * Lets a hosted page share the screen — "Present now" in Google Meet, and
+ * every other getDisplayMedia call. Electron refuses the call outright until
+ * a session has a handler, which is why sharing did nothing at all.
+ *
+ * The system picker first: on macOS 15 and later it is the same "choose a
+ * screen or a window" sheet every other app shows, and the handler below is
+ * not called. Where that picker does not exist the whole screen the window
+ * is on is shared, because a picker of our own could not be drawn above the
+ * page asking for it (a hosted view paints over the renderer).
+ */
+function enableScreenShare(session: Session, window: BrowserWindow): void {
+  if (screenShareSessions.has(session)) return;
+  screenShareSessions.add(session);
+  session.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      void desktopCapturer
+        .getSources({ types: ["screen"] })
+        .then((sources) => {
+          const displayId = window.isDestroyed()
+            ? undefined
+            : String(screen.getDisplayMatching(window.getBounds()).id);
+          const source = sources.find((candidate) => candidate.display_id === displayId) ?? sources[0];
+          // No source means screen recording was refused in System Settings;
+          // answering with nothing is how the page is told no.
+          callback(source === undefined ? {} : { video: source });
+        })
+        .catch(() => callback({}));
+    },
+    { useSystemPicker: true },
+  );
+}
+
+export function createElectronViewFactory(window: BrowserWindow, options: ElectronViewOptions): ViewFactory {
+  // No partition here: Chromium creates a popup in its opener's session, which
+  // is what keeps a sign-in popup's cookies the project's own.
+  //
+  // And no `parent`. A child of the full-screen main window makes macOS hide
+  // that window when the child appears and never show it again once the child
+  // closes: Jarvis went to a black screen after a Microsoft sign-in
+  // popup. Unparented, the popup opens on a Space of its own and macOS brings
+  // the full-screen window back when it closes — measured on that same popup,
+  // the main page went hidden → visible instead of staying hidden.
+  const popupPolicy: PopupPolicy = {
+    allow: () => options.allowPopups(),
+    windowOptions: {
+      autoHideMenuBar: true,
+      backgroundColor: "#ffffff",
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    },
+  };
+
   return (partition) => {
     const view = new WebContentsView({
       webPreferences: {
@@ -59,6 +124,34 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
     // hostedUserAgent. Set on the WebContents rather than the session so it
     // covers subframes and survives a partition shared with another view.
     contents.setUserAgent(hostedUserAgent(contents.getUserAgent()));
+    enableScreenShare(contents.session, window);
+
+    const listeners: ((event: HostedViewEvent) => void)[] = [];
+    const emit = (event: HostedViewEvent): void => {
+      for (const listener of [...listeners]) listener(event);
+    };
+    bridgeEvents(
+      contents as unknown as WebContentsLike,
+      {
+        canGoBack: () => contents.navigationHistory.canGoBack(),
+        canGoForward: () => contents.navigationHistory.canGoForward(),
+      },
+      emit,
+      popupPolicy,
+    );
+
+    // Popups this page opened, and any they opened in turn. They belong to
+    // the page: closing the tab closes them, rather than leaving a sign-in
+    // window open for a page that no longer exists.
+    const popupWindows = new Set<BrowserWindow>();
+    const adoptPopup = (popup: BrowserWindow): void => {
+      popupWindows.add(popup);
+      popup.on("closed", () => popupWindows.delete(popup));
+      popup.webContents.setUserAgent(hostedUserAgent(popup.webContents.getUserAgent()));
+      bridgePopupWindow(popup.webContents as unknown as PopupContentsLike, emit, popupPolicy);
+      popup.webContents.on("did-create-window", adoptPopup);
+    };
+    contents.on("did-create-window", adoptPopup);
 
     // DevTools, when they have been asked for. Rendered into a second view
     // of our own rather than opened as a detached window or docked by
@@ -67,13 +160,79 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
     // the layout. setDevToolsWebContents is the supported way to host them
     // anywhere — the panel is then just another rectangle the renderer
     // measures, exactly like the page slot.
+    //
+    // Undocked is the same view moved into a window of its own, not a second
+    // DevTools: a view can change parents, and DevTools' web contents cannot
+    // be swapped once they are attached.
     let devTools: WebContentsView | undefined;
     let devToolsBounds: Rect | undefined;
     let devToolsWanted = false;
+    let devToolsDock: DevToolsDock = "bottom";
+    let devToolsWindow: BrowserWindow | undefined;
     let pageVisible = false;
 
-    const syncDevToolsVisibility = (): void => {
-      devTools?.setVisible(pageVisible && devToolsWanted);
+    const fitDevToolsWindow = (): void => {
+      if (devTools === undefined || devToolsWindow === undefined) return;
+      const [width = 0, height = 0] = devToolsWindow.getContentSize();
+      devTools.setBounds({ x: 0, y: 0, width, height });
+    };
+
+    /** Moves the view back into the main window. `dispose` is false only
+     *  from the undocked window's own close handler, where it is already
+     *  going away. */
+    const redock = (dispose: boolean): void => {
+      const undocked = devToolsWindow;
+      if (undocked === undefined || devTools === undefined) return;
+      devToolsWindow = undefined;
+      if (!undocked.isDestroyed()) undocked.contentView.removeChildView(devTools);
+      if (!window.isDestroyed()) {
+        window.contentView.addChildView(devTools);
+        if (devToolsBounds !== undefined) devTools.setBounds(devToolsBounds);
+      }
+      if (dispose && !undocked.isDestroyed()) {
+        undocked.removeAllListeners("close");
+        undocked.destroy();
+      }
+    };
+
+    const undock = (): void => {
+      if (devTools === undefined || devToolsWindow !== undefined) return;
+      const undocked = new BrowserWindow({
+        width: 1000,
+        height: 720,
+        title: `DevTools — ${contents.getTitle()}`,
+        backgroundColor: "#202124",
+        autoHideMenuBar: true,
+      });
+      devToolsWindow = undocked;
+      window.contentView.removeChildView(devTools);
+      undocked.contentView.addChildView(devTools);
+      devTools.setVisible(true);
+      fitDevToolsWindow();
+      undocked.on("resize", fitDevToolsWindow);
+      // Closing the window is closing DevTools. The renderer did not ask for
+      // it, so it is told — otherwise the toggle stays lit and the next click
+      // "closes" DevTools that are already gone.
+      undocked.on("close", () => {
+        redock(false);
+        devToolsWanted = false;
+        contents.closeDevTools();
+        placeDevTools();
+        emit({ kind: "devtoolsClosed" });
+      });
+    };
+
+    /** Puts the DevTools view wherever the dock and the open state say.
+     *  Undocked DevTools stay on screen whichever tab is showing, as they do
+     *  in Chrome; docked ones follow the page. */
+    const placeDevTools = (): void => {
+      if (devTools === undefined) return;
+      if (devToolsWanted && devToolsDock === "undocked") {
+        undock();
+        return;
+      }
+      redock(true);
+      devTools.setVisible(pageVisible && devToolsWanted);
     };
 
     const openDevTools = (): void => {
@@ -89,19 +248,27 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
       // 'detach' keeps Chromium from trying to dock them itself; the view is
       // already ours to place.
       contents.openDevTools({ mode: "detach" });
-      syncDevToolsVisibility();
+      placeDevTools();
     };
 
     const closeDevTools = (): void => {
       contents.closeDevTools();
-      syncDevToolsVisibility();
+      placeDevTools();
     };
 
     // Closing DevTools does not destroy the view they were rendered into —
     // the docs are explicit that this is the caller's job.
     const destroyDevTools = (): void => {
       if (devTools === undefined) return;
-      window.contentView.removeChildView(devTools);
+      const undocked = devToolsWindow;
+      devToolsWindow = undefined;
+      if (undocked !== undefined && !undocked.isDestroyed()) {
+        undocked.removeAllListeners("close");
+        undocked.contentView.removeChildView(devTools);
+        undocked.destroy();
+      } else if (!window.isDestroyed()) {
+        window.contentView.removeChildView(devTools);
+      }
       devTools.webContents.close();
       devTools = undefined;
     };
@@ -117,14 +284,19 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
       setVisible: (visible) => {
         pageVisible = visible;
         view.setVisible(visible);
-        syncDevToolsVisibility();
+        placeDevTools();
       },
       goBack: () => contents.navigationHistory.goBack(),
       goForward: () => contents.navigationHistory.goForward(),
       reload: () => contents.reload(),
       destroy: () => {
         destroyDevTools();
-        window.contentView.removeChildView(view);
+        for (const popup of popupWindows) if (!popup.isDestroyed()) popup.destroy();
+        popupWindows.clear();
+        // On quit the window is already gone, and removing a child from a
+        // destroyed window throws — which used to stop every tab after the
+        // first from being closed at all.
+        if (!window.isDestroyed()) window.contentView.removeChildView(view);
         contents.close();
       },
       setDevTools: (open) => {
@@ -135,7 +307,13 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
       },
       setDevToolsBounds: (bounds) => {
         devToolsBounds = bounds;
-        devTools?.setBounds(bounds);
+        // Undocked, the view is sized by its own window, not the layout.
+        if (devToolsWindow === undefined) devTools?.setBounds(bounds);
+      },
+      setDevToolsDock: (dock) => {
+        if (dock === devToolsDock) return;
+        devToolsDock = dock;
+        placeDevTools();
       },
       hasPlayingVideo: () =>
         contents
@@ -196,14 +374,7 @@ export function createElectronViewFactory(window: BrowserWindow): ViewFactory {
           });
       },
       onEvent: (listener) => {
-        bridgeEvents(
-          contents as unknown as WebContentsLike,
-          {
-            canGoBack: () => contents.navigationHistory.canGoBack(),
-            canGoForward: () => contents.navigationHistory.canGoForward(),
-          },
-          listener,
-        );
+        listeners.push(listener);
       },
     };
   };

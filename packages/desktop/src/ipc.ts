@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import type { DevToolsDock } from "./browser-host.js";
 import {
   checkAgent,
   gitFailureText,
@@ -408,6 +409,15 @@ export type RendererApi = {
    *  Workspace layout rather than a detached window. */
   setDevTools(tabId: string, open: boolean): Promise<void>;
   setDevToolsBounds(bounds: ReportedRect): Promise<void>;
+  /** Where DevTools dock — beside the page, or "undocked" into a window of
+   *  their own. One choice for every tab. */
+  setDevToolsDock(dock: DevToolsDock): Promise<void>;
+  /** Pops the native dock-side menu; a choice arrives on onDevToolsDockChosen. */
+  showDevToolsDockMenu(current: DevToolsDock): Promise<void>;
+  onDevToolsDockChosen(cb: (dock: DevToolsDock) => void): void;
+  /** A tab's DevTools closed without the renderer asking: the user closed
+   *  their undocked window. */
+  onDevToolsClosed(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;

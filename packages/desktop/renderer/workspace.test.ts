@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceState } from "@jarvis/core";
+import type { DevToolsDock } from "../src/browser-host.js";
 import type { BookmarkView } from "../src/ipc.js";
 import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 
@@ -47,16 +48,25 @@ function harness(): Recorded[] {
           <button id="workspace-pip" hidden></button>
         </div>
         <div id="workspace-error" hidden></div>
-        <div id="workspace-body">
-          <div id="workspace-bookmarks">
-            <div id="workspace-essentials"></div>
-            <div id="workspace-ask" hidden></div>
-            <div id="workspace-bookmark-list"></div>
+        <div id="workspace-stage">
+          <div id="workspace-body">
+            <div id="workspace-bookmarks">
+              <div id="workspace-essentials"></div>
+              <div id="workspace-ask" hidden></div>
+              <div id="workspace-bookmark-list"></div>
+            </div>
+            <div id="workspace-page"></div>
           </div>
-          <div id="workspace-page"></div>
+          <div id="workspace-devtools-handle" hidden></div>
+          <div id="workspace-devtools" hidden>
+            <button id="workspace-devtools-dock-undocked"></button>
+            <button id="workspace-devtools-dock-left"></button>
+            <button id="workspace-devtools-dock-bottom"></button>
+            <button id="workspace-devtools-dock-right"></button>
+            <button id="workspace-devtools-close"></button>
+            <div id="workspace-devtools-slot"></div>
+          </div>
         </div>
-        <div id="workspace-devtools-handle" hidden></div>
-        <div id="workspace-devtools" hidden></div>
         <div id="workspace-terminal" hidden></div>
         <div id="workspace-api" hidden>
           <select id="api-collection"></select>
@@ -133,6 +143,14 @@ function harness(): Recorded[] {
     setWorkspaceBounds: record("setWorkspaceBounds"),
     setDevTools: record("setDevTools"),
     setDevToolsBounds: record("setDevToolsBounds"),
+    setDevToolsDock: record("setDevToolsDock"),
+    showDevToolsDockMenu: record("showDevToolsDockMenu"),
+    onDevToolsDockChosen: (cb: (dock: DevToolsDock) => void) => {
+      devToolsHooks.dockChosen = cb;
+    },
+    onDevToolsClosed: (cb: (tabId: string) => void) => {
+      devToolsHooks.closed = cb;
+    },
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
     requestPictureInPicture: record("requestPictureInPicture"),
@@ -2618,6 +2636,13 @@ describe("bookmarks sidebar toggle", () => {
   });
 });
 
+/** What main pushes at the renderer about DevTools, captured by the harness
+ *  so a test can play main's part. */
+const devToolsHooks: {
+  dockChosen?: (dock: DevToolsDock) => void;
+  closed?: (tabId: string) => void;
+} = {};
+
 describe("devtools panel", () => {
   let calls: Recorded[];
 
@@ -2628,10 +2653,123 @@ describe("devtools panel", () => {
     // between tests; a render with no tabs prunes every id, which is the
     // same path a closed tab takes.
     renderWorkspace({ tabs: [], activeTabId: undefined });
+    // So is the dock side, and it is remembered besides.
+    document.getElementById("workspace-devtools-dock-bottom")?.click();
   });
 
   const panel = () => document.getElementById("workspace-devtools") as HTMLElement;
   const handle = () => document.getElementById("workspace-devtools-handle") as HTMLElement;
+  const stage = () => document.getElementById("workspace-stage") as HTMLElement;
+  const toggle = () => document.getElementById("workspace-toggle-devtools") as HTMLElement;
+  const click = (id: string) => document.getElementById(id)?.click();
+
+  it("docks to the right as a row, sized by width", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+
+    click("workspace-devtools-dock-right");
+
+    expect(stage().classList.contains("workspace-stage--right")).toBe(true);
+    expect(stage().classList.contains("workspace-stage--bottom")).toBe(false);
+    expect(panel().style.width).not.toBe("");
+    expect(panel().style.height).toBe("");
+    expect(calls).toContainEqual({ call: "setDevToolsDock", args: ["right"] });
+  });
+
+  it("docks to the left as the same row reversed", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+
+    click("workspace-devtools-dock-left");
+
+    expect(stage().classList.contains("workspace-stage--left")).toBe(true);
+    expect(document.getElementById("workspace-devtools-dock-left")?.classList).toContain(
+      "workspace-devtools-button--on",
+    );
+    expect(document.getElementById("workspace-devtools-dock-bottom")?.classList).not.toContain(
+      "workspace-devtools-button--on",
+    );
+  });
+
+  // Undocked they are a window of their own: no room taken here, but they
+  // are still open, and the toggle has to say so.
+  it("takes no room undocked, but stays open", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+
+    click("workspace-devtools-dock-undocked");
+
+    expect(panel().hidden).toBe(true);
+    expect(handle().hidden).toBe(true);
+    expect(toggle().classList.contains("workspace-nav--on")).toBe(true);
+    expect(calls).toContainEqual({ call: "setDevToolsDock", args: ["undocked"] });
+    expect(calls).not.toContainEqual({ call: "setDevTools", args: ["tab-1", false] });
+  });
+
+  it("remembers the dock side and tells main at the next start", () => {
+    click("workspace-devtools-dock-right");
+
+    calls = harness();
+    initWorkspace(["acme"]);
+
+    expect(calls).toContainEqual({ call: "setDevToolsDock", args: ["right"] });
+  });
+
+  // An undocked window has no dock buttons, so right-click is the way back.
+  it("asks main for the dock menu on right-click", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    toggle().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+
+    expect(calls).toContainEqual({ call: "showDevToolsDockMenu", args: ["bottom"] });
+  });
+
+  it("opens DevTools where a side chosen from that menu puts them", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+    devToolsHooks.dockChosen?.("right");
+
+    expect(calls).toContainEqual({ call: "setDevTools", args: ["tab-1", true] });
+    expect(panel().hidden).toBe(false);
+    expect(stage().classList.contains("workspace-stage--right")).toBe(true);
+  });
+
+  // Otherwise the toggle stays lit, and the next click "closes" DevTools
+  // that are already gone.
+  it("forgets DevTools whose window the user closed", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+
+    devToolsHooks.closed?.("tab-1");
+    expect(toggle().classList.contains("workspace-nav--on")).toBe(false);
+
+    toggle().click();
+    expect(calls.filter((entry) => entry.call === "setDevTools").at(-1)?.args).toEqual(["tab-1", true]);
+  });
+
+  it("closes from the panel's own close button", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+
+    click("workspace-devtools-close");
+
+    expect(panel().hidden).toBe(true);
+    expect(calls).toContainEqual({ call: "setDevTools", args: ["tab-1", false] });
+  });
+
+  it("resizes the panel's width when docked to a side", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    toggle().click();
+    click("workspace-devtools-dock-right");
+    stage().getBoundingClientRect = () =>
+      ({ x: 0, y: 100, width: 1000, height: 600, left: 0, right: 1000, top: 100, bottom: 700 }) as DOMRect;
+
+    handle().dispatchEvent(new MouseEvent("mousedown", { clientX: 600, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 300, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    expect(panel().style.width).toBe("700px");
+  });
 
   it("is closed until it is asked for", () => {
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
@@ -2708,7 +2846,8 @@ describe("devtools panel", () => {
   // already was — the hosted views know nothing about CSS.
   it("reports the panel's own rectangle to main", () => {
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
-    panel().getBoundingClientRect = () =>
+    // The slot under the panel's head, which is where the view goes.
+    (document.getElementById("workspace-devtools-slot") as HTMLElement).getBoundingClientRect = () =>
       ({ x: 10, y: 400, width: 900, height: 300 }) as DOMRect;
 
     document.getElementById("workspace-toggle-devtools")?.click();
