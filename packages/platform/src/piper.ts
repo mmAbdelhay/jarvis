@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { accessSync, constants } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,15 +14,31 @@ import { join } from "node:path";
 // the same league as a compact macOS voice.
 //
 // Two processes per utterance — synthesise to a file, then play it — because
-// Piper writes WAV and macOS has no pipe-to-speaker command that is as
-// reliable as afplay on a real file.
+// Piper writes WAV and neither platform has a pipe-to-speaker command as
+// reliable as playing a real file. Which player that is differs: macOS has
+// exactly one worth using, and Linux has three depending on the sound
+// server. See audioPlayer.
 
 export type SpokenProcess = { kill(): void; done: Promise<{ code: number }> };
 
-export type ProcessRunner = (command: string, args: string[]) => SpokenProcess;
+/** `stdin`, when given, is written to the child and the stream is then
+ *  closed. Piper reads the text it is to speak from stdin and produces
+ *  nothing at all until it sees EOF. */
+export type ProcessRunner = (command: string, args: string[], stdin?: string) => SpokenProcess;
 
-export const defaultProcessRunner: ProcessRunner = (command, args) => {
+export const defaultProcessRunner: ProcessRunner = (command, args, stdin) => {
   const child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+
+  if (stdin !== undefined) {
+    // end() rather than write(): piper waits for EOF before it synthesises
+    // anything, so a stream left open is a process that never finishes.
+    //
+    // The error handler matters because writing to a child that failed to
+    // spawn raises EPIPE asynchronously, which would take the app down past
+    // every catch the caller has.
+    child.stdin?.on("error", () => undefined);
+    child.stdin?.end(stdin);
+  }
 
   // A spawn that fails to start fires "error"; without a listener Node throws
   // it as an uncaught exception the caller cannot catch. Same latch as
@@ -41,18 +58,60 @@ export const defaultProcessRunner: ProcessRunner = (command, args) => {
 };
 
 export type PiperConfig = {
-  /** Absolute path: the app is launched from Finder, whose PATH does not
-   *  include ~/.local/bin, so a bare "piper" would not resolve. */
+  /** Absolute path: the app is launched from Finder or a desktop launcher,
+   *  whose PATH does not include ~/.local/bin, so a bare "piper" would not
+   *  resolve. */
   binary: string;
-  /** The .onnx voice model. */
+  /** The .onnx voice model. One model speaks one language. */
   model: string;
+  /** What plays the WAV it writes — see audioPlayer. Resolved once by the
+   *  caller rather than probed per utterance. */
+  player: string;
 };
+
+/** The Linux players, most modern first. pw-play is PipeWire's own, paplay
+ *  PulseAudio's, aplay ALSA's — and on a PipeWire system all three work,
+ *  which is why this is an order and not a detection. */
+const LINUX_PLAYERS = ["pw-play", "paplay", "aplay"] as const;
+
+/**
+ * What plays the WAV Piper just wrote.
+ *
+ * macOS has exactly one worth using. Linux has three, and which are installed
+ * depends on the sound server, so this probes rather than assumes.
+ *
+ * When none is found it still returns the last candidate. The alternative is
+ * an undefined that every caller has to grow a "cannot play" branch for, when
+ * spawning `aplay` and failing already produces an error naming a binary the
+ * user can go and install.
+ */
+export function audioPlayer(
+  platform: NodeJS.Platform,
+  exists: (command: string) => boolean,
+): string {
+  if (platform === "darwin") return "afplay";
+  return LINUX_PLAYERS.find((player) => exists(player)) ?? LINUX_PLAYERS[LINUX_PLAYERS.length - 1]!;
+}
+
+/** Whether `command` is an executable on PATH. Used once, at startup, to
+ *  settle audioPlayer's probe — the same "asked once and reused" shape
+ *  loginShellPath uses in headlamp.ts. */
+export function onPath(command: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  for (const dir of (env["PATH"] ?? "").split(":")) {
+    if (dir === "") continue;
+    try {
+      accessSync(join(dir, command), constants.X_OK);
+      return true;
+    } catch {
+      // Not here; try the next entry.
+    }
+  }
+  return false;
+}
 
 export type PiperDeps = {
   run?: ProcessRunner;
-  /** Where the synthesised wav goes. Injected so tests need no filesystem. */
   makeTempDir?: () => Promise<string>;
-  writeFile?: (path: string, text: string) => Promise<void>;
   removeDir?: (path: string) => Promise<void>;
 };
 
@@ -64,7 +123,6 @@ export class PiperSpeech {
   readonly #config: PiperConfig;
   readonly #run: ProcessRunner;
   readonly #makeTempDir: () => Promise<string>;
-  readonly #writeFile: (path: string, text: string) => Promise<void>;
   readonly #removeDir: (path: string) => Promise<void>;
 
   /** Bumped by every speak and every stop, so an utterance whose synthesis
@@ -78,7 +136,6 @@ export class PiperSpeech {
     this.#config = config;
     this.#run = deps.run ?? defaultProcessRunner;
     this.#makeTempDir = deps.makeTempDir ?? (() => mkdtemp(join(tmpdir(), "jarvis-speech-")));
-    this.#writeFile = deps.writeFile ?? ((path, text) => writeFile(path, text, "utf8"));
     this.#removeDir = deps.removeDir ?? ((path) => rm(path, { recursive: true, force: true }));
   }
 
@@ -88,32 +145,36 @@ export class PiperSpeech {
     const generation = ++this.#generation;
 
     const dir = await this.#makeTempDir();
-    const input = join(dir, "line.txt");
     const wav = join(dir, "line.wav");
 
     try {
-      // Through a file rather than stdin: the text is arbitrary and may
-      // contain anything, and a file needs no quoting or encoding rules.
-      await this.#writeFile(input, text);
-
-      const synth = this.#run(this.#config.binary, [
-        "-m",
-        this.#config.model,
-        "-i",
-        input,
-        "-f",
-        wav,
-      ]);
+      // The text goes in on stdin, because that is the only way piper takes
+      // it. There is no input-file flag — an earlier `-i <path>` here was
+      // accepted silently, ignored, and left piper reading an empty stdin: it
+      // logged "Initialized piper", logged "Terminated piper", wrote no file,
+      // and exited 0. Every utterance failed at the *player*, complaining
+      // about a wav that was never created.
+      //
+      // stdin needs no quoting or escaping either, which was the worry that
+      // put the text in a file to begin with. It is a byte stream; only argv
+      // would have needed rules.
+      const synth = this.#run(
+        this.#config.binary,
+        ["-m", this.#config.model, "-f", wav],
+        text,
+      );
       this.#current = synth;
       const synthesised = await synth.done;
       if (generation !== this.#generation) return;
       if (synthesised.code !== 0) throw new Error(`piper exited with code ${synthesised.code}`);
 
-      const playback = this.#run("afplay", [wav]);
+      const playback = this.#run(this.#config.player, [wav]);
       this.#current = playback;
       const played = await playback.done;
       if (generation !== this.#generation) return;
-      if (played.code !== 0) throw new Error(`afplay exited with code ${played.code}`);
+      if (played.code !== 0) {
+        throw new Error(`${this.#config.player} exited with code ${played.code}`);
+      }
     } finally {
       if (this.#current !== undefined && generation === this.#generation) {
         this.#current = undefined;
@@ -160,4 +221,27 @@ export class RoutedSpeech {
     this.#english.stopSpeaking();
     this.#other.stopSpeaking();
   }
+}
+
+/**
+ * A speech object that says nothing and reports why, once per utterance.
+ *
+ * It exists so "no voice is installed for this language" is a normal outcome
+ * with a normal shape, rather than a null every caller has to branch on or a
+ * rejection nobody catches. Silence with no explanation is the failure mode
+ * this codebase refuses; `notify` is how it explains.
+ */
+export function silentSpeech(notify: (language: "ar" | "en") => void): {
+  speak(text: string, language: "ar" | "en"): Promise<void>;
+  stopSpeaking(): void;
+} {
+  return {
+    async speak(text: string, language: "ar" | "en"): Promise<void> {
+      if (text.trim() === "") return;
+      notify(language);
+    },
+    stopSpeaking(): void {
+      // Nothing is ever playing.
+    },
+  };
 }

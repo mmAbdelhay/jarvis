@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, MESSAGES } from "./messages.js";
+import { PREREQUISITES } from "@jarvis/platform";
+import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
 // strings beside @jarvis/core's bilingual MESSAGES table — every string a
@@ -317,5 +318,83 @@ describe("the bookmarks sidebar", () => {
       expect(message("ar")).not.toBe(message("en"));
       expect(message("ar")).not.toBe("");
     }
+  });
+});
+
+describe("isWayland", () => {
+  it("recognises a Wayland session by either marker", () => {
+    // Neither is universal: XDG_SESSION_TYPE comes from the login manager and
+    // some do not set it; WAYLAND_DISPLAY comes from the compositor.
+    expect(isWayland({ XDG_SESSION_TYPE: "wayland" })).toBe(true);
+    expect(isWayland({ WAYLAND_DISPLAY: "wayland-0" })).toBe(true);
+  });
+
+  it("does not mistake X11 for it", () => {
+    // Including XWayland, where an X11 app's global shortcut does work — so
+    // saying it does not would be wrong in the other direction.
+    expect(isWayland({ XDG_SESSION_TYPE: "x11", DISPLAY: ":0" })).toBe(false);
+  });
+
+  it("does not mistake macOS, where neither variable exists", () => {
+    expect(isWayland({})).toBe(false);
+  });
+
+  it("treats an empty WAYLAND_DISPLAY as unset", () => {
+    expect(isWayland({ WAYLAND_DISPLAY: "" })).toBe(false);
+  });
+});
+
+describe("MESSAGES.hotkeyUnavailableWayland", () => {
+  it("names the combo in both languages", () => {
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "en")).toContain("Alt+Space");
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "ar")).toContain("Alt+Space");
+  });
+
+  it("is written in Arabic for an Arabic reader", () => {
+    expect(MESSAGES.hotkeyUnavailableWayland("Alt+Space", "ar")).toMatch(/[\u0600-\u06FF]/);
+  });
+
+  it("points at what still works rather than at a conflict that does not exist", () => {
+    // The collision message's advice — look for the app holding the combo —
+    // is a wild goose chase here: Wayland lets no application hold one.
+    const text = MESSAGES.hotkeyUnavailableWayland("Alt+Space", "en");
+    expect(text).toMatch(/microphone/i);
+    expect(text).not.toMatch(/another app/i);
+  });
+});
+
+describe("prerequisite wording", () => {
+  it("names every catalogue entry in both languages", () => {
+    // Derived from the catalogue rather than a hand-written list, so a tool
+    // cannot be added without its wording — which is how an English-only
+    // string lane grows back.
+    for (const prerequisite of PREREQUISITES) {
+      for (const language of ["en", "ar"] as const) {
+        expect(MESSAGES.prerequisiteName(prerequisite.id, language)).not.toBe("");
+        expect(MESSAGES.prerequisiteUnlocks(prerequisite.id, language)).not.toBe("");
+      }
+    }
+  });
+
+  it("writes the Arabic line in Arabic", () => {
+    // A table with both columns filled from English is the failure this rule
+    // exists to prevent, and it looks complete until someone reads it.
+    for (const prerequisite of PREREQUISITES) {
+      expect(MESSAGES.prerequisiteUnlocks(prerequisite.id, "ar")).toMatch(/[؀-ۿ]/);
+    }
+  });
+
+  it("counts tools the way Arabic counts them", () => {
+    // Singular, dual, then the small-number plural — the same split
+    // arabicFilesCount and arabicSessionsCount already make.
+    expect(MESSAGES.setupInstallCount(1, "ar")).toContain("واحدة");
+    expect(MESSAGES.setupInstallCount(2, "ar")).toContain("أداتين");
+    expect(MESSAGES.setupInstallCount(3, "ar")).toContain("أدوات");
+    expect(MESSAGES.setupInstallCount(3, "en")).toBe("Install 3 selected");
+  });
+
+  it("says plainly that Windows is not supported yet", () => {
+    expect(MESSAGES.setupWindowsUnsupported("en")).toMatch(/not run on Windows/i);
+    expect(MESSAGES.setupWindowsUnsupported("ar")).toMatch(/[؀-ۿ]/);
   });
 });

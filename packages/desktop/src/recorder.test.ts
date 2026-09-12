@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Recorder } from "./recorder.js";
+import { recorderCommand, Recorder } from "./recorder.js";
 
 function deps() {
   const kill = vi.fn();
@@ -175,8 +175,8 @@ describe("defaultRecorderDeps", () => {
     }));
     vi.doMock("node:child_process", () => ({ spawn: spawnMock }));
 
-    const { defaultRecorderDeps } = await import("./recorder.js");
-    const recording = defaultRecorderDeps.spawnRecorder("/tmp/out.wav");
+    const { createRecorderDeps } = await import("./recorder.js");
+    const recording = createRecorderDeps("darwin").spawnRecorder("/tmp/out.wav");
 
     expect(spawnMock).toHaveBeenCalledWith(
       "ffmpeg",
@@ -188,7 +188,7 @@ describe("defaultRecorderDeps", () => {
     expect(kill).toHaveBeenCalledWith("SIGINT");
 
     let settled: { error?: string } | undefined;
-    void recording.done.then((result) => {
+    void recording.done.then((result: { error?: string }) => {
       settled = result;
     });
     expect(settled).toBeUndefined();
@@ -215,8 +215,8 @@ describe("defaultRecorderDeps", () => {
     }));
     vi.doMock("node:child_process", () => ({ spawn: spawnMock }));
 
-    const { defaultRecorderDeps } = await import("./recorder.js");
-    const recording = defaultRecorderDeps.spawnRecorder("/tmp/out.wav");
+    const { createRecorderDeps } = await import("./recorder.js");
+    const recording = createRecorderDeps("darwin").spawnRecorder("/tmp/out.wav");
 
     let resolutions = 0;
     void recording.done.then(() => {
@@ -245,8 +245,8 @@ describe("defaultRecorderDeps", () => {
     }));
     vi.doMock("node:child_process", () => ({ spawn: spawnMock }));
 
-    const { defaultRecorderDeps } = await import("./recorder.js");
-    const recording = defaultRecorderDeps.spawnRecorder("/tmp/out.wav");
+    const { createRecorderDeps } = await import("./recorder.js");
+    const recording = createRecorderDeps("darwin").spawnRecorder("/tmp/out.wav");
 
     // Before the fix, this "error" event had no listener, so Node would
     // throw it as an uncaught exception right here and crash the process
@@ -265,19 +265,56 @@ describe("defaultRecorderDeps", () => {
     const { writeFile, readFile } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const { defaultRecorderDeps } = await import("./recorder.js");
+    const { createRecorderDeps } = await import("./recorder.js");
 
     const path = join(tmpdir(), `jarvis-recorder-test-${Date.now()}.wav`);
     await writeFile(path, "not really a wav");
-    await defaultRecorderDeps.deleteFile(path);
+    await createRecorderDeps("linux").deleteFile(path);
 
     await expect(readFile(path)).rejects.toThrow();
   });
 
   it("deleteFile resolves without throwing when the file does not exist", async () => {
-    const { defaultRecorderDeps } = await import("./recorder.js");
+    const { createRecorderDeps } = await import("./recorder.js");
     await expect(
-      defaultRecorderDeps.deleteFile("/tmp/jarvis-recorder-test-does-not-exist.wav"),
+      createRecorderDeps("linux").deleteFile("/tmp/jarvis-recorder-test-does-not-exist.wav"),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("recorderCommand", () => {
+  it("records through avfoundation on macOS", () => {
+    const { command, args } = recorderCommand("darwin", "/tmp/a.wav");
+    expect(command).toBe("ffmpeg");
+    expect(args).toEqual([
+      "-f", "avfoundation", "-i", ":default",
+      "-ar", "16000", "-ac", "1", "-y", "/tmp/a.wav",
+    ]);
+  });
+
+  it("records through pulse on Linux", () => {
+    // PipeWire ships a PulseAudio shim, so one spelling covers both sound
+    // servers. Raw ALSA works only where there is neither, and takes the
+    // device away from the mixer where there is.
+    const { command, args } = recorderCommand("linux", "/tmp/a.wav");
+    expect(command).toBe("ffmpeg");
+    expect(args).toEqual([
+      "-f", "pulse", "-i", "default",
+      "-ar", "16000", "-ac", "1", "-y", "/tmp/a.wav",
+    ]);
+  });
+
+  it("always asks for 16 kHz mono, which is what whisper.cpp expects", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const { args } = recorderCommand(platform, "/tmp/a.wav");
+      expect(args).toEqual(expect.arrayContaining(["-ar", "16000", "-ac", "1"]));
+    }
+  });
+
+  it("writes to the path it was given, overwriting", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const { args } = recorderCommand(platform, "/tmp/x y.wav");
+      expect(args.slice(-2)).toEqual(["-y", "/tmp/x y.wav"]);
+    }
   });
 });

@@ -65,3 +65,19 @@ between the two axes and pushes the view past the bottom of the window.
 The codebase is dense with comments that record a decision and the failure that
 prompted it. When you change such a line, the comment is part of what you are
 changing.
+
+## A function whose behaviour differs by OS takes the platform as a parameter
+
+`defaultHeadlampBinary(platform, env)` is the pattern. Only `main.ts` and
+`preload.cts` read `process.platform`; everything downstream receives it.
+
+This is not tidiness. There is no CI and one laptop, so a function that reads
+`process.platform` at the point of use can only ever be tested on the OS the
+test happens to run on — and the whole Linux port would then be asserted by
+nothing. Parametrised, one `pnpm test` proves both.
+
+The rule is why `parseHeadlamp` returns `undefined` for an absent
+`headlamp.binary` rather than the per-OS default it used to: config parsing
+knows nothing about the host, and `main.ts` fills the default in at the edge.
+
+Guarded by `platform-convention.test.ts`.

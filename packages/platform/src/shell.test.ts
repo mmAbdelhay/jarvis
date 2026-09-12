@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createShellManager, shellEnv, type ShellProcess, type ShellSpawner } from "./shell.js";
+import {
+  createShellManager,
+  shellArgs,
+  shellCommand,
+  shellEnv,
+  type ShellProcess,
+  type ShellSpawner,
+} from "./shell.js";
 
 class FakeShell implements ShellProcess {
   written: string[] = [];
@@ -219,5 +226,93 @@ describe("shellEnv", () => {
 
     expect(env["TERM"]).toBe("xterm-256color");
     expect(env["COLORTERM"]).toBe("truecolor");
+  });
+});
+
+describe("shellCommand", () => {
+  // The passwd lookup is injected so these stay true on any machine.
+  const passwd = (value: string | undefined) => () => value;
+
+  it("uses $SHELL when the user has one", () => {
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "linux")).toBe("/usr/bin/fish");
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "darwin")).toBe("/usr/bin/fish");
+  });
+
+  it("reads the passwd entry when $SHELL is unset", () => {
+    // $SHELL is exported by a shell, and nothing that starts an app from a
+    // desktop launcher, a .desktop entry or Finder is one — so a
+    // launcher-started Jarvis has no $SHELL at all. The user still has a
+    // login shell; it is in their passwd entry.
+    //
+    // This is not cosmetic. loginShellPath asks this shell for the real PATH,
+    // and without it every binary is resolved against a GUI PATH of
+    // /usr/bin:/bin — which is how the Editor, Database, Cluster and Docker
+    // tabs all failed on a machine where those binaries were installed, and
+    // why the startup report said "No agents are working".
+    expect(shellCommand({}, "linux", passwd("/usr/bin/fish"))).toBe("/usr/bin/fish");
+    expect(shellCommand({}, "darwin", passwd("/bin/zsh"))).toBe("/bin/zsh");
+  });
+
+  it("prefers $SHELL over the passwd entry when both are there", () => {
+    // A user who exported a different shell for this session means it.
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "linux", passwd("/bin/bash"))).toBe(
+      "/usr/bin/fish",
+    );
+  });
+
+  it("falls back to zsh on macOS, its default since Catalina", () => {
+    expect(shellCommand({}, "darwin", passwd(undefined))).toBe("/bin/zsh");
+  });
+
+  it("falls back to bash on Linux, where zsh is often not installed at all", () => {
+    // A missing /bin/zsh is not a degraded terminal, it is no terminal: the
+    // pty spawn fails and the tab shows nothing.
+    expect(shellCommand({}, "linux", passwd(undefined))).toBe("/bin/bash");
+  });
+
+  it("treats an empty $SHELL, and an empty passwd shell, as unset", () => {
+    expect(shellCommand({ SHELL: "" }, "linux", passwd(""))).toBe("/bin/bash");
+    expect(shellCommand({ SHELL: "" }, "darwin", passwd(undefined))).toBe("/bin/zsh");
+  });
+});
+
+describe("shellArgs", () => {
+  it("asks for a login shell when there is no integration", () => {
+    // Their profile, their PATH, their aliases, their prompt — the terminal
+    // they actually have.
+    expect(shellArgs({})).toEqual(["-l"]);
+  });
+
+  it("asks for a login shell under the zsh wrapper", () => {
+    // ZDOTDIR does the redirection; the shell is still a login shell.
+    expect(shellArgs({ zdotdir: "/cfg/zdotdir" })).toEqual(["-l"]);
+  });
+
+  it("asks for an interactive shell reading the wrapper under bash", () => {
+    // bash honours --rcfile only for an interactive NON-login shell, so the
+    // wrapper reads the profile files itself. See bash-integration.ts.
+    expect(shellArgs({ rcfile: "/cfg/bash/bashrc" })).toEqual([
+      "--rcfile",
+      "/cfg/bash/bashrc",
+      "-i",
+    ]);
+  });
+
+  it("never passes -l beside --rcfile, which would make bash ignore it", () => {
+    expect(shellArgs({ rcfile: "/cfg/bash/bashrc" })).not.toContain("-l");
+  });
+});
+
+describe("shellEnv under each wrapper", () => {
+  it("sets ZDOTDIR only for the zsh wrapper", () => {
+    expect(shellEnv({}, { zdotdir: "/z" })["ZDOTDIR"]).toBe("/z");
+    // bash's wrapper is an argument, not a variable; setting ZDOTDIR for it
+    // would change which startup files a zsh started later reads.
+    expect(shellEnv({}, { rcfile: "/b" })["ZDOTDIR"]).toBeUndefined();
+  });
+
+  it("sets the command log for either wrapper", () => {
+    expect(shellEnv({}, { zdotdir: "/z", commandLog: "/l" })["JARVIS_COMMAND_LOG"]).toBe("/l");
+    expect(shellEnv({}, { rcfile: "/b", commandLog: "/l" })["JARVIS_COMMAND_LOG"]).toBe("/l");
   });
 });

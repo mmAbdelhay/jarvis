@@ -907,9 +907,13 @@ describe("clusters", () => {
     ).toThrow(/duplicates an earlier cluster/);
   });
 
-  it("takes headlamp.binary when given, and a platform default when not", () => {
+  it("takes headlamp.binary when given, and leaves the default to the caller when not", () => {
     expect(parseConfig({ ...base, headlamp: { binary: "/opt/hl" } }).headlamp.binary).toBe("/opt/hl");
-    expect(parseConfig(base).headlamp.binary).not.toBe("");
+    // Undefined, not a per-OS path: resolving one here would mean reading
+    // process.platform during config parsing, and this assertion would then
+    // hold only on the OS it happened to run on. main.ts fills it in with
+    // defaultHeadlampBinary, which headlamp.test.ts covers for all three.
+    expect(parseConfig(base).headlamp.binary).toBeUndefined();
   });
 
   it("expands a tilde in headlamp.binary", () => {

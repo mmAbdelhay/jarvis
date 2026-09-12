@@ -226,6 +226,13 @@ export class FakeTerminal {
     this.defaultPrevented = false;
     const event = {
       type: "keydown",
+      // A real KeyboardEvent always carries every modifier as a boolean.
+      // Left undefined, a chord matched as a subset rather than exactly,
+      // which is the sloppiness keys.ts exists to remove.
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
       ...init,
       preventDefault: () => {
         this.defaultPrevented = true;

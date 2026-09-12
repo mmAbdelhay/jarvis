@@ -4,9 +4,15 @@ packages:
 # pnpm 10.28.2 honours onlyBuiltDependencies here, but ~/.npmrc sets
 # ignore-scripts=true as a blanket pre-gate that makes this list inert
 # regardless of what's named — no listed package's install/postinstall
-# script runs. That means the Electron binary this app needs is NOT
-# fetched automatically. After `pnpm install`, run this by hand once:
-#   node node_modules/electron/install.js
+# script runs. And even where that global setting is absent, the list below
+# still stops node-pty, which is not on it. So two things this app cannot
+# run without are left undone by `pnpm install`: the Electron binary is not
+# fetched, and node-pty's native binding is not built (it ships no Linux
+# prebuild at all).
+#
+# After `pnpm install`, run `pnpm bootstrap` once. It performs exactly those
+# two steps, explicitly, where a human can read them.
+#
 # Do not add a project-level .npmrc to override ignore-scripts — that
 # setting is deliberate supply-chain protection (see Global Constraints).
 onlyBuiltDependencies:

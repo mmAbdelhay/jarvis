@@ -1,5 +1,6 @@
 import { parse } from "yaml";
 import { runCommand } from "./spawn.js";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /** What an AWS identifier is allowed to look like before it may reach
  *  awsLoginCommand. Everything this module extracts — a profile out of an
@@ -102,14 +103,14 @@ export type AwsSessionChecker = (profile: string, region?: string) => Promise<bo
  *  exit 0 -> true. `env` is a parameter, not `process.env`, for the same
  *  reason headlamp.ts's real spawner takes one: the exec credential plugin
  *  is resolved on PATH, and a GUI app's PATH is not a login shell's. */
-export function createAwsSessionChecker(env: NodeJS.ProcessEnv): AwsSessionChecker {
+export function createAwsSessionChecker(env: EnvSource): AwsSessionChecker {
   return async (profile, region) => {
     const args =
       region === undefined
         ? ["sts", "get-caller-identity", "--profile", profile]
         : ["sts", "get-caller-identity", "--profile", profile, "--region", region];
     try {
-      const { code } = await runCommand("aws", args, env);
+      const { code } = await runCommand("aws", args, resolveEnv(env));
       return code === 0;
     } catch {
       return false;

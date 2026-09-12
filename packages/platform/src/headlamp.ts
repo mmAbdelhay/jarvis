@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
+import { shellCommand } from "./shell.js";
 import { runCommand } from "./spawn.js";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /** One entry of a project's `clusters:` list in jarvis.yaml: a kubeconfig
  *  context the Cluster button may open, and the name shown for it. */
@@ -297,13 +299,13 @@ export function createKubeContextLister(path: string): () => Promise<string[]> {
  * below is for.
  */
 export function createRealHeadlampSpawner(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvSource = process.env,
   log: (line: string) => void = (line) => console.error(line),
 ): HeadlampSpawner {
   return ({ binary, ...rest }) => {
     const child = spawn(binary, headlampArgs(rest), {
       stdio: ["ignore", "pipe", "pipe"],
-      env,
+      env: resolveEnv(env),
     });
 
     for (const stream of [child.stdout, child.stderr]) {
@@ -372,25 +374,90 @@ export function headlampArgs({
   return args;
 }
 
+/** Markers around the PATH the probe prints.
+ *
+ *  An interactive shell's startup files print things — a MOTD, a version
+ *  notice, a fortune — and all of it lands on the same stdout. Delimiting the
+ *  one value we asked for is the difference between reading a PATH and
+ *  reading a PATH with somebody's welcome banner glued to the front. */
+const PATH_START = "__JARVIS_PATH__";
+const PATH_END = "__JARVIS_PATH_END__";
+
+/** `printf` rather than `echo`: no trailing newline to trim, and no shell
+ *  where `echo` decides to interpret a backslash in a directory name. */
+const PATH_PROBE = `printf '${PATH_START}%s${PATH_END}' "$PATH"`;
+
+function extractPath(stdout: string): string | undefined {
+  const from = stdout.indexOf(PATH_START);
+  const to = stdout.indexOf(PATH_END);
+  if (from === -1 || to === -1 || to < from) return undefined;
+  const path = stdout.slice(from + PATH_START.length, to).trim();
+  return path === "" ? undefined : path;
+}
+
 /**
  * The PATH a login shell would give, or undefined if asking failed.
  *
- * Asked once at startup and reused, because it costs a shell start: the
- * point is the user's own .zprofile/.zshrc PATH, which is where `aws`,
- * `gcloud` or whatever else a kubeconfig's exec plugin names actually
- * lives. Failure is not fatal — the caller falls back to the inherited
- * environment, which is right for a Jarvis launched from a terminal.
+ * Asked once at startup and reused, because it costs a shell start: the point
+ * is the user's own PATH, which is where `claude`, `dbgate-serve`,
+ * `code-server`, `aws` or whatever else a kubeconfig's exec plugin names
+ * actually lives. A GUI-launched app inherits none of it — Finder and a
+ * desktop launcher both give `/usr/bin:/bin:/usr/sbin:/sbin`.
+ *
+ * It asks an **interactive** login shell, and that is the whole subtlety.
+ * `bash -lc` is not interactive, and Debian and Ubuntu's stock ~/.bashrc
+ * opens with
+ *
+ *     case $- in *i*) ;; *) return;; esac
+ *
+ * so it returns immediately — taking nvm, rbenv, pyenv, mise and every other
+ * version manager that installs itself there with it. A tool installed under
+ * one of those is then invisible: on the machine this was found on, `claude`
+ * and `code-server` resolved (they live in ~/.local/bin, which ~/.profile
+ * adds) while `dbgate-serve` did not, because npm had put it in nvm's bin.
+ * The Database tab failed with "Could not open the database browser." and
+ * nothing else did.
+ *
+ * The non-interactive form is kept as a fallback for a shell where `-i`
+ * fails outright, and both are bounded: an interactive startup file that
+ * waits for input would otherwise hang startup, and this runs before the
+ * window.
  */
 export async function loginShellPath(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  timeoutMs = DEFAULT_SHELL_PATH_TIMEOUT_MS,
 ): Promise<string | undefined> {
-  const shell = env["SHELL"];
-  if (shell === undefined || shell === "") return undefined;
-  try {
-    const { code, stdout } = await runCommand(shell, ["-lc", "printf %s \"$PATH\""]);
-    const path = stdout.trim();
-    return code === 0 && path !== "" ? path : undefined;
-  } catch {
-    return undefined;
+  const shell = shellCommand(env, platform);
+
+  for (const flags of ["-lic", "-lc"]) {
+    try {
+      const { code, stdout } = await withTimeout(
+        runCommand(shell, [flags, PATH_PROBE]),
+        timeoutMs,
+      );
+      const path = extractPath(stdout);
+      // A non-zero exit with a usable PATH still counts: an interactive
+      // startup file that ends in an error has still finished building PATH,
+      // and refusing it would throw away the answer over someone else's bug.
+      if (path !== undefined && (code === 0 || flags === "-lic")) return path;
+    } catch {
+      // Timed out, or the shell would not start with these flags. Try the
+      // next form.
+    }
   }
+  return undefined;
+}
+
+/** Long enough for a heavy .bashrc on a cold cache, short enough that a
+ *  startup file blocking on input does not hold the window hostage. */
+const DEFAULT_SHELL_PATH_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((_resolve, reject) => {
+      setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms).unref?.();
+    }),
+  ]);
 }

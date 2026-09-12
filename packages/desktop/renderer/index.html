@@ -94,10 +94,10 @@
             </div>
             <div class="tile">
               <div class="lbl">TEMP</div>
-              <div class="val" style="color: var(--text-muted);">—</div>
+              <div class="val" id="temp-value" style="color: var(--text-muted);">—</div>
             </div>
           </div>
-          <div class="temp-note">Temperature needs a privileged helper on Apple Silicon — not wired up.</div>
+          <div class="temp-note" id="temp-note"></div>
         </div>
       </div>
 
@@ -158,7 +158,7 @@
       </div>
 
       <div id="conversation">
-        <div class="conversation-empty">No conversation yet — type below, or press ⌥Space to start talking and ⌥⇧Space to stop.</div>
+        <div id="conversation-empty" class="conversation-empty">No conversation yet — type below, or press ⌥Space to start talking and ⌥⇧Space to stop.</div>
       </div>
 
       <div class="composer">
@@ -494,6 +494,8 @@
       <div class="pt">Settings</div>
       <div class="spacer"></div>
       <span id="settings-status" class="mono"></span>
+      <button id="settings-tools" class="workspace-nav" type="button"
+              style="width: auto; padding: 0 14px;">Tools…</button>
       <button id="settings-restart" class="workspace-nav" type="button" hidden
               style="width: auto; padding: 0 14px;">Restart Jarvis</button>
       <button id="settings-save" class="workspace-nav" type="button"
@@ -675,6 +677,25 @@
   </div>
 
 </div>
+    <!-- The first-run prerequisites screen. An overlay, not a route: no nav
+         button, and Skip closes it for good. Never a gate — the app is behind
+         it and working. See renderer/setup.ts. -->
+    <div id="setup-overlay" class="setup-overlay" hidden>
+      <div class="setup-panel">
+        <div class="setup-panel__head">
+          <h2 id="setup-title" class="setup-panel__title">Jarvis needs a few tools</h2>
+          <button id="setup-skip" class="setup-panel__skip" type="button">Skip</button>
+        </div>
+        <p id="setup-intro" class="setup-panel__intro"></p>
+        <p id="setup-notice" class="setup-panel__notice" hidden></p>
+        <div id="setup-list" class="setup-list"></div>
+        <pre id="setup-output" class="setup-output" hidden></pre>
+        <div class="setup-panel__foot">
+          <button id="setup-install" class="setup-panel__install" type="button">Install</button>
+        </div>
+      </div>
+    </div>
+
 <script type="module" src="../dist/renderer/app.js"></script>
 </body>
 </html>

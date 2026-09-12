@@ -1,3 +1,4 @@
+import { hostPlatform, matchChord } from "./keys.js";
 import type { BlockNav } from "./block-nav.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
@@ -62,8 +63,10 @@ export type SplitKeys = {
 };
 
 /**
- * The split chords: ⌘D beside, ⌘⇧D below, ⌘W closes the pane (or the tab,
- * when it was the pane's last), ⌥⌘←/→ move the focus.
+ * The split chords: split beside, split below, close the pane (or the tab,
+ * when it was the pane's last), and move the focus. keys.ts holds how each
+ * is spelled on each platform — ⌘D/⌘⇧D/⌘W/⌥⌘←→ on macOS,
+ * Ctrl+Shift+D/E/W and Alt+←→ elsewhere.
  *
  * Returns false when the key was claimed — the same contract as
  * `TerminalHooks.interceptKey`, and it is chained through exactly that
@@ -72,23 +75,24 @@ export type SplitKeys = {
  * targets the editor's own field. Both paths consult interceptKey, so this
  * is the one place both can see.
  */
-export function handleSplitKey(event: KeyboardEvent, keys: SplitKeys): boolean {
-  if (event.type !== "keydown" || !event.metaKey) return true;
+export function handleSplitKey(
+  event: KeyboardEvent,
+  keys: SplitKeys,
+  platform: NodeJS.Platform = hostPlatform(),
+): boolean {
+  const action = matchChord(event, platform);
 
-  // ⌥⌘←/→ before anything else, and only with Option held: ⌘←/⌘→ are
-  // start-of-line and end-of-line, which no split may take.
-  if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-    attempt(() => keys.focus(event.key === "ArrowRight" ? 1 : -1));
+  if (action === "focusPrev" || action === "focusNext") {
+    attempt(() => keys.focus(action === "focusNext" ? 1 : -1));
     return claim(event);
   }
 
-  // Shift makes it "D": one key, two directions.
-  if (event.key === "d" || event.key === "D") {
-    attempt(() => keys.split(event.shiftKey ? "column" : "row"));
+  if (action === "splitRow" || action === "splitColumn") {
+    attempt(() => keys.split(action === "splitColumn" ? "column" : "row"));
     return claim(event);
   }
 
-  if (event.key === "w") {
+  if (action === "closePane") {
     // The last pane is the tab, so closing it is closing the tab — which is
     // also what reaps whatever shells the tab still has.
     attempt(() => {
@@ -131,17 +135,23 @@ export type PaletteKeys = {
  * nothing here would only be zsh's line editor doing a worse job of the
  * feature the app now owns.
  */
-export function handlePaletteKey(event: KeyboardEvent, keys: PaletteKeys): boolean {
+export function handlePaletteKey(
+  event: KeyboardEvent,
+  keys: PaletteKeys,
+  platform: NodeJS.Platform = hostPlatform(),
+): boolean {
   if (event.type !== "keydown") return true;
 
   if (keys.palette.isOpen()) return keys.palette.handleKey(event);
 
-  if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
+  const action = matchChord(event, platform);
+
+  if (action === "palette") {
     keys.palette.open(keys.actions(), "Actions");
     return claim(event);
   }
 
-  if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r") {
+  if (action === "historySearch") {
     keys.historySearch();
     return claim(event);
   }
@@ -160,10 +170,15 @@ const SHIFT_ENTER = "\u001b\r";
  * have. Call once per terminal, after `terminal.open(host)` — WebGL needs a
  * real element to attach its context to.
  */
-export function enhanceTerminal(terminal: Terminal, host: HTMLElement, hooks: TerminalHooks): void {
+export function enhanceTerminal(
+  terminal: Terminal,
+  host: HTMLElement,
+  hooks: TerminalHooks,
+  platform: NodeJS.Platform = hostPlatform(),
+): void {
   loadAddons(terminal, hooks);
   const search = attachSearch(terminal, host, hooks);
-  attachKeys(terminal, hooks, search);
+  attachKeys(terminal, hooks, search, platform);
 }
 
 function loadAddons(terminal: Terminal, hooks: TerminalHooks): void {
@@ -311,7 +326,12 @@ function claim(event: KeyboardEvent): false {
   return false;
 }
 
-function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): void {
+function attachKeys(
+  terminal: Terminal,
+  hooks: TerminalHooks,
+  search: Search,
+  platform: NodeJS.Platform,
+): void {
   terminal.attachCustomKeyEventHandler((event) => {
     // First, and only ever while it has something open: an autocomplete
     // dropdown owns Tab and the arrows for as long as it is showing, and
@@ -326,13 +346,15 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
       return claim(event);
     }
 
-    // Everything below is a Cmd chord the app owns rather than the shell. On
-    // a Mac these never had a terminal meaning to shadow, which is why Ctrl
-    // is deliberately not accepted for any of them: Ctrl+C, Ctrl+V and
-    // Ctrl+K are real control bytes a program may want.
-    if (!event.metaKey) return true;
+    // Everything below is a chord the app owns rather than the shell. Which
+    // chord that is differs by platform and lives in keys.ts — on a Mac ⌘,
+    // which never had a terminal meaning to shadow; elsewhere Ctrl+Shift,
+    // because bare Ctrl+C, Ctrl+V and Ctrl+K are real control bytes a
+    // program may want.
+    const action = matchChord(event, platform);
+    if (action === undefined) return true;
 
-    if (event.key === "f") {
+    if (action === "search") {
       search.open();
       return claim(event);
     }
@@ -344,11 +366,10 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
     // that went inert the moment a command started would deny both at
     // precisely the wrong moment.
     //
-    // !ctrlKey && !altKey, matching handlePaletteKey's own guard for the
-    // same chord at the editor-visible listener — the two must agree on
-    // exactly which modifiers claim ⌘P, or ⌥⌘P would be claimed in one
-    // pane state and not another.
-    if (!event.ctrlKey && !event.altKey && event.key.toLowerCase() === "p") {
+    // Both this and handlePaletteKey ask keys.ts, which is what makes them
+    // agree on exactly which modifiers claim the palette. They did not always
+    // — an extra modifier claimed it in one pane state and not the other.
+    if (action === "palette") {
       if (hooks.openPalette === undefined) return true;
       hooks.openPalette();
       return claim(event);
@@ -356,14 +377,14 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
 
     // Jump the selection between blocks. Undefined blockNav (no blocks in
     // this pane) leaves the key to xterm exactly as before this existed.
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    if (action === "blockPrev" || action === "blockNext") {
       if (hooks.blockNav === undefined) return true;
-      hooks.blockNav.move(event.key === "ArrowDown" ? 1 : -1);
+      hooks.blockNav.move(action === "blockNext" ? 1 : -1);
       return claim(event);
     }
 
     // Failed-only filter.
-    if (event.key === "F" && event.shiftKey) {
+    if (action === "filterFailed") {
       if (hooks.blockNav === undefined) return true;
       hooks.blockNav.toggleFailedFilter();
       return claim(event);
@@ -372,7 +393,7 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
     // Copy. xterm draws to a canvas and owns its own selection, so the
     // browser's default copy has nothing to act on — without this, Cmd+C
     // over a selection silently does nothing at all.
-    if (event.key === "c") {
+    if (action === "copy") {
       const selection = terminal.getSelection();
       if (selection === "") return true;
       void navigator.clipboard?.writeText(selection);
@@ -380,14 +401,14 @@ function attachKeys(terminal: Terminal, hooks: TerminalHooks, search: Search): v
     }
 
     // Paste goes in as bytes, exactly as if typed.
-    if (event.key === "v") {
+    if (action === "paste") {
       void navigator.clipboard?.readText().then((text) => {
         if (text !== "") hooks.sendInput(text);
       });
       return claim(event);
     }
 
-    if (event.key === "k") {
+    if (action === "clearScreen") {
       terminal.clear();
       return claim(event);
     }

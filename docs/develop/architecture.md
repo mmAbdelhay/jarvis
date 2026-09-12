@@ -17,6 +17,33 @@ operating system. `platform` is where every side effect lives, always behind an
 injected dependency so the orchestration around it can be tested with a fake.
 `desktop` composes the two and adds the window.
 
+## Two platforms
+
+macOS and Linux, and the rule that keeps them one codebase: **a function whose
+behaviour differs by OS takes the platform as a parameter**. Only `main.ts`
+and `preload.cts` read `process.platform`; the renderer receives it over the
+bridge as `window.jarvis.platform`. `platform-convention.test.ts` enforces it.
+
+There is no CI and one laptop, so this is not tidiness — a function that reads
+`process.platform` at the point of use can only be tested on the OS the test
+happens to run on, and half the app would be asserted by nothing. See
+[conventions](conventions.md).
+
+The places that actually differ are few, and each is a named function with
+both branches tested:
+
+| Concern | Module |
+|---|---|
+| Shell integration | `platform/zsh-integration.ts`, `bash-integration.ts`, dispatched by `shell-integration.ts` |
+| Which shell, and how it is started | `platform/shell.ts` — `shellCommand`, `shellArgs` |
+| History format | `platform/completion.ts` — `parseZshHistory`, `parseBashHistory` |
+| Microphone | `desktop/recorder.ts` — `recorderCommand` |
+| Audio playback | `platform/piper.ts` — `audioPlayer` |
+| Speech routing | `platform/piper.ts` — `RoutedSpeech`, `silentSpeech` |
+| Keyboard chords and their labels | `desktop/renderer/keys.ts` |
+| Application menu | `desktop/app-menu.ts` |
+| Sidecar default paths | `platform/headlamp.ts` — `defaultHeadlampBinary` |
+
 ## Inside `desktop`
 
 ```

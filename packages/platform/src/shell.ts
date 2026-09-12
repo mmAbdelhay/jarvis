@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { userInfo } from "node:os";
 import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 
@@ -122,15 +123,49 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
   };
 }
 
-/** The user's own login shell, or zsh — macOS's default since Catalina. */
-function shellCommand(env: NodeJS.ProcessEnv): string {
+/**
+ * The user's own login shell, or the platform's default.
+ *
+ * The fallback is not cosmetic. macOS has shipped zsh since Catalina, but a
+ * great many Linux installs have no /bin/zsh at all — and a shell binary that
+ * does not exist is not a degraded terminal, it is a pty that fails to spawn
+ * and a tab that shows nothing.
+ */
+export function shellCommand(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  fromPasswd: () => string | undefined = passwdShell,
+): string {
   const shell = env["SHELL"];
-  return shell === undefined || shell === "" ? "/bin/zsh" : shell;
+  if (shell !== undefined && shell !== "") return shell;
+
+  // $SHELL is not always set. A process started by a desktop launcher, a
+  // .desktop entry or Finder frequently has no SHELL at all — it is exported
+  // by the shell, and no shell was involved in starting it. The user still
+  // has a login shell; it is in their passwd entry, which is where this looks
+  // before falling back to a platform guess.
+  const passwd = fromPasswd();
+  if (passwd !== undefined && passwd !== "") return passwd;
+
+  return platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
+/** The current user's login shell from the passwd database, or undefined if
+ *  it cannot be read. Node reads this without spawning anything. */
+export function passwdShell(): string | undefined {
+  try {
+    const shell = userInfo().shell;
+    return shell === null ? undefined : shell;
+  } catch {
+    return undefined;
+  }
 }
 
 export type ShellIntegration = {
-  /** The Jarvis-owned ZDOTDIR wrapper, when one was installed. */
+  /** The Jarvis-owned ZDOTDIR wrapper, when one was installed for zsh. */
   zdotdir?: string | undefined;
+  /** The Jarvis-owned rcfile, when one was installed for bash. */
+  rcfile?: string | undefined;
   /** Where the wrapper's preexec hook appends `<epoch>\t<cwd>\t<command>`. */
   commandLog?: string | undefined;
 };
@@ -182,6 +217,24 @@ export function shellEnv(
 }
 
 /**
+ * How the shell is asked to start.
+ *
+ * `-l` is the default, and it is the reason the terminal is the one the user
+ * actually has: their profile, their PATH, their aliases, their prompt. A GUI
+ * app inherits none of that from the environment it was launched in.
+ *
+ * bash is the exception, and not by preference. It honours `--rcfile` only
+ * for an interactive *non-login* shell — a login bash ignores it entirely and
+ * reads the profile files, so the hook would silently never install. So the
+ * wrapper takes over the login shell's own reading (see bash-integration.ts)
+ * and the shell is started interactive instead.
+ */
+export function shellArgs(integration: ShellIntegration): string[] {
+  if (integration.rcfile !== undefined) return ["--rcfile", integration.rcfile, "-i"];
+  return ["-l"];
+}
+
+/**
  * The real spawner: the user's login shell under a pty, rooted at the
  * project.
  *
@@ -191,13 +244,17 @@ export function shellEnv(
  * so a non-login shell here would be a stripped-down impostor of the one
  * they get in a terminal window.
  *
- * `integration` carries the completion feature's ZDOTDIR wrapper, when one
- * was installed — see shellEnv and zsh-integration.ts. An empty one is the
- * terminal as it was before autocomplete existed.
+ * `integration` carries whichever wrapper the completion feature installed —
+ * zsh's ZDOTDIR directory or bash's rcfile, see shellEnv and shellArgs. An
+ * empty one is the terminal as it was before autocomplete existed.
+ *
+ * `platform` decides only the fallback shell for a user with no $SHELL; see
+ * shellCommand.
  */
 export function createRealShellSpawner(
   env: NodeJS.ProcessEnv = process.env,
   integration: ShellIntegration = {},
+  platform: NodeJS.Platform = "darwin",
 ): ShellSpawner {
   // node-pty's own shape: onExit hands over an event object, not a bare
   // code, which is the one place it differs from ShellProcess.
@@ -217,7 +274,7 @@ export function createRealShellSpawner(
   };
 
   return ({ cwd, cols, rows }) => {
-    const child = pty.spawn(shellCommand(env), ["-l"], {
+    const child = pty.spawn(shellCommand(env, platform), shellArgs(integration), {
       name: "xterm-256color",
       cols,
       rows,

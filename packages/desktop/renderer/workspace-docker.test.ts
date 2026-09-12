@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderDockerPane, toTerminalText } from "./workspace-docker.js";
 
 const view = {
@@ -44,6 +44,27 @@ function flush(): Promise<void> {
 }
 
 describe("renderDockerPane", () => {
+  // Selecting a row opens a log stream, so every click in this file reaches
+  // window.jarvis.dockerFollow whether the test is about following logs or
+  // not. A test that installs only the one method it asserts on leaves the
+  // rest missing, and the resulting TypeError is thrown from inside a DOM
+  // event listener — asynchronously, where the test's own stack cannot catch
+  // it. Vitest then reports an unhandled error and fails the run with every
+  // assertion passing, which is the false positive its warning describes.
+  //
+  // So: a complete baseline here, and tests still override whichever method
+  // they are actually asserting against.
+  beforeEach(() => {
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
+      dockerFollow: vi.fn(),
+      dockerStart: vi.fn(),
+      dockerStop: vi.fn(),
+      dockerRestart: vi.fn(),
+      dockerComposeUp: vi.fn(),
+      dockerComposeDown: vi.fn(),
+    };
+  });
+
   // vi.spyOn on an already-spied method reuses the same mock rather than
   // resetting its call history, so a spy left over from an earlier test in
   // this file would otherwise be counted against a later one that asserts
@@ -177,7 +198,7 @@ describe("renderDockerPane", () => {
 
   it("confirms before stopping, and does nothing when refused", () => {
     const stop = vi.fn();
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStop = stop;
     vi.spyOn(window, "confirm").mockReturnValue(false);
 
     const element = host();
@@ -190,7 +211,7 @@ describe("renderDockerPane", () => {
 
   it("stops once the confirmation is accepted", () => {
     const stop = vi.fn(() => Promise.resolve({ ok: true, value: undefined }));
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStop = stop;
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const element = host();
@@ -203,7 +224,7 @@ describe("renderDockerPane", () => {
 
   it("starts without asking", () => {
     const start = vi.fn(() => Promise.resolve({ ok: true, value: undefined }));
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStart: start };
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStart = start;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const element = host();
@@ -221,7 +242,7 @@ describe("renderDockerPane", () => {
     const stop = vi.fn(() =>
       Promise.resolve({ ok: false as const, text: "The container is gone.", language: "en" as const }),
     );
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStop: stop };
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStop = stop;
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const element = host();
@@ -235,7 +256,7 @@ describe("renderDockerPane", () => {
 
   it("leaves the status line alone when the action succeeds", async () => {
     const start = vi.fn(() => Promise.resolve({ ok: true as const, value: undefined }));
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis = { dockerStart: start };
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStart = start;
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", {

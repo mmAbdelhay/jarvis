@@ -1,3 +1,4 @@
+import { openSetup } from "./setup.js";
 import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
 import type {
   ChatDriver,
@@ -43,6 +44,13 @@ export async function openSettings(): Promise<void> {
   // Settings while Jarvis is open should appear the next time this route is
   // opened, not the next time the app restarts. After the first render, so
   // the section appears immediately and fills in when the listing arrives.
+  // Reopens the prerequisites screen. It shows itself on a first run and
+  // when something required is missing; this is how a user reaches it the
+  // rest of the time — after installing a tool, or to see what a tab wants.
+  $("settings-tools").addEventListener("click", () => {
+    void openSetup(window.jarvis);
+  });
+
   void loadVoices();
 }
 
@@ -1068,6 +1076,11 @@ function renderVoice(): void {
 function renderVoiceNote(): void {
   const note = $("settings-voice-note");
   note.replaceChildren();
+  // The advice below names a macOS preference pane. Elsewhere every voice on
+  // the list is a Piper model, which has no compact and enhanced versions to
+  // choose between, and the note would be directions to a screen that does
+  // not exist.
+  if (window.jarvis.platform !== "darwin") return;
   if (installedVoices.length === 0) return;
   if (installedVoices.some((voice) => voice.upgraded)) return;
 

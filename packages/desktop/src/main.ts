@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
 import type { Session } from "electron";
+import { appMenuTemplate } from "./app-menu.js";
+import { createSetupHandlers } from "./ipc.js";
 import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import {
   AgentRegistry,
@@ -19,9 +21,12 @@ import {
 } from "@jarvis/core";
 import type { TabKind, WorkspaceTab } from "@jarvis/core";
 import {
+  audioPlayer,
   MacSpeech,
+  onPath,
   PiperSpeech,
   RoutedSpeech,
+  silentSpeech,
   createBookmarkStore,
   createBrain,
   createCapacityReader,
@@ -32,6 +37,12 @@ import {
   createFsImportDeps,
   createGitProvider,
   createHeadlampManager,
+  defaultHeadlampBinary,
+  defaultHistoryPath,
+  installShellIntegration,
+  isBash,
+  parseBashHistory,
+  parseZshHistory,
   createKubeContextLister,
   createMetricsReader,
   createPtySpawner,
@@ -40,7 +51,6 @@ import {
   createRealShellSpawner,
   createSessionImporter,
   createShellManager,
-  installZshIntegration,
   createCollection,
   createFolder,
   apiFetch,
@@ -111,14 +121,15 @@ import {
 } from "./completion-source.js";
 import {
   DEFAULT_CONFIG_PATH,
+  DEFAULT_TERMINAL,
   defaultWorkflowsDir,
   ensureConfigFile,
   loadConfig,
 } from "./config.js";
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
-import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
-import { defaultRecorderDeps, Recorder } from "./recorder.js";
+import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
+import { createRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ReportedRect } from "./ipc.js";
@@ -217,6 +228,10 @@ function nodeVersionIn(cwd: string): Promise<string | undefined> {
  *  line that hides how the voice handles it. */
 /** How the Piper engine appears in the voice picker. */
 const PIPER_VOICE = "Alan (neural)";
+/** And its Arabic model, which off darwin is the only Arabic voice there is.
+ *  Named for the picker the same way — the user is choosing a voice, not an
+ *  engine. */
+const PIPER_ARABIC_VOICE = "Kareem (neural)";
 
 const VOICE_SAMPLE = {
   en: "Good evening sir, how can I help you today?",
@@ -245,6 +260,16 @@ export let widevineReady: Promise<void> | undefined;
 app.whenReady().then(async () => {
   setDockIcon();
 
+  // Electron's default menu is the standard Mac menu bar on darwin — which is
+  // right, and where ⌘Q and the edit roles come from. Off darwin the same
+  // default draws a visible File/Edit/View bar inside the window, over a UI
+  // that opens full screen and has chrome of its own.
+  //
+  // So: a minimal role menu, hidden by autoHideMenuBar below. The roles are
+  // not decoration — without them copy and paste stop working in ordinary
+  // input fields, which is what makes "just remove the menu" the wrong fix.
+  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(process.platform)));
+
   widevineReady = components
     .whenReady()
     .then(() => {
@@ -259,7 +284,10 @@ app.whenReady().then(async () => {
     // this, loadConfig throws ENOENT and the handler at the bottom of this
     // block turns it into "Jarvis failed to start" — which is what every
     // downloaded build did, on every machine but the one it was built on.
-    await ensureConfigFile(DEFAULT_CONFIG_PATH);
+    // Whether this launch created the config file. The first-run setup screen
+    // opens for it — and for a missing required prerequisite, which is the
+    // other way a machine can have nothing to run an agent with.
+    const firstRun = await ensureConfigFile(DEFAULT_CONFIG_PATH);
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
 
@@ -302,7 +330,7 @@ app.whenReady().then(async () => {
     // by awaiting this promise, which it can afford because its own line is
     // already deferred behind the greeting.
     let agentEnv: NodeJS.ProcessEnv = process.env;
-    const agentEnvReady = loginShellPath()
+    const agentEnvReady = loginShellPath(process.env, process.platform)
       .then((path) => {
         if (path !== undefined) agentEnv = { ...process.env, PATH: path };
       })
@@ -362,13 +390,24 @@ app.whenReady().then(async () => {
       .catch((error) => {
         console.error(`Session import failed: ${errorMessage(error)}`);
       });
-    // macOS's own voices, always — Arabic goes through these whichever engine
-    // English uses, because a Piper model speaks one language.
-    const macSpeech = new MacSpeech(
-      { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
-      defaultSpeechRunner,
-      defaultVoiceLister,
-    );
+    // What plays a synthesised WAV. Probed once here rather than per
+    // utterance — see audioPlayer.
+    const player = audioPlayer(process.platform, (command) => onPath(command, process.env));
+
+    // macOS's own voices. On darwin they are the fallback for anything Piper
+    // is not speaking; elsewhere there is no `say` to call, and constructing
+    // this would only produce a speech object whose every utterance rejects.
+    //
+    // That rejection was not theoretical: with Piper absent, the greeting hit
+    // `say`, and announceSpeaking awaited a promise nobody caught.
+    const macSpeech =
+      process.platform === "darwin"
+        ? new MacSpeech(
+            { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
+            defaultSpeechRunner,
+            defaultVoiceLister,
+          )
+        : undefined;
 
     // Piper only if it is actually installed. Configured-but-absent must fall
     // back rather than leave the app silent: the model is a 60MB download the
@@ -380,9 +419,44 @@ app.whenReady().then(async () => {
       existsSync(config.voice.piperModel);
     if (config.voice.engine === "piper" && !piperReady) {
       console.log(
-        `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel}) — using macOS voices.`,
+        `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel})` +
+          `${macSpeech === undefined ? " — nothing else here can speak." : " — using macOS voices."}`,
       );
     }
+
+    // Arabic. A Piper model speaks one language, so the Arabic voice is its
+    // own model — and on a platform with no system voices it is the only
+    // thing that can say an Arabic sentence at all.
+    const arabicPiperReady =
+      existsSync(config.voice.piperBinary) && existsSync(config.voice.piperArabicModel);
+    const arabicSpeech =
+      macSpeech ??
+      (arabicPiperReady
+        ? new PiperSpeech({
+            binary: config.voice.piperBinary,
+            model: config.voice.piperArabicModel,
+            player,
+          })
+        : silentSpeech(() => {
+            // Never silence with no explanation: the feature says why rather
+            // than appearing broken.
+            //
+            // Which explanation depends on what is actually missing. With
+            // Piper installed and only the Arabic model absent, the Arabic
+            // model is the thing to go and get. With Piper absent entirely
+            // this object is the whole of speech — English included — and
+            // naming the Arabic model would send the user to fix something
+            // that is not the problem.
+            const piperInstalled = existsSync(config.voice.piperBinary);
+            window.webContents.send("turn:new", {
+              role: "assistant",
+              text: piperInstalled
+                ? MESSAGES.arabicVoiceUnavailable(PRIMARY_LANGUAGE)
+                : MESSAGES.noVoiceInstalled(PRIMARY_LANGUAGE),
+              language: PRIMARY_LANGUAGE,
+              at: Date.now(),
+            });
+          }));
 
     /**
      * Speaks, and tells the renderer while it is happening.
@@ -397,6 +471,14 @@ app.whenReady().then(async () => {
       window.webContents.send("voice:speaking", true);
       try {
         await speech.speak(text, language);
+      } catch (error) {
+        // A voice that cannot speak is not a reason to take the process down.
+        // Every caller of this is fire-and-forget — the greeting, a reply, a
+        // capacity report — so a rejection here reached nobody's catch and
+        // surfaced as an UnhandledPromiseRejectionWarning, which under
+        // --unhandled-rejections=strict would be a crash. The turn is already
+        // on screen; only the audio is missing, and that is what is logged.
+        console.error(`Speech failed (${language}): ${errorMessage(error)}`);
       } finally {
         window.webContents.send("voice:speaking", false);
       }
@@ -404,10 +486,14 @@ app.whenReady().then(async () => {
 
     const speech = piperReady
       ? new RoutedSpeech(
-          new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel }),
-          macSpeech,
+          new PiperSpeech({
+            binary: config.voice.piperBinary,
+            model: config.voice.piperModel,
+            player,
+          }),
+          arabicSpeech,
         )
-      : macSpeech;
+      : (macSpeech ?? arabicSpeech);
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -486,6 +572,10 @@ app.whenReady().then(async () => {
       fullscreen: true,
       width: 1440,
       height: 900,
+      // Linux and Windows draw the menu bar inside the window; macOS never
+      // has and ignores this. See appMenuTemplate for what is in it and why
+      // it is not simply removed.
+      autoHideMenuBar: true,
       backgroundColor: "#060a0f",
       // Windows and Linux take the icon from the window; macOS takes it from
       // the bundle at package time and from the dock while developing, which
@@ -493,6 +583,9 @@ app.whenReady().then(async () => {
       icon: iconPath("icon.png"),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
+        // argv rather than an IPC call, because the renderer needs it while
+        // it is deciding what to draw, before any round trip could answer.
+        additionalArguments: firstRun ? ["--jarvis-first-run"] : [],
         // This renderer displays untrusted agent output and holds
         // `window.jarvis.send`. These already match Electron 44's implicit
         // defaults; stated explicitly so a future edit that weakens them
@@ -539,7 +632,24 @@ app.whenReady().then(async () => {
     // The same lookup the agents above started; awaited here because the
     // sidecars are wired now and want a concrete environment.
     await agentEnvReady;
-    const env = agentEnv;
+    // A getter, never `agentEnv` itself.
+    //
+    // agentEnv starts as process.env and is replaced when loginShellPath()
+    // answers — which happens after startup, deliberately, because asking
+    // costs a login shell and a heavy profile would sit between app-ready and
+    // the window. Capturing the value here captured whatever was there before
+    // that answer arrived, which for a launcher-started app is a PATH with no
+    // Homebrew, npm, nvm or ~/.local/bin in it. Every sidecar below then
+    // resolved its binary against that stripped-down PATH for the rest of the
+    // session, and the Editor, Database, Cluster and Docker tabs failed with
+    // "could not open" on a machine where the binary was installed and on
+    // PATH in every terminal.
+    //
+    // It was a race, which is why it looked intermittent: the same build
+    // worked when launched from a terminal (whose PATH is already the user's)
+    // and failed from a desktop launcher. createPtySpawner has taken a getter
+    // for exactly this reason since it was written; these did not.
+    const env = (): NodeJS.ProcessEnv => agentEnv;
 
     // One code-server process per project, started lazily the first time
     // its editor is opened. Jarvis-managed profile directories, separate
@@ -573,9 +683,81 @@ app.whenReady().then(async () => {
       },
       workspaceRoot: dbgateRoot,
       connectionsFor: (project) => config.databases[project] ?? [],
-      env,
+      // Not the getter above: this one is read for `passwordEnv` lookups, not
+      // to resolve a binary, and the variables it reads are the same in both.
+      // Only PATH is late.
+      env: process.env,
       randomPassword,
     });
+    // The first-run prerequisites screen. `env` is the getter for the same
+    // reason the sidecars take one: the login shell's PATH arrives after
+    // startup, and checking against the pre-answer environment would report
+    // every tool missing and offer to install what is already there.
+    const setup = createSetupHandlers({
+      platform: process.platform,
+      arch: process.arch,
+      env,
+      home: homedir(),
+      fileExists: (path) => existsSync(path),
+      onOutput: (chunk) => window.webContents.send("setup:output", chunk),
+      installDeps: (onOutput) => ({
+        onOutput,
+        home: homedir(),
+        run: (command, args, emit) =>
+          new Promise<number>((resolve) => {
+            const child = spawn(command, [...args], {
+              stdio: ["ignore", "pipe", "pipe"],
+              env: env(),
+            });
+            for (const stream of [child.stdout, child.stderr]) {
+              stream?.setEncoding("utf8");
+              stream?.on("data", (chunk: string) => emit(chunk));
+            }
+            // A missing binary arrives as an async "error", not a throw.
+            child.on("error", (error) => {
+              emit(`${error.message}\n`);
+              resolve(1);
+            });
+            child.on("close", (code) => resolve(code ?? 1));
+          }),
+        download: async (url, dest) => {
+          await mkdir(dirname(dest), { recursive: true });
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+          await writeFile(dest, Buffer.from(await response.arrayBuffer()));
+        },
+        extract: async (url, dest) => {
+          await mkdir(dest, { recursive: true });
+          const archive = join(dest, basename(new URL(url).pathname));
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+          await writeFile(archive, Buffer.from(await response.arrayBuffer()));
+          // tar is on every macOS and Linux, and on Windows since 1803.
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn("tar", ["-xf", archive, "-C", dest], { stdio: "ignore" });
+            child.on("error", reject);
+            child.on("close", (code) =>
+              code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`)),
+            );
+          });
+          await rm(archive, { force: true });
+          return dest;
+        },
+        link: async (from, to) => {
+          await mkdir(dirname(to), { recursive: true });
+          await rm(to, { force: true });
+          await symlink(from, to);
+        },
+        locate: async (command) => {
+          const { code, stdout } = await runCommand("sh", ["-lc", `command -v ${command}`], env());
+          const found = stdout.trim();
+          return code === 0 && found !== "" ? found : undefined;
+        },
+      }),
+    });
+    ipcMain.handle("setup:check", () => setup.check());
+    ipcMain.handle("setup:install", (_event, id: unknown) => setup.install(id));
+
     const database = createDatabaseHandlers({
       dbgate,
       projects: config.projects,
@@ -588,7 +770,11 @@ app.whenReady().then(async () => {
       waitUntilReady,
       listContexts: createKubeContextLister(join(homedir(), ".kube/config")),
       clusters: config.clusters,
-      binary: config.headlamp.binary,
+      // The per-OS default lives here rather than in config.ts: resolving it
+      // there would mean config parsing reading process.platform, and every
+      // headlamp assertion in its tests would then hold only on the OS the
+      // test happened to run on.
+      binary: config.headlamp.binary ?? defaultHeadlampBinary(process.platform, process.env),
       kubeconfigPath: join(homedir(), ".kube/config"),
     });
     const checkAwsSession = createAwsSessionChecker(env);
@@ -599,22 +785,28 @@ app.whenReady().then(async () => {
     const dockerClient = createRealDockerClient(env);
 
     // Terminal autocomplete's shell integration, installed before the first
-    // shell can be started. It writes a Jarvis-owned ZDOTDIR whose files
-    // chain to the user's real dotfiles; ~/.zshrc and friends are read and
-    // never modified. Undefined means no integration — disabled, not zsh,
-    // or unwritable — and the terminal then behaves exactly as it did
-    // before this feature existed.
+    // shell can be started. It writes a Jarvis-owned wrapper — a ZDOTDIR
+    // directory for zsh, an rcfile for bash — whose contents chain to the
+    // user's real dotfiles; ~/.zshrc, ~/.profile and friends are read and
+    // never modified. Undefined means no integration — disabled, a shell
+    // neither wrapper knows, or unwritable — and the terminal then behaves
+    // exactly as it did before this feature existed.
     const completionEnabled = config.terminal.completion.enabled;
+    const shell = process.env["SHELL"];
     const zdotdir = join(homedir(), ".config/jarvis/zdotdir");
+    const bashDir = join(homedir(), ".config/jarvis/bash");
     await mkdir(zdotdir, { recursive: true }).catch(() => undefined);
+    await mkdir(bashDir, { recursive: true }).catch(() => undefined);
     await mkdir(dirname(config.terminal.completion.commandLogPath), { recursive: true }).catch(
       () => undefined,
     );
-    const installedZdotdir = await installZshIntegration({
-      shell: process.env["SHELL"],
+    const installedIntegration = await installShellIntegration({
+      shell,
       enabled: completionEnabled,
-      dir: zdotdir,
+      zdotdirDir: zdotdir,
+      bashDir,
       realZdotdir: process.env["ZDOTDIR"] ?? homedir(),
+      home: homedir(),
       write: (path, contents) => writeFile(path, contents, "utf8"),
     });
 
@@ -622,18 +814,40 @@ app.whenReady().then(async () => {
     // and the database this hosts no page and opens no port: the tab has no
     // view at all, and its screen is drawn by the renderer's own xterm.
     const shells = createShellManager({
-      spawn: createRealShellSpawner(process.env, {
-        zdotdir: installedZdotdir,
-        // Only worth writing when the wrapper that reads it is installed.
-        commandLog:
-          installedZdotdir === undefined
-            ? undefined
-            : config.terminal.completion.commandLogPath,
-      }),
+      spawn: createRealShellSpawner(
+        process.env,
+        {
+          ...(installedIntegration ?? {}),
+          // Only worth writing when a wrapper that reads it is installed.
+          commandLog:
+            installedIntegration === undefined
+              ? undefined
+              : config.terminal.completion.commandLogPath,
+        },
+        process.platform,
+      ),
     });
 
+    // The history file, and the parser that matches it.
+    //
+    // config.ts defaults this to zsh's HISTFILE and knows nothing about the
+    // host — deliberately, so its tests hold on both platforms. Comparing
+    // against DEFAULT_TERMINAL is how a caller tells "the user never wrote
+    // this key" from "the user wrote it and it happens to match", which is
+    // exactly what that export exists for. Only the former is overridden: a
+    // path the user actually chose is theirs.
+    //
+    // The parser has to follow the file. zsh's reads a bash history without
+    // failing and silently drops every timestamp, taking the recency half of
+    // the ranking with it.
+    const historyPath =
+      config.terminal.completion.historyPath === DEFAULT_TERMINAL.completion.historyPath
+        ? defaultHistoryPath(shell, homedir())
+        : config.terminal.completion.historyPath;
+
     const completionSource = createCompletionSource({
-      readHistory: createFileReader(config.terminal.completion.historyPath),
+      readHistory: createFileReader(historyPath),
+      parseHistory: isBash(shell) ? parseBashHistory : parseZshHistory,
       readCommandLog: createFileReader(config.terminal.completion.commandLogPath),
       listDirectory: createDirectoryLister(),
       now: () => Date.now(),
@@ -1562,14 +1776,33 @@ app.whenReady().then(async () => {
       ),
     );
     ipcMain.handle("voice:list", async () => {
-      const installed = await listInstalledVoices();
+      // `say -v '?'` is the only source of system voices and it exists only on
+      // darwin. Asking elsewhere spawns a binary that is not there, waits for
+      // it to fail, and returns the same empty list this does immediately.
+      const installed = process.platform === "darwin" ? await listInstalledVoices() : [];
       // Piper is offered beside the system voices rather than in a separate
       // control: from where the user stands it is simply the best-sounding
       // English voice on the list.
       const system = installed.map((voice) => ({ ...voice, engine: "say" as const }));
-      return piperReady
-        ? [{ name: PIPER_VOICE, language: "en_GB", upgraded: true, engine: "piper" as const }, ...system]
-        : system;
+      const piperVoices = [
+        ...(piperReady
+          ? [{ name: PIPER_VOICE, language: "en_GB", upgraded: true, engine: "piper" as const }]
+          : []),
+        // Arabic is only ever a Piper model off darwin — there is no `say` to
+        // name a system voice with, so without this the Arabic picker would
+        // be an empty control on a bilingual app.
+        ...(arabicPiperReady && process.platform !== "darwin"
+          ? [
+              {
+                name: PIPER_ARABIC_VOICE,
+                language: "ar_JO",
+                upgraded: true,
+                engine: "piper" as const,
+              },
+            ]
+          : []),
+      ];
+      return [...piperVoices, ...system];
     });
     // The sample is spoken through the same MacSpeech the app uses, so a
     // preview sounds exactly like the thing being chosen — including the
@@ -1582,9 +1815,24 @@ app.whenReady().then(async () => {
       // being chosen, which is the one thing a preview must not do.
       const preview =
         name === PIPER_VOICE && piperReady
-          ? new PiperSpeech({ binary: config.voice.piperBinary, model: config.voice.piperModel })
-          : new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner);
-      void preview.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
+          ? new PiperSpeech({
+              binary: config.voice.piperBinary,
+              model: config.voice.piperModel,
+              player,
+            })
+          : name === PIPER_ARABIC_VOICE && arabicPiperReady
+            ? new PiperSpeech({
+                binary: config.voice.piperBinary,
+                model: config.voice.piperArabicModel,
+                player,
+              })
+            : process.platform === "darwin"
+              ? new MacSpeech({ arabicVoice: name, englishVoice: name }, defaultSpeechRunner)
+              : undefined;
+      // Off darwin there is no `say` to preview a named system voice with,
+      // and the Settings panel does not offer that list there — see
+      // renderer/settings.ts.
+      void preview?.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
     });
     ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
     ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
@@ -1724,7 +1972,7 @@ app.whenReady().then(async () => {
     // and this handler never rejects on a normal per-account failure.
     ipcMain.handle("providers:refresh", () => providers.refreshCapacity({ force: true }));
 
-    const recorder = new Recorder(defaultRecorderDeps);
+    const recorder = new Recorder(createRecorderDeps(process.platform));
 
     function startVoice(): void {
       recorder.start();
@@ -1890,9 +2138,15 @@ app.whenReady().then(async () => {
       ["Alt+Shift+Space", stopRegistered],
     ] as const) {
       if (registered) continue;
+      // Two causes, two pieces of advice. A collision means another app holds
+      // the combo and the user can close it or pick another. Wayland means no
+      // application can hold one at all, and saying "another app is probably
+      // using it" would send them looking for something that does not exist.
       window.webContents.send("turn:new", {
         role: "assistant",
-        text: MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
+        text: isWayland(process.env)
+          ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
+          : MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
         language: PRIMARY_LANGUAGE,
         at: Date.now(),
       });
@@ -1918,7 +2172,7 @@ app.whenReady().then(async () => {
     // list costs 1.2s and only decides which macOS voice to speak with, so
     // with nothing to speak there is nothing to wait for either.
     const speakGreeting = config.voice.speakGreeting;
-    if (speakGreeting && !piperReady) await macSpeech.ready;
+    if (speakGreeting && !piperReady) await macSpeech?.ready;
 
     const template = config.voice.greeting[PRIMARY_LANGUAGE] ?? "";
     const wantsUncommitted = template.includes("{uncommitted}");

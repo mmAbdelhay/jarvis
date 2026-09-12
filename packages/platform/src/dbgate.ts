@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import type { DbGateConnection, DbGateEngine } from "./dbgate-types.js";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /** DbGate names an engine as `<engine>@<plugin package>`; the plugin half
  *  is not derivable from the engine name (mariadb is served by the mysql
@@ -284,16 +285,14 @@ function waitForPort(
  * "exited before it started listening" — so the Database button simply did
  * not work in the installed build, and did work from a terminal.
  */
-export function createRealDbGateSpawner(
-  baseEnv: NodeJS.ProcessEnv = process.env,
-): DbGateSpawner {
+export function createRealDbGateSpawner(baseEnv: EnvSource = process.env): DbGateSpawner {
   return ({ env, workspaceDir }) => {
     const child = spawn("dbgate-serve", [], {
       cwd: workspaceDir,
       // The instance's own variables last: LOGIN, PASSWORD and the seeded
       // CONNECTIONS belong to this spawn and must beat anything of the
       // same name that happens to be in the inherited environment.
-      env: { ...baseEnv, ...env },
+      env: { ...resolveEnv(baseEnv), ...env },
       stdio: ["ignore", "pipe", "ignore"],
     });
 

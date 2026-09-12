@@ -6,10 +6,10 @@ A desktop workspace for running coding agents by voice, and for doing the work
 around them without leaving it: the project's files, its databases, a shell in
 it, and its APIs.
 
-Jarvis is a single Electron app over a pnpm workspace. It speaks Arabic and
-English, and it is built for one person on one machine — there is no server,
-no account, and nothing leaves the laptop that was not already going to. It
-opens full screen.
+Jarvis is a single Electron app over a pnpm workspace. It runs on macOS and
+Linux. It speaks Arabic and English, and it is built for one person on one
+machine — there is no server, no account, and nothing leaves the laptop that
+was not already going to. It opens full screen.
 
 Everything in the Workspace belongs to a project, except the **Personal**
 browser, which belongs to none: somewhere to keep tabs that are not work,
@@ -62,8 +62,8 @@ what is uncommitted. Re-run, workflows, history and the AI's suggestion all
 
 ### Install the built app
 
-Grab the `.dmg` from the releases page, open it, and drag Jarvis to
-Applications. Two things are worth knowing before you do:
+**macOS** — grab the `.dmg` from the releases page, open it, and drag Jarvis
+to Applications. Two things are worth knowing before you do:
 
 - **Apple Silicon only.** The build is arm64; an Intel Mac cannot run it.
 - **It is not signed by an identified developer**, so the first launch is
@@ -72,8 +72,28 @@ Applications. Two things are worth knowing before you do:
   `xattr -dr com.apple.quarantine /Applications/Jarvis.app`. This is what
   ad-hoc signing costs; nothing about the app changes either way.
 
+**Linux** — grab the `.AppImage`, make it executable, and run it. There is
+nothing to install and no package manager involved:
+
+```bash
+chmod +x Jarvis-*.AppImage
+./Jarvis-*.AppImage
+```
+
+- **x64 only.** arm64 needs an arm64 machine to build on; there isn't one yet.
+- **Ubuntu 22.04 and later need `libfuse2`** (`sudo apt install libfuse2t64`),
+  which is what mounts an AppImage. Without it, `./Jarvis-*.AppImage
+  --appimage-extract-and-run` works instead.
+- **Voice needs `ffmpeg` and a player** — see
+  [installation](docs/guide/installation.md). Everything else works without
+  them.
+
 Jarvis writes `~/.config/jarvis/jarvis.yaml` on first run and opens with it,
-so there is nothing to set up before the first launch. It will report the
+so there is nothing to set up before the first launch. It also shows a setup
+screen naming the external tools it can use, what each unlocks, and whether
+you have it — installing the ones you tick. Nothing installs until you press
+the button, and nothing needing root is ever run: those are shown as a command
+to copy. It will report the
 agent it cannot find until you install one — see
 **[installation](docs/guide/installation.md)** for the external tools each
 Workspace tab wants, all of them optional except the agent CLI itself.
@@ -84,9 +104,21 @@ New machine? **[SETUP.md](SETUP.md)** walks the whole thing, start to finish.
 
 ```bash
 pnpm install
+pnpm bootstrap                           # fetches Electron, builds node-pty
 pnpm --filter @jarvis/desktop start      # builds, then opens the app
-pnpm --filter @jarvis/desktop package    # builds Jarvis.app and the .dmg
+pnpm --filter @jarvis/desktop package    # builds for whichever platform this is
 ```
+
+`pnpm bootstrap` is not optional and is not a convenience. This workspace runs
+with install scripts disabled on purpose, which leaves two things undone that
+the app cannot run without: the Electron binary is never downloaded, and
+node-pty's native binding is never built. node-pty ships no Linux prebuild at
+all, so on Linux that second step is a compile and wants `build-essential` and
+`python3`. Run it once after every `pnpm install`.
+
+Each platform is packaged on itself — `--linux` from a Mac would wrap a darwin
+Electron in a Linux bundle without complaining, and node-pty's binding has to
+be compiled by the machine that ships it.
 
 Configuration lives at `~/.config/jarvis/jarvis.yaml`. Jarvis writes a
 starting one on first run, reads it at startup, and the Settings route writes
@@ -120,8 +152,11 @@ tools each Workspace tab needs.
 |---|---|
 | `pnpm test` | the whole suite |
 | `pnpm typecheck` | `tsc -b` across the workspace |
+| `pnpm bootstrap` | fetch the Electron binary, build node-pty |
+| `pnpm prereqs` | report the external tools; `--all` installs them |
 | `pnpm --filter @jarvis/desktop build` | compile and copy vendored assets |
 | `pnpm --filter @jarvis/desktop start` | build, then run |
+| `pnpm --filter @jarvis/desktop package` | package for this platform |
 
 The build step matters: the renderer's vendored libraries and the app icon are
 copied into `dist/` by a script, not by `tsc`. Running `tsc` alone leaves them

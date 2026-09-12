@@ -4,7 +4,6 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   COMMAND_SPECS,
   parseCommandLog,
-  parseZshHistory,
   pathPrefix,
   suggest,
   type CommandHistoryEntry,
@@ -31,6 +30,11 @@ export type CompletionSource = {
 
 export type CompletionSourceDeps = {
   readHistory: () => Promise<string>;
+  /** How to read the user's history file. zsh and bash write different
+   *  formats, and the shell whose history file was named in config decides
+   *  which — see parseZshHistory and parseBashHistory. Injected rather than
+   *  chosen here so this stays the impure half and nothing more. */
+  parseHistory: (text: string) => CommandHistoryEntry[];
   readCommandLog: () => Promise<string>;
   /** The entries of one directory, with a trailing `/` on the directories. */
   listDirectory: (path: string) => Promise<string[]>;
@@ -77,7 +81,7 @@ export function createCompletionSource(deps: CompletionSourceDeps): CompletionSo
     ]);
     // The log comes last so that, at equal score, the entry carrying a cwd
     // is the one whose spelling survives de-duplication.
-    cached = [...parseZshHistory(history), ...parseCommandLog(log)].slice(-MAX_ENTRIES);
+    cached = [...deps.parseHistory(history), ...parseCommandLog(log)].slice(-MAX_ENTRIES);
     cachedAt = at;
     return cached;
   }

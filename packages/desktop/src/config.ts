@@ -16,7 +16,7 @@ import type {
   EditorsConfig,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import { DB_GATE_ENGINES, defaultHeadlampBinary, isChatDriver } from "@jarvis/platform";
+import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 
 /** What Jarvis sounds like, and what it says on opening. */
@@ -30,6 +30,10 @@ export type VoiceConfig = {
    *  include ~/.local/bin. */
   piperBinary: string;
   piperModel: string;
+  /** The Arabic .onnx model. A Piper model speaks one language, and on a
+   *  platform with no system voices this is the only thing that can speak
+   *  Arabic — see RoutedSpeech. */
+  piperArabicModel: string;
   /** A `say -v` voice name. An unknown name makes macOS fall back to the
    *  system default silently rather than failing, so a typo here is quiet. */
   englishVoice: string;
@@ -145,7 +149,11 @@ export type JarvisConfig = {
   /** Where `headlamp-server` lives. Not on PATH and never will be: it is
    *  only distributed inside the Headlamp desktop bundle, so this is a
    *  declared path like `voice.piperBinary`, with a per-OS default. */
-  headlamp: { binary: string };
+  /** Where `headlamp-server` lives, when the user has said. Undefined means
+   *  they have not, and the per-OS default applies — resolved by main.ts
+   *  with `defaultHeadlampBinary`, not here. Config parsing is pure and
+   *  knows nothing about the host it is running on. */
+  headlamp: { binary: string | undefined };
   terminal: TerminalConfig;
   performance: PerformanceConfig;
   browser: BrowserConfig;
@@ -198,6 +206,10 @@ const DEFAULT_ARABIC_VOICE = "Majed";
 const DEFAULT_ENGINE = "piper";
 const DEFAULT_PIPER_BINARY = join(homedir(), ".local/bin/piper");
 const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-low.onnx");
+const DEFAULT_PIPER_ARABIC_MODEL = join(
+  homedir(),
+  ".config/jarvis/voices/ar_JO-kareem-low.onnx",
+);
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
@@ -1040,11 +1052,17 @@ function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
   return rawValue;
 }
 
-/** The `headlamp:` section. One key, with a per-OS default, so an absent
- *  section is not an error — only a binary that turns out not to exist is,
- *  and that is the manager's failure to report, not this one's. */
-function parseHeadlamp(rawHeadlamp: unknown): { binary: string } {
-  const fallback = { binary: defaultHeadlampBinary(process.platform, process.env) };
+/** The `headlamp:` section. One optional key, so an absent section is not an
+ *  error — only a binary that turns out not to exist is, and that is the
+ *  manager's failure to report, not this one's.
+ *
+ *  An absent key yields undefined rather than the per-OS default it used to.
+ *  Resolving that default meant reading `process.platform` here, which made
+ *  every headlamp assertion in config.test.ts true only on the OS the test
+ *  ran on. The default now lives at main.ts's edge, where the host is
+ *  already known — see defaultHeadlampBinary. */
+function parseHeadlamp(rawHeadlamp: unknown): { binary: string | undefined } {
+  const fallback = { binary: undefined };
   if (rawHeadlamp === undefined) return fallback;
   if (typeof rawHeadlamp !== "object" || rawHeadlamp === null || Array.isArray(rawHeadlamp)) {
     throw new Error("Config `headlamp` must be an object");
@@ -1067,6 +1085,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     engine: DEFAULT_ENGINE,
     piperBinary: DEFAULT_PIPER_BINARY,
     piperModel: DEFAULT_PIPER_MODEL,
+    piperArabicModel: DEFAULT_PIPER_ARABIC_MODEL,
     englishVoice: DEFAULT_ENGLISH_VOICE,
     arabicVoice: DEFAULT_ARABIC_VOICE,
     greeting: { ...DEFAULT_GREETING },
@@ -1114,6 +1133,7 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
     engine: engine ?? DEFAULT_ENGINE,
     piperBinary: expandTilde(text("piperBinary", DEFAULT_PIPER_BINARY)),
     piperModel: expandTilde(text("piperModel", DEFAULT_PIPER_MODEL)),
+    piperArabicModel: expandTilde(text("piperArabicModel", DEFAULT_PIPER_ARABIC_MODEL)),
     englishVoice: text("englishVoice", DEFAULT_ENGLISH_VOICE),
     arabicVoice: text("arabicVoice", DEFAULT_ARABIC_VOICE),
     greeting: {

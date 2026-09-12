@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { runCommand } from "./spawn.js";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /** One container the Docker tab may manage, as `jarvis.yaml` names it.
  *
@@ -275,14 +276,17 @@ export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): Do
  *  GUI-launched app's PATH is not the user's, and `docker` lives in
  *  /opt/homebrew/bin or an OrbStack shim directory that only a login shell
  *  knows about. */
-export function createRealDockerClient(env: NodeJS.ProcessEnv = process.env): DockerClient {
+export function createRealDockerClient(env: EnvSource = process.env): DockerClient {
   return createDockerClient(
-    (command, args) => runCommand(command, args, env),
+    (command, args) => runCommand(command, args, resolveEnv(env)),
     (command, args, onChunk) => {
       // stderr is merged into the same callback: a container writes its
       // logs to both streams and the tab shows one interleaved view, which
       // is what `docker logs` itself does.
-      const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
+      const child = spawn(command, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: resolveEnv(env),
+      });
       for (const stream of [child.stdout, child.stderr]) {
         stream?.setEncoding("utf8");
         stream?.on("data", (chunk: string) => onChunk(chunk));

@@ -21,6 +21,13 @@ import {
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import {
+  checkPrerequisites,
+  installFor,
+  runInstall,
+  type InstallDeps,
+  type PrerequisiteStatus,
+} from "@jarvis/platform";
+import {
   awsLoginCommand,
   chatUrl,
   eksUpdateKubeconfigArgs,
@@ -300,6 +307,20 @@ export type ReportedRect = {
 };
 
 export type RendererApi = {
+  /** The host OS, as `process.platform` spells it.
+   *
+   *  The renderer's chord table (renderer/keys.ts) is the consumer: the app
+   *  modifier is ⌘ on darwin and Ctrl+Shift everywhere else, and the visible
+   *  hints have to agree with whatever actually dispatches. A plain value
+   *  rather than an invoke, because it cannot change while the app runs and
+   *  every keystroke would otherwise pay for an IPC round trip. */
+  platform: NodeJS.Platform;
+  /** True when this launch created the config file — the first run. The setup
+   *  screen opens itself for it, and for a missing required prerequisite. */
+  firstRun: boolean;
+  checkPrerequisites(): Promise<PrerequisiteStatus[]>;
+  installPrerequisite(id: string): Promise<{ ok: boolean; detail?: string }>;
+  onInstallOutput(cb: (chunk: string) => void): void;
   send(text: string, language: "ar" | "en"): Promise<void>;
   // Drives the exact same start/stop path as the Alt+Space / Alt+Shift+Space
   // global hotkey — the renderer's mic button is a second control on one
@@ -709,6 +730,86 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
   };
 }
 
+/**
+ * Records why a sidecar would not start, for the main process's console.
+ *
+ * The bilingual headline a user sees ("Could not open the database browser.")
+ * is deliberately one sentence with no diagnostics in it. The manager's own
+ * detail — "dbgate-serve exited before it started listening", "did not become
+ * ready in time" — is developer-facing, and the comments here said it rode
+ * underneath the headline. It did not: it was dropped on the floor, and every
+ * `catch` threw the exception away with it. A sidecar that would not start
+ * was undiagnosable from either side of the app.
+ *
+ * So it goes where main.ts already sends the renderer's own errors: the
+ * terminal that launched Jarvis, and the devtools console of a packaged one.
+ */
+function reportSidecarFailure(what: string, reason: unknown): void {
+  const detail =
+    typeof reason === "string"
+      ? reason
+      : reason instanceof Error
+        ? reason.message
+        : JSON.stringify(reason);
+  console.error(`[${what}] ${detail}`);
+}
+
+
+/**
+ * The first-run screen's two questions: what is missing, and please install
+ * this one.
+ *
+ * `env` is a getter, not a value. The login shell's PATH arrives after
+ * startup, and detection run against the pre-answer environment would report
+ * every tool missing — then offer to install things the machine already has.
+ * Same reason the sidecar spawners take one.
+ */
+export type SetupHandlers = {
+  check(): Promise<PrerequisiteStatus[]>;
+  install(id: unknown): Promise<{ ok: boolean; detail?: string }>;
+};
+
+export type SetupHandlerDeps = {
+  platform: NodeJS.Platform;
+  arch: string;
+  env: () => NodeJS.ProcessEnv;
+  home: string;
+  fileExists: (path: string) => boolean;
+  installDeps: (onOutput: (chunk: string) => void) => InstallDeps;
+  onOutput: (chunk: string) => void;
+};
+
+export function createSetupHandlers(deps: SetupHandlerDeps): SetupHandlers {
+  const check = async (): Promise<PrerequisiteStatus[]> =>
+    checkPrerequisites({
+      platform: deps.platform,
+      arch: deps.arch,
+      env: deps.env(),
+      home: deps.home,
+      fileExists: deps.fileExists,
+    });
+
+  return {
+    check,
+    async install(id) {
+      const statuses = await check();
+      const status = statuses.find((candidate) => candidate.id === id);
+      // Refused rather than attempted for anything the check did not mark
+      // installable — a manual step, an already-installed tool, or an id the
+      // renderer made up. The renderer is not trusted to have read its own
+      // checkboxes correctly.
+      if (status === undefined || !status.installable) {
+        return { ok: false, detail: "not installable" };
+      }
+
+      const step = installFor(status.id, deps.platform, deps.arch);
+      if (step === undefined) return { ok: false, detail: "no install for this platform" };
+
+      return runInstall(step, deps.installDeps(deps.onOutput));
+    },
+  };
+}
+
 export type EditorHandlers = {
   /** Ensures a code-server instance is running for `project`, rooted at the
    *  configured editor root named `root` (the project directory itself when
@@ -760,11 +861,14 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
 
       try {
         const result = await deps.codeServer.open(projectPath, folder);
-        // The manager's own failure detail is developer-facing (e.g. "did
-        // not become ready in time") — same discipline as docFailureText:
-        // wrap it behind one bilingual headline rather than surface it raw.
-        return result.ok ? { ok: true, value: result.url } : fail(MESSAGES.editorUnavailable(deps.language));
-      } catch {
+        // One bilingual headline for the user; the manager's own detail
+        // ("did not become ready in time") goes to the console rather than
+        // being surfaced raw — or, as it was, dropped entirely.
+        if (result.ok) return { ok: true, value: result.url };
+        reportSidecarFailure("editor", result.detail);
+        return fail(MESSAGES.editorUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("editor", error);
         return fail(MESSAGES.editorUnavailable(deps.language));
       }
     },
@@ -801,13 +905,16 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
       }
       try {
         const result = await deps.dbgate.open(project);
-        // The manager's own detail ("did not report a port in time") is
-        // developer-facing — wrapped behind one bilingual headline, same
-        // discipline as createEditorHandlers.
-        return result.ok
-          ? { ok: true, value: { url: result.url, login: result.login, password: result.password } }
-          : fail(MESSAGES.databaseUnavailable(deps.language));
-      } catch {
+        // One bilingual headline for the user; the manager's own detail
+        // ("did not report a port in time") goes to the console, which is
+        // where anyone diagnosing this will look. See reportSidecarFailure.
+        if (result.ok) {
+          return { ok: true, value: { url: result.url, login: result.login, password: result.password } };
+        }
+        reportSidecarFailure("database", result.detail);
+        return fail(MESSAGES.databaseUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("database", error);
         return fail(MESSAGES.databaseUnavailable(deps.language));
       }
     },
@@ -1132,10 +1239,11 @@ export function createClusterHandlers(deps: ClusterHandlerDeps): ClusterHandlers
         }
 
         const result = await deps.headlamp.open(project, declared.context);
-        return result.ok
-          ? { ok: true, value: result.url }
-          : fail(MESSAGES.clusterUnavailable(deps.language));
-      } catch {
+        if (result.ok) return { ok: true, value: result.url };
+        reportSidecarFailure("cluster", result.detail);
+        return fail(MESSAGES.clusterUnavailable(deps.language));
+      } catch (error) {
+        reportSidecarFailure("cluster", error);
         return fail(MESSAGES.clusterUnavailable(deps.language));
       }
     },

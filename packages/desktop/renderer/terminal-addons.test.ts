@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { enhanceTerminal, handlePaletteKey, type PaletteKeys } from "./terminal-addons.js";
+import {
+  enhanceTerminal,
+  handlePaletteKey,
+  handleSplitKey,
+  type PaletteKeys,
+  type SplitKeys,
+} from "./terminal-addons.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { FakeTerminal } from "./terminal-double.js";
 
@@ -12,6 +18,7 @@ function keydown(init: {
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
   type?: string;
 }): KeyboardEvent {
   return {
@@ -20,6 +27,10 @@ function keydown(init: {
     metaKey: init.metaKey ?? false,
     ctrlKey: init.ctrlKey ?? false,
     altKey: init.altKey ?? false,
+    // A real KeyboardEvent always carries every modifier as a boolean. Left
+    // undefined, a chord matched as a subset rather than exactly — which is
+    // precisely the sloppiness keys.ts exists to remove.
+    shiftKey: init.shiftKey ?? false,
     preventDefault: () => {},
   } as unknown as KeyboardEvent;
 }
@@ -149,5 +160,73 @@ describe("enhanceTerminal — ⌘P claims the palette in every pane state", () =
 
     expect(claimed).toBe(true);
     expect(opened).toBe(0);
+  });
+});
+
+// The macOS cases above are the originals. These are the same behaviours in
+// the other spelling — the point of keys.ts is that one table drives both, so
+// a regression on either platform shows up on the machine that is not it.
+describe("the same chords, spelled for Linux", () => {
+  it("splits beside and below, and closes a pane", () => {
+    const calls: string[] = [];
+    const keys: SplitKeys = {
+      split: (direction) => {
+        calls.push(`split:${direction}`);
+        return true;
+      },
+      closeFocused: () => {
+        calls.push("closeFocused");
+        return true;
+      },
+      focus: (delta) => calls.push(`focus:${delta}`),
+      closeTab: () => calls.push("closeTab"),
+    };
+
+    expect(handleSplitKey(keydown({ key: "D", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(handleSplitKey(keydown({ key: "E", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(handleSplitKey(keydown({ key: "W", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(handleSplitKey(keydown({ key: "ArrowRight", altKey: true }), keys, "linux")).toBe(false);
+
+    expect(calls).toEqual(["split:row", "split:column", "closeFocused", "focus:1"]);
+  });
+
+  it("leaves the shell's own control keys alone", () => {
+    // The property that makes the Terminal tab usable at all on Linux. A
+    // regression here reads as "Ctrl+C stopped working".
+    const keys: SplitKeys = {
+      split: () => {
+        throw new Error("must not split");
+      },
+      closeFocused: () => {
+        throw new Error("must not close");
+      },
+      focus: () => {
+        throw new Error("must not move focus");
+      },
+      closeTab: () => {
+        throw new Error("must not close the tab");
+      },
+    };
+    for (const k of ["c", "d", "w", "e", "u", "a", "k", "z"]) {
+      expect(handleSplitKey(keydown({ key: k, ctrlKey: true }), keys, "linux")).toBe(true);
+    }
+  });
+
+  it("opens the palette on Ctrl+Shift+P and history search on Ctrl+R", () => {
+    const { palette, opened } = stubPalette();
+    let searched = 0;
+    const keys: PaletteKeys = {
+      palette,
+      actions: () => [],
+      historySearch: () => {
+        searched += 1;
+      },
+    };
+
+    expect(handlePaletteKey(keydown({ key: "P", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(opened).toHaveLength(1);
+
+    expect(handlePaletteKey(keydown({ key: "r", ctrlKey: true }), keys, "linux")).toBe(false);
+    expect(searched).toBe(1);
   });
 });

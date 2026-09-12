@@ -1,6 +1,7 @@
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { isAbsolute, relative } from "node:path";
+import { resolveEnv, type EnvSource } from "./pty.js";
 
 /**
  * One entry of a project's `editors:` list in jarvis.yaml: a folder inside
@@ -265,10 +266,9 @@ export function waitUntilReady(url: string, timeoutMs = 15_000): Promise<boolean
  * port and use code-server's own terminal. Binding to loopback keeps it off
  * the network; there is currently no further access control beyond that.
  */
-export function createRealCodeServerSpawner(
-  env: NodeJS.ProcessEnv = process.env,
-): CodeServerSpawner {
+export function createRealCodeServerSpawner(env: EnvSource = process.env): CodeServerSpawner {
   return ({ port, userDataDir, extensionsDir, folderPath }) => {
+    const resolvedEnv = resolveEnv(env);
     const child = spawn(
       "code-server",
       [
@@ -284,7 +284,7 @@ export function createRealCodeServerSpawner(
         "--disable-update-check",
         folderPath,
       ],
-      { stdio: "ignore", env },
+      { stdio: "ignore", env: resolvedEnv },
     );
 
     const exitListeners: ((code: number | null) => void)[] = [];

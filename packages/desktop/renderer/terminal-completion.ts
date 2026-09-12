@@ -443,8 +443,10 @@ export function attachCompletion(
       scheduleRefresh();
       return true;
     }
-    // A chord is the app's or the shell's — Ctrl-C must still interrupt,
-    // Cmd-F must still open the find bar.
+    // A chord is the app's or the shell's, never the dropdown's — ^C must
+    // still interrupt, and the find bar's chord (⌘F, or Ctrl+Shift+F off
+    // darwin — see keys.ts) must still open it. Both carry a modifier, which
+    // is all this needs to know.
     if (event.ctrlKey || event.metaKey || event.altKey) {
       scheduleRefresh();
       return true;

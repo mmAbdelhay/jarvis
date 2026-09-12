@@ -10,17 +10,21 @@ export type MetricsSource = {
   fsSize(): Promise<{ mount?: string; used: number; size: number; available?: number }[]>;
   networkStats(): Promise<{ rx_sec: number; tx_sec: number }[]>;
   time(): { uptime: number };
+  /** `main` is the package temperature in °C, or null where the machine has
+   *  no sensor the reader can reach. */
+  cpuTemperature(): Promise<{ main: number | null }>;
 };
 
 const BITS_PER_BYTE = 8;
 const BITS_PER_MEGABIT = 1_000_000;
 
 export async function readMetrics(source: MetricsSource): Promise<SystemMetrics> {
-  const [load, memory, filesystems, network] = await Promise.all([
+  const [load, memory, filesystems, network, temperature] = await Promise.all([
     source.currentLoad(),
     source.mem(),
     source.fsSize(),
     source.networkStats(),
+    source.cpuTemperature(),
   ]);
 
   const primary = primaryFilesystem(filesystems);
@@ -36,6 +40,11 @@ export async function readMetrics(source: MetricsSource): Promise<SystemMetrics>
     networkDownMbps: toMbps(down),
     networkUpMbps: toMbps(up),
     uptimeSeconds: source.time().uptime,
+    // Absent rather than zero where there is no sensor: 0 °C is a reading,
+    // and the tile would show it as one.
+    ...(typeof temperature.main === "number" && Number.isFinite(temperature.main)
+      ? { cpuTemperatureC: round1(temperature.main) }
+      : {}),
   };
 }
 
@@ -81,6 +90,10 @@ export function cacheSource(
   return {
     currentLoad: () => source.currentLoad(),
     networkStats: () => source.networkStats(),
+    // Uncached with CPU and network, and for the same reason: it is one of
+    // the readings that actually moves between two ticks. It is also cheap —
+    // a couple of small reads under /sys on Linux.
+    cpuTemperature: () => source.cpuTemperature(),
 
     mem: async () => {
       if (fresh(memory, ttls.memoryMs)) return memory.value;
@@ -117,6 +130,7 @@ export function createMetricsReader(): () => Promise<SystemMetrics> {
     fsSize: () => si.fsSize(),
     networkStats: () => si.networkStats(),
     time: () => si.time(),
+    cpuTemperature: () => si.cpuTemperature(),
   };
   const cached = cacheSource(source);
   return () => readMetrics(cached);

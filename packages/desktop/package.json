@@ -2,12 +2,16 @@
   "name": "@jarvis/desktop",
   "version": "0.1.2",
   "private": true,
+  "description": "A desktop workspace for running coding agents by voice",
+  "desktopName": "jarvis.desktop",
   "type": "module",
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -b ../../tsconfig.json && node scripts/copy-vendor.mjs",
-    "start": "pnpm run build && electron .",
-    "package": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml"
+    "start": "pnpm run build && node scripts/start.mjs",
+    "package": "node scripts/package.mjs",
+    "package:mac": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml",
+    "package:linux": "pnpm run build && electron-builder --linux --x64 --config electron-builder.yml"
   },
   "dependencies": {
     "@jarvis/core": "workspace:*",

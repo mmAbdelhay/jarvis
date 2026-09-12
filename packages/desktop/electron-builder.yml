@@ -1,4 +1,4 @@
-# How Jarvis is turned into a real macOS .app.
+# How Jarvis is turned into a real macOS .app and a real Linux AppImage.
 #
 # This lives beside package.json rather than inside it because every
 # decision below needs a reason attached, and package.json is JSON — it
@@ -56,13 +56,8 @@ files:
   # materialises into the archive) and so escape the globs above.
   - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
   - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
-  # @anthropic-ai/claude-agent-sdk declares one optional package per
-  # platform, each carrying a ~200 MB bundled runtime, and pnpm installs
-  # every one of them. Only the host's own is ever loaded; the other seven
-  # are a gigabyte of dead weight in the bundle. This build is macOS
-  # arm64-only, so keep exactly that one.
-  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{linux,win32}-*/**"
-  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**"
+  # (@anthropic-ai/claude-agent-sdk's per-platform runtimes are excluded in
+  # each target's own `files:` below, not here — see the note above `mac:`.)
 
 # ---------------------------------------------------------------------------
 # node-pty must live outside the asar archive
@@ -124,7 +119,21 @@ npmRebuild: false
 # ID here, and electron-builder's own ad-hoc handling is inconsistent
 # across versions; signing is done afterwards, deliberately and visibly,
 # with `codesign --force --deep --sign -` on the installed app.
+# @anthropic-ai/claude-agent-sdk declares one optional package per platform,
+# each carrying a ~200 MB bundled runtime, and pnpm installs every one of
+# them. Only the host's own is ever loaded; the other seven are a gigabyte of
+# dead weight in the bundle.
+#
+# Which one to keep is the one thing here that genuinely differs by target, so
+# it lives in each platform's own `files:` rather than in the shared block
+# above. A single shared glob excluding `claude-agent-sdk-linux-*` is how the
+# first Linux build shipped with no agent runtime at all — a bundle that
+# installs, launches, and fails at the first session rather than at build
+# time.
 mac:
+  files:
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{linux,win32}-*/**"
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**"
   target:
     - target: dir
       arch:
@@ -143,6 +152,54 @@ mac:
   # entitlements and a real signing identity to allow that; with an ad-hoc
   # signature it only buys refusals.
   hardenedRuntime: false
+
+# ---------------------------------------------------------------------------
+# linux
+# ---------------------------------------------------------------------------
+#
+# AppImage alone. It is the closest thing Linux has to the .dmg above — one
+# file, executable bit, no install step, no package manager, and it runs on
+# any distribution — which keeps the releases page down to one instruction
+# per platform. A .deb and an .rpm would each be a second set of dependencies
+# to declare and a second thing to test, for users who can already run the
+# AppImage.
+#
+# There is no `dir` target as there is for mac: nothing on this side copies
+# from one, and electron-builder leaves the unpacked tree in
+# release/linux-unpacked regardless.
+linux:
+  files:
+    # Only the host's own agent SDK runtime — see the note above `mac:`.
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,win32}-*/**"
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/**"
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  # freedesktop's own category for a developer tool; it decides which menu a
+  # launcher files it under.
+  category: Development
+  # The 512×512 PNG beside icon.icns. electron-builder rescales it into every
+  # size the desktop entry wants, and the .icns is macOS-only.
+  icon: assets/icon.png
+  synopsis: A desktop workspace for running coding agents by voice
+  description: >-
+    Runs coding agents under real ptys, listens on a hotkey, and keeps the
+    work — a project's files, its databases, a shell, its APIs and a browser —
+    in one window.
+  # The name of the binary inside the AppImage, and of the .desktop entry.
+  #
+  # It has to be said. electron-builder derives it from the package name
+  # otherwise, and this package is `@jarvis/desktop` — which becomes
+  # `@jarvisdesktop`, a name it then refuses as unsafe in a file path. macOS
+  # never hit this because the .app is named from productName instead.
+  executableName: jarvis
+  # Makes Electron's own app_id match the .desktop entry (whose name comes
+  # from package.json's desktopName), so the window manager can
+  # link the running window to the launcher that started it. Without the
+  # match, the app appears twice in the dock: once as the launcher, once as an
+  # unnamed window.
+  syncDesktopName: true
 
 # The disk image window: the app on the left, /Applications on the right,
 # which is the drag every Mac user has already done a hundred times. Nothing
@@ -175,6 +232,12 @@ dmg:
 # node_modules/electron/dist. A `pnpm install` that re-fetched stock Electron
 # there would silently produce a build with no CDM — which the VMP signing
 # hook below would then fail on, deliberately.
+#
+# And that dist is the *host's* build, so each platform is packaged on itself.
+# `--linux` from a Mac would wrap a darwin Electron in a Linux bundle without
+# complaining. node-pty forces the same constraint independently: it ships no
+# Linux prebuild at all, so its binding is compiled by `pnpm bootstrap` on the
+# machine that is going to ship it.
 electronDist: node_modules/electron/dist
 electronVersion: 44.1.0
 

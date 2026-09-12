@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMMAND_SPECS,
   completePath,
+  parseBashHistory,
   parseCommandLog,
   parseZshHistory,
   pathPrefix,
@@ -277,5 +278,57 @@ describe("suggest", () => {
       "npm",
       "pnpm",
     ]);
+  });
+});
+
+describe("parseBashHistory", () => {
+  it("reads bare command lines", () => {
+    expect(parseBashHistory("ls -la\ngit status\n")).toEqual([
+      { command: "ls -la" },
+      { command: "git status" },
+    ]);
+  });
+
+  it("attaches a #<epoch> comment line to the command below it", () => {
+    // What HISTTIMEFORMAT makes bash write. The timestamp is what gives
+    // recency its meaning in rank().
+    expect(parseBashHistory("#1710000000\nls -la\n")).toEqual([
+      { command: "ls -la", at: 1710000000 },
+    ]);
+  });
+
+  it("keeps a command that merely looks like a timestamp comment", () => {
+    // `# 1710000000` with a space is a comment the user typed; bash's own
+    // marker never has one.
+    expect(parseBashHistory("# 1710000000\n")).toEqual([{ command: "# 1710000000" }]);
+  });
+
+  it("does not carry a timestamp past the command it belongs to", () => {
+    expect(parseBashHistory("#1710000000\nls\ngit status\n")).toEqual([
+      { command: "ls", at: 1710000000 },
+      { command: "git status" },
+    ]);
+  });
+
+  it("ignores blank lines", () => {
+    expect(parseBashHistory("ls\n\n\ngit status\n")).toEqual([
+      { command: "ls" },
+      { command: "git status" },
+    ]);
+  });
+
+  it("drops a trailing timestamp with no command after it", () => {
+    expect(parseBashHistory("ls\n#1710000000\n")).toEqual([{ command: "ls" }]);
+  });
+
+  it("keeps the lines of a multi-line command separate", () => {
+    // bash marks nothing when a command spans lines — unlike zsh, which
+    // writes a trailing backslash — so there is no way to tell them from two
+    // commands. Splitting is what bash's own history recall does.
+    expect(parseBashHistory("for f in *; do\n  echo $f\ndone\n")).toHaveLength(3);
+  });
+
+  it("reads an empty file as no history at all", () => {
+    expect(parseBashHistory("")).toEqual([]);
   });
 });

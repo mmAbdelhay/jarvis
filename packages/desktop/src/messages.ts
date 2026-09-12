@@ -20,6 +20,8 @@
 // string fired before a language signal exists. It never overrides a
 // detected utterance — an Arabic sentence still gets an Arabic reply, and
 // Arabic session/project text still renders RTL via detectLanguage().
+import type { PrerequisiteId } from "@jarvis/platform";
+
 export const PRIMARY_LANGUAGE = "en";
 
 export const MESSAGES = {
@@ -27,6 +29,77 @@ export const MESSAGES = {
     language === "ar"
       ? `تعذر تسجيل اختصار ${combo} — يبدو أن تطبيقًا آخر يستخدمه بالفعل.`
       : `Could not register the ${combo} shortcut — another app is probably already using it.`,
+  // Nothing is installed that can speak at all. Distinct from the Arabic-only
+  // case below: telling someone their Arabic voice is missing when no voice
+  // of any kind is installed sends them to fix the wrong thing.
+  noVoiceInstalled: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يوجد صوت مثبَّت — ثبِّت Piper وحمِّل نموذجًا، أو أوقف النطق من الإعدادات."
+      : "No voice is installed — install Piper and download a model, or turn speech off in Settings.",
+  // Linux has no `say`, so an Arabic reply needs an Arabic Piper model. The
+  // reply is already on screen; only the audio is missing, and the user is
+  // told which key would fix it rather than left with a voice that answers in
+  // one language and not the other.
+  arabicVoiceUnavailable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يوجد صوت عربي مثبَّت — حمِّل نموذج Piper عربيًا وحدِّد مساره في voice.piperArabicModel."
+      : "No Arabic voice is installed — download an Arabic Piper model and set voice.piperArabicModel.",
+  // A different cause from hotkeyCollision, and different advice. Wayland
+  // gives no application a way to grab a key system-wide at all, so telling a
+  // Wayland user to look for a conflicting app sends them hunting for
+  // something that does not exist.
+  hotkeyUnavailableWayland: (combo: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختصار ${combo} لا يعمل على Wayland — استخدم زر الميكروفون، أو اربط الاختصار من إعدادات لوحة المفاتيح في سطح المكتب.`
+      : `The ${combo} shortcut does not work on Wayland — use the microphone button, or bind it in your desktop's own keyboard settings.`,
+  // The first-run prerequisites screen.
+  //
+  // Each tool gets a name and one line saying what it unlocks, because "what
+  // is dbgate-serve" is the question a first-run screen exists to answer. The
+  // wording lives here rather than in the catalogue so both languages stay
+  // together, and prerequisites.test.ts asserts that every id has both.
+  prerequisiteName: (id: PrerequisiteId, language: "ar" | "en"): string =>
+    PREREQUISITE_TEXT[id][language].name,
+  prerequisiteUnlocks: (id: PrerequisiteId, language: "ar" | "en"): string =>
+    PREREQUISITE_TEXT[id][language].unlocks,
+  setupTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارفيس يحتاج بعض الأدوات" : "Jarvis needs a few tools",
+  setupIntro: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لن يُثبَّت شيء حتى تختار. ما يحتاج صلاحيات الجذر يُعرض كأمر تنسخه بنفسك."
+      : "Nothing is installed until you choose. Anything needing root is shown as a command to copy.",
+  setupRequired: (language: "ar" | "en"): string => (language === "ar" ? "مطلوب" : "Required"),
+  setupOptional: (language: "ar" | "en"): string => (language === "ar" ? "اختياري" : "Optional"),
+  setupInstalled: (language: "ar" | "en"): string => (language === "ar" ? "مثبَّت" : "Installed"),
+  setupUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "غير متاح على هذا النظام" : "Not available on this platform",
+  // Two different things end up in this slot: a command for a package
+  // manager, and a page for a tool that has no package. Labelling a URL "run
+  // this in a terminal" is wrong, and wrong instructions are how a reader
+  // learns to stop reading them.
+  setupCopyHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "شغِّل هذا في الطرفية" : "Run this in a terminal",
+  setupOpenHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح هذه الصفحة" : "Open this page",
+  setupInstallCount: (count: number, language: "ar" | "en"): string =>
+    language === "ar" ? `ثبِّت ${arabicToolsCount(count)}` : `Install ${count} selected`,
+  setupInstalling: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التثبيت…" : "Installing…",
+  setupSkip: (language: "ar" | "en"): string => (language === "ar" ? "تخطَّ" : "Skip"),
+  setupDone: (language: "ar" | "en"): string => (language === "ar" ? "تم" : "Done"),
+  setupFailed: (id: PrerequisiteId, detail: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذّر تثبيت ${PREREQUISITE_TEXT[id].ar.name}: ${detail}`
+      : `Could not install ${PREREQUISITE_TEXT[id].en.name}: ${detail}`,
+  setupVoiceSize: (language: "ar" | "en"): string =>
+    language === "ar" ? "نحو ٦١ ميجابايت للتنزيل" : "about 61 MB to download",
+  // Stated rather than implied. Jarvis has one win32 branch in the whole
+  // application and no build target; a screen that installed tools cleanly
+  // here would leave a machine fully prepared for an app that cannot start.
+  setupWindowsUnsupported: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "جارفيس لا يعمل على ويندوز بعد. يمكنك تثبيت الأدوات، لكن التطبيق نفسه لن يبدأ."
+      : "Jarvis does not run on Windows yet. You can install the tools, but the app itself will not start.",
   recordingFailed: (message: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل الصوت: ${message}`
@@ -494,3 +567,88 @@ function arabicSessionsCount(count: number): string {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Whether this is a Wayland session.
+ *
+ * Only used to explain a failed globalShortcut registration, which is why it
+ * takes the environment rather than reading it: the message that comes out is
+ * a user-visible string, and messages.test.ts asserts both branches.
+ *
+ * Both variables are checked because neither is universal — XDG_SESSION_TYPE
+ * is set by the login manager and missing under some, while WAYLAND_DISPLAY is
+ * set by the compositor and missing when an app runs through XWayland (where
+ * the shortcut does in fact work, and this correctly says so).
+ */
+export function isWayland(env: NodeJS.ProcessEnv): boolean {
+  if (env["XDG_SESSION_TYPE"] === "wayland") return true;
+  const display = env["WAYLAND_DISPLAY"];
+  return display !== undefined && display !== "";
+}
+
+/** Arabic counts tools with the same singular/dual/plural split
+ *  arabicFilesCount and arabicSessionsCount already handle for their nouns —
+ *  see the conventions doc on why these are separate tables that look alike. */
+function arabicToolsCount(count: number): string {
+  if (count === 1) return "أداة واحدة";
+  if (count === 2) return "أداتين";
+  if (count >= 3 && count <= 10) return `${count} أدوات`;
+  return `${count} أداة`;
+}
+
+/** What each prerequisite is called, and the one line saying why anyone would
+ *  want it. Kept beside the other bilingual strings rather than in the
+ *  catalogue, so a tool cannot gain an entry without gaining both languages. */
+const PREREQUISITE_TEXT: Record<
+  PrerequisiteId,
+  { en: { name: string; unlocks: string }; ar: { name: string; unlocks: string } }
+> = {
+  agent: {
+    en: { name: "Claude Code", unlocks: "Sessions — the point of the app" },
+    ar: { name: "Claude Code", unlocks: "الجلسات — وهي جوهر التطبيق" },
+  },
+  ffmpeg: {
+    en: { name: "ffmpeg", unlocks: "Recording your voice" },
+    ar: { name: "ffmpeg", unlocks: "تسجيل صوتك" },
+  },
+  player: {
+    en: { name: "An audio player", unlocks: "Hearing replies out loud" },
+    ar: { name: "مشغّل صوت", unlocks: "سماع الردود بصوت مسموع" },
+  },
+  whisper: {
+    en: { name: "whisper.cpp", unlocks: "Turning what you said into text" },
+    ar: { name: "whisper.cpp", unlocks: "تحويل ما تقوله إلى نص" },
+  },
+  piper: {
+    en: { name: "Piper", unlocks: "The voice that speaks replies" },
+    ar: { name: "Piper", unlocks: "الصوت الذي ينطق الردود" },
+  },
+  "voice-en": {
+    en: { name: "English voice", unlocks: "Spoken replies in English" },
+    ar: { name: "صوت إنجليزي", unlocks: "ردود منطوقة بالإنجليزية" },
+  },
+  "voice-ar": {
+    en: { name: "Arabic voice", unlocks: "Spoken replies in Arabic" },
+    ar: { name: "صوت عربي", unlocks: "ردود منطوقة بالعربية" },
+  },
+  "code-server": {
+    en: { name: "code-server", unlocks: "The Editor tab" },
+    ar: { name: "code-server", unlocks: "تبويب المحرر" },
+  },
+  dbgate: {
+    en: { name: "DbGate", unlocks: "The Database tab" },
+    ar: { name: "DbGate", unlocks: "تبويب قواعد البيانات" },
+  },
+  headlamp: {
+    en: { name: "Headlamp", unlocks: "The Cluster tab" },
+    ar: { name: "Headlamp", unlocks: "تبويب العناقيد" },
+  },
+  docker: {
+    en: { name: "Docker", unlocks: "The Docker tab" },
+    ar: { name: "Docker", unlocks: "تبويب Docker" },
+  },
+  kubectl: {
+    en: { name: "kubectl", unlocks: "Not needed by Jarvis; reported if present" },
+    ar: { name: "kubectl", unlocks: "لا يحتاجه جارفيس؛ يُعرض إن كان موجودًا" },
+  },
+};

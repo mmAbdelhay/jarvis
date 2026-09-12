@@ -32,6 +32,30 @@ that mock the vendored modules must agree on its shape.
 This is the part worth reading, because most of the bugs found late in this
 codebase were found *outside* the suite.
 
+**The platform half of the suite is asserted, but not exercised.** Every
+OS-dependent function takes the platform as a parameter, so `pnpm test` proves
+both spellings of every chord and both shells' wrappers from one machine —
+what it cannot prove is that either actually behaves that way on the other OS.
+The list below is the manual pass, and every item on it caught something a
+green suite did not:
+
+- A real bash under a real pty, emitting OSC 133 with blocks, the file sidebar
+  and the chips following it. Two ordering bugs lived here: the wrapper's own
+  setup lines tripped the DEBUG trap, and bash-preexec — which several tools
+  install — clobbered the trap and swallowed the first command of a session.
+- An AppImage launched from outside the repo on a clean machine. Running from
+  the repo picks up files the bundle does not contain.
+- `node-pty` loading from inside `app.asar.unpacked`. It is the load-bearing
+  native module and the one thing asar can break.
+- The hotkey under Wayland against X11.
+- DRM playback in the Personal browser.
+- Recording through PulseAudio and through PipeWire's shim.
+- That every formula, cask, winget id and release asset in the prerequisite
+  catalogue still resolves upstream. The suite proves the catalogue's shape —
+  that nothing runnable needs root, that every tool has a detection, that a
+  voice downloads both its files — and can prove nothing about whether
+  `brew install whisper-cpp` still names a real formula a year from now.
+
 **jsdom is not a browser, and Electron is not jsdom.** `window.prompt` exists
 in jsdom and throws in Electron. Every create and rename in the API tab did
 nothing for a while, with 1581 tests green.
