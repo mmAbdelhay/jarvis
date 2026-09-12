@@ -9,8 +9,8 @@ import { runCommand } from "./spawn.js";
 
 describe("parseWhisperOutput", () => {
   it("extracts the transcript text", () => {
-    const result = parseWhisperOutput(" افتح مشروع سعودي سيل\n", "");
-    expect(result.text).toBe("افتح مشروع سعودي سيل");
+    const result = parseWhisperOutput(" افتح مشروع متجر أكمي\n", "");
+    expect(result.text).toBe("افتح مشروع متجر أكمي");
   });
 
   it("extracts the auto-detected language from stderr", () => {
@@ -105,6 +105,8 @@ describe.skipIf(!installed)("transcribe (integration)", () => {
   it("transcribes Arabic audio and detects the language", async () => {
     const result = await transcribe(fixture, { binaryPath: whisper, modelPath: model }, runCommand);
     expect(result.language).toBe("ar");
+    // What the fixture recording actually says. Unrelated to the example
+    // project names elsewhere — this asserts a transcription, not a config.
     expect(result.text).toContain("سعودي");
   }, 60_000);
 });

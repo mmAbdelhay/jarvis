@@ -13,3 +13,9 @@ release/
 
 # Internal design specs and implementation plans — kept local, never published
 docs/superpowers/
+
+# Agent tooling — a local working setup, not part of the app. Untracked is not
+# enough on its own: one `git add -A` would publish it.
+.claude/
+.agents/
+skills-lock.json

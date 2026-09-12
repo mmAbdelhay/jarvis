@@ -63,7 +63,7 @@ describe("formatDiskUsage", () => {
 
 describe("detectLanguage", () => {
   it("detects Arabic script", () => {
-    expect(detectLanguage("افتح مشروع سعودي سيل")).toBe("ar");
+    expect(detectLanguage("افتح مشروع متجر أكمي")).toBe("ar");
   });
 
   it("detects English", () => {

@@ -228,10 +228,10 @@ const DEFAULT_IMPORT_WINDOW_DAYS = 30;
 
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
 // large-v3-turbo, not base: synthesised-speech testing of the spec's own
-// acceptance sentence showed base corrupting the Arabic project name
-// itself ("سعودي سيل" -> "سعودي ينسيل"), which breaks project resolution
-// since routing depends on that exact token. large-v3-turbo is already on
-// disk at this path.
+// acceptance sentence showed base corrupting the Arabic project name itself
+// — returning a similar-sounding word that names no project. Routing depends
+// on that exact token, so a corrupted one sends the instruction nowhere.
+// large-v3-turbo is already on disk at this path.
 const DEFAULT_WHISPER_MODEL_PATH = "~/.whisper-models/ggml-large-v3-turbo.bin";
 
 export function parseConfig(raw: unknown): JarvisConfig {

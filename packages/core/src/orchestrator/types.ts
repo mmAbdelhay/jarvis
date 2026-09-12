@@ -30,7 +30,7 @@ export type ToolSpec = {
 // A live snapshot of what the brain is allowed to reference by name: the
 // project names it may resolve "project" input to, and the sessions it may
 // resolve "sessionId" input to. Without this the model has never seen
-// these strings and must guess them, which is exactly how "افتح سعودي
+// these strings and must guess them, which is exactly how "افتح متجر
 // سيل" fails to match a project keyed as "acme".
 export type BrainSessionSummary = {
   id: string;

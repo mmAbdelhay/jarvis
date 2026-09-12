@@ -188,9 +188,9 @@ describe("parseConfig", () => {
     expect(config.whisper.binaryPath.startsWith("~")).toBe(false);
   });
 
-  // Important 7: base corrupts the Arabic project name itself in testing
-  // ("سعودي سيل" -> "سعودي ينسيل"), so the shipped default must be
-  // large-v3-turbo, not base.
+  // Important 7: base corrupts the Arabic project name itself in testing,
+  // returning a similar-sounding word that names no project — so the shipped
+  // default must be large-v3-turbo, not base.
   it("defaults to the large-v3-turbo whisper model, expanded", () => {
     const config = parseConfig(valid);
     expect(config.whisper.modelPath).toContain("ggml-large-v3-turbo.bin");

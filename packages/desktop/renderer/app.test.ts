@@ -433,11 +433,11 @@ describe("history panel", () => {
 describe("Arabic project names", () => {
   it("renders an Arabic project name right-to-left with the arabic class in the live Sessions panel", async () => {
     const { onSessions } = await loadApp();
-    onSessions?.([makeSession({ project: "سعودي سيل" })]);
+    onSessions?.([makeSession({ project: "متجر أكمي" })]);
 
     const project = document.querySelector("#centre-body .session__project");
     expect(project).not.toBeNull();
-    expect(project?.textContent).toBe("سعودي سيل");
+    expect(project?.textContent).toBe("متجر أكمي");
     expect((project as HTMLElement).dir).toBe("rtl");
     expect(project?.classList.contains("arabic")).toBe(true);
   });

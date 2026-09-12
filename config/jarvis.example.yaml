@@ -73,7 +73,7 @@ brain:
 
 whisper:
   binaryPath: ~/.voicemode/services/whisper/build/bin/whisper-cli
-  # large-v3-turbo, not base: base corrupts Arabic project names in testing
-  # (e.g. "سعودي سيل" transcribed as "سعودي ينسيل"), which breaks project
-  # resolution since routing depends on that exact token.
+  # large-v3-turbo, not base: base corrupts Arabic project names in testing,
+  # returning a similar-sounding word that names no project — which breaks
+  # routing, since it depends on that exact token.
   modelPath: ~/.whisper-models/ggml-large-v3-turbo.bin

@@ -120,3 +120,31 @@ project is ever *acted on*.
 | `systeminformation` | machine metrics | |
 | `code-server`, `dbgate-serve` | Editor and Database tabs | spawned, never linked; installed by the user |
 | `headlamp-server` | Cluster tab | spawned, never linked; installed by the user |
+
+### Electron for Content Security, and Widevine
+
+Jarvis does not run on stock Electron. It runs on
+[castlabs/electron-releases](https://github.com/castlabs/electron-releases) —
+"Electron for Content Security" — which is Electron plus Google's **Widevine
+Content Decryption Module**. That is what lets the Personal browser play
+protected video; stock Electron plays none.
+
+Two consequences worth stating plainly, because neither is implied by this
+repository's MIT licence:
+
+- **The Widevine CDM is proprietary software owned by Google**, distributed
+  under its own terms. It is not covered by the MIT licence above, and MIT
+  says nothing about your right to redistribute it.
+- **A build that plays DRM must be VMP-signed** by castLabs' EVS service,
+  which issues credentials per account. `scripts/vmp-sign.cjs` does this at
+  package time. Without those credentials the build still works — it simply
+  plays no DRM, and says so loudly during packaging.
+
+Anyone redistributing a packaged Jarvis should read castLabs' terms for
+themselves. Building and running it for your own use raises none of this;
+publishing binaries that embed the CDM does.
+
+To build on stock Electron instead, replace the `electron` dependency in
+`packages/desktop/package.json` and drop the `electronDist`, `electronVersion`
+and `afterPack` keys from `electron-builder.yml`. Everything except DRM
+playback behaves identically.

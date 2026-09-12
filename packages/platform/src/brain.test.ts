@@ -168,7 +168,7 @@ describe("createBrain", () => {
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
 
     await brain.ask({
-      text: "افتح سعودي سيل",
+      text: "افتح متجر أكمي",
       tools,
       context: { projects: ["acme", "storefront"], sessions: [], changes: [] },
     });

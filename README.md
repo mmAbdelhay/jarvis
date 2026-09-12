@@ -41,7 +41,7 @@ what the machine has left to give them, and how much capacity each provider
 account has before it resets.
 
 **Listens.** ⌥Space talks to the brain, which resolves what you said against
-the projects and sessions that actually exist, so "افتح سعودي سيل" reaches a
+the projects and sessions that actually exist, so "افتح متجر أكمي" reaches a
 project keyed `acme`. Speak to a session instead and the words go to that
 agent's stdin.
 
@@ -181,6 +181,27 @@ is written down in [testing](docs/develop/testing.md) rather than assumed.
 Features arrive by the same route each time: a design argues for the shape,
 a plan breaks it into reviewable pieces, and each piece is written test-first
 and read by a fresh reviewer before the next begins.
+
+## What it exposes
+
+Jarvis is built for one person on one machine, and most of it touches no
+network at all. Three things are worth knowing before you run it somewhere
+shared.
+
+**The Database tab is reachable from your network while it is open.**
+DbGate always listens on `0.0.0.0` and offers no bind-address option, so an
+open Database tab is reachable from any machine that can reach yours. It is
+guarded by a per-spawn random password shown in the status line, and the
+instance stops when the tab closes. On a café or office network, that
+password is the only thing between your databases and everyone else.
+
+**The Editor tab runs without authentication, on loopback only.**
+`code-server` is started with `--auth none` bound to `127.0.0.1`, so nothing
+outside this machine's own processes can reach it.
+
+**Agents run as you.** Every session is a real process under a real pty with
+your environment, your PATH and your credentials — that is what the app is
+for, and it is worth saying out loud. Jarvis adds no sandbox of its own.
 
 ## Licence
 

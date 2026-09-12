@@ -101,7 +101,7 @@ describe("Orchestrator", () => {
         toolCalls: [{ name: "session.start", input: { project: "acme" } }],
       }),
     );
-    const turn = await orchestrator.handle("افتح سعودي سيل", "ar");
+    const turn = await orchestrator.handle("افتح متجر أكمي", "ar");
     expect(sessions.list()).toHaveLength(1);
     expect(sessions.list()[0]?.agentId).toBe("claude-acme");
     expect(turn.sessionId).toBe(sessions.list()[0]?.id);
@@ -469,7 +469,7 @@ describe("Orchestrator", () => {
       projects: { acme: "/Users/x/projects/acme" },
       providers: { snapshot: () => [], refresh: async () => {} },
     });
-    const turn = await orchestrator.handle("افتح سعودي سيل", "ar");
+    const turn = await orchestrator.handle("افتح متجر أكمي", "ar");
     expect(turn.text).toContain("تعذر بدء الجلسة");
     expect(speak).toHaveBeenCalledWith(turn.text, "ar");
   });
@@ -629,7 +629,7 @@ describe("Orchestrator", () => {
     it("passes the known project names to the brain", async () => {
       const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
       const orchestrator = build({ ask });
-      await orchestrator.handle("افتح سعودي سيل", "ar");
+      await orchestrator.handle("افتح متجر أكمي", "ar");
       expect(ask).toHaveBeenCalledWith(
         expect.objectContaining({ context: expect.objectContaining({ projects: ["acme"] }) }),
       );
@@ -684,7 +684,7 @@ describe("Orchestrator", () => {
           toolCalls: [{ name: "session.start", input: { project: "acme" } }],
         }),
       );
-      await first.handle("افتح سعودي سيل", "ar");
+      await first.handle("افتح متجر أكمي", "ar");
       const sessionId = sessions.list()[0]?.id;
 
       const ask = vi.fn<Brain["ask"]>(async () => ({ text: "ok", toolCalls: [] }));
