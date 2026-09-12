@@ -5,7 +5,22 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "@jarvis/core";
-import { createSqliteSessionStore } from "./session-store.js";
+import { createSqliteSessionStore as openSqliteSessionStore } from "./session-store.js";
+
+// Every store a test opens, closed before its directory is removed. On
+// macOS an open sqlite handle does not stop rmSync; on Windows it does —
+// the file is locked — so the close that production does on quit
+// (SessionStore.close) has to happen here too, and once for the test file
+// rather than in each of the forty tests.
+const openStores: ReturnType<typeof openSqliteSessionStore>[] = [];
+function createSqliteSessionStore(path: string): ReturnType<typeof openSqliteSessionStore> {
+  const store = openSqliteSessionStore(path);
+  openStores.push(store);
+  return store;
+}
+function closeOpenStores(): void {
+  for (const store of openStores.splice(0)) store.close?.();
+}
 
 // The version this build migrates to. Pinned here rather than repeated as a
 // literal in each migration test, so a bump changes one line.
@@ -100,7 +115,8 @@ describe("createSqliteSessionStore", () => {
     });
 
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
     });
 
     it("throws a specific error when a row has an unrecognised state", () => {
@@ -158,6 +174,7 @@ describe("createSqliteSessionStore", () => {
         const row = reopened.history().find((s) => s.id === "stuck");
         expect(row).toMatchObject({ state: "dead", endedAt: 4242 });
       } finally {
+        closeOpenStores();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -173,6 +190,7 @@ describe("createSqliteSessionStore", () => {
         const row = reopened.history().find((s) => s.id === "done-one");
         expect(row).toMatchObject({ state: "done", exitCode: 0, endedAt: 9000 });
       } finally {
+        closeOpenStores();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -188,7 +206,8 @@ describe("createSqliteSessionStore", () => {
     });
 
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
     });
 
     it("creates the db file (and its parent directory) on first use", () => {
@@ -238,7 +257,8 @@ describe("createSqliteSessionStore", () => {
     });
 
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
     });
 
     it("adds the git columns to an existing v1 database without losing rows", () => {
@@ -510,6 +530,7 @@ describe("createSqliteSessionStore", () => {
           "/home/u/.claude/projects/-home-u-app/imported-1.jsonl",
         );
       } finally {
+        closeOpenStores();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -530,6 +551,7 @@ describe("createSqliteSessionStore", () => {
         });
         expect(store.history()[0]?.transcriptPath).toBeUndefined();
       } finally {
+        closeOpenStores();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -571,7 +593,8 @@ describe("createSqliteSessionStore", () => {
     });
 
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
     });
 
     // A v2 database exactly as phase 2 wrote it — built by hand, not
@@ -700,7 +723,8 @@ describe("createSqliteSessionStore", () => {
     });
 
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
     });
 
     // The ownership boundary the design turns on: for a session id

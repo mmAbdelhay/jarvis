@@ -1,3 +1,4 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,27 @@ import { parseUnifiedDiff } from "@jarvis/core";
 import { simpleGit } from "simple-git";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGitProvider, DEFAULT_GIT_TIMEOUT_MS } from "./git.js";
+
+/**
+ * Whether this process may create symlinks. On macOS and Linux always; on
+ * Windows only with Developer Mode or the SeCreateSymbolicLink privilege,
+ * without which symlink() fails with EPERM. The tests that need one are
+ * skipped rather than failed there: the containment rule they pin does not
+ * depend on the host being able to plant the link.
+ */
+const canSymlink = ((): boolean => {
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-symlink-probe-"));
+  try {
+    writeFileSync(join(dir, "target"), "");
+    symlinkSync(join(dir, "target"), join(dir, "link"));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 
@@ -336,7 +358,7 @@ describe("createGitProvider().diff", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("refuses an untracked symlink whose target resolves outside the repository (P17)", async () => {
+  it.skipIf(!canSymlink)("refuses an untracked symlink whose target resolves outside the repository (P17)", async () => {
     const dir = await makeRepo();
     const secretDir = await mkdtemp(join(tmpdir(), "jarvis-secret-"));
     cleanups.push(() => rm(secretDir, { recursive: true, force: true }));

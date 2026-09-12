@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
 import { argsFor, createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS, resolveEnv } from "./pty.js";
 
@@ -6,7 +9,10 @@ import { argsFor, createPtySpawner, DEFAULT_COLS, DEFAULT_ROWS, resolveEnv } fro
 // this module exists to fix (an agent seeing a pipe instead of a terminal,
 // deciding it was handed a single non-interactive prompt, and exiting) is
 // invisible to any test that fakes the pty away. `/usr/bin/tty` and
-// `/bin/echo` are on every POSIX system these tests run on.
+// `/bin/echo` are on every POSIX system these tests run on; the Windows
+// block at the end drives the same contract through cmd.exe under ConPTY.
+
+const isWindows = process.platform === "win32";
 
 const agent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
   id: "test",
@@ -26,7 +32,7 @@ function collect(
   });
 }
 
-describe("createPtySpawner", () => {
+describe.runIf(!isWindows)("createPtySpawner", () => {
   // The whole reason this module exists. `tty` prints the terminal device
   // name and exits 0 when stdin is a terminal; with a pipe it prints "not a
   // tty" and exits non-zero — which is exactly the condition that made
@@ -243,6 +249,123 @@ describe("createPtySpawner", () => {
       process.cwd(),
     );
     const exited = collect(handle);
+    handle.write("hello\r");
+    const { output } = await exited;
+
+    expect(output).toContain("got:hello");
+  });
+});
+
+/**
+ * The same spawner on Windows, where the child is cmd.exe under ConPTY.
+ *
+ * What is specific to Windows and worth a real pty: a bare command name
+ * has to be resolved to a file with an extension before ConPTY can start
+ * it (a bare `cmd` finds cmd.exe; a bare `tool` finds tool.cmd, the shape
+ * every npm-installed CLI has), and a `.cmd` started that way must still
+ * receive its arguments and report its exit code.
+ */
+describe.runIf(isWindows)("createPtySpawner on Windows", () => {
+  let binDir: string;
+  beforeAll(() => {
+    binDir = mkdtempSync(join(tmpdir(), "jarvis-pty-bin-"));
+    // An npm-style shim: echoes its arguments and exits with the code the
+    // first argument names, so one file serves every assertion below.
+    writeFileSync(join(binDir, "shim.cmd"), "@echo off\r\necho args:%*\r\nexit /b %1\r\n");
+  });
+  afterAll(() => {
+    rmSync(binDir, { recursive: true, force: true });
+  });
+  const envWith = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+    ...process.env,
+    PATH: `${binDir};${process.env["PATH"] ?? ""}`,
+    ...extra,
+  });
+
+  it("resolves a bare name to cmd.exe and runs it in the project directory", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(agent({ command: "cmd", args: ["/d", "/c", "cd"] }), tmpdir());
+    const { output, code } = await collect(handle);
+
+    expect(code).toBe(0);
+    expect(output.toLowerCase()).toContain(tmpdir().toLowerCase());
+  });
+
+  it("starts a .cmd shim found on PATH, with its arguments and its exit code", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(agent({ command: "shim", args: ["3", "--flag", "value"] }), process.cwd());
+    const { output, code } = await collect(handle);
+
+    expect(output).toContain("args:3 --flag value");
+    expect(code).toBe(3);
+  });
+
+  it("passes the model and the session id through to the child", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(agent({ command: "shim", args: ["0"], model: "sonnet" }), process.cwd(), "sid-w");
+    const { output } = await collect(handle);
+
+    expect(output).toContain("--model sonnet --session-id sid-w");
+  });
+
+  it("strips the inherited Claude Code markers and the ambient API key", async () => {
+    const spawn = createPtySpawner(
+      envWith({ CLAUDECODE: "1", CLAUDE_CODE_CHILD_SESSION: "1", ANTHROPIC_API_KEY: "sk-no" }),
+    );
+    const handle = spawn(
+      agent({
+        command: "cmd",
+        args: ["/d", "/c", "echo [%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][%TERM%]"],
+      }),
+      process.cwd(),
+    );
+    const { output } = await collect(handle);
+
+    // cmd prints an unset variable's name back verbatim, which is the proof
+    // the variable is not there; TERM is set, and to the colour terminal.
+    expect(output).toContain("[%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][xterm-256color]");
+  });
+
+  it("does not report a killed session as a clean exit", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(agent({ command: "cmd", args: ["/d", "/c", "pause"] }), process.cwd());
+    const exited = collect(handle);
+    handle.kill();
+    const { code } = await exited;
+
+    expect(code).not.toBe(0);
+  });
+
+  it("replays the exit exactly once, and swallows late writes", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(agent({ command: "shim", args: ["7"] }), process.cwd());
+    let calls = 0;
+    await new Promise<void>((resolve) => {
+      handle.onExit(() => {
+        calls += 1;
+        resolve();
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const replayed = await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    expect(calls).toBe(1);
+    expect(replayed).toBe(7);
+    expect(() => handle.write("too late\r")).not.toThrow();
+    expect(() => handle.resize?.(100, 30)).not.toThrow();
+  });
+
+  it("sends typed input to the child", async () => {
+    const spawn = createPtySpawner(envWith());
+    const handle = spawn(
+      // /v:on — delayed expansion, so !line! is read after `set /p` ran
+      // rather than when the line was parsed, when it was still empty.
+      agent({ command: "cmd", args: ["/d", "/v:on", "/c", "set /p line= && echo got:!line!"] }),
+      process.cwd(),
+    );
+    const exited = collect(handle);
+    // ConPTY needs a moment to have the child reading before input lands.
+    await new Promise((resolve) => setTimeout(resolve, 300));
     handle.write("hello\r");
     const { output } = await exited;
 

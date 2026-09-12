@@ -393,8 +393,4 @@ describe("prerequisite wording", () => {
     expect(MESSAGES.setupInstallCount(3, "en")).toBe("Install 3 selected");
   });
 
-  it("says plainly that Windows is not supported yet", () => {
-    expect(MESSAGES.setupWindowsUnsupported("en")).toMatch(/not run on Windows/i);
-    expect(MESSAGES.setupWindowsUnsupported("ar")).toMatch(/[؀-ۿ]/);
-  });
 });

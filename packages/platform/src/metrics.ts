@@ -27,7 +27,7 @@ export async function readMetrics(source: MetricsSource): Promise<SystemMetrics>
     source.cpuTemperature(),
   ]);
 
-  const primary = primaryFilesystem(filesystems);
+  const primary = primaryFilesystem(filesystems, process.env);
   const down = sum(network.map((n) => n.rx_sec));
   const up = sum(network.map((n) => n.tx_sec));
 
@@ -163,7 +163,23 @@ function inUse(total: number, available: number | undefined, used: number): numb
  * Mac a read-only system snapshot, and on any machine a mounted USB stick
  * could take the slot.
  */
-function primaryFilesystem<T extends { mount?: string }>(filesystems: T[]): T | undefined {
+export function primaryFilesystem<T extends { mount?: string }>(
+  filesystems: T[],
+  env: NodeJS.ProcessEnv = {},
+): T | undefined {
+  // Windows mounts are drive letters, and the one that matters is the system
+  // drive — read from the environment rather than assumed to be C:. Decided
+  // by the shape of the mounts rather than by process.platform, so the macOS
+  // and Linux readings (and the tests that pin them) are identical on every
+  // host.
+  const driveOf = (mount: string | undefined): string | undefined => {
+    const match = /^([A-Za-z]:)[\\/]?$/.exec(mount ?? "");
+    return match?.[1]?.toLowerCase();
+  };
+  if (filesystems.some((entry) => driveOf(entry.mount) !== undefined)) {
+    const drive = (env["SystemDrive"] ?? env["SYSTEMDRIVE"] ?? "C:").toLowerCase();
+    return filesystems.find((entry) => driveOf(entry.mount) === drive) ?? filesystems[0];
+  }
   return (
     filesystems.find((entry) => entry.mount === "/System/Volumes/Data") ??
     filesystems.find((entry) => entry.mount === "/") ??

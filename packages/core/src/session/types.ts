@@ -108,6 +108,15 @@ export interface SessionStore {
     sessionId: string,
     git: { branch: string; insertions: number; deletions: number; changedFiles: number },
   ): void;
+  /**
+   * Releases whatever the store holds open — called once, on quit.
+   *
+   * Optional because an in-memory fake has nothing to release. The sqlite
+   * store has a file handle, and on Windows an open handle is a lock: the
+   * directory it sits in cannot be removed while it is held, which is how a
+   * test that opened a store left its own temp directory undeletable.
+   */
+  close?(): void;
 }
 
 export interface ProcessHandle {

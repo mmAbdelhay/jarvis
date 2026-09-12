@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { recorderCommand, Recorder } from "./recorder.js";
 
@@ -14,7 +15,8 @@ describe("Recorder", () => {
     const recorder = new Recorder(d);
     recorder.start();
     const path = await recorder.stop();
-    expect(path.startsWith("/tmp/jarvis-test")).toBe(true);
+    // join(): the recorder builds the path with the platform's separator.
+    expect(path.startsWith(join("/tmp/jarvis-test", "jarvis-"))).toBe(true);
     expect(path.endsWith(".wav")).toBe(true);
   });
 

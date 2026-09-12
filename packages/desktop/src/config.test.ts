@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ describe("parseConfig", () => {
   it("expands a leading tilde in project paths", () => {
     const config = parseConfig(valid);
     expect(config.projects["acme"]?.startsWith("~")).toBe(false);
-    expect(config.projects["acme"]).toContain("/projects/acme");
+    expect(config.projects["acme"]).toBe(join(homedir(), "projects", "acme"));
   });
 
   it("leaves absolute project paths untouched", () => {
@@ -203,7 +203,7 @@ describe("parseConfig", () => {
       whisper: { binaryPath: "~/custom/whisper-cli", modelPath: "/models/ggml.bin" },
     });
     expect(config.whisper.binaryPath.startsWith("~")).toBe(false);
-    expect(config.whisper.binaryPath).toContain("/custom/whisper-cli");
+    expect(config.whisper.binaryPath).toBe(join(homedir(), "custom", "whisper-cli"));
     expect(config.whisper.modelPath).toBe("/models/ggml.bin");
   });
 
@@ -223,13 +223,13 @@ describe("parseConfig", () => {
   it("expands a leading tilde in brain.cwd", () => {
     const config = parseConfig({ ...valid, brain: { ...valid.brain, cwd: "~/.config/jarvis/brain" } });
     expect(config.brain.cwd.startsWith("~")).toBe(false);
-    expect(config.brain.cwd).toContain("/.config/jarvis/brain");
+    expect(config.brain.cwd).toBe(join(homedir(), ".config", "jarvis", "brain"));
   });
 
   it("expands a leading tilde in the default brain.cwd", () => {
     const config = parseConfig({ ...valid, brain: { systemPrompt: "You are Jarvis." } });
     expect(config.brain.cwd.startsWith("~")).toBe(false);
-    expect(config.brain.cwd).toContain("/.config/jarvis/brain");
+    expect(config.brain.cwd).toBe(join(homedir(), ".config", "jarvis", "brain"));
   });
 
   it("leaves an absolute brain.cwd untouched", () => {
@@ -605,7 +605,8 @@ describe("voice", () => {
     const config = parseConfig(base);
 
     expect(config.voice.engine).toBe("piper");
-    expect(config.voice.piperBinary.startsWith("/")).toBe(true);
+    // isAbsolute(): "/" is not what an absolute path starts with everywhere.
+    expect(isAbsolute(config.voice.piperBinary)).toBe(true);
     expect(config.voice.piperModel.endsWith(".onnx")).toBe(true);
   });
 

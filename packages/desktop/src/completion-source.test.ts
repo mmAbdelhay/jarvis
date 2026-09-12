@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBashHistory, parseZshHistory } from "@jarvis/platform";
 import { createCompletionSource, type CompletionSourceDeps } from "./completion-source.js";
@@ -50,7 +51,9 @@ describe("createCompletionSource", () => {
     expect(await instance.suggest("/p", "cat ./scripts/po")).toEqual([
       "cat ./scripts/port-forward-dev2.sh",
     ]);
-    expect(seen).toEqual(["/p/scripts"]);
+    // resolve(): the source resolves the token against the cwd, so the
+    // listing is asked for the platform's own spelling of the path.
+    expect(seen).toEqual([resolve("/p", "./scripts")]);
   });
 
   it("lists no directory at all when the token is not a path", async () => {

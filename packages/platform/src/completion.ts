@@ -98,6 +98,39 @@ export function parseBashHistory(text: string): CommandHistoryEntry[] {
 }
 
 /**
+ * PSReadLine's history — `ConsoleHost_history.txt` — to entries.
+ *
+ * One bare command per line and no timestamps at all: PSReadLine records
+ * when nothing, so every entry is undated and scores as one half-life old,
+ * exactly as an undated zsh entry does.
+ *
+ * A command spanning lines is written with a trailing backtick on every line
+ * but the last — the same shape zsh's trailing backslash has, with a
+ * different character — and is rejoined here into the one entry it is. The
+ * file is written CRLF, which is stripped so no command ends in a carriage
+ * return.
+ */
+export function parsePowerShellHistory(text: string): CommandHistoryEntry[] {
+  const entries: CommandHistoryEntry[] = [];
+  let continued: string | undefined;
+
+  for (const raw of text.split("\n")) {
+    const stripped = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const line = continued === undefined ? stripped : `${continued}\n${stripped}`;
+    if (line.endsWith("`")) {
+      continued = line.slice(0, -1);
+      continue;
+    }
+    continued = undefined;
+    if (line === "") continue;
+    entries.push({ command: line });
+  }
+
+  if (continued !== undefined && continued !== "") entries.push({ command: continued });
+  return entries;
+}
+
+/**
  * Jarvis's own command log — `<epoch>\t<cwd>\t<command>`, one line per
  * command, appended by the preexec hook the ZDOTDIR wrapper installs.
  *

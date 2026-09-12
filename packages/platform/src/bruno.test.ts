@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createCollection,
@@ -266,8 +266,8 @@ describe("collection editing", () => {
 
     // The property that matters is containment: no separator survives, so
     // the file cannot land anywhere but inside the collection.
-    expect(file.startsWith(`${path}/`)).toBe(true);
-    expect(file.slice(path.length + 1)).not.toContain("/");
+    expect(file.startsWith(`${path}${sep}`)).toBe(true);
+    expect(file.slice(path.length + 1)).not.toMatch(/[\\/]/);
     expect(file).toBe(join(path, "..-..-etc-passwd.bru"));
     // The displayed name is untouched — only the filename is sanitised.
     expect((await readRequest(file))["meta"]).toMatchObject({ name: "../../etc/passwd" });

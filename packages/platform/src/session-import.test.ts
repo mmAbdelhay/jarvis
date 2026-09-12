@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
@@ -37,8 +38,9 @@ describe("transcriptDirs", () => {
       { id: "claude-x", command: "claude-x", vendor: "anthropic", configDir: "/home/u/.claude-x" },
     ];
 
+    // join(): the directory is built with the platform's own separator.
     expect(transcriptDirs(agents, "/home/u")).toEqual([
-      { agentId: "claude-x", dir: "/home/u/.claude-x/projects", format: "claude" },
+      { agentId: "claude-x", dir: join("/home/u/.claude-x", "projects"), format: "claude" },
     ]);
   });
 
@@ -51,7 +53,7 @@ describe("transcriptDirs", () => {
     ];
 
     expect(transcriptDirs(agents, "/home/u")).toEqual([
-      { agentId: "copilot", dir: "/home/u/.copilot/session-state", format: "copilot" },
+      { agentId: "copilot", dir: join("/home/u/.copilot", "session-state"), format: "copilot" },
     ]);
   });
 
@@ -66,8 +68,8 @@ describe("transcriptDirs", () => {
     ];
 
     expect(transcriptDirs(agents, "/home/u")).toEqual([
-      { agentId: "claude", dir: "/home/u/.claude/projects", format: "claude" },
-      { agentId: "copilot", dir: "/home/u/.copilot/session-state", format: "copilot" },
+      { agentId: "claude", dir: join("/home/u/.claude", "projects"), format: "claude" },
+      { agentId: "copilot", dir: join("/home/u/.copilot", "session-state"), format: "copilot" },
     ]);
   });
 
@@ -274,7 +276,8 @@ describe("isSessionTranscriptEntry", () => {
   // session's summary read "You are implementing Task 5 of a plan..." and
   // its startedAt was an hour late.
   it("accepts a transcript one level below the projects directory", () => {
-    expect(isSessionTranscriptEntry("-Users-me-projects-app/abc.jsonl")).toBe(true);
+    // readdir spells a recursive entry with the platform's separator.
+    expect(isSessionTranscriptEntry(["-Users-me-projects-app", "abc.jsonl"].join(sep))).toBe(true);
   });
 
   it("rejects a subagent transcript nested under a session directory", () => {
@@ -423,6 +426,10 @@ describe("sessionFromTranscript", () => {
   });
 });
 
+/** Copilot's session directory as transcriptDirs spells it — join(), so the
+ *  fake's `dir === DIR` filter matches on every platform. */
+const COPILOT_DIR = join("/h/.copilot", "session-state");
+
 describe("createSessionImporter", () => {
   const NOW = Date.parse("2026-09-02T12:00:00.000Z");
   const DAY = 24 * 60 * 60 * 1000;
@@ -430,7 +437,9 @@ describe("createSessionImporter", () => {
   const AGENTS = [
     { id: "claude-main", command: "claude-main", vendor: "anthropic" as const, configDir: "/h/.claude-main" },
   ];
-  const DIR = "/h/.claude-main/projects";
+  // As transcriptDirs spells it — join(), so the fake's `dir === DIR` filter
+  // matches on every platform.
+  const DIR = join("/h/.claude-main", "projects");
 
   /** One transcript's worth of JSONL, in the shape a real one has. */
   function transcript(options: {
@@ -709,7 +718,7 @@ describe("createSessionImporter", () => {
       {
         [`/h/.claude-two/projects/-a/a.jsonl`]: {
           head: transcript({ id: "a", cwd: "/Users/u/a" }),
-          dir: "/h/.claude-two/projects",
+          dir: join("/h/.claude-two", "projects"),
         },
       },
       {
@@ -737,8 +746,8 @@ describe("createSessionImporter", () => {
   it("imports a Copilot session from its workspace.yaml", async () => {
     const { deps, store } = world(
       {
-        "/h/.copilot/session-state/abc-123/workspace.yaml": {
-          dir: "/h/.copilot/session-state",
+        [join(COPILOT_DIR, "abc-123", "workspace.yaml")]: {
+          dir: COPILOT_DIR,
           head: [
             "id: abc-123",
             "cwd: /Users/u/projects/jarvis",
@@ -773,8 +782,8 @@ describe("createSessionImporter", () => {
   it("imports a Copilot session that names neither a title nor a branch", async () => {
     const { deps, store } = world(
       {
-        "/h/.copilot/session-state/bare-1/workspace.yaml": {
-          dir: "/h/.copilot/session-state",
+        [join(COPILOT_DIR, "bare-1", "workspace.yaml")]: {
+          dir: COPILOT_DIR,
           head: [
             "id: bare-1",
             "cwd: /Users/u/projects/jarvis",
@@ -799,8 +808,8 @@ describe("createSessionImporter", () => {
   it("keeps a Copilot session whose cwd is no project of ours", async () => {
     const { deps, store } = world(
       {
-        "/h/.copilot/session-state/tmp-1/workspace.yaml": {
-          dir: "/h/.copilot/session-state",
+        [join(COPILOT_DIR, "tmp-1", "workspace.yaml")]: {
+          dir: COPILOT_DIR,
           head: [
             "id: tmp-1",
             "cwd: /var/folders/tr/x/T/scratch",

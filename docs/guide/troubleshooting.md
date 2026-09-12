@@ -249,3 +249,40 @@ pnpm --filter @jarvis/desktop build
 
 Only hosted pages are capped (eight, each a Chromium process). Terminal and API
 tabs are exempt from eviction — if one disappeared, it was closed, not evicted.
+
+## On Windows, `claude` is not recognised in a terminal
+
+The CLI is installed somewhere PATH does not name — usually
+`%USERPROFILE%\.local\bin`, which its own installer does not always add. Add
+that directory to your PATH and **open a new terminal**: a window that was
+already open keeps the PATH it started with, and so does a Jarvis that was
+launched before the change. Jarvis itself is unaffected either way when
+`jarvis.yaml` names the full path.
+
+## On Windows, the Terminal tab has no blocks and no autocomplete
+
+The integration is PowerShell's and needs PSReadLine, which every Windows
+PowerShell 5.1 and PowerShell 7 install has unless a policy removed it. If
+`SHELL` in Jarvis's environment names a real Windows path — Git's `bash.exe`,
+say — that shell is used instead and gets no integration; unset it, or point
+it at `powershell.exe`.
+
+## On Windows, recording fails naming DirectShow
+
+Voice input records through ffmpeg's DirectShow input, so ffmpeg has to be on
+the PATH the app was launched with. "ffmpeg lists no DirectShow audio device"
+means ffmpeg ran and found no microphone — check Settings → Privacy →
+Microphone, and that a capture device is enabled.
+
+## On Windows, Arabic is read in an English voice
+
+No Arabic voice is installed. Windows ships none by default: Settings → Time &
+language → Speech → Add voices. Jarvis prefers the voice named in
+`voice.arabicVoice`, then any voice of the language, then the system default —
+which is why it speaks at all rather than going silent.
+
+## On Windows, Alt+Space does nothing
+
+Another application holds it — PowerToys Run claims it by default. Jarvis says
+so at startup and registers Ctrl+Shift+Space / Ctrl+Alt+Shift+Space instead,
+and every hint in the app then names that pair.

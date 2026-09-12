@@ -154,6 +154,32 @@ mac:
   hardenedRuntime: false
 
 # ---------------------------------------------------------------------------
+# windows
+# ---------------------------------------------------------------------------
+#
+# `dir` alone, deliberately. The deliverable is a folder with Jarvis.exe in
+# it, run from wherever it is unpacked — the same "no install step" the .dmg
+# and the AppImage give. An NSIS installer would add a second thing to test
+# and, unsigned, a SmartScreen warning on the way in: Windows flags an
+# unsigned *installer* far more loudly than an unsigned executable a user
+# unpacked themselves. There is no Authenticode certificate here, so the
+# quieter of the two is the honest one to ship.
+#
+# The icon is derived from the same 512×512 PNG the Linux target uses;
+# electron-builder generates the .ico. A checked-in .ico would be a second
+# copy of one picture, free to drift from the first.
+win:
+  files:
+    # Only the host's own agent SDK runtime — see the note above `mac:`.
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux}-*/**"
+    - "!**/node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**"
+  target:
+    - target: dir
+      arch:
+        - x64
+  icon: assets/icon.png
+
+# ---------------------------------------------------------------------------
 # linux
 # ---------------------------------------------------------------------------
 #

@@ -5,6 +5,7 @@ const base = {
   enabled: true,
   zdotdirDir: "/cfg/zdotdir",
   bashDir: "/cfg/bash",
+  powerShellDir: "/cfg/powershell",
   realZdotdir: "/home/u",
   home: "/home/u",
 };
@@ -25,6 +26,29 @@ describe("installShellIntegration", () => {
     });
     expect(result).toEqual({ zdotdir: "/cfg/zdotdir" });
     expect(written).toContain("/cfg/zdotdir/.zshrc");
+  });
+
+  it("installs the PowerShell script for PowerShell, and reports it as one", async () => {
+    const written: string[] = [];
+    const result = await installShellIntegration({
+      ...base,
+      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      write: async (p) => {
+        written.push(p);
+      },
+    });
+    expect(result).toEqual({ powerShellScript: "/cfg/powershell\\jarvis-integration.ps1" });
+    expect(written).toEqual(["/cfg/powershell\\jarvis-integration.ps1"]);
+  });
+
+  // pwsh is PowerShell 7, and the same integration serves it.
+  it("recognises pwsh as well", async () => {
+    const result = await installShellIntegration({
+      ...base,
+      shell: "/usr/local/bin/pwsh",
+      write: async () => {},
+    });
+    expect(result).toEqual({ powerShellScript: "/cfg/powershell\\jarvis-integration.ps1" });
   });
 
   it("installs the bash wrapper for bash, and reports it as an rcfile", async () => {

@@ -1,13 +1,28 @@
 import { spawn } from "node:child_process";
 import type { AgentConfig, ProcessHandle, Spawner } from "@jarvis/core";
+import { spawnTarget } from "./executable.js";
 
+/**
+ * `platform` exists only for Windows, where a command name is not enough to
+ * start anything: an npm-installed tool is a `.cmd` shim that CreateProcess
+ * will not find and Node will not run. Optional, and absent means "spawn the
+ * name as given", which is every POSIX caller and what this did before
+ * Windows — see executable.ts.
+ */
 export function runCommand(
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
+  platform?: NodeJS.Platform,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
+    const target =
+      platform === undefined ? { file: command, args: [...args] } : spawnTarget(command, args, env, platform);
+    const child = spawn(target.file, target.args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+      ...("windowsVerbatimArguments" in target ? { windowsVerbatimArguments: true } : {}),
+    });
     let stdout = "";
     let stderr = "";
 
@@ -20,12 +35,20 @@ export function runCommand(
   });
 }
 
-export function createSpawner(env: NodeJS.ProcessEnv = process.env): Spawner {
+export function createSpawner(
+  env: NodeJS.ProcessEnv = process.env,
+  platform?: NodeJS.Platform,
+): Spawner {
   return (agent: AgentConfig, projectPath: string): ProcessHandle => {
-    const child = spawn(agent.command, agent.args ?? [], {
+    const target =
+      platform === undefined
+        ? { file: agent.command, args: [...(agent.args ?? [])] }
+        : spawnTarget(agent.command, agent.args ?? [], env, platform);
+    const child = spawn(target.file, target.args, {
       cwd: projectPath,
       env,
       stdio: ["pipe", "pipe", "pipe"],
+      ...("windowsVerbatimArguments" in target ? { windowsVerbatimArguments: true } : {}),
     });
 
     const outputListeners: ((chunk: string) => void)[] = [];

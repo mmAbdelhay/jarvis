@@ -3,6 +3,7 @@ import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
+import { hostPlatform } from "./keys.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
@@ -350,6 +351,8 @@ function makePane(
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
     resize: (cols, rows) => void window.jarvis.resizeTerminal(paneKey, cols, rows),
+    // ConPTY repaints its whole screen on every resize; a POSIX pty does not.
+    ptyRepaintsOnResize: hostPlatform() === "win32",
     // A `Notification` this environment lacks, or has never been granted
     // permission for, throws — and this is the one call in the pane's
     // whole chain of side effects allowed to swallow that, since nothing

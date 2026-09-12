@@ -1,8 +1,30 @@
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { resolvesInside } from "./paths.js";
+
+/**
+ * Whether this process may create symlinks. On macOS and Linux always; on
+ * Windows only with Developer Mode or the SeCreateSymbolicLink privilege,
+ * without which symlink() fails with EPERM. The tests that need one are
+ * skipped rather than failed there: the containment rule they pin does not
+ * depend on the host being able to plant the link.
+ */
+const canSymlink = ((): boolean => {
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-symlink-probe-"));
+  try {
+    writeFileSync(join(dir, "target"), "");
+    symlinkSync(join(dir, "target"), join(dir, "link"));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
 
 async function tempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "jarvis-paths-"));
@@ -33,7 +55,7 @@ describe("resolvesInside", () => {
   // The case ruling P17 exists for: an agent creates files as part of its
   // job, so a symlink pointing at the user's private keys is a realistic
   // artefact, not a hypothetical.
-  it("refuses a symlink whose target resolves outside the root", async () => {
+  it.skipIf(!canSymlink)("refuses a symlink whose target resolves outside the root", async () => {
     const root = await tempRoot();
     const outside = await tempRoot();
     await writeFile(join(outside, "secret"), "private key");
@@ -42,7 +64,7 @@ describe("resolvesInside", () => {
     expect(await resolvesInside(root, "link.md")).toBe(false);
   });
 
-  it("accepts a symlink whose target stays inside the root", async () => {
+  it.skipIf(!canSymlink)("accepts a symlink whose target stays inside the root", async () => {
     const root = await tempRoot();
     await writeFile(join(root, "real.md"), "x");
     await symlink(join(root, "real.md"), join(root, "alias.md"));

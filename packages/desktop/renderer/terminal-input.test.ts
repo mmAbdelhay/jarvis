@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // packages/desktop/renderer/terminal-input.test.ts
 import { describe, expect, it, vi } from "vitest";
+import { hostPlatform, keyLabel } from "./keys.js";
 import { createEditor } from "./terminal-input.js";
 
 function editor() {
@@ -77,7 +78,7 @@ describe("the input editor", () => {
   it("shows a hint while the line is empty", () => {
     const { editor: e } = editor();
     expect(e.element.querySelector(".terminal-input-hint")?.textContent).toBe(
-      "Type a command · ⌘P for actions",
+      `Type a command · ${keyLabel("palette", hostPlatform())} for actions`,
     );
   });
 

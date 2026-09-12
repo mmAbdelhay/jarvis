@@ -81,6 +81,9 @@ export type IpcChannels = {
   "voice:listening": boolean;
   "voice:speaking": boolean;
   "voice:notice": VoiceNotice;
+  /** Which voice hotkeys are actually live, sent once at startup and only
+   *  when they are not the default pair — see src/hotkeys.ts. */
+  "voice:hotkeys": { start: string; stop: string };
   "git:counts": SessionChanges[];
   "providers:update": ProviderStatus[];
   "session:output": SessionOutput;
@@ -338,6 +341,8 @@ export type RendererApi = {
   // nothing" — shown briefly in the voice-state element, never added to
   // the conversation as a hollow turn.
   onNotice(cb: (notice: VoiceNotice) => void): void;
+  /** Which voice hotkeys main registered, when they are not the default pair. */
+  onVoiceHotkeys(cb: (hotkeys: { start: string; stop: string }) => void): void;
   // Session history is pulled on demand (when the history panel opens),
   // not pushed like sessions:update — there is no live subscriber to keep
   // in sync, only a snapshot to render once.
@@ -1074,17 +1079,38 @@ export function createTranscriptHandler(
  * transcript this code does not understand rather than something to escape
  * and hope.
  */
-export function resumeCommandFor(command: string, sessionId: string): string | undefined {
+export function resumeCommandFor(
+  command: string,
+  sessionId: string,
+  shell: TerminalShell,
+): string | undefined {
   if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return undefined;
+  if (shell === "powershell") {
+    // PowerShell's single-quoted literal escapes only a doubled quote — and a
+    // quoted string on its own is an expression, not a call, so the call
+    // operator has to precede it: `& 'C:\...\claude.exe' --resume id`. A bare
+    // name is already a call; a Windows path is not, and carries a colon and
+    // backslashes that the POSIX quoting below would mangle.
+    const quoted = /^[A-Za-z0-9._-]+$/.test(command)
+      ? command
+      : `& '${command.replaceAll("'", "''")}'`;
+    return `${quoted} --resume ${sessionId}`;
+  }
   const quoted = /^[A-Za-z0-9._/-]+$/.test(command)
     ? command
     : `'${command.replaceAll("'", `'\\''`)}'`;
   return `${quoted} --resume ${sessionId}`;
 }
 
+/** Which shell a Terminal tab runs, for the one thing that differs: how a
+ *  command line is quoted. Supplied by main, which knows the platform. */
+export type TerminalShell = "posix" | "powershell";
+
 /** What resuming into a terminal needs. Every side effect injected, so the
  *  handler is testable without a window, a shell or a filesystem. */
 export type ResumeInTerminalDeps = {
+  /** The shell the Terminal tab will type this into. */
+  shell: TerminalShell;
   history(): Session[];
   agents: Record<string, AgentConfig>;
   projects: Readonly<Record<string, string>>;
@@ -1132,7 +1158,7 @@ export function createResumeInTerminalHandler(
     const agent = deps.agents[session.agentId];
     if (agent === undefined) return refuse();
 
-    const command = resumeCommandFor(agent.command, session.id);
+    const command = resumeCommandFor(agent.command, session.id, deps.shell);
     if (command === undefined) return refuse();
 
     // The session's own project when it has one, else the one on screen.
@@ -1775,7 +1801,12 @@ function isExplainPayload(value: unknown): value is ExplainPayload {
  * handling this does not attempt.
  */
 function vscodeRemoteUri(filePath: string): string {
-  return `vscode-remote://remote${filePath.split(sep).map(encodeURIComponent).join("/")}`;
+  // A POSIX path's first segment is empty (it begins with "/") and the join
+  // restores that leading slash. A Windows path's first segment is its drive,
+  // and the URI needs the slash put in front of it — `/C%3A/proj/…`, which is
+  // how VS Code itself spells a Windows path in a URI.
+  const path = filePath.split(sep).map(encodeURIComponent).join("/");
+  return `vscode-remote://remote${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 /**

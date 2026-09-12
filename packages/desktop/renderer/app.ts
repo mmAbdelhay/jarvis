@@ -1,5 +1,5 @@
 import { initSetup, openSetupIfNeeded } from "./setup.js";
-import { hostPlatform, keyLabel } from "./keys.js";
+import { hostPlatform, keyLabel, setVoiceHotkeys } from "./keys.js";
 import type {
   Session,
   SessionChanges,
@@ -154,6 +154,15 @@ window.jarvis.onSessionOutput((output) => appendSessionOutput(output));
 
 startClock();
 labelShortcuts();
+
+// Which hotkeys are really live. Sent only when they are not the default
+// pair — on Windows, where another app held Alt+Space — and every hint is
+// redrawn from the answer rather than left naming a key nothing listens to.
+window.jarvis.onVoiceHotkeys?.((hotkeys) => {
+  setVoiceHotkeys(hotkeys);
+  labelShortcuts();
+  renderPresence();
+});
 
 // The first-run prerequisites screen. Opens on a first run, and on any launch
 // where the required agent CLI is missing — an app with no agent has nothing

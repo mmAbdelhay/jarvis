@@ -29,6 +29,9 @@ const api: RendererApi = {
   onListening: (cb) => {
     ipcRenderer.on("voice:listening", (_e, listening) => cb(listening));
   },
+  onVoiceHotkeys: (cb) => {
+    ipcRenderer.on("voice:hotkeys", (_e, hotkeys) => cb(hotkeys));
+  },
   onNotice: (cb) => {
     ipcRenderer.on("voice:notice", (_e, notice) => cb(notice));
   },

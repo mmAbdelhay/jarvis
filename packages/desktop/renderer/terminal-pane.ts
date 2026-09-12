@@ -33,6 +33,12 @@ import { Terminal } from "./vendor/xterm.mjs";
 export type PaneHooks = {
   sendInput: (data: string) => void;
   resize: (cols: number, rows: number) => void;
+  /**
+   * Whether the pty repaints its whole screen on every resize — ConPTY does,
+   * a POSIX pty does not. Supplied by the caller (which knows the platform);
+   * absent means it does not, which is every platform but Windows.
+   */
+  ptyRepaintsOnResize?: boolean | undefined;
   attach: () => Promise<string>;
   /** The full renderer-facing settings payload — see window.jarvis.terminalSettings()
    *  in src/ipc.ts, which is where `home` comes from. */
@@ -298,7 +304,37 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   terminal.onData((data) => hooks.sendInput(data));
   // The pty's size has to track the pane's, or a full-screen program draws
   // to a width that does not exist.
-  terminal.onResize(({ cols, rows }) => hooks.resize(cols, rows));
+  // The pty's size has to track the pane's, or a full-screen program draws to
+  // a width that does not exist.
+  //
+  // On Windows, not while a command is running. ConPTY answers every resize
+  // by repainting its entire screen buffer — every line it holds, with
+  // absolute cursor positions — where a POSIX pty only signals the child. The
+  // live terminal is shown the moment a command starts and its box differs
+  // from the one it had, so the fit that follows resized the pty mid-command
+  // and the repaint landed inside the block: every earlier command's output
+  // again, under rows of blank. So a resize that arrives while a block is
+  // open is held and applied when the block closes, with the shell back at
+  // its prompt and the repaint falling on the hidden live terminal — which is
+  // cleared before it is shown again. The program that was running saw the
+  // size it started with, which is what a POSIX shell would have shown it had
+  // the window been resized a moment earlier.
+  const repaintsOnResize = hooks.ptyRepaintsOnResize ?? false;
+  let heldResize: { cols: number; rows: number } | undefined;
+  function flushHeldResize(): void {
+    if (heldResize === undefined) return;
+    const { cols, rows } = heldResize;
+    heldResize = undefined;
+    hooks.resize(cols, rows);
+  }
+  terminal.onResize(({ cols, rows }) => {
+    if (repaintsOnResize && splitter.active() !== undefined) {
+      heldResize = { cols, rows };
+      return;
+    }
+    heldResize = undefined;
+    hooks.resize(cols, rows);
+  });
 
   const splitter = createSplitter();
   const views: BlockView[] = [];
@@ -1008,6 +1044,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       return;
     }
     if (event.type === "command-start") {
+      // A ConPTY repaint that arrived while the live terminal was hidden at
+      // the prompt is still sitting in its buffer — the earlier commands'
+      // output, which the blocks above already show. Cleared behind xterm's
+      // write queue so the command's own echo (the current line, which
+      // clear() keeps) has painted first, and only where repaints happen.
+      if (repaintsOnResize) terminal.write("", () => attempt(() => terminal.clear()));
       attempt(() => applyState("running"));
       return;
     }
@@ -1020,6 +1062,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       return;
     }
     if (event.type === "block-done") {
+      // The shell is back at its prompt: a resize held during the command can
+      // go to the pty now, and its repaint will fall on the hidden terminal.
+      attempt(flushHeldResize);
       // Freezing may fail (a hostile `cols`, a DOM that says no); the reset
       // that follows must happen either way, or the live terminal would go
       // on showing output the block above it is also showing.

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { spawnTarget } from "./executable.js";
 import { randomBytes } from "node:crypto";
 import type { DbGateConnection, DbGateEngine } from "./dbgate-types.js";
 import { resolveEnv, type EnvSource } from "./pty.js";
@@ -285,15 +286,24 @@ function waitForPort(
  * "exited before it started listening" — so the Database button simply did
  * not work in the installed build, and did work from a terminal.
  */
-export function createRealDbGateSpawner(baseEnv: EnvSource = process.env): DbGateSpawner {
+export function createRealDbGateSpawner(
+  baseEnv: EnvSource = process.env,
+  platform?: NodeJS.Platform,
+): DbGateSpawner {
   return ({ env, workspaceDir }) => {
-    const child = spawn("dbgate-serve", [], {
+    // The instance's own variables last: LOGIN, PASSWORD and the seeded
+    // CONNECTIONS belong to this spawn and must beat anything of the same
+    // name that happens to be in the inherited environment.
+    const childEnv = { ...resolveEnv(baseEnv), ...env };
+    // `dbgate-serve` is an npm bin, which on Windows is a `.cmd` shim that
+    // has to go through cmd.exe — spawnTarget does that, and nothing else
+    // does anything at all off Windows.
+    const target = spawnTarget("dbgate-serve", [], childEnv, platform ?? "linux");
+    const child = spawn(target.file, target.args, {
       cwd: workspaceDir,
-      // The instance's own variables last: LOGIN, PASSWORD and the seeded
-      // CONNECTIONS belong to this spawn and must beat anything of the
-      // same name that happens to be in the inherited environment.
-      env: { ...resolveEnv(baseEnv), ...env },
+      env: childEnv,
       stdio: ["ignore", "pipe", "ignore"],
+      ...("windowsVerbatimArguments" in target ? { windowsVerbatimArguments: true } : {}),
     });
 
     const exitListeners: ((code: number | null) => void)[] = [];

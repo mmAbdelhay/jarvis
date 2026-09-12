@@ -64,6 +64,9 @@ export type PiperConfig = {
   binary: string;
   /** The .onnx voice model. One model speaks one language. */
   model: string;
+  /** Which platform the player belongs to — it decides what the player is
+   *  handed, not which one it is. See playerArgs. */
+  platform?: NodeJS.Platform;
   /** What plays the WAV it writes — see audioPlayer. Resolved once by the
    *  caller rather than probed per utterance. */
   player: string;
@@ -88,16 +91,52 @@ const LINUX_PLAYERS = ["pw-play", "paplay", "aplay"] as const;
 export function audioPlayer(
   platform: NodeJS.Platform,
   exists: (command: string) => boolean,
+  env: NodeJS.ProcessEnv = {},
 ): string {
   if (platform === "darwin") return "afplay";
+  // Windows ships no player on PATH at all, and there is nothing to probe
+  // for: .NET's SoundPlayer is always there, and PowerShell is how a process
+  // reaches it. It plays synchronously, which is the contract afplay gives —
+  // the process ends when the sound does, and killing it stops the sound.
+  if (platform === "win32") {
+    const systemRoot = env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows";
+    return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+  }
   return LINUX_PLAYERS.find((player) => exists(player)) ?? LINUX_PLAYERS[LINUX_PLAYERS.length - 1]!;
+}
+
+/**
+ * What the player is handed.
+ *
+ * Every player but Windows' takes the path and nothing else. PowerShell takes
+ * a script, and it takes it base64'd as UTF-16LE rather than as a command
+ * line: a wav path is arbitrary text, and a command line goes through the
+ * console code page, which is not UTF-8 on Windows PowerShell.
+ */
+export function playerArgs(platform: NodeJS.Platform, wavPath: string): string[] {
+  if (platform !== "win32") return [wavPath];
+  const script = `(New-Object System.Media.SoundPlayer '${wavPath.replaceAll("'", "''")}').PlaySync()`;
+  return [
+    "-NoProfile",
+    "-NonInteractive",
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64"),
+  ];
 }
 
 /** Whether `command` is an executable on PATH. Used once, at startup, to
  *  settle audioPlayer's probe — the same "asked once and reused" shape
  *  loginShellPath uses in headlamp.ts. */
-export function onPath(command: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  for (const dir of (env["PATH"] ?? "").split(":")) {
+export function onPath(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = "linux",
+): boolean {
+  // Windows separates PATH with ";" and marks nothing executable — there is
+  // no X_OK bit to test, so presence is the whole question. This is only ever
+  // asked to choose a Linux player, but a wrong separator here would make it
+  // answer nonsense rather than nothing.
+  for (const dir of (env["PATH"] ?? "").split(platform === "win32" ? ";" : ":")) {
     if (dir === "") continue;
     try {
       accessSync(join(dir, command), constants.X_OK);
@@ -168,7 +207,7 @@ export class PiperSpeech {
       if (generation !== this.#generation) return;
       if (synthesised.code !== 0) throw new Error(`piper exited with code ${synthesised.code}`);
 
-      const playback = this.#run(this.#config.player, [wav]);
+      const playback = this.#run(this.#config.player, playerArgs(this.#config.platform ?? "linux", wav));
       this.#current = playback;
       const played = await playback.done;
       if (generation !== this.#generation) return;

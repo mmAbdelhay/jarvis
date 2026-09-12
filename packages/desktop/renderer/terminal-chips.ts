@@ -37,10 +37,24 @@ export type ChipRow = {
  *  "~/foo". */
 export function formatCwd(cwd: string, home: string): string {
   if (home === "") return cwd;
-  const normalized = home.length > 1 && home.endsWith("/") ? home.slice(0, -1) : home;
-  if (cwd === normalized) return "~";
-  const prefix = normalized.endsWith("/") ? normalized : `${normalized}/`;
-  if (cwd.startsWith(prefix)) return `~/${cwd.slice(prefix.length)}`;
+  // Either separator: a Windows home is `C:\Users\x` and the shell reports
+  // its directory the same way. This renderer has no node:path to ask, and a
+  // "/"-only rule leaves every Windows path uncollapsed.
+  const isSeparator = (character: string): boolean => character === "/" || character === "\\";
+  // Windows paths are case-insensitive and may arrive with either separator,
+  // so `C:\Users\x` and `c:/users/x` are one directory. A POSIX path never
+  // begins with a drive letter, so the folding is scoped to those that do.
+  const fold = (path: string): string =>
+    /^[A-Za-z]:/.test(path) ? path.toLowerCase().replaceAll("\\", "/") : path;
+
+  const normalized = home.length > 1 && isSeparator(home.slice(-1)) ? home.slice(0, -1) : home;
+  if (fold(cwd) === fold(normalized)) return "~";
+  if (!fold(cwd).startsWith(fold(normalized))) return cwd;
+  // The separator the path itself uses, kept: a Windows path rendered as
+  // `~/projects\jarvis` reads as neither one thing nor the other.
+  const rest = cwd.slice(normalized.length);
+  if (isSeparator(normalized.slice(-1))) return `~${cwd.slice(normalized.length - 1)}`;
+  if (rest !== "" && isSeparator(rest.charAt(0))) return `~${rest}`;
   return cwd;
 }
 

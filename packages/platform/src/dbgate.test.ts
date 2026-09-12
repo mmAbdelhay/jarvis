@@ -11,6 +11,12 @@ import {
 } from "./dbgate.js";
 import type { DbGateConnection } from "./dbgate-types.js";
 
+/** What a fake binary must be called to be found and run on this platform:
+ *  a bare name with a shebang on POSIX, a `.cmd` on Windows. */
+function fakeName(command: string): string {
+  return process.platform === "win32" ? `${command}.cmd` : command;
+}
+
 describe("connectionEnv", () => {
   it("produces nothing at all for an empty list", () => {
     expect(connectionEnv([], {})).toEqual({});
@@ -408,16 +414,21 @@ describe("createRealDbGateSpawner", () => {
   // button in the installed build only.
   it("resolves the binary on the PATH it is handed, not the ambient one", async () => {
     const dir = await mkdtemp(join(tmpdir(), "dbgate-path-"));
+    // A shell script, or on Windows the .cmd shim every npm bin actually is
+    // there — which is the case worth proving: only cmd.exe can run one, and
+    // only a PATHEXT lookup finds it from the bare name.
     await writeFile(
-      join(dir, "dbgate-serve"),
-      '#!/bin/sh\nprintf "DbGate API listening on port 3210\\n"\n',
+      join(dir, fakeName("dbgate-serve")),
+      process.platform === "win32"
+        ? "@echo off\r\necho DbGate API listening on port 3210\r\n"
+        : '#!/bin/sh\nprintf "DbGate API listening on port 3210\\n"\n',
       { mode: 0o755 },
     );
 
     const ambient = process.env["PATH"];
     process.env["PATH"] = "";
     try {
-      const child = createRealDbGateSpawner({ PATH: dir })({
+      const child = createRealDbGateSpawner({ PATH: dir }, process.platform)({
         env: {},
         workspaceDir: dir,
       });
@@ -441,12 +452,17 @@ describe("createRealDbGateSpawner", () => {
   it("layers the instance environment over the one it inherits", async () => {
     const dir = await mkdtemp(join(tmpdir(), "dbgate-env-"));
     await writeFile(
-      join(dir, "dbgate-serve"),
-      '#!/bin/sh\nprintf "PASSWORD=$PASSWORD MARKER=$MARKER\\n"\n',
+      join(dir, fakeName("dbgate-serve")),
+      process.platform === "win32"
+        ? "@echo off\r\necho PASSWORD=%PASSWORD% MARKER=%MARKER%\r\n"
+        : '#!/bin/sh\nprintf "PASSWORD=$PASSWORD MARKER=$MARKER\\n"\n',
       { mode: 0o755 },
     );
 
-    const child = createRealDbGateSpawner({ PATH: dir, MARKER: "inherited", PASSWORD: "stale" })({
+    const child = createRealDbGateSpawner(
+      { PATH: dir, MARKER: "inherited", PASSWORD: "stale" },
+      process.platform,
+    )({
       env: { PASSWORD: "fresh" },
       workspaceDir: dir,
     });

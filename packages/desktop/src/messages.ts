@@ -93,13 +93,11 @@ export const MESSAGES = {
       : `Could not install ${PREREQUISITE_TEXT[id].en.name}: ${detail}`,
   setupVoiceSize: (language: "ar" | "en"): string =>
     language === "ar" ? "نحو ٦١ ميجابايت للتنزيل" : "about 61 MB to download",
-  // Stated rather than implied. Jarvis has one win32 branch in the whole
-  // application and no build target; a screen that installed tools cleanly
-  // here would leave a machine fully prepared for an app that cannot start.
-  setupWindowsUnsupported: (language: "ar" | "en"): string =>
+  /** Windows only: the primary pair was taken and a second one is live. */
+  hotkeyFallback: (combo: string, replacement: string, language: "ar" | "en"): string =>
     language === "ar"
-      ? "جارفيس لا يعمل على ويندوز بعد. يمكنك تثبيت الأدوات، لكن التطبيق نفسه لن يبدأ."
-      : "Jarvis does not run on Windows yet. You can install the tools, but the app itself will not start.",
+      ? `اختصار ${combo} يستخدمه تطبيق آخر، لذا سيعمل ${replacement} بدلًا منه.`
+      : `The ${combo} shortcut is taken by another app, so ${replacement} works instead.`,
   recordingFailed: (message: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل الصوت: ${message}`

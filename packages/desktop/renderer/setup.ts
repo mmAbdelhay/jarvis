@@ -107,12 +107,10 @@ function render(bridge: SetupBridge): void {
   $("setup-title").textContent = MESSAGES.setupTitle(language);
   $("setup-intro").textContent = MESSAGES.setupIntro(language);
 
-  // Jarvis has one win32 branch in the whole application and no build target.
-  // Installing tools cleanly here would leave a machine fully prepared for an
-  // app that cannot start, so it says so.
-  const notice = $("setup-notice");
-  notice.hidden = bridge.platform !== "win32";
-  notice.textContent = MESSAGES.setupWindowsUnsupported(language);
+  // No notice today. It carried "Jarvis does not run on Windows yet", which
+  // stopped being true when the Windows port landed; the element stays so
+  // the next thing worth saying here has somewhere to go.
+  $("setup-notice").hidden = true;
 
   const list = $("setup-list");
   list.replaceChildren();
