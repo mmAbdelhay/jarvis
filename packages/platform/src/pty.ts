@@ -2,6 +2,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { AgentConfig, ProcessHandle, Spawner } from "@jarvis/core";
+import { ptySpawnTarget } from "./executable.js";
 
 /**
  * Spawns coding agents inside a real pseudo-terminal.
@@ -248,7 +249,13 @@ export function createPtySpawner(
     const resolved = typeof env === "function" ? env() : env;
     const childEnv: NodeJS.ProcessEnv = { ...sanitizedShellEnv(resolved), TERM };
 
-    const child = pty.spawn(agent.command, argsFor(agent, sessionId), {
+    // Resolved on Windows so a bare `claude` finds claude.exe, or an npm
+    // shim's claude.cmd: ConPTY resolves nothing itself and reports the miss
+    // as "File not found: " with the name left blank. Untouched elsewhere —
+    // see executable.ts. This file is one of the three the platform
+    // convention allows to read process.platform.
+    const target = ptySpawnTarget(agent.command, argsFor(agent, sessionId), childEnv, process.platform);
+    const child = pty.spawn(target.file, target.args, {
       name: TERM,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,

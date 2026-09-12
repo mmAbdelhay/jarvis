@@ -1,6 +1,9 @@
+import { existsSync } from "node:fs";
+import { resolveWindowsExecutable } from "./executable.js";
 import { createRequire } from "node:module";
 import { userInfo } from "node:os";
 import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
+import { powerShellLaunchArgs } from "./powershell-integration.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 
 // node-pty is a native module, loaded lazily through createRequire for the
@@ -147,7 +150,36 @@ export function shellCommand(
   const passwd = fromPasswd();
   if (passwd !== undefined && passwd !== "") return passwd;
 
+  // Windows has no passwd database to consult, so `fromPasswd` has no part
+  // in this branch.
+  if (platform === "win32") return windowsShell(env);
   return platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
+/**
+ * The shell a Terminal tab runs on Windows.
+ *
+ * `$SHELL` is honoured only when it names a real Windows path. A Jarvis
+ * launched from Git Bash inherits `SHELL=/usr/bin/bash`, which is a path
+ * inside MSYS's virtual filesystem that ConPTY cannot start — treating it as
+ * the answer would mean every Terminal tab dying on open for anyone who
+ * develops from that terminal.
+ *
+ * PowerShell 7 when it is installed, because a user who has it wants it; the
+ * Windows PowerShell every machine ships otherwise.
+ */
+function windowsShell(
+  env: NodeJS.ProcessEnv,
+  exists: (path: string) => boolean = existsSync,
+): string {
+  const configured = env["SHELL"];
+  if (configured !== undefined && /^[A-Za-z]:[\\/]/.test(configured) && exists(configured)) {
+    return configured;
+  }
+  const pwsh = resolveWindowsExecutable("pwsh", env, exists);
+  if (pwsh !== undefined) return pwsh;
+  const systemRoot = env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows";
+  return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 
 /** The current user's login shell from the passwd database, or undefined if
@@ -166,6 +198,8 @@ export type ShellIntegration = {
   zdotdir?: string | undefined;
   /** The Jarvis-owned rcfile, when one was installed for bash. */
   rcfile?: string | undefined;
+  /** The Jarvis-owned script, when one was installed for PowerShell. */
+  powerShellScript?: string | undefined;
   /** Where the wrapper's preexec hook appends `<epoch>\t<cwd>\t<command>`. */
   commandLog?: string | undefined;
 };
@@ -230,6 +264,12 @@ export function shellEnv(
  * and the shell is started interactive instead.
  */
 export function shellArgs(integration: ShellIntegration): string[] {
+  // PowerShell takes neither a login flag nor an rcfile: the profile loads on
+  // its own, and the integration is dot-sourced after it. See
+  // powershell-integration.ts.
+  if (integration.powerShellScript !== undefined) {
+    return powerShellLaunchArgs(integration.powerShellScript);
+  }
   if (integration.rcfile !== undefined) return ["--rcfile", integration.rcfile, "-i"];
   return ["-l"];
 }

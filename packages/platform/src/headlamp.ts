@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { spawnTarget } from "./executable.js";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
@@ -301,11 +302,18 @@ export function createKubeContextLister(path: string): () => Promise<string[]> {
 export function createRealHeadlampSpawner(
   env: EnvSource = process.env,
   log: (line: string) => void = (line) => console.error(line),
+  platform?: NodeJS.Platform,
 ): HeadlampSpawner {
   return ({ binary, ...rest }) => {
-    const child = spawn(binary, headlampArgs(rest), {
+    const resolved = resolveEnv(env);
+    // headlamp-server is a real executable inside the desktop app on every
+    // platform; the resolution only matters for the `.exe` suffix Windows
+    // needs when the configured path omits it.
+    const target = spawnTarget(binary, headlampArgs(rest), resolved, platform ?? "linux");
+    const child = spawn(target.file, target.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: resolveEnv(env),
+      env: resolved,
+      ...("windowsVerbatimArguments" in target ? { windowsVerbatimArguments: true } : {}),
     });
 
     for (const stream of [child.stdout, child.stderr]) {
@@ -318,7 +326,13 @@ export function createRealHeadlampSpawner(
         // The last element is whatever came after the final newline — an
         // incomplete line, held back until the rest of it arrives.
         pending = lines.pop() ?? "";
-        for (const line of lines) if (line !== "") log(`[headlamp] ${line}`);
+        // A CRLF-terminated line — a Windows build, or a batch file in the
+        // test — would otherwise be logged with a stray carriage return on
+        // the end of every line.
+        for (const raw of lines) {
+          const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+          if (line !== "") log(`[headlamp] ${line}`);
+        }
       });
       stream.on("end", () => {
         if (pending !== "") log(`[headlamp] ${pending}`);

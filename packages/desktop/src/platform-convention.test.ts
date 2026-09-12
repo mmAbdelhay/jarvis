@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Only these may read process.platform. Everything else receives the platform
@@ -46,7 +46,10 @@ describe("the platform-parameter convention", () => {
     const offenders: string[] = [];
     for (const root of ROOTS) {
       for (const path of await sourceFiles(root)) {
-        const name = path.slice(path.lastIndexOf("/") + 1);
+        // basename, not a split on "/": join() builds these with the
+        // platform's own separator, so on Windows the slice returns the whole
+        // backslash path and every allowed file reads as an offender.
+        const name = basename(path);
         if (ALLOWED.has(name)) continue;
         const source = await readFile(path, "utf8");
         // Comments are stripped first: this codebase discusses platforms

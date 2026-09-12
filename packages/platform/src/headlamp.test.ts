@@ -66,8 +66,9 @@ describe("skippedContexts", () => {
 
 describe("frontendDirFor", () => {
   it("is the sibling of the binary", () => {
+    // join(): spelled with the platform's own separator.
     expect(frontendDirFor("/Applications/Headlamp.app/Contents/Resources/headlamp-server")).toBe(
-      "/Applications/Headlamp.app/Contents/Resources/frontend",
+      join("/Applications/Headlamp.app/Contents/Resources", "frontend"),
     );
   });
 });
@@ -183,7 +184,7 @@ describe("createHeadlampManager", () => {
     await manager.open("opf", "ctx-a");
     expect(spawned[0]).toMatchObject({
       binary: "/bundle/Resources/headlamp-server",
-      frontendDir: "/bundle/Resources/frontend",
+      frontendDir: join("/bundle/Resources", "frontend"),
       kubeconfigPath: "/home/u/.kube/config",
       port: 5000,
     });
@@ -461,18 +462,27 @@ describe("createRealHeadlampSpawner", () => {
     // explanation used to go to /dev/null. Both streams, because it uses
     // stdout for the same purpose depending on the failure.
     const dir = await mkdtemp(join(tmpdir(), "headlamp-log-"));
-    const binary = join(dir, "fake-headlamp-server");
+    // A shell script, or on Windows a batch file — which also proves the
+    // spawner starts a .cmd through cmd.exe, the way every npm-installed
+    // tool has to be started there.
+    const binary = join(dir, process.platform === "win32" ? "fake-headlamp-server.cmd" : "fake-headlamp-server");
     await writeFile(
       binary,
-      // Split across two writes so a line has to be reassembled from
-      // more than one chunk, which is the case the buffering exists for.
-      '#!/bin/sh\nprintf "listening on "\nsleep 0.05\nprintf "127.0.0.1\\n"\n' +
-        'printf "auth failed\\n" >&2\n',
+      process.platform === "win32"
+        ? // `<nul set /p` prints without a newline, so the line is split
+          // across two writes here too.
+          "@echo off\r\n<nul set /p =listening on \r\nping -n 1 127.0.0.1 >nul\r\necho 127.0.0.1\r\n1>&2 echo auth failed\r\n"
+        : // Split across two writes so a line has to be reassembled from
+          // more than one chunk, which is the case the buffering exists for.
+          '#!/bin/sh\nprintf "listening on "\nsleep 0.05\nprintf "127.0.0.1\\n"\n' +
+            'printf "auth failed\\n" >&2\n',
       { mode: 0o755 },
     );
 
     const lines: string[] = [];
-    const child = createRealHeadlampSpawner({}, (line) => lines.push(line))({
+    // The host's own platform: the fake is a .cmd on Windows, which only
+    // reaches CreateProcess through cmd.exe — see executable.ts.
+    const child = createRealHeadlampSpawner({}, (line) => lines.push(line), process.platform)({
       binary,
       frontendDir: join(dir, "frontend"),
       kubeconfigPath: join(dir, "config"),

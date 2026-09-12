@@ -4,13 +4,17 @@
 
 - **Node 22 or newer** and **pnpm 10**. The repository pins pnpm in
   `package.json`; `corepack enable` is enough to get the right one.
-- **macOS (Apple Silicon) or Linux (x64).** Both are built and run; neither is
-  a port of the other. Windows is not a target.
+- **macOS (Apple Silicon), Linux (x64) or Windows (x64).** All three are
+  built and run; none is a port of the others. What differs is named where it
+  differs: the Terminal tab's shell (zsh, bash, PowerShell), the voice that
+  speaks (`say`, Piper, System.Speech), the microphone ffmpeg records from
+  (avfoundation, PulseAudio, DirectShow) and the spelling of every chord.
 - **On Linux, a C++ toolchain and Python** — `build-essential` and `python3`
   on Debian and Ubuntu, `gcc-c++ make python3` on Fedora, `base-devel python`
   on Arch. node-pty ships prebuilt binaries for macOS and Windows only, so on
-  Linux its native binding is compiled once, by `pnpm bootstrap`. Every agent
-  session and every Terminal tab is a pty; without it nothing runs.
+  Linux — and only there — its native binding is compiled once, by
+  `pnpm bootstrap`. Every agent session and every Terminal tab is a pty;
+  without it nothing runs.
 
 ```bash
 pnpm install
@@ -57,6 +61,37 @@ Detection asks the **login shell's** PATH, which is the same PATH Jarvis
 resolves its sidecars against. A tool installed under nvm is visible to an
 interactive shell and not to a GUI process, so a check against anything else
 would tick a box for a tool the app then could not find.
+
+## On Windows
+
+Everything above holds. What is specific to Windows:
+
+**The agent command.** `command: claude` works when the CLI is on PATH, which
+is how npm installs it. The native installer puts `claude.exe` in
+`%USERPROFILE%\.local\bin` and does not always add that directory to PATH —
+if `claude` is not found, either write the full path in `jarvis.yaml` or add
+the directory to your PATH and open a new terminal. An `.exe` or an npm `.cmd`
+shim are both fine: Jarvis resolves a bare name the way a shell does, and
+starts a `.cmd` through cmd.exe because Node refuses to run one directly.
+
+**The Terminal tab runs PowerShell** — PowerShell 7 when `pwsh` is on PATH,
+else the Windows PowerShell every machine has. Your own `$PROFILE` loads
+first and is never modified; a Jarvis script is dot-sourced after it, which is
+what draws the blocks, the chip row and autocomplete. It is passed as an
+encoded command rather than as a `.ps1` to execute, so a machine left on the
+default ExecutionPolicy needs no change to it. Autocomplete ranks against
+PSReadLine's history rather than a shell's history file.
+
+**Chords are Ctrl+Shift**, as on Linux — ⌘ does not exist and plain Ctrl
+belongs to the shell. Ctrl+Shift+P for the palette, Ctrl+Shift+D to split.
+
+**Voice.** Replies speak through Windows' own System.Speech voices with
+nothing installed; Piper is better and the setup screen installs it. An Arabic
+voice is a language pack: Settings → Time & language → Speech. Recording needs
+ffmpeg, and records from the first DirectShow capture device ffmpeg lists.
+
+**The Editor tab is unavailable**: code-server has no Windows build. Every
+other tab works.
 
 ## What each optional tool unlocks
 

@@ -48,7 +48,7 @@ function evsAvailable() {
 
 exports.default = async function vmpSign(context) {
   const platform = context.electronPlatformName;
-  if (platform !== "darwin" && platform !== "linux") return;
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") return;
 
   // The EVS client takes the directory *containing* the app, not the bundle
   // itself: it globs that directory to find what to sign.

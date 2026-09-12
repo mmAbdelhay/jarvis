@@ -1832,3 +1832,72 @@ describe("the file sidebar's palette action", () => {
     expect(palette(p)?.textContent).not.toContain("Refresh file sidebar");
   });
 });
+
+describe("a terminal pane over a ConPTY", () => {
+  const settings = {
+    blocks: true,
+    inputEditor: false,
+    notifyAfterSeconds: 0,
+    home: "/Users/x",
+    scrollback: 0,
+  };
+
+  function conptyPane(repaints: boolean) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const resize = vi.fn();
+    const view = createPane(host, {
+      sendInput: vi.fn(),
+      resize,
+      attach: async () => "",
+      settings,
+      notify: vi.fn(),
+      ptyRepaintsOnResize: repaints,
+    });
+    return { view, resize, terminal: FakeTerminal.instances[0] as FakeTerminal };
+  }
+
+  // ConPTY repaints its whole screen on every resize, and a repaint that
+  // lands mid-command becomes part of that command's block.
+  it("holds a resize while a command runs and applies it when the block closes", () => {
+    const { view, resize, terminal } = conptyPane(true);
+    view.write(A + "PS> " + B + C("ls"));
+    terminal.emitResize(120, 30);
+    expect(resize).not.toHaveBeenCalled();
+
+    view.write("out" + D(0));
+    expect(resize).toHaveBeenCalledWith(120, 30);
+    expect(resize).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps only the last held size, and passes an idle resize straight through", () => {
+    const { view, resize, terminal } = conptyPane(true);
+    terminal.emitResize(100, 20);
+    expect(resize).toHaveBeenCalledWith(100, 20);
+
+    view.write(C("ls"));
+    terminal.emitResize(110, 22);
+    terminal.emitResize(120, 24);
+    view.write(D(0));
+    expect(resize).toHaveBeenLastCalledWith(120, 24);
+    expect(resize).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the stale screen behind the write queue when a command starts", () => {
+    const { view, terminal } = conptyPane(true);
+    view.write(A + "PS> " + B + C("ls"));
+    expect(terminal.cleared).toBe(0);
+    terminal.flush();
+    expect(terminal.cleared).toBe(1);
+  });
+
+  // Every other platform: exactly as it was.
+  it("resizes at once, and clears nothing, where the pty does not repaint", () => {
+    const { view, resize, terminal } = conptyPane(false);
+    view.write(C("ls"));
+    terminal.emitResize(120, 30);
+    expect(resize).toHaveBeenCalledWith(120, 30);
+    terminal.flush();
+    expect(terminal.cleared).toBe(0);
+  });
+});

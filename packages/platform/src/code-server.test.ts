@@ -348,11 +348,15 @@ describe("createRealCodeServerSpawner PATH", () => {
   it("resolves the binary on the PATH it is handed, not the ambient one", async () => {
     const dir = await mkdtemp(join(tmpdir(), "code-server-path-"));
     const marker = join(dir, "ran");
+    // A shell script, or on Windows the .cmd shim an npm install actually
+    // leaves — which only cmd.exe can run, and only a PATHEXT lookup finds.
     await writeFile(
-      join(dir, "code-server"),
-      // Redirection rather than `touch`: the fake runs with only `dir` on
-      // its PATH, so it cannot call out to /usr/bin for anything.
-      `#!/bin/sh\n: > ${marker}\n`,
+      join(dir, process.platform === "win32" ? "code-server.cmd" : "code-server"),
+      process.platform === "win32"
+        ? `@echo off\r\ntype nul > "${marker}"\r\n`
+        : // Redirection rather than `touch`: the fake runs with only `dir` on
+          // its PATH, so it cannot call out to /usr/bin for anything.
+          `#!/bin/sh\n: > ${marker}\n`,
       { mode: 0o755 },
     );
 
@@ -361,7 +365,7 @@ describe("createRealCodeServerSpawner PATH", () => {
     const ambient = process.env["PATH"];
     process.env["PATH"] = "";
     try {
-      const spawned = createRealCodeServerSpawner({ PATH: dir })({
+      const spawned = createRealCodeServerSpawner({ PATH: dir }, process.platform)({
         port: 4455,
         userDataDir: join(dir, "user-data"),
         extensionsDir: join(dir, "extensions"),

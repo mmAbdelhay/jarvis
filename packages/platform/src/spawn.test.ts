@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { basename } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createSpawner, runCommand } from "./spawn.js";
 import type { AgentConfig } from "@jarvis/core";
@@ -45,14 +47,19 @@ describe("createSpawner", () => {
   });
 
   it("runs the process in the given directory", async () => {
-    const agent: AgentConfig = { id: "pwd", command: "pwd" };
-    const handle = createSpawner()(agent, "/tmp");
+    // `pwd` on POSIX, `cd` (with no argument) on cmd.exe: both print the cwd.
+    const agent: AgentConfig =
+      process.platform === "win32"
+        ? { id: "pwd", command: "cmd", args: ["/d", "/c", "cd"] }
+        : { id: "pwd", command: "pwd" };
+    const handle = createSpawner()(agent, tmpdir());
 
     const chunks: string[] = [];
     handle.onOutput((chunk) => chunks.push(chunk));
     await new Promise<number>((resolve) => handle.onExit(resolve));
 
-    expect(chunks.join("")).toContain("/tmp");
+    // macOS resolves /tmp to /private/tmp; the basename is the same either way.
+    expect(chunks.join("").toLowerCase()).toContain(basename(tmpdir()).toLowerCase());
   });
 
   it("reports a non-zero exit code for a process killed by a signal", async () => {

@@ -6,8 +6,8 @@ A desktop workspace for running coding agents by voice, and for doing the work
 around them without leaving it: the project's files, its databases, a shell in
 it, and its APIs.
 
-Jarvis is a single Electron app over a pnpm workspace. It runs on macOS and
-Linux. It speaks Arabic and English, and it is built for one person on one
+Jarvis is a single Electron app over a pnpm workspace. It runs on macOS,
+Linux and Windows. It speaks Arabic and English, and it is built for one person on one
 machine — there is no server, no account, and nothing leaves the laptop that
 was not already going to. It opens full screen.
 
@@ -79,6 +79,16 @@ nothing to install and no package manager involved:
 chmod +x Jarvis-*.AppImage
 ./Jarvis-*.AppImage
 ```
+
+**Windows** — grab the `.zip`, unpack it anywhere, and run `Jarvis.exe`. The
+whole folder is the app; keep it together. There is no installer, which is
+also why there is no SmartScreen prompt to click past — but the executable is
+not Authenticode-signed either, so Windows may still ask once.
+
+The Terminal tab runs PowerShell there, and the app's own chords are
+Ctrl+Shift rather than ⌘ — the same spelling Linux uses. If another app holds
+Alt+Space (PowerToys Run does, by default), Jarvis says so at startup and uses
+Ctrl+Shift+Space instead; every hint in the app then names that.
 
 - **x64 only.** arm64 needs an arm64 machine to build on; there isn't one yet.
 - **Ubuntu 22.04 and later need `libfuse2`** (`sudo apt install libfuse2t64`),

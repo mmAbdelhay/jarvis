@@ -38,6 +38,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onTurn: vi.fn(),
     onListening: vi.fn(),
     onNotice: vi.fn(),
+    onVoiceHotkeys: vi.fn(),
     getHistory: vi.fn(async () => []),
     gitChanges: vi.fn(async () => notStubbed),
     gitDiff: vi.fn(async () => notStubbed),

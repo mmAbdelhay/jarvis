@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -78,6 +79,16 @@ function baseDeps(sent: { channel: string; payload: unknown }[]): WiringDeps {
     healthIntervalMs: 100_000,
   };
 }
+
+/**
+ * The containment tests below are written against POSIX fixtures — `/proj`,
+ * `/proj/link`, `/etc` — and the code under test resolves every path with
+ * node:path before the fakes see it, so on Windows `/proj` has already
+ * become `C:\proj` by then. Those blocks run only where the fixtures are
+ * native; the "on Windows" block beside them drives the same boundary with
+ * Windows-native fixtures, so both platforms pin it.
+ */
+const POSIX_FIXTURES = process.platform !== "win32";
 
 describe("buildWiring", () => {
   beforeEach(() => {
@@ -901,7 +912,9 @@ describe("editor handlers", () => {
 
       await withRoots(opened).open("acme", "api");
 
-      expect(opened).toEqual([{ project: "/p/acme", folder: "/p/acme/services/api" }]);
+      // join(): the root is resolved against the project with the platform's
+      // own separator.
+      expect(opened).toEqual([{ project: "/p/acme", folder: join("/p/acme", "services/api") }]);
     });
 
     it("opens the project itself when no root is named", async () => {
@@ -2668,7 +2681,7 @@ describe("terminal handlers", () => {
   // renderer and a shell can cd anywhere, so every one of these asks the
   // same question: can a string reach a directory outside the project the
   // pane belongs to?
-  describe("listDir", () => {
+  describe.runIf(POSIX_FIXTURES)("listDir", () => {
     // Every path readDir was asked for. Asserting only on the return value
     // cannot tell a refusal from a listing that happened to be empty — the
     // fake answers [] for every path but "/proj" — so each refusal below
@@ -2890,7 +2903,7 @@ describe("terminal handlers", () => {
     });
   });
 
-  describe("openFile", () => {
+  describe.runIf(POSIX_FIXTURES)("openFile", () => {
     const files = {
       readDir: () => [],
       realPath: (path: string) => path.replace(/\/$/, ""),
@@ -3139,6 +3152,116 @@ describe("terminal handlers", () => {
       await handlers.openFile("tab-1", "/proj/selflink");
 
       expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
+    });
+  });
+
+  describe.runIf(!POSIX_FIXTURES)("listDir, openFile and chips on Windows", () => {
+    // Native fixtures: what resolve() and realpathSync() actually hand the
+    // handlers on this platform.
+    const PROJ = "C:\\proj";
+    let read: string[] = [];
+    beforeEach(() => {
+      read = [];
+    });
+    const files = {
+      readDir: (path: string) => {
+        read.push(path);
+        return path === PROJ
+          ? [
+              { name: "src", directory: true },
+              { name: "a.ts", directory: false },
+            ]
+          : [];
+      },
+      realPath: (path: string) => path.replace(/\\$/, ""),
+    };
+
+    function handlersFor(overrides: Partial<TerminalHandlerDeps> = {}) {
+      const opened: { projectPath: string; folderPath: string }[] = [];
+      const tabs: { project: string; url: string }[] = [];
+      const git = {
+        changes: vi.fn(async (repoPath: string) => ({
+          ok: true as const,
+          value: { repoPath, branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
+        })),
+      };
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: { p: PROJ },
+        language: "en",
+        terminal: terminalConfig,
+        terminalScrollback: 5000,
+        files,
+        git: git as unknown as GitProvider,
+        editor: {
+          open: async (projectPath: string, folderPath: string) => {
+            opened.push({ projectPath, folderPath });
+            return { ok: true as const, url: "http://127.0.0.1:9999/?folder=x" };
+          },
+          openTab: (project: string, url: string) => {
+            tabs.push({ project, url });
+          },
+        },
+        ...overrides,
+      });
+      handlers.open("p");
+      return { handlers, opened, tabs, git };
+    }
+
+    it("lists inside the project, in either separator, and refuses everything outside it", async () => {
+      const { handlers } = handlersFor();
+
+      await expect(handlers.listDir("tab-1", "C:\\proj")).resolves.toHaveLength(2);
+      await expect(handlers.listDir("tab-1", "C:/proj")).resolves.toHaveLength(2);
+      await expect(handlers.listDir("tab-1", "C:\\Windows")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "C:\\proj\\..\\Windows")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "C:\\proj-secrets")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "D:\\proj")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
+      expect(read).toEqual([PROJ, PROJ]);
+    });
+
+    it("refuses a junction that resolves outside the project, and reads the real path of one inside", async () => {
+      const linked = {
+        ...files,
+        realPath: (path: string) =>
+          path === "C:\\proj\\out" ? "C:\\Windows" : path === "C:\\proj\\link" ? "C:\\proj\\real" : path,
+      };
+      const { handlers } = handlersFor({ files: linked });
+
+      await expect(handlers.listDir("tab-1", "C:\\proj\\out")).resolves.toEqual([]);
+      expect(read).toEqual([]);
+      await expect(handlers.listDir("tab-1", "C:\\proj\\link")).resolves.toEqual([]);
+      expect(read).toEqual(["C:\\proj\\real"]);
+    });
+
+    it("roots the editor at the project and carries the file as a remote URI", async () => {
+      const { handlers, opened, tabs } = handlersFor();
+
+      await expect(handlers.openFile("tab-1", "C:\\proj\\src\\a.ts")).resolves.toEqual({
+        ok: true,
+        value: undefined,
+      });
+      expect(opened).toEqual([{ projectPath: PROJ, folderPath: PROJ }]);
+      expect(tabs[0]?.url).toContain(encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/C%3A/proj/src/a.ts"]])));
+
+      await expect(handlers.openFile("tab-1", "C:\\Windows\\x.ts")).resolves.toMatchObject({ ok: false });
+      expect(opened).toHaveLength(1);
+    });
+
+    it("describes the directory the shell moved to, native and resolved", async () => {
+      const { handlers, git } = handlersFor();
+
+      await expect(handlers.chips("tab-1", "C:\\proj\\packages")).resolves.toMatchObject({
+        cwd: "C:\\proj\\packages",
+        branch: "main",
+      });
+      expect(git.changes).toHaveBeenCalledWith("C:\\proj\\packages");
+      // Outside the project: no answer, and never the start directory's.
+      await expect(handlers.chips("tab-1", "C:\\Windows")).resolves.toBeUndefined();
+      expect(git.changes).not.toHaveBeenCalledWith("C:\\Windows");
     });
   });
 
@@ -3421,7 +3544,7 @@ describe("terminal handlers", () => {
     // own OSC 7 path) while the chips described the project root's
     // repository, confidently wrong. The fakes cannot move a shell, so the
     // renderer's path is what stands in for one here.
-    describe("the shell's live directory", () => {
+    describe.runIf(POSIX_FIXTURES)("the shell's live directory", () => {
       const files = { readDir: () => [], realPath: (path: string) => path };
 
       function moved(overrides: Partial<TerminalHandlerDeps> = {}) {
@@ -3552,7 +3675,7 @@ describe("terminal handlers", () => {
     // diffSummary runs), asked for once per prompt per pane — a bare Enter
     // included. Held Enter, or a pasted script, must not mean a hundred of
     // them, and three panes in one repository must not mean three.
-    describe("coalescing the git read", () => {
+    describe.runIf(POSIX_FIXTURES)("coalescing the git read", () => {
       const files = { readDir: () => [], realPath: (path: string) => path };
 
       function counted() {
@@ -4451,7 +4574,7 @@ describe("terminal open with an explicit directory", () => {
 
 describe("resumeCommandFor", () => {
   it("builds the CLI line that continues a session", () => {
-    expect(resumeCommandFor("claude-main", "abc-123")).toBe("claude-main --resume abc-123");
+    expect(resumeCommandFor("claude-main", "abc-123", "posix")).toBe("claude-main --resume abc-123");
   });
 
   // The command is typed into a live shell, so anything odd in it executes.
@@ -4459,11 +4582,25 @@ describe("resumeCommandFor", () => {
   // prompt, but "not attacker-controlled today" is not a reason to hand a
   // shell an unquoted string.
   it("quotes a command containing a space", () => {
-    expect(resumeCommandFor("my agent", "abc")).toBe("'my agent' --resume abc");
+    expect(resumeCommandFor("my agent", "abc", "posix")).toBe("'my agent' --resume abc");
   });
 
   it("refuses a session id that is not a plain identifier", () => {
-    expect(resumeCommandFor("claude-main", "abc; rm -rf /")).toBeUndefined();
+    expect(resumeCommandFor("claude-main", "abc; rm -rf /", "posix")).toBeUndefined();
+    expect(resumeCommandFor("claude-main", "abc; rm -rf /", "powershell")).toBeUndefined();
+  });
+
+  // PowerShell: a quoted string is an expression until `&` makes it a call,
+  // and a Windows path needs quoting for its colon and backslashes — the
+  // line that used to be typed there was a parse error.
+  it("spells the line for PowerShell, with the call operator before a quoted path", () => {
+    expect(resumeCommandFor("claude", "abc", "powershell")).toBe("claude --resume abc");
+    expect(resumeCommandFor("C:\\Users\\me\\.local\\bin\\claude.exe", "abc", "powershell")).toBe(
+      "& 'C:\\Users\\me\\.local\\bin\\claude.exe' --resume abc",
+    );
+    expect(resumeCommandFor("C:\\o'brien\\claude.exe", "abc", "powershell")).toBe(
+      "& 'C:\\o''brien\\claude.exe' --resume abc",
+    );
   });
 });
 
@@ -4496,6 +4633,7 @@ describe("createResumeInTerminalHandler", () => {
     const typed: { tabId: string; data: string }[] = [];
     const handler = createResumeInTerminalHandler({
       history: () => [session],
+      shell: "posix",
       agents,
       projects,
       directoryExists: async () => true,
@@ -4550,6 +4688,7 @@ describe("createResumeInTerminalHandler", () => {
     const opened: { project: string; cwd: string }[] = [];
     const handler = createResumeInTerminalHandler({
       history: () => [past()],
+      shell: "posix",
       agents,
       projects: { app: "/home/u/app" },
       directoryExists: async () => false,

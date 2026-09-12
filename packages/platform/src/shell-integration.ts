@@ -1,17 +1,27 @@
 // Which shell integration to install, if any.
 //
-// The two installers are per-shell because the mechanism is: zsh is
-// redirected with ZDOTDIR and bash with --rcfile, and the hook syntax has
-// nothing in common. This is the one place that has to know both exist, so
-// main.ts asks a single question and gets a single answer.
+// The installers are per-shell because the mechanism is: zsh is redirected
+// with ZDOTDIR, bash with --rcfile, PowerShell with a script dot-sourced at
+// startup — and the hook syntax has nothing in common between any of them.
+// This is the one place that has to know they all exist, so main.ts asks a
+// single question and gets a single answer.
 
 import { installBashIntegration, isBash } from "./bash-integration.js";
+import {
+  installPowerShellIntegration,
+  isPowerShell,
+  powerShellHistoryPath,
+} from "./powershell-integration.js";
 import { installZshIntegration, isZsh } from "./zsh-integration.js";
 
 /** What was installed, in the shape the spawner needs to act on it: a
  *  directory to hand zsh as ZDOTDIR, or a file to hand bash as --rcfile.
  *  Undefined means no integration at all — see the installers. */
-export type InstalledIntegration = { zdotdir: string } | { rcfile: string } | undefined;
+export type InstalledIntegration =
+  | { zdotdir: string }
+  | { rcfile: string }
+  | { powerShellScript: string }
+  | undefined;
 
 export type ShellIntegrationDeps = {
   /** The user's login shell — `$SHELL`. */
@@ -23,6 +33,8 @@ export type ShellIntegrationDeps = {
   zdotdirDir: string;
   /** Where the bash wrapper file is written. */
   bashDir: string;
+  /** Where the PowerShell script is written. */
+  powerShellDir: string;
   /** The user's real ZDOTDIR: `$ZDOTDIR` if they set one, else `$HOME`. */
   realZdotdir: string;
   /** The user's home directory, whose profile files the bash wrapper chains
@@ -66,6 +78,15 @@ export async function installShellIntegration(
     return rcfile === undefined ? undefined : { rcfile };
   }
 
+  if (isPowerShell(deps.shell)) {
+    const powerShellScript = await installPowerShellIntegration({
+      enabled: deps.enabled,
+      dir: deps.powerShellDir,
+      write: deps.write,
+    });
+    return powerShellScript === undefined ? undefined : { powerShellScript };
+  }
+
   return undefined;
 }
 
@@ -82,6 +103,7 @@ export async function installShellIntegration(
  * about them, and a file that does not exist reads as an empty history, which
  * is what it already did.
  */
-export function defaultHistoryPath(shell: string | undefined, home: string): string {
+export function defaultHistoryPath(shell: string | undefined, home: string, env: NodeJS.ProcessEnv = {}): string {
+  if (isPowerShell(shell)) return powerShellHistoryPath(env, home);
   return isBash(shell) ? `${home}/.bash_history` : `${home}/.zsh_history`;
 }

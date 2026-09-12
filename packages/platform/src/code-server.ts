@@ -1,5 +1,6 @@
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
+import { spawnTarget } from "./executable.js";
 import { isAbsolute, relative } from "node:path";
 import { resolveEnv, type EnvSource } from "./pty.js";
 
@@ -266,10 +267,16 @@ export function waitUntilReady(url: string, timeoutMs = 15_000): Promise<boolean
  * port and use code-server's own terminal. Binding to loopback keeps it off
  * the network; there is currently no further access control beyond that.
  */
-export function createRealCodeServerSpawner(env: EnvSource = process.env): CodeServerSpawner {
+export function createRealCodeServerSpawner(
+  env: EnvSource = process.env,
+  platform?: NodeJS.Platform,
+): CodeServerSpawner {
   return ({ port, userDataDir, extensionsDir, folderPath }) => {
     const resolvedEnv = resolveEnv(env);
-    const child = spawn(
+    // Through spawnTarget so an npm-installed `code-server.cmd` on Windows is
+    // found and started the way Node insists on. A pass-through everywhere
+    // else — see executable.ts.
+    const target = spawnTarget(
       "code-server",
       [
         "--auth",
@@ -284,8 +291,14 @@ export function createRealCodeServerSpawner(env: EnvSource = process.env): CodeS
         "--disable-update-check",
         folderPath,
       ],
-      { stdio: "ignore", env: resolvedEnv },
+      resolvedEnv,
+      platform ?? "linux",
     );
+    const child = spawn(target.file, target.args, {
+      stdio: "ignore",
+      env: resolvedEnv,
+      ...("windowsVerbatimArguments" in target ? { windowsVerbatimArguments: true } : {}),
+    });
 
     const exitListeners: ((code: number | null) => void)[] = [];
     // A code-server that is not installed arrives as an async "error"

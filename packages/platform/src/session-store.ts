@@ -38,8 +38,16 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
   mkdirSync(dirname(dbPath), { recursive: true });
 
   const db = new DatabaseSync(dbPath);
-  migrate(db);
-  reconcileStaleSessions(db);
+  try {
+    migrate(db);
+    reconcileStaleSessions(db);
+  } catch (error) {
+    // A failed migration is a failed start, but not a leaked handle: on
+    // Windows the open file would keep its directory undeletable for as long
+    // as this process lives.
+    db.close();
+    throw error;
+  }
 
   const upsertStmt = db.prepare(`
     INSERT INTO sessions (
@@ -171,6 +179,15 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       // exactly the "do nothing, don't throw" behaviour a race between the
       // tracker and a row's removal needs — see the interface doc comment.
       updateGitStmt.run(git.branch, git.insertions, git.deletions, git.changedFiles, sessionId);
+    },
+    close(): void {
+      // node:sqlite throws on a second close; a store closed twice (a signal
+      // handler racing a clean quit) is not worth a crash.
+      try {
+        db.close();
+      } catch {
+        // Already closed.
+      }
     },
   };
 }

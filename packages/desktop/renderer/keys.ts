@@ -207,8 +207,28 @@ export function matchChord(
   return undefined;
 }
 
+/**
+ * The voice hotkeys main actually registered, when they are not the pair in
+ * the table.
+ *
+ * The two voice entries are the only chords this module does not match
+ * itself — globalShortcut owns them, and on Windows it may have had to take
+ * a different pair because another app held Alt+Space (see src/hotkeys.ts).
+ * A label that names a key nothing listens to is exactly what this module
+ * exists to prevent, so main's answer wins over the table.
+ */
+let liveVoiceHotkeys: { start: string; stop: string } | undefined;
+
+export function setVoiceHotkeys(hotkeys: { start: string; stop: string }): void {
+  liveVoiceHotkeys = hotkeys;
+}
+
 /** How a chord is written where a user can read it. */
 export function keyLabel(action: LabelledChord, platform: NodeJS.Platform): string {
+  if (liveVoiceHotkeys !== undefined) {
+    if (action === "voiceStart") return liveVoiceHotkeys.start;
+    if (action === "voiceStop") return liveVoiceHotkeys.stop;
+  }
   return BINDINGS[action].label[side(platform)];
 }
 

@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   audioPlayer,
@@ -60,9 +61,9 @@ describe("PiperSpeech", () => {
 
     expect(spawned[0]).toMatchObject({
       command: "/opt/piper",
-      args: ["-m", "/voices/alan.onnx", "-f", "/tmp/utterance/line.wav"],
+      args: ["-m", "/voices/alan.onnx", "-f", join("/tmp/utterance", "line.wav")],
     });
-    expect(spawned[1]).toMatchObject({ command: "afplay", args: ["/tmp/utterance/line.wav"] });
+    expect(spawned[1]).toMatchObject({ command: "afplay", args: [join("/tmp/utterance", "line.wav")] });
   });
 
   it("says nothing at all for empty text", async () => {
@@ -211,7 +212,9 @@ describe("audioPlayer", () => {
 });
 
 describe("onPath", () => {
-  it("finds an executable on PATH", () => {
+  // A real binary at a real POSIX path: there is none on Windows, and this
+  // helper only ever picks a Linux audio player.
+  it.skipIf(process.platform === "win32")("finds an executable on PATH", () => {
     expect(onPath("sh", { PATH: "/usr/bin:/bin" })).toBe(true);
   });
 
@@ -315,7 +318,7 @@ describe("how the text reaches piper", () => {
     const { speech, calls } = recording();
     await speech.speak("hello there", "en");
     expect(calls[0]?.args).not.toContain("-i");
-    expect(calls[0]?.args).toEqual(["-m", "/voices/alan.onnx", "-f", "/tmp/utterance/line.wav"]);
+    expect(calls[0]?.args).toEqual(["-m", "/voices/alan.onnx", "-f", join("/tmp/utterance", "line.wav")]);
   });
 
   it("sends no stdin to the player, which takes a path", async () => {

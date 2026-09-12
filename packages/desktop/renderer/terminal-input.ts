@@ -7,6 +7,8 @@
 // the only one that keeps selection, IME and Arabic input working. Never
 // reach for contenteditable here.
 
+import { hostPlatform, keyLabel } from "./keys.js";
+
 export type EditorHooks = {
   /** Enter: the whole line, for the pane to send with a carriage return. */
   submit: (line: string) => void;
@@ -86,7 +88,7 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
   // up even while [hidden] — hidden only affects rendering, not the DOM
   // tree — so the hint's text is cleared, not just hidden, once there's a
   // line to show instead.
-  const HINT_TEXT = "Type a command · ⌘P for actions";
+  const HINT_TEXT = `Type a command · ${keyLabel("palette", hostPlatform())} for actions`;
   const hint = document.createElement("div");
   hint.className = "terminal-input-hint";
   hint.textContent = HINT_TEXT;

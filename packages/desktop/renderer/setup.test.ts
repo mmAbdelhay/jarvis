@@ -164,16 +164,14 @@ describe("the setup overlay", () => {
     expect(installed).toEqual([]);
   });
 
-  it("says Jarvis does not run on Windows, and only there", async () => {
-    const linux = harness([status({ id: "agent", installable: true })], "linux");
-    await openSetup(linux.bridge);
-    expect(document.getElementById("setup-notice")?.hidden).toBe(true);
-
-    const windows = harness([status({ id: "agent", installable: true })], "win32");
-    await openSetup(windows.bridge);
-    const notice = document.getElementById("setup-notice");
-    expect(notice?.hidden).toBe(false);
-    expect(notice?.textContent).toMatch(/Windows/);
+  // It used to say "Jarvis does not run on Windows yet". The port landed, so
+  // the screen says nothing of the kind on any platform.
+  it("shows no platform notice, Windows included", async () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      const { bridge } = harness([status({ id: "agent", installable: true })], platform);
+      await openSetup(bridge);
+      expect(document.getElementById("setup-notice")?.hidden).toBe(true);
+    }
   });
 
   it("closes cleanly when it was never open", () => {

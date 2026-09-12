@@ -1,0 +1,15 @@
+# Every text file is LF in the working tree on every platform, whatever a
+# machine's core.autocrlf says. Two things depend on it: the tests that read
+# source files and match them line by line (the CSS suites, id-contract), and
+# the shell integration files Jarvis generates from string literals — a CRLF
+# in a zsh or bash startup file is a syntax error, and a CRLF in the
+# PowerShell profile the Windows terminal sources is a stray character on
+# every line.
+* text=auto eol=lf
+
+# Binary assets, never touched.
+*.png binary
+*.icns binary
+*.ico binary
+*.bin binary
+*.onnx binary

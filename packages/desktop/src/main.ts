@@ -23,6 +23,8 @@ import type { TabKind, WorkspaceTab } from "@jarvis/core";
 import {
   audioPlayer,
   MacSpeech,
+  WindowsSpeech,
+  windowsPowerShellPath,
   onPath,
   PiperSpeech,
   RoutedSpeech,
@@ -41,7 +43,9 @@ import {
   defaultHistoryPath,
   installShellIntegration,
   isBash,
+  isPowerShell,
   parseBashHistory,
+  parsePowerShellHistory,
   parseZshHistory,
   createKubeContextLister,
   createMetricsReader,
@@ -49,6 +53,7 @@ import {
   createRealCodeServerSpawner,
   createRealDockerClient,
   createRealShellSpawner,
+  shellCommand,
   createSessionImporter,
   createShellManager,
   createCollection,
@@ -82,6 +87,7 @@ import {
   createSqliteSessionStore,
   defaultSpeechRunner,
   listInstalledVoices,
+  listWindowsVoices,
   defaultVoiceLister,
   loginShellPath,
   randomPassword,
@@ -126,6 +132,7 @@ import {
   ensureConfigFile,
   loadConfig,
 } from "./config.js";
+import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
@@ -394,20 +401,21 @@ app.whenReady().then(async () => {
     // utterance — see audioPlayer.
     const player = audioPlayer(process.platform, (command) => onPath(command, process.env));
 
-    // macOS's own voices. On darwin they are the fallback for anything Piper
-    // is not speaking; elsewhere there is no `say` to call, and constructing
-    // this would only produce a speech object whose every utterance rejects.
+    // The operating system's own voices, where it has any. On darwin they are
+    // the fallback for anything Piper is not speaking, and on Windows the
+    // same: System.Speech is present on every install. Linux has neither —
+    // no voice engine ships on every machine — and constructing something
+    // there would only produce a speech object whose every utterance rejects.
     //
     // That rejection was not theoretical: with Piper absent, the greeting hit
     // `say`, and announceSpeaking awaited a promise nobody caught.
-    const macSpeech =
+    const voices = { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice };
+    const systemSpeech =
       process.platform === "darwin"
-        ? new MacSpeech(
-            { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice },
-            defaultSpeechRunner,
-            defaultVoiceLister,
-          )
-        : undefined;
+        ? new MacSpeech(voices, defaultSpeechRunner, defaultVoiceLister)
+        : process.platform === "win32"
+          ? new WindowsSpeech(voices, defaultSpeechRunner, windowsPowerShellPath(process.env))
+          : undefined;
 
     // Piper only if it is actually installed. Configured-but-absent must fall
     // back rather than leave the app silent: the model is a 60MB download the
@@ -420,7 +428,7 @@ app.whenReady().then(async () => {
     if (config.voice.engine === "piper" && !piperReady) {
       console.log(
         `Piper is configured but not installed (${config.voice.piperBinary}, ${config.voice.piperModel})` +
-          `${macSpeech === undefined ? " — nothing else here can speak." : " — using macOS voices."}`,
+          `${systemSpeech === undefined ? " — nothing else here can speak." : " — using the system voices."}`,
       );
     }
 
@@ -430,7 +438,7 @@ app.whenReady().then(async () => {
     const arabicPiperReady =
       existsSync(config.voice.piperBinary) && existsSync(config.voice.piperArabicModel);
     const arabicSpeech =
-      macSpeech ??
+      systemSpeech ??
       (arabicPiperReady
         ? new PiperSpeech({
             binary: config.voice.piperBinary,
@@ -493,7 +501,7 @@ app.whenReady().then(async () => {
           }),
           arabicSpeech,
         )
-      : (macSpeech ?? arabicSpeech);
+      : (systemSpeech ?? arabicSpeech);
     const git = createGitProvider();
     const changeTracker = new ChangeTracker({ git, sessions });
 
@@ -656,7 +664,7 @@ app.whenReady().then(async () => {
     // from anywhere the user's own VS Code (if any) keeps its own settings.
     const codeServerRoot = join(homedir(), ".config/jarvis/code-server");
     const codeServer = createCodeServerManager({
-      spawn: createRealCodeServerSpawner(env),
+      spawn: createRealCodeServerSpawner(env, process.platform),
       findFreePort,
       waitUntilReady,
       userDataDir: join(codeServerRoot, "user-data"),
@@ -675,7 +683,7 @@ app.whenReady().then(async () => {
     // connections declared in jarvis.yaml are seeded into it at spawn.
     const dbgateRoot = join(homedir(), ".config/jarvis/dbgate");
     const dbgate = createDbGateManager({
-      spawn: createRealDbGateSpawner(env),
+      spawn: createRealDbGateSpawner(env, process.platform),
       findFreePort,
       waitUntilReady,
       ensureDir: async (path) => {
@@ -765,7 +773,7 @@ app.whenReady().then(async () => {
     });
 
     const headlamp = createHeadlampManager({
-      spawn: createRealHeadlampSpawner(env),
+      spawn: createRealHeadlampSpawner(env, undefined, process.platform),
       findFreePort,
       waitUntilReady,
       listContexts: createKubeContextLister(join(homedir(), ".kube/config")),
@@ -782,7 +790,7 @@ app.whenReady().then(async () => {
     // Same reasoning as headlamp above: `docker` lives wherever the login
     // shell's PATH puts it (Homebrew, OrbStack, Docker Desktop's shim), not
     // wherever a GUI-launched process's PATH puts it.
-    const dockerClient = createRealDockerClient(env);
+    const dockerClient = createRealDockerClient(env, process.platform);
 
     // Terminal autocomplete's shell integration, installed before the first
     // shell can be started. It writes a Jarvis-owned wrapper — a ZDOTDIR
@@ -792,11 +800,20 @@ app.whenReady().then(async () => {
     // neither wrapper knows, or unwritable — and the terminal then behaves
     // exactly as it did before this feature existed.
     const completionEnabled = config.terminal.completion.enabled;
-    const shell = process.env["SHELL"];
+    // On Windows `$SHELL` is either absent or an MSYS path that ConPTY cannot
+    // start, so the shell the tab will really run is the one shellCommand
+    // picks — and the integration has to be chosen for *that*, not for a
+    // variable this process happened to inherit.
+    const shell =
+      process.platform === "win32"
+        ? shellCommand(process.env, process.platform)
+        : process.env["SHELL"];
     const zdotdir = join(homedir(), ".config/jarvis/zdotdir");
     const bashDir = join(homedir(), ".config/jarvis/bash");
+    const powerShellDir = join(homedir(), ".config/jarvis/powershell");
     await mkdir(zdotdir, { recursive: true }).catch(() => undefined);
     await mkdir(bashDir, { recursive: true }).catch(() => undefined);
+    await mkdir(powerShellDir, { recursive: true }).catch(() => undefined);
     await mkdir(dirname(config.terminal.completion.commandLogPath), { recursive: true }).catch(
       () => undefined,
     );
@@ -805,6 +822,7 @@ app.whenReady().then(async () => {
       enabled: completionEnabled,
       zdotdirDir: zdotdir,
       bashDir,
+      powerShellDir,
       realZdotdir: process.env["ZDOTDIR"] ?? homedir(),
       home: homedir(),
       write: (path, contents) => writeFile(path, contents, "utf8"),
@@ -842,12 +860,16 @@ app.whenReady().then(async () => {
     // the ranking with it.
     const historyPath =
       config.terminal.completion.historyPath === DEFAULT_TERMINAL.completion.historyPath
-        ? defaultHistoryPath(shell, homedir())
+        ? defaultHistoryPath(shell, homedir(), process.env)
         : config.terminal.completion.historyPath;
 
     const completionSource = createCompletionSource({
       readHistory: createFileReader(historyPath),
-      parseHistory: isBash(shell) ? parseBashHistory : parseZshHistory,
+      parseHistory: isPowerShell(shell)
+        ? parsePowerShellHistory
+        : isBash(shell)
+          ? parseBashHistory
+          : parseZshHistory,
       readCommandLog: createFileReader(config.terminal.completion.commandLogPath),
       listDirectory: createDirectoryLister(),
       now: () => Date.now(),
@@ -1471,6 +1493,10 @@ app.whenReady().then(async () => {
     // Jarvis does not own — a real shell, at the cost of no live state.
     const sessionResume = createResumeInTerminalHandler({
       history: () => sessionStore.history(),
+      // Which shell the tab will type this into — the only thing about the
+      // line that differs by platform. main is one of the three files the
+      // platform convention lets read process.platform.
+      shell: process.platform === "win32" ? "powershell" : "posix",
       agents: Object.fromEntries(registry.list().map((agent) => [agent.id, agent])),
       projects: config.projects,
       directoryExists: async (path: string) => {
@@ -1776,10 +1802,16 @@ app.whenReady().then(async () => {
       ),
     );
     ipcMain.handle("voice:list", async () => {
-      // `say -v '?'` is the only source of system voices and it exists only on
-      // darwin. Asking elsewhere spawns a binary that is not there, waits for
-      // it to fail, and returns the same empty list this does immediately.
-      const installed = process.platform === "darwin" ? await listInstalledVoices() : [];
+      // Each platform's own source of system voices, and nothing where there
+      // is none: asking `say -v '?'` on Linux spawns a binary that is not
+      // there, waits for it to fail, and returns the same empty list this
+      // does immediately.
+      const installed =
+        process.platform === "darwin"
+          ? await listInstalledVoices()
+          : process.platform === "win32"
+            ? await listWindowsVoices(windowsPowerShellPath(process.env))
+            : [];
       // Piper is offered beside the system voices rather than in a separate
       // control: from where the user stands it is simply the best-sounding
       // English voice on the list.
@@ -2089,8 +2121,18 @@ app.whenReady().then(async () => {
       }
     }
 
-    const spaceRegistered = globalShortcut.register("Alt+Space", startVoice);
-    const stopRegistered = globalShortcut.register("Alt+Shift+Space", stopVoice);
+    // Alt+Space, or on Windows a fallback pair when another app holds it —
+    // see hotkeys.ts. Which pair is live is reported to the renderer below,
+    // so every hint it draws names a key that actually works.
+    const hotkeys = registerVoiceHotkeys(
+      {
+        register: (accelerator, handler) => globalShortcut.register(accelerator, handler),
+        unregister: (accelerator) => globalShortcut.unregister(accelerator),
+        onStart: startVoice,
+        onStop: stopVoice,
+      },
+      process.platform,
+    );
 
     // M-b: the renderer's mic button drives the exact same start/stop path
     // as the global hotkey, so voice has one implementation no matter which
@@ -2133,23 +2175,34 @@ app.whenReady().then(async () => {
     // input-source switchers commonly claim Alt-combos) makes it return
     // false silently. Left unchecked, the headline feature is inert and
     // the UI still advertises a hotkey that will never fire.
-    for (const [combo, registered] of [
-      ["Alt+Space", spaceRegistered],
-      ["Alt+Shift+Space", stopRegistered],
-    ] as const) {
-      if (registered) continue;
-      // Two causes, two pieces of advice. A collision means another app holds
-      // the combo and the user can close it or pick another. Wayland means no
-      // application can hold one at all, and saying "another app is probably
-      // using it" would send them looking for something that does not exist.
+    if (hotkeys.fellBack && hotkeys.active !== undefined) {
+      // Taken, and answered rather than merely reported: the keys that do
+      // work are named, and the renderer is told so its hints agree.
       window.webContents.send("turn:new", {
         role: "assistant",
-        text: isWayland(process.env)
-          ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
-          : MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
+        text: MESSAGES.hotkeyFallback(PRIMARY_HOTKEYS.start, hotkeys.active.start, PRIMARY_LANGUAGE),
         language: PRIMARY_LANGUAGE,
         at: Date.now(),
       });
+    } else {
+      for (const combo of hotkeys.refused) {
+        // Two causes, two pieces of advice. A collision means another app
+        // holds the combo and the user can close it or pick another. Wayland
+        // means no application can hold one at all, and saying "another app
+        // is probably using it" would send them looking for something that
+        // does not exist.
+        window.webContents.send("turn:new", {
+          role: "assistant",
+          text: isWayland(process.env)
+            ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
+            : MESSAGES.hotkeyCollision(combo, PRIMARY_LANGUAGE),
+          language: PRIMARY_LANGUAGE,
+          at: Date.now(),
+        });
+      }
+    }
+    if (hotkeys.active !== undefined && hotkeys.active !== PRIMARY_HOTKEYS) {
+      window.webContents.send("voice:hotkeys", hotkeys.active);
     }
 
     // The greeting comes first, before the health line: it is instant, it is
@@ -2172,7 +2225,7 @@ app.whenReady().then(async () => {
     // list costs 1.2s and only decides which macOS voice to speak with, so
     // with nothing to speak there is nothing to wait for either.
     const speakGreeting = config.voice.speakGreeting;
-    if (speakGreeting && !piperReady) await macSpeech?.ready;
+    if (speakGreeting && !piperReady) await systemSpeech?.ready;
 
     const template = config.voice.greeting[PRIMARY_LANGUAGE] ?? "";
     const wantsUncommitted = template.includes("{uncommitted}");

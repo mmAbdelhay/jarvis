@@ -3,6 +3,7 @@ import {
   COMMAND_SPECS,
   completePath,
   parseBashHistory,
+  parsePowerShellHistory,
   parseCommandLog,
   parseZshHistory,
   pathPrefix,
@@ -330,5 +331,26 @@ describe("parseBashHistory", () => {
 
   it("reads an empty file as no history at all", () => {
     expect(parseBashHistory("")).toEqual([]);
+  });
+});
+
+describe("parsePowerShellHistory", () => {
+  // PSReadLine records no timestamps at all, so every entry is undated and
+  // scores as one half-life old — the same as an undated zsh entry.
+  it("reads bare lines, CRLF and all", () => {
+    expect(parsePowerShellHistory("git status\r\nnpm run dev\r\n")).toEqual([
+      { command: "git status" },
+      { command: "npm run dev" },
+    ]);
+  });
+
+  it("rejoins a command continued with a trailing backtick", () => {
+    expect(parsePowerShellHistory("Get-ChildItem `\r\n  -Recurse\r\n")).toEqual([
+      { command: "Get-ChildItem \n  -Recurse" },
+    ]);
+  });
+
+  it("keeps a file that ends mid-continuation, and skips blank lines", () => {
+    expect(parsePowerShellHistory("\n\nfoo `")).toEqual([{ command: "foo " }]);
   });
 });
