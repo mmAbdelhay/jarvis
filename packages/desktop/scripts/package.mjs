@@ -11,13 +11,13 @@
 // asked for something it cannot honestly produce.
 import { spawn } from "node:child_process";
 
-const TARGETS = { darwin: "package:mac", linux: "package:linux" };
+const TARGETS = { darwin: "package:mac", linux: "package:linux", win32: "package:win" };
 
 const script = TARGETS[process.platform];
 if (script === undefined) {
   console.error(
-    `Nothing to package on ${process.platform}: Jarvis targets macOS (dmg) and Linux (AppImage), ` +
-      "and each is built on its own platform.",
+    `Nothing to package on ${process.platform}: Jarvis targets macOS (dmg), Linux (AppImage) ` +
+      "and Windows (a folder), and each is built on its own platform.",
   );
   process.exit(1);
 }

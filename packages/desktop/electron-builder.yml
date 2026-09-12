@@ -174,7 +174,13 @@ win:
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux}-*/**"
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**"
   target:
+    # `dir` is what runs from the tree; `zip` is what a release page can
+    # carry — one file, named like the .dmg and the .AppImage beside it, and
+    # unpacked wherever the user wants it.
     - target: dir
+      arch:
+        - x64
+    - target: zip
       arch:
         - x64
   icon: assets/icon.png
