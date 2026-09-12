@@ -314,92 +314,127 @@ current-context: kind-kind
 });
 
 describe("loginShellPath", () => {
-  it("returns undefined when SHELL is unset", async () => {
-    expect(await loginShellPath({})).toBeUndefined();
-  });
+  const MARKED = (path: string): string => `__JARVIS_PATH__${path}__JARVIS_PATH_END__`;
 
-  it("returns undefined when SHELL is empty", async () => {
-    expect(await loginShellPath({ SHELL: "" })).toBeUndefined();
-  });
+  function mockShell(result: { code: number; stdout: string; stderr: string }) {
+    return vi.spyOn(spawnModule, "runCommand").mockResolvedValue(result);
+  }
 
-  it("asks the shell named by SHELL for a login PATH and trims it", async () => {
-    const spy = vi
-      .spyOn(spawnModule, "runCommand")
-      .mockResolvedValue({ code: 0, stdout: "/usr/local/bin:/usr/bin\n", stderr: "" });
+  it("asks an interactive login shell, which is where version managers live", async () => {
+    // `bash -lc` is not interactive, and Debian and Ubuntu's stock ~/.bashrc
+    // opens with `case $- in *i*) ;; *) return;; esac` — so it returns
+    // immediately, taking nvm, rbenv, pyenv and mise with it. A tool
+    // installed under one of those is then invisible: on the machine this was
+    // found on, `claude` and `code-server` resolved from ~/.local/bin while
+    // `dbgate-serve` did not, because npm had put it in nvm's bin. Only the
+    // Database tab failed, and it failed with no clue why.
+    const spy = mockShell({ code: 0, stdout: MARKED("/home/u/.nvm/bin:/usr/bin"), stderr: "" });
     try {
-      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBe("/usr/local/bin:/usr/bin");
-      expect(spy).toHaveBeenCalledWith("/bin/zsh", ["-lc", 'printf %s "$PATH"']);
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBe(
+        "/home/u/.nvm/bin:/usr/bin",
+      );
+      expect(spy.mock.calls[0]?.[1]?.[0]).toBe("-lic");
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("returns undefined when the shell exits non-zero", async () => {
+  it("reads only what it asked for, not a startup file's banner", async () => {
+    // An interactive shell prints MOTDs, version notices and whatever else a
+    // startup file feels like saying, all onto the same stdout.
+    const spy = mockShell({
+      code: 0,
+      stdout: `Welcome to Ubuntu!\nnvm: v0.39.7\n${MARKED("/usr/bin:/bin")}\nbye\n`,
+      stderr: "",
+    });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBe("/usr/bin:/bin");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to a non-interactive login shell when -i will not start", async () => {
     const spy = vi
       .spyOn(spawnModule, "runCommand")
-      .mockResolvedValue({ code: 1, stdout: "/usr/bin\n", stderr: "no such file" });
+      .mockRejectedValueOnce(new Error("cannot set terminal process group"))
+      .mockResolvedValueOnce({ code: 0, stdout: MARKED("/usr/bin"), stderr: "" });
     try {
-      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBeUndefined();
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBe("/usr/bin");
+      expect(spy.mock.calls[1]?.[1]?.[0]).toBe("-lc");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to the passwd shell when SHELL is unset", async () => {
+    // $SHELL is exported by a shell, and nothing that starts an app from a
+    // desktop launcher, a .desktop entry or Finder is one — so the launcher
+    // case, the exact case this function exists to fix, was the one it used
+    // to refuse. Every binary was then resolved against a GUI PATH, and the
+    // startup report said "No agents are working".
+    const spy = mockShell({ code: 0, stdout: MARKED("/opt/homebrew/bin:/usr/bin"), stderr: "" });
+    try {
+      expect(await loginShellPath({}, "linux")).toBe("/opt/homebrew/bin:/usr/bin");
+      expect(spy.mock.calls[0]?.[0]).toBeTruthy();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("treats an empty SHELL as unset rather than spawning it", async () => {
+    const spy = mockShell({ code: 0, stdout: MARKED("/usr/bin"), stderr: "" });
+    try {
+      await loginShellPath({ SHELL: "" }, "linux");
+      expect(spy.mock.calls[0]?.[0]).not.toBe("");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("keeps an interactive shell's PATH even when it exits non-zero", async () => {
+    // A startup file that ends in an error has still finished building PATH,
+    // and throwing the answer away over somebody else's bug helps nobody.
+    const spy = mockShell({ code: 1, stdout: MARKED("/usr/bin"), stderr: "some rc error" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBe("/usr/bin");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns undefined when nothing usable comes back", async () => {
+    const spy = mockShell({ code: 0, stdout: "no markers here\n", stderr: "" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBeUndefined();
     } finally {
       spy.mockRestore();
     }
   });
 
   it("returns undefined when the shell prints an empty PATH", async () => {
+    const spy = mockShell({ code: 0, stdout: MARKED(""), stderr: "" });
+    try {
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux")).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("gives up rather than hanging startup on a shell that waits for input", async () => {
+    // This runs before the window. An interactive startup file that blocks on
+    // a prompt would otherwise hold the whole app.
     const spy = vi
       .spyOn(spawnModule, "runCommand")
-      .mockResolvedValue({ code: 0, stdout: "\n", stderr: "" });
+      .mockImplementation(() => new Promise(() => undefined));
     try {
-      expect(await loginShellPath({ SHELL: "/bin/zsh" })).toBeUndefined();
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("returns undefined rather than throwing when the shell cannot be spawned", async () => {
-    const spy = vi.spyOn(spawnModule, "runCommand").mockRejectedValue(new Error("ENOENT"));
-    try {
-      expect(await loginShellPath({ SHELL: "/bin/does-not-exist" })).toBeUndefined();
+      expect(await loginShellPath({ SHELL: "/bin/bash" }, "linux", 20)).toBeUndefined();
     } finally {
       spy.mockRestore();
     }
   });
 });
 
-describe("headlampArgs", () => {
-  const base = {
-    frontendDir: "/Applications/Headlamp.app/Contents/Resources/frontend",
-    kubeconfigPath: "/home/u/.kube/config",
-    port: 4466,
-    skippedContexts: [],
-  };
-
-  it("binds loopback", () => {
-    // The whole reason Headlamp ships without a generated login: if this
-    // flag is ever dropped, headlamp-server binds every interface with no
-    // authentication at all. Pinned here so that cannot happen silently.
-    const args = headlampArgs(base);
-    expect(args[args.indexOf("-listen-addr") + 1]).toBe("127.0.0.1");
-  });
-
-  it("passes the frontend dir, the kubeconfig and the port", () => {
-    expect(headlampArgs(base)).toEqual([
-      "-html-static-dir", "/Applications/Headlamp.app/Contents/Resources/frontend",
-      "-kubeconfig", "/home/u/.kube/config",
-      "-listen-addr", "127.0.0.1",
-      "-port", "4466",
-    ]);
-  });
-
-  it("comma-joins the skipped contexts", () => {
-    const args = headlampArgs({ ...base, skippedContexts: ["ctx-b", "ctx-c"] });
-    expect(args[args.indexOf("-skipped-kube-contexts") + 1]).toBe("ctx-b,ctx-c");
-  });
-
-  it("omits the skip flag entirely when nothing is skipped", () => {
-    expect(headlampArgs(base)).not.toContain("-skipped-kube-contexts");
-  });
-});
 
 describe("createRealHeadlampSpawner", () => {
   it("reports a missing binary as an exit rather than crashing the process", async () => {

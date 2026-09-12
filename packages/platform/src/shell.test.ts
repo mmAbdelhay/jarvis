@@ -230,24 +230,49 @@ describe("shellEnv", () => {
 });
 
 describe("shellCommand", () => {
+  // The passwd lookup is injected so these stay true on any machine.
+  const passwd = (value: string | undefined) => () => value;
+
   it("uses $SHELL when the user has one", () => {
     expect(shellCommand({ SHELL: "/usr/bin/fish" }, "linux")).toBe("/usr/bin/fish");
     expect(shellCommand({ SHELL: "/usr/bin/fish" }, "darwin")).toBe("/usr/bin/fish");
   });
 
+  it("reads the passwd entry when $SHELL is unset", () => {
+    // $SHELL is exported by a shell, and nothing that starts an app from a
+    // desktop launcher, a .desktop entry or Finder is one — so a
+    // launcher-started Jarvis has no $SHELL at all. The user still has a
+    // login shell; it is in their passwd entry.
+    //
+    // This is not cosmetic. loginShellPath asks this shell for the real PATH,
+    // and without it every binary is resolved against a GUI PATH of
+    // /usr/bin:/bin — which is how the Editor, Database, Cluster and Docker
+    // tabs all failed on a machine where those binaries were installed, and
+    // why the startup report said "No agents are working".
+    expect(shellCommand({}, "linux", passwd("/usr/bin/fish"))).toBe("/usr/bin/fish");
+    expect(shellCommand({}, "darwin", passwd("/bin/zsh"))).toBe("/bin/zsh");
+  });
+
+  it("prefers $SHELL over the passwd entry when both are there", () => {
+    // A user who exported a different shell for this session means it.
+    expect(shellCommand({ SHELL: "/usr/bin/fish" }, "linux", passwd("/bin/bash"))).toBe(
+      "/usr/bin/fish",
+    );
+  });
+
   it("falls back to zsh on macOS, its default since Catalina", () => {
-    expect(shellCommand({}, "darwin")).toBe("/bin/zsh");
+    expect(shellCommand({}, "darwin", passwd(undefined))).toBe("/bin/zsh");
   });
 
   it("falls back to bash on Linux, where zsh is often not installed at all", () => {
     // A missing /bin/zsh is not a degraded terminal, it is no terminal: the
     // pty spawn fails and the tab shows nothing.
-    expect(shellCommand({}, "linux")).toBe("/bin/bash");
+    expect(shellCommand({}, "linux", passwd(undefined))).toBe("/bin/bash");
   });
 
-  it("treats an empty $SHELL as unset", () => {
-    expect(shellCommand({ SHELL: "" }, "linux")).toBe("/bin/bash");
-    expect(shellCommand({ SHELL: "" }, "darwin")).toBe("/bin/zsh");
+  it("treats an empty $SHELL, and an empty passwd shell, as unset", () => {
+    expect(shellCommand({ SHELL: "" }, "linux", passwd(""))).toBe("/bin/bash");
+    expect(shellCommand({ SHELL: "" }, "darwin", passwd(undefined))).toBe("/bin/zsh");
   });
 });
 

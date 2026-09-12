@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { userInfo } from "node:os";
 import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 
@@ -130,10 +131,34 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
  * does not exist is not a degraded terminal, it is a pty that fails to spawn
  * and a tab that shows nothing.
  */
-export function shellCommand(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+export function shellCommand(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  fromPasswd: () => string | undefined = passwdShell,
+): string {
   const shell = env["SHELL"];
   if (shell !== undefined && shell !== "") return shell;
+
+  // $SHELL is not always set. A process started by a desktop launcher, a
+  // .desktop entry or Finder frequently has no SHELL at all — it is exported
+  // by the shell, and no shell was involved in starting it. The user still
+  // has a login shell; it is in their passwd entry, which is where this looks
+  // before falling back to a platform guess.
+  const passwd = fromPasswd();
+  if (passwd !== undefined && passwd !== "") return passwd;
+
   return platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
+/** The current user's login shell from the passwd database, or undefined if
+ *  it cannot be read. Node reads this without spawning anything. */
+export function passwdShell(): string | undefined {
+  try {
+    const shell = userInfo().shell;
+    return shell === null ? undefined : shell;
+  } catch {
+    return undefined;
+  }
 }
 
 export type ShellIntegration = {

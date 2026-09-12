@@ -326,7 +326,7 @@ app.whenReady().then(async () => {
     // by awaiting this promise, which it can afford because its own line is
     // already deferred behind the greeting.
     let agentEnv: NodeJS.ProcessEnv = process.env;
-    const agentEnvReady = loginShellPath()
+    const agentEnvReady = loginShellPath(process.env, process.platform)
       .then((path) => {
         if (path !== undefined) agentEnv = { ...process.env, PATH: path };
       })
