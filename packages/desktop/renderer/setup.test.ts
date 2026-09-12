@@ -181,3 +181,20 @@ describe("the setup overlay", () => {
     expect(() => closeSetup()).not.toThrow();
   });
 });
+
+describe("a tool with no package at all", () => {
+  it("offers to open the page rather than to run a URL in a terminal", async () => {
+    // Two different things land in this slot — a package-manager command and
+    // a documentation page — and telling someone to run a URL in a terminal
+    // is how a reader learns to stop reading the instructions.
+    const { bridge } = harness([
+      status({ id: "whisper", manual: "https://github.com/ggerganov/whisper.cpp" }),
+      status({ id: "ffmpeg", manual: "sudo apt install ffmpeg" }),
+    ]);
+    await openSetup(bridge);
+
+    const labels = [...document.querySelectorAll(".setup-row__copy")].map((b) => b.textContent);
+    expect(labels[0]).toMatch(/open/i);
+    expect(labels[1]).toMatch(/terminal/i);
+  });
+});

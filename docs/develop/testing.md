@@ -50,6 +50,11 @@ green suite did not:
 - The hotkey under Wayland against X11.
 - DRM playback in the Personal browser.
 - Recording through PulseAudio and through PipeWire's shim.
+- That every formula, cask, winget id and release asset in the prerequisite
+  catalogue still resolves upstream. The suite proves the catalogue's shape —
+  that nothing runnable needs root, that every tool has a detection, that a
+  voice downloads both its files — and can prove nothing about whether
+  `brew install whisper-cpp` still names a real formula a year from now.
 
 **jsdom is not a browser, and Electron is not jsdom.** `window.prompt` exists
 in jsdom and throws in Electron. Every create and rename in the API tab did

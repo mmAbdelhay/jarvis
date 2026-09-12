@@ -50,6 +50,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
   document.body.innerHTML = `
     <div id="settings-status"></div>
     <button id="settings-restart" hidden></button>
+    <button id="settings-tools"></button>
     <button id="settings-save"></button>
     <button id="settings-agent-add"></button>
     <div id="settings-agents"></div>

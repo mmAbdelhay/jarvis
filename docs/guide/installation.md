@@ -31,6 +31,33 @@ file that works declares one agent and an empty brain — see
 **[SETUP.md](../../SETUP.md)** for it, and [configuration](configuration.md)
 for everything else.
 
+## Jarvis installs these for you
+
+On its first run — and on any launch where the agent CLI is missing — Jarvis
+shows a setup screen listing every tool below, what each one unlocks, and
+whether this machine has it. Tick what you want and press install.
+
+Two things it will not do. It never installs anything until you press the
+button, and it never runs a command that needs root: those rows show the exact
+line for the package manager you actually have, with a copy button. Jarvis
+does not ask for your password.
+
+From a clone, the same thing without the window:
+
+```bash
+pnpm prereqs              # report only
+pnpm prereqs --all        # install everything that needs no root
+pnpm prereqs --only=piper,voice-en
+```
+
+(`pnpm prereqs`, not `pnpm setup` — that name is a pnpm builtin which
+configures pnpm's own home directory and would shadow the script.)
+
+Detection asks the **login shell's** PATH, which is the same PATH Jarvis
+resolves its sidecars against. A tool installed under nvm is visible to an
+interactive shell and not to a GUI process, so a check against anything else
+would tick a box for a tool the app then could not find.
+
 ## What each optional tool unlocks
 
 Jarvis works without all of these; each one is missing only the feature it

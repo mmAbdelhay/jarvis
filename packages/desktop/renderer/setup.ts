@@ -179,12 +179,18 @@ function row(
     manual.className = "setup-row__manual";
     const command = document.createElement("code");
     command.textContent = status.manual;
+    // A page is opened, a command is copied. Offering to "run" a URL in a
+    // terminal is an instruction that does not work.
+    const isPage = status.manual.startsWith("http");
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "setup-row__copy";
-    copy.textContent = MESSAGES.setupCopyHint(language);
+    copy.textContent = isPage
+      ? MESSAGES.setupOpenHint(language)
+      : MESSAGES.setupCopyHint(language);
     copy.addEventListener("click", () => {
-      void navigator.clipboard?.writeText(status.manual ?? "");
+      if (isPage) window.open(status.manual, "_blank");
+      else void navigator.clipboard?.writeText(status.manual ?? "");
     });
     manual.append(command, copy);
     text.append(manual);

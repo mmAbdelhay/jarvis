@@ -73,8 +73,14 @@ export const MESSAGES = {
   setupInstalled: (language: "ar" | "en"): string => (language === "ar" ? "مثبَّت" : "Installed"),
   setupUnavailable: (language: "ar" | "en"): string =>
     language === "ar" ? "غير متاح على هذا النظام" : "Not available on this platform",
+  // Two different things end up in this slot: a command for a package
+  // manager, and a page for a tool that has no package. Labelling a URL "run
+  // this in a terminal" is wrong, and wrong instructions are how a reader
+  // learns to stop reading them.
   setupCopyHint: (language: "ar" | "en"): string =>
     language === "ar" ? "شغِّل هذا في الطرفية" : "Run this in a terminal",
+  setupOpenHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح هذه الصفحة" : "Open this page",
   setupInstallCount: (count: number, language: "ar" | "en"): string =>
     language === "ar" ? `ثبِّت ${arabicToolsCount(count)}` : `Install ${count} selected`,
   setupInstalling: (language: "ar" | "en"): string =>

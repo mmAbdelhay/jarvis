@@ -89,7 +89,11 @@ chmod +x Jarvis-*.AppImage
   them.
 
 Jarvis writes `~/.config/jarvis/jarvis.yaml` on first run and opens with it,
-so there is nothing to set up before the first launch. It will report the
+so there is nothing to set up before the first launch. It also shows a setup
+screen naming the external tools it can use, what each unlocks, and whether
+you have it — installing the ones you tick. Nothing installs until you press
+the button, and nothing needing root is ever run: those are shown as a command
+to copy. It will report the
 agent it cannot find until you install one — see
 **[installation](docs/guide/installation.md)** for the external tools each
 Workspace tab wants, all of them optional except the agent CLI itself.
@@ -149,6 +153,7 @@ tools each Workspace tab needs.
 | `pnpm test` | the whole suite |
 | `pnpm typecheck` | `tsc -b` across the workspace |
 | `pnpm bootstrap` | fetch the Electron binary, build node-pty |
+| `pnpm prereqs` | report the external tools; `--all` installs them |
 | `pnpm --filter @jarvis/desktop build` | compile and copy vendored assets |
 | `pnpm --filter @jarvis/desktop start` | build, then run |
 | `pnpm --filter @jarvis/desktop package` | package for this platform |
