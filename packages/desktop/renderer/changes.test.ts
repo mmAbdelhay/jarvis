@@ -26,6 +26,10 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     // The tests in this file exercise the Changes route, which has no
     // chords of its own; darwin keeps them reading as they always have.
     platform: "darwin",
+    firstRun: false,
+    checkPrerequisites: vi.fn(async () => []),
+    installPrerequisite: vi.fn(async () => ({ ok: true })),
+    onInstallOutput: vi.fn(),
     send: vi.fn(async () => {}),
     startVoice: vi.fn(async () => {}),
     stopVoice: vi.fn(async () => {}),

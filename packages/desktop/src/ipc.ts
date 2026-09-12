@@ -21,6 +21,13 @@ import {
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import {
+  checkPrerequisites,
+  installFor,
+  runInstall,
+  type InstallDeps,
+  type PrerequisiteStatus,
+} from "@jarvis/platform";
+import {
   awsLoginCommand,
   chatUrl,
   eksUpdateKubeconfigArgs,
@@ -308,6 +315,12 @@ export type RendererApi = {
    *  rather than an invoke, because it cannot change while the app runs and
    *  every keystroke would otherwise pay for an IPC round trip. */
   platform: NodeJS.Platform;
+  /** True when this launch created the config file — the first run. The setup
+   *  screen opens itself for it, and for a missing required prerequisite. */
+  firstRun: boolean;
+  checkPrerequisites(): Promise<PrerequisiteStatus[]>;
+  installPrerequisite(id: string): Promise<{ ok: boolean; detail?: string }>;
+  onInstallOutput(cb: (chunk: string) => void): void;
   send(text: string, language: "ar" | "en"): Promise<void>;
   // Drives the exact same start/stop path as the Alt+Space / Alt+Shift+Space
   // global hotkey — the renderer's mic button is a second control on one
@@ -739,6 +752,62 @@ function reportSidecarFailure(what: string, reason: unknown): void {
         ? reason.message
         : JSON.stringify(reason);
   console.error(`[${what}] ${detail}`);
+}
+
+
+/**
+ * The first-run screen's two questions: what is missing, and please install
+ * this one.
+ *
+ * `env` is a getter, not a value. The login shell's PATH arrives after
+ * startup, and detection run against the pre-answer environment would report
+ * every tool missing — then offer to install things the machine already has.
+ * Same reason the sidecar spawners take one.
+ */
+export type SetupHandlers = {
+  check(): Promise<PrerequisiteStatus[]>;
+  install(id: unknown): Promise<{ ok: boolean; detail?: string }>;
+};
+
+export type SetupHandlerDeps = {
+  platform: NodeJS.Platform;
+  arch: string;
+  env: () => NodeJS.ProcessEnv;
+  home: string;
+  fileExists: (path: string) => boolean;
+  installDeps: (onOutput: (chunk: string) => void) => InstallDeps;
+  onOutput: (chunk: string) => void;
+};
+
+export function createSetupHandlers(deps: SetupHandlerDeps): SetupHandlers {
+  const check = async (): Promise<PrerequisiteStatus[]> =>
+    checkPrerequisites({
+      platform: deps.platform,
+      arch: deps.arch,
+      env: deps.env(),
+      home: deps.home,
+      fileExists: deps.fileExists,
+    });
+
+  return {
+    check,
+    async install(id) {
+      const statuses = await check();
+      const status = statuses.find((candidate) => candidate.id === id);
+      // Refused rather than attempted for anything the check did not mark
+      // installable — a manual step, an already-installed tool, or an id the
+      // renderer made up. The renderer is not trusted to have read its own
+      // checkboxes correctly.
+      if (status === undefined || !status.installable) {
+        return { ok: false, detail: "not installable" };
+      }
+
+      const step = installFor(status.id, deps.platform, deps.arch);
+      if (step === undefined) return { ok: false, detail: "no install for this platform" };
+
+      return runInstall(step, deps.installDeps(deps.onOutput));
+    },
+  };
 }
 
 export type EditorHandlers = {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PREREQUISITES } from "@jarvis/platform";
 import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
@@ -359,5 +360,41 @@ describe("MESSAGES.hotkeyUnavailableWayland", () => {
     const text = MESSAGES.hotkeyUnavailableWayland("Alt+Space", "en");
     expect(text).toMatch(/microphone/i);
     expect(text).not.toMatch(/another app/i);
+  });
+});
+
+describe("prerequisite wording", () => {
+  it("names every catalogue entry in both languages", () => {
+    // Derived from the catalogue rather than a hand-written list, so a tool
+    // cannot be added without its wording — which is how an English-only
+    // string lane grows back.
+    for (const prerequisite of PREREQUISITES) {
+      for (const language of ["en", "ar"] as const) {
+        expect(MESSAGES.prerequisiteName(prerequisite.id, language)).not.toBe("");
+        expect(MESSAGES.prerequisiteUnlocks(prerequisite.id, language)).not.toBe("");
+      }
+    }
+  });
+
+  it("writes the Arabic line in Arabic", () => {
+    // A table with both columns filled from English is the failure this rule
+    // exists to prevent, and it looks complete until someone reads it.
+    for (const prerequisite of PREREQUISITES) {
+      expect(MESSAGES.prerequisiteUnlocks(prerequisite.id, "ar")).toMatch(/[؀-ۿ]/);
+    }
+  });
+
+  it("counts tools the way Arabic counts them", () => {
+    // Singular, dual, then the small-number plural — the same split
+    // arabicFilesCount and arabicSessionsCount already make.
+    expect(MESSAGES.setupInstallCount(1, "ar")).toContain("واحدة");
+    expect(MESSAGES.setupInstallCount(2, "ar")).toContain("أداتين");
+    expect(MESSAGES.setupInstallCount(3, "ar")).toContain("أدوات");
+    expect(MESSAGES.setupInstallCount(3, "en")).toBe("Install 3 selected");
+  });
+
+  it("says plainly that Windows is not supported yet", () => {
+    expect(MESSAGES.setupWindowsUnsupported("en")).toMatch(/not run on Windows/i);
+    expect(MESSAGES.setupWindowsUnsupported("ar")).toMatch(/[؀-ۿ]/);
   });
 });

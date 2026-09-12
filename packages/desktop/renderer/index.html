@@ -675,6 +675,25 @@
   </div>
 
 </div>
+    <!-- The first-run prerequisites screen. An overlay, not a route: no nav
+         button, and Skip closes it for good. Never a gate — the app is behind
+         it and working. See renderer/setup.ts. -->
+    <div id="setup-overlay" class="setup-overlay" hidden>
+      <div class="setup-panel">
+        <div class="setup-panel__head">
+          <h2 id="setup-title" class="setup-panel__title">Jarvis needs a few tools</h2>
+          <button id="setup-skip" class="setup-panel__skip" type="button">Skip</button>
+        </div>
+        <p id="setup-intro" class="setup-panel__intro"></p>
+        <p id="setup-notice" class="setup-panel__notice" hidden></p>
+        <div id="setup-list" class="setup-list"></div>
+        <pre id="setup-output" class="setup-output" hidden></pre>
+        <div class="setup-panel__foot">
+          <button id="setup-install" class="setup-panel__install" type="button">Install</button>
+        </div>
+      </div>
+    </div>
+
 <script type="module" src="../dist/renderer/app.js"></script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+import { initSetup, openSetupIfNeeded } from "./setup.js";
 import { hostPlatform, keyLabel } from "./keys.js";
 import type {
   Session,
@@ -153,6 +154,13 @@ window.jarvis.onSessionOutput((output) => appendSessionOutput(output));
 
 startClock();
 labelShortcuts();
+
+// The first-run prerequisites screen. Opens on a first run, and on any launch
+// where the required agent CLI is missing — an app with no agent has nothing
+// to offer, and finding that out one failed session at a time is the
+// experience this replaces. See renderer/setup.ts.
+initSetup(window.jarvis);
+void openSetupIfNeeded(window.jarvis, window.jarvis.firstRun).catch(() => undefined);
 applyStaticChrome();
 wireComposer();
 wireMicButton();

@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
+import { createSetupHandlers } from "./ipc.js";
 import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import {
   AgentRegistry,
@@ -283,7 +284,10 @@ app.whenReady().then(async () => {
     // this, loadConfig throws ENOENT and the handler at the bottom of this
     // block turns it into "Jarvis failed to start" — which is what every
     // downloaded build did, on every machine but the one it was built on.
-    await ensureConfigFile(DEFAULT_CONFIG_PATH);
+    // Whether this launch created the config file. The first-run setup screen
+    // opens for it — and for a missing required prerequisite, which is the
+    // other way a machine can have nothing to run an agent with.
+    const firstRun = await ensureConfigFile(DEFAULT_CONFIG_PATH);
     const config = await loadConfig();
     const registry = new AgentRegistry(config.registry);
 
@@ -579,6 +583,9 @@ app.whenReady().then(async () => {
       icon: iconPath("icon.png"),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
+        // argv rather than an IPC call, because the renderer needs it while
+        // it is deciding what to draw, before any round trip could answer.
+        additionalArguments: firstRun ? ["--jarvis-first-run"] : [],
         // This renderer displays untrusted agent output and holds
         // `window.jarvis.send`. These already match Electron 44's implicit
         // defaults; stated explicitly so a future edit that weakens them
@@ -682,6 +689,75 @@ app.whenReady().then(async () => {
       env: process.env,
       randomPassword,
     });
+    // The first-run prerequisites screen. `env` is the getter for the same
+    // reason the sidecars take one: the login shell's PATH arrives after
+    // startup, and checking against the pre-answer environment would report
+    // every tool missing and offer to install what is already there.
+    const setup = createSetupHandlers({
+      platform: process.platform,
+      arch: process.arch,
+      env,
+      home: homedir(),
+      fileExists: (path) => existsSync(path),
+      onOutput: (chunk) => window.webContents.send("setup:output", chunk),
+      installDeps: (onOutput) => ({
+        onOutput,
+        home: homedir(),
+        run: (command, args, emit) =>
+          new Promise<number>((resolve) => {
+            const child = spawn(command, [...args], {
+              stdio: ["ignore", "pipe", "pipe"],
+              env: env(),
+            });
+            for (const stream of [child.stdout, child.stderr]) {
+              stream?.setEncoding("utf8");
+              stream?.on("data", (chunk: string) => emit(chunk));
+            }
+            // A missing binary arrives as an async "error", not a throw.
+            child.on("error", (error) => {
+              emit(`${error.message}\n`);
+              resolve(1);
+            });
+            child.on("close", (code) => resolve(code ?? 1));
+          }),
+        download: async (url, dest) => {
+          await mkdir(dirname(dest), { recursive: true });
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+          await writeFile(dest, Buffer.from(await response.arrayBuffer()));
+        },
+        extract: async (url, dest) => {
+          await mkdir(dest, { recursive: true });
+          const archive = join(dest, basename(new URL(url).pathname));
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+          await writeFile(archive, Buffer.from(await response.arrayBuffer()));
+          // tar is on every macOS and Linux, and on Windows since 1803.
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn("tar", ["-xf", archive, "-C", dest], { stdio: "ignore" });
+            child.on("error", reject);
+            child.on("close", (code) =>
+              code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`)),
+            );
+          });
+          await rm(archive, { force: true });
+          return dest;
+        },
+        link: async (from, to) => {
+          await mkdir(dirname(to), { recursive: true });
+          await rm(to, { force: true });
+          await symlink(from, to);
+        },
+        locate: async (command) => {
+          const { code, stdout } = await runCommand("sh", ["-lc", `command -v ${command}`], env());
+          const found = stdout.trim();
+          return code === 0 && found !== "" ? found : undefined;
+        },
+      }),
+    });
+    ipcMain.handle("setup:check", () => setup.check());
+    ipcMain.handle("setup:install", (_event, id: unknown) => setup.install(id));
+
     const database = createDatabaseHandlers({
       dbgate,
       projects: config.projects,

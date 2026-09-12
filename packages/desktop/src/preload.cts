@@ -3,6 +3,14 @@ import type { RendererApi } from "./ipc.js";
 
 const api: RendererApi = {
   platform: process.platform,
+  // Set by main before the renderer loads — see ensureConfigFile, which
+  // reports whether this launch created the config file.
+  firstRun: process.argv.includes("--jarvis-first-run"),
+  checkPrerequisites: () => ipcRenderer.invoke("setup:check"),
+  installPrerequisite: (id) => ipcRenderer.invoke("setup:install", id),
+  onInstallOutput: (cb) => {
+    ipcRenderer.on("setup:output", (_e, chunk) => cb(chunk));
+  },
   send: (text, language) => ipcRenderer.invoke("input:send", text, language),
   startVoice: () => ipcRenderer.invoke("voice:start"),
   stopVoice: () => ipcRenderer.invoke("voice:stop"),
