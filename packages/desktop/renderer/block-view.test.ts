@@ -4,14 +4,27 @@ import { describe, expect, it, vi } from "vitest";
 import { createBlockView } from "./block-view.js";
 
 const record = (over: Partial<Parameters<typeof createBlockView>[0]> = {}) => ({
-  id: 1, command: "pnpm test", output: "42 passed\r\n", exitCode: 0,
-  startedAt: 1000, endedAt: 3400, cwd: "/Users/x/projects/jarvis", truncated: false, ...over,
+  id: 1,
+  command: "pnpm test",
+  output: "42 passed\r\n",
+  exitCode: 0,
+  startedAt: 1000,
+  endedAt: 3400,
+  cwd: "/Users/x/projects/jarvis",
+  truncated: false,
+  ...over,
 });
 
 // The brief's hooks() omits `home`, which the header needs to collapse
 // `$HOME` to `~` (see the task's Decisions Already Made). Fixed here rather
 // than in the assertion it exists to satisfy. `filterToCommand` is Task 7's.
-const hooks = () => ({ cols: 80, fill: vi.fn(), copy: vi.fn(), home: "/Users/x", filterToCommand: vi.fn() });
+const hooks = () => ({
+  cols: 80,
+  fill: vi.fn(),
+  copy: vi.fn(),
+  home: "/Users/x",
+  filterToCommand: vi.fn(),
+});
 
 describe("a block", () => {
   it("shows the command, its status, its duration and where it ran", () => {
@@ -140,7 +153,9 @@ describe("a block", () => {
     const h = hooks();
     const view = createBlockView(record({ command: "rm -rf build" }), h);
     view.element.click();
-    view.element.querySelector(".block-command")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    view.element
+      .querySelector(".block-command")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(h.fill).not.toHaveBeenCalled();
   });
 
@@ -194,7 +209,10 @@ describe("a block", () => {
   });
 
   it("leaves the cwd unchanged when home is empty", () => {
-    const view = createBlockView(record({ cwd: "/Users/x/projects/jarvis" }), { ...hooks(), home: "" });
+    const view = createBlockView(record({ cwd: "/Users/x/projects/jarvis" }), {
+      ...hooks(),
+      home: "",
+    });
     const header = view.element.querySelector(".block-header")?.textContent ?? "";
     expect(header).toContain("/Users/x/projects/jarvis");
   });

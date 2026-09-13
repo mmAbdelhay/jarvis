@@ -26,9 +26,9 @@ export type ReadableBuffer = {
   cursorY: number;
   /** The absolute row the viewport starts at. */
   baseY: number;
-  getLine(y: number):
-    | { translateToString(trimRight?: boolean, start?: number, end?: number): string }
-    | undefined;
+  getLine(
+    y: number,
+  ): { translateToString(trimRight?: boolean, start?: number, end?: number): string } | undefined;
 };
 
 export type PromptTracker = {

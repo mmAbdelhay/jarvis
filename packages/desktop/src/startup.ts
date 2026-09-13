@@ -14,8 +14,7 @@ import type { AgentHealth, AgentRegistry, CommandRunner, ProviderStatus } from "
  * than guessing on their behalf — one command either way, and this one is
  * right everywhere.
  */
-const REPAIR_HINT =
-  'Repair with: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"';
+const REPAIR_HINT = 'Repair with: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"';
 
 export async function startupReport(
   registry: AgentRegistry,
@@ -53,9 +52,6 @@ export async function startupReport(
  * Returns "" when no account produced a reading, and the caller then sends
  * no turn at all rather than announcing that it knows nothing.
  */
-export function capacityReport(
-  statuses: readonly ProviderStatus[],
-  language: "ar" | "en",
-): string {
+export function capacityReport(statuses: readonly ProviderStatus[], language: "ar" | "en"): string {
   return capacityReportText(statuses, language);
 }

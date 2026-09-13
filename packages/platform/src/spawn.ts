@@ -17,7 +17,9 @@ export function runCommand(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const target =
-      platform === undefined ? { file: command, args: [...args] } : spawnTarget(command, args, env, platform);
+      platform === undefined
+        ? { file: command, args: [...args] }
+        : spawnTarget(command, args, env, platform);
     const child = spawn(target.file, target.args, {
       stdio: ["ignore", "pipe", "pipe"],
       env,
@@ -26,8 +28,12 @@ export function runCommand(
     let stdout = "";
     let stderr = "";
 
-    child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+    child.stdout.on("data", (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.stderr.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
     child.on("error", reject);
     child.on("close", (code, signal) => {
       resolve({ code: exitCodeFor(code, signal), stdout, stderr });
@@ -109,9 +115,15 @@ export function createSpawner(
     child.stdin.on("error", () => {});
 
     return {
-      write: (data: string) => { child.stdin.write(data); },
-      kill: () => { child.kill(); },
-      onOutput: (listener) => { outputListeners.push(listener); },
+      write: (data: string) => {
+        child.stdin.write(data);
+      },
+      kill: () => {
+        child.kill();
+      },
+      onOutput: (listener) => {
+        outputListeners.push(listener);
+      },
       onExit: (listener) => {
         if (exited && exitCode !== undefined) {
           listener(exitCode);

@@ -9,7 +9,9 @@ account; nothing is assumed.
   and run. What differs on Windows — the PowerShell terminal, the chords, the
   voice, and the Editor tab, which has no Windows build — is collected under
   "On Windows" in [installation](docs/guide/installation.md#on-windows).
-- **Node 22 or newer** — `node --version` to check.
+- **Node 24 or newer** — `node --version` to check. Not 22: the session
+  store is built on `node:sqlite`, which Node 22 does not carry, and the test
+  suite does not load without it.
 - **pnpm** — the version is pinned in the repo, so let corepack pick it:
 
 ```bash

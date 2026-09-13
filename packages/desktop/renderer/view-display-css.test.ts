@@ -30,10 +30,7 @@ import { describe, expect, it } from "vitest";
 // must not set `display` in their base rule, and the only rules that set
 // `display` for them must be gated on `:not([hidden])`, a selector that by
 // construction can never match while `hidden` is present.
-const htmlSource = readFileSync(
-  fileURLToPath(new URL("./styles.css", import.meta.url)),
-  "utf8",
-);
+const htmlSource = readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
 
 function ruleBodyFor(selector: string, source: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -78,55 +75,55 @@ describe(".main / .main--changes [hidden] cascade", () => {
     expect(body).toMatch(/display\s*:\s*flex/);
   });
 });
-  it("never sets display on .main--workspace outside a :not([hidden]) rule", () => {
-    const rules = [...htmlSource.matchAll(/\.main--workspace[^{]*\{[^}]*\}/g)].map((m) => m[0]);
-    expect(rules.length).toBeGreaterThan(0);
-    for (const rule of rules) {
-      if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
-    }
-  });
+it("never sets display on .main--workspace outside a :not([hidden]) rule", () => {
+  const rules = [...htmlSource.matchAll(/\.main--workspace[^{]*\{[^}]*\}/g)].map((m) => m[0]);
+  expect(rules.length).toBeGreaterThan(0);
+  for (const rule of rules) {
+    if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
+  }
+});
 
-  it("never sets display on .main--settings outside a :not([hidden]) rule", () => {
-    const rules = [...htmlSource.matchAll(/\.main--settings[^{]*\{[^}]*\}/g)].map((m) => m[0]);
-    expect(rules.length).toBeGreaterThan(0);
-    for (const rule of rules) {
-      if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
-    }
-  });
+it("never sets display on .main--settings outside a :not([hidden]) rule", () => {
+  const rules = [...htmlSource.matchAll(/\.main--settings[^{]*\{[^}]*\}/g)].map((m) => m[0]);
+  expect(rules.length).toBeGreaterThan(0);
+  for (const rule of rules) {
+    if (/display\s*:/.test(rule)) expect(rule).toContain(":not([hidden])");
+  }
+});
 
-  // Found live, twice: (1) renderWorkspace() set #workspace-bar's `hidden`
-  // property for an editor-kind tab, but the base .workspace-bar rule set
-  // `display: flex` unconditionally with no [hidden] override — an author
-  // rule, which always beats the UA's [hidden]{display:none} regardless of
-  // specificity, so the address bar stayed visible no matter what the JS
-  // did. (2) Fixed by splitting the row so only back/forward/reload/
-  // address hid, keeping "+" (open a new tab) reachable — but the user
-  // then asked for "+" to sit at the end of the tab strip instead, which
-  // makes the split unnecessary: "+" moved out of this row entirely
-  // (workspace.ts relocates the existing button into #workspace-tabs on
-  // every render), so hiding the *whole* .workspace-bar row is safe again.
-  // This test pins the final shape's override.
-  it("overrides display for .workspace-bar when hidden is present", () => {
-    const rules = [...htmlSource.matchAll(/\.workspace-bar(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
-      (m) => m[0],
-    );
-    const hasOverride = rules.some(
-      (rule) => rule.startsWith(".workspace-bar[hidden]") && /display\s*:\s*none/.test(rule),
-    );
-    expect(hasOverride).toBe(true);
-  });
+// Found live, twice: (1) renderWorkspace() set #workspace-bar's `hidden`
+// property for an editor-kind tab, but the base .workspace-bar rule set
+// `display: flex` unconditionally with no [hidden] override — an author
+// rule, which always beats the UA's [hidden]{display:none} regardless of
+// specificity, so the address bar stayed visible no matter what the JS
+// did. (2) Fixed by splitting the row so only back/forward/reload/
+// address hid, keeping "+" (open a new tab) reachable — but the user
+// then asked for "+" to sit at the end of the tab strip instead, which
+// makes the split unnecessary: "+" moved out of this row entirely
+// (workspace.ts relocates the existing button into #workspace-tabs on
+// every render), so hiding the *whole* .workspace-bar row is safe again.
+// This test pins the final shape's override.
+it("overrides display for .workspace-bar when hidden is present", () => {
+  const rules = [...htmlSource.matchAll(/\.workspace-bar(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
+    (m) => m[0],
+  );
+  const hasOverride = rules.some(
+    (rule) => rule.startsWith(".workspace-bar[hidden]") && /display\s*:\s*none/.test(rule),
+  );
+  expect(hasOverride).toBe(true);
+});
 
-  // The bookmarks sidebar is browser chrome hidden by the same rule as the
-  // address bar, so it inherits the address bar's footgun: it is a flex
-  // column, and an unconditional `display: flex` is an author rule that
-  // beats the UA's [hidden]{display:none} no matter what renderWorkspace
-  // sets. Without this override the sidebar would sit over an editor tab.
-  it("overrides display for .workspace-bookmarks when hidden is present", () => {
-    const rules = [...htmlSource.matchAll(/\.workspace-bookmarks(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
-      (m) => m[0],
-    );
-    const hasOverride = rules.some(
-      (rule) => rule.startsWith(".workspace-bookmarks[hidden]") && /display\s*:\s*none/.test(rule),
-    );
-    expect(hasOverride).toBe(true);
-  });
+// The bookmarks sidebar is browser chrome hidden by the same rule as the
+// address bar, so it inherits the address bar's footgun: it is a flex
+// column, and an unconditional `display: flex` is an author rule that
+// beats the UA's [hidden]{display:none} no matter what renderWorkspace
+// sets. Without this override the sidebar would sit over an editor tab.
+it("overrides display for .workspace-bookmarks when hidden is present", () => {
+  const rules = [...htmlSource.matchAll(/\.workspace-bookmarks(?:\[hidden\])?[^{]*\{[^}]*\}/g)].map(
+    (m) => m[0],
+  );
+  const hasOverride = rules.some(
+    (rule) => rule.startsWith(".workspace-bookmarks[hidden]") && /display\s*:\s*none/.test(rule),
+  );
+  expect(hasOverride).toBe(true);
+});

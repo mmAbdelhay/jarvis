@@ -21,7 +21,10 @@ describe("readMetrics", () => {
   });
 
   it("rounds a cpu load with more than one decimal place", async () => {
-    const jittery: MetricsSource = { ...source, currentLoad: async () => ({ currentLoad: 23.449 }) };
+    const jittery: MetricsSource = {
+      ...source,
+      currentLoad: async () => ({ currentLoad: 23.449 }),
+    };
     const metrics = await readMetrics(jittery);
     expect(metrics.cpuPercent).toBe(23.4);
   });
@@ -241,7 +244,11 @@ describe("cacheSource", () => {
   it("re-reads once the value has gone stale", async () => {
     const { calls, base } = counting();
     let clock = 0;
-    const source = cacheSource(base, () => clock, { memoryMs: 5000, diskMs: 10_000, uptimeMs: 10_000 });
+    const source = cacheSource(base, () => clock, {
+      memoryMs: 5000,
+      diskMs: 10_000,
+      uptimeMs: 10_000,
+    });
 
     await readMetrics(source);
     clock = 4000;

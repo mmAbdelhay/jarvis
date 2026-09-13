@@ -25,7 +25,6 @@ const canSymlink = ((): boolean => {
   }
 })();
 
-
 async function tempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "jarvis-paths-"));
 }

@@ -40,12 +40,15 @@ const draft: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/Users/x/.config/jarvis/brain" },
   whisper: { binaryPath: "/opt/whisper/bin/whisper-cli", modelPath: "/opt/whisper/model.bin" },
-  performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+  performance: {
+    suspendTabsAfterMinutes: 15,
+    stopSidecarsAfterMinutes: 10,
+    terminalScrollback: 5000,
+  },
   browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
-
 
 /**
  * Every section that is *not* the default, so that every "written only when
@@ -509,7 +512,10 @@ describe("docker round-trip", () => {
     // What Settings would hand back after a read/edit cycle that never
     // touched the Docker page at all.
     const reread = parseConfig(parse(await readFile(path, "utf8")));
-    await writeSettingsFile(path, { ...reread, brain: { ...reread.brain, systemPrompt: "Changed." } });
+    await writeSettingsFile(path, {
+      ...reread,
+      brain: { ...reread.brain, systemPrompt: "Changed." },
+    });
 
     const after = parseConfig(parse(await readFile(path, "utf8")));
     expect(after.docker).toEqual({ acme: [{ name: "app", container: "acme-app-1" }] });
@@ -558,7 +564,10 @@ describe("chat round-trip", () => {
     await writeSettingsFile(path, withChat);
 
     const reread = parseConfig(parse(await readFile(path, "utf8")));
-    await writeSettingsFile(path, { ...reread, brain: { ...reread.brain, systemPrompt: "Changed." } });
+    await writeSettingsFile(path, {
+      ...reread,
+      brain: { ...reread.brain, systemPrompt: "Changed." },
+    });
 
     const after = parseConfig(parse(await readFile(path, "utf8")));
     expect(after.chat).toEqual({
@@ -571,7 +580,10 @@ describe("chat round-trip", () => {
   it("writes an entry with no account without an empty account key", async () => {
     const dir = await tempDir();
     const path = join(dir, "jarvis.yaml");
-    await writeSettingsFile(path, { ...draft, chat: { acme: [{ name: "Globex", driver: "teams" }] } });
+    await writeSettingsFile(path, {
+      ...draft,
+      chat: { acme: [{ name: "Globex", driver: "teams" }] },
+    });
 
     const text = await readFile(path, "utf8");
     expect(text).not.toContain("account");

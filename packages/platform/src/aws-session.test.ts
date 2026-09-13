@@ -208,7 +208,11 @@ describe("createAwsSessionChecker", () => {
       .mockResolvedValue({ code: 0, stdout: "", stderr: "" });
     try {
       await createAwsSessionChecker({})("saml");
-      expect(spy).toHaveBeenCalledWith("aws", ["sts", "get-caller-identity", "--profile", "saml"], {});
+      expect(spy).toHaveBeenCalledWith(
+        "aws",
+        ["sts", "get-caller-identity", "--profile", "saml"],
+        {},
+      );
     } finally {
       spy.mockRestore();
     }

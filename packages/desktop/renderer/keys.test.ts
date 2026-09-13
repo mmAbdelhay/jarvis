@@ -117,13 +117,29 @@ describe("the shell keeps its control keys on linux", () => {
   // claimed deliberately on both platforms, and `s` because Ctrl+S is the API
   // tab's save — matched only by that tab's own editor, where no shell is
   // listening.
-  it.each(["c", "d", "z", "u", "a", "e", "k", "w", "l", "q", "b", "f", "p", "v", "n", "o", "t", "y"])(
-    "never claims Ctrl+%s for the terminal",
-    (k) => {
-      const action = matchChord(key({ key: k, ctrlKey: true }), "linux");
-      expect(action === undefined || !TERMINAL_ACTIONS.has(action)).toBe(true);
-    },
-  );
+  it.each([
+    "c",
+    "d",
+    "z",
+    "u",
+    "a",
+    "e",
+    "k",
+    "w",
+    "l",
+    "q",
+    "b",
+    "f",
+    "p",
+    "v",
+    "n",
+    "o",
+    "t",
+    "y",
+  ])("never claims Ctrl+%s for the terminal", (k) => {
+    const action = matchChord(key({ key: k, ctrlKey: true }), "linux");
+    expect(action === undefined || !TERMINAL_ACTIONS.has(action)).toBe(true);
+  });
 
   it("claims ^R on both platforms, as it already did", () => {
     // Superseded on purpose: the palette searches the same command log,
@@ -181,9 +197,24 @@ describe("keyLabel", () => {
     // an action with no label is how one gets written by hand somewhere else.
     for (const platform of ["darwin", "linux"] as const) {
       for (const action of [
-        "palette", "historySearch", "search", "filterFailed", "blockPrev", "blockNext",
-        "copy", "paste", "clearScreen", "splitRow", "splitColumn", "closePane",
-        "focusPrev", "focusNext", "sendRequest", "saveRequest", "voiceStart", "voiceStop",
+        "palette",
+        "historySearch",
+        "search",
+        "filterFailed",
+        "blockPrev",
+        "blockNext",
+        "copy",
+        "paste",
+        "clearScreen",
+        "splitRow",
+        "splitColumn",
+        "closePane",
+        "focusPrev",
+        "focusNext",
+        "sendRequest",
+        "saveRequest",
+        "voiceStart",
+        "voiceStop",
       ] as const) {
         expect(keyLabel(action, platform)).not.toBe("");
       }

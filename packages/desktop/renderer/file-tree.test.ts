@@ -64,7 +64,9 @@ describe("the file tree", () => {
 
   it("does not fire a second list() call for a folder double-clicked before the first resolves", async () => {
     const d = deferred<{ name: string; directory: boolean }[]>();
-    const list = vi.fn((path: string) => (path === "/proj/src" ? d.promise : Promise.resolve(listing[path] ?? [])));
+    const list = vi.fn((path: string) =>
+      path === "/proj/src" ? d.promise : Promise.resolve(listing[path] ?? []),
+    );
     const t = createFileTree({ list, choose: vi.fn() });
     await t.setRoot("/proj");
 

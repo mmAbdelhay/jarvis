@@ -92,7 +92,9 @@ describe("createPromptTracker", () => {
 
 describe("currentInput", () => {
   it("is the text between the mark and the cursor", () => {
-    expect(currentInput(buffer(["~/p > git sta"], { x: 13, y: 0 }), { x: 6, y: 0 })).toBe("git sta");
+    expect(currentInput(buffer(["~/p > git sta"], { x: 13, y: 0 }), { x: 6, y: 0 })).toBe(
+      "git sta",
+    );
   });
 
   it("is empty at a bare prompt", () => {
@@ -201,7 +203,10 @@ describe("createDropdown", () => {
 });
 
 describe("attachCompletion", () => {
-  function attached(suggestions: string[] = ["git status"], extraHooks: Partial<CompletionHooks> = {}) {
+  function attached(
+    suggestions: string[] = ["git status"],
+    extraHooks: Partial<CompletionHooks> = {},
+  ) {
     const terminal = new FakeTerminal();
     const host = document.createElement("div");
     const sent: string[] = [];
@@ -237,7 +242,7 @@ describe("attachCompletion", () => {
   // The single rule that keeps the terminal feeling like a terminal: with
   // the dropdown shut, zsh receives every key exactly as it does today.
   it("passes every key to zsh while the dropdown is closed", () => {
-    const { terminal, press } = attached();
+    const { press } = attached();
 
     for (const key of ["Tab", "ArrowUp", "ArrowDown", "Enter", "Escape", "a", "c"]) {
       expect(press({ key })).toBe(true);
@@ -245,7 +250,7 @@ describe("attachCompletion", () => {
   });
 
   it("opens on typing and lists what the source returned", async () => {
-    const { terminal, host, asked, press } = attached();
+    const { terminal, host, asked } = attached();
 
     await typeAt(terminal, "~/p > ", "git sta");
 
@@ -267,7 +272,7 @@ describe("attachCompletion", () => {
   });
 
   it("does not open at a bare prompt, and does not even ask", async () => {
-    const { terminal, host, asked, press } = attached();
+    const { terminal, host, asked } = attached();
 
     terminal.parser.emitOsc(133, "A");
     terminal.typeLine("~/p > ");
@@ -323,7 +328,7 @@ describe("attachCompletion", () => {
 
     press({ key: "Tab" });
 
-    expect(sent).toEqual(["\u007f".repeat(7) + "git status"]);
+    expect(sent).toEqual([`${"\u007f".repeat(7)}git status`]);
   });
 
   it("closes after accepting, so the next Tab is zsh's again", async () => {
@@ -444,7 +449,7 @@ describe("attachCompletion with an editor", () => {
   // dropdown, ever. The pane knows a prompt is live — the splitter is what
   // told it so — and promptActive is how it says so.
   it("suggests with no OSC ever reaching xterm, when the pane says a prompt is live", async () => {
-    let promptLive = true;
+    const promptLive = true;
     const { asked, press } = attachedWithEditor(["git status"], "git sta", {
       promptActive: () => promptLive,
     });

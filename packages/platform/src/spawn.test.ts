@@ -27,7 +27,7 @@ describe("runCommand", () => {
   });
 
   it("runs with a caller-supplied environment instead of the inherited one", async () => {
-    const result = await runCommand("sh", ["-c", "printf %s \"$MARKER\""], { MARKER: "hi" });
+    const result = await runCommand("sh", ["-c", 'printf %s "$MARKER"'], { MARKER: "hi" });
     expect(result.stdout).toBe("hi");
   });
 });
@@ -190,7 +190,10 @@ describe("createSpawner", () => {
 
   it("passes the given environment through to the child process", async () => {
     const agent: AgentConfig = { id: "env", command: "sh", args: ["-c", "echo $JARVIS_TEST_VAR"] };
-    const handle = createSpawner({ ...process.env, JARVIS_TEST_VAR: "marker-value" })(agent, process.cwd());
+    const handle = createSpawner({ ...process.env, JARVIS_TEST_VAR: "marker-value" })(
+      agent,
+      process.cwd(),
+    );
 
     const chunks: string[] = [];
     handle.onOutput((chunk) => chunks.push(chunk));

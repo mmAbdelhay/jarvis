@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { postmanToRequests } from "./postman-import.js";
 
 const collection = (items: unknown[]) => ({
-  info: { name: "Demo", schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  info: {
+    name: "Demo",
+    schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+  },
   item: items,
 });
 
@@ -28,7 +31,10 @@ describe("postmanToRequests", () => {
 
     expect(name).toBe("Demo");
     expect(requests[0]?.segments).toEqual(["Get user"]);
-    expect(requests[0]?.json["http"]).toMatchObject({ method: "get", url: "https://api.test/users" });
+    expect(requests[0]?.json["http"]).toMatchObject({
+      method: "get",
+      url: "https://api.test/users",
+    });
     expect(requests[0]?.json["params"]).toEqual([
       { name: "page", value: "1", type: "query", enabled: true },
     ]);
@@ -40,7 +46,10 @@ describe("postmanToRequests", () => {
   it("keeps folder structure as path segments", () => {
     const { requests } = postmanToRequests(
       collection([
-        { name: "Orders", item: [{ name: "List", request: { method: "GET", url: "https://api.test/o" } }] },
+        {
+          name: "Orders",
+          item: [{ name: "List", request: { method: "GET", url: "https://api.test/o" } }],
+        },
       ]),
     );
 
@@ -52,7 +61,11 @@ describe("postmanToRequests", () => {
       collection([
         {
           name: "Create",
-          request: { method: "POST", url: "https://api.test/o", body: { mode: "raw", raw: '{"a":1}' } },
+          request: {
+            method: "POST",
+            url: "https://api.test/o",
+            body: { mode: "raw", raw: '{"a":1}' },
+          },
         },
       ]),
     );
@@ -96,7 +109,13 @@ describe("postmanToRequests", () => {
           request: {
             method: "GET",
             url: "https://api.test",
-            auth: { type: "basic", basic: [{ key: "username", value: "u" }, { key: "password", value: "p" }] },
+            auth: {
+              type: "basic",
+              basic: [
+                { key: "username", value: "u" },
+                { key: "password", value: "p" },
+              ],
+            },
           },
         },
       ]),
@@ -107,7 +126,9 @@ describe("postmanToRequests", () => {
   });
 
   it("accepts a bare URL string where a request object would go", () => {
-    const { requests } = postmanToRequests(collection([{ name: "Bare", request: "https://api.test/x" }]));
+    const { requests } = postmanToRequests(
+      collection([{ name: "Bare", request: "https://api.test/x" }]),
+    );
 
     expect(requests[0]?.json["http"]).toMatchObject({ method: "get", url: "https://api.test/x" });
   });
@@ -117,7 +138,10 @@ describe("postmanToRequests", () => {
   it("drops a body mode it cannot represent instead of guessing", () => {
     const { requests } = postmanToRequests(
       collection([
-        { name: "F", request: { method: "POST", url: "https://api.test", body: { mode: "formdata" } } },
+        {
+          name: "F",
+          request: { method: "POST", url: "https://api.test", body: { mode: "formdata" } },
+        },
       ]),
     );
 

@@ -53,8 +53,8 @@ describe("the terminal pane's layout", () => {
     // written by applyState and is true only while the editor is visible, so
     // a pane with no editor, one whose shell has no integration yet, and one
     // with a command running all keep the terminal they have always had.
-    const hiding = [...css.matchAll(/([^{}]*\.terminal-live[^{}]*)\{([^}]*)\}/g)].filter(([, , body]) =>
-      /display\s*:\s*none/.test(body ?? ""),
+    const hiding = [...css.matchAll(/([^{}]*\.terminal-live[^{}]*)\{([^}]*)\}/g)].filter(
+      ([, , body]) => /display\s*:\s*none/.test(body ?? ""),
     );
     expect(hiding).toHaveLength(1);
     expect(hiding[0]?.[1]).toContain('[data-state="blocks"]');

@@ -353,7 +353,8 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
       runAction(window.jarvis.dockerComposeUp(project));
     }),
     composeButton("Down", () => {
-      if (!window.confirm(MESSAGES.dockerConfirmComposeDown(composeProject, PRIMARY_LANGUAGE))) return;
+      if (!window.confirm(MESSAGES.dockerConfirmComposeDown(composeProject, PRIMARY_LANGUAGE)))
+        return;
       runAction(window.jarvis.dockerComposeDown(project));
     }),
   );
@@ -369,7 +370,12 @@ function renderCompose(project: string, composeProject: string): HTMLElement {
  *  compose bar. `logHost` is attached once and left alone, because taking it
  *  out of the document every three seconds would drop whatever text the user
  *  had selected in the log and disturb xterm's own renderer under it. */
-export function renderDockerPane(host: HTMLElement, tabId: string, project: string, view: DockerView): void {
+export function renderDockerPane(
+  host: HTMLElement,
+  tabId: string,
+  project: string,
+  view: DockerView,
+): void {
   const pane = getPane(tabId);
 
   // Dropped before anything else is decided. The bar only exists while every
@@ -386,16 +392,10 @@ export function renderDockerPane(host: HTMLElement, tabId: string, project: stri
     host.replaceChildren(pane.side, pane.logHost);
   }
 
-  pane.rowsHost.replaceChildren(
-    ...view.rows.map((row) => renderRow(host, tabId, project, row)),
-  );
+  pane.rowsHost.replaceChildren(...view.rows.map((row) => renderRow(host, tabId, project, row)));
 
   const running = view.rows.filter((row) => row.facts?.state === "running").length;
-  pane.count.textContent = MESSAGES.dockerRunningCount(
-    running,
-    view.rows.length,
-    PRIMARY_LANGUAGE,
-  );
+  pane.count.textContent = MESSAGES.dockerRunningCount(running, view.rows.length, PRIMARY_LANGUAGE);
 
   // The compose bar sits above the rows, in the left column.
   if (view.composeProject !== undefined) {

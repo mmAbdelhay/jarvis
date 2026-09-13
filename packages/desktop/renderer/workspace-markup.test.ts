@@ -148,7 +148,7 @@ describe("api bar layout", () => {
   // a time.
   it("keeps the sizing in the stylesheet, not on the buttons", () => {
     const bar = html.slice(html.indexOf('<div class="api-bar">'), html.indexOf('id="api-tabs"'));
-    expect(bar).not.toContain("style=\"width: auto");
+    expect(bar).not.toContain('style="width: auto');
   });
 });
 
@@ -208,7 +208,9 @@ describe("bookmarks sidebar layout", () => {
   // the positioning context for it.
   it("positions the tile so its unpin action can sit in the corner", () => {
     expect(css).toMatch(/\.workspace-essential \{[^}]*position:\s*relative/);
-    expect(css).toMatch(/\.workspace-essential \.workspace-essential-unpin \{[^}]*position:\s*absolute/);
+    expect(css).toMatch(
+      /\.workspace-essential \.workspace-essential-unpin \{[^}]*position:\s*absolute/,
+    );
   });
 
   // A narrow column has no width to spare for the bar's old horizontal

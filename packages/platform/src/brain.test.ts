@@ -326,7 +326,11 @@ describe("createBrain", () => {
       },
     });
 
-    await brain.ask({ text: "hi", tools: [], context: { projects: [], sessions: [], changes: [] } });
+    await brain.ask({
+      text: "hi",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
 
     expect(capturedPrompt).toContain("Uncommitted changes: (none)");
   });
@@ -370,7 +374,11 @@ describe("capacity piggyback", () => {
       query: usageQuery(messages, usage),
     });
 
-    await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+    await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
 
     expect(onUsage).toHaveBeenCalledWith("claude-main", {
       ok: true,
@@ -389,7 +397,11 @@ describe("capacity piggyback", () => {
       query: usageQuery(messages, usage),
     });
 
-    await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+    await brain.ask({
+      text: "hello",
+      tools: [],
+      context: { projects: [], sessions: [], changes: [] },
+    });
     expect(onUsage).not.toHaveBeenCalled();
   });
 
@@ -521,7 +533,11 @@ describe("capacity piggyback", () => {
         },
       });
 
-      await brain.ask({ text: "hello", tools: [], context: { projects: [], sessions: [], changes: [] } });
+      await brain.ask({
+        text: "hello",
+        tools: [],
+        context: { projects: [], sessions: [], changes: [] },
+      });
 
       const env = capturedOptions?.env as Record<string, string> | undefined;
       expect(env).toBeDefined();
@@ -535,4 +551,3 @@ describe("capacity piggyback", () => {
     }
   });
 });
-

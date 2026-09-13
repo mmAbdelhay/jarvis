@@ -154,9 +154,7 @@ describe("createDockerClient.list", () => {
       { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
       {
         code: 0,
-        stdout: JSON.stringify([
-          inspected({ Config: { Image: "redis:7", Labels: {} } }),
-        ]),
+        stdout: JSON.stringify([inspected({ Config: { Image: "redis:7", Labels: {} } })]),
         stderr: "",
       },
     ]);
@@ -235,9 +233,7 @@ describe("createDockerClient.list", () => {
       { code: 0, stdout: "abc123\tUp 3 hours\n", stderr: "" },
       {
         code: 0,
-        stdout: JSON.stringify([
-          inspected({ NetworkSettings: { Ports: { "5432/tcp": null } } }),
-        ]),
+        stdout: JSON.stringify([inspected({ NetworkSettings: { Ports: { "5432/tcp": null } } })]),
         stderr: "",
       },
     ]);
@@ -350,7 +346,11 @@ describe("createDockerClient.follow", () => {
     let closed = false;
     const spawnLog: LogSpawner = (_command, _args, onChunk) => {
       onChunk("first line\n");
-      return { close: () => { closed = true; } };
+      return {
+        close: () => {
+          closed = true;
+        },
+      };
     };
 
     const follower = createDockerClient(runnerFor([]).run, spawnLog).follow("app", (chunk) =>

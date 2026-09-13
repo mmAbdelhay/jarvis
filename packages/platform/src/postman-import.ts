@@ -23,8 +23,16 @@ type PostmanRequest = {
   method?: string;
   url?: string | { raw?: string; query?: { key?: string; value?: string; disabled?: boolean }[] };
   header?: { key?: string; value?: string; disabled?: boolean }[];
-  body?: { mode?: string; raw?: string; urlencoded?: { key?: string; value?: string; disabled?: boolean }[] };
-  auth?: { type?: string; bearer?: { key?: string; value?: string }[]; basic?: { key?: string; value?: string }[] };
+  body?: {
+    mode?: string;
+    raw?: string;
+    urlencoded?: { key?: string; value?: string; disabled?: boolean }[];
+  };
+  auth?: {
+    type?: string;
+    bearer?: { key?: string; value?: string }[];
+    basic?: { key?: string; value?: string }[];
+  };
 };
 
 /** Postman writes `{{var}}` the same way Bruno does, so variables need no
@@ -56,9 +64,14 @@ function walk(items: PostmanItem[], prefix: string[], out: ImportedRequest[]): v
   });
 }
 
-function toBruno(name: string, request: PostmanRequest | string, seq: number): Record<string, unknown> {
+function toBruno(
+  name: string,
+  request: PostmanRequest | string,
+  seq: number,
+): Record<string, unknown> {
   // Postman allows a bare URL string where a request object would go.
-  const source: PostmanRequest = typeof request === "string" ? { method: "GET", url: request } : request;
+  const source: PostmanRequest =
+    typeof request === "string" ? { method: "GET", url: request } : request;
   const rawUrl = typeof source.url === "string" ? source.url : (source.url?.raw ?? "");
   // Bruno keeps query parameters in their own block, so the URL loses them.
   const [base] = rawUrl.split("?");
@@ -106,12 +119,12 @@ function toBruno(name: string, request: PostmanRequest | string, seq: number): R
 
   const auth = authMode(source.auth?.type);
   if (auth === "bearer") {
-    json["auth"] = { bearer: { token: valueOf(source.auth?.bearer, "token") } };
+    json["auth"] = { bearer: { token: authValue(source.auth?.bearer, "token") } };
   } else if (auth === "basic") {
     json["auth"] = {
       basic: {
-        username: valueOf(source.auth?.basic, "username"),
-        password: valueOf(source.auth?.basic, "password"),
+        username: authValue(source.auth?.basic, "username"),
+        password: authValue(source.auth?.basic, "password"),
       },
     };
   }
@@ -120,7 +133,7 @@ function toBruno(name: string, request: PostmanRequest | string, seq: number): R
 }
 
 /** Postman stores auth details as a list of {key, value} pairs. */
-function valueOf(pairs: { key?: string; value?: string }[] | undefined, key: string): string {
+function authValue(pairs: { key?: string; value?: string }[] | undefined, key: string): string {
   return pairs?.find((pair) => pair.key === key)?.value ?? "";
 }
 

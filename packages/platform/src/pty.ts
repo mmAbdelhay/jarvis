@@ -165,7 +165,12 @@ export function argsFor(agent: AgentConfig, sessionId?: string): string[] {
 export function ensureSpawnHelperExecutable(): void {
   try {
     const entry = require.resolve("node-pty");
-    const helper = join(dirname(dirname(entry)), "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");
+    const helper = join(
+      dirname(dirname(entry)),
+      "prebuilds",
+      `${process.platform}-${process.arch}`,
+      "spawn-helper",
+    );
     if (!existsSync(helper)) return;
     const mode = statSync(helper).mode;
     // 0o111 — the three execute bits. Already set is the common case.
@@ -254,7 +259,12 @@ export function createPtySpawner(
     // as "File not found: " with the name left blank. Untouched elsewhere —
     // see executable.ts. This file is one of the three the platform
     // convention allows to read process.platform.
-    const target = ptySpawnTarget(agent.command, argsFor(agent, sessionId), childEnv, process.platform);
+    const target = ptySpawnTarget(
+      agent.command,
+      argsFor(agent, sessionId),
+      childEnv,
+      process.platform,
+    );
     const child = pty.spawn(target.file, target.args, {
       name: TERM,
       cols: DEFAULT_COLS,

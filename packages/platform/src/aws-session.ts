@@ -62,7 +62,9 @@ export function profileForContext(kubeconfigYaml: string, context: string): stri
       ? (userBlock as Record<string, unknown>)["exec"]
       : undefined;
   const env =
-    typeof exec === "object" && exec !== null ? (exec as Record<string, unknown>)["env"] : undefined;
+    typeof exec === "object" && exec !== null
+      ? (exec as Record<string, unknown>)["env"]
+      : undefined;
   if (!Array.isArray(env)) return undefined;
 
   const profileEntry = env.find(
@@ -82,7 +84,9 @@ const EKS_ARN = /^arn:aws:eks:([^:]+):[^:]*:cluster\/(.+)$/;
  *  EKS ARN (a local `kind` context, for instance) — there is no
  *  update-kubeconfig target for it — and for one whose name or region is not
  *  a plain AWS identifier (see AWS_NAME). */
-export function eksUpdateKubeconfigArgs(context: string): { name: string; region: string } | undefined {
+export function eksUpdateKubeconfigArgs(
+  context: string,
+): { name: string; region: string } | undefined {
   const match = EKS_ARN.exec(context);
   if (match === null) return undefined;
   const [, region, name] = match;

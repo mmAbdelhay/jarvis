@@ -208,7 +208,11 @@ function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement 
     menu.hidden = true;
   });
 
-  const filter = actionButton("block-more-item", "Filter to this command", "Filter to this command");
+  const filter = actionButton(
+    "block-more-item",
+    "Filter to this command",
+    "Filter to this command",
+  );
   filter.dataset["action"] = "filter";
   filter.addEventListener("click", (event) => {
     event.stopPropagation();

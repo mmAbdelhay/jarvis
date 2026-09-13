@@ -83,7 +83,11 @@ function clearSaveStatus(): void {
 
 /** One labelled text field, committing on change (blur/Enter), not on
  *  every keystroke. */
-function fieldInput(labelText: string, value: string, onChange: (value: string) => void): HTMLElement {
+function fieldInput(
+  labelText: string,
+  value: string,
+  onChange: (value: string) => void,
+): HTMLElement {
   const label = document.createElement("label");
   // The label carries the field name too, so the stylesheet can give a path
   // more width than a port without knowing anything about either.
@@ -171,7 +175,9 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
   row.className = "settings-row";
 
   const idField = fieldInput("id", id, (value) => renameAgent(id, value));
-  const commandField = fieldInput("command", agent.command, (value) => updateAgent(id, { command: value }));
+  const commandField = fieldInput("command", agent.command, (value) =>
+    updateAgent(id, { command: value }),
+  );
   const argsField = fieldInput("args", (agent.args ?? []).join(" "), (value) => {
     const parts = value.trim();
     updateAgent(id, { args: parts === "" ? undefined : parts.split(/\s+/) });
@@ -208,7 +214,9 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
   }
   vendorSelect.value = agent.vendor ?? "";
   vendorSelect.addEventListener("change", () => {
-    updateAgent(id, { vendor: vendorSelect.value === "" ? undefined : (vendorSelect.value as ProviderVendor) });
+    updateAgent(id, {
+      vendor: vendorSelect.value === "" ? undefined : (vendorSelect.value as ProviderVendor),
+    });
     clearSaveStatus();
   });
   vendorLabel.append(vendorSelect);
@@ -306,7 +314,9 @@ function renderRouting(): void {
   if (draft === undefined) return;
   const container = $("settings-routing");
   container.replaceChildren();
-  (draft.registry.routing ?? []).forEach((rule, index) => container.append(renderRoutingRow(rule, index)));
+  for (const [index, rule] of (draft.registry.routing ?? []).entries()) {
+    container.append(renderRoutingRow(rule, index));
+  }
 }
 
 function renderRoutingRow(rule: RoutingRule, index: number): HTMLElement {
@@ -341,7 +351,13 @@ function renderRoutingRow(rule: RoutingRule, index: number): HTMLElement {
   });
   agentLabel.append(agentSelect);
 
-  row.append(projectField, intentField, agentLabel, spacer(), removeControl(() => removeRoutingRule(index)));
+  row.append(
+    projectField,
+    intentField,
+    agentLabel,
+    spacer(),
+    removeControl(() => removeRoutingRule(index)),
+  );
   return row;
 }
 
@@ -386,7 +402,12 @@ function renderProjectRow(name: string, path: string): HTMLElement {
   row.className = "settings-row";
   const nameField = fieldInput("name", name, (value) => renameProject(name, value));
   const pathField = fieldInput("path", path, (value) => updateProject(name, value));
-  row.append(nameField, pathField, spacer(), removeControl(() => removeProject(name)));
+  row.append(
+    nameField,
+    pathField,
+    spacer(),
+    removeControl(() => removeProject(name)),
+  );
   return row;
 }
 
@@ -477,7 +498,11 @@ function renderDatabases(): void {
     Object.keys(draft.projects).length === 0;
 }
 
-function renderConnectionRow(project: string, index: number, connection: DbGateConnection): HTMLElement {
+function renderConnectionRow(
+  project: string,
+  index: number,
+  connection: DbGateConnection,
+): HTMLElement {
   if (draft === undefined) return document.createElement("div");
   const row = document.createElement("div");
   row.className = "settings-row";
@@ -497,18 +522,22 @@ function renderConnectionRow(project: string, index: number, connection: DbGateC
   const hostField = fieldInput("host", connection.host ?? "", (value) =>
     updateConnection(project, index, { host: value === "" ? undefined : value }),
   );
-  const portField = fieldInput("port", connection.port === undefined ? "" : String(connection.port), (value) => {
-    if (value === "") {
-      updateConnection(project, index, { port: undefined });
-      return;
-    }
-    // A half-typed port is not a reason to write NaN into the draft, which
-    // parseConfig would then reject with a message about a field the user
-    // thinks they filled in correctly. An unparseable value is simply not
-    // committed; the field re-renders with the last good one.
-    const port = Number(value);
-    if (Number.isFinite(port)) updateConnection(project, index, { port });
-  });
+  const portField = fieldInput(
+    "port",
+    connection.port === undefined ? "" : String(connection.port),
+    (value) => {
+      if (value === "") {
+        updateConnection(project, index, { port: undefined });
+        return;
+      }
+      // A half-typed port is not a reason to write NaN into the draft, which
+      // parseConfig would then reject with a message about a field the user
+      // thinks they filled in correctly. An unparseable value is simply not
+      // committed; the field re-renders with the last good one.
+      const port = Number(value);
+      if (Number.isFinite(port)) updateConnection(project, index, { port });
+    },
+  );
   const userField = fieldInput("user", connection.user ?? "", (value) =>
     updateConnection(project, index, { user: value === "" ? undefined : value }),
   );
@@ -624,7 +653,13 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
     if (value !== "") updateEditorRoot(project, index, { path: value });
   });
 
-  row.append(projectField, nameField, pathField, spacer(), removeControl(() => removeEditorRoot(project, index)));
+  row.append(
+    projectField,
+    nameField,
+    pathField,
+    spacer(),
+    removeControl(() => removeEditorRoot(project, index)),
+  );
   return row;
 }
 
@@ -851,9 +886,14 @@ function renderDockerPicker(): void {
     // Visible and editable, never a silent default: a container with no
     // matching project directory still needs a project the user picked,
     // not one guessed on their behalf.
-    const projectField = fieldSelect("project", entry.project, Object.keys(draft.projects), (value) => {
-      entry.project = value;
-    });
+    const projectField = fieldSelect(
+      "project",
+      entry.project,
+      Object.keys(draft.projects),
+      (value) => {
+        entry.project = value;
+      },
+    );
     row.append(checkbox, name, projectField);
     container.append(row);
   }
@@ -918,8 +958,7 @@ function renderChat(): void {
   }
   // parseConfig rejects a chat keyed to a project that does not exist, so
   // with no projects there is no valid row to add.
-  ($("settings-chat-add") as HTMLButtonElement).disabled =
-    Object.keys(draft.projects).length === 0;
+  ($("settings-chat-add") as HTMLButtonElement).disabled = Object.keys(draft.projects).length === 0;
 }
 
 function renderChatRow(project: string, index: number, entry: ChatEntry): HTMLElement {
@@ -1043,8 +1082,12 @@ function renderBrain(): void {
 // ------------------------------------------------------------------ Voice
 
 /** Every installed voice, read once when Settings first opens. */
-let installedVoices: { name: string; language: string; upgraded: boolean; engine: "piper" | "say" }[] =
-  [];
+let installedVoices: {
+  name: string;
+  language: string;
+  upgraded: boolean;
+  engine: "piper" | "say";
+}[] = [];
 
 /** Which entry the English picker should be showing: the neural engine when
  *  it is selected, otherwise the configured `say` voice. The picker is the
@@ -1052,7 +1095,9 @@ let installedVoices: { name: string; language: string; upgraded: boolean; engine
 function selectedEnglishVoice(): string {
   if (draft === undefined) return "";
   if (draft.voice.engine === "piper") {
-    return installedVoices.find((voice) => voice.engine === "piper")?.name ?? draft.voice.englishVoice;
+    return (
+      installedVoices.find((voice) => voice.engine === "piper")?.name ?? draft.voice.englishVoice
+    );
   }
   return draft.voice.englishVoice;
 }
@@ -1208,8 +1253,12 @@ function wireStaticFields(): void {
     draft.voice.arabicVoice = ($("settings-voice-ar") as HTMLSelectElement).value;
     clearSaveStatus();
   });
-  $("settings-voice-en-play").addEventListener("click", () => previewVoice("settings-voice-en", "en"));
-  $("settings-voice-ar-play").addEventListener("click", () => previewVoice("settings-voice-ar", "ar"));
+  $("settings-voice-en-play").addEventListener("click", () =>
+    previewVoice("settings-voice-en", "en"),
+  );
+  $("settings-voice-ar-play").addEventListener("click", () =>
+    previewVoice("settings-voice-ar", "ar"),
+  );
   $("settings-allow-popups").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.browser.allowPopups = ($("settings-allow-popups") as HTMLInputElement).checked;

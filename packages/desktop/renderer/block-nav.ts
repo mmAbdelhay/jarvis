@@ -90,7 +90,7 @@ export function createBlockNav(list: HTMLElement, sticky: HTMLElement): BlockNav
    *  block a user can no longer see is not a selection any more. */
   function applyFilter(): void {
     for (const view of views) view.element.hidden = !passesFilter(view);
-    if (selected !== undefined && selected.element.hidden) {
+    if (selected?.element.hidden) {
       selected.setSelected(false);
       selected = undefined;
     }

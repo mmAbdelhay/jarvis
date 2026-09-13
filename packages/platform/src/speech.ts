@@ -30,9 +30,7 @@ export function bestVariant(name: string, installed: readonly string[]): string 
   const wanted = name.trim();
   if (wanted === "") return wanted;
 
-  const matches = installed.filter(
-    (voice) => voice === wanted || voice.startsWith(`${wanted} (`),
-  );
+  const matches = installed.filter((voice) => voice === wanted || voice.startsWith(`${wanted} (`));
   const byRank = (voice: string): number =>
     voice.includes("(Premium)") ? 0 : voice.includes("(Enhanced)") ? 1 : 2;
 
@@ -98,7 +96,6 @@ export const defaultSpeechRunner: SpeechRunner = (command, args) => {
 };
 
 export class MacSpeech {
-  readonly #config: SpeechConfig;
   readonly #run: SpeechRunner;
   #current: { kill(): void } | undefined;
   /** The names actually passed to `say`. They start as configured and are
@@ -116,7 +113,6 @@ export class MacSpeech {
     run: SpeechRunner = defaultSpeechRunner,
     listVoices?: VoiceLister,
   ) {
-    this.#config = config;
     this.#run = run;
     this.#names = { ar: config.arabicVoice, en: config.englishVoice };
 
@@ -166,7 +162,6 @@ export class MacSpeech {
     this.#current = undefined;
   }
 }
-
 
 /** Every installed voice, for the Settings picker. */
 export async function listInstalledVoices(): Promise<InstalledVoice[]> {

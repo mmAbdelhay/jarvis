@@ -63,7 +63,10 @@ describe("PiperSpeech", () => {
       command: "/opt/piper",
       args: ["-m", "/voices/alan.onnx", "-f", join("/tmp/utterance", "line.wav")],
     });
-    expect(spawned[1]).toMatchObject({ command: "afplay", args: [join("/tmp/utterance", "line.wav")] });
+    expect(spawned[1]).toMatchObject({
+      command: "afplay",
+      args: [join("/tmp/utterance", "line.wav")],
+    });
   });
 
   it("says nothing at all for empty text", async () => {
@@ -318,7 +321,12 @@ describe("how the text reaches piper", () => {
     const { speech, calls } = recording();
     await speech.speak("hello there", "en");
     expect(calls[0]?.args).not.toContain("-i");
-    expect(calls[0]?.args).toEqual(["-m", "/voices/alan.onnx", "-f", join("/tmp/utterance", "line.wav")]);
+    expect(calls[0]?.args).toEqual([
+      "-m",
+      "/voices/alan.onnx",
+      "-f",
+      join("/tmp/utterance", "line.wav"),
+    ]);
   });
 
   it("sends no stdin to the player, which takes a path", async () => {

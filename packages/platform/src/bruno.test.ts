@@ -28,7 +28,10 @@ async function project(): Promise<string> {
 async function collection(root: string, name: string): Promise<string> {
   const path = join(root, name);
   await mkdir(path, { recursive: true });
-  await writeFile(join(path, "bruno.json"), JSON.stringify({ version: "1", name, type: "collection" }));
+  await writeFile(
+    join(path, "bruno.json"),
+    JSON.stringify({ version: "1", name, type: "collection" }),
+  );
   return path;
 }
 
@@ -138,9 +141,15 @@ describe("readCollection", () => {
   it("orders requests by seq, then by name", async () => {
     const root = await project();
     const path = await collection(root, "api");
-    await writeFile(join(path, "b.bru"), REQUEST.replace("seq: 1", "seq: 2").replace("List orders", "B"));
+    await writeFile(
+      join(path, "b.bru"),
+      REQUEST.replace("seq: 1", "seq: 2").replace("List orders", "B"),
+    );
     await writeFile(join(path, "a.bru"), REQUEST.replace("List orders", "A"));
-    await writeFile(join(path, "c.bru"), REQUEST.replace("seq: 1", "seq: 2").replace("List orders", "AA"));
+    await writeFile(
+      join(path, "c.bru"),
+      REQUEST.replace("seq: 1", "seq: 2").replace("List orders", "AA"),
+    );
 
     const tree = await readCollection(path);
 
@@ -350,8 +359,20 @@ describe("collection editing", () => {
     const root = await project();
 
     const path = await writeImported(root, "Imported", [
-      { segments: ["Health"], json: { meta: { name: "Health", type: "http", seq: "1" }, http: { method: "get", url: "http://h", body: "none", auth: "none" } } },
-      { segments: ["Orders", "List"], json: { meta: { name: "List", type: "http", seq: "1" }, http: { method: "get", url: "http://o", body: "none", auth: "none" } } },
+      {
+        segments: ["Health"],
+        json: {
+          meta: { name: "Health", type: "http", seq: "1" },
+          http: { method: "get", url: "http://h", body: "none", auth: "none" },
+        },
+      },
+      {
+        segments: ["Orders", "List"],
+        json: {
+          meta: { name: "List", type: "http", seq: "1" },
+          http: { method: "get", url: "http://o", body: "none", auth: "none" },
+        },
+      },
     ]);
 
     const tree = await readCollection(path);

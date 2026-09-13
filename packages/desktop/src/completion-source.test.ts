@@ -138,8 +138,7 @@ describe("createCompletionSource", () => {
   // the command you just ran is the one you are most likely to want back.
   it("gives the command log's commands newest first, deduplicated and capped", async () => {
     const instance = source({
-      readCommandLog: async () =>
-        "100\t/p\tls\n101\t/p\tgit status\n102\t/p\tls\n103\t/p\tmake\n",
+      readCommandLog: async () => "100\t/p\tls\n101\t/p\tgit status\n102\t/p\tls\n103\t/p\tmake\n",
     });
 
     expect(await instance.history(2)).toEqual(["make", "ls"]);

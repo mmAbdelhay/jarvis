@@ -60,7 +60,9 @@ export class FakeTerminal {
       cursorX: number;
       cursorY: number;
       baseY: number;
-      getLine(y: number): { translateToString(t?: boolean, s?: number, e?: number): string } | undefined;
+      getLine(
+        y: number,
+      ): { translateToString(t?: boolean, s?: number, e?: number): string } | undefined;
     };
   } {
     const lines = this.lines;

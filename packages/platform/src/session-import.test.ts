@@ -7,7 +7,6 @@ import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
   parseTranscript,
-  summaryOf,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
@@ -74,7 +73,9 @@ describe("transcriptDirs", () => {
   });
 
   it("skips an agent that declares no vendor at all", () => {
-    expect(transcriptDirs([{ id: "c", command: "c", configDir: "/home/u/.c" }], "/home/u")).toEqual([]);
+    expect(transcriptDirs([{ id: "c", command: "c", configDir: "/home/u/.c" }], "/home/u")).toEqual(
+      [],
+    );
   });
 
   it("keeps one entry per agent when several qualify", () => {
@@ -211,8 +212,7 @@ describe("parseTranscript", () => {
       line({
         type: "user",
         message: {
-          content:
-            "<command-name>/plan</command-name> <command-args>add a tab</command-args>",
+          content: "<command-name>/plan</command-name> <command-args>add a tab</command-args>",
         },
       }),
     );
@@ -281,9 +281,9 @@ describe("isSessionTranscriptEntry", () => {
   });
 
   it("rejects a subagent transcript nested under a session directory", () => {
-    expect(
-      isSessionTranscriptEntry("-Users-me-projects-app/abc/subagents/agent-x.jsonl"),
-    ).toBe(false);
+    expect(isSessionTranscriptEntry("-Users-me-projects-app/abc/subagents/agent-x.jsonl")).toBe(
+      false,
+    );
   });
 
   it("rejects a file sitting directly in the projects directory", () => {
@@ -383,7 +383,7 @@ describe("sessionFromTranscript", () => {
   // A head read is cut mid-line by definition; a fragment is not a
   // malformed record.
   it("ignores an unterminated final line", () => {
-    expect(sessionFromTranscript(HEAD + '{"type":"assis', PATH, 1)?.cwd).toBe(
+    expect(sessionFromTranscript(`${HEAD}{"type":"assis`, PATH, 1)?.cwd).toBe(
       "/Users/u/projects/jarvis",
     );
   });
@@ -435,7 +435,12 @@ describe("createSessionImporter", () => {
   const DAY = 24 * 60 * 60 * 1000;
 
   const AGENTS = [
-    { id: "claude-main", command: "claude-main", vendor: "anthropic" as const, configDir: "/h/.claude-main" },
+    {
+      id: "claude-main",
+      command: "claude-main",
+      vendor: "anthropic" as const,
+      configDir: "/h/.claude-main",
+    },
   ];
   // As transcriptDirs spells it — join(), so the fake's `dir === DIR` filter
   // matches on every platform.
@@ -657,12 +662,10 @@ describe("createSessionImporter", () => {
 
   it("never reads a file that is not a transcript", async () => {
     const read: string[] = [];
-    const { deps, store } = world(
-      {
-        [`${DIR}/-a/notes.json`]: { head: "{}" },
-        [`${DIR}/-a/a.jsonl`]: { head: transcript({ id: "a", cwd: "/Users/u/a" }) },
-      },
-    );
+    const { deps, store } = world({
+      [`${DIR}/-a/notes.json`]: { head: "{}" },
+      [`${DIR}/-a/a.jsonl`]: { head: transcript({ id: "a", cwd: "/Users/u/a" }) },
+    });
     const inner = deps.readHead;
     deps.readHead = async (path) => {
       read.push(path);
@@ -724,7 +727,12 @@ describe("createSessionImporter", () => {
       {
         agents: [
           ...AGENTS,
-          { id: "claude-two", command: "claude-two", vendor: "anthropic", configDir: "/h/.claude-two" },
+          {
+            id: "claude-two",
+            command: "claude-two",
+            vendor: "anthropic",
+            configDir: "/h/.claude-two",
+          },
         ],
       },
     );
@@ -760,7 +768,9 @@ describe("createSessionImporter", () => {
           ].join("\n"),
         },
       },
-      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+      {
+        agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }],
+      },
     );
 
     const imported = await createSessionImporter(deps).backfill();
@@ -793,7 +803,9 @@ describe("createSessionImporter", () => {
           ].join("\n"),
         },
       },
-      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+      {
+        agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }],
+      },
     );
 
     const imported = await createSessionImporter(deps).backfill();
@@ -820,7 +832,9 @@ describe("createSessionImporter", () => {
           ].join("\n"),
         },
       },
-      { agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }] },
+      {
+        agents: [{ id: "copilot", command: "copilot", vendor: "github", configDir: "/h/.copilot" }],
+      },
     );
 
     await createSessionImporter(deps).backfill();
@@ -855,7 +869,9 @@ describe("createFsImportDeps", () => {
     // than take the scan down. This path is never created by this test.
     const { listFiles } = createFsImportDeps();
 
-    await expect(listFiles("/nonexistent-jarvis-session-import-test", "claude")).resolves.toEqual([]);
+    await expect(listFiles("/nonexistent-jarvis-session-import-test", "claude")).resolves.toEqual(
+      [],
+    );
   });
 
   it("reads nothing from a file that does not exist", async () => {

@@ -72,7 +72,10 @@ function buildContext(
     },
     // Bruno's own helpers that make sense without a runner around them.
     interpolate: (text: string) =>
-      text.replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (match, name: string) => setVariables[name] ?? variables[name] ?? match),
+      text.replace(
+        /\{\{\s*([^}\s]+)\s*\}\}/g,
+        (match, name: string) => setVariables[name] ?? variables[name] ?? match,
+      ),
   };
 
   const console = {
@@ -98,10 +101,14 @@ function buildContext(
     };
 
     const be = {
-      a: (type: string) => check(typeof actual === type, `expected ${format(actual)} to be a ${type}`),
-      an: (type: string) => check(typeof actual === type, `expected ${format(actual)} to be an ${type}`),
-      above: (value: number) => check(Number(actual) > value, `expected ${format(actual)} to be above ${value}`),
-      below: (value: number) => check(Number(actual) < value, `expected ${format(actual)} to be below ${value}`),
+      a: (type: string) =>
+        check(typeof actual === type, `expected ${format(actual)} to be a ${type}`),
+      an: (type: string) =>
+        check(typeof actual === type, `expected ${format(actual)} to be an ${type}`),
+      above: (value: number) =>
+        check(Number(actual) > value, `expected ${format(actual)} to be above ${value}`),
+      below: (value: number) =>
+        check(Number(actual) < value, `expected ${format(actual)} to be below ${value}`),
       get null() {
         check(actual === null, `expected ${format(actual)} to be null`);
         return undefined;
@@ -121,7 +128,9 @@ function buildContext(
       get empty() {
         const length = (actual as { length?: number })?.length;
         check(
-          actual === "" || length === 0 || (typeof actual === "object" && actual !== null && Object.keys(actual).length === 0),
+          actual === "" ||
+            length === 0 ||
+            (typeof actual === "object" && actual !== null && Object.keys(actual).length === 0),
           `expected ${format(actual)} to be empty`,
         );
         return undefined;
@@ -138,11 +147,20 @@ function buildContext(
             `expected ${format(actual)} to deeply equal ${format(expected)}`,
           ),
         match: (pattern: RegExp) =>
-          check(pattern.test(String(actual)), `expected ${format(actual)} to match ${String(pattern)}`),
+          check(
+            pattern.test(String(actual)),
+            `expected ${format(actual)} to match ${String(pattern)}`,
+          ),
         include: (value: unknown) =>
-          check(String(actual).includes(String(value)), `expected ${format(actual)} to include ${format(value)}`),
+          check(
+            String(actual).includes(String(value)),
+            `expected ${format(actual)} to include ${format(value)}`,
+          ),
         contain: (value: unknown) =>
-          check(String(actual).includes(String(value)), `expected ${format(actual)} to contain ${format(value)}`),
+          check(
+            String(actual).includes(String(value)),
+            `expected ${format(actual)} to contain ${format(value)}`,
+          ),
         be,
         get exist() {
           check(actual !== undefined && actual !== null, `expected ${format(actual)} to exist`);
@@ -189,7 +207,11 @@ function buildContext(
  *  not an `instanceof` this one's Error — reading the message directly is
  *  what keeps "boom" from being reported as "Error: boom". */
 function messageOf(error: unknown): string {
-  if (typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string") {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
     return (error as { message: string }).message;
   }
   return String(error);

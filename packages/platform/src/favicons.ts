@@ -43,10 +43,7 @@ function fileFor(directory: string, origin: string): string {
   return join(directory, `${createHash("sha256").update(origin).digest("hex").slice(0, 32)}.json`);
 }
 
-export function createFaviconStore(
-  directory: string,
-  now: () => number = Date.now,
-): FaviconStore {
+export function createFaviconStore(directory: string, now: () => number = Date.now): FaviconStore {
   async function read(url: string): Promise<Entry | undefined> {
     const path = fileFor(directory, originOf(url));
     try {
@@ -68,7 +65,10 @@ export function createFaviconStore(
     async get(url) {
       try {
         const entry = await read(url);
-        return { ok: true, value: entry?.dataUri === undefined ? undefined : { dataUri: entry.dataUri } };
+        return {
+          ok: true,
+          value: entry?.dataUri === undefined ? undefined : { dataUri: entry.dataUri },
+        };
       } catch (error) {
         return { ok: false, detail: errorMessage(error) };
       }

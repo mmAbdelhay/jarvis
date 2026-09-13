@@ -133,7 +133,10 @@ export function evaluateAssertions(
       target: assertion.name,
       expression,
       passed: compare(operator, actual, operand),
-      actual: actual === undefined ? "undefined" : String(typeof actual === "object" ? JSON.stringify(actual) : actual),
+      actual:
+        actual === undefined
+          ? "undefined"
+          : String(typeof actual === "object" ? JSON.stringify(actual) : actual),
     });
   }
 

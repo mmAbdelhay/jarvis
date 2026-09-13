@@ -319,8 +319,9 @@ export class SessionManager {
  * out of these, so a summary taken from raw output would otherwise be a
  * row of cursor-positioning noise rather than words.
  */
-// eslint-disable-next-line no-control-regex
-const ANSI_PATTERN = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|[@-Z\\-_])/g;
+const ANSI_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC and BEL literally is the point — stripping them is what this pattern is for.
+  /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|[@-Z\\-_])/g;
 
 /**
  * The last line of output with anything to say, for the dashboard row's
@@ -342,7 +343,8 @@ function lastNonEmptyLine(chunk: string): string | undefined {
 
 // Box-drawing, block and geometric-shape ranges, plus the spinner glyphs
 // and bullets a CLI animates with. A line made only of these is chrome.
-const DECORATION_ONLY = /^[\s\u2500-\u257F\u2580-\u259F\u25A0-\u25FF\u2022\u00B7\u283F-\u28FF*=_.-]+$/;
+const DECORATION_ONLY =
+  /^[\s\u2500-\u257F\u2580-\u259F\u25A0-\u25FF\u2022\u00B7\u283F-\u28FF*=_.-]+$/;
 
 function isDecorationOnly(line: string): boolean {
   return DECORATION_ONLY.test(line);

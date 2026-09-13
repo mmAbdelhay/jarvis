@@ -88,7 +88,7 @@ describe("ProviderMonitor.refreshCapacity", () => {
 
   it("lets an explicit force outrun an unforced pass and refresh what it left stale", async () => {
     let gate: Promise<void> = Promise.resolve();
-    const readCapacity = vi.fn(async (configDir: string) => {
+    const readCapacity = vi.fn(async (_configDir: string) => {
       await gate;
       return OK;
     });

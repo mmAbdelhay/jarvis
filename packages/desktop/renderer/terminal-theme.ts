@@ -50,11 +50,22 @@ export const TERMINAL_FONT = {
 export const SCROLLBACK_LINES = 5_000;
 
 const ANSI_16 = [
-  TERMINAL_THEME.black, TERMINAL_THEME.red, TERMINAL_THEME.green, TERMINAL_THEME.yellow,
-  TERMINAL_THEME.blue, TERMINAL_THEME.magenta, TERMINAL_THEME.cyan, TERMINAL_THEME.white,
-  TERMINAL_THEME.brightBlack, TERMINAL_THEME.brightRed, TERMINAL_THEME.brightGreen,
-  TERMINAL_THEME.brightYellow, TERMINAL_THEME.brightBlue, TERMINAL_THEME.brightMagenta,
-  TERMINAL_THEME.brightCyan, TERMINAL_THEME.brightWhite,
+  TERMINAL_THEME.black,
+  TERMINAL_THEME.red,
+  TERMINAL_THEME.green,
+  TERMINAL_THEME.yellow,
+  TERMINAL_THEME.blue,
+  TERMINAL_THEME.magenta,
+  TERMINAL_THEME.cyan,
+  TERMINAL_THEME.white,
+  TERMINAL_THEME.brightBlack,
+  TERMINAL_THEME.brightRed,
+  TERMINAL_THEME.brightGreen,
+  TERMINAL_THEME.brightYellow,
+  TERMINAL_THEME.brightBlue,
+  TERMINAL_THEME.brightMagenta,
+  TERMINAL_THEME.brightCyan,
+  TERMINAL_THEME.brightWhite,
 ];
 
 /** Slot → colour, for the frozen renderer. Out of range means the program

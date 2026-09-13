@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -70,9 +70,9 @@ describe("parseConfig", () => {
   });
 
   it("throws when a routing entry is missing agent", () => {
-    expect(() =>
-      parseConfig({ ...valid, routing: [{ match: { project: "x" } }] }),
-    ).toThrow(/routing\[0\]\.agent/);
+    expect(() => parseConfig({ ...valid, routing: [{ match: { project: "x" } }] })).toThrow(
+      /routing\[0\]\.agent/,
+    );
   });
 
   it("throws when an agent entry is not an object", () => {
@@ -92,9 +92,7 @@ describe("parseConfig", () => {
   });
 
   it("throws when a projects value is not a string", () => {
-    expect(() => parseConfig({ ...valid, projects: { acme: 123 } })).toThrow(
-      /projects\.acme/,
-    );
+    expect(() => parseConfig({ ...valid, projects: { acme: 123 } })).toThrow(/projects\.acme/);
   });
 
   it("throws when agents is an array", () => {
@@ -160,19 +158,19 @@ describe("parseConfig", () => {
   });
 
   it("keeps the defaults for the performance keys a config does not name", () => {
-    expect(
-      parseConfig({ ...valid, performance: { terminalScrollback: 100 } }).performance,
-    ).toEqual({
-      suspendTabsAfterMinutes: 15,
-      stopSidecarsAfterMinutes: 10,
-      terminalScrollback: 100,
-    });
+    expect(parseConfig({ ...valid, performance: { terminalScrollback: 100 } }).performance).toEqual(
+      {
+        suspendTabsAfterMinutes: 15,
+        stopSidecarsAfterMinutes: 10,
+        terminalScrollback: 100,
+      },
+    );
   });
 
   it("throws when a performance value is negative or not a number", () => {
-    expect(() =>
-      parseConfig({ ...valid, performance: { suspendTabsAfterMinutes: -1 } }),
-    ).toThrow(/performance\.suspendTabsAfterMinutes/);
+    expect(() => parseConfig({ ...valid, performance: { suspendTabsAfterMinutes: -1 } })).toThrow(
+      /performance\.suspendTabsAfterMinutes/,
+    );
     expect(() => parseConfig({ ...valid, performance: { terminalScrollback: "lots" } })).toThrow(
       /performance\.terminalScrollback/,
     );
@@ -221,7 +219,10 @@ describe("parseConfig", () => {
   // and `~/…` resolved against the SDK's own working-directory logic (not
   // the shell) is not a real path — every turn would fail.
   it("expands a leading tilde in brain.cwd", () => {
-    const config = parseConfig({ ...valid, brain: { ...valid.brain, cwd: "~/.config/jarvis/brain" } });
+    const config = parseConfig({
+      ...valid,
+      brain: { ...valid.brain, cwd: "~/.config/jarvis/brain" },
+    });
     expect(config.brain.cwd.startsWith("~")).toBe(false);
     expect(config.brain.cwd).toBe(join(homedir(), ".config", "jarvis", "brain"));
   });
@@ -249,15 +250,15 @@ describe("parseConfig", () => {
 // reach silently, and the first person to find out is someone whose Jarvis
 // will not start.
 describe("the shipped example config", () => {
-  const examplePath = fileURLToPath(new URL("../../../config/jarvis.example.yaml", import.meta.url));
+  const examplePath = fileURLToPath(
+    new URL("../../../config/jarvis.example.yaml", import.meta.url),
+  );
 
   it("parses", () => {
     const config = parseConfig(parse(readFileSync(examplePath, "utf8")));
 
     expect(Object.keys(config.projects)).toContain("orbit");
-    expect(config.chat["acme"]).toEqual([
-      { name: "Acme", driver: "slack", account: "acme" },
-    ]);
+    expect(config.chat["acme"]).toEqual([{ name: "Acme", driver: "slack", account: "acme" }]);
     expect(config.chat["orbit"]).toEqual([{ name: "Globex", driver: "teams" }]);
   });
 });
@@ -374,9 +375,9 @@ describe("agent provider fields", () => {
   });
 
   it("rejects a non-string configDir", () => {
-    expect(() =>
-      parseConfig({ agents: { x: { command: "x", configDir: 7 } }, brain: {} }),
-    ).toThrow(/configDir/);
+    expect(() => parseConfig({ agents: { x: { command: "x", configDir: 7 } }, brain: {} })).toThrow(
+      /configDir/,
+    );
   });
 });
 
@@ -392,7 +393,10 @@ describe("brain.accountId", () => {
 
   it("rejects an accountId that names no agent, rather than silently ignoring it", () => {
     expect(() =>
-      parseConfig({ agents: { "claude-main": { command: "claude-main" } }, brain: { accountId: "ghost" } }),
+      parseConfig({
+        agents: { "claude-main": { command: "claude-main" } },
+        brain: { accountId: "ghost" },
+      }),
     ).toThrow(/accountId/);
   });
 
@@ -413,7 +417,7 @@ describe("databases", () => {
   const base = {
     agents: { "claude-main": { command: "claude-main", default: true } },
     brain: { cwd: "/tmp/brain" },
-    projects: { "storefront": "/p/storefront" },
+    projects: { storefront: "/p/storefront" },
   };
 
   it("defaults to an empty record when the section is absent", () => {
@@ -424,7 +428,7 @@ describe("databases", () => {
     const config = parseConfig({
       ...base,
       databases: {
-        "storefront": [
+        storefront: [
           {
             id: "main",
             label: "Sail (local)",
@@ -454,7 +458,10 @@ describe("databases", () => {
   });
 
   it("keeps a connection that declares nothing but an id and an engine", () => {
-    const config = parseConfig({ ...base, databases: { "storefront": [{ id: "main", engine: "sqlite" }] } });
+    const config = parseConfig({
+      ...base,
+      databases: { storefront: [{ id: "main", engine: "sqlite" }] },
+    });
 
     expect(config.databases["storefront"]).toEqual([{ id: "main", engine: "sqlite" }]);
   });
@@ -467,8 +474,10 @@ describe("databases", () => {
 
   it("rejects an unknown engine", () => {
     expect(() =>
-      parseConfig({ ...base, databases: { "storefront": [{ id: "main", engine: "oracle" }] } }),
-    ).toThrow("Config `databases.storefront[0].engine` must be one of mysql, mariadb, postgres, sqlite");
+      parseConfig({ ...base, databases: { storefront: [{ id: "main", engine: "oracle" }] } }),
+    ).toThrow(
+      "Config `databases.storefront[0].engine` must be one of mysql, mariadb, postgres, sqlite",
+    );
   });
 
   it("rejects a duplicate id within one project", () => {
@@ -476,7 +485,7 @@ describe("databases", () => {
       parseConfig({
         ...base,
         databases: {
-          "storefront": [
+          storefront: [
             { id: "main", engine: "mysql" },
             { id: "main", engine: "mysql" },
           ],
@@ -487,21 +496,23 @@ describe("databases", () => {
 
   it("rejects an id that is not usable as an environment-variable suffix", () => {
     expect(() =>
-      parseConfig({ ...base, databases: { "storefront": [{ id: "main db", engine: "mysql" }] } }),
-    ).toThrow("Config `databases.storefront[0].id` must contain only letters, digits and underscores");
+      parseConfig({ ...base, databases: { storefront: [{ id: "main db", engine: "mysql" }] } }),
+    ).toThrow(
+      "Config `databases.storefront[0].id` must contain only letters, digits and underscores",
+    );
   });
 
   it("rejects a non-numeric port", () => {
     expect(() =>
       parseConfig({
         ...base,
-        databases: { "storefront": [{ id: "main", engine: "mysql", port: "3306" }] },
+        databases: { storefront: [{ id: "main", engine: "mysql", port: "3306" }] },
       }),
     ).toThrow("Config `databases.storefront[0].port` must be a number");
   });
 
   it("rejects a project whose value is not an array", () => {
-    expect(() => parseConfig({ ...base, databases: { "storefront": {} } })).toThrow(
+    expect(() => parseConfig({ ...base, databases: { storefront: {} } })).toThrow(
       "Config `databases.storefront` must be an array",
     );
   });
@@ -510,7 +521,7 @@ describe("databases", () => {
     expect(() =>
       parseConfig({
         ...base,
-        databases: { "storefront": [{ id: "main", engine: "mysql", readonly: "yes" }] },
+        databases: { storefront: [{ id: "main", engine: "mysql", readonly: "yes" }] },
       }),
     ).toThrow("Config `databases.storefront[0].readonly` must be true or false");
   });
@@ -537,7 +548,9 @@ describe("voice", () => {
   // losing the greeting itself — the text still arrives in the panel.
   it("speaks the greeting unless told not to", () => {
     expect(parseConfig(base).voice.speakGreeting).toBe(true);
-    expect(parseConfig({ ...base, voice: { speakGreeting: false } }).voice.speakGreeting).toBe(false);
+    expect(parseConfig({ ...base, voice: { speakGreeting: false } }).voice.speakGreeting).toBe(
+      false,
+    );
   });
 
   it("refuses a speakGreeting that is not a boolean", () => {
@@ -552,14 +565,18 @@ describe("voice", () => {
   it("allows popups unless told not to", () => {
     expect(parseConfig(base).browser.allowPopups).toBe(true);
     expect(parseConfig({ ...base, browser: {} }).browser.allowPopups).toBe(true);
-    expect(parseConfig({ ...base, browser: { allowPopups: false } }).browser.allowPopups).toBe(false);
+    expect(parseConfig({ ...base, browser: { allowPopups: false } }).browser.allowPopups).toBe(
+      false,
+    );
   });
 
   it("refuses an allowPopups that is not a boolean", () => {
     expect(() => parseConfig({ ...base, browser: { allowPopups: "yes" } })).toThrow(
       "Config `browser.allowPopups` must be a boolean",
     );
-    expect(() => parseConfig({ ...base, browser: ["x"] })).toThrow("Config `browser` must be an object");
+    expect(() => parseConfig({ ...base, browser: ["x"] })).toThrow(
+      "Config `browser` must be an object",
+    );
   });
 
   it("takes the configured voices and greetings", () => {
@@ -590,7 +607,9 @@ describe("voice", () => {
   });
 
   it("rejects a section that is not an object", () => {
-    expect(() => parseConfig({ ...base, voice: "loud" })).toThrow("Config `voice` must be an object");
+    expect(() => parseConfig({ ...base, voice: "loud" })).toThrow(
+      "Config `voice` must be an object",
+    );
   });
 
   it("rejects a voice name that is not a string", () => {
@@ -659,7 +678,10 @@ describe("editors", () => {
   // resolving it here would make Settings write an absolute path back into
   // a file the user still edits by hand.
   it("keeps the path relative rather than resolving it against the project", () => {
-    const config = parseConfig({ ...base, editors: { acme: [{ name: "a", path: "./portal-vue/" }] } });
+    const config = parseConfig({
+      ...base,
+      editors: { acme: [{ name: "a", path: "./portal-vue/" }] },
+    });
 
     expect(config.editors["acme"]).toEqual([{ name: "a", path: "./portal-vue/" }]);
   });
@@ -706,9 +728,9 @@ describe("editors", () => {
   // manager refuses it — so it is refused here, where the user is looking
   // at the config, rather than as a dead Editor menu entry later.
   it("rejects a path that climbs out of the project", () => {
-    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "up", path: "../secrets" }] } })).toThrow(
-      "Config `editors.acme[0].path` must stay inside the project",
-    );
+    expect(() =>
+      parseConfig({ ...base, editors: { acme: [{ name: "up", path: "../secrets" }] } }),
+    ).toThrow("Config `editors.acme[0].path` must stay inside the project");
   });
 
   it("rejects a path that climbs out through a subdirectory", () => {
@@ -718,18 +740,18 @@ describe("editors", () => {
   });
 
   it("rejects an absolute path", () => {
-    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "etc", path: "/etc" }] } })).toThrow(
-      "Config `editors.acme[0].path` must be relative to the project",
-    );
+    expect(() =>
+      parseConfig({ ...base, editors: { acme: [{ name: "etc", path: "/etc" }] } }),
+    ).toThrow("Config `editors.acme[0].path` must be relative to the project");
   });
 
   // `~` is expanded everywhere else in this file, and would be a home-
   // relative — that is, absolute — path here. Refused with the message that
   // names the actual rule rather than being silently expanded.
   it("rejects a home-relative path", () => {
-    expect(() => parseConfig({ ...base, editors: { acme: [{ name: "home", path: "~/x" }] } })).toThrow(
-      "Config `editors.acme[0].path` must be relative to the project",
-    );
+    expect(() =>
+      parseConfig({ ...base, editors: { acme: [{ name: "home", path: "~/x" }] } }),
+    ).toThrow("Config `editors.acme[0].path` must be relative to the project");
   });
 
   it("accepts the project directory itself, written as .", () => {
@@ -841,9 +863,9 @@ describe("clusters", () => {
   });
 
   it("rejects a chat entry with an empty name", () => {
-    expect(() =>
-      parseConfig({ ...base, chat: { acme: [{ name: "", driver: "slack" }] } }),
-    ).toThrow(/name/);
+    expect(() => parseConfig({ ...base, chat: { acme: [{ name: "", driver: "slack" }] } })).toThrow(
+      /name/,
+    );
   });
 
   it("rejects a chat entry whose driver is not one this build knows", () => {
@@ -903,13 +925,20 @@ describe("clusters", () => {
     expect(() =>
       parseConfig({
         ...base,
-        clusters: { acme: [{ name: "dev", context: "a" }, { name: "dev", context: "b" }] },
+        clusters: {
+          acme: [
+            { name: "dev", context: "a" },
+            { name: "dev", context: "b" },
+          ],
+        },
       }),
     ).toThrow(/duplicates an earlier cluster/);
   });
 
   it("takes headlamp.binary when given, and leaves the default to the caller when not", () => {
-    expect(parseConfig({ ...base, headlamp: { binary: "/opt/hl" } }).headlamp.binary).toBe("/opt/hl");
+    expect(parseConfig({ ...base, headlamp: { binary: "/opt/hl" } }).headlamp.binary).toBe(
+      "/opt/hl",
+    );
     // Undefined, not a per-OS path: resolving one here would mean reading
     // process.platform during config parsing, and this assertion would then
     // hold only on the OS it happened to run on. main.ts fills it in with

@@ -23,7 +23,10 @@ export function formatDiskUsage(
   const unit = totalFormatted.slice(totalFormatted.indexOf(" ") + 1);
   const exponent = UNITS.indexOf(unit as (typeof UNITS)[number]);
   if (exponent <= 0 || usedBytes <= 0) {
-    return { used: usedBytes <= 0 ? "0" : `${Math.round(usedBytes)}`, total: `/ ${totalFormatted}` };
+    return {
+      used: usedBytes <= 0 ? "0" : `${Math.round(usedBytes)}`,
+      total: `/ ${totalFormatted}`,
+    };
   }
   const usedValue = usedBytes / 1000 ** exponent;
   return { used: usedValue.toFixed(1), total: `/ ${totalFormatted}` };
@@ -104,7 +107,8 @@ export function formatAgo(at: number, now: number, language: "ar" | "en" = "en")
   const seconds = Math.floor((now - at) / 1000);
   if (seconds < 60) return language === "ar" ? "الآن" : "just now";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return language === "ar" ? `قبل ${arabicMinutesAgo(minutes)}` : `${minutes}m ago`;
+  if (minutes < 60)
+    return language === "ar" ? `قبل ${arabicMinutesAgo(minutes)}` : `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return language === "ar" ? `قبل ${arabicHoursAgo(hours)}` : `${hours}h ago`;
   const days = Math.floor(hours / 24);
@@ -145,6 +149,10 @@ export function detectLanguage(text: string): "ar" | "en" {
 export function formatEndedAt(epochMs: number): string {
   const date = new Date(epochMs);
   const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-  const time = date.toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  const time = date.toLocaleTimeString("en-GB", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   return `${day} · ${time}`;
 }

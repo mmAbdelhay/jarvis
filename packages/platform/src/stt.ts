@@ -22,10 +22,13 @@ export async function transcribe(
   run: CommandRunner,
 ): Promise<Transcript> {
   const { code, stdout, stderr } = await run(config.binaryPath, [
-    "-m", config.modelPath,
-    "-l", "auto",
+    "-m",
+    config.modelPath,
+    "-l",
+    "auto",
     "-nt",
-    "-f", wavPath,
+    "-f",
+    wavPath,
   ]);
 
   // A non-zero exit (bad model path, corrupt wav) can produce empty

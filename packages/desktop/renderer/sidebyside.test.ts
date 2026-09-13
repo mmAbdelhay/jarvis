@@ -19,7 +19,10 @@ describe("toSideBySide", () => {
   });
 
   it("pairs a removed line with the added line that replaced it", () => {
-    const rows = toSideBySide([line("removed", "old", 5, undefined), line("added", "new", undefined, 5)]);
+    const rows = toSideBySide([
+      line("removed", "old", 5, undefined),
+      line("added", "new", undefined, 5),
+    ]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.before?.text).toBe("old");
     expect(rows[0]?.after?.text).toBe("new");

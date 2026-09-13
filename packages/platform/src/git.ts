@@ -238,7 +238,10 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
           }
           const info = await stat(join(repoPath, filePath));
           if (info.size > MAX_DIFF_BYTES) {
-            return { ok: true, value: { path: filePath, binary: false, tooLarge: true, hunks: [] } };
+            return {
+              ok: true,
+              value: { path: filePath, binary: false, tooLarge: true, hunks: [] },
+            };
           }
           const buffer = await readFile(join(repoPath, filePath));
           if (buffer.includes(0)) {

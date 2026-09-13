@@ -198,8 +198,6 @@ describe("the splitter", () => {
     const splitter = createSplitter({ now: clock() });
     splitter.push(`${CWD("/repo")}${A}$ ${B}cd src\r\n${C("cd src")}${D(0)}`);
     const events = splitter.push(`${CWD("/repo/src")}${A}$ ${B}`);
-    expect(events.filter((e) => e.type === "cwd")).toEqual([
-      { type: "cwd", path: "/repo/src" },
-    ]);
+    expect(events.filter((e) => e.type === "cwd")).toEqual([{ type: "cwd", path: "/repo/src" }]);
   });
 });

@@ -162,9 +162,15 @@ async function loadApp(
   return callbacks;
 }
 
-function jarvisApi(): { startVoice: ReturnType<typeof vi.fn>; stopVoice: ReturnType<typeof vi.fn> } {
-  return (window as unknown as { jarvis: { startVoice: ReturnType<typeof vi.fn>; stopVoice: ReturnType<typeof vi.fn> } })
-    .jarvis;
+function jarvisApi(): {
+  startVoice: ReturnType<typeof vi.fn>;
+  stopVoice: ReturnType<typeof vi.fn>;
+} {
+  return (
+    window as unknown as {
+      jarvis: { startVoice: ReturnType<typeof vi.fn>; stopVoice: ReturnType<typeof vi.fn> };
+    }
+  ).jarvis;
 }
 
 function micButtonEl(): HTMLElement {
@@ -728,8 +734,22 @@ describe("opening a session", () => {
     const gitChanges = vi.fn(async () => ({
       ok: true,
       value: {
-        session: { id: "s1", project: "acme", projectPath: "/p", agentId: "claude-main", lastActivityAt: 1000, endedAt: undefined },
-        changes: { repoPath: "/p", branch: "main", detached: false, files: [], insertions: 3, deletions: 1 },
+        session: {
+          id: "s1",
+          project: "acme",
+          projectPath: "/p",
+          agentId: "claude-main",
+          lastActivityAt: 1000,
+          endedAt: undefined,
+        },
+        changes: {
+          repoPath: "/p",
+          branch: "main",
+          detached: false,
+          files: [],
+          insertions: 3,
+          deletions: 1,
+        },
       },
     }));
     const { onSessions, onChangeCounts } = await loadApp(undefined, gitChanges);
@@ -990,10 +1010,7 @@ describe("the running-sessions indicator", () => {
   // countable and a remainder is the honest way to say so.
   it("draws an orb per session, up to three", async () => {
     const { onSessions } = await loadApp();
-    onSessions?.([
-      makeSession({ id: "s1" }),
-      makeSession({ id: "s2" }),
-    ]);
+    onSessions?.([makeSession({ id: "s1" }), makeSession({ id: "s2" })]);
     expect(document.getElementById("running-orbs")?.childElementCount).toBe(2);
 
     onSessions?.([

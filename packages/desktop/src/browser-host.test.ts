@@ -242,7 +242,8 @@ describe("BrowserHost", () => {
   });
 
   it("recognises the four dock sides and nothing else", () => {
-    for (const dock of ["undocked", "left", "bottom", "right"]) expect(isDevToolsDock(dock)).toBe(true);
+    for (const dock of ["undocked", "left", "bottom", "right"])
+      expect(isDevToolsDock(dock)).toBe(true);
     for (const other of ["top", "", undefined, 3]) expect(isDevToolsDock(other)).toBe(false);
   });
 
@@ -520,17 +521,25 @@ describe("popup windows", () => {
   let events: HostedViewEvent[];
   let allowed: boolean;
   const policy: PopupPolicy = { allow: () => allowed, windowOptions };
-  const open = (details: WindowOpenDetails): WindowOpenResponse | undefined => contents.popupHandler?.(details);
+  const open = (details: WindowOpenDetails): WindowOpenResponse | undefined =>
+    contents.popupHandler?.(details);
 
   beforeEach(() => {
     contents = new FakeContents();
     events = [];
     allowed = true;
-    bridgeEvents(contents, { canGoBack: () => false, canGoForward: () => false }, (event) => events.push(event), policy);
+    bridgeEvents(
+      contents,
+      { canGoBack: () => false, canGoForward: () => false },
+      (event) => events.push(event),
+      policy,
+    );
   });
 
   it("opens a window.open that asked for a window as a real window", () => {
-    expect(open({ url: "https://accounts.google.com/o/oauth2", disposition: "new-window" })).toEqual({
+    expect(
+      open({ url: "https://accounts.google.com/o/oauth2", disposition: "new-window" }),
+    ).toEqual({
       action: "allow",
       overrideBrowserWindowOptions: windowOptions,
     });
@@ -539,23 +548,31 @@ describe("popup windows", () => {
 
   // The usual sign-in pattern: open an empty window, then navigate it.
   it("allows the empty window a sign-in opens first", () => {
-    expect(open({ url: "about:blank", disposition: "new-window" })).toMatchObject({ action: "allow" });
+    expect(open({ url: "about:blank", disposition: "new-window" })).toMatchObject({
+      action: "allow",
+    });
   });
 
   it("still opens target=_blank as a tab", () => {
-    expect(open({ url: "https://example.com/help", disposition: "foreground-tab" })).toEqual({ action: "deny" });
+    expect(open({ url: "https://example.com/help", disposition: "foreground-tab" })).toEqual({
+      action: "deny",
+    });
     expect(events).toEqual([{ kind: "popup", url: "https://example.com/help" }]);
   });
 
   it("opens popups as tabs once the user turns them off", () => {
     allowed = false;
 
-    expect(open({ url: "https://meet.google.com/x", disposition: "new-window" })).toEqual({ action: "deny" });
+    expect(open({ url: "https://meet.google.com/x", disposition: "new-window" })).toEqual({
+      action: "deny",
+    });
     expect(events).toEqual([{ kind: "popup", url: "https://meet.google.com/x" }]);
   });
 
   it("never gives a non-web scheme a window", () => {
-    expect(open({ url: "file:///etc/passwd", disposition: "new-window" })).toEqual({ action: "deny" });
+    expect(open({ url: "file:///etc/passwd", disposition: "new-window" })).toEqual({
+      action: "deny",
+    });
   });
 
   // A popup window gets no tab of its own, but it must not be a way around
@@ -567,10 +584,14 @@ describe("popup windows", () => {
     let prevented = false;
     popup.fire("will-navigate", { preventDefault: () => (prevented = true) }, "file:///etc/passwd");
     expect(prevented).toBe(true);
-    expect(popup.popupHandler?.({ url: "https://example.com", disposition: "new-window" })).toMatchObject({
+    expect(
+      popup.popupHandler?.({ url: "https://example.com", disposition: "new-window" }),
+    ).toMatchObject({
       action: "allow",
     });
-    expect(popup.popupHandler?.({ url: "https://example.com/doc", disposition: "foreground-tab" })).toEqual({
+    expect(
+      popup.popupHandler?.({ url: "https://example.com/doc", disposition: "foreground-tab" }),
+    ).toEqual({
       action: "deny",
     });
     expect(events).toEqual([{ kind: "popup", url: "https://example.com/doc" }]);
@@ -717,7 +738,7 @@ describe("BrowserHost idle suspension", () => {
     const first = host.state().tabs[0]!.id;
 
     now = 900;
-    host.activate(first);       // one is visible again, two starts its clock
+    host.activate(first); // one is visible again, two starts its clock
     now = 1500;
     host.sweepIdle();
 
@@ -845,7 +866,7 @@ describe("BrowserHost idle suspension", () => {
     host.open("p", "https://two.example");
 
     now = 5000;
-    host.sweepIdle();          // one is suspended; only two holds a view
+    host.sweepIdle(); // one is suspended; only two holds a view
     host.open("p", "https://three.example");
 
     // Three tabs, two views: the suspended one was not closed to make room.
@@ -986,7 +1007,12 @@ describe("BrowserHost picture-in-picture", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    view.emit({ kind: "navigated", url: "https://example.com/next", canGoBack: true, canGoForward: false });
+    view.emit({
+      kind: "navigated",
+      url: "https://example.com/next",
+      canGoBack: true,
+      canGoForward: false,
+    });
 
     expect(host.state().tabs[0]?.hasPlayingVideo).toBe(false);
   });
@@ -1060,10 +1086,8 @@ describe("bridgeEvents", () => {
     events = [];
     back = false;
     forward = false;
-    bridgeEvents(
-      contents,
-      { canGoBack: () => back, canGoForward: () => forward },
-      (event) => events.push(event),
+    bridgeEvents(contents, { canGoBack: () => back, canGoForward: () => forward }, (event) =>
+      events.push(event),
     );
   });
 
@@ -1093,7 +1117,10 @@ describe("bridgeEvents", () => {
   // exposes neither to BrowserHost — this is the only place either is read.
   it("reports the favicon Chromium resolved, with the page's URL and session", () => {
     contents.url = "https://a.test/page";
-    contents.fire("page-favicon-updated", {}, ["https://a.test/icon.png", "https://a.test/other.png"]);
+    contents.fire("page-favicon-updated", {}, [
+      "https://a.test/icon.png",
+      "https://a.test/other.png",
+    ]);
 
     expect(events).toEqual([
       {
@@ -1379,8 +1406,18 @@ describe("BrowserHost terminal tabs", () => {
     const pending = host.openForResult("acme", "https://auth.test/authorize", "https://cb.test/");
     expect(host.state().tabs).toHaveLength(1);
 
-    views[0]?.emit({ kind: "navigated", url: "https://auth.test/login", canGoBack: false, canGoForward: false });
-    views[0]?.emit({ kind: "navigated", url: "https://cb.test/?code=abc", canGoBack: true, canGoForward: false });
+    views[0]?.emit({
+      kind: "navigated",
+      url: "https://auth.test/login",
+      canGoBack: false,
+      canGoForward: false,
+    });
+    views[0]?.emit({
+      kind: "navigated",
+      url: "https://cb.test/?code=abc",
+      canGoBack: true,
+      canGoForward: false,
+    });
 
     await expect(pending).resolves.toBe("https://cb.test/?code=abc");
     expect(host.state().tabs).toHaveLength(0);
@@ -1393,7 +1430,12 @@ describe("BrowserHost terminal tabs", () => {
       settled = true;
     });
 
-    views[0]?.emit({ kind: "navigated", url: "https://auth.test/consent", canGoBack: false, canGoForward: false });
+    views[0]?.emit({
+      kind: "navigated",
+      url: "https://auth.test/consent",
+      canGoBack: false,
+      canGoForward: false,
+    });
     await Promise.resolve();
 
     expect(settled).toBe(false);
@@ -1405,7 +1447,12 @@ describe("BrowserHost terminal tabs", () => {
   it("accepts any code-bearing redirect when no prefix was given", async () => {
     const pending = host.openForResult("acme", "https://auth.test/a");
 
-    views[0]?.emit({ kind: "navigated", url: "http://localhost:9/cb?code=xyz", canGoBack: false, canGoForward: false });
+    views[0]?.emit({
+      kind: "navigated",
+      url: "http://localhost:9/cb?code=xyz",
+      canGoBack: false,
+      canGoForward: false,
+    });
 
     await expect(pending).resolves.toContain("code=xyz");
   });

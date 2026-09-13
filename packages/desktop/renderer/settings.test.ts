@@ -9,7 +9,12 @@ function sample(): JarvisConfig {
   return {
     registry: {
       agents: {
-        "claude-main": { command: "claude-main", model: "opus", default: true, configDir: "/x/.claude-main" },
+        "claude-main": {
+          command: "claude-main",
+          model: "opus",
+          default: true,
+          configDir: "/x/.claude-main",
+        },
         copilot: { command: "copilot" },
       },
       routing: [{ match: { project: "acme" }, agent: "claude-main" }],
@@ -23,27 +28,48 @@ function sample(): JarvisConfig {
     workflows: {},
     headlamp: { binary: "/some/path" },
     terminal: {
-    completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
-    blocks: { enabled: true, inputEditor: true },
-    notifyAfterSeconds: 30,
-  },
+      completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
+      blocks: { enabled: true, inputEditor: true },
+      notifyAfterSeconds: 30,
+    },
     voice: {
       engine: "say" as const,
-    piperBinary: "/opt/piper",
-    piperModel: "/voices/alan.onnx",
-    piperArabicModel: "/voices/ar.onnx",
-    englishVoice: "Daniel",
+      piperBinary: "/opt/piper",
+      piperModel: "/voices/alan.onnx",
+      piperArabicModel: "/voices/ar.onnx",
+      englishVoice: "Daniel",
       arabicVoice: "Majed",
-      greeting: { en: "Good {timeOfDay} sir, how can I help you today?", ar: "{timeOfDay} يا سيدي" },
+      greeting: {
+        en: "Good {timeOfDay} sir, how can I help you today?",
+        ar: "{timeOfDay} يا سيدي",
+      },
       speakGreeting: true,
     },
-    brain: { systemPrompt: "You are Jarvis.", cwd: "/x/.config/jarvis/brain", accountId: "claude-main" },
+    brain: {
+      systemPrompt: "You are Jarvis.",
+      cwd: "/x/.config/jarvis/brain",
+      accountId: "claude-main",
+    },
     whisper: { binaryPath: "/opt/whisper/bin", modelPath: "/opt/whisper/model.bin" },
-    performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+    performance: {
+      suspendTabsAfterMinutes: 15,
+      stopSidecarsAfterMinutes: 10,
+      terminalScrollback: 5000,
+    },
     browser: { allowPopups: true },
     sessions: { importWindowDays: 30 },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };
+}
+
+/** The config a recorded `saveSettings` call carried.
+ *
+ *  Written as a function because `savedConfig(saved).docker`
+ *  puts the member access outside the optional chain: a test where Save never
+ *  fired would throw on undefined rather than fail with a reason. */
+function savedConfig(saved: Recorded | undefined): JarvisConfig {
+  if (saved === undefined) throw new Error("saveSettings was never called");
+  return saved.args[0] as JarvisConfig;
 }
 
 function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: JarvisConfig } {
@@ -204,7 +230,9 @@ describe("openSettings", () => {
   it("offers only agents with a configDir as the brain account", async () => {
     await openSettings();
 
-    const options = [...(document.getElementById("settings-brain-account") as HTMLSelectElement).options]
+    const options = [
+      ...(document.getElementById("settings-brain-account") as HTMLSelectElement).options,
+    ]
       .map((option) => option.value)
       .filter((value) => value !== "");
 
@@ -445,7 +473,14 @@ describe("databases section", () => {
       ...sample(),
       databases: {
         acme: [
-          { id: "main", label: "Local", engine: "mysql", host: "127.0.0.1", port: 3306, user: "root" },
+          {
+            id: "main",
+            label: "Local",
+            engine: "mysql",
+            host: "127.0.0.1",
+            port: 3306,
+            user: "root",
+          },
         ],
       },
     };
@@ -512,9 +547,9 @@ describe("databases section", () => {
 
     document.getElementById("settings-database-add")?.click();
 
-    const ids = [...document.querySelectorAll<HTMLInputElement>(
-      '#settings-databases input[data-field="id"]',
-    )].map((input) => input.value);
+    const ids = [
+      ...document.querySelectorAll<HTMLInputElement>('#settings-databases input[data-field="id"]'),
+    ].map((input) => input.value);
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
   });
@@ -524,12 +559,14 @@ describe("databases section", () => {
     initSettings();
     await openSettings();
 
-    expect((document.getElementById("settings-database-add") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("settings-database-add") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("moves a connection between projects through its project select", async () => {
     const config = withConnections();
-    config.projects = { acme: "/x/a", "storefront": "/x/b" };
+    config.projects = { acme: "/x/a", storefront: "/x/b" };
     const { calls } = harness(config);
     initSettings();
     await openSettings();
@@ -604,7 +641,9 @@ describe("editor roots section", () => {
     initSettings();
     await openSettings();
 
-    const path = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="path"]')!;
+    const path = document.querySelector<HTMLInputElement>(
+      '#settings-editors input[data-field="path"]',
+    )!;
     path.value = "services/api";
     change(path);
 
@@ -616,7 +655,9 @@ describe("editor roots section", () => {
     initSettings();
     await openSettings();
 
-    const name = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="name"]')!;
+    const name = document.querySelector<HTMLInputElement>(
+      '#settings-editors input[data-field="name"]',
+    )!;
     name.value = "portal";
     change(name);
 
@@ -630,7 +671,9 @@ describe("editor roots section", () => {
     initSettings();
     await openSettings();
 
-    const path = document.querySelector<HTMLInputElement>('#settings-editors input[data-field="path"]')!;
+    const path = document.querySelector<HTMLInputElement>(
+      '#settings-editors input[data-field="path"]',
+    )!;
     path.value = "half-typ";
     path.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -666,12 +709,14 @@ describe("editor roots section", () => {
     initSettings();
     await openSettings();
 
-    expect((document.getElementById("settings-editor-add") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("settings-editor-add") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("moves a root between projects through its project select", async () => {
     const config = withRoots();
-    config.projects = { acme: "/x/a", "storefront": "/x/b" };
+    config.projects = { acme: "/x/a", storefront: "/x/b" };
     const { calls } = harness(config);
     initSettings();
     await openSettings();
@@ -724,7 +769,9 @@ describe("voice section", () => {
     await openSettings();
     await settle();
 
-    const english = [...document.querySelectorAll("#settings-voice-en option")].map((o) => o.textContent);
+    const english = [...document.querySelectorAll("#settings-voice-en option")].map(
+      (o) => o.textContent,
+    );
     expect(english).toEqual([
       "Alan (neural) · en_GB",
       "Daniel · en_GB",
@@ -732,7 +779,9 @@ describe("voice section", () => {
       "Samantha · en_US",
     ]);
 
-    const arabic = [...document.querySelectorAll("#settings-voice-ar option")].map((o) => o.textContent);
+    const arabic = [...document.querySelectorAll("#settings-voice-ar option")].map(
+      (o) => o.textContent,
+    );
     expect(arabic).toEqual(["Majed · ar_001"]);
   });
 
@@ -742,7 +791,9 @@ describe("voice section", () => {
     await openSettings();
     await settle();
 
-    expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe("Daniel");
+    expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe(
+      "Daniel",
+    );
   });
 
   // Opening Settings must not silently rewrite a configured voice to
@@ -820,7 +871,9 @@ describe("voice section", () => {
     await openSettings();
     await settle();
 
-    expect((document.getElementById("settings-speak-greeting") as HTMLInputElement).checked).toBe(true);
+    expect((document.getElementById("settings-speak-greeting") as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
 
   it("saves the greeting silenced", async () => {
@@ -848,7 +901,9 @@ describe("voice section", () => {
     await openSettings();
     await settle();
 
-    expect((document.getElementById("settings-allow-popups") as HTMLInputElement).checked).toBe(true);
+    expect((document.getElementById("settings-allow-popups") as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
 
   it("saves popups turned off", async () => {
@@ -980,7 +1035,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({});
+    expect(savedConfig(saved).docker).toEqual({});
   });
 
   it("adds exactly the ticked containers, named after their compose service", async () => {
@@ -995,7 +1050,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [{ name: "app", container: "acme-app-1" }],
     });
   });
@@ -1022,7 +1077,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [
         { name: "app", container: "acme-app-1" },
         { name: "app-2", container: "other-app-1" },
@@ -1042,7 +1097,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [{ name: "container-1", container: "container-1" }],
     });
     // The thing that actually matters: parseConfig accepts it.
@@ -1051,7 +1106,7 @@ describe("settings docker section", () => {
         agents: { a: { command: "a" } },
         projects: { acme: "/x/projects/acme" },
         brain: { cwd: "/x/brain" },
-        docker: (saved?.args[0] as JarvisConfig).docker,
+        docker: savedConfig(saved).docker,
       }),
     ).not.toThrow();
   });
@@ -1070,7 +1125,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker["acme"]).toContainEqual({
+    expect(savedConfig(saved).docker["acme"]).toContainEqual({
       name: "gone",
       container: "acme-gone-1",
     });
@@ -1108,8 +1163,7 @@ describe("settings docker section", () => {
     document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = (calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig)
-      .docker;
+    const saved = savedConfig(calls.find((entry) => entry.call === "saveSettings")).docker;
     expect(saved["extra"]).toContainEqual({ name: "app", container: "other-app-1" });
     expect(saved["acme"]?.some((entry) => entry.container === "other-app-1")).toBe(false);
   });
@@ -1142,7 +1196,9 @@ describe("settings chat section", () => {
     initSettings();
     await openSettings();
 
-    const driver = document.querySelector<HTMLSelectElement>('#settings-chat select[data-field="driver"]')!;
+    const driver = document.querySelector<HTMLSelectElement>(
+      '#settings-chat select[data-field="driver"]',
+    )!;
     expect([...driver.options].map((option) => option.value)).toEqual(["slack", "teams"]);
   });
 
@@ -1151,7 +1207,9 @@ describe("settings chat section", () => {
     initSettings();
     await openSettings();
 
-    const driver = document.querySelector<HTMLSelectElement>('#settings-chat select[data-field="driver"]')!;
+    const driver = document.querySelector<HTMLSelectElement>(
+      '#settings-chat select[data-field="driver"]',
+    )!;
     driver.value = "teams";
     change(driver);
 
@@ -1163,7 +1221,9 @@ describe("settings chat section", () => {
     initSettings();
     await openSettings();
 
-    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    const account = document.querySelector<HTMLInputElement>(
+      '#settings-chat input[data-field="account"]',
+    )!;
     account.value = "orbit.com";
     change(account);
 
@@ -1178,7 +1238,9 @@ describe("settings chat section", () => {
     initSettings();
     await openSettings();
 
-    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    const account = document.querySelector<HTMLInputElement>(
+      '#settings-chat input[data-field="account"]',
+    )!;
     account.value = "";
     change(account);
 
@@ -1193,7 +1255,9 @@ describe("settings chat section", () => {
     initSettings();
     await openSettings();
 
-    const account = document.querySelector<HTMLInputElement>('#settings-chat input[data-field="account"]')!;
+    const account = document.querySelector<HTMLInputElement>(
+      '#settings-chat input[data-field="account"]',
+    )!;
     account.value = "half-typ";
     account.dispatchEvent(new Event("input", { bubbles: true }));
 

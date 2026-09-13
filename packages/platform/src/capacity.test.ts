@@ -32,7 +32,10 @@ describe("parseUsage", () => {
   });
 
   it("reads the five-hour window even when the seven-day one is absent", () => {
-    const reading = parseUsage({ ...LIVE_SHAPE, rate_limits: { five_hour: LIVE_SHAPE.rate_limits.five_hour } });
+    const reading = parseUsage({
+      ...LIVE_SHAPE,
+      rate_limits: { five_hour: LIVE_SHAPE.rate_limits.five_hour },
+    });
     expect(reading.ok && reading.sevenDay).toBeUndefined();
     expect(reading.ok).toBe(true);
   });
@@ -51,10 +54,22 @@ describe("parseUsage", () => {
       {},
       { rate_limits_available: true, rate_limits: {} },
       // The exact mistake the spike's own report would have caused:
-      { rate_limits_available: true, five_hour: { utilization: 9, resets_at: "2026-08-31T14:30:00Z" } },
-      { rate_limits_available: true, rate_limits: { five_hour: { utilization: "9", resets_at: "x" } } },
-      { rate_limits_available: true, rate_limits: { five_hour: { utilization: 9, resets_at: "not a date" } } },
-      { rate_limits_available: true, rate_limits: { five_hour: { utilization: null, resets_at: null } } },
+      {
+        rate_limits_available: true,
+        five_hour: { utilization: 9, resets_at: "2026-08-31T14:30:00Z" },
+      },
+      {
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: "9", resets_at: "x" } },
+      },
+      {
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 9, resets_at: "not a date" } },
+      },
+      {
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: null, resets_at: null } },
+      },
       // Payload is a string, not an object.
       "not an object",
       // Payload is an array, not a record.
@@ -143,7 +158,8 @@ function fakeQuery(options: {
       state.seen.push("usage");
       // The real method throws when called after the query closes.
       if (state.drained) throw new Error("Query closed before response received");
-      if (options.throwBefore === true) throw new Error("ProcessTransport is not ready for writing");
+      if (options.throwBefore === true)
+        throw new Error("ProcessTransport is not ready for writing");
       return options.usage;
     },
   };
@@ -172,7 +188,9 @@ describe("createCapacityReader", () => {
     expect(query).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "ok",
-        options: expect.objectContaining({ env: expect.objectContaining({ CLAUDE_CONFIG_DIR: "/c/acme" }) }),
+        options: expect.objectContaining({
+          env: expect.objectContaining({ CLAUDE_CONFIG_DIR: "/c/acme" }),
+        }),
       }),
     );
   });
@@ -227,7 +245,11 @@ describe("createCapacityReader", () => {
     try {
       const before = vi.getTimerCount();
       const query = fakeQuery({ usage: LIVE_SHAPE });
-      const read = createCapacityReader({ cwd: "/tmp/brain", query: () => query, timeoutMs: 1_000 });
+      const read = createCapacityReader({
+        cwd: "/tmp/brain",
+        query: () => query,
+        timeoutMs: 1_000,
+      });
       const pending = read("/c/mm");
       await vi.runAllTimersAsync();
       await pending;

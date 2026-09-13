@@ -2,7 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderStatus, RateWindow } from "@jarvis/core";
 import { remainingPercent as coreRemainingPercent } from "@jarvis/core";
-import { remainingPercent as rendererRemainingPercent, renderProviders, wireProvidersPanel } from "./providers.js";
+import {
+  remainingPercent as rendererRemainingPercent,
+  renderProviders,
+  wireProvidersPanel,
+} from "./providers.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { formatAgo } from "./format.js";
 
@@ -65,8 +69,9 @@ describe("renderProviders", () => {
     );
     expect(document.querySelector(".provider__value")?.textContent).toBe("0%");
     expect(document.querySelector(".provider .bar")).not.toBeNull();
-    expect(document.querySelector(".provider__value")?.classList.contains("provider__value--empty"))
-      .toBe(true);
+    expect(
+      document.querySelector(".provider__value")?.classList.contains("provider__value--empty"),
+    ).toBe(true);
   });
 
   it("renders an unknown as an em dash with NO meter at all", () => {
@@ -138,7 +143,9 @@ describe("renderProviders", () => {
   it("builds every node with createElement — no markup is ever assigned as text", () => {
     renderProviders([status({ id: "<img src=x onerror=alert(1)>" })], NOW);
     expect(document.querySelector("#providers img")).toBeNull();
-    expect(document.querySelector(".provider__id")?.textContent).toBe("<img src=x onerror=alert(1)>");
+    expect(document.querySelector(".provider__id")?.textContent).toBe(
+      "<img src=x onerror=alert(1)>",
+    );
   });
 
   it("says so plainly when no accounts are configured", () => {
@@ -158,8 +165,14 @@ describe("renderProviders", () => {
 // agree on every input, including core's floor (ruling S11).
 describe("remainingPercent — core and the renderer's local copy agree (ruling S1)", () => {
   const table: Array<{ label: string; window: RateWindow }> = [
-    { label: "0% used (100% left)", window: { usedPercent: 0, resetsAt: "2026-08-31T14:30:00.000Z" } },
-    { label: "100% used (0% left)", window: { usedPercent: 100, resetsAt: "2026-08-31T14:30:00.000Z" } },
+    {
+      label: "0% used (100% left)",
+      window: { usedPercent: 0, resetsAt: "2026-08-31T14:30:00.000Z" },
+    },
+    {
+      label: "100% used (0% left)",
+      window: { usedPercent: 100, resetsAt: "2026-08-31T14:30:00.000Z" },
+    },
     {
       label: "a fractional usedPercent (62.5), which must floor rather than round",
       window: { usedPercent: 62.5, resetsAt: "2026-08-31T14:30:00.000Z" },

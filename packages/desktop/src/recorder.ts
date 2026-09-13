@@ -109,8 +109,7 @@ export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
           resolve(result);
         };
         child.on("error", (error) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
+          const message = error instanceof Error ? error.message : String(error);
           settle({
             error: `Could not start the microphone recorder: ${message}`,
           });

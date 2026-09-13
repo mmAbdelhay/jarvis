@@ -14,14 +14,16 @@ describe("page full screen", () => {
   // video sits under a topbar and a workspace head — which is what made it
   // look like Jarvis had gone full screen instead of the video.
   it("takes the topbar and the workspace head out of the layout", () => {
-    expect(css).toMatch(/body\.page-fullscreen \.topbar,\s*\n\s*body\.page-fullscreen \.workspace-head \{ display: none; \}/);
+    expect(css).toMatch(
+      /body\.page-fullscreen \.topbar,\s*\n\s*body\.page-fullscreen \.workspace-head \{ display: none; \}/,
+    );
   });
 
   // Scoped to body, so that leaving full screen is a class removal with
   // nothing to put back — and so each element's own layout stays described
   // in exactly one place.
   it("never sets display on the base rules to do it", () => {
-    expect(css).toMatch(/\n  \.topbar \{\n    display: flex;/);
-    expect(css).toMatch(/\n  \.workspace-head \{\n    display: flex;/);
+    expect(css).toMatch(/\n {2}\.topbar \{\n {4}display: flex;/);
+    expect(css).toMatch(/\n {2}\.workspace-head \{\n {4}display: flex;/);
   });
 });

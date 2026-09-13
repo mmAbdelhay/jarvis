@@ -58,7 +58,9 @@ describe("createSqliteSessionStore", () => {
   it("updates the same row in place on a later transition, not a second row", () => {
     const store = createSqliteSessionStore(":memory:");
     store.upsert(agentSession());
-    store.upsert(agentSession({ state: "running", summary: "Running tests", lastActivityAt: 2000 }));
+    store.upsert(
+      agentSession({ state: "running", summary: "Running tests", lastActivityAt: 2000 }),
+    );
     const history = store.history();
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ state: "running", summary: "Running tests" });
@@ -66,9 +68,7 @@ describe("createSqliteSessionStore", () => {
 
   it("records endedAt and exitCode when set", () => {
     const store = createSqliteSessionStore(":memory:");
-    store.upsert(
-      agentSession({ state: "dead", exitCode: 1, endedAt: 3000, lastActivityAt: 3000 }),
-    );
+    store.upsert(agentSession({ state: "dead", exitCode: 1, endedAt: 3000, lastActivityAt: 3000 }));
     expect(store.history()[0]).toMatchObject({ state: "dead", exitCode: 1, endedAt: 3000 });
   });
 
@@ -116,7 +116,7 @@ describe("createSqliteSessionStore", () => {
 
     afterEach(() => {
       closeOpenStores();
-        rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     });
 
     it("throws a specific error when a row has an unrecognised state", () => {
@@ -141,7 +141,7 @@ describe("createSqliteSessionStore", () => {
       expect(() => store.history()).toThrow(/numeric `startedAt` column/);
     });
 
-    it("throws a specific error for a non-string project instead of rendering the literal string \"undefined\"", () => {
+    it('throws a specific error for a non-string project instead of rendering the literal string "undefined"', () => {
       const store = createSqliteSessionStore(dbPath);
       store.upsert(agentSession());
 
@@ -151,7 +151,9 @@ describe("createSqliteSessionStore", () => {
       // out as a Uint8Array, which is exactly the kind of wrong-shaped
       // value a validated read must reject rather than accept as `unknown`.
       const raw = new DatabaseSync(dbPath);
-      raw.prepare("UPDATE sessions SET project = ? WHERE id = ?").run(new Uint8Array([1, 2, 3]), "s1");
+      raw
+        .prepare("UPDATE sessions SET project = ? WHERE id = ?")
+        .run(new Uint8Array([1, 2, 3]), "s1");
       raw.close();
 
       // "a string or null" since v3, where null became a legitimate value
@@ -207,7 +209,7 @@ describe("createSqliteSessionStore", () => {
 
     afterEach(() => {
       closeOpenStores();
-        rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     });
 
     it("creates the db file (and its parent directory) on first use", () => {
@@ -258,7 +260,7 @@ describe("createSqliteSessionStore", () => {
 
     afterEach(() => {
       closeOpenStores();
-        rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     });
 
     it("adds the git columns to an existing v1 database without losing rows", () => {
@@ -399,7 +401,9 @@ describe("createSqliteSessionStore", () => {
 
     it("defaults branch/insertions/deletions/changedFiles for a session that ends before any git metadata is recorded", () => {
       const store = createSqliteSessionStore(dbPath);
-      store.upsert(agentSession({ id: "no-git", state: "dead", endedAt: 5000, lastActivityAt: 5000 }));
+      store.upsert(
+        agentSession({ id: "no-git", state: "dead", endedAt: 5000, lastActivityAt: 5000 }),
+      );
 
       const row = store.history().find((session) => session.id === "no-git");
       expect(row).toMatchObject({ branch: "", insertions: 0, deletions: 0, changedFiles: 0 });
@@ -594,7 +598,7 @@ describe("createSqliteSessionStore", () => {
 
     afterEach(() => {
       closeOpenStores();
-        rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     });
 
     // A v2 database exactly as phase 2 wrote it — built by hand, not
@@ -724,7 +728,7 @@ describe("createSqliteSessionStore", () => {
 
     afterEach(() => {
       closeOpenStores();
-        rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     });
 
     // The ownership boundary the design turns on: for a session id

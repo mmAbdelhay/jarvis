@@ -103,7 +103,11 @@ export async function installShellIntegration(
  * about them, and a file that does not exist reads as an empty history, which
  * is what it already did.
  */
-export function defaultHistoryPath(shell: string | undefined, home: string, env: NodeJS.ProcessEnv = {}): string {
+export function defaultHistoryPath(
+  shell: string | undefined,
+  home: string,
+  env: NodeJS.ProcessEnv = {},
+): string {
   if (isPowerShell(shell)) return powerShellHistoryPath(env, home);
   return isBash(shell) ? `${home}/.bash_history` : `${home}/.zsh_history`;
 }

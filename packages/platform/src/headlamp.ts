@@ -63,15 +63,18 @@ export function frontendDirFor(binary: string): string {
  * all Electron, so the path inside the bundle is the same shape everywhere
  * and only the install root differs. `headlamp.binary` overrides this.
  */
-export function defaultHeadlampBinary(
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv,
-): string {
+export function defaultHeadlampBinary(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
   if (platform === "darwin") {
     return "/Applications/Headlamp.app/Contents/Resources/headlamp-server";
   }
   if (platform === "win32") {
-    return join(env["LOCALAPPDATA"] ?? "", "Programs", "Headlamp", "resources", "headlamp-server.exe");
+    return join(
+      env["LOCALAPPDATA"] ?? "",
+      "Programs",
+      "Headlamp",
+      "resources",
+      "headlamp-server.exe",
+    );
   }
   return "/opt/Headlamp/resources/headlamp-server";
 }
@@ -376,10 +379,14 @@ export function headlampArgs({
   skippedContexts: skipped,
 }: Omit<Parameters<HeadlampSpawner>[0], "binary">): string[] {
   const args = [
-    "-html-static-dir", frontendDir,
-    "-kubeconfig", kubeconfigPath,
-    "-listen-addr", "127.0.0.1",
-    "-port", String(port),
+    "-html-static-dir",
+    frontendDir,
+    "-kubeconfig",
+    kubeconfigPath,
+    "-listen-addr",
+    "127.0.0.1",
+    "-port",
+    String(port),
   ];
   // Omitted entirely when nothing is skipped: an empty string argument
   // is not obviously the same thing as "skip nothing" to a Go flag
@@ -446,10 +453,7 @@ export async function loginShellPath(
 
   for (const flags of ["-lic", "-lc"]) {
     try {
-      const { code, stdout } = await withTimeout(
-        runCommand(shell, [flags, PATH_PROBE]),
-        timeoutMs,
-      );
+      const { code, stdout } = await withTimeout(runCommand(shell, [flags, PATH_PROBE]), timeoutMs);
       const path = extractPath(stdout);
       // A non-zero exit with a usable PATH still counts: an interactive
       // startup file that ends in an error has still finished building PATH,

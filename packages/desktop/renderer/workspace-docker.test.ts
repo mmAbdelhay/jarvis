@@ -96,7 +96,9 @@ describe("renderDockerPane", () => {
     const element = host();
     renderDockerPane(element, "tab-1", "acme", {
       ...view,
-      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+      rows: [
+        { ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } },
+      ],
     });
 
     const labels = [...element.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
@@ -203,7 +205,9 @@ describe("renderDockerPane", () => {
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
+    const button = [...element.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Stop the container",
+    );
     button?.click();
 
     expect(stop).not.toHaveBeenCalled();
@@ -216,7 +220,9 @@ describe("renderDockerPane", () => {
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
+    const button = [...element.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Stop the container",
+    );
     button?.click();
 
     expect(stop).toHaveBeenCalledWith("acme", "acme-app-1");
@@ -230,9 +236,13 @@ describe("renderDockerPane", () => {
     const element = host();
     renderDockerPane(element, "tab-1", "acme", {
       ...view,
-      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+      rows: [
+        { ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } },
+      ],
     });
-    [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Start the container")?.click();
+    [...element.querySelectorAll("button")]
+      .find((b) => b.getAttribute("aria-label") === "Start the container")
+      ?.click();
 
     expect(start).toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
@@ -240,18 +250,26 @@ describe("renderDockerPane", () => {
 
   it("surfaces a failed action in the shared status line", async () => {
     const stop = vi.fn(() =>
-      Promise.resolve({ ok: false as const, text: "The container is gone.", language: "en" as const }),
+      Promise.resolve({
+        ok: false as const,
+        text: "The container is gone.",
+        language: "en" as const,
+      }),
     );
     (window as unknown as { jarvis: Record<string, unknown> }).jarvis.dockerStop = stop;
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const element = host();
     renderDockerPane(element, "tab-1", "acme", view);
-    const button = [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Stop the container");
+    const button = [...element.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Stop the container",
+    );
     button?.click();
     await flush();
 
-    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("The container is gone.");
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
+      "The container is gone.",
+    );
   });
 
   it("leaves the status line alone when the action succeeds", async () => {
@@ -261,9 +279,13 @@ describe("renderDockerPane", () => {
     const element = host();
     renderDockerPane(element, "tab-1", "acme", {
       ...view,
-      rows: [{ ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } }],
+      rows: [
+        { ...view.rows[0]!, facts: { ...view.rows[0]!.facts!, state: "exited", status: "exited" } },
+      ],
     });
-    [...element.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Start the container")?.click();
+    [...element.querySelectorAll("button")]
+      .find((b) => b.getAttribute("aria-label") === "Start the container")
+      ?.click();
     await flush();
 
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");

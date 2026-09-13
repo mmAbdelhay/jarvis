@@ -1,4 +1,3 @@
-
 /**
  * Route switching for the whole window, and — the part that matters — the
  * single place that tells the main process whether the hosted browser view

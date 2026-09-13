@@ -40,7 +40,11 @@ export function setResponse(next: View): void {
     (next.scripts?.tests ?? []).some((test) => !test.passed);
   if (failed) activeTab = "tests";
   else if (next.scripts?.error !== undefined) activeTab = "console";
-  else if (activeTab === "tests" && next.assertions.length === 0 && (next.scripts?.tests.length ?? 0) === 0) {
+  else if (
+    activeTab === "tests" &&
+    next.assertions.length === 0 &&
+    (next.scripts?.tests.length ?? 0) === 0
+  ) {
     activeTab = "body";
   } else if (activeTab === "console" && (next.scripts?.logs.length ?? 0) === 0) activeTab = "body";
   renderResponse();

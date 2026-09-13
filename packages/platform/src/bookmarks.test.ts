@@ -45,7 +45,10 @@ describe("createBookmarkStore", () => {
     const store = createBookmarkStore(await tempFile());
     await store.add("acme", { url: "https://github.com", title: "GitHub" });
 
-    const result = await store.add("acme", { url: "https://github.com", title: "GitHub (new tab)" });
+    const result = await store.add("acme", {
+      url: "https://github.com",
+      title: "GitHub (new tab)",
+    });
 
     expect(result).toEqual({
       ok: true,
@@ -152,7 +155,7 @@ describe("createBookmarkStore", () => {
     await store.add("p", { url: "https://b.test/", title: "B" });
     await store.add("p", { url: "https://a.test/", title: "A" });
 
-    const result = await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.add("p", { url: "https://a.test/", title: "A" });
     // Pin the unpinned one to test sorting
     await store.setPinned("p", "https://b.test/", true);
     // Add another, should come after the pinned B even though added last
@@ -256,7 +259,12 @@ describe("a file written before pinning existed", () => {
     const file = await tempFile();
     await writeFile(
       file,
-      JSON.stringify({ p: [{ url: "https://a.test/", title: "A" }, { url: "https://b.test/", title: "B" }] }),
+      JSON.stringify({
+        p: [
+          { url: "https://a.test/", title: "A" },
+          { url: "https://b.test/", title: "B" },
+        ],
+      }),
       "utf8",
     );
     const store = createBookmarkStore(file);

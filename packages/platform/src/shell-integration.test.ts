@@ -98,9 +98,7 @@ describe("installShellIntegration", () => {
       throw new Error("read-only filesystem");
     };
     for (const shell of ["/bin/zsh", "/bin/bash"]) {
-      expect(
-        await installShellIntegration({ ...base, shell, write: failing }),
-      ).toBeUndefined();
+      expect(await installShellIntegration({ ...base, shell, write: failing })).toBeUndefined();
     }
   });
 

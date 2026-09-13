@@ -16,7 +16,10 @@ describe("checkPrerequisites", () => {
   it("reports a binary found on the given PATH as installed", () => {
     expect(
       statusOf(
-        { env: { PATH: "/home/u/.local/bin" }, fileExists: (p) => p === "/home/u/.local/bin/ffmpeg" },
+        {
+          env: { PATH: "/home/u/.local/bin" },
+          fileExists: (p) => p === "/home/u/.local/bin/ffmpeg",
+        },
         "ffmpeg",
       )?.installed,
     ).toBe(true);
@@ -67,9 +70,9 @@ describe("checkPrerequisites", () => {
 
   it("counts any one of the audio players as the player", () => {
     for (const player of ["pw-play", "paplay", "aplay"]) {
-      expect(
-        statusOf({ fileExists: (p) => p === `/usr/bin/${player}` }, "player")?.installed,
-      ).toBe(true);
+      expect(statusOf({ fileExists: (p) => p === `/usr/bin/${player}` }, "player")?.installed).toBe(
+        true,
+      );
     }
   });
 

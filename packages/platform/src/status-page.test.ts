@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { FetchFn } from "./status-page.js";
 import { STATUS_PAGE_URLS, readStatusPage } from "./status-page.js";
 
-const respond = (body: unknown): FetchFn => async () => ({ ok: true, json: async () => body });
+const respond =
+  (body: unknown): FetchFn =>
+  async () => ({ ok: true, json: async () => body });
 
 describe("readStatusPage", () => {
   it("maps each Statuspage indicator to a health state", async () => {

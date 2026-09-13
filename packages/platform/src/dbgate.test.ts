@@ -75,7 +75,9 @@ describe("connectionEnv", () => {
   });
 
   it("never sets both a password and a prompt for the same connection", () => {
-    const env = connectionEnv([{ id: "main", engine: "mysql", passwordEnv: "PW" }], { PW: "s3cret" });
+    const env = connectionEnv([{ id: "main", engine: "mysql", passwordEnv: "PW" }], {
+      PW: "s3cret",
+    });
 
     expect(env["PASSWORD_main"]).toBe("s3cret");
     expect(env["PASSWORD_MODE_main"]).toBeUndefined();
@@ -123,7 +125,8 @@ class FakeProcess implements DbGateProcess {
   }
 }
 
-const READY_LINE = (port: number) => `DBGM-00031 DbGate API listening on port ${port} (NPM build)\n`;
+const READY_LINE = (port: number) =>
+  `DBGM-00031 DbGate API listening on port ${port} (NPM build)\n`;
 
 function manager(
   overrides: {
@@ -287,7 +290,10 @@ describe("createDbGateManager", () => {
 
     const result = await instance.open("acme");
 
-    expect(result).toEqual({ ok: false, detail: "dbgate-serve exited before it started listening" });
+    expect(result).toEqual({
+      ok: false,
+      detail: "dbgate-serve exited before it started listening",
+    });
   });
 
   it("forgets an instance whose process exits, and spawns again next time", async () => {
@@ -428,7 +434,10 @@ describe("createRealDbGateSpawner", () => {
     const ambient = process.env["PATH"];
     process.env["PATH"] = "";
     try {
-      const child = createRealDbGateSpawner({ PATH: dir }, process.platform)({
+      const child = createRealDbGateSpawner(
+        { PATH: dir },
+        process.platform,
+      )({
         env: {},
         workspaceDir: dir,
       });

@@ -56,10 +56,11 @@ export type TranscriptFormat = "claude" | "copilot";
  *  what sits under that directory once you are there. Both CLIs put it in
  *  the same place on every machine, which is what lets a fresh install
  *  import anything at all. */
-const VENDOR_SOURCES: Record<string, { home: string; sessions: string; format: TranscriptFormat }> = {
-  anthropic: { home: ".claude", sessions: "projects", format: "claude" },
-  github: { home: ".copilot", sessions: "session-state", format: "copilot" },
-};
+const VENDOR_SOURCES: Record<string, { home: string; sessions: string; format: TranscriptFormat }> =
+  {
+    anthropic: { home: ".claude", sessions: "projects", format: "claude" },
+    github: { home: ".copilot", sessions: "session-state", format: "copilot" },
+  };
 
 /**
  * One Copilot session, read from its `workspace.yaml`.
@@ -76,10 +77,7 @@ const VENDOR_SOURCES: Record<string, { home: string; sessions: string; format: T
  * does not record one here, and a column that reads as fact is left empty
  * rather than filled from somewhere it does not belong.
  */
-export function sessionFromCopilotWorkspace(
-  text: string,
-  path: string,
-): TranscriptSession | null {
+export function sessionFromCopilotWorkspace(text: string, path: string): TranscriptSession | null {
   const lines = text.split("\n");
   const scalar = (key: string): string | undefined => {
     const line = lines.find((candidate) => candidate.startsWith(`${key}:`));

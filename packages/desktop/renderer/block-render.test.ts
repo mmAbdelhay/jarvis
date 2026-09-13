@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // packages/desktop/renderer/block-render.test.ts
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TERMINAL_THEME } from "./terminal-theme.js";
 
 // The real xterm, counted. Everything here needs a genuine emulator — the
@@ -110,8 +110,8 @@ describe("freezing a block's output", () => {
     await flushAll();
 
     // 100 x's on one line, not wrapped onto two at 20 columns.
-    const lines = [...wide.querySelectorAll(".block-line")].filter(
-      (line) => (line.textContent ?? "").includes("x"),
+    const lines = [...wide.querySelectorAll(".block-line")].filter((line) =>
+      (line.textContent ?? "").includes("x"),
     );
     expect(lines).toHaveLength(1);
   });

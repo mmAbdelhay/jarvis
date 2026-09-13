@@ -16,9 +16,9 @@ const modules = readdirSync(dir).filter(
 describe("renderer workspace-package imports", () => {
   it.each(modules)("%s imports no values from a workspace package", (name) => {
     const source = readFileSync(`${dir}${name}`, "utf8");
-    const offenders = [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"(@jarvis\/[^"]+)"/gm)].map(
-      (match) => match[1],
-    );
+    const offenders = [
+      ...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"(@jarvis\/[^"]+)"/gm),
+    ].map((match) => match[1]);
 
     expect(offenders).toEqual([]);
   });

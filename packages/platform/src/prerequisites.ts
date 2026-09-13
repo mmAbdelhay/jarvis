@@ -216,7 +216,10 @@ export const PREREQUISITES: readonly Prerequisite[] = [
     install: sameEverywhere({
       kind: "download",
       files: [
-        { url: `${VOICES}/en/en_GB/alan/low/en_GB-alan-low.onnx`, dest: `${VOICE_DIR}/${EN_LOCAL}.onnx` },
+        {
+          url: `${VOICES}/en/en_GB/alan/low/en_GB-alan-low.onnx`,
+          dest: `${VOICE_DIR}/${EN_LOCAL}.onnx`,
+        },
         {
           url: `${VOICES}/en/en_GB/alan/low/en_GB-alan-low.onnx.json`,
           dest: `${VOICE_DIR}/${EN_LOCAL}.onnx.json`,
@@ -364,7 +367,10 @@ const RUNNERS: Record<string, { name: string; page: string }> = {
 
 /** The line to show for `step` when the tool that would run it is missing,
  *  or undefined when nothing is in the way. */
-export function missingRunnerLine(step: InstallStep, present: (command: string) => boolean): string | undefined {
+export function missingRunnerLine(
+  step: InstallStep,
+  present: (command: string) => boolean,
+): string | undefined {
   if (step.kind !== "run") return undefined;
   const runner = RUNNERS[step.command];
   if (runner === undefined || present(step.command)) return undefined;

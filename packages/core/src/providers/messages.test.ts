@@ -171,12 +171,16 @@ describe("providerStatusLine — capacity known", () => {
 
 describe("providerStatusLine — capacity unknown", () => {
   it("renders 'unsupported' exactly, in both languages", () => {
-    expect(providerStatusLine(capUnsupported, "en")).toBe("copilot-x — no capacity reading available");
+    expect(providerStatusLine(capUnsupported, "en")).toBe(
+      "copilot-x — no capacity reading available",
+    );
     expect(providerStatusLine(capUnsupported, "ar")).toBe("copilot-x — لا يوفّر قراءة للسعة");
   });
 
   it("renders 'unavailable' exactly, in both languages", () => {
-    expect(providerStatusLine(capUnavailable, "en")).toBe("claude-unavail — capacity couldn't be read");
+    expect(providerStatusLine(capUnavailable, "en")).toBe(
+      "claude-unavail — capacity couldn't be read",
+    );
     expect(providerStatusLine(capUnavailable, "ar")).toBe("claude-unavail — تعذّرت قراءة السعة");
   });
 

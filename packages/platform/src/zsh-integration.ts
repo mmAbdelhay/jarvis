@@ -157,9 +157,7 @@ export type ZshIntegrationDeps = {
  * dialog and nothing logged to the user, because a failure here costs an
  * autocomplete and nothing else.
  */
-export async function installZshIntegration(
-  deps: ZshIntegrationDeps,
-): Promise<string | undefined> {
+export async function installZshIntegration(deps: ZshIntegrationDeps): Promise<string | undefined> {
   if (!deps.enabled) return undefined;
   if (!isZsh(deps.shell)) return undefined;
 

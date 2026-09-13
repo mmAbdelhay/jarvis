@@ -14,13 +14,7 @@ export type DockerEntry = { name: string; container: string };
  *  same reasoning, as ClustersConfig in headlamp.ts. */
 export type DockerConfig = Record<string, DockerEntry[]>;
 
-export type ContainerState =
-  | "running"
-  | "exited"
-  | "created"
-  | "paused"
-  | "restarting"
-  | "dead";
+export type ContainerState = "running" | "exited" | "created" | "paused" | "restarting" | "dead";
 
 export type ContainerFacts = {
   name: string;
@@ -59,14 +53,7 @@ export type CommandRunner = (
   args: string[],
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-const STATES = new Set<string>([
-  "running",
-  "exited",
-  "created",
-  "paused",
-  "restarting",
-  "dead",
-]);
+const STATES = new Set<string>(["running", "exited", "created", "paused", "restarting", "dead"]);
 
 function stateOf(raw: unknown): ContainerState {
   return typeof raw === "string" && STATES.has(raw) ? (raw as ContainerState) : "dead";
@@ -144,9 +131,7 @@ function factsOf(raw: unknown, statuses: Map<string, string>): ContainerFacts | 
  *  binary and must not be reported as one. */
 function isMissingBinary(error: unknown): boolean {
   return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === "ENOENT"
+    typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"
   );
 }
 
@@ -263,11 +248,9 @@ export function createDockerClient(run: CommandRunner, spawnLog: LogSpawner): Do
     start: (name) => act(["start", name]),
     stop: (name) => act(["stop", name]),
     restart: (name) => act(["restart", name]),
-    composeUp: (workingDir) =>
-      act(["compose", "--project-directory", workingDir, "up", "-d"]),
+    composeUp: (workingDir) => act(["compose", "--project-directory", workingDir, "up", "-d"]),
     composeDown: (project) => act(["compose", "-p", project, "down"]),
-    follow: (name, onChunk) =>
-      spawnLog("docker", ["logs", "-f", "--tail", "500", name], onChunk),
+    follow: (name, onChunk) => spawnLog("docker", ["logs", "-f", "--tail", "500", name], onChunk),
   };
 }
 

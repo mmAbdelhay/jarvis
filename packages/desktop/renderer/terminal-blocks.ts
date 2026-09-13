@@ -56,7 +56,9 @@ const ALT_SEQUENCES: ReadonlyArray<readonly [string, boolean]> = [
   ["[?1049l", false],
 ];
 
-export function createSplitter(deps: { now?: () => number; maxOutputBytes?: number } = {}): Splitter {
+export function createSplitter(
+  deps: { now?: () => number; maxOutputBytes?: number } = {},
+): Splitter {
   const now = deps.now ?? (() => Date.now());
   const maxOutputBytes = deps.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
 
@@ -215,26 +217,26 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
       };
 
       while (index < text.length) {
-        const escape = text.indexOf(ESC, index);
-        if (escape === -1) {
+        const escapeAt = text.indexOf(ESC, index);
+        if (escapeAt === -1) {
           plain += text.slice(index);
           break;
         }
-        plain += text.slice(index, escape);
+        plain += text.slice(index, escapeAt);
 
-        const next = text.charAt(escape + 1);
+        const next = text.charAt(escapeAt + 1);
         if (next === "") {
           // A lone ESC at the end of a chunk: the rest is coming.
-          pending = text.slice(escape);
+          pending = text.slice(escapeAt);
           break;
         }
 
         if (next === "]") {
-          const osc = startOsc(text, escape);
+          const osc = startOsc(text, escapeAt);
           if (osc === undefined) {
             // The terminator has not arrived yet — hold the whole partial
             // OSC back rather than guess at its payload.
-            pending = text.slice(escape);
+            pending = text.slice(escapeAt);
             break;
           }
           const ours = osc.payload.startsWith("133;") || osc.payload.startsWith("7;file://");
@@ -246,7 +248,7 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
           } else {
             // Somebody else's OSC — a title, a clipboard write. Ours to pass
             // through untouched.
-            plain += text.slice(escape, osc.end);
+            plain += text.slice(escapeAt, osc.end);
           }
           index = osc.end;
           continue;
@@ -255,7 +257,7 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
         // The alternate screen, in either of the forms a program writes it.
         let matchedAlt = false;
         for (const [sequence, active] of ALT_SEQUENCES) {
-          if (text.startsWith(sequence, escape + 1)) {
+          if (text.startsWith(sequence, escapeAt + 1)) {
             plain += ESC + sequence;
             // Entering: flag it before the flush, so the entry sequence
             // itself is drawn to the live terminal but not kept as block
@@ -266,7 +268,7 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
             flush();
             alt = active;
             events.push({ type: "alt-screen", active });
-            index = escape + 1 + sequence.length;
+            index = escapeAt + 1 + sequence.length;
             matchedAlt = true;
             break;
           }
@@ -278,17 +280,17 @@ export function createSplitter(deps: { now?: () => number; maxOutputBytes?: numb
         // an alt-screen entry landing exactly on a chunk boundary would go
         // undetected.
         const isPartialAlt = ALT_SEQUENCES.some(([sequence]) => {
-          const remaining = text.length - (escape + 1);
-          return remaining < sequence.length && sequence.startsWith(text.slice(escape + 1));
+          const remaining = text.length - (escapeAt + 1);
+          return remaining < sequence.length && sequence.startsWith(text.slice(escapeAt + 1));
         });
         if (isPartialAlt) {
-          pending = text.slice(escape);
+          pending = text.slice(escapeAt);
           break;
         }
 
         // Any other escape sequence is the live terminal's business.
         plain += ESC;
-        index = escape + 1;
+        index = escapeAt + 1;
       }
 
       flush();

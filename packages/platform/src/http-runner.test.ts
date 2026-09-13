@@ -20,6 +20,25 @@ function harness(
   return { captured, deps };
 }
 
+/** The RequestInit a captured request was sent with.
+ *
+ *  A function rather than `captured[n]?.init` at each call site: the
+ *  optional chain short-circuits to undefined and the member access that
+ *  follows then throws, so a harness that captured nothing crashes the test
+ *  instead of failing it. This says which index was missing. */
+function initOf(captured: Captured[], index = 0): RequestInit {
+  const request = captured[index];
+  if (request === undefined) {
+    throw new Error(`no request was captured at index ${index}`);
+  }
+  return request.init;
+}
+
+/** The headers of a captured request, as the plain record they are built as. */
+function headersOf(captured: Captured[], index = 0): Record<string, string> {
+  return initOf(captured, index).headers as Record<string, string>;
+}
+
 const get = (overrides: Record<string, unknown> = {}) => ({
   meta: { name: "R", type: "http", seq: "1" },
   http: { method: "get", url: "{{base}}/api/orders", body: "none", auth: "none" },
@@ -167,7 +186,12 @@ describe("sendRequest", () => {
     const { captured, deps } = harness();
 
     const result = await sendRequest(
-      get({ headers: [{ name: "", value: "x", enabled: true }, { name: "Accept", value: "json", enabled: true }] }),
+      get({
+        headers: [
+          { name: "", value: "x", enabled: true },
+          { name: "Accept", value: "json", enabled: true },
+        ],
+      }),
       { base: "http://h" },
       deps,
     );
@@ -201,7 +225,11 @@ describe("sendRequest", () => {
     const { captured, deps } = harness();
 
     const result = await sendRequest(
-      { ...get(), http: { method: "get", url: "http://h", body: "json", auth: "none" }, body: { json: "{}" } },
+      {
+        ...get(),
+        http: { method: "get", url: "http://h", body: "json", auth: "none" },
+        body: { json: "{}" },
+      },
       {},
       deps,
     );
@@ -266,7 +294,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer abc");
+    expect(headersOf(captured)["Authorization"]).toBe("Bearer abc");
   });
 
   // The editor offers apikey auth; sending nothing for it is a request that
@@ -284,7 +312,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["X-API-Key"]).toBe("secret");
+    expect(headersOf(captured)["X-API-Key"]).toBe("secret");
   });
 
   it("sends an API key in the query when that is where it belongs", async () => {
@@ -316,7 +344,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    const header = (captured[0]?.init.headers as Record<string, string>)["Authorization"];
+    const header = headersOf(captured)["Authorization"];
     expect(header).toBe(`Basic ${Buffer.from("u:p").toString("base64")}`);
   });
 
@@ -334,9 +362,7 @@ describe("sendRequest", () => {
     );
 
     expect(captured[0]?.init.body).toBe('{"a":1}');
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/json");
   });
 
   it("does not override a Content-Type the request already set", async () => {
@@ -353,9 +379,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/vnd.api+json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/vnd.api+json");
   });
 
   it("sends a form body as urlencoded pairs", async () => {
@@ -397,9 +421,12 @@ describe("sendRequest", () => {
   // in the app rather than as a server that is not running.
   it("says why a request failed, not just that it did", async () => {
     const failure = new Error("fetch failed");
-    (failure as { cause?: unknown }).cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8000"), {
-      code: "ECONNREFUSED",
-    });
+    (failure as { cause?: unknown }).cause = Object.assign(
+      new Error("connect ECONNREFUSED 127.0.0.1:8000"),
+      {
+        code: "ECONNREFUSED",
+      },
+    );
     const { deps } = harness(failure);
 
     const result = await sendRequest(get(), { base: "http://h" }, deps);
@@ -411,9 +438,12 @@ describe("sendRequest", () => {
 
   it("names the code when the cause does not repeat it", async () => {
     const failure = new Error("fetch failed");
-    (failure as { cause?: unknown }).cause = Object.assign(new Error("Client network socket disconnected"), {
-      code: "ECONNRESET",
-    });
+    (failure as { cause?: unknown }).cause = Object.assign(
+      new Error("Client network socket disconnected"),
+      {
+        code: "ECONNRESET",
+      },
+    );
     const { deps } = harness(failure);
 
     const result = await sendRequest(get(), { base: "http://h" }, deps);
@@ -490,9 +520,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       query: "{ user(id: 7) { name } }",
       variables: { a: 1 },
     });
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/json");
   });
 
   it("omits variables entirely when there are none", async () => {
@@ -522,7 +550,13 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
         body: {
           multipartForm: [
             { name: "note", value: "hello", type: "text", enabled: true },
-            { name: "doc", value: ["./a.txt"], type: "file", enabled: true, contentType: "text/plain" },
+            {
+              name: "doc",
+              value: ["./a.txt"],
+              type: "file",
+              enabled: true,
+              contentType: "text/plain",
+            },
           ],
         },
       },
@@ -562,7 +596,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect(headersOf(captured)["Content-Type"]).toBeUndefined();
   });
 
   it("sends the jar's cookies and stores what came back", async () => {
@@ -578,7 +612,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       { ...deps, jar },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("existing=1");
+    expect(headersOf(captured)["Cookie"]).toBe("existing=1");
     expect(jar.headerFor("http://h/")).toContain("sid=new");
   });
 
@@ -598,23 +632,32 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       { ...deps, jar },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=mine");
+    expect(headersOf(captured)["Cookie"]).toBe("sid=mine");
   });
 
   it("passes a dispatcher built from the network options", async () => {
     const { captured, deps } = harness();
     const seen: unknown[] = [];
 
-    await sendRequest(get(), { base: "http://h" }, {
-      ...deps,
-      dispatcherFor: (options) => {
-        seen.push(options);
-        return { marker: true };
+    await sendRequest(
+      get(),
+      { base: "http://h" },
+      {
+        ...deps,
+        dispatcherFor: (options) => {
+          seen.push(options);
+          return { marker: true };
+        },
       },
-    }, { verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" });
+      { verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" },
+    );
 
-    expect(seen).toEqual([{ verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" }]);
-    expect((captured[0]?.init as Record<string, unknown>)["dispatcher"]).toEqual({ marker: true });
+    expect(seen).toEqual([
+      { verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" },
+    ]);
+    expect((initOf(captured) as unknown as Record<string, unknown>)["dispatcher"]).toEqual({
+      marker: true,
+    });
   });
 
   // A request's own timeout setting is more specific than the global one.
@@ -622,13 +665,18 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
     const { deps } = harness();
     const seen: { timeoutMs: number }[] = [];
 
-    await sendRequest({ ...get(), settings: { timeout: 250 } }, { base: "http://h" }, {
-      ...deps,
-      dispatcherFor: (options) => {
-        seen.push(options);
-        return undefined;
+    await sendRequest(
+      { ...get(), settings: { timeout: 250 } },
+      { base: "http://h" },
+      {
+        ...deps,
+        dispatcherFor: (options) => {
+          seen.push(options);
+          return undefined;
+        },
       },
-    }, { verifyCertificate: true, timeoutMs: 9000 });
+      { verifyCertificate: true, timeoutMs: 9000 },
+    );
 
     expect(seen[0]?.timeoutMs).toBe(250);
   });
@@ -641,11 +689,16 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       {},
       {
         ...deps,
-        token: { accessToken: "t0ken", placement: "header", headerPrefix: "Bearer", queryKey: "access_token" },
+        token: {
+          accessToken: "t0ken",
+          placement: "header",
+          headerPrefix: "Bearer",
+          queryKey: "access_token",
+        },
       },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer t0ken");
+    expect(headersOf(captured)["Authorization"]).toBe("Bearer t0ken");
   });
 
   it("places an OAuth2 token in the query when the provider wants it there", async () => {
@@ -654,7 +707,10 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
     await sendRequest(
       { ...get(), http: { method: "get", url: "http://h/x", body: "none", auth: "oauth2" } },
       {},
-      { ...deps, token: { accessToken: "t0ken", placement: "url", headerPrefix: "Bearer", queryKey: "tok" } },
+      {
+        ...deps,
+        token: { accessToken: "t0ken", placement: "url", headerPrefix: "Bearer", queryKey: "tok" },
+      },
     );
 
     expect(captured[0]?.url).toBe("http://h/x?tok=t0ken");
@@ -663,9 +719,12 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
   it("attaches an abort signal when there is a timeout", async () => {
     const { captured, deps } = harness();
 
-    await sendRequest(get(), { base: "http://h" }, deps, { verifyCertificate: true, timeoutMs: 1000 });
+    await sendRequest(get(), { base: "http://h" }, deps, {
+      verifyCertificate: true,
+      timeoutMs: 1000,
+    });
 
-    expect((captured[0]?.init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect(initOf(captured).signal).toBeInstanceOf(AbortSignal);
   });
 });
 
@@ -700,7 +759,10 @@ describe("sendRequest: redirects and the cookie jar", () => {
     const jar = createCookieJar();
 
     await sendRequest(
-      { meta: {}, http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" } },
+      {
+        meta: {},
+        http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" },
+      },
       {},
       { ...deps, jar },
     );
@@ -712,13 +774,16 @@ describe("sendRequest: redirects and the cookie jar", () => {
     const { captured, deps } = chain([redirect("https://api.test/home", 302, "sid=abc; Path=/")]);
 
     await sendRequest(
-      { meta: {}, http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" } },
+      {
+        meta: {},
+        http: { method: "get", url: "https://api.test/login", body: "none", auth: "none" },
+      },
       {},
       { ...deps, jar: createCookieJar() },
     );
 
     expect(captured[1]?.url).toBe("https://api.test/home");
-    expect((captured[1]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=abc");
+    expect(headersOf(captured, 1)["Cookie"]).toBe("sid=abc");
   });
 
   // What every browser does, and what an API that redirects after a POST
@@ -744,7 +809,10 @@ describe("sendRequest: redirects and the cookie jar", () => {
     const { captured, deps } = chain([redirect("/v2/orders")]);
 
     await sendRequest(
-      { meta: {}, http: { method: "get", url: "https://api.test/v1/orders", body: "none", auth: "none" } },
+      {
+        meta: {},
+        http: { method: "get", url: "https://api.test/v1/orders", body: "none", auth: "none" },
+      },
       {},
       { ...deps, jar: createCookieJar() },
     );
@@ -759,7 +827,10 @@ describe("sendRequest: redirects and the cookie jar", () => {
     );
 
     await sendRequest(
-      { meta: {}, http: { method: "get", url: "https://api.test/loop", body: "none", auth: "none" } },
+      {
+        meta: {},
+        http: { method: "get", url: "https://api.test/loop", body: "none", auth: "none" },
+      },
       {},
       { ...deps, jar: createCookieJar() },
     );
@@ -776,7 +847,7 @@ describe("sendRequest: redirects and the cookie jar", () => {
       deps,
     );
 
-    expect((captured[0]?.init as RequestInit).redirect).toBeUndefined();
+    expect(initOf(captured).redirect).toBeUndefined();
   });
 
   // The other bug live testing found: a multipart body built from a different
@@ -789,7 +860,12 @@ describe("sendRequest: redirects and the cookie jar", () => {
     await sendRequest(
       {
         meta: {},
-        http: { method: "post", url: "https://api.test/upload", body: "multipartForm", auth: "none" },
+        http: {
+          method: "post",
+          url: "https://api.test/upload",
+          body: "multipartForm",
+          auth: "none",
+        },
         body: { multipartForm: [{ name: "a", value: "1", type: "text", enabled: true }] },
       },
       {},

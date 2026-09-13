@@ -1,12 +1,6 @@
 import { initSetup, openSetupIfNeeded } from "./setup.js";
 import { hostPlatform, keyLabel, setVoiceHotkeys } from "./keys.js";
-import type {
-  Session,
-  SessionChanges,
-  SessionState,
-  SystemMetrics,
-  Turn,
-} from "@jarvis/core";
+import type { Session, SessionChanges, SessionState, SystemMetrics, Turn } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
@@ -72,7 +66,9 @@ type Presence = "idle" | "listening" | "thinking" | "speaking";
  *  Built from keyLabel rather than written out, because a hint that names a
  *  chord which does nothing is worse than no hint — and ⌥Space is not what
  *  the hotkey is called anywhere but macOS. */
-function presenceText(platform: NodeJS.Platform): Record<Presence, { state: string; hint: string }> {
+function presenceText(
+  platform: NodeJS.Platform,
+): Record<Presence, { state: string; hint: string }> {
   const start = keyLabel("voiceStart", platform);
   const stop = keyLabel("voiceStop", platform);
   return {
@@ -91,7 +87,13 @@ let thinking = false;
  *  thing happening, and two of them can be true at once — the microphone
  *  opens again while the last reply is still being spoken. */
 function renderPresence(): void {
-  const state: Presence = speaking ? "speaking" : listening ? "listening" : thinking ? "thinking" : "idle";
+  const state: Presence = speaking
+    ? "speaking"
+    : listening
+      ? "listening"
+      : thinking
+        ? "thinking"
+        : "idle";
   const element = document.getElementById("presence");
   if (element === null) return;
 
@@ -454,10 +456,6 @@ function buildProjectRow(project: string): HTMLElement {
   return row;
 }
 
-function renderSession(session: Session): HTMLElement {
-  return buildSessionRow(session);
-}
-
 // Shared by the live Sessions panel and the History panel so a past
 // session's row matches an active one's visual language exactly — same
 // palette, type scale, and dot/state/summary/meta structure — rather than
@@ -549,7 +547,10 @@ function buildSessionRow(session: Session): HTMLElement {
 // visibly different from a genuine "recorded zero changes" session, which
 // still renders "+0 −0" rather than being silently indistinguishable from
 // "we have no idea" (the exact conflation ruling P21 exists to avoid).
-function buildDiffBadge(session: Session, live: SessionChanges | undefined): HTMLElement | undefined {
+function buildDiffBadge(
+  session: Session,
+  live: SessionChanges | undefined,
+): HTMLElement | undefined {
   if (session.endedAt === undefined) {
     if (live === undefined || (live.insertions === 0 && live.deletions === 0)) return undefined;
     return diffPill(live.insertions, live.deletions);

@@ -125,11 +125,7 @@ function render(bridge: SetupBridge): void {
   updateInstallButton(language);
 }
 
-function row(
-  status: PrerequisiteStatus,
-  language: "ar" | "en",
-  bridge: SetupBridge,
-): HTMLElement {
+function row(status: PrerequisiteStatus, language: "ar" | "en", bridge: SetupBridge): HTMLElement {
   const element = document.createElement("div");
   element.className = "setup-row";
 
@@ -183,9 +179,7 @@ function row(
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "setup-row__copy";
-    copy.textContent = isPage
-      ? MESSAGES.setupOpenHint(language)
-      : MESSAGES.setupCopyHint(language);
+    copy.textContent = isPage ? MESSAGES.setupOpenHint(language) : MESSAGES.setupCopyHint(language);
     copy.addEventListener("click", () => {
       if (isPage) window.open(status.manual, "_blank");
       else void navigator.clipboard?.writeText(status.manual ?? "");

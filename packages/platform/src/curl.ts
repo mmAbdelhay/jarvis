@@ -8,7 +8,12 @@ import { interpolate, withScheme } from "./http-runner.js";
 
 type Pair = { name?: string; value?: string; enabled?: boolean; type?: string };
 
-type MultipartField = { name?: string; value?: string | string[]; enabled?: boolean; type?: string };
+type MultipartField = {
+  name?: string;
+  value?: string | string[];
+  enabled?: boolean;
+  type?: string;
+};
 
 /** Single-quotes for a POSIX shell, the only quoting that needs no escape
  *  table: everything inside is literal except the quote itself. */
@@ -21,7 +26,12 @@ export function toCurl(
   variables: Record<string, string> = {},
 ): string {
   const resolve = (text: string): string => interpolate(text, variables).text;
-  const http = (request["http"] ?? {}) as { method?: string; url?: string; body?: string; auth?: string };
+  const http = (request["http"] ?? {}) as {
+    method?: string;
+    url?: string;
+    body?: string;
+    auth?: string;
+  };
   const method = (http.method ?? "get").toUpperCase();
 
   const parts: string[] = ["curl"];
@@ -30,13 +40,19 @@ export function toCurl(
   let url = withScheme(resolve(http.url ?? "").trim());
   const query = ((request["params"] as Pair[] | undefined) ?? [])
     .filter(
-      (param) => param.enabled !== false && (param.type ?? "query") === "query" && (param.name ?? "").trim() !== "",
+      (param) =>
+        param.enabled !== false &&
+        (param.type ?? "query") === "query" &&
+        (param.name ?? "").trim() !== "",
     )
-    .map((param) => `${encodeURIComponent(resolve(param.name ?? ""))}=${encodeURIComponent(resolve(param.value ?? ""))}`);
+    .map(
+      (param) =>
+        `${encodeURIComponent(resolve(param.name ?? ""))}=${encodeURIComponent(resolve(param.value ?? ""))}`,
+    );
   if (query.length > 0) url += `${url.includes("?") ? "&" : "?"}${query.join("&")}`;
   parts.push(quote(url));
 
-  for (const header of ((request["headers"] as Pair[] | undefined) ?? [])) {
+  for (const header of (request["headers"] as Pair[] | undefined) ?? []) {
     if (header.enabled === false || (header.name ?? "").trim() === "") continue;
     parts.push("-H", quote(`${resolve(header.name ?? "")}: ${resolve(header.value ?? "")}`));
   }
@@ -47,7 +63,10 @@ export function toCurl(
   }
   if (http.auth === "basic") {
     const basic = auth["basic"] ?? {};
-    parts.push("-u", quote(`${resolve(basic["username"] ?? "")}:${resolve(basic["password"] ?? "")}`));
+    parts.push(
+      "-u",
+      quote(`${resolve(basic["username"] ?? "")}:${resolve(basic["password"] ?? "")}`),
+    );
   }
 
   if (http.auth === "apikey") {
@@ -82,17 +101,20 @@ export function toCurl(
         variables = raw;
       }
     }
-    const payload = { query: resolve(graphql.query ?? ""), ...(variables === undefined ? {} : { variables }) };
+    const payload = {
+      query: resolve(graphql.query ?? ""),
+      ...(variables === undefined ? {} : { variables }),
+    };
     parts.push("--data-raw", quote(JSON.stringify(payload)));
   } else if (mode === "formUrlEncoded") {
-    for (const field of ((bodies["formUrlEncoded"] as Pair[] | undefined) ?? [])) {
+    for (const field of (bodies["formUrlEncoded"] as Pair[] | undefined) ?? []) {
       if (field.enabled === false || field.name === undefined) continue;
       parts.push("--data-urlencode", quote(`${resolve(field.name)}=${resolve(field.value ?? "")}`));
     }
   } else if (mode === "multipartForm") {
     // curl's own @-syntax for a file, so the command uploads the same file
     // this request would.
-    for (const field of ((bodies["multipartForm"] as MultipartField[] | undefined) ?? [])) {
+    for (const field of (bodies["multipartForm"] as MultipartField[] | undefined) ?? []) {
       if (field.enabled === false || field.name === undefined) continue;
       const name = resolve(field.name);
       if (field.type === "file") {
@@ -101,7 +123,10 @@ export function toCurl(
         }
         continue;
       }
-      parts.push("-F", quote(`${name}=${resolve(typeof field.value === "string" ? field.value : "")}`));
+      parts.push(
+        "-F",
+        quote(`${name}=${resolve(typeof field.value === "string" ? field.value : "")}`),
+      );
     }
   }
 

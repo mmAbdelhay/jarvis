@@ -459,7 +459,8 @@ function detail(text: string): HTMLElement {
  * Workspace has no way to display one that belongs to none.
  */
 async function resumeInTerminal(id: string): Promise<void> {
-  const selected = (document.getElementById("workspace-project") as HTMLSelectElement | null)?.value;
+  const selected = (document.getElementById("workspace-project") as HTMLSelectElement | null)
+    ?.value;
   let result: { ok: boolean; text?: string; project?: string };
   try {
     result = await window.jarvis.resumeSession(id, selected ?? "");
@@ -684,7 +685,6 @@ function renderResume(session: Session): void {
     void resumeInTerminal(session.id);
   };
 }
-
 
 /**
  * A recorded conversation, laid out as one.

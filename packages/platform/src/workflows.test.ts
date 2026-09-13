@@ -3,9 +3,11 @@ import { fillWorkflow, loadWorkflows, parseWorkflow } from "./workflows.js";
 
 describe("parseWorkflow", () => {
   it("parses a file with name, command and description", () => {
-    const text = ["name: New branch", "command: git checkout -b {{branch}}", "description: Start a branch"].join(
-      "\n",
-    );
+    const text = [
+      "name: New branch",
+      "command: git checkout -b {{branch}}",
+      "description: Start a branch",
+    ].join("\n");
 
     expect(parseWorkflow(text)).toEqual({
       name: "New branch",
@@ -66,10 +68,16 @@ describe("parseWorkflow", () => {
 describe("fillWorkflow", () => {
   it("substitutes every occurrence of a placeholder", () => {
     const workflow = parseWorkflow(
-      ["name: Push", "command: git push origin {{branch}} && echo {{branch}} done", "description: Push"].join("\n"),
+      [
+        "name: Push",
+        "command: git push origin {{branch}} && echo {{branch}} done",
+        "description: Push",
+      ].join("\n"),
     )!;
 
-    expect(fillWorkflow(workflow, { branch: "main" })).toBe("git push origin main && echo main done");
+    expect(fillWorkflow(workflow, { branch: "main" })).toBe(
+      "git push origin main && echo main done",
+    );
   });
 
   it("leaves an unsupplied placeholder in place rather than becoming 'undefined'", () => {
@@ -82,7 +90,11 @@ describe("fillWorkflow", () => {
 
   it("substitutes both spaced and unspaced forms of the same placeholder", () => {
     const workflow = parseWorkflow(
-      ["name: Rebase", "command: git rebase {{ branch }} && echo {{branch}}", "description: Rebase"].join("\n"),
+      [
+        "name: Rebase",
+        "command: git rebase {{ branch }} && echo {{branch}}",
+        "description: Rebase",
+      ].join("\n"),
     )!;
 
     expect(fillWorkflow(workflow, { branch: "main" })).toBe("git rebase main && echo main");
@@ -132,7 +144,10 @@ describe("loadWorkflows", () => {
   it("skips a malformed file rather than throwing", () => {
     const workflows = loadWorkflows({
       readDir: () => ["good.yaml", "bad.yaml"],
-      readFile: (path) => (path.endsWith("bad.yaml") ? "not: valid: yaml: [" : "name: Good\ncommand: echo good\ndescription: Good"),
+      readFile: (path) =>
+        path.endsWith("bad.yaml")
+          ? "not: valid: yaml: ["
+          : "name: Good\ncommand: echo good\ndescription: Good",
       paths: ["/dir"],
     });
 

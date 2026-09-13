@@ -16,9 +16,7 @@ function fakeGitProvider(overrides: Partial<GitProvider> = {}): GitProvider {
         repoPath,
         branch: "feat/checkout-retry",
         detached: false,
-        files: [
-          { path: "a.php", status: "M", insertions: 3, deletions: 1, staged: false },
-        ],
+        files: [{ path: "a.php", status: "M", insertions: 3, deletions: 1, staged: false }],
         insertions: 3,
         deletions: 1,
       },
@@ -196,7 +194,11 @@ describe("Orchestrator", () => {
   });
 
   it("reports a brain failure as a spoken turn instead of throwing", async () => {
-    const orchestrator = build({ ask: async () => { throw new Error("rate limited"); } });
+    const orchestrator = build({
+      ask: async () => {
+        throw new Error("rate limited");
+      },
+    });
     const turn = await orchestrator.handle("hello", "en");
     expect(turn.role).toBe("assistant");
     expect(turn.text).toContain("rate limited");
@@ -475,7 +477,11 @@ describe("Orchestrator", () => {
   });
 
   it("reports a brain failure in Arabic", async () => {
-    const orchestrator = build({ ask: async () => { throw new Error("rate limited"); } });
+    const orchestrator = build({
+      ask: async () => {
+        throw new Error("rate limited");
+      },
+    });
     const turn = await orchestrator.handle("مرحبا", "ar");
     expect(turn.text).toContain("حدث خطأ");
     expect(speak).toHaveBeenCalledWith(turn.text, "ar");
@@ -814,9 +820,7 @@ describe("git tools", () => {
       brain: {
         ask: async () => ({
           text: "ok",
-          toolCalls: [
-            { name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } },
-          ],
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } }],
         }),
       },
       git: fakeGitProvider({
@@ -981,9 +985,7 @@ describe("git tools", () => {
       brain: {
         ask: async () => ({
           text: "ok",
-          toolCalls: [
-            { name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } },
-          ],
+          toolCalls: [{ name: "git.commit", input: { sessionId: "s1", message: "إصلاح الدفع" } }],
         }),
       },
       git: fakeGitProvider({
@@ -1004,13 +1006,14 @@ describe("git tools", () => {
       brain: {
         ask: async () => ({
           text: "ok",
-          toolCalls: [
-            { name: "git.diff", input: { sessionId: "s1", path: "../../etc/passwd" } },
-          ],
+          toolCalls: [{ name: "git.diff", input: { sessionId: "s1", path: "../../etc/passwd" } }],
         }),
       },
       git: fakeGitProvider({
-        diff: async () => ({ ok: false, error: { code: "failed", detail: "path escapes repository" } }),
+        diff: async () => ({
+          ok: false,
+          error: { code: "failed", detail: "path escapes repository" },
+        }),
       }),
     });
     await startTestSession(orchestrator, "s1");

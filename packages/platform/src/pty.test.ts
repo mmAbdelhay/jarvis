@@ -64,7 +64,7 @@ describe.runIf(!isWindows)("createPtySpawner", () => {
     path = "/usr/bin:/bin";
 
     const handle = spawn(
-      agent({ command: "/bin/sh", args: ["-c", "printf %s \"$MARKER\""] }),
+      agent({ command: "/bin/sh", args: ["-c", 'printf %s "$MARKER"'] }),
       process.cwd(),
     );
     const { output } = await collect(handle);
@@ -84,7 +84,7 @@ describe.runIf(!isWindows)("createPtySpawner", () => {
   it("declares a colour-capable terminal in TERM", async () => {
     const spawn = createPtySpawner();
     const handle = spawn(
-      agent({ command: "/bin/sh", args: ["-c", "printf %s \"$TERM\""] }),
+      agent({ command: "/bin/sh", args: ["-c", 'printf %s "$TERM"'] }),
       process.cwd(),
     );
     const { output } = await collect(handle);
@@ -120,7 +120,10 @@ describe.runIf(!isWindows)("createPtySpawner", () => {
   // subscription. brain.ts and capacity.ts already strip it; a session
   // spends far more than either.
   it("strips ANTHROPIC_API_KEY so the account's own credentials decide who pays", async () => {
-    const spawn = createPtySpawner({ ...process.env, ANTHROPIC_API_KEY: "sk-should-not-reach-a-session" });
+    const spawn = createPtySpawner({
+      ...process.env,
+      ANTHROPIC_API_KEY: "sk-should-not-reach-a-session",
+    });
     const handle = spawn(
       agent({ command: "/bin/sh", args: ["-c", 'printf "[%s]" "$ANTHROPIC_API_KEY"'] }),
       process.cwd(),
@@ -132,10 +135,7 @@ describe.runIf(!isWindows)("createPtySpawner", () => {
 
   it("passes the configured model through as --model", async () => {
     const spawn = createPtySpawner();
-    const handle = spawn(
-      agent({ command: "/bin/echo", model: "sonnet" }),
-      process.cwd(),
-    );
+    const handle = spawn(agent({ command: "/bin/echo", model: "sonnet" }), process.cwd());
     const { output } = await collect(handle);
 
     expect(output).toContain("--model sonnet");
@@ -175,10 +175,7 @@ describe.runIf(!isWindows)("createPtySpawner", () => {
   it("starts at the default terminal size and accepts a resize", async () => {
     const spawn = createPtySpawner();
     // `stty size` prints "rows cols" as the terminal reports them.
-    const handle = spawn(
-      agent({ command: "/bin/sh", args: ["-c", "stty size"] }),
-      process.cwd(),
-    );
+    const handle = spawn(agent({ command: "/bin/sh", args: ["-c", "stty size"] }), process.cwd());
     const { output } = await collect(handle);
 
     expect(output).toContain(`${DEFAULT_ROWS} ${DEFAULT_COLS}`);
@@ -302,7 +299,11 @@ describe.runIf(isWindows)("createPtySpawner on Windows", () => {
 
   it("passes the model and the session id through to the child", async () => {
     const spawn = createPtySpawner(envWith());
-    const handle = spawn(agent({ command: "shim", args: ["0"], model: "sonnet" }), process.cwd(), "sid-w");
+    const handle = spawn(
+      agent({ command: "shim", args: ["0"], model: "sonnet" }),
+      process.cwd(),
+      "sid-w",
+    );
     const { output } = await collect(handle);
 
     expect(output).toContain("--model sonnet --session-id sid-w");
@@ -315,7 +316,11 @@ describe.runIf(isWindows)("createPtySpawner on Windows", () => {
     const handle = spawn(
       agent({
         command: "cmd",
-        args: ["/d", "/c", "echo [%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][%TERM%]"],
+        args: [
+          "/d",
+          "/c",
+          "echo [%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][%TERM%]",
+        ],
       }),
       process.cwd(),
     );
@@ -323,7 +328,9 @@ describe.runIf(isWindows)("createPtySpawner on Windows", () => {
 
     // cmd prints an unset variable's name back verbatim, which is the proof
     // the variable is not there; TERM is set, and to the colour terminal.
-    expect(output).toContain("[%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][xterm-256color]");
+    expect(output).toContain(
+      "[%CLAUDECODE%][%CLAUDE_CODE_CHILD_SESSION%][%ANTHROPIC_API_KEY%][xterm-256color]",
+    );
   });
 
   it("does not report a killed session as a clean exit", async () => {

@@ -206,10 +206,7 @@ const DEFAULT_ARABIC_VOICE = "Majed";
 const DEFAULT_ENGINE = "piper";
 const DEFAULT_PIPER_BINARY = join(homedir(), ".local/bin/piper");
 const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-low.onnx");
-const DEFAULT_PIPER_ARABIC_MODEL = join(
-  homedir(),
-  ".config/jarvis/voices/ar_JO-kareem-low.onnx",
-);
+const DEFAULT_PIPER_ARABIC_MODEL = join(homedir(), ".config/jarvis/voices/ar_JO-kareem-low.onnx");
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
@@ -251,7 +248,9 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const routing = parseRouting(root["routing"]);
   routing.forEach((rule, index) => {
     if (agents[rule.agent] === undefined) {
-      throw new Error(`Config \`routing[${index}].agent\` names no configured agent: "${rule.agent}"`);
+      throw new Error(
+        `Config \`routing[${index}].agent\` names no configured agent: "${rule.agent}"`,
+      );
     }
   });
   const projects = parseProjects(root["projects"]);
@@ -280,7 +279,9 @@ export function parseConfig(raw: unknown): JarvisConfig {
       throw new Error(`Config \`brain.accountId\` names no configured agent: "${accountId}"`);
     }
     if (agent.configDir === undefined) {
-      throw new Error(`Config \`brain.accountId\` names "${accountId}", which declares no configDir`);
+      throw new Error(
+        `Config \`brain.accountId\` names "${accountId}", which declares no configDir`,
+      );
     }
     brainAccount = { accountId, configDir: agent.configDir };
   }
@@ -426,9 +427,7 @@ function parseAgents(rawAgents: unknown): RegistryConfig["agents"] {
       throw new Error(`Config \`agents.${id}.configDir\` must be a string`);
     }
     if (agent.vendor !== undefined && !isVendor(agent.vendor)) {
-      throw new Error(
-        `Config \`agents.${id}.vendor\` must be one of: ${VENDORS.join(", ")}`,
-      );
+      throw new Error(`Config \`agents.${id}.vendor\` must be one of: ${VENDORS.join(", ")}`);
     }
     agents[id] = {
       command: agent.command,
@@ -535,7 +534,9 @@ function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: str
   }
   return {
     binaryPath: expandTilde(
-      typeof whisper["binaryPath"] === "string" ? whisper["binaryPath"] : DEFAULT_WHISPER_BINARY_PATH,
+      typeof whisper["binaryPath"] === "string"
+        ? whisper["binaryPath"]
+        : DEFAULT_WHISPER_BINARY_PATH,
     ),
     modelPath: expandTilde(
       typeof whisper["modelPath"] === "string" ? whisper["modelPath"] : DEFAULT_WHISPER_MODEL_PATH,
@@ -981,7 +982,10 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
   return {
     completion: parseTerminalCompletion(terminal["completion"], defaults.completion),
     blocks: parseTerminalBlocks(terminal["blocks"], defaults.blocks),
-    notifyAfterSeconds: parseNotifyAfterSeconds(terminal["notifyAfterSeconds"], defaults.notifyAfterSeconds),
+    notifyAfterSeconds: parseNotifyAfterSeconds(
+      terminal["notifyAfterSeconds"],
+      defaults.notifyAfterSeconds,
+    ),
   };
 }
 
@@ -990,11 +994,7 @@ function parseTerminalCompletion(
   defaults: TerminalConfig["completion"],
 ): TerminalConfig["completion"] {
   if (rawCompletion === undefined) return defaults;
-  if (
-    typeof rawCompletion !== "object" ||
-    rawCompletion === null ||
-    Array.isArray(rawCompletion)
-  ) {
+  if (typeof rawCompletion !== "object" || rawCompletion === null || Array.isArray(rawCompletion)) {
     throw new Error("Config `terminal.completion` must be an object");
   }
   const completion = rawCompletion as Record<string, unknown>;

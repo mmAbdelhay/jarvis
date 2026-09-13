@@ -119,9 +119,7 @@ describe("a terminal pane", () => {
   // does not disturb what follows it.
   it("keeps the stream in order when one chunk holds several commands", () => {
     const p = pane();
-    p.write(
-      `${A}$ ${B}a\r\n${C("a")}1\r\n${D(0)}` + `${A}$ ${B}b\r\n${C("b")}2\r\n${D(0)}`,
-    );
+    p.write(`${A}$ ${B}a\r\n${C("a")}1\r\n${D(0)}` + `${A}$ ${B}b\r\n${C("b")}2\r\n${D(0)}`);
     expect(FakeTerminal.instances[0]?.written.join("")).toBe("$ a\r\n1\r\n$ b\r\n2\r\n");
     expect(p.blocks().map((view) => view.record.command)).toEqual(["a", "b"]);
   });
@@ -192,7 +190,13 @@ describe("a terminal pane", () => {
   // exactly as it arrived, marks and all, which is the terminal Jarvis
   // shipped before blocks existed.
   it("builds no blocks at all when blocks are off", () => {
-    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 });
+    const p = pane({
+      blocks: false,
+      inputEditor: false,
+      notifyAfterSeconds: 0,
+      home: "/Users/x",
+      scrollback: 0,
+    });
     const chunk = `${A}$ ${B}ls\r\n${C("ls")}a b\r\n${D(0)}`;
     p.write(chunk);
     expect(p.blocks()).toHaveLength(0);
@@ -302,7 +306,13 @@ describe("a terminal pane", () => {
   // Nothing to reset, and nothing to throw: the same rule every other part
   // of the block machinery follows.
   it("resets a pane with blocks switched off without complaint", () => {
-    const p = pane({ blocks: false, inputEditor: false, notifyAfterSeconds: 0, home: "/h", scrollback: 0 });
+    const p = pane({
+      blocks: false,
+      inputEditor: false,
+      notifyAfterSeconds: 0,
+      home: "/h",
+      scrollback: 0,
+    });
     p.write("hello");
 
     expect(() => p.reset()).not.toThrow();
@@ -323,7 +333,13 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 
 describe("the chip row in a pane", () => {
   it("mounts a chip row above the editor", () => {
-    const p = pane({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 });
+    const p = pane({
+      blocks: true,
+      inputEditor: true,
+      notifyAfterSeconds: 0,
+      home: "/Users/x",
+      scrollback: 0,
+    });
     const chipsEl = p.element.querySelector(".terminal-chips");
     const editorEl = p.element.querySelector(".terminal-input");
     expect(chipsEl).not.toBeNull();
@@ -503,17 +519,14 @@ describe("the chip row in a pane", () => {
   // A read that rejects must still release the guard, or one failed `git`
   // call would freeze the row for the life of the pane.
   it("goes on reading after a read rejects mid-burst", async () => {
-    const chips = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("read failed"))
-      .mockResolvedValue({
-        cwd: "/Users/x/proj",
-        branch: "main",
-        detached: false,
-        insertions: 0,
-        deletions: 0,
-        runtime: undefined,
-      });
+    const chips = vi.fn().mockRejectedValueOnce(new Error("read failed")).mockResolvedValue({
+      cwd: "/Users/x/proj",
+      branch: "main",
+      detached: false,
+      insertions: 0,
+      deletions: 0,
+      runtime: undefined,
+    });
     const p = pane(undefined, { chips });
 
     p.write(`${CWD("/Users/x/proj")}${A}$ ${B}`);
@@ -750,9 +763,7 @@ describe("the command editor in a pane", () => {
     const terminal = FakeTerminal.instances[0];
     terminal?.typeLine("~/p master $ ");
     p.write(`${A}${B}`);
-    expect(p.element.querySelector(".terminal-input-prompt")?.textContent).toBe(
-      "~/p master $ ",
-    );
+    expect(p.element.querySelector(".terminal-input-prompt")?.textContent).toBe("~/p master $ ");
   });
 
   // Jarvis's own command log, not zsh's line editor: a line the DOM composed
@@ -1043,10 +1054,10 @@ describe("the command editor in a pane", () => {
       p.openPalette();
       expect(paletteEl(p)?.hidden).toBe(false);
 
-      const escape = pressInPalette(p, { key: "Escape" });
+      const escapeEvent = pressInPalette(p, { key: "Escape" });
 
       expect(paletteEl(p)?.hidden).toBe(true);
-      expect(escape.defaultPrevented).toBe(true);
+      expect(escapeEvent.defaultPrevented).toBe(true);
     });
 
     // And the keys come back to the pty with it. The palette's <input> held
@@ -1130,7 +1141,9 @@ describe("the command editor in a pane", () => {
       if (input === null || input === undefined) throw new Error("no palette input");
       input.value = "Clear terminal";
       input.dispatchEvent(new Event("input"));
-      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+      );
 
       expect(FakeTerminal.instances[0]?.cleared).toBe(1);
       expect(paletteEl(p)?.hidden).toBe(true);
@@ -1194,7 +1207,9 @@ describe("the command editor in a pane", () => {
       if (input === null || input === undefined) throw new Error("no palette input");
       input.value = "Re-run command";
       input.dispatchEvent(new Event("input"));
-      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+      );
 
       expect(textarea(p)?.value).toBe("ls");
       expect(sendInput).not.toHaveBeenCalled();
@@ -1236,8 +1251,12 @@ describe("the command editor in a pane", () => {
       expect(palette?.hidden).toBe(false);
       const input = palette?.querySelector("input");
       if (input === null || input === undefined) throw new Error("no palette input");
-      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowDown" }));
-      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowDown" }),
+      );
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+      );
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(textarea(p)?.value).toBe("git log");
@@ -1255,7 +1274,9 @@ describe("the command editor in a pane", () => {
       press(p, { key: "r", ctrlKey: true });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const input = paletteEl(p)?.querySelector("input");
-      input?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+      input?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }),
+      );
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(field.value).toBe("half-typed");
@@ -1279,13 +1300,18 @@ describe("the command editor in a pane", () => {
       });
 
       it("prompts for each placeholder in order and fills the editor, never sending it", async () => {
-        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], async () => [workflow]);
+        const { p, sendInput } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          async () => [workflow],
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Run workflow";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1297,12 +1323,15 @@ describe("the command editor in a pane", () => {
         expect(paletteEl(p)?.textContent).toContain("New branch");
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         // The placeholder prompt — free text, filled in and submitted.
         const branchInput = paletteEl(p)?.querySelector("input");
-        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        if (branchInput === null || branchInput === undefined)
+          throw new Error("no placeholder input");
         branchInput.value = "feature/login";
         branchInput.dispatchEvent(new Event("input"));
         branchInput.dispatchEvent(
@@ -1318,7 +1347,11 @@ describe("the command editor in a pane", () => {
       });
 
       it("abandons the whole thing without filling the editor when Escape is pressed on a placeholder prompt", async () => {
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [workflow]);
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          async () => [workflow],
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
         const field = textarea(p);
@@ -1327,7 +1360,8 @@ describe("the command editor in a pane", () => {
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Run workflow";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1337,12 +1371,16 @@ describe("the command editor in a pane", () => {
 
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(field.value).toBe("half-typed");
@@ -1362,13 +1400,18 @@ describe("the command editor in a pane", () => {
           description: "Rebase onto a branch",
           placeholders: ["branch"],
         };
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [spaced]);
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          async () => [spaced],
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Run workflow";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1377,11 +1420,14 @@ describe("the command editor in a pane", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         const branchInput = paletteEl(p)?.querySelector("input");
-        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        if (branchInput === null || branchInput === undefined)
+          throw new Error("no placeholder input");
         branchInput.value = "main";
         branchInput.dispatchEvent(new Event("input"));
         branchInput.dispatchEvent(
@@ -1402,13 +1448,18 @@ describe("the command editor in a pane", () => {
           description: "Deploy",
           placeholders: ["branch"],
         };
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], async () => [partial]);
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          async () => [partial],
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Run workflow";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1417,11 +1468,14 @@ describe("the command editor in a pane", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         const branchInput = paletteEl(p)?.querySelector("input");
-        if (branchInput === null || branchInput === undefined) throw new Error("no placeholder input");
+        if (branchInput === null || branchInput === undefined)
+          throw new Error("no placeholder input");
         branchInput.value = "main";
         branchInput.dispatchEvent(new Event("input"));
         branchInput.dispatchEvent(
@@ -1442,7 +1496,11 @@ describe("the command editor in a pane", () => {
           description: "Multi",
           placeholders: ["a", "b", "c"],
         };
-        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], async () => [threePlaceholders]);
+        const { p, sendInput } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          async () => [threePlaceholders],
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
         const field = textarea(p);
@@ -1451,7 +1509,8 @@ describe("the command editor in a pane", () => {
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Run workflow";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1461,7 +1520,9 @@ describe("the command editor in a pane", () => {
         // Choose "Multi".
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         // Answer the first placeholder, "a".
@@ -1469,13 +1530,17 @@ describe("the command editor in a pane", () => {
         if (aInput === null || aInput === undefined) throw new Error("no placeholder input");
         aInput.value = "1";
         aInput.dispatchEvent(new Event("input"));
-        aInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        aInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         // Escape on the second, "b".
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(field.value).toBe("half-typed");
@@ -1496,16 +1561,22 @@ describe("the command editor in a pane", () => {
 
       it("Generate command… asks free text, fills the editor with the reply, and never sends it", async () => {
         const calls: [string, string][] = [];
-        const { p, sendInput } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
-          calls.push([kind, text]);
-          return "git status";
-        });
+        const { p, sendInput } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          undefined,
+          async (kind, text) => {
+            calls.push([kind, text]);
+            return "git status";
+          },
+        );
         p.write(`${A}$ ${B}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Generate command";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1518,7 +1589,9 @@ describe("the command editor in a pane", () => {
         if (askInput === null || askInput === undefined) throw new Error("no free-text input");
         askInput.value = "show me the current branch status";
         askInput.dispatchEvent(new Event("input"));
-        askInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+        askInput.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+        );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(calls).toEqual([["generate", "show me the current branch status"]]);
@@ -1537,7 +1610,8 @@ describe("the command editor in a pane", () => {
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Generate command";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1547,7 +1621,9 @@ describe("the command editor in a pane", () => {
 
         paletteEl(p)
           ?.querySelector("input")
-          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }),
+          );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(field.value).toBe("half-typed");
@@ -1555,7 +1631,12 @@ describe("the command editor in a pane", () => {
       });
 
       it("offers Explain this failure only for a selected block with a non-zero exit code", () => {
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async () => "explanation");
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          undefined,
+          async () => "explanation",
+        );
         p.write(`${A}$ ${B}ok\r\n${C("ok")}${D(0)}${A}$ ${B}bad\r\n${C("bad")}${D(1)}${A}$ ${B}`);
 
         p.blockNav?.move(1); // selects the first block, "ok" (exit 0)
@@ -1570,16 +1651,22 @@ describe("the command editor in a pane", () => {
 
       it("Explain this failure sends the command, exit code and output, and renders the reply into the block", async () => {
         const calls: [string, string][] = [];
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
-          calls.push([kind, text]);
-          return "npm test failed because a dependency is missing.";
-        });
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          undefined,
+          async (kind, text) => {
+            calls.push([kind, text]);
+            return "npm test failed because a dependency is missing.";
+          },
+        );
         p.write(`${A}$ ${B}npm test\r\n${C("npm test")}some output${D(1)}${A}$ ${B}`);
         p.blockNav?.move(1);
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Explain this failure";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1589,7 +1676,11 @@ describe("the command editor in a pane", () => {
 
         expect(calls).toHaveLength(1);
         expect(calls[0]?.[0]).toBe("explain");
-        const payload = JSON.parse(calls[0]?.[1] ?? "{}") as { command: string; exitCode: number; output: string };
+        const payload = JSON.parse(calls[0]?.[1] ?? "{}") as {
+          command: string;
+          exitCode: number;
+          output: string;
+        };
         expect(payload).toEqual({ command: "npm test", exitCode: 1, output: "some output" });
 
         const explanation = p.element.querySelector(".block-explanation");
@@ -1603,16 +1694,22 @@ describe("the command editor in a pane", () => {
       it("sends no more than 4000 characters of output for a block whose output is far larger", async () => {
         const calls: [string, string][] = [];
         const bigOutput = `head-${"x".repeat(6000)}-tail`;
-        const { p } = editorPane(EDITOR_SETTINGS, async () => [], undefined, async (kind, text) => {
-          calls.push([kind, text]);
-          return "explained";
-        });
+        const { p } = editorPane(
+          EDITOR_SETTINGS,
+          async () => [],
+          undefined,
+          async (kind, text) => {
+            calls.push([kind, text]);
+            return "explained";
+          },
+        );
         p.write(`${A}$ ${B}build\r\n${C("build")}${bigOutput}${D(1)}${A}$ ${B}`);
         p.blockNav?.move(1);
 
         press(p, { key: "p", metaKey: true });
         const actionsInput = paletteEl(p)?.querySelector("input");
-        if (actionsInput === null || actionsInput === undefined) throw new Error("no palette input");
+        if (actionsInput === null || actionsInput === undefined)
+          throw new Error("no palette input");
         actionsInput.value = "Explain this failure";
         actionsInput.dispatchEvent(new Event("input"));
         actionsInput.dispatchEvent(
@@ -1698,7 +1795,13 @@ describe("notifications", () => {
       sendInput: vi.fn(),
       resize: vi.fn(),
       attach: async () => "",
-      settings: { blocks: true, inputEditor: false, notifyAfterSeconds, home: "/Users/x", scrollback: 0 },
+      settings: {
+        blocks: true,
+        inputEditor: false,
+        notifyAfterSeconds,
+        home: "/Users/x",
+        scrollback: 0,
+      },
       notify,
     });
     return { p, notify };
@@ -1771,7 +1874,13 @@ describe("the file sidebar's palette action", () => {
       sendInput: vi.fn(),
       resize: vi.fn(),
       attach: async () => "",
-      settings: { blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/Users/x", scrollback: 0 },
+      settings: {
+        blocks: true,
+        inputEditor: true,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
       notify: vi.fn(),
       toggleExplorer,
       refreshExplorer,
@@ -1861,11 +1970,11 @@ describe("a terminal pane over a ConPTY", () => {
   // lands mid-command becomes part of that command's block.
   it("holds a resize while a command runs and applies it when the block closes", () => {
     const { view, resize, terminal } = conptyPane(true);
-    view.write(A + "PS> " + B + C("ls"));
+    view.write(`${A}PS> ${B}${C("ls")}`);
     terminal.emitResize(120, 30);
     expect(resize).not.toHaveBeenCalled();
 
-    view.write("out" + D(0));
+    view.write(`out${D(0)}`);
     expect(resize).toHaveBeenCalledWith(120, 30);
     expect(resize).toHaveBeenCalledTimes(1);
   });
@@ -1885,7 +1994,7 @@ describe("a terminal pane over a ConPTY", () => {
 
   it("clears the stale screen behind the write queue when a command starts", () => {
     const { view, terminal } = conptyPane(true);
-    view.write(A + "PS> " + B + C("ls"));
+    view.write(`${A}PS> ${B}${C("ls")}`);
     expect(terminal.cleared).toBe(0);
     terminal.flush();
     expect(terminal.cleared).toBe(1);

@@ -17,7 +17,13 @@ import { describe, expect, it } from "vitest";
 // catch this class of bug — it requires parsing the real markup.
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
-const ROUTE_IDS = ["view-dashboard", "view-changes", "view-session", "view-workspace", "view-settings"];
+const ROUTE_IDS = [
+  "view-dashboard",
+  "view-changes",
+  "view-session",
+  "view-workspace",
+  "view-settings",
+];
 
 describe("routed view nesting", () => {
   const dom = new JSDOM(htmlSource);
@@ -29,18 +35,24 @@ describe("routed view nesting", () => {
     }
   });
 
-  it.each(ROUTE_IDS)("keeps %s a direct child of the shared app root, not nested in another route", (id) => {
-    const element = document.getElementById(id);
-    const parent = element?.parentElement;
-    expect(parent?.id).toBe("app");
-  });
+  it.each(ROUTE_IDS)(
+    "keeps %s a direct child of the shared app root, not nested in another route",
+    (id) => {
+      const element = document.getElementById(id);
+      const parent = element?.parentElement;
+      expect(parent?.id).toBe("app");
+    },
+  );
 
   it("keeps no routed view nested inside another routed view", () => {
     for (const outerId of ROUTE_IDS) {
       const outer = document.getElementById(outerId);
       for (const innerId of ROUTE_IDS) {
         if (innerId === outerId) continue;
-        expect(outer?.querySelector(`#${innerId}`), `#${innerId} found inside #${outerId}`).toBeNull();
+        expect(
+          outer?.querySelector(`#${innerId}`),
+          `#${innerId} found inside #${outerId}`,
+        ).toBeNull();
       }
     }
   });

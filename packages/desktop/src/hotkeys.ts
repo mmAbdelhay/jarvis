@@ -71,7 +71,10 @@ function tryPair(pair: HotkeyPair, deps: HotkeyDeps): string[] {
  * Registers the voice hotkeys: the primary pair, or on Windows the fallback
  * pair when the primary is taken.
  */
-export function registerVoiceHotkeys(deps: HotkeyDeps, platform: NodeJS.Platform): HotkeyRegistration {
+export function registerVoiceHotkeys(
+  deps: HotkeyDeps,
+  platform: NodeJS.Platform,
+): HotkeyRegistration {
   const refused = tryPair(PRIMARY_HOTKEYS, deps);
   if (refused.length === 0) return { active: PRIMARY_HOTKEYS, refused: [], fellBack: false };
   if (platform !== "win32") return { active: undefined, refused, fellBack: false };

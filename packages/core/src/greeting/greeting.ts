@@ -132,7 +132,8 @@ function uncommittedLine(projects: readonly DirtyProject[], language: Language):
  */
 export function greetingText(input: GreetingInput, language: Language): string {
   const configured = input.template?.[language]?.trim();
-  const template = configured === undefined || configured === "" ? DEFAULT_GREETING[language] : configured;
+  const template =
+    configured === undefined || configured === "" ? DEFAULT_GREETING[language] : configured;
 
   const last = input.history[0];
   const values: Record<string, string> = {
