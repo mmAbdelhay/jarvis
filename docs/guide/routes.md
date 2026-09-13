@@ -11,6 +11,15 @@ beside something else. Leaving full screen restores it to 1440×900.
 
 What every agent is doing, and what the machine is doing.
 
+<p align="center">
+  <img src="../media/dashboard.png" width="100%" alt="The Dashboard: machine load and provider capacity on the left, the voice indicator and the project list in the middle, the conversation on the right.">
+</p>
+
+<p align="center">
+  <sub>Project names, provider accounts and capacity figures are blurred — everything else is the running app.</sub>
+</p>
+
+
 - **Sessions** — each running agent, its project, its model and its state.
 - **Providers** — each configured account, whether it is reachable, and how
   much capacity is left. Three different unknowns are reported as three
@@ -40,6 +49,15 @@ otherwise would be the more comfortable lie.
 One agent's real terminal, under a pty. Every byte the agent writes goes to
 xterm.js untouched and every keystroke goes back untouched, which is what makes
 slash commands, permission prompts and plan mode work at all.
+
+<p align="center">
+  <img src="../media/session.png" width="100%" alt="The Session route's table: every session across every project, with its agent, its state and when it was last active.">
+</p>
+
+<p align="center">
+  <sub>The table every session lands in, searchable and filterable by project and agent. Prompts, project names and agent accounts are blurred; the states and timestamps are the running app.</sub>
+</p>
+
 
 While this route is open, **⌥Space** talks to *this session* rather than to the
 brain. The badge in the corner says so, because it is the one thing about voice
