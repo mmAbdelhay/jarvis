@@ -54,17 +54,17 @@ describe("filterSessions", () => {
   });
 
   it("matches the summary, case-insensitively", () => {
-    expect(filterSessions(all, { query: "CLUSTER", project: "", agent: "" }).map((s) => s.id)).toEqual(
-      ["b"],
-    );
+    expect(
+      filterSessions(all, { query: "CLUSTER", project: "", agent: "" }).map((s) => s.id),
+    ).toEqual(["b"]);
   });
 
   // A session with no configured project is found by the directory it ran
   // in, because for 66 of the 95 sessions here that is the only name it has.
   it("matches the directory of a session with no project", () => {
-    expect(filterSessions(all, { query: "jarvis", project: "", agent: "" }).map((s) => s.id)).toEqual(
-      ["b"],
-    );
+    expect(
+      filterSessions(all, { query: "jarvis", project: "", agent: "" }).map((s) => s.id),
+    ).toEqual(["b"]);
   });
 
   it("matches the agent and the branch too", () => {
@@ -73,9 +73,9 @@ describe("filterSessions", () => {
   });
 
   it("filters by project", () => {
-    expect(filterSessions(all, { query: "", project: "orbit", agent: "" }).map((s) => s.id)).toEqual([
-      "c",
-    ]);
+    expect(
+      filterSessions(all, { query: "", project: "orbit", agent: "" }).map((s) => s.id),
+    ).toEqual(["c"]);
   });
 
   // The largest group in the table, and the one a project dropdown cannot

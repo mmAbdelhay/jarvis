@@ -2,7 +2,12 @@ import { existsSync } from "node:fs";
 import { resolveWindowsExecutable } from "./executable.js";
 import { createRequire } from "node:module";
 import { userInfo } from "node:os";
-import { DEFAULT_COLS, DEFAULT_ROWS, ensureSpawnHelperExecutable, sanitizedShellEnv } from "./pty.js";
+import {
+  DEFAULT_COLS,
+  DEFAULT_ROWS,
+  ensureSpawnHelperExecutable,
+  sanitizedShellEnv,
+} from "./pty.js";
 import { powerShellLaunchArgs } from "./powershell-integration.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 
@@ -218,10 +223,7 @@ export type ShellIntegration = {
  * one failure that could cost the user their PATH. Whatever ZDOTDIR the
  * user had set passes through untouched.
  */
-export function shellEnv(
-  env: NodeJS.ProcessEnv,
-  integration: ShellIntegration,
-): NodeJS.ProcessEnv {
+export function shellEnv(env: NodeJS.ProcessEnv, integration: ShellIntegration): NodeJS.ProcessEnv {
   return {
     ...sanitizedShellEnv(env),
     TERM: "xterm-256color",

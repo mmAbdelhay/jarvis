@@ -42,8 +42,20 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
-import type { AgentConfig, AgentHealth, Brain, Session, WorkspaceState, WorkspaceTab } from "@jarvis/core";
-import { ProviderMonitor, ProviderStatusStore, type GitProvider, type ProviderStatus } from "@jarvis/core";
+import type {
+  AgentConfig,
+  AgentHealth,
+  Brain,
+  Session,
+  WorkspaceState,
+  WorkspaceTab,
+} from "@jarvis/core";
+import {
+  ProviderMonitor,
+  ProviderStatusStore,
+  type GitProvider,
+  type ProviderStatus,
+} from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 
@@ -102,9 +114,14 @@ describe("buildWiring", () => {
   it("pushes metrics on the interval", async () => {
     const send = vi.fn();
     const metrics = vi.fn(async () => ({
-      cpuPercent: 10, memoryUsedBytes: 1, memoryTotalBytes: 2,
-      diskUsedBytes: 1, diskTotalBytes: 2, networkDownMbps: 0,
-      networkUpMbps: 0, uptimeSeconds: 1,
+      cpuPercent: 10,
+      memoryUsedBytes: 1,
+      memoryTotalBytes: 2,
+      diskUsedBytes: 1,
+      diskTotalBytes: 2,
+      networkDownMbps: 0,
+      networkUpMbps: 0,
+      uptimeSeconds: 1,
     }));
 
     const wiring = buildWiring({
@@ -119,7 +136,10 @@ describe("buildWiring", () => {
     wiring.stop();
 
     expect(metrics.mock.calls.length).toBeGreaterThan(1);
-    expect(send).toHaveBeenCalledWith("metrics:update", expect.objectContaining({ cpuPercent: 10 }));
+    expect(send).toHaveBeenCalledWith(
+      "metrics:update",
+      expect.objectContaining({ cpuPercent: 10 }),
+    );
   });
 
   // A hidden Jarvis has nobody to show a metric to, and refreshChanges
@@ -127,9 +147,14 @@ describe("buildWiring", () => {
   it("skips the metrics and changes ticks while the window is hidden", async () => {
     let awake = true;
     const readMetrics = vi.fn(async () => ({
-      cpuPercent: 10, memoryUsedBytes: 1, memoryTotalBytes: 2,
-      diskUsedBytes: 1, diskTotalBytes: 2, networkDownMbps: 0,
-      networkUpMbps: 0, uptimeSeconds: 1,
+      cpuPercent: 10,
+      memoryUsedBytes: 1,
+      memoryTotalBytes: 2,
+      diskUsedBytes: 1,
+      diskTotalBytes: 2,
+      networkDownMbps: 0,
+      networkUpMbps: 0,
+      uptimeSeconds: 1,
     }));
     const refreshChanges = vi.fn(async () => {});
 
@@ -186,8 +211,13 @@ describe("buildWiring", () => {
     const wiring = buildWiring({
       ...baseDeps([]),
       send,
-      readMetrics: async () => { throw new Error("unused"); },
-      onSessionsChange: (cb) => { emit = cb as (s: unknown[]) => void; return () => {}; },
+      readMetrics: async () => {
+        throw new Error("unused");
+      },
+      onSessionsChange: (cb) => {
+        emit = cb as (s: unknown[]) => void;
+        return () => {};
+      },
     });
 
     wiring.start();
@@ -203,8 +233,13 @@ describe("buildWiring", () => {
     const wiring = buildWiring({
       ...baseDeps([]),
       send,
-      readMetrics: async () => { throw new Error("unused"); },
-      onTurn: (cb) => { emit = cb as (t: unknown) => void; return () => {}; },
+      readMetrics: async () => {
+        throw new Error("unused");
+      },
+      onTurn: (cb) => {
+        emit = cb as (t: unknown) => void;
+        return () => {};
+      },
     });
 
     wiring.start();
@@ -220,7 +255,9 @@ describe("buildWiring", () => {
     const wiring = buildWiring({
       ...baseDeps([]),
       send: vi.fn(),
-      readMetrics: async () => { throw new Error("unused"); },
+      readMetrics: async () => {
+        throw new Error("unused");
+      },
       onSessionsChange: () => unsubSessions,
       onTurn: () => unsubTurns,
     });
@@ -235,9 +272,14 @@ describe("buildWiring", () => {
   it("stops the metrics interval on stop, so no further reads happen", async () => {
     const send = vi.fn();
     const metrics = vi.fn(async () => ({
-      cpuPercent: 10, memoryUsedBytes: 1, memoryTotalBytes: 2,
-      diskUsedBytes: 1, diskTotalBytes: 2, networkDownMbps: 0,
-      networkUpMbps: 0, uptimeSeconds: 1,
+      cpuPercent: 10,
+      memoryUsedBytes: 1,
+      memoryTotalBytes: 2,
+      diskUsedBytes: 1,
+      diskTotalBytes: 2,
+      networkDownMbps: 0,
+      networkUpMbps: 0,
+      uptimeSeconds: 1,
     }));
 
     const wiring = buildWiring({
@@ -261,7 +303,9 @@ describe("buildWiring", () => {
     const wiring = buildWiring({
       ...baseDeps([]),
       send,
-      readMetrics: async () => { throw new Error("sensor gone"); },
+      readMetrics: async () => {
+        throw new Error("sensor gone");
+      },
       intervalMs: 10,
     });
 
@@ -462,7 +506,9 @@ describe("createGitHandlers", () => {
     it("returns a renderable failure, never a rejection, when the provider throws unexpectedly", async () => {
       const { handlers } = handlerFakes({
         diff: async () => {
-          throw new TypeError('The "path" argument must be of type string. Received an instance of Object');
+          throw new TypeError(
+            'The "path" argument must be of type string. Received an instance of Object',
+          );
         },
       });
       await expect(handlers.fileDiff("s1", "a.php")).resolves.toEqual(
@@ -547,7 +593,14 @@ describe("createGitHandlers", () => {
       const git: GitProvider = {
         changes: async (repoPath) => ({
           ok: true,
-          value: { repoPath, branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
+          value: {
+            repoPath,
+            branch: "main",
+            detached: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
         }),
         diff: async (_repoPath, path) => ({ ok: true, value: { path, binary: false, hunks: [] } }),
         stage: async () => ({ ok: true, value: null }),
@@ -664,8 +717,18 @@ describe("provider wiring", () => {
 describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not by renderer restraint", () => {
   it("a tight loop of forced refresh calls buys one billed read per account, not one per call", async () => {
     const agents = [
-      { id: "claude-main", command: "claude", configDir: "/config/mm", vendor: "anthropic" as const },
-      { id: "claude-personal", command: "claude", configDir: "/config/247", vendor: "anthropic" as const },
+      {
+        id: "claude-main",
+        command: "claude",
+        configDir: "/config/mm",
+        vendor: "anthropic" as const,
+      },
+      {
+        id: "claude-personal",
+        command: "claude",
+        configDir: "/config/247",
+        vendor: "anthropic" as const,
+      },
     ];
     const store = new ProviderStatusStore(agents);
     const readCapacity = vi.fn(
@@ -1119,7 +1182,9 @@ describe("bookmarks handlers", () => {
 
   it("attaches each bookmark's cached icon", async () => {
     const handlers = createBookmarksHandlers({
-      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      store: store({
+        list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }),
+      }),
       favicons: {
         get: async () => ({ ok: true, value: { dataUri: "data:image/png;base64,AQ==" } }),
         put: async () => ({ ok: true, value: undefined }),
@@ -1137,7 +1202,9 @@ describe("bookmarks handlers", () => {
 
   it("leaves icon absent when the origin has none cached", async () => {
     const handlers = createBookmarksHandlers({
-      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      store: store({
+        list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }),
+      }),
       favicons: {
         get: async () => ({ ok: true, value: undefined }),
         put: async () => ({ ok: true, value: undefined }),
@@ -1156,7 +1223,9 @@ describe("bookmarks handlers", () => {
   it("requests the missing favicon through the bookmark's own project", async () => {
     const requested: { project: string; url: string }[] = [];
     const handlers = createBookmarksHandlers({
-      store: store({ list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }) }),
+      store: store({
+        list: () => Promise.resolve({ ok: true, value: [{ url: "https://a.test/", title: "A" }] }),
+      }),
       favicons: {
         get: async () => ({ ok: true, value: undefined }),
         put: async () => ({ ok: true, value: undefined }),
@@ -1230,18 +1299,27 @@ const sampleConfig: JarvisConfig = {
   },
   brain: { systemPrompt: "You are Jarvis.", cwd: "/tmp/brain" },
   whisper: { binaryPath: "/opt/whisper", modelPath: "/opt/model.bin" },
-  performance: { suspendTabsAfterMinutes: 15, stopSidecarsAfterMinutes: 10, terminalScrollback: 5000 },
+  performance: {
+    suspendTabsAfterMinutes: 15,
+    stopSidecarsAfterMinutes: 10,
+    terminalScrollback: 5000,
+  },
   browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
   sessionsDbPath: "/tmp/sessions.db",
 };
 
-function settingsDeps(overrides: Partial<{
-  readConfig: () => Promise<JarvisConfig>;
-  writeConfig: (draft: JarvisConfig) => Promise<{ ok: true } | { ok: false; detail: string }>;
-  run: (command: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
-  restart: () => void;
-}> = {}) {
+function settingsDeps(
+  overrides: Partial<{
+    readConfig: () => Promise<JarvisConfig>;
+    writeConfig: (draft: JarvisConfig) => Promise<{ ok: true } | { ok: false; detail: string }>;
+    run: (
+      command: string,
+      args: string[],
+    ) => Promise<{ code: number; stdout: string; stderr: string }>;
+    restart: () => void;
+  }> = {},
+) {
   return {
     readConfig: overrides.readConfig ?? (() => Promise.resolve(sampleConfig)),
     writeConfig: overrides.writeConfig ?? (() => Promise.resolve({ ok: true } as const)),
@@ -1315,7 +1393,10 @@ describe("createSettingsHandlers", () => {
       }),
     );
 
-    const health: AgentHealth = await handlers.testAgent({ id: "claude-main", command: "claude-main" });
+    const health: AgentHealth = await handlers.testAgent({
+      id: "claude-main",
+      command: "claude-main",
+    });
 
     expect(health).toEqual({ id: "claude-main", ok: true, detail: "1.2.3" });
     expect(calls).toEqual([["claude-main", ["--version"]]]);
@@ -1335,7 +1416,13 @@ describe("createSettingsHandlers", () => {
 
   it("calls the injected restart function", () => {
     let called = false;
-    const handlers = createSettingsHandlers(settingsDeps({ restart: () => { called = true; } }));
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        restart: () => {
+          called = true;
+        },
+      }),
+    );
 
     handlers.restart();
 
@@ -1347,7 +1434,12 @@ describe("database handlers", () => {
   function dbgate(overrides: Partial<DbGateManager> = {}): DbGateManager {
     return {
       open: () =>
-        Promise.resolve({ ok: true, url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" }),
+        Promise.resolve({
+          ok: true,
+          url: "http://127.0.0.1:51234/",
+          login: "jarvis",
+          password: "pw",
+        }),
       stop: () => {},
       runningKeys: () => [],
       stopAll: () => {},
@@ -1491,7 +1583,8 @@ users:
       awaitAwsSession?: AwsSessionChecker;
     } = {},
   ) {
-    const open = over.open ?? vi.fn().mockResolvedValue({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" });
+    const open =
+      over.open ?? vi.fn().mockResolvedValue({ ok: true, url: "http://127.0.0.1:5000/c/ctx-a" });
     const checkAwsSession = over.checkAwsSession ?? vi.fn().mockResolvedValue(true);
     const awaitAwsSession = over.awaitAwsSession ?? vi.fn().mockResolvedValue(true);
     const opened: { project: string; cwd: string }[] = [];
@@ -1529,7 +1622,10 @@ users:
 
   it("resolves a cluster name to its context and returns the URL", async () => {
     const { handlers: h, open } = handlers();
-    expect(await h.open("platform", "dev")).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
+    expect(await h.open("platform", "dev")).toEqual({
+      ok: true,
+      value: "http://127.0.0.1:5000/c/ctx-a",
+    });
     expect(open).toHaveBeenCalledWith("platform", "ctx-a");
   });
 
@@ -1579,12 +1675,21 @@ users:
     const result = await h.open("platform", "prod");
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
     expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith(
+      "platform",
+      "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev",
+    );
     expect(opened).toEqual([]);
   });
 
   it("runs the login in a terminal tab, waits for it, then opens the cluster", async () => {
-    const { handlers: h, open, awaitAwsSession, opened, typed } = handlers({
+    const {
+      handlers: h,
+      open,
+      awaitAwsSession,
+      opened,
+      typed,
+    } = handlers({
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
     const result = await h.open("platform", "prod");
@@ -1596,7 +1701,10 @@ users:
       },
     ]);
     expect(awaitAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith(
+      "platform",
+      "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev",
+    );
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
   });
 
@@ -1619,7 +1727,13 @@ users:
   // not fine for `saml2aws login`: that opens a terminal tab and pushes MFA
   // to the user's phone. A hover may reach headlamp; it may not reach AWS.
   it("never starts a login for a background call with no AWS session", async () => {
-    const { handlers: h, open, awaitAwsSession, opened, typed } = handlers({
+    const {
+      handlers: h,
+      open,
+      awaitAwsSession,
+      opened,
+      typed,
+    } = handlers({
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
 
@@ -1644,7 +1758,10 @@ users:
     const result = await h.open("platform", "prod", { background: true });
 
     expect(checkAwsSession).toHaveBeenCalledWith("saml", "eu-west-1");
-    expect(open).toHaveBeenCalledWith("platform", "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev");
+    expect(open).toHaveBeenCalledWith(
+      "platform",
+      "arn:aws:eks:eu-west-1:123456789012:cluster/app_dev",
+    );
     expect(opened).toEqual([]);
     expect(result).toEqual({ ok: true, value: "http://127.0.0.1:5000/c/ctx-a" });
   });
@@ -1653,7 +1770,11 @@ users:
   // one that has to open the terminal, and it cannot if the hover parked an
   // entry in the in-flight map that nothing will ever resolve.
   it("lets the click that follows a backed-off pre-warm log in normally", async () => {
-    const { handlers: h, opened, typed } = handlers({
+    const {
+      handlers: h,
+      opened,
+      typed,
+    } = handlers({
       checkAwsSession: vi.fn().mockResolvedValue(false),
     });
 
@@ -1941,7 +2062,10 @@ describe("terminal handlers", () => {
       language: "en",
       terminal: terminalConfig,
       terminalScrollback: 5000,
-      completion: { enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } },
+      completion: {
+        enabled: true,
+        source: { suggest: async () => ["git status"], history: async () => [] },
+      },
     });
     handlers.open("acme");
     handlers.split("tab-7", "p1");
@@ -2127,13 +2251,19 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing for a tab it never started", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
+    const handlers = completing({
+      enabled: true,
+      source: { suggest: async () => ["git status"], history: async () => [] },
+    });
 
     expect(await handlers.suggest("ghost", "git")).toEqual([]);
   });
 
   it("forgets a tab's directory when the tab is closed", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
+    const handlers = completing({
+      enabled: true,
+      source: { suggest: async () => ["git status"], history: async () => [] },
+    });
     handlers.open("acme");
     handlers.close("tab-7");
 
@@ -2141,7 +2271,10 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing when completion is disabled", async () => {
-    const handlers = completing({ enabled: false, source: { suggest: async () => ["git status"], history: async () => [] } });
+    const handlers = completing({
+      enabled: false,
+      source: { suggest: async () => ["git status"], history: async () => [] },
+    });
     handlers.open("acme");
 
     expect(await handlers.suggest("tab-7", "git")).toEqual([]);
@@ -2170,7 +2303,10 @@ describe("terminal handlers", () => {
   });
 
   it("suggests nothing for arguments that are not strings", async () => {
-    const handlers = completing({ enabled: true, source: { suggest: async () => ["git status"], history: async () => [] } });
+    const handlers = completing({
+      enabled: true,
+      source: { suggest: async () => ["git status"], history: async () => [] },
+    });
     handlers.open("acme");
 
     expect(await handlers.suggest(7 as unknown as string, "git")).toEqual([]);
@@ -2426,7 +2562,9 @@ describe("terminal handlers", () => {
     });
 
     it("asks the brain with the command, the exit code and the output tail when explaining", async () => {
-      const { brain, calls } = fakeBrain({ text: "npm test failed because a dependency is missing." });
+      const { brain, calls } = fakeBrain({
+        text: "npm test failed because a dependency is missing.",
+      });
       const handlers = withBrain(brain);
       const output = `head-${"x".repeat(5000)}-tail`;
 
@@ -2455,7 +2593,11 @@ describe("terminal handlers", () => {
 
       await handlers.terminalAi(
         "explain",
-        JSON.stringify({ command: "npm test", exitCode: 1, output: `some real output\n${injected}` }),
+        JSON.stringify({
+          command: "npm test",
+          exitCode: 1,
+          output: `some real output\n${injected}`,
+        }),
       );
 
       const prompt = calls[0]?.text ?? "";
@@ -2585,7 +2727,11 @@ describe("terminal handlers", () => {
 
       await handlers.terminalAi(
         "explain",
-        JSON.stringify({ command: "npm test", exitCode: 1, output: `before\n${forgedOpen}\nafter` }),
+        JSON.stringify({
+          command: "npm test",
+          exitCode: 1,
+          output: `before\n${forgedOpen}\nafter`,
+        }),
       );
       const prompt = calls[1]?.text ?? "";
       const count = (prompt.match(/<\s*untrusted-output\s*>/gi) ?? []).length;
@@ -2617,7 +2763,7 @@ describe("terminal handlers", () => {
       expect(exitCodeLines).toEqual(["Exit code: 1"]);
     });
 
-    it("returns \"\" without throwing when the brain rejects", async () => {
+    it('returns "" without throwing when the brain rejects', async () => {
       const brain: Brain = {
         ask: async () => {
           throw new Error("boom");
@@ -2628,13 +2774,13 @@ describe("terminal handlers", () => {
       await expect(handlers.terminalAi("generate", "anything")).resolves.toBe("");
     });
 
-    it("returns \"\" and calls nothing when no brain is configured", async () => {
+    it('returns "" and calls nothing when no brain is configured', async () => {
       const handlers = withBrain(undefined);
 
       expect(await handlers.terminalAi("generate", "anything")).toBe("");
     });
 
-    it("returns \"\" for a kind that is neither of the two literals, without calling the brain", async () => {
+    it('returns "" for a kind that is neither of the two literals, without calling the brain', async () => {
       const { brain, calls } = fakeBrain({ text: "ls -la" });
       const handlers = withBrain(brain);
 
@@ -2642,7 +2788,7 @@ describe("terminal handlers", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("returns \"\" for a non-string text, without calling the brain", async () => {
+    it('returns "" for a non-string text, without calling the brain', async () => {
       const { brain, calls } = fakeBrain({ text: "ls -la" });
       const handlers = withBrain(brain);
 
@@ -2650,7 +2796,7 @@ describe("terminal handlers", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("returns \"\" for an explain payload that fails to parse or is missing fields", async () => {
+    it('returns "" for an explain payload that fails to parse or is missing fields', async () => {
       const { brain, calls } = fakeBrain({ text: "should not be seen" });
       const handlers = withBrain(brain);
 
@@ -2921,7 +3067,10 @@ describe("terminal handlers", () => {
       const editor = {
         open: async (projectPath: string, folderPath: string) => {
           opened.push({ projectPath, folderPath });
-          return { ok: true as const, url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}` };
+          return {
+            ok: true as const,
+            url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}`,
+          };
         },
         openTab: (project: string, url: string, detail: string | undefined) => {
           tabs.push({ project, url, detail });
@@ -2960,7 +3109,9 @@ describe("terminal handlers", () => {
           detail: undefined,
           url:
             "http://127.0.0.1:9999/?folder=%2Fproj&payload=" +
-            encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/src/a.ts"]])),
+            encodeURIComponent(
+              JSON.stringify([["openFile", "vscode-remote://remote/proj/src/a.ts"]]),
+            ),
         },
       ]);
     });
@@ -2991,12 +3142,15 @@ describe("terminal handlers", () => {
     it("passes the project's resolved real path as the editor root", async () => {
       const linkedRoot = {
         readDir: () => [],
-        realPath: (p: string) => (p === "/link" || p.startsWith("/link/") ? `/real${p.slice(5)}` : p),
+        realPath: (p: string) =>
+          p === "/link" || p.startsWith("/link/") ? `/real${p.slice(5)}` : p,
       };
       const { handlers, opened, tabs } = opener({ files: linkedRoot, projects: { p: "/link" } });
       handlers.open("p");
 
-      await expect(handlers.openFile("tab-1", "/link/src/a.ts")).resolves.toMatchObject({ ok: true });
+      await expect(handlers.openFile("tab-1", "/link/src/a.ts")).resolves.toMatchObject({
+        ok: true,
+      });
 
       expect(opened).toEqual([{ projectPath: "/real", folderPath: "/real" }]);
       expect(tabs[0]?.url).toContain(
@@ -3061,7 +3215,9 @@ describe("terminal handlers", () => {
       const { handlers, opened } = opener();
       handlers.open("p");
 
-      await expect(handlers.openFile("tab-1", "/proj-secrets/x.ts")).resolves.toMatchObject({ ok: false });
+      await expect(handlers.openFile("tab-1", "/proj-secrets/x.ts")).resolves.toMatchObject({
+        ok: false,
+      });
       expect(opened).toEqual([]);
     });
 
@@ -3121,7 +3277,9 @@ describe("terminal handlers", () => {
       await handlers.openFile("tab-1", "/proj/link");
 
       expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
-      expect(tabs[0]?.url).toContain(encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/real/a.ts"]])));
+      expect(tabs[0]?.url).toContain(
+        encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/proj/real/a.ts"]])),
+      );
     });
 
     it("attributes the tab to the pane's own project, not another whose path is a prefix", async () => {
@@ -3182,7 +3340,14 @@ describe("terminal handlers", () => {
       const git = {
         changes: vi.fn(async (repoPath: string) => ({
           ok: true as const,
-          value: { repoPath, branch: "main", detached: false, files: [], insertions: 0, deletions: 0 },
+          value: {
+            repoPath,
+            branch: "main",
+            detached: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
         })),
       };
       const { manager } = shells();
@@ -3227,7 +3392,11 @@ describe("terminal handlers", () => {
       const linked = {
         ...files,
         realPath: (path: string) =>
-          path === "C:\\proj\\out" ? "C:\\Windows" : path === "C:\\proj\\link" ? "C:\\proj\\real" : path,
+          path === "C:\\proj\\out"
+            ? "C:\\Windows"
+            : path === "C:\\proj\\link"
+              ? "C:\\proj\\real"
+              : path,
       };
       const { handlers } = handlersFor({ files: linked });
 
@@ -3245,9 +3414,15 @@ describe("terminal handlers", () => {
         value: undefined,
       });
       expect(opened).toEqual([{ projectPath: PROJ, folderPath: PROJ }]);
-      expect(tabs[0]?.url).toContain(encodeURIComponent(JSON.stringify([["openFile", "vscode-remote://remote/C%3A/proj/src/a.ts"]])));
+      expect(tabs[0]?.url).toContain(
+        encodeURIComponent(
+          JSON.stringify([["openFile", "vscode-remote://remote/C%3A/proj/src/a.ts"]]),
+        ),
+      );
 
-      await expect(handlers.openFile("tab-1", "C:\\Windows\\x.ts")).resolves.toMatchObject({ ok: false });
+      await expect(handlers.openFile("tab-1", "C:\\Windows\\x.ts")).resolves.toMatchObject({
+        ok: false,
+      });
       expect(opened).toHaveLength(1);
     });
 
@@ -3424,7 +3599,11 @@ describe("terminal handlers", () => {
     it("leaves branch undefined when the directory is not a repository", async () => {
       const deps = baseDeps();
       const git = {
-        changes: vi.fn(async () => ({ ok: false as const, text: "not a repo", language: "en" as const })),
+        changes: vi.fn(async () => ({
+          ok: false as const,
+          text: "not a repo",
+          language: "en" as const,
+        })),
       };
       const handlers = createTerminalHandlers({ ...deps, git: git as unknown as GitProvider });
       handlers.open("p");
@@ -3450,7 +3629,9 @@ describe("terminal handlers", () => {
 
     it("reports nothing at all for an unknown pane", async () => {
       const deps = baseDeps();
-      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const git = {
+        changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })),
+      };
       const runtimeVersion = vi.fn(async () => "v22.11.0");
       const handlers = createTerminalHandlers({
         ...deps,
@@ -3499,7 +3680,9 @@ describe("terminal handlers", () => {
 
     it("resolves a split pane to its own directory when it has one, not its tab's", async () => {
       const deps = baseDeps();
-      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const git = {
+        changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })),
+      };
       const handlers = createTerminalHandlers({
         ...deps,
         projects: { p: "/proj", q: "/other" },
@@ -3524,7 +3707,9 @@ describe("terminal handlers", () => {
     // so deleting the `directoryOf` fallback would not fail it.
     it("falls back to the tab's directory for a pane key with no exact entry of its own", async () => {
       const deps = baseDeps();
-      const git = { changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })) };
+      const git = {
+        changes: vi.fn(async () => ({ ok: false as const, text: "x", language: "en" as const })),
+      };
       const handlers = createTerminalHandlers({ ...deps, git: git as unknown as GitProvider });
       handlers.open("p");
 
@@ -4073,9 +4258,9 @@ describe("isDeclaredContainer", () => {
   });
 
   it("refuses a declared container whose name is not a container name", () => {
-    expect(isDeclaredContainer([{ name: "app", container: "app; rm -rf /" }], "app; rm -rf /")).toBe(
-      false,
-    );
+    expect(
+      isDeclaredContainer([{ name: "app", container: "app; rm -rf /" }], "app; rm -rf /"),
+    ).toBe(false);
   });
 
   it("refuses everything for a project that declares nothing", () => {
@@ -4141,9 +4326,7 @@ describe("createDockerHandlers", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.rows).toEqual([
-      { name: "app", container: "acme-app-1", facts: facts() },
-    ]);
+    expect(result.value.rows).toEqual([{ name: "app", container: "acme-app-1", facts: facts() }]);
   });
 
   it("reports a configured container that does not exist, rather than hiding it", async () => {
@@ -4190,11 +4373,14 @@ describe("createDockerHandlers", () => {
   });
 
   it("translates a missing docker binary", async () => {
-    const { handlers: h } = handlers({}, {
-      ok: false,
-      reason: "not-installed",
-      detail: "spawn docker ENOENT",
-    });
+    const { handlers: h } = handlers(
+      {},
+      {
+        ok: false,
+        reason: "not-installed",
+        detail: "spawn docker ENOENT",
+      },
+    );
 
     const result = await h.view("acme");
 
@@ -4206,11 +4392,14 @@ describe("createDockerHandlers", () => {
   });
 
   it("translates a daemon that is not running", async () => {
-    const { handlers: h } = handlers({}, {
-      ok: false,
-      reason: "daemon-down",
-      detail: "Cannot connect",
-    });
+    const { handlers: h } = handlers(
+      {},
+      {
+        ok: false,
+        reason: "daemon-down",
+        detail: "Cannot connect",
+      },
+    );
 
     const result = await h.view("acme");
 
@@ -4242,11 +4431,14 @@ describe("createDockerHandlers", () => {
   });
 
   it("translates a missing docker binary for containers() too", async () => {
-    const { handlers: h } = handlers({}, {
-      ok: false,
-      reason: "not-installed",
-      detail: "spawn docker ENOENT",
-    });
+    const { handlers: h } = handlers(
+      {},
+      {
+        ok: false,
+        reason: "not-installed",
+        detail: "spawn docker ENOENT",
+      },
+    );
 
     const result = await h.containers();
 
@@ -4274,11 +4466,7 @@ describe("createDockerHandlers", () => {
     await h.stop("acme", "acme-app-1");
     await h.restart("acme", "acme-app-1");
 
-    expect(acted).toEqual([
-      "start:acme-app-1",
-      "stop:acme-app-1",
-      "restart:acme-app-1",
-    ]);
+    expect(acted).toEqual(["start:acme-app-1", "stop:acme-app-1", "restart:acme-app-1"]);
   });
 
   it("surfaces the daemon's own words when an action fails", async () => {
@@ -4374,13 +4562,15 @@ describe("createDockerHandlers", () => {
 
     expect(result.ok).toBe(true);
     expect(opened).toEqual(["acme"]);
-    expect(sent).toEqual([
-      "docker exec -it acme-app-1 sh -c 'exec bash || exec sh'\r",
-    ]);
+    expect(sent).toEqual(["docker exec -it acme-app-1 sh -c 'exec bash || exec sh'\r"]);
   });
 
   it("never types a container name that is not a container name", () => {
-    const { handlers: h, opened, sent } = handlers({
+    const {
+      handlers: h,
+      opened,
+      sent,
+    } = handlers({
       containers: { acme: [{ name: "app", container: "app; rm -rf /" }] },
     });
 
@@ -4574,7 +4764,9 @@ describe("terminal open with an explicit directory", () => {
 
 describe("resumeCommandFor", () => {
   it("builds the CLI line that continues a session", () => {
-    expect(resumeCommandFor("claude-main", "abc-123", "posix")).toBe("claude-main --resume abc-123");
+    expect(resumeCommandFor("claude-main", "abc-123", "posix")).toBe(
+      "claude-main --resume abc-123",
+    );
   });
 
   // The command is typed into a live shell, so anything odd in it executes.
@@ -4715,10 +4907,7 @@ describe("createResumeInTerminalHandler", () => {
 });
 
 describe("main.ts ipc registrations", () => {
-  const mainSource = readFileSync(
-    fileURLToPath(new URL("./main.ts", import.meta.url)),
-    "utf8",
-  );
+  const mainSource = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
 
   for (const channel of ["session:transcript", "session:resume"]) {
     it(`passes the argument, not the event, to the ${channel} handler`, () => {

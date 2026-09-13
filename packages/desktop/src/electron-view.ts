@@ -72,7 +72,8 @@ function enableScreenShare(session: Session, window: BrowserWindow): void {
           const displayId = window.isDestroyed()
             ? undefined
             : String(screen.getDisplayMatching(window.getBounds()).id);
-          const source = sources.find((candidate) => candidate.display_id === displayId) ?? sources[0];
+          const source =
+            sources.find((candidate) => candidate.display_id === displayId) ?? sources[0];
           // No source means screen recording was refused in System Settings;
           // answering with nothing is how the page is told no.
           callback(source === undefined ? {} : { video: source });
@@ -83,7 +84,10 @@ function enableScreenShare(session: Session, window: BrowserWindow): void {
   );
 }
 
-export function createElectronViewFactory(window: BrowserWindow, options: ElectronViewOptions): ViewFactory {
+export function createElectronViewFactory(
+  window: BrowserWindow,
+  options: ElectronViewOptions,
+): ViewFactory {
   // No partition here: Chromium creates a popup in its opener's session, which
   // is what keeps a sign-in popup's cookies the project's own.
   //
@@ -370,7 +374,9 @@ export function createElectronViewFactory(window: BrowserWindow, options: Electr
           // worth a dialog — the user can press the button again — but it
           // belongs in the log.
           .catch((error: unknown) => {
-            console.error(`Picture-in-Picture failed: ${error instanceof Error ? error.message : String(error)}`);
+            console.error(
+              `Picture-in-Picture failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
           });
       },
       onEvent: (listener) => {

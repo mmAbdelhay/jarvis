@@ -211,9 +211,9 @@ describe("greetingText", () => {
     it("greets the afternoon and the evening with the same phrase", () => {
       const afternoon = new Date("2026-08-31T13:00:00").getTime();
 
-      expect(
-        greetingText({ now: afternoon, history: [], dirtyProjects: [] }, "ar"),
-      ).toContain("مساء الخير");
+      expect(greetingText({ now: afternoon, history: [], dirtyProjects: [] }, "ar")).toContain(
+        "مساء الخير",
+      );
       expect(greetingText({ now: EVENING, history: [], dirtyProjects: [] }, "ar")).toContain(
         "مساء الخير",
       );

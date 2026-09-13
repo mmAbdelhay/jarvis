@@ -180,7 +180,10 @@ function paint(terminal: Terminal, element: HTMLElement): void {
 }
 
 /** Rows past the last one the program wrote are padding, not output. */
-function lastWrittenRow(buffer: { length: number; getLine(y: number): { translateToString(t?: boolean): string } | undefined }): number {
+function lastWrittenRow(buffer: {
+  length: number;
+  getLine(y: number): { translateToString(t?: boolean): string } | undefined;
+}): number {
   for (let y = buffer.length - 1; y >= 0; y -= 1) {
     if ((buffer.getLine(y)?.translateToString(true) ?? "") !== "") return y;
   }
@@ -188,10 +191,15 @@ function lastWrittenRow(buffer: { length: number; getLine(y: number): { translat
 }
 
 function styleOf(cell: {
-  isBold(): number; isItalic(): number; isUnderline(): number; isDim(): number;
+  isBold(): number;
+  isItalic(): number;
+  isUnderline(): number;
+  isDim(): number;
   isInverse(): number;
-  getFgColorMode(): number; getBgColorMode(): number;
-  getFgColor(): number; getBgColor(): number;
+  getFgColorMode(): number;
+  getBgColorMode(): number;
+  getFgColor(): number;
+  getBgColor(): number;
 }): Style {
   const fg = colorOf(cell.getFgColorMode(), cell.getFgColor());
   const bg = colorOf(cell.getBgColorMode(), cell.getBgColor());
@@ -225,7 +233,11 @@ function xterm256(index: number): string {
   }
   const steps = [0, 95, 135, 175, 215, 255];
   const n = index - 16;
-  return rgb(steps[Math.floor(n / 36) % 6] ?? 0, steps[Math.floor(n / 6) % 6] ?? 0, steps[n % 6] ?? 0);
+  return rgb(
+    steps[Math.floor(n / 36) % 6] ?? 0,
+    steps[Math.floor(n / 6) % 6] ?? 0,
+    steps[n % 6] ?? 0,
+  );
 }
 
 const rgb = (r: number, g: number, b: number): string =>

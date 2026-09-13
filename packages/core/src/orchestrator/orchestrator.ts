@@ -17,8 +17,7 @@ import type { Brain, BrainContext, BrainReply, ToolSpec, Turn } from "./types.js
 const TOOLS = [
   {
     name: "session.start",
-    description:
-      "Start an agent session in a project, and give the agent its first instruction",
+    description: "Start an agent session in a project, and give the agent its first instruction",
     inputSchema: {
       project: "Name of the project to open, from the list of known projects",
       agent: "(optional) explicit agent id to use instead of routing",
@@ -70,7 +69,7 @@ const TOOLS = [
       "Report each configured account's provider health and how much of its own capacity is left, so the user can pick which account to use",
     inputSchema: {
       refresh:
-        "(optional) \"yes\" to take a fresh reading first — this costs a real API query per account, so only pass it when the user explicitly asks for an up-to-date number",
+        '(optional) "yes" to take a fresh reading first — this costs a real API query per account, so only pass it when the user explicitly asks for an up-to-date number',
     },
   },
 ] as const satisfies readonly ToolSpec[];
@@ -96,9 +95,7 @@ const MESSAGES = {
       ? `تعذر العثور على الوكيل: ${message}`
       : `I couldn't find that agent: ${message}`,
   sessionStartFailed: (message: string, language: "ar" | "en"): string =>
-    language === "ar"
-      ? `تعذر بدء الجلسة: ${message}`
-      : `I couldn't start that session: ${message}`,
+    language === "ar" ? `تعذر بدء الجلسة: ${message}` : `I couldn't start that session: ${message}`,
   unknownSession: (sessionId: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `لا أعرف جلسة باسم "${sessionId}".`
@@ -376,9 +373,8 @@ export class Orchestrator {
     // file or `.env.local` sitting untracked in the tree must never ride
     // along on a voice commit neither lane asked for.
     const alreadyStaged = changes.value.files.filter((file) => file.staged);
-    const toStage = alreadyStaged.length > 0
-      ? []
-      : changes.value.files.filter((file) => file.status !== "?");
+    const toStage =
+      alreadyStaged.length > 0 ? [] : changes.value.files.filter((file) => file.status !== "?");
 
     if (toStage.length > 0) {
       const staged = await this.#options.git.stage(

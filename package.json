@@ -6,11 +6,16 @@
   "scripts": {
     "bootstrap": "node scripts/bootstrap.mjs",
     "prereqs": "node scripts/setup.mjs",
+    "build": "pnpm --filter @jarvis/desktop build",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.13",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^22.10.2",
     "jsdom": "^30.0.1",

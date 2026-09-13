@@ -677,13 +677,21 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         { id: "copy-command", label: "Copy command", run: () => copy(selected.record.command) },
       );
       if (idle()) {
-        actions.push({ id: "rerun", label: "Re-run command", run: () => fill(selected.record.command) });
+        actions.push({
+          id: "rerun",
+          label: "Re-run command",
+          run: () => fill(selected.record.command),
+        });
       }
       // Only a real failure — a defined, non-zero exit code — has a
       // command, a code and an output worth sending; an unknown exit code
       // (should not normally reach a frozen block) offers nothing rather
       // than explaining a status that was never actually observed.
-      if (hooks.terminalAi !== undefined && selected.record.exitCode !== undefined && selected.record.exitCode !== 0) {
+      if (
+        hooks.terminalAi !== undefined &&
+        selected.record.exitCode !== undefined &&
+        selected.record.exitCode !== 0
+      ) {
         actions.push({ id: "explain-failure", label: "Explain this failure", run: explainFailure });
       }
     }
@@ -692,7 +700,11 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       label: "Collapse all blocks",
       run: () => attempt(() => views.forEach((view) => view.collapse(true))),
     });
-    actions.push({ id: "clear", label: "Clear terminal", run: () => attempt(() => terminal.clear()) });
+    actions.push({
+      id: "clear",
+      label: "Clear terminal",
+      run: () => attempt(() => terminal.clear()),
+    });
     const toggleExplorer = hooks.toggleExplorer;
     if (toggleExplorer !== undefined) {
       actions.push({
@@ -943,7 +955,11 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     },
   };
 
-  const paletteKeys: PaletteKeys = { palette: paletteForKeys, actions: paletteActions, historySearch };
+  const paletteKeys: PaletteKeys = {
+    palette: paletteForKeys,
+    actions: paletteActions,
+    historySearch,
+  };
 
   /** True while this pane is the one the user is looking at: the window
    *  itself has focus, and the focused element is inside this pane (its
@@ -959,7 +975,8 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     const durationSeconds = (record.endedAt - record.startedAt) / 1000;
     if (durationSeconds < threshold) return;
     if (isWatched()) return;
-    const status = record.exitCode === 0 ? "succeeded" : `failed (exit ${record.exitCode ?? "unknown"})`;
+    const status =
+      record.exitCode === 0 ? "succeeded" : `failed (exit ${record.exitCode ?? "unknown"})`;
     hooks.notify("Command finished", `${record.command} ${status}`);
   }
 

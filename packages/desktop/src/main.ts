@@ -4,7 +4,17 @@ import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, Menu, app, components, dialog, globalShortcut, ipcMain, screen, session } from "electron";
+import {
+  BrowserWindow,
+  Menu,
+  app,
+  components,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  screen,
+  session,
+} from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
 import { createSetupHandlers } from "./ipc.js";
@@ -353,9 +363,9 @@ app.whenReady().then(async () => {
     const reportPromise = agentEnvReady
       .then(() => startupReport(registry, (command, args) => runCommand(command, args, agentEnv)))
       .catch((error) => {
-      console.error(`Startup health check failed: ${errorMessage(error)}`);
-      return { healthy: [], broken: [], message: "" };
-    });
+        console.error(`Startup health check failed: ${errorMessage(error)}`);
+        return { healthy: [], broken: [], message: "" };
+      });
     // Beside jarvis.yaml, created (directory included) on first use — see
     // config.ts's defaultSessionsDbPath() note. SessionManager upserts a
     // row into this store on every state transition it already emits a
@@ -364,7 +374,10 @@ app.whenReady().then(async () => {
     // A pty, not pipes: an interactive coding agent checks whether stdin is
     // a TTY and, finding a pipe, exits after three seconds having decided it
     // was handed a single non-interactive prompt. See createPtySpawner.
-    const sessions = new SessionManager(createPtySpawner(() => agentEnv), sessionStore);
+    const sessions = new SessionManager(
+      createPtySpawner(() => agentEnv),
+      sessionStore,
+    );
 
     // Sessions Jarvis did not spawn — the ones started by typing an agent
     // into a terminal, which on this machine outnumber the recorded ones
@@ -416,7 +429,10 @@ app.whenReady().then(async () => {
     //
     // That rejection was not theoretical: with Piper absent, the greeting hit
     // `say`, and announceSpeaking awaited a promise nobody caught.
-    const voices = { arabicVoice: config.voice.arabicVoice, englishVoice: config.voice.englishVoice };
+    const voices = {
+      arabicVoice: config.voice.arabicVoice,
+      englishVoice: config.voice.englishVoice,
+    };
     const systemSpeech =
       process.platform === "darwin"
         ? new MacSpeech(voices, defaultSpeechRunner, defaultVoiceLister)
@@ -627,14 +643,17 @@ app.whenReady().then(async () => {
     // The Workspace's hosted browser tabs. Each is a native WebContentsView
     // over this window, so the host — not CSS — decides where they sit and
     // whether they are visible at all.
-    const workspace = new BrowserHost(createElectronViewFactory(window, {
-      allowPopups: () => config.browser.allowPopups,
-    }), {
-      cacheFavicon,
-      suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
-      resumeUrl: (tab) =>
-        resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
-    });
+    const workspace = new BrowserHost(
+      createElectronViewFactory(window, {
+        allowPopups: () => config.browser.allowPopups,
+      }),
+      {
+        cacheFavicon,
+        suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
+        resumeUrl: (tab) =>
+          resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
+      },
+    );
 
     // Asked once, at startup: every sidecar below is a binary resolved on
     // PATH — `code-server`, `dbgate-serve`, `docker`, and the exec
@@ -1016,7 +1035,13 @@ app.whenReady().then(async () => {
         cookies: jar.list(),
         ...(logs.length === 0 && tests.length === 0 && scriptError === undefined
           ? {}
-          : { scripts: { logs, tests, ...(scriptError === undefined ? {} : { error: scriptError }) } }),
+          : {
+              scripts: {
+                logs,
+                tests,
+                ...(scriptError === undefined ? {} : { error: scriptError }),
+              },
+            }),
       };
     }
 
@@ -1535,10 +1560,8 @@ app.whenReady().then(async () => {
       sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
       language: PRIMARY_LANGUAGE,
     });
-    ipcMain.handle(
-      "session:resume",
-      (_event, sessionId: unknown, selectedProject: unknown) =>
-        sessionResume(sessionId, selectedProject),
+    ipcMain.handle("session:resume", (_event, sessionId: unknown, selectedProject: unknown) =>
+      sessionResume(sessionId, selectedProject),
     );
 
     // Keystrokes into a session's pty. Validated rather than trusted: the
@@ -1671,9 +1694,13 @@ app.whenReady().then(async () => {
         checked: current === dock,
         click: () => window.webContents.send("workspace:devtoolsDockChosen", dock),
       });
-      Menu.buildFromTemplate([item("undocked"), item("left"), item("bottom"), item("right")]).popup({ window });
+      Menu.buildFromTemplate([item("undocked"), item("left"), item("bottom"), item("right")]).popup(
+        { window },
+      );
     });
-    workspace.onDevToolsClosed((tabId) => window.webContents.send("workspace:devtoolsClosed", tabId));
+    workspace.onDevToolsClosed((tabId) =>
+      window.webContents.send("workspace:devtoolsClosed", tabId),
+    );
     ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
       workspace.setVisible(visible === true),
     );
@@ -1690,7 +1717,7 @@ app.whenReady().then(async () => {
       ),
     );
     ipcMain.handle("editor:roots", (_event, project: unknown) =>
-      editor.roots(typeof project === "string" ? project : "")
+      editor.roots(typeof project === "string" ? project : ""),
     );
     ipcMain.handle("database:open", (_event, project: unknown) =>
       database.open(typeof project === "string" ? project : ""),
@@ -1711,10 +1738,7 @@ app.whenReady().then(async () => {
       cluster.names(typeof project === "string" ? project : ""),
     );
     ipcMain.handle("chat:open", (_event, project: unknown, name: unknown) =>
-      chat.open(
-        typeof project === "string" ? project : "",
-        typeof name === "string" ? name : "",
-      ),
+      chat.open(typeof project === "string" ? project : "", typeof name === "string" ? name : ""),
     );
     ipcMain.handle("chat:names", (_event, project: unknown) =>
       chat.names(typeof project === "string" ? project : ""),
@@ -1724,7 +1748,11 @@ app.whenReady().then(async () => {
     // exactly as it is for the API tab.
     ipcMain.handle("docker:open", (_event, project: unknown) => {
       if (typeof project !== "string" || config.projects[project] === undefined) {
-        return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+        return {
+          ok: false,
+          text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
+          language: PRIMARY_LANGUAGE,
+        };
       }
       workspace.openDocker(project);
       return { ok: true, value: undefined };
@@ -1762,8 +1790,16 @@ app.whenReady().then(async () => {
     ipcMain.handle(
       "docker:follow",
       (_event, tabId: unknown, project: unknown, container: unknown) => {
-        if (typeof tabId !== "string" || typeof project !== "string" || typeof container !== "string") {
-          return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+        if (
+          typeof tabId !== "string" ||
+          typeof project !== "string" ||
+          typeof container !== "string"
+        ) {
+          return {
+            ok: false,
+            text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
+            language: PRIMARY_LANGUAGE,
+          };
         }
         // The same check the Docker handlers apply — membership and name
         // grammar both, from the one shared helper — so `follow` is not the
@@ -1795,7 +1831,11 @@ app.whenReady().then(async () => {
     // Editor and Database buttons.
     ipcMain.handle("api:open", (_event, project: unknown) => {
       if (typeof project !== "string" || config.projects[project] === undefined) {
-        return { ok: false, text: MESSAGES.unknownProject(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+        return {
+          ok: false,
+          text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
+          language: PRIMARY_LANGUAGE,
+        };
       }
       workspace.openApi(project);
       return { ok: true, value: undefined };
@@ -1888,8 +1928,10 @@ app.whenReady().then(async () => {
     ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
     ipcMain.handle("api:cookies", (_event, p: unknown) => api.cookies(p as string));
     ipcMain.handle("api:clearCookies", (_event, p: unknown) => api.clearCookies(p as string));
-    ipcMain.handle("api:removeCookie", (_event, p: unknown, n: unknown, d: unknown, path: unknown) =>
-      api.removeCookie(p as string, n as string, d as string, path as string),
+    ipcMain.handle(
+      "api:removeCookie",
+      (_event, p: unknown, n: unknown, d: unknown, path: unknown) =>
+        api.removeCookie(p as string, n as string, d as string, path as string),
     );
     ipcMain.handle("api:settings", (_event, p: unknown) => api.settings(p as string));
     ipcMain.handle("api:saveSettings", (_event, p: unknown, settings: unknown) =>
@@ -1906,7 +1948,11 @@ app.whenReady().then(async () => {
     });
     ipcMain.handle("dialog:readJson", async (_event, path: unknown) => {
       if (typeof path !== "string") {
-        return { ok: false, text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE), language: PRIMARY_LANGUAGE };
+        return {
+          ok: false,
+          text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE),
+          language: PRIMARY_LANGUAGE,
+        };
       }
       try {
         return { ok: true, value: JSON.parse(await readFile(path, "utf8")) };
@@ -1915,16 +1961,24 @@ app.whenReady().then(async () => {
       }
     });
     ipcMain.handle("api:curl", (_event, p: unknown, request: unknown, variables: unknown) =>
-      api.curl(p as string, request as Record<string, unknown>, variables as Record<string, string>),
+      api.curl(
+        p as string,
+        request as Record<string, unknown>,
+        variables as Record<string, string>,
+      ),
     );
-    ipcMain.handle("api:createRequest", (_event, p: unknown, folder: unknown, name: unknown, seq: unknown) =>
-      api.createRequest(p as string, folder as string, name as string, seq as number),
+    ipcMain.handle(
+      "api:createRequest",
+      (_event, p: unknown, folder: unknown, name: unknown, seq: unknown) =>
+        api.createRequest(p as string, folder as string, name as string, seq as number),
     );
     ipcMain.handle("api:createFolder", (_event, p: unknown, parent: unknown, name: unknown) =>
       api.createFolder(p as string, parent as string, name as string),
     );
-    ipcMain.handle("api:rename", (_event, p: unknown, path: unknown, name: unknown, folder: unknown) =>
-      api.renameEntry(p as string, path as string, name as string, folder === true),
+    ipcMain.handle(
+      "api:rename",
+      (_event, p: unknown, path: unknown, name: unknown, folder: unknown) =>
+        api.renameEntry(p as string, path as string, name as string, folder === true),
     );
     ipcMain.handle("api:delete", (_event, p: unknown, path: unknown) =>
       api.deleteEntry(p as string, path as string),
@@ -1932,8 +1986,10 @@ app.whenReady().then(async () => {
     ipcMain.handle("api:createCollection", (_event, p: unknown, name: unknown) =>
       api.createCollection(p as string, name as string),
     );
-    ipcMain.handle("api:saveEnvironment", (_event, p: unknown, path: unknown, name: unknown, vars: unknown) =>
-      api.saveEnvironment(p as string, path as string, name as string, vars as never[]),
+    ipcMain.handle(
+      "api:saveEnvironment",
+      (_event, p: unknown, path: unknown, name: unknown, vars: unknown) =>
+        api.saveEnvironment(p as string, path as string, name as string, vars as never[]),
     );
     ipcMain.handle("api:importPostman", (_event, p: unknown, name: unknown, collection: unknown) =>
       api.importPostman(p as string, name as string, collection),
@@ -1997,10 +2053,15 @@ app.whenReady().then(async () => {
       bookmarks.add(typeof project === "string" ? project : "", bookmark as never),
     );
     ipcMain.handle("bookmarks:remove", (_event, project: unknown, url: unknown) =>
-      bookmarks.remove(typeof project === "string" ? project : "", typeof url === "string" ? url : ""),
+      bookmarks.remove(
+        typeof project === "string" ? project : "",
+        typeof url === "string" ? url : "",
+      ),
     );
-    ipcMain.handle("bookmarks:setPinned", (_event, project: unknown, url: unknown, pinned: unknown) =>
-      bookmarks.setPinned(project as string, url as string, pinned as boolean),
+    ipcMain.handle(
+      "bookmarks:setPinned",
+      (_event, project: unknown, url: unknown, pinned: unknown) =>
+        bookmarks.setPinned(project as string, url as string, pinned as boolean),
     );
     ipcMain.handle("bookmarks:rename", (_event, project: unknown, url: unknown, title: unknown) =>
       bookmarks.rename(project as string, url as string, title as string),
@@ -2178,7 +2239,9 @@ app.whenReady().then(async () => {
     // renderer's business.
     window.webContents.on("console-message", (event) => {
       if (event.level !== "error" && event.level !== "warning") return;
-      console.error(`[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+      console.error(
+        `[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`,
+      );
     });
 
     // A page that fails to load at all never reaches the console at all.
@@ -2198,7 +2261,11 @@ app.whenReady().then(async () => {
       // work are named, and the renderer is told so its hints agree.
       window.webContents.send("turn:new", {
         role: "assistant",
-        text: MESSAGES.hotkeyFallback(PRIMARY_HOTKEYS.start, hotkeys.active.start, PRIMARY_LANGUAGE),
+        text: MESSAGES.hotkeyFallback(
+          PRIMARY_HOTKEYS.start,
+          hotkeys.active.start,
+          PRIMARY_LANGUAGE,
+        ),
         language: PRIMARY_LANGUAGE,
         at: Date.now(),
       });

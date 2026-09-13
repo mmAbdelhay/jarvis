@@ -22,8 +22,14 @@ const sessionViewSource = readFileSync(
   "utf8",
 );
 // workspace.ts's $() throws, same contract as app.ts/changes.ts.
-const workspaceSource = readFileSync(fileURLToPath(new URL("./workspace.ts", import.meta.url)), "utf8");
-const settingsSource = readFileSync(fileURLToPath(new URL("./settings.ts", import.meta.url)), "utf8");
+const workspaceSource = readFileSync(
+  fileURLToPath(new URL("./workspace.ts", import.meta.url)),
+  "utf8",
+);
+const settingsSource = readFileSync(
+  fileURLToPath(new URL("./settings.ts", import.meta.url)),
+  "utf8",
+);
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -49,7 +55,7 @@ describe("$() id contract", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
-  it.each(Array.from(new Set(ids)))("index.html has an element with id=\"%s\"", (id) => {
+  it.each(Array.from(new Set(ids)))('index.html has an element with id="%s"', (id) => {
     expect(htmlSource).toMatch(new RegExp(`id="${id}"`));
   });
 });

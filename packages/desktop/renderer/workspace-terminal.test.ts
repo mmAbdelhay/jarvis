@@ -559,8 +559,7 @@ describe("moving around a pane's blocks", () => {
   function finishCommand(command: string, exitCode: number): void {
     dataListener?.(
       "tab-1",
-      `]133;A$ ]133;B${command}\r\n` +
-        `]133;C;${command}ok\r\n]133;D;${exitCode}`,
+      `]133;A$ ]133;B${command}\r\n` + `]133;C;${command}ok\r\n]133;D;${exitCode}`,
     );
   }
 
@@ -684,7 +683,9 @@ describe("completion with the command editor live", () => {
     const { field } = await editorPane();
     field.value = "git sta";
 
-    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // The xterm buffer never moved past "~/p > " — nothing reached the pty
@@ -695,10 +696,14 @@ describe("completion with the command editor live", () => {
   it("accepts into the editor and sends nothing to the pty", async () => {
     const { field } = await editorPane();
     field.value = "git sta";
-    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+    );
 
     expect(field.value).toBe("git status");
     expect(calls.some((c) => c.call === "sendTerminalInput")).toBe(false);
@@ -710,7 +715,9 @@ describe("completion with the command editor live", () => {
   it("does not let the editor's own history walk run on a key the dropdown claimed", async () => {
     const { field } = await editorPane();
     field.value = "git sta";
-    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     field.dispatchEvent(
@@ -1002,8 +1009,7 @@ describe("the terminal tab's file sidebar", () => {
     const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     jarvis["terminalSettings"] = () =>
       Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
-    jarvis["listTerminalDir"] = () =>
-      Promise.resolve([{ name: "a.ts", directory: false }]);
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "a.ts", directory: false }]);
     const opened: [string, string][] = [];
     jarvis["openTerminalFile"] = (paneKey: string, path: string) => {
       opened.push([paneKey, path]);
@@ -1029,10 +1035,8 @@ describe("the terminal tab's file sidebar", () => {
     const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     jarvis["terminalSettings"] = () =>
       Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
-    jarvis["listTerminalDir"] = () =>
-      Promise.resolve([{ name: "a.ts", directory: false }]);
-    jarvis["openTerminalFile"] = () =>
-      Promise.resolve({ ok: false, text: "nope", language: "en" });
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "a.ts", directory: false }]);
+    jarvis["openTerminalFile"] = () => Promise.resolve({ ok: false, text: "nope", language: "en" });
     const { renderWorkspaceTerminals } = await load();
     await settle();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");

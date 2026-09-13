@@ -300,7 +300,7 @@ describe("sync", () => {
     n.toggleFailedFilter();
 
     const fresh = fakeView("b", 0);
-    n.sync([...n.selected() ? [n.selected()!] : [], fresh]);
+    n.sync([...(n.selected() ? [n.selected()!] : []), fresh]);
     expect(fresh.element.hidden).toBe(true);
   });
 });

@@ -166,4 +166,3 @@ export type StartInput = {
   projectPath: string;
   agent: AgentConfig;
 };
-

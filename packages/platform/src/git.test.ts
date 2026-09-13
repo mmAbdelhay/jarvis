@@ -28,7 +28,6 @@ const canSymlink = ((): boolean => {
   }
 })();
 
-
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -358,24 +357,27 @@ describe("createGitProvider().diff", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it.skipIf(!canSymlink)("refuses an untracked symlink whose target resolves outside the repository (P17)", async () => {
-    const dir = await makeRepo();
-    const secretDir = await mkdtemp(join(tmpdir(), "jarvis-secret-"));
-    cleanups.push(() => rm(secretDir, { recursive: true, force: true }));
-    const secretPath = join(secretDir, "id_rsa");
-    await writeFile(secretPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n", "utf8");
+  it.skipIf(!canSymlink)(
+    "refuses an untracked symlink whose target resolves outside the repository (P17)",
+    async () => {
+      const dir = await makeRepo();
+      const secretDir = await mkdtemp(join(tmpdir(), "jarvis-secret-"));
+      cleanups.push(() => rm(secretDir, { recursive: true, force: true }));
+      const secretPath = join(secretDir, "id_rsa");
+      await writeFile(secretPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n", "utf8");
 
-    // insideRepo() is a lexical-only check on the *link's own* path
-    // ("link.txt" — no "../", not absolute) and would pass it; the escape
-    // is entirely in what the link resolves to.
-    await symlink(secretPath, join(dir, "link.txt"));
+      // insideRepo() is a lexical-only check on the *link's own* path
+      // ("link.txt" — no "../", not absolute) and would pass it; the escape
+      // is entirely in what the link resolves to.
+      await symlink(secretPath, join(dir, "link.txt"));
 
-    const outcome = await createGitProvider().diff(dir, "link.txt");
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    // Must be a normal GitOutcome failure, never leak the secret content.
-    expect(JSON.stringify(outcome)).not.toContain("secret");
-  });
+      const outcome = await createGitProvider().diff(dir, "link.txt");
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) return;
+      // Must be a normal GitOutcome failure, never leak the secret content.
+      expect(JSON.stringify(outcome)).not.toContain("secret");
+    },
+  );
 
   it("still reads a legitimate untracked file when the repo itself sits under a symlinked root", async () => {
     // makeRepo() already creates its repo under os.tmpdir(), which is
@@ -453,9 +455,7 @@ describe("createGitProvider().diff", () => {
     expect(lines.filter((line) => line.kind === "removed").map((line) => line.text)).toEqual([
       "two",
     ]);
-    expect(lines.filter((line) => line.kind === "added").map((line) => line.text)).toEqual([
-      "TWO",
-    ]);
+    expect(lines.filter((line) => line.kind === "added").map((line) => line.text)).toEqual(["TWO"]);
     expect(lines.some((line) => line.kind === "context" && line.text === "one")).toBe(true);
     expect(lines.some((line) => line.kind === "context" && line.text === "three")).toBe(true);
   });

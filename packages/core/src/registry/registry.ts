@@ -1,9 +1,4 @@
-import type {
-  AgentConfig,
-  RegistryConfig,
-  ResolveRequest,
-  RoutingRule,
-} from "./types.js";
+import type { AgentConfig, RegistryConfig, ResolveRequest, RoutingRule } from "./types.js";
 
 export class UnknownAgentError extends Error {}
 
@@ -39,9 +34,7 @@ export class AgentRegistry {
       if (this.#matches(rule, request)) {
         const routed = this.#agents.get(rule.agent);
         if (routed === undefined) {
-          throw new UnknownAgentError(
-            `Routing rule points at unknown agent "${rule.agent}"`,
-          );
+          throw new UnknownAgentError(`Routing rule points at unknown agent "${rule.agent}"`);
         }
         return routed;
       }

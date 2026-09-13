@@ -39,7 +39,11 @@ describe("ProviderStatusStore", () => {
     const store = new ProviderStatusStore(AGENTS);
     store.recordCapacity(
       "claude-main",
-      { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+      {
+        ok: true,
+        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        sevenDay: undefined,
+      },
       1_000,
     );
 
@@ -56,7 +60,11 @@ describe("ProviderStatusStore", () => {
     const store = new ProviderStatusStore(AGENTS);
     store.recordCapacity(
       "claude-main",
-      { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+      {
+        ok: true,
+        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        sevenDay: undefined,
+      },
       1_000,
     );
     store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);
@@ -70,7 +78,11 @@ describe("ProviderStatusStore", () => {
     const store = new ProviderStatusStore(AGENTS);
     store.recordCapacity(
       "copilot",
-      { ok: true, fiveHour: { usedPercent: 1, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+      {
+        ok: true,
+        fiveHour: { usedPercent: 1, resetsAt: "2026-08-31T14:30:00Z" },
+        sevenDay: undefined,
+      },
       1_000,
     );
     expect(store.snapshot()[1]?.capacity).toEqual({ state: "unknown", reason: "unsupported" });
@@ -78,7 +90,11 @@ describe("ProviderStatusStore", () => {
 
   it("applies one vendor's health to every account of that vendor only", () => {
     const store = new ProviderStatusStore(AGENTS);
-    store.recordHealth("anthropic", { state: "degraded", detail: "Partially Degraded Service" }, 5_000);
+    store.recordHealth(
+      "anthropic",
+      { state: "degraded", detail: "Partially Degraded Service" },
+      5_000,
+    );
 
     expect(store.snapshot()[0]?.health).toEqual({
       state: "degraded",
@@ -94,24 +110,44 @@ describe("ProviderStatusStore", () => {
     // that let recordHealth touch capacity would be visible as a change.
     store.recordCapacity(
       "claude-main",
-      { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+      {
+        ok: true,
+        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        sevenDay: undefined,
+      },
       1_000,
     );
     store.recordCapacity(
       "claude-acme",
-      { ok: true, fiveHour: { usedPercent: 42, resetsAt: "2026-08-31T15:00:00Z" }, sevenDay: undefined },
+      {
+        ok: true,
+        fiveHour: { usedPercent: 42, resetsAt: "2026-08-31T15:00:00Z" },
+        sevenDay: undefined,
+      },
       1_500,
     );
     const capacityBeforeMm = store.snapshot()[0]?.capacity;
     const capacityBeforeAcme = store.snapshot()[1]?.capacity;
 
-    store.recordHealth("anthropic", { state: "degraded", detail: "Partially Degraded Service" }, 5_000);
+    store.recordHealth(
+      "anthropic",
+      { state: "degraded", detail: "Partially Degraded Service" },
+      5_000,
+    );
 
     const [mm, acme, copilot] = store.snapshot();
 
     // Both anthropic accounts got the health update — this is the fan-out.
-    expect(mm?.health).toEqual({ state: "degraded", detail: "Partially Degraded Service", readAt: 5_000 });
-    expect(acme?.health).toEqual({ state: "degraded", detail: "Partially Degraded Service", readAt: 5_000 });
+    expect(mm?.health).toEqual({
+      state: "degraded",
+      detail: "Partially Degraded Service",
+      readAt: 5_000,
+    });
+    expect(acme?.health).toEqual({
+      state: "degraded",
+      detail: "Partially Degraded Service",
+      readAt: 5_000,
+    });
 
     // The github account is untouched.
     expect(copilot?.health.state).toBe("unknown");
@@ -140,7 +176,11 @@ describe("ProviderStatusStore", () => {
       const store = new ProviderStatusStore(AGENTS);
       store.recordCapacity(
         "claude-main",
-        { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+        {
+          ok: true,
+          fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+          sevenDay: undefined,
+        },
         1_000,
       );
       store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);
@@ -152,7 +192,11 @@ describe("ProviderStatusStore", () => {
       const store = new ProviderStatusStore(AGENTS);
       store.recordCapacity(
         "claude-main",
-        { ok: true, fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" }, sevenDay: undefined },
+        {
+          ok: true,
+          fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+          sevenDay: undefined,
+        },
         1_000,
       );
       store.recordCapacity("claude-main", { ok: false, reason: "unavailable" }, 2_000);

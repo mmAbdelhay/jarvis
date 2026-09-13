@@ -145,9 +145,7 @@ async function readFolder(path: string, name: string, isRoot = false): Promise<B
   // __pycache__ and every other folder in the project as though they were
   // part of the collection. A folder belongs in the tree only if there is a
   // request somewhere inside it.
-  folder.folders = folder.folders
-    .filter(hasRequests)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  folder.folders = folder.folders.filter(hasRequests).sort((a, b) => a.name.localeCompare(b.name));
   return folder;
 }
 
@@ -215,7 +213,6 @@ export async function writeRequest(path: string, json: Record<string, unknown>):
   await writeFile(path, jsonToBruV2(json), "utf8");
 }
 
-
 /** A filename that cannot escape its directory or collide with the shell.
  *  A request is named by the user; the file it lands in is not. */
 function safeFileName(name: string): string {
@@ -224,7 +221,11 @@ function safeFileName(name: string): string {
 }
 
 /** Creates an empty GET request in `folderPath`, and returns its path. */
-export async function createRequest(folderPath: string, name: string, seq: number): Promise<string> {
+export async function createRequest(
+  folderPath: string,
+  name: string,
+  seq: number,
+): Promise<string> {
   const path = join(folderPath, `${safeFileName(name)}.bru`);
   await writeRequest(path, {
     meta: { name, type: "http", seq: String(seq) },
@@ -307,7 +308,10 @@ export async function writeImported(
   for (const request of requests) {
     const segments = [...request.segments];
     const fileName = segments.pop() ?? `request-${seq}`;
-    const folder = segments.reduce((path, segment) => join(path, safeFileName(segment)), collectionPath);
+    const folder = segments.reduce(
+      (path, segment) => join(path, safeFileName(segment)),
+      collectionPath,
+    );
     await mkdir(folder, { recursive: true });
 
     const json = { ...request.json };

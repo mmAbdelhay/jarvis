@@ -60,7 +60,12 @@ describe("evaluateAssertions", () => {
   it("reports what the target actually was, so a failure reads", () => {
     const result = run("res.status", "eq 404", { status: 500 });
 
-    expect(result).toMatchObject({ target: "res.status", expression: "eq 404", passed: false, actual: "500" });
+    expect(result).toMatchObject({
+      target: "res.status",
+      expression: "eq 404",
+      passed: false,
+      actual: "500",
+    });
   });
 
   it("fails an unknown path rather than passing it", () => {
@@ -77,7 +82,9 @@ describe("evaluateAssertions", () => {
 
   // Reporting a skipped assertion as passing would be a claim nobody checked.
   it("skips a disabled assertion entirely", () => {
-    expect(evaluateAssertions([{ name: "res.status", value: "eq 999", enabled: false }], subject())).toEqual([]);
+    expect(
+      evaluateAssertions([{ name: "res.status", value: "eq 999", enabled: false }], subject()),
+    ).toEqual([]);
   });
 
   it("fails an unknown operator rather than passing it", () => {

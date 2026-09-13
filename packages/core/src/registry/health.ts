@@ -38,9 +38,7 @@ export async function checkAgent(
     // not this pure, Electron-free health check).
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new Error(`Health probe for "${agent.id}" timed out after ${timeoutMs}ms.`),
-        );
+        reject(new Error(`Health probe for "${agent.id}" timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
     });
     try {
@@ -93,5 +91,10 @@ export async function checkAll(
 }
 
 function firstLine(text: string): string {
-  return text.split("\n").map((line) => line.trim()).find((line) => line !== "") ?? "";
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line !== "") ?? ""
+  );
 }

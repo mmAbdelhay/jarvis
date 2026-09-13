@@ -182,9 +182,15 @@ describe("the same chords, spelled for Linux", () => {
       closeTab: () => calls.push("closeTab"),
     };
 
-    expect(handleSplitKey(keydown({ key: "D", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
-    expect(handleSplitKey(keydown({ key: "E", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
-    expect(handleSplitKey(keydown({ key: "W", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(
+      handleSplitKey(keydown({ key: "D", ctrlKey: true, shiftKey: true }), keys, "linux"),
+    ).toBe(false);
+    expect(
+      handleSplitKey(keydown({ key: "E", ctrlKey: true, shiftKey: true }), keys, "linux"),
+    ).toBe(false);
+    expect(
+      handleSplitKey(keydown({ key: "W", ctrlKey: true, shiftKey: true }), keys, "linux"),
+    ).toBe(false);
     expect(handleSplitKey(keydown({ key: "ArrowRight", altKey: true }), keys, "linux")).toBe(false);
 
     expect(calls).toEqual(["split:row", "split:column", "closeFocused", "focus:1"]);
@@ -223,7 +229,9 @@ describe("the same chords, spelled for Linux", () => {
       },
     };
 
-    expect(handlePaletteKey(keydown({ key: "P", ctrlKey: true, shiftKey: true }), keys, "linux")).toBe(false);
+    expect(
+      handlePaletteKey(keydown({ key: "P", ctrlKey: true, shiftKey: true }), keys, "linux"),
+    ).toBe(false);
     expect(opened).toHaveLength(1);
 
     expect(handlePaletteKey(keydown({ key: "r", ctrlKey: true }), keys, "linux")).toBe(false);

@@ -8,13 +8,7 @@ import type { Session, SessionState, SessionStore } from "@jarvis/core";
 // existing db always opens without losing rows.
 const SCHEMA_VERSION = 4;
 
-const SESSION_STATES: readonly SessionState[] = [
-  "starting",
-  "running",
-  "waiting",
-  "done",
-  "dead",
-];
+const SESSION_STATES: readonly SessionState[] = ["starting", "running", "waiting", "done", "dead"];
 
 function isSessionState(value: string): value is SessionState {
   return (SESSION_STATES as readonly string[]).includes(value);
@@ -444,7 +438,8 @@ function rowToSession(raw: unknown): Session {
   // Nullable by design: a session Jarvis spawned has a pty backlog rather
   // than a transcript, so unset is the honest value.
   const transcriptRaw = row["transcriptPath"];
-  const transcriptPath = typeof transcriptRaw === "string" && transcriptRaw !== "" ? transcriptRaw : null;
+  const transcriptPath =
+    typeof transcriptRaw === "string" && transcriptRaw !== "" ? transcriptRaw : null;
 
   return {
     id,
@@ -478,7 +473,9 @@ function requireNullableString(row: Record<string, unknown>, key: string): strin
   const value = row[key];
   if (value === null) return null;
   if (typeof value !== "string") {
-    throw new Error(`sessions.db row's \`${key}\` column must be a string or null (got ${typeof value})`);
+    throw new Error(
+      `sessions.db row's \`${key}\` column must be a string or null (got ${typeof value})`,
+    );
   }
   return value;
 }
@@ -495,7 +492,9 @@ function requireNullableNumber(row: Record<string, unknown>, key: string): numbe
   const value = row[key];
   if (value === null) return null;
   if (typeof value !== "number") {
-    throw new Error(`sessions.db row's \`${key}\` column must be a number or null (got ${typeof value})`);
+    throw new Error(
+      `sessions.db row's \`${key}\` column must be a number or null (got ${typeof value})`,
+    );
   }
   return value;
 }

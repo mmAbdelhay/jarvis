@@ -35,7 +35,10 @@ describe("toCurl", () => {
   });
 
   it("adds headers", () => {
-    const command = toCurl(request({ headers: [{ name: "Accept", value: "application/json", enabled: true }] }), {});
+    const command = toCurl(
+      request({ headers: [{ name: "Accept", value: "application/json", enabled: true }] }),
+      {},
+    );
     expect(command).toContain("-H 'Accept: application/json'");
   });
 

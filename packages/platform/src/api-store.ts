@@ -98,7 +98,10 @@ export function createApiStore(filePath: string): ApiStore {
     return {
       history: Array.isArray(existing.history) ? existing.history : [],
       cookies: Array.isArray(existing.cookies) ? existing.cookies : [],
-      settings: { ...DEFAULT_API_SETTINGS, ...(isRecord(existing.settings) ? existing.settings : {}) },
+      settings: {
+        ...DEFAULT_API_SETTINGS,
+        ...(isRecord(existing.settings) ? existing.settings : {}),
+      },
     };
   }
 

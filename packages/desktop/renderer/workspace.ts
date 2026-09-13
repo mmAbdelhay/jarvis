@@ -148,7 +148,8 @@ async function renderClusterButton(): Promise<void> {
  *  "nothing configured" is knowable for free. */
 async function renderDockerButton(): Promise<void> {
   const project = selectedProject();
-  const result = project === "" ? { ok: true as const, value: [] } : await window.jarvis.dockerNames(project);
+  const result =
+    project === "" ? { ok: true as const, value: [] } : await window.jarvis.dockerNames(project);
   // The user may have switched projects while that request was in flight;
   // a stale answer must not clobber whatever project is selected now.
   if (selectedProject() !== project) return;
@@ -299,7 +300,8 @@ function saveDevToolsLayout(): void {
  *  (a different project's tabs collapsing into a pill does not touch it). */
 async function refreshBookmarks(): Promise<void> {
   const project = selectedProject();
-  const result = project === "" ? { ok: true as const, value: [] } : await window.jarvis.listBookmarks(project);
+  const result =
+    project === "" ? { ok: true as const, value: [] } : await window.jarvis.listBookmarks(project);
   bookmarks = result.ok ? result.value : [];
   renderBookmarks();
 }
@@ -357,7 +359,11 @@ function renderBookmarkChip(bookmark: BookmarkView): HTMLElement {
   // feature unreachable from the state every existing install upgrades
   // into — everything unpinned, so an empty grid with no tile to drop on —
   // and gives a keyboard user no path at all.
-  const pin = glyphControl("⊞", MESSAGES.pinBookmark(PRIMARY_LANGUAGE), () => void pinBookmark(bookmark.url, true));
+  const pin = glyphControl(
+    "⊞",
+    MESSAGES.pinBookmark(PRIMARY_LANGUAGE),
+    () => void pinBookmark(bookmark.url, true),
+  );
   pin.classList.add("workspace-bookmark-pin");
 
   const rename = glyphControl(RENAME_GLYPH, MESSAGES.renameBookmark(PRIMARY_LANGUAGE), () =>
@@ -428,7 +434,11 @@ function monogramTile(bookmark: BookmarkView): HTMLElement {
  * those from firing twice: committing on Enter moves focus, which fires
  * blur, which would otherwise commit a second time.
  */
-function titleEditor(current: string, commit: (title: string) => void, done: () => void): HTMLInputElement {
+function titleEditor(
+  current: string,
+  commit: (title: string) => void,
+  done: () => void,
+): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "workspace-rename-input";
@@ -565,8 +575,10 @@ function renderEssential(bookmark: BookmarkView): HTMLElement {
   }
   open.addEventListener("click", () => openBookmark(bookmark.url));
 
-  const unpin = glyphControl("⊟", MESSAGES.unpinBookmark(PRIMARY_LANGUAGE), () =>
-    void pinBookmark(bookmark.url, false),
+  const unpin = glyphControl(
+    "⊟",
+    MESSAGES.unpinBookmark(PRIMARY_LANGUAGE),
+    () => void pinBookmark(bookmark.url, false),
   );
   unpin.classList.add("workspace-essential-unpin");
 
@@ -606,7 +618,11 @@ async function dropOnto(draggedUrl: string, target: BookmarkView): Promise<void>
   // store decides whether a thirteenth pin is allowed, and a refusal must
   // stop the reorder rather than leave the two disagreeing.
   if ((dragged.pinned === true) !== (target.pinned === true)) {
-    const pinResult = await window.jarvis.setBookmarkPinned(project, draggedUrl, target.pinned === true);
+    const pinResult = await window.jarvis.setBookmarkPinned(
+      project,
+      draggedUrl,
+      target.pinned === true,
+    );
     if (!pinResult.ok) {
       showToolStatus(pinResult.text);
       return;
@@ -690,9 +706,9 @@ function wireDrag(element: HTMLElement, bookmark: BookmarkView): void {
   element.addEventListener("drop", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
-      "text/plain",
-    );
+    const dragged = (
+      event as unknown as { dataTransfer: { getData(type: string): string } }
+    ).dataTransfer.getData("text/plain");
     if (dragged === "" || dragged === bookmark.url) return;
     void dropOnto(dragged, bookmark);
   });
@@ -769,7 +785,9 @@ async function toggleBookmark(): Promise<void> {
 /** The sidebar shows only when both the chrome rule and the user's own
  *  toggle allow it. Kept in one function because those two reasons to be
  *  hidden are decided in different places and must not drift. */
-function renderBookmarksVisibility(hostedApp = activeTab() !== undefined && activeTab()?.kind !== "web"): void {
+function renderBookmarksVisibility(
+  hostedApp = activeTab() !== undefined && activeTab()?.kind !== "web",
+): void {
   ($("workspace-bookmarks") as HTMLElement).hidden = hostedApp || !bookmarksVisible;
   $("workspace-toggle-bookmarks").classList.toggle("workspace-nav--on", bookmarksVisible);
 }
@@ -802,7 +820,10 @@ function renderDevTools(): void {
   ($("workspace-devtools-handle") as HTMLElement).hidden = !docked;
   $("workspace-toggle-devtools").classList.toggle("workspace-nav--on", open);
   for (const dock of DEVTOOLS_DOCKS) {
-    $(`workspace-devtools-dock-${dock}`).classList.toggle("workspace-devtools-button--on", dock === devToolsDock);
+    $(`workspace-devtools-dock-${dock}`).classList.toggle(
+      "workspace-devtools-button--on",
+      dock === devToolsDock,
+    );
   }
 
   if (!docked) return;
@@ -812,7 +833,8 @@ function renderDevTools(): void {
   const fraction = bottom ? devToolsFraction : devToolsSideFraction;
   // A stage with no layout yet measures zero; a percentage still lands
   // correctly once it does, where a computed pixel size would not.
-  const size = available === 0 ? `${Math.round(fraction * 100)}%` : `${Math.round(available * fraction)}px`;
+  const size =
+    available === 0 ? `${Math.round(fraction * 100)}%` : `${Math.round(available * fraction)}px`;
   panel.style.height = bottom ? size : "";
   panel.style.width = bottom ? "" : size;
   reportDevToolsBounds();
@@ -884,7 +906,9 @@ function wireDevToolsHandle(): void {
       } else {
         if (box.width === 0) return;
         const share =
-          devToolsDock === "right" ? (box.right - move.clientX) / box.width : (move.clientX - box.left) / box.width;
+          devToolsDock === "right"
+            ? (box.right - move.clientX) / box.width
+            : (move.clientX - box.left) / box.width;
         devToolsSideFraction = clampDevToolsFraction(share);
         panel.style.width = `${Math.round(box.width * devToolsSideFraction)}px`;
       }
@@ -1011,9 +1035,9 @@ export function initWorkspace(projects: string[]): void {
   grid.addEventListener("dragover", (event) => event.preventDefault());
   grid.addEventListener("drop", (event) => {
     event.preventDefault();
-    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
-      "text/plain",
-    );
+    const dragged = (
+      event as unknown as { dataTransfer: { getData(type: string): string } }
+    ).dataTransfer.getData("text/plain");
     if (dragged !== "") void dropOnGrid(dragged);
   });
 
@@ -1024,9 +1048,9 @@ export function initWorkspace(projects: string[]): void {
   list.addEventListener("dragover", (event) => event.preventDefault());
   list.addEventListener("drop", (event) => {
     event.preventDefault();
-    const dragged = (event as unknown as { dataTransfer: { getData(type: string): string } }).dataTransfer.getData(
-      "text/plain",
-    );
+    const dragged = (
+      event as unknown as { dataTransfer: { getData(type: string): string } }
+    ).dataTransfer.getData("text/plain");
     if (dragged !== "") void dropOnList(dragged);
   });
 
@@ -1044,7 +1068,8 @@ export function initWorkspace(projects: string[]): void {
     event.preventDefault();
     void window.jarvis.showDevToolsDockMenu(devToolsDock);
   });
-  ($("workspace-toggle-devtools") as HTMLButtonElement).title = MESSAGES.devToolsToggle(PRIMARY_LANGUAGE);
+  ($("workspace-toggle-devtools") as HTMLButtonElement).title =
+    MESSAGES.devToolsToggle(PRIMARY_LANGUAGE);
   for (const dock of DEVTOOLS_DOCKS) {
     const button = $(`workspace-devtools-dock-${dock}`) as HTMLButtonElement;
     button.title = MESSAGES.devToolsDock(dock, PRIMARY_LANGUAGE);
@@ -1441,7 +1466,11 @@ async function openDatabase(): Promise<void> {
     return;
   }
 
-  status.textContent = MESSAGES.databaseLogin(result.value.login, result.value.password, PRIMARY_LANGUAGE);
+  status.textContent = MESSAGES.databaseLogin(
+    result.value.login,
+    result.value.password,
+    PRIMARY_LANGUAGE,
+  );
   void window.jarvis.openTab(project, result.value.url, "database");
 }
 
@@ -1522,9 +1551,14 @@ let dockerAttached: string | undefined;
 /** Shows or hides the Docker pane and starts/stops its poll to match: the
  *  same "flex sibling of the page slot" rule the terminal and API panes
  *  follow, and the same show/hide call site they are wired at. */
-function renderDocker(tabs: WorkspaceTab[], activeTabId: string | undefined, selectedProject: string): void {
+function renderDocker(
+  tabs: WorkspaceTab[],
+  activeTabId: string | undefined,
+  selectedProject: string,
+): void {
   const active = tabs.find((tab) => tab.id === activeTabId);
-  const showing = active?.kind === "docker" && active.project === selectedProject ? active.id : undefined;
+  const showing =
+    active?.kind === "docker" && active.project === selectedProject ? active.id : undefined;
 
   ($("workspace-docker") as HTMLElement).hidden = showing === undefined;
   if (showing === dockerAttached) return;
@@ -1650,7 +1684,8 @@ export function renderWorkspace(state: WorkspaceState): void {
   // an ordinary page that has told us it has a video actually playing. A
   // button on every page would be a control that does nothing almost all
   // of the time, which is the thing this deliberately avoids.
-  ($("workspace-pip") as HTMLElement).hidden = !(tab?.hasPlayingVideo ?? false) || tab?.kind !== "web";
+  ($("workspace-pip") as HTMLElement).hidden =
+    !(tab?.hasPlayingVideo ?? false) || tab?.kind !== "web";
 
   // The page slot and the terminal host are flex siblings that both grow, so
   // exactly one of them may be in the layout at a time — with both showing

@@ -30,7 +30,9 @@ describe("pathExtensions", () => {
 describe("resolveWindowsExecutable", () => {
   it("finds a bare name on PATH with a PATHEXT extension, in PATHEXT order", () => {
     const exists = fs("C:\\tools\\claude.cmd", "C:\\tools\\claude.exe");
-    expect(resolveWindowsExecutable("claude", env, exists, "C:\\cwd")).toBe("C:\\tools\\claude.exe");
+    expect(resolveWindowsExecutable("claude", env, exists, "C:\\cwd")).toBe(
+      "C:\\tools\\claude.exe",
+    );
   });
 
   it("finds an npm shim", () => {
@@ -42,7 +44,9 @@ describe("resolveWindowsExecutable", () => {
 
   it("tries a name that already has an extension as given first", () => {
     const exists = fs("C:\\tools\\claude.exe");
-    expect(resolveWindowsExecutable("claude.exe", env, exists, "C:\\cwd")).toBe("C:\\tools\\claude.exe");
+    expect(resolveWindowsExecutable("claude.exe", env, exists, "C:\\cwd")).toBe(
+      "C:\\tools\\claude.exe",
+    );
   });
 
   it("checks a path with a directory only as given, plus the extensions", () => {
@@ -104,7 +108,10 @@ describe("spawnTarget", () => {
   });
 
   it("leaves an unresolved name for Node to report as ENOENT", () => {
-    expect(spawnTarget("missing", ["-v"], env, "win32", fs())).toEqual({ file: "missing", args: ["-v"] });
+    expect(spawnTarget("missing", ["-v"], env, "win32", fs())).toEqual({
+      file: "missing",
+      args: ["-v"],
+    });
   });
 });
 
@@ -115,7 +122,10 @@ describe("ptySpawnTarget", () => {
       file: "C:\\tools\\claude.cmd",
       args: ["--session-id", "x"],
     });
-    expect(ptySpawnTarget("claude", [], env, "darwin", exists)).toEqual({ file: "claude", args: [] });
+    expect(ptySpawnTarget("claude", [], env, "darwin", exists)).toEqual({
+      file: "claude",
+      args: [],
+    });
   });
 });
 

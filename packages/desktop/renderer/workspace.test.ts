@@ -176,14 +176,18 @@ function harness(): Recorded[] {
     openDockerTab: recordOk("openDockerTab"),
     dockerNames: () => Promise.resolve({ ok: true, value: ["app"] }),
     dockerView: () =>
-      Promise.resolve({ ok: true, value: { rows: [], composeProject: undefined, composeWorkingDir: undefined } }),
+      Promise.resolve({
+        ok: true,
+        value: { rows: [], composeProject: undefined, composeWorkingDir: undefined },
+      }),
     dockerUnfollow: record("dockerUnfollow"),
     onDockerLog: () => {},
     listApiCollections: () => Promise.resolve({ ok: true, value: [] }),
     readApiTree: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     readApiRequest: () => Promise.resolve({ ok: false, text: "none", language: "en" }),
     saveApiRequest: () => Promise.resolve({ ok: true, value: undefined }),
-    sendApiRequest: () => Promise.resolve({ ok: true, value: { response: undefined, assertions: [] } }),
+    sendApiRequest: () =>
+      Promise.resolve({ ok: true, value: { response: undefined, assertions: [] } }),
     apiCurl: () => Promise.resolve({ ok: true, value: "curl" }),
     createApiRequest: () => Promise.resolve({ ok: true, value: "" }),
     createApiFolder: () => Promise.resolve({ ok: true, value: "" }),
@@ -197,8 +201,10 @@ function harness(): Recorded[] {
     apiCookies: () => Promise.resolve({ ok: true, value: [] }),
     clearApiCookies: () => Promise.resolve({ ok: true, value: [] }),
     removeApiCookie: () => Promise.resolve({ ok: true, value: [] }),
-    apiSettings: () => Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
-    saveApiSettings: () => Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
+    apiSettings: () =>
+      Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
+    saveApiSettings: () =>
+      Promise.resolve({ ok: true, value: { proxyUrl: "", verifyCertificate: true, timeoutMs: 1 } }),
     pickFiles: () => Promise.resolve([]),
     readJsonFile: () => Promise.resolve({ ok: true, value: {} }),
     attachTerminal: () => Promise.resolve(""),
@@ -336,17 +342,17 @@ describe("workspace chrome", () => {
       tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
       activeTabId: "tab-1",
     });
-    const first = (document.querySelector(".workspace-tab-group") as HTMLElement).style.getPropertyValue(
-      "--tab-color",
-    );
+    const first = (
+      document.querySelector(".workspace-tab-group") as HTMLElement
+    ).style.getPropertyValue("--tab-color");
 
     renderWorkspace({
       tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
       activeTabId: "tab-1",
     });
-    const second = (document.querySelector(".workspace-tab-group") as HTMLElement).style.getPropertyValue(
-      "--tab-color",
-    );
+    const second = (
+      document.querySelector(".workspace-tab-group") as HTMLElement
+    ).style.getPropertyValue("--tab-color");
 
     expect(first).toBe(second);
   });
@@ -365,7 +371,9 @@ describe("workspace chrome", () => {
     document.querySelector<HTMLElement>(".workspace-tab-group")?.click();
     await flush();
 
-    expect((document.getElementById("workspace-project") as HTMLSelectElement).value).toBe("storefront");
+    expect((document.getElementById("workspace-project") as HTMLSelectElement).value).toBe(
+      "storefront",
+    );
     expect(calls).toContainEqual({ call: "activateTab", args: ["tab-2"] });
   });
 
@@ -389,7 +397,10 @@ describe("workspace chrome", () => {
 
   // A page title is attacker-controlled text in the privileged renderer.
   it("renders a title as text, never as markup", () => {
-    renderWorkspace({ tabs: [tab({ title: "<img src=x onerror=alert(1)>" })], activeTabId: "tab-1" });
+    renderWorkspace({
+      tabs: [tab({ title: "<img src=x onerror=alert(1)>" })],
+      activeTabId: "tab-1",
+    });
 
     expect(document.querySelector("#workspace-tabs img")).toBeNull();
     expect(document.querySelector(".workspace-tab-title")?.textContent).toBe(
@@ -613,8 +624,7 @@ describe("workspace chrome", () => {
   // side that knows where the layout put the slot.
   it("reports the page slot's rectangle to main", () => {
     const page = document.getElementById("workspace-page") as HTMLElement;
-    page.getBoundingClientRect = () =>
-      ({ x: 12, y: 140, width: 900, height: 600 }) as DOMRect;
+    page.getBoundingClientRect = () => ({ x: 12, y: 140, width: 900, height: 600 }) as DOMRect;
 
     reportWorkspaceBounds();
 
@@ -723,7 +733,10 @@ describe("workspace bookmarks", () => {
     jarvis["listBookmarks"] = () => Promise.resolve({ ok: true, value: [] });
     initWorkspace(["acme"]);
     await flush();
-    renderWorkspace({ tabs: [tab({ url: "https://github.com", title: "GitHub" })], activeTabId: "tab-1" });
+    renderWorkspace({
+      tabs: [tab({ url: "https://github.com", title: "GitHub" })],
+      activeTabId: "tab-1",
+    });
 
     const page = document.getElementById("workspace-page") as HTMLElement;
     page.getBoundingClientRect = () => ({ x: 0, y: 240, width: 800, height: 500 }) as DOMRect;
@@ -769,7 +782,10 @@ describe("workspace bookmarks", () => {
       Promise.resolve({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
     initWorkspace(["acme"]);
     await flush();
-    renderWorkspace({ tabs: [tab({ id: "tab-7", url: "https://github.com" })], activeTabId: "tab-7" });
+    renderWorkspace({
+      tabs: [tab({ id: "tab-7", url: "https://github.com" })],
+      activeTabId: "tab-7",
+    });
 
     document.querySelector<HTMLElement>(".workspace-bookmark")?.click();
 
@@ -914,7 +930,9 @@ describe("the bookmarks sidebar", () => {
     await flush();
 
     expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(1);
-    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(1);
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(
+      1,
+    );
   });
 
   it("draws the cached icon when there is one", async () => {
@@ -938,7 +956,9 @@ describe("the bookmarks sidebar", () => {
     await flush();
 
     expect(document.querySelector("#workspace-essentials img")).toBeNull();
-    expect(document.querySelector("#workspace-essentials .workspace-essential-monogram")?.textContent).toBe("A");
+    expect(
+      document.querySelector("#workspace-essentials .workspace-essential-monogram")?.textContent,
+    ).toBe("A");
   });
 
   it("gives one origin the same monogram colour every time", async () => {
@@ -968,14 +988,14 @@ describe("the bookmarks sidebar", () => {
     initWorkspace(["acme"]);
     await flush();
 
-    expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(12);
+    expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(
+      12,
+    );
   });
 
   it("shows the cached icon on a listed (unpinned) row too", async () => {
     harness();
-    stubBookmarks([
-      { url: "https://a.test/", title: "A", icon: "data:image/png;base64,AQ==" },
-    ]);
+    stubBookmarks([{ url: "https://a.test/", title: "A", icon: "data:image/png;base64,AQ==" }]);
 
     initWorkspace(["acme"]);
     await flush();
@@ -992,7 +1012,9 @@ describe("the bookmarks sidebar", () => {
     await flush();
 
     expect(document.querySelector("#workspace-bookmark-list img")).toBeNull();
-    expect(document.querySelector("#workspace-bookmark-list .workspace-essential-monogram")?.textContent).toBe("A");
+    expect(
+      document.querySelector("#workspace-bookmark-list .workspace-essential-monogram")?.textContent,
+    ).toBe("A");
   });
 });
 
@@ -1125,10 +1147,11 @@ describe("renaming a bookmark", () => {
   it("redraws the label from the store's answer, not from what was typed", async () => {
     harness();
     stubBookmarks([{ url: "https://b.test/", title: "B" }]);
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark = async () => ({
-      ok: true as const,
-      value: [{ url: "https://b.test/", title: "Netflix" }],
-    });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark =
+      async () => ({
+        ok: true as const,
+        value: [{ url: "https://b.test/", title: "Netflix" }],
+      });
     initWorkspace(["acme"]);
     await flush();
 
@@ -1143,11 +1166,12 @@ describe("renaming a bookmark", () => {
   it("surfaces the store's refusal in the tool status", async () => {
     harness();
     stubBookmarks([{ url: "https://b.test/", title: "B" }]);
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark = async () => ({
-      ok: false as const,
-      text: "A bookmark needs a name.",
-      language: "en" as const,
-    });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.renameBookmark =
+      async () => ({
+        ok: false as const,
+        text: "A bookmark needs a name.",
+        language: "en" as const,
+      });
     initWorkspace(["acme"]);
     await flush();
 
@@ -1156,7 +1180,9 @@ describe("renaming a bookmark", () => {
     type("anything");
     await flush();
 
-    expect(document.querySelector("#workspace-tool-status")?.textContent).toBe("A bookmark needs a name.");
+    expect(document.querySelector("#workspace-tool-status")?.textContent).toBe(
+      "A bookmark needs a name.",
+    );
   });
 });
 
@@ -1180,11 +1206,12 @@ describe("the pin and unpin controls", () => {
   it("surfaces the store's refusal when the pin control hits the limit", async () => {
     harness();
     stubBookmarks([{ url: "https://b.test/", title: "B" }]);
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = async () => ({
-      ok: false as const,
-      text: "The grid holds 12 bookmarks; unpin one first.",
-      language: "en" as const,
-    });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned =
+      async () => ({
+        ok: false as const,
+        text: "The grid holds 12 bookmarks; unpin one first.",
+        language: "en" as const,
+      });
     initWorkspace(["acme"]);
     await flush();
 
@@ -1199,14 +1226,16 @@ describe("the pin and unpin controls", () => {
   it("unpins a tile from its own unpin action, and the bookmark lands in the list", async () => {
     const calls = harness();
     stubBookmarks([{ url: "https://a.test/", title: "A", pinned: true }]);
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned = async () => ({
-      ok: true as const,
-      value: [{ url: "https://a.test/", title: "A", pinned: false }],
-    });
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks = async () => ({
-      ok: true as const,
-      value: [{ url: "https://a.test/", title: "A", pinned: false }],
-    });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.setBookmarkPinned =
+      async () => ({
+        ok: true as const,
+        value: [{ url: "https://a.test/", title: "A", pinned: false }],
+      });
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis.reorderBookmarks =
+      async () => ({
+        ok: true as const,
+        value: [{ url: "https://a.test/", title: "A", pinned: false }],
+      });
     initWorkspace(["acme"]);
     await flush();
 
@@ -1214,7 +1243,9 @@ describe("the pin and unpin controls", () => {
     await flush();
 
     expect(document.querySelectorAll("#workspace-essentials .workspace-essential")).toHaveLength(0);
-    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(1);
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(
+      1,
+    );
     expect(calls.some((entry) => entry.call === "openTab")).toBe(false);
   });
 
@@ -1230,8 +1261,13 @@ describe("the pin and unpin controls", () => {
     initWorkspace(["acme"]);
     await flush();
 
-    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(0);
-    document.querySelector<HTMLElement>('.workspace-essential[data-url="https://a.test/"] .workspace-essential-unpin')
+    expect(document.querySelectorAll("#workspace-bookmark-list .workspace-bookmark")).toHaveLength(
+      0,
+    );
+    document
+      .querySelector<HTMLElement>(
+        '.workspace-essential[data-url="https://a.test/"] .workspace-essential-unpin',
+      )
       ?.click();
     await flush();
 
@@ -1278,7 +1314,7 @@ describe("the pin and unpin controls", () => {
       const control = document.querySelector<HTMLElement>(selector);
       expect(control?.getAttribute("aria-label")).toMatch(/\S/);
       expect(control?.title).toBe(control?.getAttribute("aria-label"));
-      expect(control?.querySelector("[aria-hidden=\"true\"]")?.textContent).toMatch(/\S/);
+      expect(control?.querySelector('[aria-hidden="true"]')?.textContent).toMatch(/\S/);
     }
   });
 
@@ -1291,7 +1327,9 @@ describe("the pin and unpin controls", () => {
     initWorkspace(["acme"]);
     await flush();
 
-    expect(document.querySelector("#workspace-essentials .workspace-essentials-empty")?.textContent).toMatch(/\S/);
+    expect(
+      document.querySelector("#workspace-essentials .workspace-essentials-empty")?.textContent,
+    ).toMatch(/\S/);
   });
 
   it("drops the grid's note once something is pinned", async () => {
@@ -1342,7 +1380,9 @@ describe("reordering bookmarks", () => {
     initWorkspace(["acme"]);
     await flush();
 
-    const first = document.querySelector('.workspace-essential[data-url="https://a.test/"]') as HTMLElement;
+    const first = document.querySelector(
+      '.workspace-essential[data-url="https://a.test/"]',
+    ) as HTMLElement;
     first.dispatchEvent(dropEvent("https://b.test/"));
     await flush();
 
@@ -1371,7 +1411,9 @@ describe("reordering bookmarks", () => {
 
     // "B" is listed, dropped onto the pinned tile "A" — a cross-group drop,
     // which is a pin change first. The store refuses it.
-    const target = document.querySelector('.workspace-essential[data-url="https://a.test/"]') as HTMLElement;
+    const target = document.querySelector(
+      '.workspace-essential[data-url="https://a.test/"]',
+    ) as HTMLElement;
     target.dispatchEvent(dropEvent("https://b.test/"));
     await flush();
 
@@ -1478,7 +1520,9 @@ describe("reordering bookmarks", () => {
     initWorkspace(["acme"]);
     await flush();
 
-    const first = document.querySelector('.workspace-bookmark[title="https://a.test/"]') as HTMLElement;
+    const first = document.querySelector(
+      '.workspace-bookmark[title="https://a.test/"]',
+    ) as HTMLElement;
     first.dispatchEvent(dropEvent("https://b.test/"));
     await flush();
 
@@ -1610,7 +1654,10 @@ describe("open in editor, with configured roots", () => {
     jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     renderWorkspace({ tabs: [], activeTabId: undefined });
     jarvis["openEditor"] = (project: string, root: string | undefined) =>
-      Promise.resolve({ ok: true, value: `http://127.0.0.1:9001/?folder=${project}/${root ?? ""}` });
+      Promise.resolve({
+        ok: true,
+        value: `http://127.0.0.1:9001/?folder=${project}/${root ?? ""}`,
+      });
   });
 
   function menuItems(): HTMLElement[] {
@@ -1895,7 +1942,9 @@ describe("the Cluster button", () => {
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
       "Could not open the cluster browser.",
     );
-    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(false);
+    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   // A cluster name is config text rendered into the menu — a node with its
@@ -2092,7 +2141,9 @@ describe("the Cluster button", () => {
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
 
-    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("workspace-open-cluster") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   // A menu left open over a project switch closes over the OLD project: its
@@ -2160,7 +2211,10 @@ describe("starting a hosted app says so", () => {
     jarvis["openDatabase"] = () =>
       new Promise((resolve) => {
         release = () =>
-          resolve({ ok: true, value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" } });
+          resolve({
+            ok: true,
+            value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
+          });
       });
     const button = document.getElementById("workspace-open-database") as HTMLButtonElement;
 
@@ -2230,9 +2284,7 @@ describe("pre-warming a hosted app on hover", () => {
   });
 
   it("starts code-server when the pointer reaches the Editor button, without opening a tab", async () => {
-    document
-      .getElementById("workspace-open-editor")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual(["editor:acme"]);
@@ -2242,9 +2294,7 @@ describe("pre-warming a hosted app on hover", () => {
   });
 
   it("starts DbGate when the pointer reaches the Database button", async () => {
-    document
-      .getElementById("workspace-open-database")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-database")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual(["database:acme"]);
@@ -2268,9 +2318,7 @@ describe("pre-warming a hosted app on hover", () => {
       activeTabId: "tab-9",
     });
 
-    document
-      .getElementById("workspace-open-editor")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual([]);
@@ -2296,9 +2344,7 @@ describe("pre-warming a hosted app on hover", () => {
       return Promise.resolve({ ok: true, value: "http://127.0.0.1:9001/?folder=%2Fp" });
     };
 
-    document
-      .getElementById("workspace-open-editor")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual(["editor:acme:portal-vue"]);
@@ -2310,9 +2356,7 @@ describe("pre-warming a hosted app on hover", () => {
   it("warms nothing when the button would offer a menu", async () => {
     jarvis["editorRoots"] = () => Promise.resolve(["portal-vue", "api"]);
 
-    document
-      .getElementById("workspace-open-editor")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual([]);
@@ -2322,9 +2366,7 @@ describe("pre-warming a hosted app on hover", () => {
     jarvis["openEditor"] = () =>
       Promise.resolve({ ok: false, text: "Could not open the editor.", language: "en" });
 
-    document
-      .getElementById("workspace-open-editor")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-editor")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
@@ -2333,9 +2375,7 @@ describe("pre-warming a hosted app on hover", () => {
   it("starts headlamp-server when the pointer reaches the Cluster button", async () => {
     jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
 
-    document
-      .getElementById("workspace-open-cluster")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-cluster")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual(["cluster:acme:dev"]);
@@ -2347,9 +2387,7 @@ describe("pre-warming a hosted app on hover", () => {
   it("warms the first cluster even when the click would offer a menu", async () => {
     jarvis["clusterNames"] = () => Promise.resolve(["dev", "chaos"]);
 
-    document
-      .getElementById("workspace-open-cluster")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-cluster")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual(["cluster:acme:dev"]);
@@ -2358,9 +2396,7 @@ describe("pre-warming a hosted app on hover", () => {
   it("does not pre-warm the cluster browser for a project with none configured", async () => {
     jarvis["clusterNames"] = () => Promise.resolve([]);
 
-    document
-      .getElementById("workspace-open-cluster")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-cluster")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(warmed).toEqual([]);
@@ -2373,9 +2409,7 @@ describe("pre-warming a hosted app on hover", () => {
   it("marks a warmed cluster open as a background call so it cannot start a login", async () => {
     jarvis["clusterNames"] = () => Promise.resolve(["dev"]);
 
-    document
-      .getElementById("workspace-open-cluster")
-      ?.dispatchEvent(new Event("pointerenter"));
+    document.getElementById("workspace-open-cluster")?.dispatchEvent(new Event("pointerenter"));
     await flush();
 
     expect(clusterArgs).toEqual([["acme", "dev", true]]);
@@ -2744,7 +2778,10 @@ describe("devtools panel", () => {
     expect(toggle().classList.contains("workspace-nav--on")).toBe(false);
 
     toggle().click();
-    expect(calls.filter((entry) => entry.call === "setDevTools").at(-1)?.args).toEqual(["tab-1", true]);
+    expect(calls.filter((entry) => entry.call === "setDevTools").at(-1)?.args).toEqual([
+      "tab-1",
+      true,
+    ]);
   });
 
   it("closes from the panel's own close button", () => {
@@ -2762,7 +2799,16 @@ describe("devtools panel", () => {
     toggle().click();
     click("workspace-devtools-dock-right");
     stage().getBoundingClientRect = () =>
-      ({ x: 0, y: 100, width: 1000, height: 600, left: 0, right: 1000, top: 100, bottom: 700 }) as DOMRect;
+      ({
+        x: 0,
+        y: 100,
+        width: 1000,
+        height: 600,
+        left: 0,
+        right: 1000,
+        top: 100,
+        bottom: 700,
+      }) as DOMRect;
 
     handle().dispatchEvent(new MouseEvent("mousedown", { clientX: 600, bubbles: true }));
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: 300, bubbles: true }));
@@ -2847,8 +2893,8 @@ describe("devtools panel", () => {
   it("reports the panel's own rectangle to main", () => {
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
     // The slot under the panel's head, which is where the view goes.
-    (document.getElementById("workspace-devtools-slot") as HTMLElement).getBoundingClientRect = () =>
-      ({ x: 10, y: 400, width: 900, height: 300 }) as DOMRect;
+    (document.getElementById("workspace-devtools-slot") as HTMLElement).getBoundingClientRect =
+      () => ({ x: 10, y: 400, width: 900, height: 300 }) as DOMRect;
 
     document.getElementById("workspace-toggle-devtools")?.click();
 
@@ -2944,7 +2990,10 @@ describe("open the API tab", () => {
   // One per project, for the same reason the api tab is one per project:
   // a second would show the same containers as the first.
   it("activates the existing docker tab instead of opening a second", async () => {
-    renderWorkspace({ tabs: [tab({ id: "tab-5", kind: "docker", url: "" })], activeTabId: "tab-5" });
+    renderWorkspace({
+      tabs: [tab({ id: "tab-5", kind: "docker", url: "" })],
+      activeTabId: "tab-5",
+    });
 
     document.getElementById("workspace-open-docker")?.click();
     await flush();
@@ -3047,9 +3096,9 @@ describe("the personal browser", () => {
       activeTabId: "tab-p",
     });
 
-    expect(document.querySelector("#workspace-tab-group, .workspace-tab-group")?.textContent).toContain(
-      "Personal",
-    );
+    expect(
+      document.querySelector("#workspace-tab-group, .workspace-tab-group")?.textContent,
+    ).toContain("Personal");
   });
 
   it.each(["editor", "database", "terminal", "api"])(

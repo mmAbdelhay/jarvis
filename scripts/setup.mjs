@@ -30,7 +30,10 @@ const run = promisify(execFile);
 
 const args = process.argv.slice(2);
 const wantsAll = args.includes("--all");
-const only = args.find((a) => a.startsWith("--only="))?.slice("--only=".length).split(",");
+const only = args
+  .find((a) => a.startsWith("--only="))
+  ?.slice("--only=".length)
+  .split(",");
 const help = args.includes("--help") || args.includes("-h");
 
 if (help) {
@@ -147,9 +150,7 @@ let statuses = check();
 console.log("\nJarvis prerequisites\n");
 report(statuses);
 
-const wanted = statuses.filter(
-  (s) => s.installable && (wantsAll || only?.includes(s.id) === true),
-);
+const wanted = statuses.filter((s) => s.installable && (wantsAll || only?.includes(s.id) === true));
 
 if (wanted.length === 0) {
   // Two different reasons Jarvis will not do it: a command that needs root,

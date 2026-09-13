@@ -114,7 +114,13 @@ describe("defaultHeadlampBinary", () => {
 
   it("follows LOCALAPPDATA on Windows", () => {
     expect(defaultHeadlampBinary("win32", { LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" })).toBe(
-      join("C:\\Users\\a\\AppData\\Local", "Programs", "Headlamp", "resources", "headlamp-server.exe"),
+      join(
+        "C:\\Users\\a\\AppData\\Local",
+        "Programs",
+        "Headlamp",
+        "resources",
+        "headlamp-server.exe",
+      ),
     );
   });
 });
@@ -123,9 +129,15 @@ function fakeProcess(): HeadlampProcess & { killed: boolean; exit: (code: number
   const listeners: ((code: number | null) => void)[] = [];
   return {
     killed: false,
-    kill() { this.killed = true; },
-    onExit(listener) { listeners.push(listener); },
-    exit(code) { for (const listener of listeners) listener(code); },
+    kill() {
+      this.killed = true;
+    },
+    onExit(listener) {
+      listeners.push(listener);
+    },
+    exit(code) {
+      for (const listener of listeners) listener(code);
+    },
   };
 }
 
@@ -172,7 +184,12 @@ describe("createHeadlampManager", () => {
 
   it("spawns once per project, not once per cluster", async () => {
     const { manager, spawned } = harness({
-      clusters: { opf: [{ name: "dev", context: "ctx-a" }, { name: "b", context: "ctx-b" }] },
+      clusters: {
+        opf: [
+          { name: "dev", context: "ctx-a" },
+          { name: "b", context: "ctx-b" },
+        ],
+      },
     });
     const first = await manager.open("opf", "ctx-a");
     const second = await manager.open("opf", "ctx-b");
@@ -200,7 +217,10 @@ describe("createHeadlampManager", () => {
   it("hands the spawner contexts spelled the way the flag matches", async () => {
     const { manager, spawned } = harness({
       listContexts: () =>
-        Promise.resolve(["arn:aws:eks:eu-west-1:1:cluster/Cast_AI", "arn:aws:eks:eu-west-1:2:cluster/app_dev"]),
+        Promise.resolve([
+          "arn:aws:eks:eu-west-1:1:cluster/Cast_AI",
+          "arn:aws:eks:eu-west-1:2:cluster/app_dev",
+        ]),
       clusters: { opf: [{ name: "dev", context: "arn:aws:eks:eu-west-1:2:cluster/app_dev" }] },
     });
     await manager.open("opf", "arn:aws:eks:eu-west-1:2:cluster/app_dev");
@@ -221,7 +241,10 @@ describe("createHeadlampManager", () => {
   it("shares an in-flight start rather than spawning twice", async () => {
     let release: (ready: boolean) => void = () => {};
     const { manager, spawned } = harness({
-      waitUntilReady: () => new Promise((resolve) => { release = resolve; }),
+      waitUntilReady: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
     });
     const first = manager.open("opf", "ctx-a");
     const second = manager.open("opf", "ctx-a");
@@ -254,7 +277,9 @@ describe("createHeadlampManager", () => {
 
   it("reports a spawn that throws instead of throwing", async () => {
     const { manager } = harness({
-      spawn: () => { throw new Error("ENOENT"); },
+      spawn: () => {
+        throw new Error("ENOENT");
+      },
     });
     expect(await manager.open("opf", "ctx-a")).toEqual({ ok: false, detail: "ENOENT" });
   });
@@ -464,7 +489,6 @@ describe("loginShellPath", () => {
   });
 });
 
-
 describe("createRealHeadlampSpawner", () => {
   it("reports a missing binary as an exit rather than crashing the process", async () => {
     // A binary that is not there arrives as an async "error" event, not a
@@ -493,7 +517,10 @@ describe("createRealHeadlampSpawner", () => {
     // A shell script, or on Windows a batch file — which also proves the
     // spawner starts a .cmd through cmd.exe, the way every npm-installed
     // tool has to be started there.
-    const binary = join(dir, process.platform === "win32" ? "fake-headlamp-server.cmd" : "fake-headlamp-server");
+    const binary = join(
+      dir,
+      process.platform === "win32" ? "fake-headlamp-server.cmd" : "fake-headlamp-server",
+    );
     await writeFile(
       binary,
       process.platform === "win32"
@@ -510,7 +537,11 @@ describe("createRealHeadlampSpawner", () => {
     const lines: string[] = [];
     // The host's own platform: the fake is a .cmd on Windows, which only
     // reaches CreateProcess through cmd.exe — see executable.ts.
-    const child = createRealHeadlampSpawner({}, (line) => lines.push(line), process.platform)({
+    const child = createRealHeadlampSpawner(
+      {},
+      (line) => lines.push(line),
+      process.platform,
+    )({
       binary,
       frontendDir: join(dir, "frontend"),
       kubeconfigPath: join(dir, "config"),

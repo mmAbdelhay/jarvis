@@ -83,7 +83,9 @@ function defaultQuery(params: { prompt: string; options?: Options }): SdkQueryRe
 }
 
 function describeTool(tool: ToolSpec): string {
-  const fields = Object.entries(tool.inputSchema).map(([key, description]) => `${key} (${description})`);
+  const fields = Object.entries(tool.inputSchema).map(
+    ([key, description]) => `${key} (${description})`,
+  );
   const schema = fields.length === 0 ? "" : ` — input: ${fields.join(", ")}`;
   return `- ${tool.name}: ${tool.description}${schema}`;
 }
@@ -95,9 +97,7 @@ function buildPrompt(
   context: BrainContext,
 ): string {
   const projectsLine =
-    context.projects.length === 0
-      ? "(no projects configured)"
-      : context.projects.join(", ");
+    context.projects.length === 0 ? "(no projects configured)" : context.projects.join(", ");
 
   const sessionsLine =
     context.sessions.length === 0

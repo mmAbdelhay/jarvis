@@ -151,7 +151,10 @@ export function createBookmarkStore(filePath: string): BookmarkStore {
         if (!existing.some((b) => b.url === url)) {
           return { ok: true, value: sorted(existing) };
         }
-        if (pinned && existing.filter((b) => b.pinned === true && b.url !== url).length >= MAX_PINNED) {
+        if (
+          pinned &&
+          existing.filter((b) => b.pinned === true && b.url !== url).length >= MAX_PINNED
+        ) {
           return { ok: false, detail: "pin-limit" };
         }
         const next = existing.map((b) => (b.url === url ? { ...b, pinned } : b));

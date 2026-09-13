@@ -3,9 +3,7 @@ import { sessionLabel } from "./label.js";
 
 describe("sessionLabel", () => {
   it("uses the configured project name when there is one", () => {
-    expect(sessionLabel({ project: "acme", projectPath: "/Users/x/projects/store" })).toBe(
-      "acme",
-    );
+    expect(sessionLabel({ project: "acme", projectPath: "/Users/x/projects/store" })).toBe("acme");
   });
 
   it("falls back to the directory's base name when no project matched", () => {

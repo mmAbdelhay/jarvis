@@ -16,7 +16,7 @@ export const SEARCH_PREFIX = "https://duckduckgo.com/?q=";
 
 // RFC 3986 scheme grammar. Anchored, so a path segment containing a colon
 // ("github.com/a:b") is not mistaken for a scheme.
-const SCHEME = /^([a-zA-Z][a-zA-Z0-9+.\-]*):/;
+const SCHEME = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
 const WEB_SCHEMES = new Set(["http", "https"]);
 
 // Something that could be a host: at least one dot with no whitespace, or a

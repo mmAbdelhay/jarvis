@@ -30,9 +30,7 @@ export function bestVariant(name: string, installed: readonly string[]): string 
   const wanted = name.trim();
   if (wanted === "") return wanted;
 
-  const matches = installed.filter(
-    (voice) => voice === wanted || voice.startsWith(`${wanted} (`),
-  );
+  const matches = installed.filter((voice) => voice === wanted || voice.startsWith(`${wanted} (`));
   const byRank = (voice: string): number =>
     voice.includes("(Premium)") ? 0 : voice.includes("(Enhanced)") ? 1 : 2;
 
@@ -166,7 +164,6 @@ export class MacSpeech {
     this.#current = undefined;
   }
 }
-
 
 /** Every installed voice, for the Settings picker. */
 export async function listInstalledVoices(): Promise<InstalledVoice[]> {

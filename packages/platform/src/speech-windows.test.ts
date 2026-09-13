@@ -82,7 +82,11 @@ describe("parseWindowsVoices", () => {
 describe("WindowsSpeech", () => {
   it("speaks through PowerShell with the voice configured for the language", async () => {
     const { run, calls } = runner();
-    const speech = new WindowsSpeech({ arabicVoice: "Naayf", englishVoice: "David" }, run, POWERSHELL);
+    const speech = new WindowsSpeech(
+      { arabicVoice: "Naayf", englishVoice: "David" },
+      run,
+      POWERSHELL,
+    );
 
     await speech.speak("hello", "en");
     await speech.speak("مرحبا", "ar");
@@ -116,7 +120,9 @@ describe("WindowsSpeech", () => {
 
   it("has a ready promise main can await, as MacSpeech does", async () => {
     const { run } = runner();
-    await expect(new WindowsSpeech({ arabicVoice: "x" }, run, POWERSHELL).ready).resolves.toBeUndefined();
+    await expect(
+      new WindowsSpeech({ arabicVoice: "x" }, run, POWERSHELL).ready,
+    ).resolves.toBeUndefined();
   });
 });
 

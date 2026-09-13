@@ -45,7 +45,11 @@ export function encodedCommandArgs(script: string): string[] {
  * ordinary case on a fresh machine — the defaults in config.ts are macOS's
  * names — and going silent over it is the one outcome this must not have.
  */
-export function speakScript(text: string, language: "ar" | "en", voice: string | undefined): string {
+export function speakScript(
+  text: string,
+  language: "ar" | "en",
+  voice: string | undefined,
+): string {
   return [
     "Add-Type -AssemblyName System.Speech",
     "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
@@ -67,7 +71,7 @@ export const LIST_VOICES_SCRIPT = [
   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
   "Add-Type -AssemblyName System.Speech",
   "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
-  "$s.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo.Name + \"`t\" + $_.VoiceInfo.Culture.Name }",
+  '$s.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo.Name + "`t" + $_.VoiceInfo.Culture.Name }',
 ].join("\n");
 
 /** `Name<TAB>Culture` lines to voices. The culture arrives as `en-US` and is
@@ -81,7 +85,10 @@ export function parseWindowsVoices(output: string): InstalledVoice[] {
     const tab = line.indexOf("\t");
     if (tab < 0) continue;
     const name = line.slice(0, tab).trim();
-    const language = line.slice(tab + 1).trim().replaceAll("-", "_");
+    const language = line
+      .slice(tab + 1)
+      .trim()
+      .replaceAll("-", "_");
     if (name === "" || language === "") continue;
     voices.push({ name, language, upgraded: false });
   }
@@ -108,7 +115,10 @@ export class WindowsSpeech {
     this.stopSpeaking();
 
     const voice = language === "ar" ? this.#config.arabicVoice : this.#config.englishVoice;
-    const utterance = this.#run(this.#powershell, encodedCommandArgs(speakScript(text, language, voice)));
+    const utterance = this.#run(
+      this.#powershell,
+      encodedCommandArgs(speakScript(text, language, voice)),
+    );
     this.#current = utterance;
     const result = await utterance.done;
 

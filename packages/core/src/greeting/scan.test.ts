@@ -48,7 +48,7 @@ describe("scanDirtyProjects", () => {
       "/p/storefront": { ok: true, value: changes([file()]) },
     });
 
-    const dirty = await scanDirtyProjects({ acme: "/p/acme", "storefront": "/p/storefront" }, git);
+    const dirty = await scanDirtyProjects({ acme: "/p/acme", storefront: "/p/storefront" }, git);
 
     expect(dirty).toEqual([
       { project: "acme", changedFiles: 2 },

@@ -78,9 +78,7 @@ describe("rank", () => {
       { command: "./docker-entrypoint.sh up", at: now - 60, cwd: "/p/other" },
       { command: "./docker-entrypoint.sh down", at: now - 60, cwd: "/p/acme" },
     ];
-    expect(rank("./doc", entries, "/p/acme", now)[0]?.value).toBe(
-      "./docker-entrypoint.sh down",
-    );
+    expect(rank("./doc", entries, "/p/acme", now)[0]?.value).toBe("./docker-entrypoint.sh down");
   });
 
   it("prefers a recent command over an older one of equal frequency", () => {
@@ -246,7 +244,10 @@ describe("suggest", () => {
   });
 
   it("puts history above specs for the same input", () => {
-    const result = suggest("git sta", { ...base, history: [{ command: "git stash pop", at: now }] });
+    const result = suggest("git sta", {
+      ...base,
+      history: [{ command: "git stash pop", at: now }],
+    });
     expect(result[0]).toMatchObject({ value: "git stash pop", kind: "history" });
     expect(result.some((s) => s.kind === "spec")).toBe(true);
   });
@@ -265,9 +266,9 @@ describe("suggest", () => {
   });
 
   it("includes path completions for a path-shaped token", () => {
-    expect(
-      suggest("cat ./", { ...base, listing: ["notes.md"] }).map((s) => s.value),
-    ).toContain("cat ./notes.md");
+    expect(suggest("cat ./", { ...base, listing: ["notes.md"] }).map((s) => s.value)).toContain(
+      "cat ./notes.md",
+    );
   });
 
   it("has specs for exactly the generic tools the design named", () => {

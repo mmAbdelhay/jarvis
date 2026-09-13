@@ -110,8 +110,8 @@ describe("freezing a block's output", () => {
     await flushAll();
 
     // 100 x's on one line, not wrapped onto two at 20 columns.
-    const lines = [...wide.querySelectorAll(".block-line")].filter(
-      (line) => (line.textContent ?? "").includes("x"),
+    const lines = [...wide.querySelectorAll(".block-line")].filter((line) =>
+      (line.textContent ?? "").includes("x"),
     );
     expect(lines).toHaveLength(1);
   });

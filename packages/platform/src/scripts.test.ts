@@ -31,7 +31,13 @@ describe("runScript", () => {
 
   it("gives a post-response script the response", () => {
     const result = run("console.log(res.status); console.log(res.body.id);", {
-      response: { status: 201, statusText: "Created", headers: {}, body: { id: 7 }, responseTime: 5 },
+      response: {
+        status: 201,
+        statusText: "Created",
+        headers: {},
+        body: { id: 7 },
+        responseTime: 5,
+      },
     });
 
     expect(result.logs).toEqual(["201", "7"]);
@@ -42,7 +48,9 @@ describe("runScript", () => {
       `test('status is ok', function () { expect(res.status).to.equal(200); });
        test('has an id', function () { expect(res.body).to.have.property('id'); });
        test('this one fails', function () { expect(res.status).to.equal(500); });`,
-      { response: { status: 200, statusText: "OK", headers: {}, body: { id: 1 }, responseTime: 2 } },
+      {
+        response: { status: 200, statusText: "OK", headers: {}, body: { id: 1 }, responseTime: 2 },
+      },
     );
 
     expect(result.tests).toEqual([

@@ -33,11 +33,14 @@ function response(overrides: {
   return {
     ok: overrides.ok ?? true,
     headers: { get: (name) => headers[name.toLowerCase()] ?? null },
-    arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
+    arrayBuffer: async () =>
+      body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
   };
 }
 
-function fetcher(result: FaviconResponse | Error): { fetch(url: string): Promise<FaviconResponse> } {
+function fetcher(result: FaviconResponse | Error): {
+  fetch(url: string): Promise<FaviconResponse>;
+} {
   return {
     fetch: async () => {
       if (result instanceof Error) throw result;
@@ -50,9 +53,12 @@ describe("cacheFavicon", () => {
   it("stores an image body against the page's origin", async () => {
     const { store, puts } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({ headers: { "content-type": "image/png" }, body: new Uint8Array([9, 9]) }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(response({ headers: { "content-type": "image/png" }, body: new Uint8Array([9, 9]) })),
+    );
 
     expect(puts).toEqual([
       { url: "https://a.test/page", bytes: new Uint8Array([9, 9]), type: "image/png" },
@@ -64,9 +70,12 @@ describe("cacheFavicon", () => {
   it("strips the parameters off the content type", async () => {
     const { store, puts } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/icon.svg", fetcher(
-      response({ headers: { "content-type": "image/svg+xml; charset=utf-8" } }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/icon.svg",
+      fetcher(response({ headers: { "content-type": "image/svg+xml; charset=utf-8" } })),
+    );
 
     expect(puts[0]?.type).toBe("image/svg+xml");
   });
@@ -76,9 +85,12 @@ describe("cacheFavicon", () => {
   it("refuses a body that is not an image, and records a miss", async () => {
     const { store, puts, misses } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({ headers: { "content-type": "text/html" } }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(response({ headers: { "content-type": "text/html" } })),
+    );
 
     expect(puts).toEqual([]);
     expect(misses).toEqual(["https://a.test/page"]);
@@ -87,7 +99,12 @@ describe("cacheFavicon", () => {
   it("refuses a body with no content type at all", async () => {
     const { store, puts, misses } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(response({})));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(response({})),
+    );
 
     expect(puts).toEqual([]);
     expect(misses).toEqual(["https://a.test/page"]);
@@ -96,12 +113,17 @@ describe("cacheFavicon", () => {
   it("refuses a body larger than the cap, and records a miss", async () => {
     const { store, puts, misses } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({
-        headers: { "content-type": "image/png" },
-        body: new Uint8Array(MAX_FAVICON_BYTES + 1),
-      }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(
+        response({
+          headers: { "content-type": "image/png" },
+          body: new Uint8Array(MAX_FAVICON_BYTES + 1),
+        }),
+      ),
+    );
 
     expect(puts).toEqual([]);
     expect(misses).toEqual(["https://a.test/page"]);
@@ -113,11 +135,16 @@ describe("cacheFavicon", () => {
   it("refuses on a declared content-length over the cap", async () => {
     const { store, puts, misses } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({
-        headers: { "content-type": "image/png", "content-length": String(MAX_FAVICON_BYTES + 1) },
-      }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(
+        response({
+          headers: { "content-type": "image/png", "content-length": String(MAX_FAVICON_BYTES + 1) },
+        }),
+      ),
+    );
 
     expect(puts).toEqual([]);
     expect(misses).toEqual(["https://a.test/page"]);
@@ -126,12 +153,17 @@ describe("cacheFavicon", () => {
   it("accepts a body exactly at the cap", async () => {
     const { store, puts } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({
-        headers: { "content-type": "image/png" },
-        body: new Uint8Array(MAX_FAVICON_BYTES),
-      }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(
+        response({
+          headers: { "content-type": "image/png" },
+          body: new Uint8Array(MAX_FAVICON_BYTES),
+        }),
+      ),
+    );
 
     expect(puts).toHaveLength(1);
   });
@@ -139,9 +171,12 @@ describe("cacheFavicon", () => {
   it("records a miss on a bad status", async () => {
     const { store, puts, misses } = recordingStore();
 
-    await cacheFavicon(store, "https://a.test/page", "https://a.test/favicon.ico", fetcher(
-      response({ ok: false, headers: { "content-type": "image/png" } }),
-    ));
+    await cacheFavicon(
+      store,
+      "https://a.test/page",
+      "https://a.test/favicon.ico",
+      fetcher(response({ ok: false, headers: { "content-type": "image/png" } })),
+    );
 
     expect(puts).toEqual([]);
     expect(misses).toEqual(["https://a.test/page"]);

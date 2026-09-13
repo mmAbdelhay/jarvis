@@ -115,9 +115,7 @@ describe("openSession", () => {
     expect(document.getElementById("session-view-project")?.textContent).toBe("acme");
     expect(document.getElementById("session-view-path")?.textContent).toBe("~/projects/acme");
     expect(document.getElementById("session-view-state")?.textContent).toBe("running");
-    expect(document.getElementById("session-view-agent")?.textContent).toBe(
-      "claude-acme · sonnet",
-    );
+    expect(document.getElementById("session-view-agent")?.textContent).toBe("claude-acme · sonnet");
   });
 
   // The terminal is opened into the pane's own live element rather than
@@ -635,9 +633,8 @@ describe("resume", () => {
 });
 
 describe("session table", () => {
-  const rows = (): HTMLElement[] => [
-    ...document.querySelectorAll("#session-table-body > tr"),
-  ] as HTMLElement[];
+  const rows = (): HTMLElement[] =>
+    [...document.querySelectorAll("#session-table-body > tr")] as HTMLElement[];
 
   it("lists every recorded session", async () => {
     stubJarvis({
@@ -663,7 +660,11 @@ describe("session table", () => {
   });
 
   it("resumes the row's own session, naming the selected project", async () => {
-    const resumeSession = vi.fn(async () => ({ ok: true, project: "app", language: "en" as const }));
+    const resumeSession = vi.fn(async () => ({
+      ok: true,
+      project: "app",
+      language: "en" as const,
+    }));
     stubJarvis({
       getHistory: vi.fn(async () => [makeSession({ id: "the-one" })]),
       resumeSession,
@@ -769,7 +770,9 @@ describe("session filters", () => {
     await load();
     expect(rows()[0]?.textContent).toContain("cluster");
 
-    (document.querySelector('#session-table th[data-sort="lastActivityAt"]') as HTMLElement).click();
+    (
+      document.querySelector('#session-table th[data-sort="lastActivityAt"]') as HTMLElement
+    ).click();
 
     expect(rows()[0]?.textContent).toContain("bugs");
   });

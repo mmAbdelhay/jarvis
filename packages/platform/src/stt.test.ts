@@ -57,17 +57,23 @@ describe("transcribe", () => {
       calls.push({ command, args });
       return { code: 0, stdout: "hi\n", stderr: "" };
     };
-    const config: WhisperConfig = { binaryPath: "/bin/whisper-cli", modelPath: "/models/ggml-base.bin" };
+    const config: WhisperConfig = {
+      binaryPath: "/bin/whisper-cli",
+      modelPath: "/models/ggml-base.bin",
+    };
 
     await transcribe("/tmp/audio.wav", config, fakeRun);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.command).toBe("/bin/whisper-cli");
     expect(calls[0]?.args).toEqual([
-      "-m", "/models/ggml-base.bin",
-      "-l", "auto",
+      "-m",
+      "/models/ggml-base.bin",
+      "-l",
+      "auto",
       "-nt",
-      "-f", "/tmp/audio.wav",
+      "-f",
+      "/tmp/audio.wav",
     ]);
   });
 
@@ -77,7 +83,10 @@ describe("transcribe", () => {
       stdout: " hello there\n",
       stderr: "auto-detected language: ar (p = 0.999)",
     });
-    const config: WhisperConfig = { binaryPath: "/bin/whisper-cli", modelPath: "/models/ggml-base.bin" };
+    const config: WhisperConfig = {
+      binaryPath: "/bin/whisper-cli",
+      modelPath: "/models/ggml-base.bin",
+    };
 
     const result = await transcribe("/tmp/audio.wav", config, fakeRun);
 
@@ -90,7 +99,10 @@ describe("transcribe", () => {
       stdout: "",
       stderr: "error: failed to load model",
     });
-    const config: WhisperConfig = { binaryPath: "/bin/whisper-cli", modelPath: "/models/ggml-base.bin" };
+    const config: WhisperConfig = {
+      binaryPath: "/bin/whisper-cli",
+      modelPath: "/models/ggml-base.bin",
+    };
 
     await expect(transcribe("/tmp/audio.wav", config, fakeRun)).rejects.toThrow();
   });

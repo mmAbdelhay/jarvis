@@ -10,7 +10,10 @@ describe("normalizeInput", () => {
   });
 
   it("keeps an explicit http URL as typed", () => {
-    expect(normalizeInput("http://example.com")).toEqual({ kind: "url", url: "http://example.com" });
+    expect(normalizeInput("http://example.com")).toEqual({
+      kind: "url",
+      url: "http://example.com",
+    });
   });
 
   it("promotes a bare hostname to https", () => {

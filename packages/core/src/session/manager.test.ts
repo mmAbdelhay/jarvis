@@ -39,14 +39,28 @@ class FakeProcess implements ProcessHandle {
   #output: ((chunk: string) => void)[] = [];
   #exit: ((code: number) => void)[] = [];
 
-  write(data: string): void { this.written.push(data); }
-  kill(): void { this.killed = true; }
-  resize(cols: number, rows: number): void { this.resizes.push({ cols, rows }); }
-  onOutput(listener: (chunk: string) => void): void { this.#output.push(listener); }
-  onExit(listener: (code: number) => void): void { this.#exit.push(listener); }
+  write(data: string): void {
+    this.written.push(data);
+  }
+  kill(): void {
+    this.killed = true;
+  }
+  resize(cols: number, rows: number): void {
+    this.resizes.push({ cols, rows });
+  }
+  onOutput(listener: (chunk: string) => void): void {
+    this.#output.push(listener);
+  }
+  onExit(listener: (code: number) => void): void {
+    this.#exit.push(listener);
+  }
 
-  emitOutput(chunk: string): void { for (const l of this.#output) l(chunk); }
-  emitExit(code: number): void { for (const l of this.#exit) l(code); }
+  emitOutput(chunk: string): void {
+    for (const l of this.#output) l(chunk);
+  }
+  emitExit(code: number): void {
+    for (const l of this.#exit) l(code);
+  }
 }
 
 describe("SessionManager", () => {
@@ -209,9 +223,7 @@ describe("SessionManager", () => {
     const manager = new SessionManager(() => {
       throw new Error("spawn ENOENT");
     });
-    expect(() => manager.start({ project: "p", projectPath: "/p", agent })).toThrow(
-      /spawn ENOENT/,
-    );
+    expect(() => manager.start({ project: "p", projectPath: "/p", agent })).toThrow(/spawn ENOENT/);
     expect(manager.list()).toEqual([]);
   });
 

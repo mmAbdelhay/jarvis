@@ -108,7 +108,13 @@ describe("runInstall", () => {
       locate: async () => "/home/u/.local/bin/dbgate-serve",
     });
     await runInstall(
-      { kind: "run", command: "npm", args: [], linkInto: "~/.local/bin", linkBinary: "dbgate-serve" },
+      {
+        kind: "run",
+        command: "npm",
+        args: [],
+        linkInto: "~/.local/bin",
+        linkBinary: "dbgate-serve",
+      },
       deps,
     );
 

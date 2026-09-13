@@ -102,8 +102,10 @@ async function authorizationCode(config: OAuth2Config, deps: OAuth2Deps): Promis
   authorize.searchParams.set("response_type", "code");
   authorize.searchParams.set("client_id", config.clientId ?? "");
   if (redirectUri !== "") authorize.searchParams.set("redirect_uri", redirectUri);
-  if (config.scope !== undefined && config.scope !== "") authorize.searchParams.set("scope", config.scope);
-  if (config.state !== undefined && config.state !== "") authorize.searchParams.set("state", config.state);
+  if (config.scope !== undefined && config.scope !== "")
+    authorize.searchParams.set("scope", config.scope);
+  if (config.state !== undefined && config.state !== "")
+    authorize.searchParams.set("state", config.state);
 
   let redirected: string;
   try {
@@ -150,7 +152,8 @@ async function exchange(
     const credential = `${config.clientId ?? ""}:${config.clientSecret ?? ""}`;
     headers["Authorization"] = `Basic ${Buffer.from(credential).toString("base64")}`;
   } else {
-    if (config.clientId !== undefined && config.clientId !== "") form.set("client_id", config.clientId);
+    if (config.clientId !== undefined && config.clientId !== "")
+      form.set("client_id", config.clientId);
     if (config.clientSecret !== undefined && config.clientSecret !== "") {
       form.set("client_secret", config.clientSecret);
     }
@@ -174,7 +177,10 @@ async function exchange(
     return { ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
 
-  const field = config.tokenSource === undefined || config.tokenSource === "" ? "access_token" : config.tokenSource;
+  const field =
+    config.tokenSource === undefined || config.tokenSource === ""
+      ? "access_token"
+      : config.tokenSource;
   const token = payload[field];
   if (typeof token !== "string" || token === "") {
     return { ok: false, detail: `The token response carried no ${field}` };
@@ -193,7 +199,9 @@ async function exchange(
           ? "Bearer"
           : config.tokenHeaderPrefix,
       queryKey:
-        config.tokenQueryKey === undefined || config.tokenQueryKey === "" ? "access_token" : config.tokenQueryKey,
+        config.tokenQueryKey === undefined || config.tokenQueryKey === ""
+          ? "access_token"
+          : config.tokenQueryKey,
       ...(Number.isFinite(expiresIn) ? { expiresAt: deps.now() + expiresIn * 1000 } : {}),
       ...(typeof refresh === "string" ? { refreshToken: refresh } : {}),
     },

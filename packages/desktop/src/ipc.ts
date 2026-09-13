@@ -591,7 +591,12 @@ export type RendererApi = {
   clearApiHistory(project: string): Promise<GitViewResult<void>>;
   apiCookies(project: string): Promise<GitViewResult<Cookie[]>>;
   clearApiCookies(project: string): Promise<GitViewResult<Cookie[]>>;
-  removeApiCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
+  removeApiCookie(
+    project: string,
+    name: string,
+    domain: string,
+    path: string,
+  ): Promise<GitViewResult<Cookie[]>>;
   apiSettings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveApiSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
   /** Every voice that can be chosen, for the Settings picker. The neural
@@ -612,9 +617,23 @@ export type RendererApi = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
   ): Promise<GitViewResult<string>>;
-  createApiRequest(project: string, folderPath: string, name: string, seq: number): Promise<GitViewResult<string>>;
-  createApiFolder(project: string, parentPath: string, name: string): Promise<GitViewResult<string>>;
-  renameApiEntry(project: string, path: string, name: string, isFolder: boolean): Promise<GitViewResult<string>>;
+  createApiRequest(
+    project: string,
+    folderPath: string,
+    name: string,
+    seq: number,
+  ): Promise<GitViewResult<string>>;
+  createApiFolder(
+    project: string,
+    parentPath: string,
+    name: string,
+  ): Promise<GitViewResult<string>>;
+  renameApiEntry(
+    project: string,
+    path: string,
+    name: string,
+    isFolder: boolean,
+  ): Promise<GitViewResult<string>>;
   deleteApiEntry(project: string, path: string): Promise<GitViewResult<void>>;
   createApiCollection(project: string, name: string): Promise<GitViewResult<string>>;
   saveApiEnvironment(
@@ -623,7 +642,11 @@ export type RendererApi = {
     name: string,
     variables: BrunoVariable[],
   ): Promise<GitViewResult<string>>;
-  importPostmanCollection(project: string, name: string, collection: unknown): Promise<GitViewResult<string>>;
+  importPostmanCollection(
+    project: string,
+    name: string,
+    collection: unknown,
+  ): Promise<GitViewResult<string>>;
   /** Announces that this tab's xterm exists; returns whatever the shell
    *  printed before it did. */
   attachTerminal(paneKey: string): Promise<string>;
@@ -642,8 +665,16 @@ export type RendererApi = {
   listBookmarks(project: string): Promise<GitViewResult<BookmarkView[]>>;
   addBookmark(project: string, bookmark: Bookmark): Promise<GitViewResult<BookmarkView[]>>;
   removeBookmark(project: string, url: string): Promise<GitViewResult<BookmarkView[]>>;
-  setBookmarkPinned(project: string, url: string, pinned: boolean): Promise<GitViewResult<BookmarkView[]>>;
-  renameBookmark(project: string, url: string, title: string): Promise<GitViewResult<BookmarkView[]>>;
+  setBookmarkPinned(
+    project: string,
+    url: string,
+    pinned: boolean,
+  ): Promise<GitViewResult<BookmarkView[]>>;
+  renameBookmark(
+    project: string,
+    url: string,
+    title: string,
+  ): Promise<GitViewResult<BookmarkView[]>>;
   reorderBookmarks(project: string, urls: string[]): Promise<GitViewResult<BookmarkView[]>>;
   getSettings(): Promise<JarvisConfig>;
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
@@ -703,7 +734,7 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       unsubscribes.push(deps.onChangeCounts((c) => deps.send("git:counts", c)));
       unsubscribes.push(deps.onSessionOutput((o) => deps.send("session:output", o)));
       unsubscribes.push(deps.onProvidersChange((s) => deps.send("providers:update", s)));
-unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update", state)));
+      unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update", state)));
 
       healthTimer = setInterval(() => {
         void deps.refreshHealth();
@@ -711,7 +742,8 @@ unsubscribes.push(deps.onWorkspaceChange((state) => deps.send("workspace:update"
 
       timer = setInterval(() => {
         if (!isAwake()) return;
-        deps.readMetrics()
+        deps
+          .readMetrics()
           .then((metrics) => deps.send("metrics:update", metrics))
           .catch(() => {
             // A failed sample is skipped; the next tick tries again.
@@ -758,7 +790,6 @@ function reportSidecarFailure(what: string, reason: unknown): void {
         : JSON.stringify(reason);
   console.error(`[${what}] ${detail}`);
 }
-
 
 /**
  * The first-run screen's two questions: what is missing, and please install
@@ -914,7 +945,10 @@ export function createDatabaseHandlers(deps: DatabaseHandlerDeps): DatabaseHandl
         // ("did not report a port in time") goes to the console, which is
         // where anyone diagnosing this will look. See reportSidecarFailure.
         if (result.ok) {
-          return { ok: true, value: { url: result.url, login: result.login, password: result.password } };
+          return {
+            ok: true,
+            value: { url: result.url, login: result.login, password: result.password },
+          };
         }
         reportSidecarFailure("database", result.detail);
         return fail(MESSAGES.databaseUnavailable(deps.language));
@@ -1296,8 +1330,7 @@ export function isDeclaredContainer(
   container: string,
 ): boolean {
   return (
-    CONTAINER_NAME.test(container) &&
-    (entries ?? []).some((entry) => entry.container === container)
+    CONTAINER_NAME.test(container) && (entries ?? []).some((entry) => entry.container === container)
   );
 }
 
@@ -1687,7 +1720,10 @@ export type TerminalHandlerDeps = {
          *  rather than routed through `createEditorHandlers`' named-root
          *  resolution, which answers for `editors:` names and not for a
          *  path. */
-        open: (projectPath: string, folderPath: string) => Promise<{ ok: true; url: string } | { ok: false }>;
+        open: (
+          projectPath: string,
+          folderPath: string,
+        ) => Promise<{ ok: true; url: string } | { ok: false }>;
         /** Opens the URL as `project`'s Editor tab for `detail` — always
          *  `undefined` from `openFile`, the project's own editor tab, the
          *  same one the toolbar's Editor button opens. main reuses an
@@ -1851,8 +1887,9 @@ export function findEditorTab(
   project: string,
   detail: string | undefined,
 ): string | undefined {
-  return tabs.find((tab) => tab.kind === "editor" && tab.project === project && tab.detail === detail)
-    ?.id;
+  return tabs.find(
+    (tab) => tab.kind === "editor" && tab.project === project && tab.detail === detail,
+  )?.id;
 }
 
 /** The little of a `BrowserHost` that showing an editor tab needs. Named
@@ -2122,7 +2159,8 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (completion === undefined) return [];
       // The same resolution `suggest`, `listDir` and `chips` do: an unknown
       // key is a shell this process never started, and it gets nothing.
-      if ((directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey)) === undefined) return [];
+      if ((directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey)) === undefined)
+        return [];
       try {
         return await completion.source.history(Math.floor(limit));
       } catch {
@@ -2232,7 +2270,8 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // dedupes a name shared across paths by keeping the *later* one, so
       // this order is what lets a project's workflow shadow a same-named
       // global one rather than the reverse.
-      const paths = projectDir === undefined ? [workflows.defaultDir] : [workflows.defaultDir, projectDir];
+      const paths =
+        projectDir === undefined ? [workflows.defaultDir] : [workflows.defaultDir, projectDir];
       try {
         return loadWorkflows({ readDir: workflows.readDir, readFile: workflows.readFile, paths });
       } catch {
@@ -2394,7 +2433,12 @@ export type ApiHandlers = ApiEditHandlers & {
   clearHistory(project: string): Promise<GitViewResult<void>>;
   cookies(project: string): Promise<GitViewResult<Cookie[]>>;
   clearCookies(project: string): Promise<GitViewResult<Cookie[]>>;
-  removeCookie(project: string, name: string, domain: string, path: string): Promise<GitViewResult<Cookie[]>>;
+  removeCookie(
+    project: string,
+    name: string,
+    domain: string,
+    path: string,
+  ): Promise<GitViewResult<Cookie[]>>;
   settings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
   /** The request as a shell command, with variables resolved. */
@@ -2417,9 +2461,19 @@ export type ApiSendResult = {
 };
 
 export type ApiEditHandlers = {
-  createRequest(project: string, folderPath: string, name: string, seq: number): Promise<GitViewResult<string>>;
+  createRequest(
+    project: string,
+    folderPath: string,
+    name: string,
+    seq: number,
+  ): Promise<GitViewResult<string>>;
   createFolder(project: string, parentPath: string, name: string): Promise<GitViewResult<string>>;
-  renameEntry(project: string, path: string, name: string, isFolder: boolean): Promise<GitViewResult<string>>;
+  renameEntry(
+    project: string,
+    path: string,
+    name: string,
+    isFolder: boolean,
+  ): Promise<GitViewResult<string>>;
   deleteEntry(project: string, path: string): Promise<GitViewResult<void>>;
   createCollection(project: string, name: string): Promise<GitViewResult<string>>;
   saveEnvironment(
@@ -2456,7 +2510,9 @@ export type ApiHandlerDeps = {
   toCurl: (request: Record<string, unknown>, variables: Record<string, string>) => string;
   /** The project's persisted API state: history, cookies and settings. */
   store: {
-    read: (project: string) => Promise<{ history: HistoryEntry[]; cookies: Cookie[]; settings: ApiSettings }>;
+    read: (
+      project: string,
+    ) => Promise<{ history: HistoryEntry[]; cookies: Cookie[]; settings: ApiSettings }>;
     addHistory: (project: string, entry: HistoryEntry) => Promise<HistoryEntry[]>;
     clearHistory: (project: string) => Promise<void>;
     saveCookies: (project: string, cookies: readonly Cookie[]) => Promise<void>;
@@ -2476,11 +2532,7 @@ export type ApiHandlerDeps = {
     variables: BrunoVariable[],
   ) => Promise<string>;
   postmanToRequests: (collection: unknown) => { name: string; requests: readonly unknown[] };
-  writeImported: (
-    projectPath: string,
-    name: string,
-    requests: readonly never[],
-  ) => Promise<string>;
+  writeImported: (projectPath: string, name: string, requests: readonly never[]) => Promise<string>;
   projects: Readonly<Record<string, string>>;
   language: "ar" | "en";
 };
@@ -2631,7 +2683,8 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
       const root = rootFor(project);
       if (root === undefined) return unknownProject();
       if (!contains(root, path)) return unknownProject();
-      if (typeof json !== "object" || json === null) return fail(MESSAGES.invalidArgument(deps.language));
+      if (typeof json !== "object" || json === null)
+        return fail(MESSAGES.invalidArgument(deps.language));
       try {
         await deps.writeRequest(path, json);
         return { ok: true, value: undefined };
@@ -2674,7 +2727,8 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
     async createCollection(project, name) {
       const root = rootFor(project);
       if (root === undefined) return unknownProject();
-      if (!isString(name) || name.trim() === "") return fail(MESSAGES.invalidArgument(deps.language));
+      if (!isString(name) || name.trim() === "")
+        return fail(MESSAGES.invalidArgument(deps.language));
       try {
         return { ok: true, value: await deps.createCollection(root, name) };
       } catch {
@@ -2857,7 +2911,9 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
     async list(project) {
       if (!isString(project)) return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.list(project);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
 
     async add(project, bookmark) {
@@ -2865,13 +2921,18 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.add(project, bookmark);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
 
     async remove(project, url) {
-      if (!isString(project) || !isString(url)) return fail(MESSAGES.invalidArgument(deps.language));
+      if (!isString(project) || !isString(url))
+        return fail(MESSAGES.invalidArgument(deps.language));
       const result = await deps.store.remove(project, url);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
 
     async rename(project, url, title) {
@@ -2879,7 +2940,9 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.rename(project, url, title);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
 
     async setPinned(project, url, pinned) {
@@ -2887,7 +2950,9 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.setPinned(project, url, pinned);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
 
     async reorder(project, urls) {
@@ -2895,7 +2960,9 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       const result = await deps.store.reorder(project, urls);
-      return result.ok ? { ok: true, value: await withIcons(project, result.value) } : translate(result.detail);
+      return result.ok
+        ? { ok: true, value: await withIcons(project, result.value) }
+        : translate(result.detail);
     },
   };
 }

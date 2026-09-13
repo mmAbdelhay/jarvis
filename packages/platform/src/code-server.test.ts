@@ -25,11 +25,13 @@ class FakeProcess implements CodeServerProcess {
   }
 }
 
-function manager(overrides: {
-  spawn?: CodeServerSpawner;
-  findFreePort?: () => Promise<number>;
-  waitUntilReady?: (url: string) => Promise<boolean>;
-} = {}) {
+function manager(
+  overrides: {
+    spawn?: CodeServerSpawner;
+    findFreePort?: () => Promise<number>;
+    waitUntilReady?: (url: string) => Promise<boolean>;
+  } = {},
+) {
   const processes: FakeProcess[] = [];
   const spawnArgs: unknown[] = [];
   const spawn: CodeServerSpawner =
@@ -365,7 +367,10 @@ describe("createRealCodeServerSpawner PATH", () => {
     const ambient = process.env["PATH"];
     process.env["PATH"] = "";
     try {
-      const spawned = createRealCodeServerSpawner({ PATH: dir }, process.platform)({
+      const spawned = createRealCodeServerSpawner(
+        { PATH: dir },
+        process.platform,
+      )({
         port: 4455,
         userDataDir: join(dir, "user-data"),
         extensionsDir: join(dir, "extensions"),

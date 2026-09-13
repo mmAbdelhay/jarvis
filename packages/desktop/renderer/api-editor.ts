@@ -23,7 +23,15 @@ const $ = (id: string): HTMLElement => {
 export const EDITOR_TABS = ["params", "auth", "headers", "body", "assert", "docs"] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
 
-const BODY_MODES = ["none", "json", "text", "xml", "graphql", "formUrlEncoded", "multipartForm"] as const;
+const BODY_MODES = [
+  "none",
+  "json",
+  "text",
+  "xml",
+  "graphql",
+  "formUrlEncoded",
+  "multipartForm",
+] as const;
 const AUTH_MODES = ["none", "bearer", "basic", "apikey", "oauth2"] as const;
 const OAUTH2_GRANTS = ["client_credentials", "password", "authorization_code"] as const;
 
@@ -57,7 +65,9 @@ function request(): Record<string, unknown> | undefined {
 
 function http(): Record<string, unknown> {
   const existing = request()?.["http"];
-  return typeof existing === "object" && existing !== null ? (existing as Record<string, unknown>) : {};
+  return typeof existing === "object" && existing !== null
+    ? (existing as Record<string, unknown>)
+    : {};
 }
 
 function pairs(key: string): Pair[] {
@@ -98,7 +108,9 @@ export function renderEditor(): void {
   }
 
   if (activeTab === "params" || activeTab === "headers") {
-    panel.append(pairTable(PAIR_KEY[activeTab] as string, activeTab === "params" ? "query" : undefined));
+    panel.append(
+      pairTable(PAIR_KEY[activeTab] as string, activeTab === "params" ? "query" : undefined),
+    );
     return;
   }
   if (activeTab === "assert") {
@@ -147,7 +159,11 @@ function note(text: string): HTMLElement {
   return element;
 }
 
-function textInput(value: string, placeholder: string, onChange: (value: string) => void): HTMLInputElement {
+function textInput(
+  value: string,
+  placeholder: string,
+  onChange: (value: string) => void,
+): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "mono";
@@ -246,7 +262,9 @@ function assertTable(): HTMLElement {
         updatePair("assertions", index, { enabled: checked });
         renderTabStrip();
       }),
-      textInput(pair.name ?? "", "res.status", (value) => updatePair("assertions", index, { name: value })),
+      textInput(pair.name ?? "", "res.status", (value) =>
+        updatePair("assertions", index, { name: value }),
+      ),
       textInput(pair.value ?? "", "eq 200", (value) => updatePair("assertions", index, { value })),
       removeControl(() => removePair("assertions", index)),
     );
@@ -298,18 +316,24 @@ function authPanel(): HTMLElement {
     panel.append(
       labelled(
         "token",
-        textInput(auth()["bearer"]?.["token"] ?? "", "{{token}}", (value) => setAuth("bearer", "token", value)),
+        textInput(auth()["bearer"]?.["token"] ?? "", "{{token}}", (value) =>
+          setAuth("bearer", "token", value),
+        ),
       ),
     );
   } else if (mode === "basic") {
     panel.append(
       labelled(
         "username",
-        textInput(auth()["basic"]?.["username"] ?? "", "user", (value) => setAuth("basic", "username", value)),
+        textInput(auth()["basic"]?.["username"] ?? "", "user", (value) =>
+          setAuth("basic", "username", value),
+        ),
       ),
       labelled(
         "password",
-        textInput(auth()["basic"]?.["password"] ?? "", "{{password}}", (value) => setAuth("basic", "password", value)),
+        textInput(auth()["basic"]?.["password"] ?? "", "{{password}}", (value) =>
+          setAuth("basic", "password", value),
+        ),
       ),
     );
   } else if (mode === "oauth2") {
@@ -342,13 +366,20 @@ function authPanel(): HTMLElement {
     // means nothing to client credentials, and showing it invites filling it
     // in and wondering why nothing happens.
     if (grant.value === "authorization_code") {
-      panel.append(field("authorizationUrl", "https://auth/authorize"), field("callbackUrl", "http://localhost/callback"));
+      panel.append(
+        field("authorizationUrl", "https://auth/authorize"),
+        field("callbackUrl", "http://localhost/callback"),
+      );
     }
     panel.append(field("accessTokenUrl", "https://auth/token"));
     if (grant.value === "password") {
       panel.append(field("username", "user"), field("password", "{{password}}"));
     }
-    panel.append(field("clientId", "{{clientId}}"), field("clientSecret", "{{clientSecret}}"), field("scope", "read write"));
+    panel.append(
+      field("clientId", "{{clientId}}"),
+      field("clientSecret", "{{clientSecret}}"),
+      field("scope", "read write"),
+    );
 
     const placement = document.createElement("select");
     placement.id = "api-oauth-placement";
@@ -360,15 +391,29 @@ function authPanel(): HTMLElement {
       placement.append(option);
     }
     placement.value = oauth["credentialsPlacement"] ?? "body";
-    placement.addEventListener("change", () => setAuth("oauth2", "credentialsPlacement", placement.value));
+    placement.addEventListener("change", () =>
+      setAuth("oauth2", "credentialsPlacement", placement.value),
+    );
     panel.append(labelled("credentials", placement));
   } else if (mode === "apikey") {
     panel.append(
-      labelled("key", textInput(auth()["apikey"]?.["key"] ?? "", "X-API-Key", (value) => setAuth("apikey", "key", value))),
-      labelled("value", textInput(auth()["apikey"]?.["value"] ?? "", "{{apiKey}}", (value) => setAuth("apikey", "value", value))),
+      labelled(
+        "key",
+        textInput(auth()["apikey"]?.["key"] ?? "", "X-API-Key", (value) =>
+          setAuth("apikey", "key", value),
+        ),
+      ),
+      labelled(
+        "value",
+        textInput(auth()["apikey"]?.["value"] ?? "", "{{apiKey}}", (value) =>
+          setAuth("apikey", "value", value),
+        ),
+      ),
       labelled(
         "placement",
-        textInput(auth()["apikey"]?.["placement"] ?? "header", "header", (value) => setAuth("apikey", "placement", value)),
+        textInput(auth()["apikey"]?.["placement"] ?? "header", "header", (value) =>
+          setAuth("apikey", "placement", value),
+        ),
       ),
     );
   }
@@ -388,7 +433,9 @@ function labelled(text: string, control: HTMLElement): HTMLElement {
 
 function bodies(): Record<string, unknown> {
   const existing = request()?.["body"];
-  return typeof existing === "object" && existing !== null ? (existing as Record<string, unknown>) : {};
+  return typeof existing === "object" && existing !== null
+    ? (existing as Record<string, unknown>)
+    : {};
 }
 
 function bodyPanel(): HTMLElement {
@@ -506,7 +553,9 @@ function bodyPairs(mode: string): HTMLElement {
     const row = document.createElement("div");
     row.className = "api-pair";
     const isFile = (pair as { type?: string }).type === "file";
-    const value = Array.isArray(pair.value) ? (pair.value as string[]).join(", ") : (pair.value ?? "");
+    const value = Array.isArray(pair.value)
+      ? (pair.value as string[]).join(", ")
+      : (pair.value ?? "");
 
     const valueControl = isFile
       ? filePickerControl(value, (paths) => {
@@ -532,7 +581,10 @@ function bodyPairs(mode: string): HTMLElement {
   add.className = "settings-add";
   add.textContent = "+ field";
   add.addEventListener("click", () => {
-    write([...current(), { name: "", value: "", enabled: true, ...(mode === "multipartForm" ? { type: "text" } : {}) }]);
+    write([
+      ...current(),
+      { name: "", value: "", enabled: true, ...(mode === "multipartForm" ? { type: "text" } : {}) },
+    ]);
     renderEditor();
   });
   table.append(add);
@@ -544,7 +596,10 @@ function bodyPairs(mode: string): HTMLElement {
     addFile.className = "settings-add";
     addFile.textContent = "+ file";
     addFile.addEventListener("click", () => {
-      write([...current(), { name: "", value: [] as unknown as string, enabled: true, type: "file" }]);
+      write([
+        ...current(),
+        { name: "", value: [] as unknown as string, enabled: true, type: "file" },
+      ]);
       renderEditor();
     });
     table.append(addFile);

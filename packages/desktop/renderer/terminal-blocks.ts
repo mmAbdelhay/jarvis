@@ -56,7 +56,9 @@ const ALT_SEQUENCES: ReadonlyArray<readonly [string, boolean]> = [
   ["[?1049l", false],
 ];
 
-export function createSplitter(deps: { now?: () => number; maxOutputBytes?: number } = {}): Splitter {
+export function createSplitter(
+  deps: { now?: () => number; maxOutputBytes?: number } = {},
+): Splitter {
   const now = deps.now ?? (() => Date.now());
   const maxOutputBytes = deps.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
 

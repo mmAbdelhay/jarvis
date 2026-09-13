@@ -149,7 +149,10 @@ export function toRawConfig(config: JarvisConfig): unknown {
  * never reaches the filesystem at all — the existing file is left exactly
  * as it was, backup or no backup.
  */
-export async function writeSettingsFile(path: string, draft: JarvisConfig): Promise<SettingsWriteResult> {
+export async function writeSettingsFile(
+  path: string,
+  draft: JarvisConfig,
+): Promise<SettingsWriteResult> {
   const validated = validateDraft(draft);
   if (!validated.ok) return validated;
 

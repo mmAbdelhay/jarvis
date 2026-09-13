@@ -32,9 +32,7 @@ export type CodeServerSpawner = (args: {
   folderPath: string;
 }) => CodeServerProcess;
 
-export type CodeServerResult =
-  | { ok: true; url: string }
-  | { ok: false; detail: string };
+export type CodeServerResult = { ok: true; url: string } | { ok: false; detail: string };
 
 /**
  * The key one code-server instance is filed under: the project *and* the

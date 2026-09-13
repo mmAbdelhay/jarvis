@@ -33,10 +33,7 @@ import { describe, expect, it } from "vitest";
 // does NOT independently prove a real browser renders it correctly — that
 // still rests on the cascade-origin reasoning above, not a live
 // measurement from this test suite.
-const htmlSource = readFileSync(
-  fileURLToPath(new URL("./styles.css", import.meta.url)),
-  "utf8",
-);
+const htmlSource = readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
 
 function ruleBodyFor(selector: string, source: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

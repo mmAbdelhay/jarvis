@@ -99,13 +99,9 @@ export const MESSAGES = {
       ? `اختصار ${combo} يستخدمه تطبيق آخر، لذا سيعمل ${replacement} بدلًا منه.`
       : `The ${combo} shortcut is taken by another app, so ${replacement} works instead.`,
   recordingFailed: (message: string, language: "ar" | "en"): string =>
-    language === "ar"
-      ? `تعذر تسجيل الصوت: ${message}`
-      : `Recording failed: ${message}`,
+    language === "ar" ? `تعذر تسجيل الصوت: ${message}` : `Recording failed: ${message}`,
   transcriptionFailed: (message: string, language: "ar" | "en"): string =>
-    language === "ar"
-      ? `فشل تحويل الصوت إلى نص: ${message}`
-      : `Transcription failed: ${message}`,
+    language === "ar" ? `فشل تحويل الصوت إلى نص: ${message}` : `Transcription failed: ${message}`,
   // The renderer's history-panel badge (`${n} sessions`) — pulled through
   // here rather than left as an inline English template literal both for
   // the language-in/string-out pattern above and because English's
@@ -113,7 +109,9 @@ export const MESSAGES = {
   // Arabic: MSA counted nouns have distinct singular (1), dual (2),
   // plural (3-10), and a reversion to singular for 11+.
   sessionsCount: (count: number, language: "ar" | "en"): string =>
-    language === "ar" ? arabicSessionsCount(count) : `${count} ${count === 1 ? "session" : "sessions"}`,
+    language === "ar"
+      ? arabicSessionsCount(count)
+      : `${count} ${count === 1 ? "session" : "sessions"}`,
   // sessionId is renderer-supplied and echoed straight into the sentence;
   // capped so a caller passing something unbounded (accidentally or not)
   // cannot blow up the size of a string that ends up rendered in the UI.
@@ -217,8 +215,7 @@ export const MESSAGES = {
     language === "ar" ? `${running} من ${total} تعمل` : `${running} of ${total} running`,
   dockerNoSelection: (language: "ar" | "en"): string =>
     language === "ar" ? "لم تُحدَّد حاوية" : "No container selected",
-  dockerHeading: (language: "ar" | "en"): string =>
-    language === "ar" ? "الحاويات" : "Containers",
+  dockerHeading: (language: "ar" | "en"): string => (language === "ar" ? "الحاويات" : "Containers"),
   dockerConfirmStop: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `إيقاف ${name}؟` : `Stop ${name}?`,
   dockerConfirmRestart: (name: string, language: "ar" | "en"): string =>
@@ -237,12 +234,16 @@ export const MESSAGES = {
   // reason rather than personalHasNoDirectory: a cluster is not rooted in a
   // directory, so "no directory on disk" would be a false explanation.
   noClustersConfigured: (language: "ar" | "en"): string =>
-    language === "ar" ? "لا توجد عناقيد مُعرَّفة لهذا المشروع." : "No clusters configured for this project.",
+    language === "ar"
+      ? "لا توجد عناقيد مُعرَّفة لهذا المشروع."
+      : "No clusters configured for this project.",
   // Follows noClustersConfigured exactly, and for the same reason: a chat
   // is not rooted in a directory either, so the personal browser's own
   // explanation would be the wrong one here.
   noChatConfigured: (language: "ar" | "en"): string =>
-    language === "ar" ? "لا توجد محادثات مُعرَّفة لهذا المشروع." : "No chat configured for this project.",
+    language === "ar"
+      ? "لا توجد محادثات مُعرَّفة لهذا المشروع."
+      : "No chat configured for this project.",
   // DbGate has no bind-address option and always listens on 0.0.0.0, so
   // every instance is guarded by a login generated at spawn. This is how
   // the user learns it; both halves are opaque technical tokens and stay
@@ -272,7 +273,8 @@ export const MESSAGES = {
     language === "ar"
       ? "لم تُنفَّذ السكربتات الخاصة بهذا الطلب."
       : "This request carries a script, which is not run here.",
-  apiNewRequest: (language: "ar" | "en"): string => (language === "ar" ? "طلب جديد" : "New request"),
+  apiNewRequest: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب جديد" : "New request",
   apiNewFolder: (language: "ar" | "en"): string => (language === "ar" ? "مجلد جديد" : "New folder"),
   apiNewCollection: (language: "ar" | "en"): string =>
     language === "ar" ? "مجموعة جديدة" : "New collection",
@@ -282,7 +284,8 @@ export const MESSAGES = {
   apiDelete: (language: "ar" | "en"): string => (language === "ar" ? "حذف" : "Delete"),
   apiConfirmDelete: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `حذف ${name}؟` : `Delete ${name}?`,
-  apiCopyCurl: (language: "ar" | "en"): string => (language === "ar" ? "نسخ كـ cURL" : "Copy as cURL"),
+  apiCopyCurl: (language: "ar" | "en"): string =>
+    language === "ar" ? "نسخ كـ cURL" : "Copy as cURL",
   apiCopied: (language: "ar" | "en"): string => (language === "ar" ? "تم النسخ" : "Copied"),
   apiNoRequest: (language: "ar" | "en"): string =>
     language === "ar" ? "اختر طلبًا من القائمة." : "Pick a request from the list.",
@@ -344,23 +347,22 @@ export const MESSAGES = {
       : "Drag a bookmark here, or use its pin",
   /** The ☰ button beside the address bar: the sidebar's own toggle. */
   toggleBookmarksSidebar: (language: "ar" | "en"): string =>
-    language === "ar" ? "إظهار أو إخفاء شريط العلامات الجانبي" : "Show or hide the bookmarks sidebar",
+    language === "ar"
+      ? "إظهار أو إخفاء شريط العلامات الجانبي"
+      : "Show or hide the bookmarks sidebar",
   // Why a Resume button refused. One message for every reason — the agent
   // gone from the config, the recorded directory deleted, the spawn itself
   // failing — because to the reader they are the same fact: this
   // conversation cannot be picked back up, and the transcript above is
   // still readable either way.
   cannotResumeSession: (language: "ar" | "en"): string =>
-    language === "ar"
-      ? "تعذّر استئناف هذه الجلسة."
-      : "This session cannot be resumed.",
+    language === "ar" ? "تعذّر استئناف هذه الجلسة." : "This session cannot be resumed.",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
   // The personal browser's name in the project selector. Its *key* is the
   // reserved "__personal__" (see personal.ts) — never shown; this is what
   // the user reads, beside project names they chose themselves.
-  personalProject: (language: "ar" | "en"): string =>
-    language === "ar" ? "شخصي" : "Personal",
+  personalProject: (language: "ar" | "en"): string => (language === "ar" ? "شخصي" : "Personal"),
   // Why Editor / Database / Terminal / API are dead while the personal
   // browser is selected. A disabled control with no stated reason reads as
   // a bug, so this goes into the tool status line beside them.
@@ -379,8 +381,18 @@ export const MESSAGES = {
       ? "أدوات المطوّر لهذه الصفحة — انقر بزر الفأرة الأيمن لاختيار مكانها"
       : "DevTools for this page — right-click to choose where they dock",
   devToolsDock: (side: "undocked" | "left" | "bottom" | "right", language: "ar" | "en"): string => {
-    const ar = { undocked: "في نافذة منفصلة", left: "على اليسار", bottom: "في الأسفل", right: "على اليمين" };
-    const en = { undocked: "Undock into a separate window", left: "Dock to left", bottom: "Dock to bottom", right: "Dock to right" };
+    const ar = {
+      undocked: "في نافذة منفصلة",
+      left: "على اليسار",
+      bottom: "في الأسفل",
+      right: "على اليمين",
+    };
+    const en = {
+      undocked: "Undock into a separate window",
+      left: "Dock to left",
+      bottom: "Dock to bottom",
+      right: "Dock to right",
+    };
     return language === "ar" ? `ثبّت أدوات المطوّر ${ar[side]}` : en[side];
   },
   devToolsClose: (language: "ar" | "en"): string =>
@@ -391,7 +403,9 @@ export const MESSAGES = {
   // string") is shown underneath it verbatim, the same headline-plus-
   // technical-detail split the Changes view and Providers panel already use.
   settingsSaveFailed: (language: "ar" | "en"): string =>
-    language === "ar" ? "تعذّر حفظ الإعدادات — التفاصيل أدناه." : "Couldn't save settings — see below.",
+    language === "ar"
+      ? "تعذّر حفظ الإعدادات — التفاصيل أدناه."
+      : "Couldn't save settings — see below.",
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
@@ -479,14 +493,16 @@ export const MESSAGES = {
   // (a filesystem path, a git ref) that stay LTR regardless of language, so
   // this is the same preposition English uses, not a sentence to reorder.
   pathBranchSeparator: (language: "ar" | "en"): string => (language === "ar" ? "على" : "on"),
-  sideBySideLabel: (language: "ar" | "en"): string => (language === "ar" ? "جنبًا إلى جنب" : "Side by side"),
+  sideBySideLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "جنبًا إلى جنب" : "Side by side",
   unifiedLabel: (language: "ar" | "en"): string => (language === "ar" ? "موحّد" : "Unified"),
   beforeColumnLabel: (language: "ar" | "en"): string => (language === "ar" ? "قبل" : "BEFORE"),
   afterColumnLabel: (language: "ar" | "en"): string => (language === "ar" ? "بعد" : "AFTER"),
   testsGroupLabel: (language: "ar" | "en"): string => (language === "ar" ? "الاختبارات" : "TESTS"),
   commitMessagePlaceholder: (language: "ar" | "en"): string =>
     language === "ar" ? "رسالة الحفظ…" : "Commit message…",
-  stageFileLabel: (language: "ar" | "en"): string => (language === "ar" ? "تجهيز الملف" : "Stage file"),
+  stageFileLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "تجهيز الملف" : "Stage file",
   unstageFileLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "إلغاء تجهيز الملف" : "Unstage file",
   // Providers panel chrome (Task 9). The account-status *sentences*
@@ -504,8 +520,7 @@ export const MESSAGES = {
   // The row's own label. "LEFT", not "USED": the System panel above shows
   // consumption, this shows headroom, and the label is what makes the
   // meter's direction unambiguous.
-  capacityLeftLabel: (language: "ar" | "en"): string =>
-    language === "ar" ? "المتبقي" : "LEFT",
+  capacityLeftLabel: (language: "ar" | "en"): string => (language === "ar" ? "المتبقي" : "LEFT"),
   // Three different facts, never collapsed into one "unknown".
   capacityUnsupported: (language: "ar" | "en"): string =>
     language === "ar" ? "لا يوفّر قراءة للسعة" : "no capacity reading available",

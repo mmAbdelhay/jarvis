@@ -104,7 +104,9 @@ export function resolveExecutable(
   if (command === "") return undefined;
   if (platform === "win32") return resolveWindowsExecutable(command, env, exists);
   if (command.includes("/")) return exists(command) ? command : undefined;
-  for (const directory of (env["PATH"] ?? "").split(posix.delimiter).filter((entry) => entry !== "")) {
+  for (const directory of (env["PATH"] ?? "")
+    .split(posix.delimiter)
+    .filter((entry) => entry !== "")) {
     const candidate = posix.join(directory, command);
     if (exists(candidate)) return candidate;
   }
@@ -199,7 +201,8 @@ export function spawnTarget(
  * the absolute path every Windows install has.
  */
 function commandShell(env: NodeJS.ProcessEnv): string {
-  const named = env["ComSpec"] ?? env["COMSPEC"] ?? process.env["ComSpec"] ?? process.env["COMSPEC"];
+  const named =
+    env["ComSpec"] ?? env["COMSPEC"] ?? process.env["ComSpec"] ?? process.env["COMSPEC"];
   if (named !== undefined && named !== "") return named;
   const systemRoot = env["SystemRoot"] ?? process.env["SystemRoot"] ?? "C:\\Windows";
   return `${systemRoot}\\System32\\cmd.exe`;

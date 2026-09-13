@@ -44,7 +44,12 @@ export type SendDeps = {
    *  out as text/plain and the server sees no fields at all. */
   multipart?: { FormData: typeof FormData; File: typeof File };
   /** A token already obtained for an oauth2 request. */
-  token?: { accessToken: string; placement: "header" | "url"; headerPrefix: string; queryKey: string };
+  token?: {
+    accessToken: string;
+    placement: "header" | "url";
+    headerPrefix: string;
+    queryKey: string;
+  };
 };
 
 /** What the Settings tab controls, and what a collection can carry. */
@@ -130,7 +135,12 @@ export async function sendRequest(
     return result.text;
   };
 
-  const http = (request["http"] ?? {}) as { method?: string; url?: string; body?: string; auth?: string };
+  const http = (request["http"] ?? {}) as {
+    method?: string;
+    url?: string;
+    body?: string;
+    auth?: string;
+  };
   const method = (http.method ?? "get").toUpperCase();
 
   let url: URL;
@@ -163,7 +173,8 @@ export async function sendRequest(
 
   const headers: Record<string, string> = {};
   for (const header of (request["headers"] as Pair[] | undefined) ?? []) {
-    if (header.enabled === false || header.name === undefined || header.name.trim() === "") continue;
+    if (header.enabled === false || header.name === undefined || header.name.trim() === "")
+      continue;
     headers[resolve(header.name)] = resolve(header.value ?? "");
   }
 
@@ -172,7 +183,8 @@ export async function sendRequest(
   // An OAuth2 token is fetched by the caller (it needs a browser for one of
   // the grants) and handed in already resolved, so this only has to place it.
   if (deps.token !== undefined) {
-    if (deps.token.placement === "url") url.searchParams.set(deps.token.queryKey, deps.token.accessToken);
+    if (deps.token.placement === "url")
+      url.searchParams.set(deps.token.queryKey, deps.token.accessToken);
     else headers["Authorization"] = `${deps.token.headerPrefix} ${deps.token.accessToken}`.trim();
   }
 
@@ -187,12 +199,17 @@ export async function sendRequest(
   // was changed from POST — leaving the body mode behind — would fail for a
   // reason that has nothing to do with what the user changed.
   const carriesBody = method !== "GET" && method !== "HEAD";
-  const body = carriesBody ? await buildBody(request, http.body, headers, resolve, deps) : undefined;
+  const body = carriesBody
+    ? await buildBody(request, http.body, headers, resolve, deps)
+    : undefined;
 
   const settings = (request["settings"] ?? {}) as { timeout?: number };
   const network: NetworkOptions = {
     verifyCertificate: options?.verifyCertificate ?? true,
-    timeoutMs: typeof settings.timeout === "number" && settings.timeout > 0 ? settings.timeout : (options?.timeoutMs ?? 0),
+    timeoutMs:
+      typeof settings.timeout === "number" && settings.timeout > 0
+        ? settings.timeout
+        : (options?.timeoutMs ?? 0),
     ...(options?.proxyUrl === undefined ? {} : { proxyUrl: options.proxyUrl }),
   };
   const dispatcher = deps.dispatcherFor?.(network);
@@ -217,7 +234,8 @@ export async function sendRequest(
     // getSetCookie is the only way to see several Set-Cookie headers; reading
     // the header directly joins them into one unparseable string.
     const collect = (from: Response, at: string): void => {
-      const setCookies = typeof from.headers.getSetCookie === "function" ? from.headers.getSetCookie() : [];
+      const setCookies =
+        typeof from.headers.getSetCookie === "function" ? from.headers.getSetCookie() : [];
       if (setCookies.length > 0) deps.jar?.store(at, setCookies);
     };
 
@@ -289,11 +307,14 @@ function failureDetail(error: unknown): string {
   // detail is a bare code and a dangling colon.
   const nested = Array.isArray(record["errors"]) ? (record["errors"] as unknown[])[0] : undefined;
   const messageOf = (value: unknown): string =>
-    typeof value === "object" && value !== null && typeof (value as { message?: unknown }).message === "string"
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { message?: unknown }).message === "string"
       ? (value as { message: string }).message
       : "";
 
-  const causeMessage = messageOf(cause) || messageOf(nested) || (typeof cause === "string" ? cause : "");
+  const causeMessage =
+    messageOf(cause) || messageOf(nested) || (typeof cause === "string" ? cause : "");
   const code = typeof record["code"] === "string" ? record["code"] : undefined;
 
   const detail =
@@ -387,7 +408,7 @@ async function buildBody(
     const graphql = (body["graphql"] ?? {}) as { query?: string; variables?: string };
     const query = resolve(graphql.query ?? "");
     const raw = resolve(graphql.variables ?? "").trim();
-    let parsed: unknown = undefined;
+    let parsed: unknown;
     if (raw !== "") {
       try {
         parsed = JSON.parse(raw);
@@ -407,7 +428,7 @@ async function buildBody(
       if (name.toLowerCase() === "content-type") delete headers[name];
     }
     const form = new (deps.multipart?.FormData ?? FormData)();
-    for (const field of ((body["multipartForm"] as MultipartField[] | undefined) ?? [])) {
+    for (const field of (body["multipartForm"] as MultipartField[] | undefined) ?? []) {
       if (field.enabled === false || field.name === undefined || field.name.trim() === "") continue;
       const name = resolve(field.name);
 

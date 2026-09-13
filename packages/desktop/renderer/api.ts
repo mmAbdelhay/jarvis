@@ -305,14 +305,17 @@ function renderToolbar(): void {
 function displayUrl(): string {
   const http = (state.request?.["http"] ?? {}) as Record<string, unknown>;
   const base = String(http["url"] ?? "");
-  const params = Array.isArray(state.request?.["params"]) ? (state.request?.["params"] as Record<string, unknown>[]) : [];
+  const params = Array.isArray(state.request?.["params"])
+    ? (state.request?.["params"] as Record<string, unknown>[])
+    : [];
 
   // Encoded, and parsed back the same way. Joining raw values means a value
   // containing & or = is read back as two params — the user's input silently
   // rewritten into something else.
   const query = new URLSearchParams();
   for (const param of params) {
-    if (param["enabled"] === false || (param["type"] ?? "query") !== "query" || !param["name"]) continue;
+    if (param["enabled"] === false || (param["type"] ?? "query") !== "query" || !param["name"])
+      continue;
     query.append(String(param["name"]), String(param["value"] ?? ""));
   }
   const text = query.toString();
@@ -331,16 +334,25 @@ function applyUrl(value: string): void {
   if (query === "") {
     // Only clear params the URL owned; a param the user typed by hand in the
     // table has no query string to have come from.
-    const existing = Array.isArray(state.request["params"]) ? (state.request["params"] as Record<string, unknown>[]) : [];
+    const existing = Array.isArray(state.request["params"])
+      ? (state.request["params"] as Record<string, unknown>[])
+      : [];
     state.request["params"] = existing.filter((param) => (param["type"] ?? "query") !== "query");
   } else {
     const parsed = new URLSearchParams(query);
     const others = Array.isArray(state.request["params"])
-      ? (state.request["params"] as Record<string, unknown>[]).filter((param) => (param["type"] ?? "query") !== "query")
+      ? (state.request["params"] as Record<string, unknown>[]).filter(
+          (param) => (param["type"] ?? "query") !== "query",
+        )
       : [];
     state.request["params"] = [
       ...others,
-      ...[...parsed.entries()].map(([name, entry]) => ({ name, value: entry, type: "query", enabled: true })),
+      ...[...parsed.entries()].map(([name, entry]) => ({
+        name,
+        value: entry,
+        type: "query",
+        enabled: true,
+      })),
     ];
   }
   markDirty();
@@ -460,7 +472,8 @@ async function openRequest(path: string): Promise<void> {
 
 async function save(): Promise<void> {
   const { project, requestPath, request } = state;
-  if (project === undefined || requestPath === undefined || request === undefined || !state.dirty) return;
+  if (project === undefined || requestPath === undefined || request === undefined || !state.dirty)
+    return;
 
   const result = await window.jarvis.saveApiRequest(project, requestPath, request);
   if (!result.ok) return;
@@ -684,7 +697,9 @@ function renderEnvironmentEditor(): void {
     remove.setAttribute("role", "button");
     remove.addEventListener("click", () => {
       if (editingEnvironment === undefined) return;
-      editingEnvironment.variables = editingEnvironment.variables.filter((_entry, i) => i !== index);
+      editingEnvironment.variables = editingEnvironment.variables.filter(
+        (_entry, i) => i !== index,
+      );
       renderEnvironmentEditor();
     });
 
@@ -865,7 +880,9 @@ function cookiesView(): HTMLElement {
     scope.className = "api-cookie-scope";
     // The flags are the reason a cookie is or is not being sent, so they
     // belong on the row rather than behind anything.
-    const flags = [cookie.secure ? "secure" : "", cookie.httpOnly ? "httpOnly" : ""].filter((flag) => flag !== "");
+    const flags = [cookie.secure ? "secure" : "", cookie.httpOnly ? "httpOnly" : ""].filter(
+      (flag) => flag !== "",
+    );
     scope.textContent = `${cookie.domain}${cookie.path}${flags.length > 0 ? ` · ${flags.join(" ")}` : ""}`;
 
     const remove = document.createElement("span");

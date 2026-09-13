@@ -90,9 +90,7 @@ export function initWorkspaceTerminals(): void {
     // silently stopped responding. It goes straight to the live terminal:
     // this is Jarvis speaking, not the pty, so it is no command's output and
     // has no business inside a block.
-    paneFor(paneKey)?.terminal.write(
-      `\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`,
-    );
+    paneFor(paneKey)?.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
   });
 }
 
@@ -540,9 +538,9 @@ function startShell(tabId: string, paneKey: string): Promise<void> | undefined {
   try {
     // Everything after the tab id and its colon — see createSplitTree,
     // which is what composed the key.
-    return Promise.resolve(window.jarvis.splitTerminal(tabId, paneKey.slice(tabId.length + 1))).catch(
-      () => undefined,
-    );
+    return Promise.resolve(
+      window.jarvis.splitTerminal(tabId, paneKey.slice(tabId.length + 1)),
+    ).catch(() => undefined);
   } catch {
     // A preload without the channel.
     return Promise.resolve();

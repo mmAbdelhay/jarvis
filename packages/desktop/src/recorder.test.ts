@@ -51,9 +51,15 @@ describe("Recorder", () => {
     const kill = vi.fn();
     const spawnRecorder = vi.fn(() => ({
       kill,
-      done: Promise.resolve({ error: "Could not start the microphone recorder: spawn ffmpeg ENOENT" }),
+      done: Promise.resolve({
+        error: "Could not start the microphone recorder: spawn ffmpeg ENOENT",
+      }),
     }));
-    const recorder = new Recorder({ spawnRecorder, deleteFile: vi.fn(async () => {}), tmpDir: "/tmp/jarvis-test" });
+    const recorder = new Recorder({
+      spawnRecorder,
+      deleteFile: vi.fn(async () => {}),
+      tmpDir: "/tmp/jarvis-test",
+    });
 
     recorder.start();
     await expect(recorder.stop()).rejects.toThrow(/microphone recorder/i);
@@ -289,8 +295,16 @@ describe("recorderCommand", () => {
     const { command, args } = recorderCommand("darwin", "/tmp/a.wav");
     expect(command).toBe("ffmpeg");
     expect(args).toEqual([
-      "-f", "avfoundation", "-i", ":default",
-      "-ar", "16000", "-ac", "1", "-y", "/tmp/a.wav",
+      "-f",
+      "avfoundation",
+      "-i",
+      ":default",
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
+      "-y",
+      "/tmp/a.wav",
     ]);
   });
 
@@ -301,8 +315,16 @@ describe("recorderCommand", () => {
     const { command, args } = recorderCommand("linux", "/tmp/a.wav");
     expect(command).toBe("ffmpeg");
     expect(args).toEqual([
-      "-f", "pulse", "-i", "default",
-      "-ar", "16000", "-ac", "1", "-y", "/tmp/a.wav",
+      "-f",
+      "pulse",
+      "-i",
+      "default",
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
+      "-y",
+      "/tmp/a.wav",
     ]);
   });
 

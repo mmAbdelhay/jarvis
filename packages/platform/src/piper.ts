@@ -197,17 +197,16 @@ export class PiperSpeech {
       // stdin needs no quoting or escaping either, which was the worry that
       // put the text in a file to begin with. It is a byte stream; only argv
       // would have needed rules.
-      const synth = this.#run(
-        this.#config.binary,
-        ["-m", this.#config.model, "-f", wav],
-        text,
-      );
+      const synth = this.#run(this.#config.binary, ["-m", this.#config.model, "-f", wav], text);
       this.#current = synth;
       const synthesised = await synth.done;
       if (generation !== this.#generation) return;
       if (synthesised.code !== 0) throw new Error(`piper exited with code ${synthesised.code}`);
 
-      const playback = this.#run(this.#config.player, playerArgs(this.#config.platform ?? "linux", wav));
+      const playback = this.#run(
+        this.#config.player,
+        playerArgs(this.#config.platform ?? "linux", wav),
+      );
       this.#current = playback;
       const played = await playback.done;
       if (generation !== this.#generation) return;
@@ -238,8 +237,14 @@ export class PiperSpeech {
  * Arabic the moment a better English voice arrived.
  */
 export class RoutedSpeech {
-  readonly #english: { speak(text: string, language: "ar" | "en"): Promise<void>; stopSpeaking(): void };
-  readonly #other: { speak(text: string, language: "ar" | "en"): Promise<void>; stopSpeaking(): void };
+  readonly #english: {
+    speak(text: string, language: "ar" | "en"): Promise<void>;
+    stopSpeaking(): void;
+  };
+  readonly #other: {
+    speak(text: string, language: "ar" | "en"): Promise<void>;
+    stopSpeaking(): void;
+  };
 
   constructor(
     english: { speak(text: string, language: "ar" | "en"): Promise<void>; stopSpeaking(): void },

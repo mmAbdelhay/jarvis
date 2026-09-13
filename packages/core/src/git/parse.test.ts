@@ -56,15 +56,7 @@ describe("parseUnifiedDiff", () => {
   });
 
   it("handles multiple hunks", () => {
-    const raw = [
-      "@@ -1,2 +1,2 @@",
-      "-a",
-      "+b",
-      " c",
-      "@@ -40,1 +40,2 @@",
-      " d",
-      "+e",
-    ].join("\n");
+    const raw = ["@@ -1,2 +1,2 @@", "-a", "+b", " c", "@@ -40,1 +40,2 @@", " d", "+e"].join("\n");
     const diff = parseUnifiedDiff("f", raw);
     expect(diff.hunks).toHaveLength(2);
     expect(diff.hunks[1]?.lines[1]).toMatchObject({ kind: "added", afterLine: 41 });

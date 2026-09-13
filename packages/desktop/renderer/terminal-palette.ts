@@ -97,7 +97,8 @@ export function createPalette(host: HTMLElement): Palette {
 
   function applyFilter(): void {
     const needle = input.value.trim().toLowerCase();
-    filtered = needle === "" ? entries : entries.filter((e) => e.label.toLowerCase().includes(needle));
+    filtered =
+      needle === "" ? entries : entries.filter((e) => e.label.toLowerCase().includes(needle));
     index = 0;
     paint();
   }

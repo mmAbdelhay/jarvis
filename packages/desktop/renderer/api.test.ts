@@ -44,13 +44,21 @@ const TREE = {
   root: {
     name: "api",
     path: "/p/api",
-    requests: [{ name: "Health", path: "/p/api/health.bru", seq: 1, method: "GET", url: "{{base}}/health" }],
+    requests: [
+      { name: "Health", path: "/p/api/health.bru", seq: 1, method: "GET", url: "{{base}}/health" },
+    ],
     folders: [
       {
         name: "orders",
         path: "/p/api/orders",
         requests: [
-          { name: "List orders", path: "/p/api/orders/list.bru", seq: 1, method: "POST", url: "{{base}}/orders" },
+          {
+            name: "List orders",
+            path: "/p/api/orders/list.bru",
+            seq: 1,
+            method: "POST",
+            url: "{{base}}/orders",
+          },
         ],
         folders: [],
       },
@@ -120,8 +128,26 @@ function harness(): void {
   confirmAnswer = true;
   collections = [{ name: "api", path: "/p/api" }];
   historyRows = [
-    { at: 1, name: "Health", method: "GET", url: "http://h/health", status: 200, timeMs: 12, bytes: 4, bodyPreview: "{}" },
-    { at: 2, name: "Bad", method: "POST", url: "http://h/x", status: 500, timeMs: 30, bytes: 9, bodyPreview: "" },
+    {
+      at: 1,
+      name: "Health",
+      method: "GET",
+      url: "http://h/health",
+      status: 200,
+      timeMs: 12,
+      bytes: 4,
+      bodyPreview: "{}",
+    },
+    {
+      at: 2,
+      name: "Bad",
+      method: "POST",
+      url: "http://h/x",
+      status: 500,
+      timeMs: 30,
+      bytes: 9,
+      bodyPreview: "",
+    },
   ];
   cookieRows = [
     { name: "sid", value: "abc", domain: "h", path: "/", secure: true, httpOnly: true },
@@ -156,7 +182,10 @@ function harness(): void {
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
     listApiCollections: record("listApiCollections", () => ({ ok: true, value: collections })),
     readApiTree: record("readApiTree", () => ({ ok: true, value: TREE })),
-    readApiRequest: record("readApiRequest", () => ({ ok: true, value: structuredClone(requestFile) })),
+    readApiRequest: record("readApiRequest", () => ({
+      ok: true,
+      value: structuredClone(requestFile),
+    })),
     saveApiRequest: record("saveApiRequest", () => ({ ok: true, value: undefined })),
     sendApiRequest: record("sendApiRequest", () => ({ ok: true, value: sendResult })),
     apiCurl: record("apiCurl", () => ({ ok: true, value: "curl 'http://h'" })),
@@ -165,8 +194,14 @@ function harness(): void {
     renameApiEntry: record("renameApiEntry", () => ({ ok: true, value: "/p/api/renamed.bru" })),
     deleteApiEntry: record("deleteApiEntry", () => ({ ok: true, value: undefined })),
     createApiCollection: record("createApiCollection", () => ({ ok: true, value: "/p/new" })),
-    saveApiEnvironment: record("saveApiEnvironment", () => ({ ok: true, value: "/p/api/environments/local.bru" })),
-    importPostmanCollection: record("importPostmanCollection", () => ({ ok: true, value: "/p/imported" })),
+    saveApiEnvironment: record("saveApiEnvironment", () => ({
+      ok: true,
+      value: "/p/api/environments/local.bru",
+    })),
+    importPostmanCollection: record("importPostmanCollection", () => ({
+      ok: true,
+      value: "/p/imported",
+    })),
     apiHistory: record("apiHistory", () => ({ ok: true, value: historyRows })),
     clearApiHistory: record("clearApiHistory", () => ({ ok: true, value: undefined })),
     apiCookies: record("apiCookies", () => ({ ok: true, value: cookieRows })),
@@ -311,7 +346,9 @@ describe("api request editor", () => {
     await openFirst();
 
     tabButton("api-tabs", "headers")?.click();
-    const inputs = document.querySelectorAll<HTMLInputElement>("#api-panel .api-pair input[type=text]");
+    const inputs = document.querySelectorAll<HTMLInputElement>(
+      "#api-panel .api-pair input[type=text]",
+    );
     expect(inputs[0]?.value).toBe("Accept");
 
     inputs[1]!.value = "text/plain";
@@ -381,7 +418,9 @@ describe("api request editor", () => {
     change(area);
     document.getElementById("api-format")?.click();
 
-    expect((document.getElementById("api-body") as HTMLTextAreaElement).value).toBe('{\n  "a": 1\n}');
+    expect((document.getElementById("api-body") as HTMLTextAreaElement).value).toBe(
+      '{\n  "a": 1\n}',
+    );
   });
 
   // A format button that appears to do nothing is indistinguishable from a
@@ -454,7 +493,9 @@ describe("api request editor", () => {
     url.value = "http://h/orders?page=2";
     change(url);
 
-    expect((document.getElementById("api-url") as HTMLInputElement).value).toBe("http://h/orders?page=2");
+    expect((document.getElementById("api-url") as HTMLInputElement).value).toBe(
+      "http://h/orders?page=2",
+    );
   });
 
   // Each row's handler used to close over the list as it was at render time,
@@ -476,7 +517,9 @@ describe("api request editor", () => {
     await openFirst();
     tabButton("api-tabs", "body")?.click();
 
-    const inputs = [...document.querySelectorAll<HTMLInputElement>("#api-panel .api-pair input[type=text]")];
+    const inputs = [
+      ...document.querySelectorAll<HTMLInputElement>("#api-panel .api-pair input[type=text]"),
+    ];
     inputs[1]!.value = "one";
     change(inputs[1]!);
     inputs[3]!.value = "two";
@@ -486,7 +529,10 @@ describe("api request editor", () => {
     await settle();
 
     const json = calls.find((e) => e.call === "saveApiRequest")?.args[2] as Record<string, unknown>;
-    const fields = (json["body"] as Record<string, unknown>)["formUrlEncoded"] as Record<string, unknown>[];
+    const fields = (json["body"] as Record<string, unknown>)["formUrlEncoded"] as Record<
+      string,
+      unknown
+    >[];
     expect(fields.map((field) => field["value"])).toEqual(["one", "two"]);
   });
 
@@ -608,7 +654,15 @@ describe("api response", () => {
   // said less than the code itself did.
   it("colours the chip by class of status", async () => {
     sendResult = {
-      response: { status: 404, statusText: "Not Found", headers: {}, body: "", timeMs: 3, bytes: 0, unresolved: [] },
+      response: {
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: "",
+        timeMs: 3,
+        bytes: 0,
+        unresolved: [],
+      },
       assertions: [],
     };
     const module = await load();
@@ -676,7 +730,15 @@ describe("api response", () => {
 
   it("lists assertion results, and says what a failure actually got", async () => {
     sendResult = {
-      response: { status: 500, statusText: "Error", headers: {}, body: "", timeMs: 4, bytes: 0, unresolved: [] },
+      response: {
+        status: 500,
+        statusText: "Error",
+        headers: {},
+        body: "",
+        timeMs: 4,
+        bytes: 0,
+        unresolved: [],
+      },
       assertions: [
         { target: "res.status", expression: "eq 200", passed: false, actual: "500" },
         { target: "res.responseTime", expression: "lt 999", passed: true, actual: "4" },
@@ -697,7 +759,15 @@ describe("api response", () => {
 
   it("names variables that had no value", async () => {
     sendResult = {
-      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: ["token"] },
+      response: {
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: "",
+        timeMs: 1,
+        bytes: 0,
+        unresolved: ["token"],
+      },
       assertions: [],
     };
     const module = await load();
@@ -713,7 +783,15 @@ describe("api response", () => {
   // Scripts run now, so what they printed has somewhere to go.
   it("shows what a script printed on the console tab", async () => {
     sendResult = {
-      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      response: {
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: "",
+        timeMs: 1,
+        bytes: 0,
+        unresolved: [],
+      },
       assertions: [],
       scripts: { logs: ["token refreshed", "id 41"], tests: [] },
     };
@@ -734,7 +812,15 @@ describe("api response", () => {
   // A post-response script that threw must not look like a quiet success.
   it("lands on the console when a script failed", async () => {
     sendResult = {
-      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      response: {
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: "",
+        timeMs: 1,
+        bytes: 0,
+        unresolved: [],
+      },
       assertions: [],
       scripts: { logs: [], tests: [], error: "token is not defined" },
     };
@@ -752,7 +838,15 @@ describe("api response", () => {
   // hide half of them.
   it("counts a tests block beside the declarative assertions", async () => {
     sendResult = {
-      response: { status: 200, statusText: "OK", headers: {}, body: "", timeMs: 1, bytes: 0, unresolved: [] },
+      response: {
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: "",
+        timeMs: 1,
+        bytes: 0,
+        unresolved: [],
+      },
       assertions: [{ target: "res.status", expression: "eq 200", passed: true, actual: "200" }],
       scripts: {
         logs: [],
@@ -837,7 +931,12 @@ describe("api history, cookies and network settings", () => {
 
     document.querySelector<HTMLElement>(".api-cookie-row .api-pair-remove")?.click();
     await settle();
-    expect(calls.find((e) => e.call === "removeApiCookie")?.args).toEqual(["acme", "sid", "h", "/"]);
+    expect(calls.find((e) => e.call === "removeApiCookie")?.args).toEqual([
+      "acme",
+      "sid",
+      "h",
+      "/",
+    ]);
 
     document.getElementById("api-cookies-clear")?.click();
     await settle();
@@ -924,7 +1023,9 @@ describe("api collection editing", () => {
 
     expect((document.getElementById("api-ask") as HTMLElement).hidden).toBe(false);
     expect(document.getElementById("api-ask-label")?.textContent).toBe("New request");
-    expect((document.getElementById("api-ask-input") as HTMLInputElement).value).toBe("New request");
+    expect((document.getElementById("api-ask-input") as HTMLInputElement).value).toBe(
+      "New request",
+    );
   });
 
   it("accepts the name on Enter and hides the row", async () => {
@@ -1061,7 +1162,9 @@ describe("api collection editing", () => {
 
     expect((document.getElementById("api-env-panel") as HTMLElement).hidden).toBe(false);
     expect((document.getElementById("api-env-name") as HTMLInputElement).value).toBe("local");
-    const inputs = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    const inputs = [
+      ...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]"),
+    ];
     expect(inputs.map((input) => input.value)).toEqual(["base", "http://localhost:8000"]);
   });
 
@@ -1075,7 +1178,9 @@ describe("api collection editing", () => {
     change(value);
 
     document.getElementById("api-env-add")?.click();
-    const added = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    const added = [
+      ...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]"),
+    ];
     added[2]!.value = "token";
     change(added[2]!);
     added[3]!.value = "abc";
@@ -1101,7 +1206,10 @@ describe("api collection editing", () => {
     document.getElementById("api-env-save")?.click();
     await settle();
 
-    const saved = calls.find((e) => e.call === "saveApiEnvironment")?.args[3] as Record<string, unknown>[];
+    const saved = calls.find((e) => e.call === "saveApiEnvironment")?.args[3] as Record<
+      string,
+      unknown
+    >[];
     expect(saved[0]).toMatchObject({ name: "base", secret: true });
   });
 
@@ -1131,7 +1239,9 @@ describe("api collection editing", () => {
     expect((document.getElementById("api-env-panel") as HTMLElement).hidden).toBe(true);
 
     document.getElementById("api-env-edit")?.click();
-    const reopened = [...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]")];
+    const reopened = [
+      ...document.querySelectorAll<HTMLInputElement>("#api-env-vars input[type=text]"),
+    ];
     expect(reopened[1]?.value).toBe("http://localhost:8000");
     expect(calls.some((e) => e.call === "saveApiEnvironment")).toBe(false);
   });

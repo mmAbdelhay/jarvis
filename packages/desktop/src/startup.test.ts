@@ -13,7 +13,9 @@ const registry = new AgentRegistry({
 describe("startupReport", () => {
   it("reports all agents healthy", async () => {
     const report = await startupReport(registry, async () => ({
-      code: 0, stdout: "1.0.0", stderr: "",
+      code: 0,
+      stdout: "1.0.0",
+      stderr: "",
     }));
     expect(report.broken).toHaveLength(0);
     expect(report.message).toContain("2 agents ready");
@@ -32,7 +34,9 @@ describe("startupReport", () => {
 
   it("reports when every agent is broken", async () => {
     const report = await startupReport(registry, async () => ({
-      code: 127, stdout: "", stderr: "command not found",
+      code: 127,
+      stdout: "",
+      stderr: "command not found",
     }));
     expect(report.healthy).toHaveLength(0);
     expect(report.message).toContain("No agents");
@@ -60,10 +64,7 @@ describe("capacityReport", () => {
 
   it("returns an empty string when nothing was read, so no turn is sent", () => {
     expect(
-      capacityReport(
-        [{ ...known, capacity: { state: "unknown", reason: "never-read" } }],
-        "ar",
-      ),
+      capacityReport([{ ...known, capacity: { state: "unknown", reason: "never-read" } }], "ar"),
     ).toBe("");
   });
 

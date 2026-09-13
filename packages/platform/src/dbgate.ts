@@ -262,7 +262,9 @@ function waitForPort(
       const match = PORT_LINE.exec(buffer);
       if (match?.[1] !== undefined) settle({ ok: true, port: Number(match[1]) });
     });
-    child.onExit(() => settle({ ok: false, detail: "dbgate-serve exited before it started listening" }));
+    child.onExit(() =>
+      settle({ ok: false, detail: "dbgate-serve exited before it started listening" }),
+    );
   });
 }
 

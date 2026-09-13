@@ -271,9 +271,7 @@ describe("docker messages", () => {
   });
 
   it("distinguishes nothing configured from nothing composable", () => {
-    expect(MESSAGES.dockerNoContainers("en")).toBe(
-      "No containers configured for this project",
-    );
+    expect(MESSAGES.dockerNoContainers("en")).toBe("No containers configured for this project");
     expect(MESSAGES.dockerNoComposeProject("en")).toBe(
       "These containers do not belong to a single compose project.",
     );
@@ -392,5 +390,4 @@ describe("prerequisite wording", () => {
     expect(MESSAGES.setupInstallCount(3, "ar")).toContain("أدوات");
     expect(MESSAGES.setupInstallCount(3, "en")).toBe("Install 3 selected");
   });
-
 });

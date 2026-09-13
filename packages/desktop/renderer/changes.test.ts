@@ -152,7 +152,11 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       detail: "not stubbed in this test",
       language: "en" as const,
     })),
-    testAgent: vi.fn(async () => ({ id: "unstubbed", ok: false, detail: "not stubbed in this test" })),
+    testAgent: vi.fn(async () => ({
+      id: "unstubbed",
+      ok: false,
+      detail: "not stubbed in this test",
+    })),
     restartApp: vi.fn(async () => {}),
     hideAllTabs: vi.fn(async () => {}),
     requestPictureInPicture: vi.fn(async () => {}),
@@ -478,14 +482,26 @@ describe("openChanges", () => {
                 repoPath: "~/projects/acme",
                 branch: "feat/checkout-retry",
                 detached: false,
-                files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 1, staged: false }],
+                files: [
+                  {
+                    path: "a.php",
+                    status: "M" as const,
+                    insertions: 1,
+                    deletions: 1,
+                    staged: false,
+                  },
+                ],
                 insertions: 1,
                 deletions: 1,
               },
             },
           };
         }
-        return { ok: false as const, text: "That folder isn't a git repository.", language: "en" as const };
+        return {
+          ok: false as const,
+          text: "That folder isn't a git repository.",
+          language: "en" as const,
+        };
       }),
       gitDiff,
     });
@@ -716,7 +732,13 @@ const FILES = [
   { path: "CheckoutService.php", status: "M" as const, insertions: 42, deletions: 9, staged: true },
   { path: "RetryPolicy.php", status: "A" as const, insertions: 61, deletions: 0, staged: false },
   { path: "LegacyRetry.php", status: "D" as const, insertions: 0, deletions: 16, staged: false },
-  { path: "tests/RetryPolicyTest.php", status: "A" as const, insertions: 8, deletions: 0, staged: false },
+  {
+    path: "tests/RetryPolicyTest.php",
+    status: "A" as const,
+    insertions: 8,
+    deletions: 0,
+    staged: false,
+  },
 ];
 
 describe("the changed-files panel", () => {
@@ -761,7 +783,13 @@ describe("the changed-files panel", () => {
 
   it("groups a spec/ directory under TESTS too", async () => {
     await openChangesWith([
-      { path: "spec/checkout_spec.rb", status: "M" as const, insertions: 1, deletions: 0, staged: false },
+      {
+        path: "spec/checkout_spec.rb",
+        status: "M" as const,
+        insertions: 1,
+        deletions: 0,
+        staged: false,
+      },
     ]);
     const labels = [...document.querySelectorAll(".file-group")].map((el) => el.textContent);
     expect(labels).toEqual([MESSAGES.testsGroupLabel(PRIMARY_LANGUAGE)]);
@@ -902,8 +930,18 @@ const HUNK = {
   header: "@@ -41,9 +41,9 @@",
   lines: [
     { kind: "context" as const, text: "public function charge()", beforeLine: 41, afterLine: 41 },
-    { kind: "removed" as const, text: "  $res = $this->pay();", beforeLine: 42, afterLine: undefined },
-    { kind: "added" as const, text: "  $res = $policy->run();", beforeLine: undefined, afterLine: 42 },
+    {
+      kind: "removed" as const,
+      text: "  $res = $this->pay();",
+      beforeLine: 42,
+      afterLine: undefined,
+    },
+    {
+      kind: "added" as const,
+      text: "  $res = $policy->run();",
+      beforeLine: undefined,
+      afterLine: 42,
+    },
   ],
 };
 
@@ -1041,9 +1079,7 @@ describe("the diff panes", () => {
       hunks: [
         {
           header: "@@ -1,1 +1,1 @@",
-          lines: [
-            { kind: "added" as const, text: longLine, beforeLine: undefined, afterLine: 1 },
-          ],
+          lines: [{ kind: "added" as const, text: longLine, beforeLine: undefined, afterLine: 1 }],
         },
       ],
     });
@@ -1126,7 +1162,9 @@ describe("the diff panes", () => {
         hunks: [
           {
             header: "@@ -1,1 +1,1 @@",
-            lines: [{ kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 }],
+            lines: [
+              { kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 },
+            ],
           },
         ],
       },
@@ -1179,7 +1217,11 @@ describe("the diff panes", () => {
         gitDiff: vi.fn(async (_id: string, path: string) => {
           if (first) {
             first = false;
-            return { ok: false as const, text: "The git command failed: boom", language: "en" as const };
+            return {
+              ok: false as const,
+              text: "The git command failed: boom",
+              language: "en" as const,
+            };
           }
           return { ok: true as const, value: { path, binary: false, hunks: [] } };
         }),
@@ -1218,7 +1260,9 @@ describe("the diff panes", () => {
         hunks: [
           {
             header: "@@ -1,1 +1,1 @@",
-            lines: [{ kind: "added" as const, text: "a file line", beforeLine: undefined, afterLine: 1 }],
+            lines: [
+              { kind: "added" as const, text: "a file line", beforeLine: undefined, afterLine: 1 },
+            ],
           },
         ],
       },
@@ -1228,7 +1272,9 @@ describe("the diff panes", () => {
         hunks: [
           {
             header: "@@ -1,1 +1,1 @@",
-            lines: [{ kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 }],
+            lines: [
+              { kind: "added" as const, text: "b file line", beforeLine: undefined, afterLine: 1 },
+            ],
           },
         ],
       },
@@ -1278,8 +1324,12 @@ describe("the diff panes", () => {
     // final highlighted row must be re-queried rather than read off the
     // `rowA`/`rowB` references captured before either click.
     const finalRows = [...document.querySelectorAll(".file-row")];
-    const finalA = finalRows.find((row) => row.querySelector(".file-name")?.textContent === "a.php");
-    const finalB = finalRows.find((row) => row.querySelector(".file-name")?.textContent === "b.php");
+    const finalA = finalRows.find(
+      (row) => row.querySelector(".file-name")?.textContent === "a.php",
+    );
+    const finalB = finalRows.find(
+      (row) => row.querySelector(".file-name")?.textContent === "b.php",
+    );
 
     expect(document.querySelector(".pane--after .code")?.textContent).toBe("b file line");
     expect(document.getElementById("diff-filename")?.textContent).toBe("b.php");
@@ -1295,14 +1345,18 @@ describe("the commit bar", () => {
       { path: "b.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
       { path: "c.php", status: "M" as const, insertions: 1, deletions: 0, staged: false },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(2, PRIMARY_LANGUAGE));
+    expect(document.getElementById("commit-button")?.textContent).toBe(
+      MESSAGES.commitButtonLabel(2, PRIMARY_LANGUAGE),
+    );
   });
 
   it("uses the singular for one staged file", async () => {
     await openChangesWith([
       { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
     ]);
-    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE));
+    expect(document.getElementById("commit-button")?.textContent).toBe(
+      MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE),
+    );
   });
 
   it("is disabled with nothing staged", async () => {
@@ -1341,7 +1395,9 @@ describe("the commit bar", () => {
         gitSetStaged: vi.fn(async () => ({ ok: true as const, value: null })),
       },
     );
-    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE));
+    expect(document.getElementById("commit-button")?.textContent).toBe(
+      MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE),
+    );
 
     // gitChanges() is re-read after the toggle resolves; simulate the file
     // now being staged, the same way openChanges's real refetch would.
@@ -1360,7 +1416,9 @@ describe("the commit bar", () => {
           repoPath: "~/projects/acme",
           branch: "feat/checkout-retry",
           detached: false,
-          files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+          files: [
+            { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+          ],
           insertions: 1,
           deletions: 0,
         },
@@ -1373,7 +1431,9 @@ describe("the commit bar", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE));
+    expect(document.getElementById("commit-button")?.textContent).toBe(
+      MESSAGES.commitButtonLabel(1, PRIMARY_LANGUAGE),
+    );
   });
 
   it("commits the typed message and clears the field on success", async () => {
@@ -1427,7 +1487,9 @@ describe("the commit bar", () => {
             session: emptyView.value.session,
             changes: {
               ...emptyView.value.changes,
-              files: [{ path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true }],
+              files: [
+                { path: "a.php", status: "M" as const, insertions: 1, deletions: 0, staged: true },
+              ],
               insertions: 1,
             },
           },
@@ -1456,7 +1518,9 @@ describe("the commit bar", () => {
     // commit resolves) to redraw the file list, counts and commit button
     // from whatever the repository actually looks like now.
     expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
-    expect(document.getElementById("commit-button")?.textContent).toBe(MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE));
+    expect(document.getElementById("commit-button")?.textContent).toBe(
+      MESSAGES.commitButtonLabel(0, PRIMARY_LANGUAGE),
+    );
   });
 
   it("shows a commit failure and keeps the message so it is not lost", async () => {

@@ -125,7 +125,8 @@ const api: RendererApi = {
   saveApiRequest: (project, path, json) => ipcRenderer.invoke("api:save", project, path, json),
   sendApiRequest: (project, request, variables) =>
     ipcRenderer.invoke("api:send", project, request, variables),
-  apiCurl: (project, request, variables) => ipcRenderer.invoke("api:curl", project, request, variables),
+  apiCurl: (project, request, variables) =>
+    ipcRenderer.invoke("api:curl", project, request, variables),
   apiHistory: (project) => ipcRenderer.invoke("api:history", project),
   clearApiHistory: (project) => ipcRenderer.invoke("api:clearHistory", project),
   apiCookies: (project) => ipcRenderer.invoke("api:cookies", project),
@@ -152,7 +153,8 @@ const api: RendererApi = {
     ipcRenderer.invoke("api:importPostman", project, name, collection),
   attachTerminal: (paneKey) => ipcRenderer.invoke("terminal:attach", paneKey),
   sendTerminalInput: (paneKey, data) => ipcRenderer.invoke("terminal:input", paneKey, data),
-  resizeTerminal: (paneKey, cols, rows) => ipcRenderer.invoke("terminal:resize", paneKey, cols, rows),
+  resizeTerminal: (paneKey, cols, rows) =>
+    ipcRenderer.invoke("terminal:resize", paneKey, cols, rows),
   onTerminalData: (cb) => {
     ipcRenderer.on("terminal:data", (_e, payload) => cb(payload.paneKey, payload.chunk));
   },
@@ -166,7 +168,8 @@ const api: RendererApi = {
   removeBookmark: (project, url) => ipcRenderer.invoke("bookmarks:remove", project, url),
   setBookmarkPinned: (project, url, pinned) =>
     ipcRenderer.invoke("bookmarks:setPinned", project, url, pinned),
-  renameBookmark: (project, url, title) => ipcRenderer.invoke("bookmarks:rename", project, url, title),
+  renameBookmark: (project, url, title) =>
+    ipcRenderer.invoke("bookmarks:rename", project, url, title),
   reorderBookmarks: (project, urls) => ipcRenderer.invoke("bookmarks:reorder", project, urls),
   getSettings: () => ipcRenderer.invoke("settings:read"),
   saveSettings: (draft) => ipcRenderer.invoke("settings:save", draft),

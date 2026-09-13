@@ -324,13 +324,16 @@ export function applyStaticChrome(): void {
   // the one spot I2's audit missed. Routed through the same bilingual table
   // as everything else here rather than left untranslated.
   const pathBranchSep = document.getElementById("changes-path-branch-sep");
-  if (pathBranchSep !== null) pathBranchSep.textContent = MESSAGES.pathBranchSeparator(PRIMARY_LANGUAGE);
+  if (pathBranchSep !== null)
+    pathBranchSep.textContent = MESSAGES.pathBranchSeparator(PRIMARY_LANGUAGE);
   const filesLabel = document.getElementById("changes-files-label");
   if (filesLabel !== null) filesLabel.textContent = MESSAGES.changedFilesLabel(PRIMARY_LANGUAGE);
   const sideButtonLabel = document.getElementById("diff-mode-side");
-  if (sideButtonLabel !== null) sideButtonLabel.textContent = MESSAGES.sideBySideLabel(PRIMARY_LANGUAGE);
+  if (sideButtonLabel !== null)
+    sideButtonLabel.textContent = MESSAGES.sideBySideLabel(PRIMARY_LANGUAGE);
   const unifiedButtonLabel = document.getElementById("diff-mode-unified");
-  if (unifiedButtonLabel !== null) unifiedButtonLabel.textContent = MESSAGES.unifiedLabel(PRIMARY_LANGUAGE);
+  if (unifiedButtonLabel !== null)
+    unifiedButtonLabel.textContent = MESSAGES.unifiedLabel(PRIMARY_LANGUAGE);
   const message = document.getElementById("commit-message");
   if (message instanceof HTMLInputElement) {
     message.placeholder = MESSAGES.commitMessagePlaceholder(PRIMARY_LANGUAGE);
@@ -375,7 +378,9 @@ function fileRow(view: ChangesView, file: GitFileChange): HTMLElement {
   stage.className = file.staged ? "file-stage file-stage--on" : "file-stage";
   stage.setAttribute(
     "aria-label",
-    file.staged ? MESSAGES.unstageFileLabel(PRIMARY_LANGUAGE) : MESSAGES.stageFileLabel(PRIMARY_LANGUAGE),
+    file.staged
+      ? MESSAGES.unstageFileLabel(PRIMARY_LANGUAGE)
+      : MESSAGES.stageFileLabel(PRIMARY_LANGUAGE),
   );
   stage.addEventListener("click", (event) => {
     // Without this the row's own click handler would also fire and the
