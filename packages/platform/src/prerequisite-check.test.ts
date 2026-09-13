@@ -36,7 +36,15 @@ describe("checkPrerequisites", () => {
         return false;
       },
     });
-    const stray = looked.filter((p) => !p.startsWith("/only/here") && !p.startsWith("/home/u"));
+    // Headlamp's bundle path is a fixed install location rather than a PATH
+    // walk — it is where the Cluster tab reads the server from — so it is the
+    // one lookup outside PATH and home that is meant to be there.
+    const stray = looked.filter(
+      (p) =>
+        !p.startsWith("/only/here") &&
+        !p.startsWith("/home/u") &&
+        p !== "/opt/Headlamp/resources/headlamp-server",
+    );
     expect(stray).toEqual([]);
   });
 
@@ -50,9 +58,11 @@ describe("checkPrerequisites", () => {
         return false;
       },
     });
-    // Only the voice models, which are file checks and not PATH lookups. An
-    // empty entry must not become a lookup of "/ffmpeg".
-    expect(looked.every((p) => p.startsWith("/home/u/.config/jarvis/voices/"))).toBe(true);
+    // Only file checks at fixed locations — the voice models, piper's link,
+    // Headlamp's bundle — and never a PATH lookup. An empty entry must not
+    // become a lookup of "/ffmpeg".
+    expect(looked.filter((p) => /^\/[^/]+$/.test(p))).toEqual([]);
+    expect(looked).toContain("/home/u/.config/jarvis/voices/en-gb-alan-low.onnx");
   });
 
   it("counts any one of the audio players as the player", () => {
@@ -97,8 +107,42 @@ describe("checkPrerequisites", () => {
   });
 
   it("marks something Jarvis can install without root as installable", () => {
-    expect(statusOf({}, "dbgate")?.installable).toBe(true);
-    expect(statusOf({}, "dbgate")?.manual).toBeUndefined();
+    const npm = { fileExists: (p: string) => p === "/usr/bin/npm" };
+    expect(statusOf(npm, "dbgate")?.installable).toBe(true);
+    expect(statusOf(npm, "dbgate")?.manual).toBeUndefined();
+  });
+
+  it("will not offer an install whose own installer is missing", () => {
+    // A Mac with no Homebrew, a machine with no Node. The row used to say
+    // "can be installed", and pressing it printed `command not found`.
+    const dbgate = statusOf({ fileExists: () => false }, "dbgate");
+    expect(dbgate?.installable).toBe(false);
+    expect(dbgate?.manual).toContain("nodejs.org");
+
+    const ffmpeg = statusOf({ platform: "darwin", fileExists: () => false }, "ffmpeg");
+    expect(ffmpeg?.installable).toBe(false);
+    expect(ffmpeg?.manual).toContain("brew.sh");
+  });
+
+  it("counts a Headlamp installed as a desktop app on macOS", () => {
+    // The cask leaves nothing on PATH, and the Cluster tab reads the server
+    // out of the bundle — so this is the state the app actually cares about.
+    expect(
+      statusOf(
+        {
+          platform: "darwin",
+          arch: "arm64",
+          fileExists: (p) => p === "/Applications/Headlamp.app/Contents/Resources/headlamp-server",
+        },
+        "headlamp",
+      )?.installed,
+    ).toBe(true);
+  });
+
+  it("counts a piper linked into ~/.local/bin, which macOS keeps off PATH", () => {
+    expect(
+      statusOf({ fileExists: (p) => p === "/home/u/.local/bin/piper" }, "piper")?.installed,
+    ).toBe(true);
   });
 
   it("offers no install for something already installed", () => {

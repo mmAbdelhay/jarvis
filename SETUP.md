@@ -5,7 +5,10 @@ account; nothing is assumed.
 
 ## 1. Prerequisites
 
-- **macOS (Apple Silicon) or Linux (x64).** Both are built and run.
+- **macOS (Apple Silicon), Linux (x64) or Windows (x64).** All three are built
+  and run. What differs on Windows — the PowerShell terminal, the chords, the
+  voice, and the Editor tab, which has no Windows build — is collected under
+  "On Windows" in [installation](docs/guide/installation.md#on-windows).
 - **Node 22 or newer** — `node --version` to check.
 - **pnpm** — the version is pinned in the repo, so let corepack pick it:
 
@@ -93,12 +96,12 @@ the API client. The Editor and Database tabs need one more install each.
 Each one is missing only the feature it belongs to, and the app says so in the
 toolbar rather than failing quietly. Install what you need, skip the rest.
 
-| Want | macOS | Linux |
-|---|---|---|
-| **Editor** tab (VS Code in a tab) | `brew install code-server` | `curl -fsSL https://code-server.dev/install.sh \| sh` |
-| **Database** tab (SQL client) | `npm i -g dbgate-serve` | `npm i -g dbgate-serve` |
-| **Voice input** | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) + a model, and `brew install ffmpeg` | the same, and `apt install ffmpeg` |
-| **A voice to speak with** | `uv tool install piper-tts` | `uv tool install piper-tts`, plus `pipewire-utils`, `pulseaudio-utils` or `alsa-utils` to play it |
+| Want | macOS | Linux | Windows |
+|---|---|---|---|
+| **Editor** tab (VS Code in a tab) | `brew install code-server` | `curl -fsSL https://code-server.dev/install.sh \| sh` | — code-server has no Windows build |
+| **Database** tab (SQL client) | `npm i -g dbgate-serve` | `npm i -g dbgate-serve` | `npm i -g dbgate-serve` |
+| **Voice input** | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) + a model, and `brew install ffmpeg` | the same, and `apt install ffmpeg` | the same, and `winget install ffmpeg` |
+| **A voice to speak with** | `uv tool install piper-tts` | `uv tool install piper-tts`, plus `pipewire-utils`, `pulseaudio-utils` or `alsa-utils` to play it | nothing — Windows' own System.Speech voices speak out of the box; `uv tool install piper-tts` sounds better |
 
 For voice input, add the two paths and restart:
 

@@ -12,6 +12,8 @@
 // no Homebrew formula, which is why macOS gets a tarball like everyone else.
 // Nothing in the suite can keep them true; see docs/develop/testing.md.
 
+import { defaultHeadlampBinary } from "./headlamp.js";
+
 /** A tool, a model, or a system package. */
 export type PrerequisiteId =
   | "agent"
@@ -36,7 +38,17 @@ export type PrerequisiteId =
 export type Detection =
   | { kind: "binary"; command: string }
   | { kind: "anyBinary"; commands: readonly string[] }
-  | { kind: "file"; path: string };
+  | { kind: "file"; path: string }
+  /** Satisfied by any one of several detections of different kinds. Headlamp
+   *  is the case: it is a PATH binary on Linux and a path inside an
+   *  application bundle on macOS and Windows, and a tool that is installed
+   *  still has to read as installed. */
+  | { kind: "anyOf"; of: readonly Detection[] };
+
+/** A detection that depends on the machine — the same shape as InstallFor,
+ *  and for the same reason: the answer differs per platform, and every input
+ *  stays a parameter so one `pnpm test` proves all three. */
+type DetectFor = Detection | ((platform: NodeJS.Platform, env: NodeJS.ProcessEnv) => Detection);
 
 /**
  * How to get it.
@@ -74,7 +86,7 @@ export type Prerequisite = {
    *  required, because a screen calling five things "required" teaches the
    *  reader to ignore the word. */
   required: boolean;
-  detect: Detection;
+  detect: DetectFor;
   /** An absent platform means "not available here", which the screen shows as
    *  its own state rather than as a missing tool. */
   install: Partial<Record<NodeJS.Platform, InstallFor>>;
@@ -175,9 +187,24 @@ export const PREREQUISITES: readonly Prerequisite[] = [
   {
     id: "piper",
     required: false,
-    detect: { kind: "binary", command: "piper" },
+    // Also the path config defaults to, because ~/.local/bin is where the
+    // tarball route links it and a login shell need not carry that directory
+    // — a piper that works would otherwise be reported missing for ever.
+    detect: {
+      kind: "anyOf",
+      of: [
+        { kind: "binary", command: "piper" },
+        { kind: "file", path: `${PIPER_BIN}/piper` },
+      ],
+    },
     install: {
-      darwin: (arch) => piperStep("darwin", arch),
+      // Not the tarball on macOS. The macOS assets of piper's last release
+      // (2023.11.14-2, and there will be no other) contain no
+      // libespeak-ng dylib at all, so the binary cannot start wherever it is
+      // put — the Linux and Windows archives do ship theirs. Offering the
+      // download anyway would tick a row for a tool that cannot speak.
+      // macOS has `say` in the meantime, which is what config falls back to.
+      darwin: { kind: "manual", display: "piper" },
       linux: (arch) => piperStep("linux", arch),
       win32: (arch) => piperStep("win32", arch),
     },
@@ -239,7 +266,19 @@ export const PREREQUISITES: readonly Prerequisite[] = [
   {
     id: "headlamp",
     required: false,
-    detect: { kind: "binary", command: "headlamp-server" },
+    // headlamp-server is not distributed on its own: every release is a
+    // desktop app, and `brew install --cask headlamp` puts one in
+    // /Applications with the server inside the bundle and nothing on PATH.
+    // Detecting only the PATH binary reported it missing on the machine that
+    // had just installed it — and the app itself resolves it by that bundle
+    // path, so the screen was disagreeing with the tab.
+    detect: (platform, env) => ({
+      kind: "anyOf",
+      of: [
+        { kind: "binary", command: "headlamp-server" },
+        { kind: "file", path: defaultHeadlampBinary(platform, env) },
+      ],
+    }),
     install: {
       darwin: { kind: "run", command: "brew", args: ["install", "--cask", "headlamp"] },
       linux: { kind: "manual", display: "headlamp" },
@@ -293,6 +332,46 @@ function sameEverywhere(step: InstallStep): Partial<Record<NodeJS.Platform, Inst
   return { darwin: step, linux: step, win32: step };
 }
 
+/** How to tell whether `prerequisite` is present on this machine. */
+export function detectionFor(
+  prerequisite: Prerequisite,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): Detection {
+  return typeof prerequisite.detect === "function"
+    ? prerequisite.detect(platform, env)
+    : prerequisite.detect;
+}
+
+/**
+ * What a `run` step needs before it can run at all, and where to get it.
+ *
+ * A fresh Mac has no Homebrew, and a packaged Jarvis may be the first Node
+ * application on the machine. Offering "install" for a step whose very
+ * command is missing produces `brew: command not found` inside the install
+ * log and a row that never turns green — so the check asks first, and says
+ * the thing that would actually fix it instead.
+ *
+ * Only the managers are listed. `sh` is on every machine this runs on, and a
+ * command absent from this map is attempted as before rather than blocked by
+ * a guess.
+ */
+const RUNNERS: Record<string, { name: string; page: string }> = {
+  brew: { name: "Homebrew", page: "https://brew.sh" },
+  npm: { name: "Node.js", page: "https://nodejs.org/en/download" },
+  winget: { name: "App Installer", page: "https://aka.ms/getwinget" },
+};
+
+/** The line to show for `step` when the tool that would run it is missing,
+ *  or undefined when nothing is in the way. */
+export function missingRunnerLine(step: InstallStep, present: (command: string) => boolean): string | undefined {
+  if (step.kind !== "run") return undefined;
+  const runner = RUNNERS[step.command];
+  if (runner === undefined || present(step.command)) return undefined;
+  const command = [step.command, ...step.args].join(" ");
+  return `${command} — needs ${runner.name} first: ${runner.page}`;
+}
+
 /** The install for `id` on this machine, or undefined where there is none —
  *  macOS needs no audio player, and kubectl is never installed. */
 export function installFor(
@@ -343,6 +422,13 @@ const PACKAGES: Record<string, Partial<Record<PackageManager, string>>> = {
   docker: { apt: "docker.io", dnf: "docker", pacman: "docker" },
 };
 
+/** Where the whole line is not "<verb> <package>" — a tool whose only working
+ *  route on that platform is some other tool's command. piper on macOS is the
+ *  one: the release has no usable macOS build, and the Python package does. */
+const COMMANDS: Record<string, Partial<Record<PackageManager, string>>> = {
+  piper: { brew: "uv tool install piper-tts" },
+};
+
 const INSTALL_VERB: Record<PackageManager, string> = {
   apt: "sudo apt install",
   dnf: "sudo dnf install",
@@ -370,6 +456,8 @@ const PAGES: Record<string, string> = {
  * that way.
  */
 export function manualLine(display: string, manager: PackageManager | undefined): string {
+  const whole = manager === undefined ? undefined : COMMANDS[display]?.[manager];
+  if (whole !== undefined) return whole;
   const pkg = manager === undefined ? undefined : PACKAGES[display]?.[manager];
   if (pkg === undefined || manager === undefined) return PAGES[display] ?? display;
   return `${INSTALL_VERB[manager]} ${pkg}`;

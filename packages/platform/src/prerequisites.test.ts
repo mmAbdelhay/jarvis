@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  detectionFor,
   installFor,
   manualLine,
+  missingRunnerLine,
   packageManager,
   PREREQUISITES,
   type PrerequisiteId,
@@ -69,15 +71,26 @@ describe("the catalogue", () => {
     expect(installFor("piper", "linux", "arm64")).toMatchObject({
       url: expect.stringContaining("piper_linux_aarch64.tar.gz"),
     });
-    expect(installFor("piper", "darwin", "arm64")).toMatchObject({
-      url: expect.stringContaining("piper_macos_aarch64.tar.gz"),
-    });
-    expect(installFor("piper", "darwin", "x64")).toMatchObject({
-      url: expect.stringContaining("piper_macos_x64.tar.gz"),
-    });
     expect(installFor("piper", "win32", "x64")).toMatchObject({
       url: expect.stringContaining("piper_windows_amd64.zip"),
     });
+  });
+
+  it("never downloads piper's macOS archive, which cannot run", () => {
+    // Both macOS assets of the last release (2023.11.14-2) ship no
+    // libespeak-ng dylib, so the binary dies in dyld wherever it is put. The
+    // Linux and Windows archives do carry their libraries, which is why only
+    // this one is a line to read instead.
+    for (const arch of ["arm64", "x64"]) {
+      const step = installFor("piper", "darwin", arch);
+      expect(step).toMatchObject({ kind: "manual" });
+      expect(JSON.stringify(step)).not.toContain("piper_macos");
+    }
+  });
+
+  it("points macOS at the build that works", () => {
+    // The Python package, which is also what SETUP.md and the guide say.
+    expect(manualLine("piper", "brew")).toBe("uv tool install piper-tts");
   });
 
   it("asks for piper by hand on an architecture with no release", () => {
@@ -152,6 +165,59 @@ describe("the catalogue", () => {
         expect(installFor(id, platform, "x64")).toBeDefined();
       }
     }
+  });
+});
+
+describe("missingRunnerLine", () => {
+  const npmStep = { kind: "run", command: "npm", args: ["i", "-g", "x"] } as const;
+
+  it("says what is in the way when the installer itself is missing", () => {
+    // A fresh Mac has no Homebrew. Offering "install" for a brew step there
+    // produced `brew: command not found` inside the log and a row that never
+    // went green.
+    const line = missingRunnerLine(
+      { kind: "run", command: "brew", args: ["install", "ffmpeg"] },
+      () => false,
+    );
+    expect(line).toContain("brew install ffmpeg");
+    expect(line).toContain("https://brew.sh");
+  });
+
+  it("is nothing at all when the installer is there", () => {
+    expect(missingRunnerLine(npmStep, () => true)).toBeUndefined();
+  });
+
+  it("names Node for a missing npm", () => {
+    expect(missingRunnerLine(npmStep, () => false)).toContain("nodejs.org");
+  });
+
+  it("blocks nothing it was not asked about", () => {
+    // `sh` is on every machine this runs on, and a command absent from the
+    // map is attempted as before rather than refused on a guess.
+    expect(
+      missingRunnerLine({ kind: "run", command: "sh", args: ["-c", "curl …"] }, () => false),
+    ).toBeUndefined();
+    expect(missingRunnerLine({ kind: "manual", display: "piper" }, () => false)).toBeUndefined();
+  });
+});
+
+describe("detectionFor", () => {
+  const headlamp = PREREQUISITES.find((p) => p.id === "headlamp");
+
+  it("looks inside the application bundle on macOS, not only on PATH", () => {
+    // `brew install --cask headlamp` puts a desktop app in /Applications and
+    // nothing on PATH, and the Cluster tab resolves the server by that same
+    // bundle path — so a PATH-only check reported missing what the app was
+    // about to use.
+    if (headlamp === undefined) throw new Error("unreachable");
+    const detect = detectionFor(headlamp, "darwin", {});
+    expect(JSON.stringify(detect)).toContain("/Applications/Headlamp.app");
+  });
+
+  it("hands back a plain detection unchanged", () => {
+    const ffmpeg = PREREQUISITES.find((p) => p.id === "ffmpeg");
+    if (ffmpeg === undefined) throw new Error("unreachable");
+    expect(detectionFor(ffmpeg, "linux", {})).toEqual({ kind: "binary", command: "ffmpeg" });
   });
 });
 
