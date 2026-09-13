@@ -1,6 +1,8 @@
 import {
+  detectionFor,
   installFor,
   manualLine,
+  missingRunnerLine,
   packageManager,
   PREREQUISITES,
   type Detection,
@@ -68,6 +70,9 @@ function detected(detect: Detection, deps: CheckDeps): boolean {
   if (detect.kind === "anyBinary") {
     return detect.commands.some((command) => onGivenPath(command, deps));
   }
+  if (detect.kind === "anyOf") {
+    return detect.of.some((candidate) => detected(candidate, deps));
+  }
   return deps.fileExists(expand(detect.path, deps.home));
 }
 
@@ -82,7 +87,7 @@ export function checkPrerequisites(deps: CheckDeps): PrerequisiteStatus[] {
   const manager = packageManager(deps.platform, (command) => onGivenPath(command, deps));
 
   return PREREQUISITES.map((prerequisite) => {
-    const installed = detected(prerequisite.detect, deps);
+    const installed = detected(detectionFor(prerequisite, deps.platform, deps.env), deps);
     const step = installFor(prerequisite.id, deps.platform, deps.arch);
 
     if (installed || step === undefined) {
@@ -96,6 +101,15 @@ export function checkPrerequisites(deps: CheckDeps): PrerequisiteStatus[] {
         installable: false,
         manual: manualLine(step.display, manager),
       };
+    }
+
+    // A step whose own command is missing — brew on a fresh Mac, npm on a
+    // machine with no Node — is not something Jarvis can run, and saying so
+    // here is the difference between a line that fixes it and a `command not
+    // found` inside the install log.
+    const blocked = missingRunnerLine(step, (command) => onGivenPath(command, deps));
+    if (blocked !== undefined) {
+      return { id: prerequisite.id, installed: false, installable: false, manual: blocked };
     }
 
     return { id: prerequisite.id, installed: false, installable: true };

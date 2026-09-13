@@ -13,7 +13,7 @@
 // with a terminal in front of it.
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -24,7 +24,7 @@ import { promisify } from "node:util";
 const { checkPrerequisites } = await import("../packages/platform/dist/prerequisite-check.js");
 const { installFor } = await import("../packages/platform/dist/prerequisites.js");
 const { runInstall } = await import("../packages/platform/dist/prerequisite-install.js");
-const { loginShellPath } = await import("../packages/platform/dist/headlamp.js");
+const { loginShellPath, withLocalBin } = await import("../packages/platform/dist/headlamp.js");
 
 const run = promisify(execFile);
 
@@ -48,8 +48,14 @@ Anything needing root is never run — its command is printed for you to copy.`)
 // means here what it means to Jarvis. A check against this process's PATH
 // would report a tool under nvm as present and leave the app unable to find
 // it, which is the bug this whole feature exists to prevent.
+// ~/.local/bin because that is where the links below go, and macOS does not
+// carry it even in a login shell — see withLocalBin.
 const path = await loginShellPath(process.env, process.platform);
-const env = path === undefined ? process.env : { ...process.env, PATH: path };
+const env = withLocalBin(
+  path === undefined ? process.env : { ...process.env, PATH: path },
+  process.platform,
+  homedir(),
+);
 
 const check = () =>
   checkPrerequisites({
@@ -74,6 +80,18 @@ function report(statuses) {
     console.log(`  ${mark} ${status.id.padEnd(13)} ${note}`);
   }
 }
+
+/** Where an archive's contents actually landed.
+ *
+ *  Every piper release is a tarball with one top-level `piper/` directory, so
+ *  unpacking into dest leaves the binary at dest/piper/piper. Returning dest
+ *  linked the *directory* into ~/.local/bin, where it existed, read as
+ *  installed, and could not be run. */
+const landingDir = async (dest) => {
+  const entries = await readdir(dest, { withFileTypes: true });
+  const only = entries.length === 1 && entries[0].isDirectory() ? entries[0].name : undefined;
+  return only === undefined ? dest : join(dest, only);
+};
 
 const installDeps = {
   home: homedir(),
@@ -108,7 +126,7 @@ const installDeps = {
     await writeFile(archive, Buffer.from(await response.arrayBuffer()));
     await run("tar", ["-xf", archive, "-C", dest]);
     await rm(archive, { force: true });
-    return dest;
+    return landingDir(dest);
   },
   link: async (from, to) => {
     await mkdir(dirname(to), { recursive: true });
@@ -138,12 +156,22 @@ if (wanted.length === 0) {
   // and a tool with no package at all. Calling a documentation link "needs
   // root" would be wrong and would teach the reader to stop reading.
   const manual = statuses.filter((s) => !s.installed && s.manual !== undefined);
-  const commands = manual.filter((s) => !s.manual.startsWith("http"));
+  const root = manual.filter((s) => s.manual.startsWith("sudo "));
+  const commands = manual.filter(
+    (s) => !s.manual.startsWith("sudo ") && !s.manual.startsWith("http"),
+  );
   const pages = manual.filter((s) => s.manual.startsWith("http"));
 
-  if (commands.length > 0) {
+  if (root.length > 0) {
     console.log("\nThese need root, so run them yourself:\n");
-    for (const status of commands) console.log(`  ${status.manual}`);
+    for (const status of root) console.log(`  ${status.manual}`);
+  }
+  // Not root — a tool Jarvis will not install for you, or one whose own
+  // installer is missing. Calling these "need root" would be wrong and would
+  // teach the reader to stop reading.
+  if (commands.length > 0) {
+    console.log("\nThese you install yourself:\n");
+    for (const status of commands) console.log(`  ${status.id.padEnd(13)} ${status.manual}`);
   }
   if (pages.length > 0) {
     console.log("\nThese have no package — see:\n");

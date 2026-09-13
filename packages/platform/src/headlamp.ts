@@ -463,6 +463,33 @@ export async function loginShellPath(
   return undefined;
 }
 
+/**
+ * `env` with `~/.local/bin` on its PATH.
+ *
+ * That directory is where Jarvis links everything it installs — piper's
+ * binary, and any npm-installed tool whose own bin a login shell cannot see.
+ * Linux distributions put it on PATH from ~/.profile; **macOS does not**, and
+ * its default is the six entries in /etc/paths. So on a stock Mac the
+ * prerequisites screen installed a tool, linked it, and then reported it
+ * missing on the next check — while every tab that resolves a sidecar on this
+ * same PATH could not find it either.
+ *
+ * Appended rather than prepended: a tool the user installed themselves, by
+ * whatever means they chose, keeps winning.
+ */
+export function withLocalBin(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  home: string,
+): NodeJS.ProcessEnv {
+  // Windows has no such convention, and nothing links there on it.
+  if (platform === "win32") return env;
+  const dir = `${home}/.local/bin`;
+  const path = env["PATH"] ?? "";
+  if (path.split(":").includes(dir)) return env;
+  return { ...env, PATH: path === "" ? dir : `${path}:${dir}` };
+}
+
 /** Long enough for a heavy .bashrc on a cold cache, short enough that a
  *  startup file blocking on input does not hold the window hostage. */
 const DEFAULT_SHELL_PATH_TIMEOUT_MS = 5_000;

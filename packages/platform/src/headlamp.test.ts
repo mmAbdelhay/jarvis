@@ -12,10 +12,38 @@ import {
   loginShellPath,
   parseKubeContexts,
   skippedContexts,
+  withLocalBin,
   type HeadlampProcess,
   type HeadlampSpawner,
 } from "./headlamp.js";
 import * as spawnModule from "./spawn.js";
+
+describe("withLocalBin", () => {
+  it("adds ~/.local/bin to a macOS PATH, which never carries it", () => {
+    // /etc/paths on a stock Mac, which is what a login shell starts from.
+    const env = withLocalBin({ PATH: "/usr/local/bin:/usr/bin:/bin" }, "darwin", "/Users/x");
+    expect(env["PATH"]).toBe("/usr/local/bin:/usr/bin:/bin:/Users/x/.local/bin");
+  });
+
+  it("appends, so a tool the user installed themselves keeps winning", () => {
+    const env = withLocalBin({ PATH: "/opt/homebrew/bin" }, "darwin", "/Users/x");
+    expect(env["PATH"]?.split(":")[0]).toBe("/opt/homebrew/bin");
+  });
+
+  it("leaves a PATH that already has it alone", () => {
+    const source = { PATH: "/home/u/.local/bin:/usr/bin" };
+    expect(withLocalBin(source, "linux", "/home/u")).toBe(source);
+  });
+
+  it("gives an empty PATH just the one directory, with no stray separator", () => {
+    expect(withLocalBin({}, "linux", "/home/u")["PATH"]).toBe("/home/u/.local/bin");
+  });
+
+  it("does nothing on Windows, where nothing is linked there", () => {
+    const source = { PATH: "C:\\bin" };
+    expect(withLocalBin(source, "win32", "C:\\Users\\x")).toBe(source);
+  });
+});
 
 describe("clusterUrlSegment", () => {
   it("replaces slashes with double hyphens and leaves colons alone", () => {

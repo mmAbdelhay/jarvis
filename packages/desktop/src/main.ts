@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -96,6 +96,7 @@ import {
   runCommand,
   transcribe,
   waitUntilReady,
+  withLocalBin,
 } from "@jarvis/platform";
 import {
   buildWiring,
@@ -336,10 +337,16 @@ app.whenReady().then(async () => {
     // late — the spawner when somebody starts a session, the health check
     // by awaiting this promise, which it can afford because its own line is
     // already deferred behind the greeting.
-    let agentEnv: NodeJS.ProcessEnv = process.env;
+    // ~/.local/bin on both branches: it is where the prerequisites screen
+    // links what it installs, and macOS's PATH does not carry it even in a
+    // login shell — so without this the app cannot find a tool it installed
+    // itself a minute earlier. See withLocalBin.
+    let agentEnv: NodeJS.ProcessEnv = withLocalBin(process.env, process.platform, homedir());
     const agentEnvReady = loginShellPath(process.env, process.platform)
       .then((path) => {
-        if (path !== undefined) agentEnv = { ...process.env, PATH: path };
+        if (path !== undefined) {
+          agentEnv = withLocalBin({ ...process.env, PATH: path }, process.platform, homedir());
+        }
       })
       .catch(() => undefined);
 
@@ -749,7 +756,18 @@ app.whenReady().then(async () => {
             );
           });
           await rm(archive, { force: true });
-          return dest;
+          // Where the contents actually landed, which is what this is
+          // documented to return. Every piper release is a tarball with one
+          // top-level `piper/` directory, so the binary sits at
+          // dest/piper/piper; returning dest linked the *directory* into
+          // ~/.local/bin, where it existed, read as installed, and could not
+          // be run.
+          const entries = await readdir(dest, { withFileTypes: true });
+          const only =
+            entries.length === 1 && entries[0]?.isDirectory() === true
+              ? entries[0].name
+              : undefined;
+          return only === undefined ? dest : join(dest, only);
         },
         link: async (from, to) => {
           await mkdir(dirname(to), { recursive: true });
