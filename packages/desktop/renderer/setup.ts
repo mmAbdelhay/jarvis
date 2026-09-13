@@ -4,7 +4,10 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 // The first-run prerequisites screen.
 //
 // An overlay rather than a route: it has no nav button, it sits above
-// whatever is behind it, and Skip closes it for good. It is never a gate — the
+// whatever is behind it, and Skip closes it for good — which it did not do
+// until the CSS beneath it was fixed, because `.setup-overlay` set `display`
+// on its base rule and out-cascaded the UA `[hidden]` rule. See
+// setup-overlay-css.test.ts. It is never a gate — the
 // app is behind it and working, and a user who wants to get on with things
 // can.
 //
