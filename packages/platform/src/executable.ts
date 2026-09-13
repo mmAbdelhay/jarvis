@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { delimiter, extname, isAbsolute, join } from "node:path";
+import { posix, win32 } from "node:path";
 
 // How a command name becomes something Windows can actually start.
 //
@@ -27,6 +27,12 @@ import { delimiter, extname, isAbsolute, join } from "node:path";
 // `platform` is a parameter everywhere, never `process.platform`: the whole
 // matrix is then a unit test on one machine rather than something only a
 // Windows laptop could prove. See platform-convention.test.ts.
+//
+// For the same reason the path helpers are taken from `win32` and `posix`
+// explicitly rather than from the module's own default. `join` on macOS is
+// posix.join, which would build `C:\tools/claude` for the Windows lookup and
+// make every Windows test pass only on Windows — the one machine the rule
+// above exists to avoid depending on.
 
 /** The extensions Windows tries for a bare command name, in PATHEXT order.
  *  The default is what a fresh Windows has; a user's own additions (`.PY`,
@@ -63,7 +69,7 @@ export function resolveWindowsExecutable(
 ): string | undefined {
   if (command === "") return undefined;
   const extensions = pathExtensions(env);
-  const hasExtension = extname(command) !== "";
+  const hasExtension = win32.extname(command) !== "";
   // Lower-cased: the filesystem does not care, and `claude.exe` is what the
   // file is actually called far more often than `claude.EXE`.
   const withExtensions = (base: string): string[] =>
@@ -71,11 +77,11 @@ export function resolveWindowsExecutable(
   const candidates = (base: string): string[] =>
     hasExtension ? [base, ...withExtensions(base)] : withExtensions(base);
 
-  if (isAbsolute(command) || command.includes("\\") || command.includes("/")) {
+  if (win32.isAbsolute(command) || command.includes("\\") || command.includes("/")) {
     return candidates(command).find(exists);
   }
   for (const directory of searchDirectories(env, cwd)) {
-    const found = candidates(join(directory, command)).find(exists);
+    const found = candidates(win32.join(directory, command)).find(exists);
     if (found !== undefined) return found;
   }
   return undefined;
@@ -98,8 +104,8 @@ export function resolveExecutable(
   if (command === "") return undefined;
   if (platform === "win32") return resolveWindowsExecutable(command, env, exists);
   if (command.includes("/")) return exists(command) ? command : undefined;
-  for (const directory of (env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "")) {
-    const candidate = join(directory, command);
+  for (const directory of (env["PATH"] ?? "").split(posix.delimiter).filter((entry) => entry !== "")) {
+    const candidate = posix.join(directory, command);
     if (exists(candidate)) return candidate;
   }
   return undefined;
@@ -107,7 +113,7 @@ export function resolveExecutable(
 
 /** A `.cmd` or `.bat`: something only cmd.exe can run. */
 export function isBatchFile(path: string): boolean {
-  const extension = extname(path).toLowerCase();
+  const extension = win32.extname(path).toLowerCase();
   return extension === ".cmd" || extension === ".bat";
 }
 
@@ -195,8 +201,8 @@ export function spawnTarget(
 function commandShell(env: NodeJS.ProcessEnv): string {
   const named = env["ComSpec"] ?? env["COMSPEC"] ?? process.env["ComSpec"] ?? process.env["COMSPEC"];
   if (named !== undefined && named !== "") return named;
-  const systemRoot = env["SystemRoot"] ?? process.env["SystemRoot"] ?? "C:\Windows";
-  return `${systemRoot}\System32\cmd.exe`;
+  const systemRoot = env["SystemRoot"] ?? process.env["SystemRoot"] ?? "C:\\Windows";
+  return `${systemRoot}\\System32\\cmd.exe`;
 }
 
 /**
