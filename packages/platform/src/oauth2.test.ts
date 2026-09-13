@@ -19,6 +19,16 @@ function harness(payload: unknown = { access_token: "t0ken", expires_in: 3600 },
 
 const body = (captured: Captured[]) => new URLSearchParams(String(captured[0]?.init.body));
 
+/** The headers the captured request was sent with. Reading
+ *  `captured[0]?.init.headers` inline would short-circuit to undefined and
+ *  then throw on the index that follows, crashing the test instead of failing
+ *  it with a reason. */
+const headers = (captured: Captured[]): Record<string, string> => {
+  const request = captured[0];
+  if (request === undefined) throw new Error("no request was captured");
+  return request.init.headers as Record<string, string>;
+};
+
 describe("fetchOAuth2Token", () => {
   it("gets a token with the client credentials grant", async () => {
     const { captured, deps } = harness();
@@ -81,7 +91,7 @@ describe("fetchOAuth2Token", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe(
+    expect(headers(captured)["Authorization"]).toBe(
       `Basic ${Buffer.from("id:secret").toString("base64")}`,
     );
     expect(body(captured).get("client_secret")).toBeNull();

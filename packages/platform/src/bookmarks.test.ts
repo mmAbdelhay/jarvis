@@ -155,7 +155,7 @@ describe("createBookmarkStore", () => {
     await store.add("p", { url: "https://b.test/", title: "B" });
     await store.add("p", { url: "https://a.test/", title: "A" });
 
-    const result = await store.add("p", { url: "https://a.test/", title: "A" });
+    await store.add("p", { url: "https://a.test/", title: "A" });
     // Pin the unpinned one to test sorting
     await store.setPinned("p", "https://b.test/", true);
     // Add another, should come after the pinned B even though added last

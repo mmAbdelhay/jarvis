@@ -8,7 +8,7 @@
 // throws on import" step here.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitFileChange, GitFileDiff } from "@jarvis/core";
-import type { ChangesView, GitViewResult, RendererApi } from "../src/ipc.js";
+import type { GitViewResult, RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
 

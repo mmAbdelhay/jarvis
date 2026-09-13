@@ -108,6 +108,7 @@ import {
   waitUntilReady,
   withLocalBin,
 } from "@jarvis/platform";
+import type { OAuth2Token } from "@jarvis/platform";
 import {
   buildWiring,
   createApiHandlers,
@@ -126,7 +127,7 @@ import {
   PROVIDER_HEALTH_INTERVAL_MS,
   showEditorTab,
 } from "./ipc.js";
-import { BrowserHost, type Rect } from "./browser-host.js";
+import { BrowserHost } from "./browser-host.js";
 import { createSidecarReaper } from "./sidecar-reaper.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
@@ -959,7 +960,7 @@ app.whenReady().then(async () => {
 
       // OAuth2 is fetched after the pre-request script, so a script can set
       // the client secret the token call needs.
-      let token;
+      let token: OAuth2Token | undefined;
       if (http.auth === "oauth2") {
         const config = ((request["auth"] ?? {}) as Record<string, never>)["oauth2"] ?? {};
         const result = await fetchOAuth2Token(config, resolved, {

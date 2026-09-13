@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import lang from "@usebruno/lang";
@@ -62,7 +63,7 @@ export async function listCollections(projectPath: string): Promise<BrunoCollect
   const own = await collectionAt(projectPath);
   if (own !== undefined) found.push(own);
 
-  let entries;
+  let entries: Dirent[];
   try {
     entries = await readdir(projectPath, { withFileTypes: true });
   } catch {
@@ -115,7 +116,7 @@ export async function readCollection(collectionPath: string): Promise<BrunoTree>
 async function readFolder(path: string, name: string, isRoot = false): Promise<BrunoFolder> {
   const folder: BrunoFolder = { name, path, requests: [], folders: [] };
 
-  let entries;
+  let entries: Dirent[];
   try {
     entries = await readdir(path, { withFileTypes: true });
   } catch {
@@ -174,7 +175,7 @@ async function readRequestFile(path: string): Promise<BrunoRequestFile | undefin
 }
 
 async function readEnvironments(path: string): Promise<BrunoEnvironment[]> {
-  let entries;
+  let entries: Dirent[];
   try {
     entries = await readdir(path, { withFileTypes: true });
   } catch {

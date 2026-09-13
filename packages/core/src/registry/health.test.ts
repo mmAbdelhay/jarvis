@@ -173,9 +173,10 @@ describe("checkAll", () => {
     expect(results[0]?.ok).toBe(false);
     expect(results[1]?.ok).toBe(true);
     expect(results.every((r) => r.ok)).toBe(false);
-  }, // so a genuine deadlock (sequential execution) reports as a failure // Comfortably above the barrier's expected (near-instant) resolution,
-  // instead of hanging the suite.
-  1000);
+    // Comfortably above the barrier's expected (near-instant) resolution, so a
+    // genuine deadlock (sequential execution) reports as a failure instead of
+    // hanging the suite.
+  }, 1000);
 
   it("returns an empty array for no agents", async () => {
     const results = await checkAll([], runner({ code: 0, stdout: "1.0.0", stderr: "" }));

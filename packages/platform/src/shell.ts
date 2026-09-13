@@ -2,12 +2,7 @@ import { existsSync } from "node:fs";
 import { resolveWindowsExecutable } from "./executable.js";
 import { createRequire } from "node:module";
 import { userInfo } from "node:os";
-import {
-  DEFAULT_COLS,
-  DEFAULT_ROWS,
-  ensureSpawnHelperExecutable,
-  sanitizedShellEnv,
-} from "./pty.js";
+import { DEFAULT_COLS, DEFAULT_ROWS, sanitizedShellEnv } from "./pty.js";
 import { powerShellLaunchArgs } from "./powershell-integration.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 

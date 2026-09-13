@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // packages/desktop/renderer/block-render.test.ts
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TERMINAL_THEME } from "./terminal-theme.js";
 
 // The real xterm, counted. Everything here needs a genuine emulator — the

@@ -106,7 +106,7 @@ function hooks(): string[] {
     "  # The two marks, independent of how this shell manages to call them.",
     "  __jarvis_emit_preexec() {",
     '    __jarvis_osc "C;${1}"',
-    '    if [[ -n "$' + log + '" ]]; then',
+    `    if [[ -n "$${log}" ]]; then`,
     // EPOCHSECONDS is bash 5.0+; `date` covers anything older. The log is the
     // only source that records a cwd, which is what directory affinity ranks
     // on — losing it on an old bash would quietly halve the feature.

@@ -314,9 +314,9 @@ function renderRouting(): void {
   if (draft === undefined) return;
   const container = $("settings-routing");
   container.replaceChildren();
-  (draft.registry.routing ?? []).forEach((rule, index) =>
-    container.append(renderRoutingRow(rule, index)),
-  );
+  for (const [index, rule] of (draft.registry.routing ?? []).entries()) {
+    container.append(renderRoutingRow(rule, index));
+  }
 }
 
 function renderRoutingRow(rule: RoutingRule, index: number): HTMLElement {

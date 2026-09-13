@@ -4,7 +4,7 @@ import { recorderCommand, Recorder } from "./recorder.js";
 
 function deps() {
   const kill = vi.fn();
-  const spawnRecorder = vi.fn((path: string) => ({ kill, done: Promise.resolve({}) }));
+  const spawnRecorder = vi.fn((_path: string) => ({ kill, done: Promise.resolve({}) }));
   const deleteFile = vi.fn((_path: string) => Promise.resolve());
   return { kill, spawnRecorder, deleteFile, tmpDir: "/tmp/jarvis-test" };
 }

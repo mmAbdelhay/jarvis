@@ -348,7 +348,12 @@ describe("terminal key bindings and addons", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
-      value: { writeText: (text: string) => (written.push(text), Promise.resolve()) },
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
       configurable: true,
     });
     FakeTerminal.instances[0]!.selection = "SELECTED";

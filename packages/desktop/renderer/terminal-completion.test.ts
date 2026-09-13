@@ -242,7 +242,7 @@ describe("attachCompletion", () => {
   // The single rule that keeps the terminal feeling like a terminal: with
   // the dropdown shut, zsh receives every key exactly as it does today.
   it("passes every key to zsh while the dropdown is closed", () => {
-    const { terminal, press } = attached();
+    const { press } = attached();
 
     for (const key of ["Tab", "ArrowUp", "ArrowDown", "Enter", "Escape", "a", "c"]) {
       expect(press({ key })).toBe(true);
@@ -250,7 +250,7 @@ describe("attachCompletion", () => {
   });
 
   it("opens on typing and lists what the source returned", async () => {
-    const { terminal, host, asked, press } = attached();
+    const { terminal, host, asked } = attached();
 
     await typeAt(terminal, "~/p > ", "git sta");
 
@@ -272,7 +272,7 @@ describe("attachCompletion", () => {
   });
 
   it("does not open at a bare prompt, and does not even ask", async () => {
-    const { terminal, host, asked, press } = attached();
+    const { terminal, host, asked } = attached();
 
     terminal.parser.emitOsc(133, "A");
     terminal.typeLine("~/p > ");
@@ -328,7 +328,7 @@ describe("attachCompletion", () => {
 
     press({ key: "Tab" });
 
-    expect(sent).toEqual(["\u007f".repeat(7) + "git status"]);
+    expect(sent).toEqual([`${"\u007f".repeat(7)}git status`]);
   });
 
   it("closes after accepting, so the next Tab is zsh's again", async () => {

@@ -119,12 +119,12 @@ function toBruno(
 
   const auth = authMode(source.auth?.type);
   if (auth === "bearer") {
-    json["auth"] = { bearer: { token: valueOf(source.auth?.bearer, "token") } };
+    json["auth"] = { bearer: { token: authValue(source.auth?.bearer, "token") } };
   } else if (auth === "basic") {
     json["auth"] = {
       basic: {
-        username: valueOf(source.auth?.basic, "username"),
-        password: valueOf(source.auth?.basic, "password"),
+        username: authValue(source.auth?.basic, "username"),
+        password: authValue(source.auth?.basic, "password"),
       },
     };
   }
@@ -133,7 +133,7 @@ function toBruno(
 }
 
 /** Postman stores auth details as a list of {key, value} pairs. */
-function valueOf(pairs: { key?: string; value?: string }[] | undefined, key: string): string {
+function authValue(pairs: { key?: string; value?: string }[] | undefined, key: string): string {
   return pairs?.find((pair) => pair.key === key)?.value ?? "";
 }
 

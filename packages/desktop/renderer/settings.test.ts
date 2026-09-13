@@ -62,6 +62,16 @@ function sample(): JarvisConfig {
   };
 }
 
+/** The config a recorded `saveSettings` call carried.
+ *
+ *  Written as a function because `savedConfig(saved).docker`
+ *  puts the member access outside the optional chain: a test where Save never
+ *  fired would throw on undefined rather than fail with a reason. */
+function savedConfig(saved: Recorded | undefined): JarvisConfig {
+  if (saved === undefined) throw new Error("saveSettings was never called");
+  return saved.args[0] as JarvisConfig;
+}
+
 function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: JarvisConfig } {
   document.body.innerHTML = `
     <div id="settings-status"></div>
@@ -1025,7 +1035,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({});
+    expect(savedConfig(saved).docker).toEqual({});
   });
 
   it("adds exactly the ticked containers, named after their compose service", async () => {
@@ -1040,7 +1050,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [{ name: "app", container: "acme-app-1" }],
     });
   });
@@ -1067,7 +1077,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [
         { name: "app", container: "acme-app-1" },
         { name: "app-2", container: "other-app-1" },
@@ -1087,7 +1097,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker).toEqual({
+    expect(savedConfig(saved).docker).toEqual({
       acme: [{ name: "container-1", container: "container-1" }],
     });
     // The thing that actually matters: parseConfig accepts it.
@@ -1096,7 +1106,7 @@ describe("settings docker section", () => {
         agents: { a: { command: "a" } },
         projects: { acme: "/x/projects/acme" },
         brain: { cwd: "/x/brain" },
-        docker: (saved?.args[0] as JarvisConfig).docker,
+        docker: savedConfig(saved).docker,
       }),
     ).not.toThrow();
   });
@@ -1115,7 +1125,7 @@ describe("settings docker section", () => {
     await flush();
 
     const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect((saved?.args[0] as JarvisConfig).docker["acme"]).toContainEqual({
+    expect(savedConfig(saved).docker["acme"]).toContainEqual({
       name: "gone",
       container: "acme-gone-1",
     });
@@ -1153,8 +1163,7 @@ describe("settings docker section", () => {
     document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = (calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig)
-      .docker;
+    const saved = savedConfig(calls.find((entry) => entry.call === "saveSettings")).docker;
     expect(saved["extra"]).toContainEqual({ name: "app", container: "other-app-1" });
     expect(saved["acme"]?.some((entry) => entry.container === "other-app-1")).toBe(false);
   });

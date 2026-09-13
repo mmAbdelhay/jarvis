@@ -1054,10 +1054,10 @@ describe("the command editor in a pane", () => {
       p.openPalette();
       expect(paletteEl(p)?.hidden).toBe(false);
 
-      const escape = pressInPalette(p, { key: "Escape" });
+      const escapeEvent = pressInPalette(p, { key: "Escape" });
 
       expect(paletteEl(p)?.hidden).toBe(true);
-      expect(escape.defaultPrevented).toBe(true);
+      expect(escapeEvent.defaultPrevented).toBe(true);
     });
 
     // And the keys come back to the pty with it. The palette's <input> held
@@ -1970,11 +1970,11 @@ describe("a terminal pane over a ConPTY", () => {
   // lands mid-command becomes part of that command's block.
   it("holds a resize while a command runs and applies it when the block closes", () => {
     const { view, resize, terminal } = conptyPane(true);
-    view.write(A + "PS> " + B + C("ls"));
+    view.write(`${A}PS> ${B}${C("ls")}`);
     terminal.emitResize(120, 30);
     expect(resize).not.toHaveBeenCalled();
 
-    view.write("out" + D(0));
+    view.write(`out${D(0)}`);
     expect(resize).toHaveBeenCalledWith(120, 30);
     expect(resize).toHaveBeenCalledTimes(1);
   });
@@ -1994,7 +1994,7 @@ describe("a terminal pane over a ConPTY", () => {
 
   it("clears the stale screen behind the write queue when a command starts", () => {
     const { view, terminal } = conptyPane(true);
-    view.write(A + "PS> " + B + C("ls"));
+    view.write(`${A}PS> ${B}${C("ls")}`);
     expect(terminal.cleared).toBe(0);
     terminal.flush();
     expect(terminal.cleared).toBe(1);

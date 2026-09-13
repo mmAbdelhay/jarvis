@@ -1,0 +1,86 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!release",
+      "!packages/desktop/renderer/vendor",
+      "!spikes",
+      "!design",
+      "!pnpm-lock.yaml",
+      "!**/*.jsonl"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "css": {
+    // Off, not an oversight. fullscreen-css.test.ts, history-overlay-css.test.ts
+    // and sticky-header-css.test.ts assert the source text of styles.css with
+    // regexes — a deliberate guard on rules that cannot be tested any other way
+    // here. A formatter rewrites the text those regexes match. CSS is still
+    // linted; only its whitespace is left to the author.
+    "formatter": { "enabled": false }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        // Flags obj["key"] in favour of obj.key. tsconfig sets
+        // noPropertyAccessFromIndexSignature, which requires the bracket form
+        // for anything reached through an index signature — process.env and
+        // every Record<string, T> in the workspace. The rule fired 588 times
+        // and every one of them was that.
+        "useLiteralKeys": "off"
+      },
+      "style": {
+        // Every instance is a lower-specificity selector written after a
+        // higher-specificity one that already wins on specificity, so nothing
+        // is actually being overridden. The fix the rule wants is reordering a
+        // 3,000-line stylesheet whose source text three test files assert:
+        // real risk, no behaviour change.
+        "noDescendingSpecificity": "off"
+      }
+    }
+  },
+  "assist": { "enabled": false },
+  "overrides": [
+    {
+      // The shell integrations are TypeScript that emits bash and zsh. Every
+      // ${...} in them is parameter expansion for the shell that will read the
+      // file, written in single quotes precisely so JavaScript leaves it alone.
+      "includes": [
+        "packages/platform/src/bash-integration.ts",
+        "packages/platform/src/bash-integration.test.ts",
+        "packages/platform/src/zsh-integration.ts",
+        "packages/platform/src/zsh-integration.test.ts",
+        "packages/platform/src/powershell-integration.ts",
+        "packages/platform/src/powershell-integration.test.ts"
+      ],
+      "linter": { "rules": { "suspicious": { "noTemplateCurlyInString": "off" } } }
+    },
+    {
+      // In a test, `element!` is the assertion. A query that returns nothing
+      // should stop the test then and there, naming the line, rather than be
+      // softened into a branch that quietly passes. The two non-null
+      // assertions that were in shipping code are gone.
+      "includes": ["**/*.test.ts"],
+      "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+    }
+  ]
+}

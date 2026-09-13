@@ -7,7 +7,6 @@ import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
   parseTranscript,
-  summaryOf,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
@@ -384,7 +383,7 @@ describe("sessionFromTranscript", () => {
   // A head read is cut mid-line by definition; a fragment is not a
   // malformed record.
   it("ignores an unterminated final line", () => {
-    expect(sessionFromTranscript(HEAD + '{"type":"assis', PATH, 1)?.cwd).toBe(
+    expect(sessionFromTranscript(`${HEAD}{"type":"assis`, PATH, 1)?.cwd).toBe(
       "/Users/u/projects/jarvis",
     );
   });

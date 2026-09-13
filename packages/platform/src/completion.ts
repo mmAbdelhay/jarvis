@@ -199,6 +199,7 @@ const CWD_AFFINITY = 8;
  *  one would submit a command the user never pressed Enter on, and an
  *  escape byte would let a history entry drive the terminal — so neither is
  *  ever offered, whatever the history holds. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this pattern exists to find control characters — a newline or an escape byte reaching the pty verbatim is the risk it guards.
 const UNSAFE_TO_OFFER = /[\u0000-\u001f\u007f]/;
 
 function recencyWeight(at: number | undefined, now: number): number {

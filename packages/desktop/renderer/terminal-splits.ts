@@ -259,7 +259,8 @@ export function createSplitTree(
 
       let leaf: Leaf;
       try {
-        leaf = makeLeafIn(`${tabId}:p${(nextPaneId += 1)}`, created);
+        nextPaneId += 1;
+        leaf = makeLeafIn(`${tabId}:p${nextPaneId}`, created);
       } catch {
         // A pane that could not be built leaves the tab exactly as it was,
         // down to where the pane being split sits in the document.

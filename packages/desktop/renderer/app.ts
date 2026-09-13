@@ -456,10 +456,6 @@ function buildProjectRow(project: string): HTMLElement {
   return row;
 }
 
-function renderSession(session: Session): HTMLElement {
-  return buildSessionRow(session);
-}
-
 // Shared by the live Sessions panel and the History panel so a past
 // session's row matches an active one's visual language exactly — same
 // palette, type scale, and dot/state/summary/meta structure — rather than

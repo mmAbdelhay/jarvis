@@ -139,6 +139,7 @@ function fallBackToText(ansi: string, element: HTMLElement): void {
   element.replaceChildren();
   const fallback = document.createElement("div");
   fallback.className = "block-line";
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC byte is what a CSI sequence starts with, and stripping those is the whole job of this fallback.
   fallback.textContent = ansi.replace(/\[[0-9;]*[A-Za-z]/g, "");
   element.append(fallback);
 }

@@ -526,7 +526,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  terminal every other moment. Both `focus()` and the palette's own
    *  hand-back call this, so there is one answer to "who has the keys". */
   function focusPane(): void {
-    if (editor !== undefined && editor.isVisible()) {
+    if (editor?.isVisible()) {
       editor.focus();
       return;
     }
@@ -610,7 +610,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   // call the rest of the terminal already makes for a selection.
   function fill(command: string): void {
     attempt(() => {
-      if (editor !== undefined && editor.isVisible()) {
+      if (editor?.isVisible()) {
         editor.setValue(command);
         editor.focus();
         return;
@@ -698,7 +698,10 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     actions.push({
       id: "collapse-all",
       label: "Collapse all blocks",
-      run: () => attempt(() => views.forEach((view) => view.collapse(true))),
+      run: () =>
+        attempt(() => {
+          for (const view of views) view.collapse(true);
+        }),
     });
     actions.push({
       id: "clear",
@@ -1227,7 +1230,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // caller holding what it was told is a readonly list must not see it move.
     blocks: () => [...views],
     blockNav: nav,
-    readInput: () => (editor !== undefined && editor.isVisible() ? editor.value() : undefined),
+    readInput: () => (editor?.isVisible() ? editor.value() : undefined),
     applyInput: (line) => attempt(() => editor?.setValue(line)),
     editorElement: () => editor?.element,
     atPrompt: () => idle(),

@@ -20,6 +20,25 @@ function harness(
   return { captured, deps };
 }
 
+/** The RequestInit a captured request was sent with.
+ *
+ *  A function rather than `captured[n]?.init` at each call site: the
+ *  optional chain short-circuits to undefined and the member access that
+ *  follows then throws, so a harness that captured nothing crashes the test
+ *  instead of failing it. This says which index was missing. */
+function initOf(captured: Captured[], index = 0): RequestInit {
+  const request = captured[index];
+  if (request === undefined) {
+    throw new Error(`no request was captured at index ${index}`);
+  }
+  return request.init;
+}
+
+/** The headers of a captured request, as the plain record they are built as. */
+function headersOf(captured: Captured[], index = 0): Record<string, string> {
+  return initOf(captured, index).headers as Record<string, string>;
+}
+
 const get = (overrides: Record<string, unknown> = {}) => ({
   meta: { name: "R", type: "http", seq: "1" },
   http: { method: "get", url: "{{base}}/api/orders", body: "none", auth: "none" },
@@ -275,9 +294,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe(
-      "Bearer abc",
-    );
+    expect(headersOf(captured)["Authorization"]).toBe("Bearer abc");
   });
 
   // The editor offers apikey auth; sending nothing for it is a request that
@@ -295,7 +312,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["X-API-Key"]).toBe("secret");
+    expect(headersOf(captured)["X-API-Key"]).toBe("secret");
   });
 
   it("sends an API key in the query when that is where it belongs", async () => {
@@ -327,7 +344,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    const header = (captured[0]?.init.headers as Record<string, string>)["Authorization"];
+    const header = headersOf(captured)["Authorization"];
     expect(header).toBe(`Basic ${Buffer.from("u:p").toString("base64")}`);
   });
 
@@ -345,9 +362,7 @@ describe("sendRequest", () => {
     );
 
     expect(captured[0]?.init.body).toBe('{"a":1}');
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/json");
   });
 
   it("does not override a Content-Type the request already set", async () => {
@@ -364,9 +379,7 @@ describe("sendRequest", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/vnd.api+json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/vnd.api+json");
   });
 
   it("sends a form body as urlencoded pairs", async () => {
@@ -507,9 +520,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       query: "{ user(id: 7) { name } }",
       variables: { a: 1 },
     });
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
+    expect(headersOf(captured)["Content-Type"]).toBe("application/json");
   });
 
   it("omits variables entirely when there are none", async () => {
@@ -585,7 +596,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       deps,
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect(headersOf(captured)["Content-Type"]).toBeUndefined();
   });
 
   it("sends the jar's cookies and stores what came back", async () => {
@@ -601,7 +612,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       { ...deps, jar },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("existing=1");
+    expect(headersOf(captured)["Cookie"]).toBe("existing=1");
     expect(jar.headerFor("http://h/")).toContain("sid=new");
   });
 
@@ -621,7 +632,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       { ...deps, jar },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=mine");
+    expect(headersOf(captured)["Cookie"]).toBe("sid=mine");
   });
 
   it("passes a dispatcher built from the network options", async () => {
@@ -644,7 +655,9 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
     expect(seen).toEqual([
       { verifyCertificate: false, timeoutMs: 5000, proxyUrl: "http://proxy:8080" },
     ]);
-    expect((captured[0]?.init as Record<string, unknown>)["dispatcher"]).toEqual({ marker: true });
+    expect((initOf(captured) as unknown as Record<string, unknown>)["dispatcher"]).toEqual({
+      marker: true,
+    });
   });
 
   // A request's own timeout setting is more specific than the global one.
@@ -685,9 +698,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       },
     );
 
-    expect((captured[0]?.init.headers as Record<string, string>)["Authorization"]).toBe(
-      "Bearer t0ken",
-    );
+    expect(headersOf(captured)["Authorization"]).toBe("Bearer t0ken");
   });
 
   it("places an OAuth2 token in the query when the provider wants it there", async () => {
@@ -713,7 +724,7 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
       timeoutMs: 1000,
     });
 
-    expect((captured[0]?.init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect(initOf(captured).signal).toBeInstanceOf(AbortSignal);
   });
 });
 
@@ -772,7 +783,7 @@ describe("sendRequest: redirects and the cookie jar", () => {
     );
 
     expect(captured[1]?.url).toBe("https://api.test/home");
-    expect((captured[1]?.init.headers as Record<string, string>)["Cookie"]).toBe("sid=abc");
+    expect(headersOf(captured, 1)["Cookie"]).toBe("sid=abc");
   });
 
   // What every browser does, and what an API that redirects after a POST
@@ -836,7 +847,7 @@ describe("sendRequest: redirects and the cookie jar", () => {
       deps,
     );
 
-    expect((captured[0]?.init as RequestInit).redirect).toBeUndefined();
+    expect(initOf(captured).redirect).toBeUndefined();
   });
 
   // The other bug live testing found: a multipart body built from a different

@@ -319,8 +319,8 @@ export class SessionManager {
  * out of these, so a summary taken from raw output would otherwise be a
  * row of cursor-positioning noise rather than words.
  */
-// eslint-disable-next-line no-control-regex
 const ANSI_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC and BEL literally is the point — stripping them is what this pattern is for.
   /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|[@-Z\\-_])/g;
 
 /**

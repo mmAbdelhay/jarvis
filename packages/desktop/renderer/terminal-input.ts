@@ -171,7 +171,7 @@ export function createEditor(host: HTMLElement, hooks: EditorHooks): TerminalEdi
     const pos = textarea.selectionStart ?? textarea.value.length;
     const before = textarea.value.slice(0, pos);
     const after = textarea.value.slice(pos);
-    textarea.value = before + "\n" + after;
+    textarea.value = `${before}\n${after}`;
     textarea.selectionStart = pos + 1;
     textarea.selectionEnd = pos + 1;
     repaint();

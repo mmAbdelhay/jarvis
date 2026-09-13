@@ -76,6 +76,11 @@ export type PiperConfig = {
  *  PulseAudio's, aplay ALSA's — and on a PipeWire system all three work,
  *  which is why this is an order and not a detection. */
 const LINUX_PLAYERS = ["pw-play", "paplay", "aplay"] as const;
+/** Returned when none of the three is installed, so the spawn that follows
+ *  fails naming a real command rather than an empty string. Destructured from
+ *  the tuple rather than repeated, which makes shortening the list a type
+ *  error here instead of a silent undefined. */
+const LAST_RESORT_PLAYER = LINUX_PLAYERS[2];
 
 /**
  * What plays the WAV Piper just wrote.
@@ -102,7 +107,7 @@ export function audioPlayer(
     const systemRoot = env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows";
     return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
   }
-  return LINUX_PLAYERS.find((player) => exists(player)) ?? LINUX_PLAYERS[LINUX_PLAYERS.length - 1]!;
+  return LINUX_PLAYERS.find((player) => exists(player)) ?? LAST_RESORT_PLAYER;
 }
 
 /**

@@ -3261,6 +3261,8 @@
   .presence__arc,
   .presence__core,
   .running-orb {
+    /* biome-ignore lint/complexity/noImportantStyles: a reduced-motion override
+       has to beat the animation shorthands it is switching off. */
     animation: none !important;
   }
 }

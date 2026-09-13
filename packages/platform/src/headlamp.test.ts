@@ -8,7 +8,6 @@ import {
   createRealHeadlampSpawner,
   defaultHeadlampBinary,
   frontendDirFor,
-  headlampArgs,
   loginShellPath,
   parseKubeContexts,
   skippedContexts,

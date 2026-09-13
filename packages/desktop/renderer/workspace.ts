@@ -397,7 +397,9 @@ function monogramColour(url: string): string {
     origin = url;
   }
   let hash = 0;
-  for (const ch of origin) hash = (hash * 31 + ch.codePointAt(0)!) % 360;
+  // `ch` is a whole code point from a string iterator, so codePointAt(0) is
+  // always there; the ?? keeps that out of the type system’ hands.
+  for (const ch of origin) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) % 360;
   return `hsl(${hash}, 45%, 32%)`;
 }
 
