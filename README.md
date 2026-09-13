@@ -1,4 +1,4 @@
-<img src="packages/desktop/assets/icon.svg" width="72" align="right" alt="">
+<img src="./packages/desktop/assets/icon.svg" width="72" align="right" alt="">
 
 # Jarvis
 
@@ -25,7 +25,7 @@ Settings          everything jarvis.yaml holds, edited in place
 ```
 
 <p align="center">
-  <img src="docs/media/dashboard.png" width="100%" alt="The Dashboard: machine load and provider capacity on the left, the voice indicator and the project list in the middle, the conversation on the right.">
+  <img src="./docs/media/dashboard.png" width="100%" alt="The Dashboard: machine load and provider capacity on the left, the voice indicator and the project list in the middle, the conversation on the right.">
 </p>
 
 <p align="center">

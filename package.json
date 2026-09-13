@@ -7,6 +7,9 @@
     "bootstrap": "node scripts/bootstrap.mjs",
     "prereqs": "node scripts/setup.mjs",
     "build": "pnpm --filter @jarvis/desktop build",
+    "docs:dev": "vitepress dev",
+    "docs:build": "node scripts/check-docs-pages.mjs && vitepress build",
+    "docs:preview": "vitepress preview",
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -20,6 +23,7 @@
     "@types/node": "^22.10.2",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.11"
   }
 }
