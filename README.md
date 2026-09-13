@@ -139,6 +139,10 @@ tools each Workspace tab needs.
 
 ## Documentation
 
+All of it is also a site, with search across every page:
+**[mmabdelhay.github.io/jarvis](https://mmabdelhay.github.io/jarvis/)**. The same
+files, rendered — so the links below work whether you read them here or there.
+
 **Using it**
 
 - [Setup](SETUP.md) — a new machine, start to finish
