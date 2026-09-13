@@ -1,0 +1,67 @@
+# The docs site: built on every pull request, published only from master.
+#
+# The build runs in both cases, so a pull request that breaks a link or adds
+# an untracked page fails there rather than on the way to the site.
+name: Docs
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  # So the site can be republished without a commit to force it.
+  workflow_dispatch:
+
+concurrency:
+  # Not `cancel-in-progress` for the deploy: a half-published site is worse
+  # than a slightly stale one.
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # VitePress reads git history for each page's "last updated", and a
+          # shallow clone gives every page the same date.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Checks every page is git-tracked before building — docs/superpowers/
+      # is on disk for the maintainer and must never reach the site — then
+      # fails on any dead link.
+      - run: pnpm docs:build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .vitepress/dist
+
+  deploy:
+    # Pull requests build to prove they can; only master publishes.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

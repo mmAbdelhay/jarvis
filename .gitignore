@@ -19,3 +19,7 @@ docs/superpowers/
 .claude/
 .agents/
 skills-lock.json
+
+# VitePress build output and cache
+.vitepress/dist/
+.vitepress/cache/
