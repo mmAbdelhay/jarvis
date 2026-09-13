@@ -8,7 +8,15 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
-Everything here is on `master` and in no download yet.
+Nothing yet.
+
+## [0.1.3] — 2026-09-13
+
+Linux and Windows, a first-run screen that installs what Jarvis needs, and the
+prerequisites screen finally closing when you press Skip.
+
+Everything since 0.1.2 in one build, from one commit, on all three platforms —
+the 0.1.2 assets were each built from a different source state.
 
 ### Added
 
@@ -31,6 +39,11 @@ Everything here is on `master` and in no download yet.
   workflow that runs `pnpm lint`, `pnpm typecheck`, `pnpm build` and
   `pnpm test` on Linux, macOS and Windows for every pull request.
 - `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE` and this file.
+- **A documentation site** at
+  [mmabdelhay.github.io/jarvis](https://mmabdelhay.github.io/jarvis/), built
+  from the markdown already in the repository, with search across every page.
+- **Screenshots** of the Session table, the Editor tab and the Terminal, in the
+  README and in the guides.
 
 ### Changed
 
@@ -48,6 +61,11 @@ Everything here is on `master` and in no download yet.
   built, and a sidecar that will not start logs why instead of being dropped.
 - Piper is given its text on stdin; it has no input-file flag.
 - The prerequisites screen installs what it says it will on macOS.
+- **The prerequisites screen closes.** It had never closed: `.setup-overlay`
+  set `display` on its base rule, which out-cascades the UA stylesheet's
+  `[hidden] { display: none }`, so Skip set the attribute and nothing moved.
+  Reported as "it opens every launch" — it did not open every launch, it never
+  went away. Two latent instances of the same cascade bug went with it.
 
 ## [0.1.2] — 2026-09-10
 
@@ -99,6 +117,7 @@ renamed in place.
 
 The first packaged build — a real macOS `.app` rather than a `pnpm start`.
 
+[0.1.3]: https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.3
 [0.1.2]: https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.1
 [0.0.9]: https://github.com/mmAbdelhay/jarvis/releases/tag/v0.0.9
