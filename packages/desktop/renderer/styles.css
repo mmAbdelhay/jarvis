@@ -1033,6 +1033,7 @@
   /* One line under the grid, for an essential's rename. Hidden and empty
      the rest of the time, so the bar keeps its height. */
   .workspace-ask { display: flex; padding: 2px 0; }
+  .workspace-ask[hidden] { display: none; }
 
   /* The rename field, in both places it appears. It inherits the label's
      own type and sits on the chip's own surface, so editing looks like the
@@ -2184,6 +2185,7 @@
   .settings-add:hover { border-color: var(--accent); }
 
   .settings-rows { display: flex; flex-direction: column; gap: var(--s2); }
+  .settings-rows[hidden] { display: none; }
 
   .settings-row {
     display: flex;
@@ -3271,14 +3273,22 @@
    An overlay above everything. It is only ever shown on routes with no hosted
    browser view: a WebContentsView is a native child of the window and ignores
    z-index entirely, so no stacking value here would cover one. */
+/* No `display` on the base rule: an author declaration here out-cascades the
+   UA stylesheet’s `[hidden] { display: none }`, so `closeSetup()` setting
+   `hidden = true` would render anyway — which is exactly what it did. The
+   `:not([hidden])` variant below is the same guard .history-overlay and
+   .session-empty already carry. See setup-overlay-css.test.ts. */
 .setup-overlay {
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.72);
+}
+
+.setup-overlay:not([hidden]) {
+  display: flex;
 }
 
 .setup-panel {
