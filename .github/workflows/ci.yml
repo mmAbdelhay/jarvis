@@ -48,11 +48,15 @@ jobs:
       # --ignore-scripts is what every developer here already installs with:
       # the workspace is built around a global ignore-scripts setting, and
       # `pnpm bootstrap` is the sanctioned way to run the two steps it
-      # suppresses. CI needs neither — the Electron binary is a 200 MB
-      # download nothing in the suite opens, and node-pty's native binding is
-      # never loaded, because every test that touches a pty passes a fake in.
-      # See pnpm-workspace.yaml.
+      # suppresses. See pnpm-workspace.yaml.
       - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Of bootstrap's two steps CI needs exactly one. pty.test.ts spawns a
+      # real pty and asserts on what the child saw, so the node-pty binding has
+      # to be there — and node-pty ships no Linux prebuild, so on ubuntu it is
+      # compiled here. The Electron binary is a 200 MB download nothing in the
+      # suite opens, which is what --pty-only skips.
+      - run: pnpm bootstrap --pty-only
 
       - run: pnpm lint
 

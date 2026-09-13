@@ -20,6 +20,11 @@
 //
 // Idempotent. Both steps check before they act, so running it twice is free
 // and running it after every `pnpm install` is the habit.
+//
+// `--pty-only` does the second step and skips the first. The test suite needs
+// the node-pty binding — pty.test.ts spawns a real pty and asserts on what the
+// child saw — but opens no window, so CI would otherwise spend a 200 MB
+// Electron download on nothing.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -27,6 +32,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ptyOnly = process.argv.includes("--pty-only");
 
 function step(message) {
   console.log(`  • ${message}`);
@@ -60,7 +66,9 @@ function packageDir(name, fromWorkspacePackage) {
 // is only worth knowing that a `pnpm install` which replaced that package
 // would silently change which Electron gets packaged.
 const electronDir = packageDir("electron", "packages/desktop");
-if (existsSync(join(electronDir, "path.txt"))) {
+if (ptyOnly) {
+  step("Skipping the Electron binary (--pty-only)");
+} else if (existsSync(join(electronDir, "path.txt"))) {
   step("Electron binary already present");
 } else {
   step("Downloading the Electron binary (castLabs build, ~200 MB)");

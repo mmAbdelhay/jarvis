@@ -17,9 +17,16 @@ pnpm test        # vitest, ~3,500 tests
 ```
 
 `pnpm lint:fix` applies everything Biome can fix on its own, and `pnpm format`
-reformats without touching rules. Run `pnpm build` before `pnpm test` on a
-fresh clone: one test reads the emitted `dist/` and fails on a tree that was
-never built.
+reformats without touching rules.
+
+Two things a fresh clone needs before `pnpm test` will pass:
+
+- **`pnpm build`** — one test reads the emitted `dist/` and the vendored xterm
+  copied beside it, and fails on a tree that was never built.
+- **`pnpm bootstrap`** (or `pnpm bootstrap --pty-only`, which skips the 200 MB
+  Electron download) — `pty.test.ts` spawns a real pty, so node-pty’s native
+  binding has to exist. macOS and Windows get a prebuilt one; on Linux it is
+  compiled, which wants `build-essential` and `python3`.
 
 ## Getting it running
 
