@@ -183,6 +183,11 @@ win:
     - target: zip
       arch:
         - x64
+  # Named like the .dmg and the .AppImage on the releases page, which carry
+  # their architecture: Jarvis-<version>-win-x64.zip. The default drops the
+  # arch, and a zip is the one artefact whose extension says nothing about
+  # which platform it is for.
+  artifactName: "${productName}-${version}-win-${arch}.${ext}"
   icon: assets/icon.png
 
 # ---------------------------------------------------------------------------
