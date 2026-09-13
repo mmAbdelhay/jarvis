@@ -155,11 +155,16 @@ tools each Workspace tab needs.
 - [Conventions](docs/develop/conventions.md) — the rules this codebase enforces, and why each exists
 - [Testing](docs/develop/testing.md) — what is tested where, and what tests cannot see
 - [Adding a Workspace tab](docs/develop/adding-a-tab.md) — the pattern, end to end
+- [Contributing](CONTRIBUTING.md) — what CI checks, and how a change is expected to arrive
+- [Security](SECURITY.md) — what is in scope, and where to report privately
+- [Changelog](CHANGELOG.md) — what each release changed
 
 ## Commands
 
 | | |
 |---|---|
+| `pnpm lint` | Biome: formatting and rules, warnings included |
+| `pnpm lint:fix` | apply everything Biome can fix itself |
 | `pnpm test` | the whole suite |
 | `pnpm typecheck` | `tsc -b` across the workspace |
 | `pnpm bootstrap` | fetch the Electron binary, build node-pty |
@@ -215,5 +220,6 @@ for, and it is worth saying out loud. Jarvis adds no sandbox of its own.
 
 ## Licence
 
-[MIT](LICENSE). Third-party components keep their own licences — see
-[architecture](docs/develop/architecture.md#third-party-components).
+[MIT](LICENSE). Third-party components keep their own licences — [NOTICE](NOTICE)
+names the one that matters most, and
+[architecture](docs/develop/architecture.md#third-party-components) has the rest.

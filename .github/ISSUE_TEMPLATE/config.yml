@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mmAbdelhay/jarvis/security/advisories/new
+    about: Report privately, never as a public issue. See SECURITY.md.
+  - name: Question or idea
+    url: https://github.com/mmAbdelhay/jarvis/discussions
+    about: For anything that is not a bug and not yet a request.

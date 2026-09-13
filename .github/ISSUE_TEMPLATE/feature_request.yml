@@ -1,0 +1,34 @@
+name: Feature request
+description: Something Jarvis should do and does not.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Jarvis is one person's tool built for one person's workflow. Requests
+        are welcome and read; none is promised. The ones that land are usually
+        the ones that describe a problem rather than a solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: >
+        The task, not the feature. What do you do today instead, and what does
+        it cost you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you think would help
+      description: Optional. A shape, a sketch, a tab, a chord — whatever you have.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What else you considered
+      description: >
+        Optional, and genuinely useful: another tool that gets this right, or
+        a workaround inside Jarvis that nearly works.

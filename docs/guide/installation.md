@@ -2,8 +2,10 @@
 
 ## What Jarvis needs to start
 
-- **Node 22 or newer** and **pnpm 10**. The repository pins pnpm in
-  `package.json`; `corepack enable` is enough to get the right one.
+- **Node 24 or newer** and **pnpm 10**. The repository pins pnpm in
+  `package.json`; `corepack enable` is enough to get the right one. Node 22
+  is not enough: `node:sqlite` is what the session store is built on, and it
+  is not in Node 22 at all.
 - **macOS (Apple Silicon), Linux (x64) or Windows (x64).** All three are
   built and run; none is a port of the others. What differs is named where it
   differs: the Terminal tab's shell (zsh, bash, PowerShell), the voice that

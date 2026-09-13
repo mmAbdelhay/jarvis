@@ -1,0 +1,13 @@
+Jarvis is MIT-licensed; see LICENSE for the grant and the warranty
+disclaimer that come with it. This file records what that licence does not
+reach.
+
+This note lived at the foot of LICENSE until it was moved here. GitHub reads
+LICENSE whole to decide which licence a repository is under, and anything
+appended to the MIT text makes it report "Other" instead of MIT.
+
+This licence covers the source in this repository. It does not cover
+third-party components that a packaged build embeds — in particular Google's
+Widevine Content Decryption Module, which ships inside the Electron fork
+Jarvis is built on and is distributed under Google's own terms. See
+docs/develop/architecture.md, "Electron for Content Security, and Widevine".

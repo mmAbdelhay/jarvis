@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in Jarvis does not do what it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. If this is a security issue, please close
+        this and read [SECURITY.md](../blob/master/SECURITY.md) instead — there
+        is a private channel for those.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I opened the Database tab on a project with a Postgres connection.
+        I expected the tables to list. The tab stayed on "starting…" forever.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest path from a fresh launch to the problem.
+      placeholder: |
+        1. Open Jarvis
+        2. …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Jarvis version
+      description: The version you downloaded, or the commit if you built from source.
+      placeholder: "0.1.2, or 245e791"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - Linux
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: "`node --version`. Only needed if you built from source."
+      placeholder: v24.21.0
+
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent
+      description: >
+        If this involves a session, name the agent — Jarvis drives several and
+        they behave differently.
+      placeholder: claude, copilot, …
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Anything printed
+      description: >
+        Terminal output, the DevTools console, or the dialog text. Pasted as
+        text rather than a screenshot where you can — it is searchable.
+      render: text

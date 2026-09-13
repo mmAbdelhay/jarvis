@@ -1,0 +1,66 @@
+# What a pull request has to survive before it can reach master.
+#
+# Every step is one a contributor can run locally with the same command, which
+# is the point: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`.
+# Nothing in this file knows anything the repository does not.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# A second push to the same pull request cancels the first: the older run's
+# answer is about code that no longer exists.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide what the others were going to say.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No version pinned here on purpose: the `packageManager` field in
+      # package.json already names one, and saying it twice is a second place
+      # to forget.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24, not the 22 the guides used to name. The session store is
+          # built on node:sqlite, and on Node 22 Vite cannot resolve that as a
+          # builtin, so the renderer suite fails to load at all.
+          node-version: 24
+          cache: pnpm
+
+      # --ignore-scripts is what every developer here already installs with:
+      # the workspace is built around a global ignore-scripts setting, and
+      # `pnpm bootstrap` is the sanctioned way to run the two steps it
+      # suppresses. CI needs neither — the Electron binary is a 200 MB
+      # download nothing in the suite opens, and node-pty's native binding is
+      # never loaded, because every test that touches a pty passes a fake in.
+      # See pnpm-workspace.yaml.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      # Before the tests, not after: dist-emit-resolution.test.ts reads the
+      # emitted dist/ and the vendored xterm copied beside it, and fails on a
+      # tree that was never built.
+      - run: pnpm build
+
+      - run: pnpm test
