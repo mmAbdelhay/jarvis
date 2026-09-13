@@ -45,10 +45,26 @@ the projects and sessions that actually exist, so "افتح متجر أكمي" r
 project keyed `acme`. Speak to a session instead and the words go to that
 agent's stdin.
 
+<p align="center">
+  <img src="./docs/media/session.png" width="100%" alt="The Session route: a searchable table of every session across every project, with its agent, its state and when it was last active.">
+</p>
+
+<p align="center">
+  <sub>Every session Jarvis has ever run, across every project. Prompts, project names and agent accounts are blurred — the table, the states and the timestamps are the running app.</sub>
+</p>
+
 **Keeps the work in one window.** The Workspace opens a project's files in an
 editor, its tables in a database client, its endpoints in an API client, its
 cluster in a browser, and a shell rooted where the project is — each as an
 ordinary tab beside the others.
+
+<p align="center">
+  <img src="./docs/media/workspace-editor.png" width="100%" alt="The Workspace with the Editor tab open: code-server running inside Jarvis, showing the project's file tree and a TypeScript source file.">
+</p>
+
+<p align="center">
+  <sub>The Editor tab — code-server, in the window, on the project Jarvis is pointed at.</sub>
+</p>
 
 **The Terminal tab is Warp-shaped.** Each command and its output become an
 addressable block you can collapse, copy, re-run or filter to the ones that
@@ -57,6 +73,14 @@ pane splits; ⌘P reaches every action. A file sidebar follows the shell as it
 `cd`s, and a row of chips above the input names the directory, the branch and
 what is uncommitted. Re-run, workflows, history and the AI's suggestion all
 *fill* the line — you press Enter yourself, always.
+
+<p align="center">
+  <img src="./docs/media/terminal.png" width="100%" alt="The Terminal tab: each command and its output as an addressable block with its own timing and working directory, a file sidebar on the left, and a row of chips naming the directory, branch and uncommitted count.">
+</p>
+
+<p align="center">
+  <sub>The Terminal tab. Each block carries its own exit state, duration and working directory; the chips under the prompt name the Node version, the directory, the branch and what is uncommitted.</sub>
+</p>
 
 ## Getting started
 

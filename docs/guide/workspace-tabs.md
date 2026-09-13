@@ -128,6 +128,14 @@ on disk**, and everything follows from that:
 
 ## Editor
 
+<p align="center">
+  <img src="../media/workspace-editor.png" width="100%" alt="The Editor tab: code-server running inside Jarvis, with the project's file tree on the left and a TypeScript source file open.">
+</p>
+
+<p align="center">
+  <sub>code-server, in the window, on whichever project the Workspace is pointed at.</sub>
+</p>
+
 Spawns `code-server` on a free loopback port and opens it as a tab. One
 instance per (project, root), reused, and killed when Jarvis quits.
 
@@ -288,6 +296,14 @@ what a Conditional Access policy can do to a Teams tenant in a browser
 Jarvis hosts.
 
 ## Terminal
+
+<p align="center">
+  <img src="../media/terminal.png" width="100%" alt="The Terminal tab: each command and its output as an addressable block with its own timing and working directory, a file sidebar on the left, and a row of chips naming the directory, branch and uncommitted count.">
+</p>
+
+<p align="center">
+  <sub>Each block carries its own exit state, duration and working directory. The chips under the prompt name the Node version, the directory, the branch and what is uncommitted.</sub>
+</p>
 
 Your login shell (`$SHELL -l`), rooted at the project, under a real pty. One
 per tab — two terminals in the same project is an ordinary thing to want.
