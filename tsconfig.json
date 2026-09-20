@@ -3,6 +3,8 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/platform" },
+    { "path": "packages/wire" },
+    { "path": "packages/remote" },
     { "path": "packages/desktop" },
     { "path": "packages/desktop/renderer" }
   ]

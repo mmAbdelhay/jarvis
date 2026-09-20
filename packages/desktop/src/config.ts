@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
+import { isIP } from "node:net";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
 import { DEFAULT_GREETING } from "@jarvis/core";
@@ -18,6 +19,24 @@ import type {
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
+
+export function providerAgentListsEqual(
+  left: readonly AgentConfig[],
+  right: readonly AgentConfig[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((agent, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        agent.id === other.id &&
+        agent.command === other.command &&
+        agent.vendor === other.vendor
+      );
+    })
+  );
+}
 
 /** What Jarvis sounds like, and what it says on opening. */
 export type VoiceConfig = {
@@ -115,6 +134,53 @@ export type BrowserConfig = {
    *  that needs the popup to report back to its opener. Links with
    *  target=_blank open as tabs either way. */
   allowPopups: boolean;
+  /** What a new Workspace tab opens instead of the built-in blank/search
+   *  page, when set. http(s) only — a `jarvis:` or `file:` page (or
+   *  anything else `new URL` cannot parse) is refused at parse time rather
+   *  than reaching openTab, and absent keeps today's behaviour. */
+  homePage?: string;
+};
+
+export type PrayerConfig = {
+  enabled: boolean;
+  location?: { latitude: number; longitude: number; name: string };
+  /** Optional, like `location` above: absent means "use the defaults"
+   *  (before-notification on, 10 minutes ahead, at-time on) rather than
+   *  "notifications off" — prayer notifications are on by default whenever
+   *  `enabled` is true, and the user turns them off in Settings. */
+  notify?: { before: boolean; beforeMinutes: number; atTime: boolean };
+};
+
+/**
+ * The `remote:` section: whether a paired phone may reach this machine, and
+ * on which address.
+ *
+ * Absent means the bridge does not exist, and an absent section parses to
+ * exactly DEFAULT_REMOTE: off, loopback, no proxy, no push. That is the
+ * spec's non-negotiable — a fresh jarvis.yaml has no `remote:` section at
+ * all, so upgrading Jarvis can never open a port — and it is why
+ * settings-io writes the section back only when it says something the
+ * defaults do not.
+ *
+ * Milestone 3 only parses and edits this. Nothing listens yet.
+ */
+export type RemoteConfig = {
+  enabled: boolean;
+  /** An IP literal, never a hostname: a hostname is a DNS lookup in a
+   *  security-relevant position. Settings' picker fills it in. */
+  bindAddress: string;
+  /** 0 asks the OS for a free port; the pairing QR carries whichever it got. */
+  port: number;
+  /** Separate consent from `enabled`: it widens what a paired phone can open
+   *  (Editor, Database, Cluster), and it needs a real certificate. */
+  sidecarProxy: boolean;
+  /** Both paths or neither. Neither means a self-signed certificate, minted
+   *  once and pinned through the pairing QR. */
+  tls: { certPath?: string; keyPath?: string };
+  /** The one part of the feature that involves a third party. */
+  push: { enabled: boolean; includeProjectNames: boolean };
+  /** 0 = never; otherwise the bridge turns itself off after this long idle. */
+  idleDisableMinutes: number;
 };
 
 export type JarvisConfig = {
@@ -157,6 +223,7 @@ export type JarvisConfig = {
   terminal: TerminalConfig;
   performance: PerformanceConfig;
   browser: BrowserConfig;
+  prayer: PrayerConfig;
   brain: BrainConfig;
   voice: VoiceConfig;
   whisper: { binaryPath: string; modelPath: string };
@@ -164,6 +231,9 @@ export type JarvisConfig = {
    *  everyone until they want to change it — the defaults are the whole
    *  point of the section. */
   sessions: { importWindowDays: number };
+  /** The `remote:` section. Absent from jarvis.yaml for everyone who has
+   *  never turned it on — see RemoteConfig. */
+  remote: RemoteConfig;
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
   sessionsDbPath: string;
@@ -176,6 +246,15 @@ export type JarvisConfig = {
 // isolation directory below.
 export function defaultSessionsDbPath(): string {
   return join(homedir(), ".config/jarvis/sessions.db");
+}
+
+// `~/.config/jarvis/sessions-scan.json`, beside the config file — the last
+// process scan's externally-discovered rows (see session-scan-cache.ts),
+// so they still show at the next launch, unchanged, until the user presses
+// Refresh. Not a yaml setting, same reasoning as defaultSessionsDbPath()
+// above: it is Jarvis's own bookkeeping, not something to relocate.
+export function defaultSessionsScanPath(): string {
+  return join(homedir(), ".config/jarvis/sessions-scan.json");
 }
 
 // The always-read workflow directory, on top of whatever `workflows:`
@@ -264,8 +343,10 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const terminal = parseTerminal(root["terminal"]);
   const performance = parsePerformance(root["performance"]);
   const browser = parseBrowser(root["browser"]);
+  const prayer = parsePrayer(root["prayer"]);
   const whisper = parseWhisper(root["whisper"]);
   const sessions = parseSessions(root["sessions"]);
+  const remote = parseRemote(root["remote"]);
   const voice = parseVoice(root["voice"]);
 
   const accountId = brainConfig.accountId;
@@ -288,8 +369,15 @@ export function parseConfig(raw: unknown): JarvisConfig {
 
   return {
     registry: { agents, routing },
-    projects: Object.fromEntries(
-      Object.entries(projects).map(([name, path]) => [name, expandTilde(path)]),
+    // `projects` is already parseProjects's null-prototype record (its
+    // members above only ever indexed into it, never replaced it), so the
+    // tilde-expanded values are assigned back onto that same object rather
+    // than into a fresh Object.fromEntries({}) — which would reintroduce
+    // Object.prototype and undo parseProjects's guard right before it
+    // reaches dispatch.ts.
+    projects: Object.assign(
+      projects,
+      Object.fromEntries(Object.entries(projects).map(([name, path]) => [name, expandTilde(path)])),
     ),
     databases,
     editors,
@@ -301,6 +389,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     terminal,
     performance,
     browser,
+    prayer,
     brain: {
       systemPrompt:
         typeof brainConfig.systemPrompt === "string"
@@ -312,8 +401,116 @@ export function parseConfig(raw: unknown): JarvisConfig {
     voice,
     whisper,
     sessions,
+    remote,
     sessionsDbPath: defaultSessionsDbPath(),
   };
+}
+
+export const DEFAULT_PRAYER: PrayerConfig = { enabled: false };
+
+/** `prayer.notify`'s defaults when the whole section is absent — not
+ *  exported, the same way Alexandria's coordinates are only a local
+ *  literal in prayer.ts rather than a config.ts export: the renderer keeps
+ *  its own copy of this fallback (prayer-notify.ts's DEFAULT_PRAYER_NOTIFY)
+ *  so it never needs a runtime import of this node-touching module. */
+const DEFAULT_PRAYER_NOTIFY = { before: true, beforeMinutes: 10, atTime: true };
+
+function parsePrayerNotify(raw: unknown): NonNullable<PrayerConfig["notify"]> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("Config `prayer.notify` must be an object");
+  }
+  const section = raw as Record<string, unknown>;
+  const before = section["before"];
+  if (before !== undefined && typeof before !== "boolean") {
+    throw new Error("Config `prayer.notify.before` must be a boolean");
+  }
+  const atTime = section["atTime"];
+  if (atTime !== undefined && typeof atTime !== "boolean") {
+    throw new Error("Config `prayer.notify.atTime` must be a boolean");
+  }
+  const beforeMinutes = section["beforeMinutes"];
+  if (
+    beforeMinutes !== undefined &&
+    (typeof beforeMinutes !== "number" ||
+      !Number.isInteger(beforeMinutes) ||
+      beforeMinutes < 1 ||
+      beforeMinutes > 60)
+  ) {
+    throw new Error("Config `prayer.notify.beforeMinutes` must be an integer from 1 to 60");
+  }
+  return {
+    before: before ?? DEFAULT_PRAYER_NOTIFY.before,
+    beforeMinutes: beforeMinutes ?? DEFAULT_PRAYER_NOTIFY.beforeMinutes,
+    atTime: atTime ?? DEFAULT_PRAYER_NOTIFY.atTime,
+  };
+}
+
+function parsePrayer(raw: unknown): PrayerConfig {
+  if (raw === undefined || raw === null) return { ...DEFAULT_PRAYER };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Config `prayer` must be an object");
+  }
+  const section = raw as Record<string, unknown>;
+  if (typeof section["enabled"] !== "boolean") {
+    throw new Error("Config `prayer.enabled` must be a boolean");
+  }
+  const rawNotify = section["notify"];
+  const notify = rawNotify === undefined ? {} : { notify: parsePrayerNotify(rawNotify) };
+  const rawLocation = section["location"];
+  if (rawLocation === undefined) return { enabled: section["enabled"], ...notify };
+  if (typeof rawLocation !== "object" || rawLocation === null || Array.isArray(rawLocation)) {
+    throw new Error("Config `prayer.location` must be an object");
+  }
+  const location = rawLocation as Record<string, unknown>;
+  const latitude = location["latitude"];
+  const longitude = location["longitude"];
+  const name = location["name"];
+  if (
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90
+  ) {
+    throw new Error("Config `prayer.location.latitude` must be a number from -90 to 90");
+  }
+  if (
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    throw new Error("Config `prayer.location.longitude` must be a number from -180 to 180");
+  }
+  if (typeof name !== "string" || name.length > 60 || /[\p{Cc}\p{Cf}]/u.test(name)) {
+    throw new Error(
+      "Config `prayer.location.name` must be at most 60 characters with no control characters",
+    );
+  }
+  return { enabled: section["enabled"], location: { latitude, longitude, name }, ...notify };
+}
+
+export function mergeConfigInPlace(
+  target: Record<string, unknown>,
+  next: Record<string, unknown>,
+): void {
+  for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
+  for (const [key, newValue] of Object.entries(next)) {
+    const oldValue = target[key];
+    if (Array.isArray(oldValue) && Array.isArray(newValue)) {
+      oldValue.splice(0, oldValue.length, ...newValue);
+    } else if (
+      oldValue &&
+      newValue &&
+      typeof oldValue === "object" &&
+      typeof newValue === "object" &&
+      !Array.isArray(oldValue) &&
+      !Array.isArray(newValue)
+    ) {
+      const destination = oldValue as Record<string, unknown>;
+      for (const nested of Object.keys(destination)) delete destination[nested];
+      Object.assign(destination, newValue);
+    } else target[key] = newValue;
+  }
 }
 
 /** Extracted so Settings (settings-io.ts, via main.ts) reads and writes the
@@ -508,11 +705,163 @@ function parseBrowser(rawBrowser: unknown): BrowserConfig {
   if (typeof rawBrowser !== "object" || Array.isArray(rawBrowser)) {
     throw new Error("Config `browser` must be an object");
   }
-  const allowPopups = (rawBrowser as Record<string, unknown>)["allowPopups"];
+  const section = rawBrowser as Record<string, unknown>;
+  const allowPopups = section["allowPopups"];
   if (allowPopups !== undefined && typeof allowPopups !== "boolean") {
     throw new Error("Config `browser.allowPopups` must be a boolean");
   }
-  return { allowPopups: allowPopups ?? DEFAULT_BROWSER.allowPopups };
+  const rawHomePage = section["homePage"];
+  if (
+    rawHomePage !== undefined &&
+    (typeof rawHomePage !== "string" ||
+      rawHomePage.length > 2048 ||
+      /[\p{Cc}\p{Cf}]/u.test(rawHomePage))
+  ) {
+    throw new Error(
+      "Config `browser.homePage` must be at most 2048 characters with no control characters",
+    );
+  }
+  if (rawHomePage !== undefined) {
+    let protocol: string;
+    try {
+      protocol = new URL(rawHomePage).protocol;
+    } catch {
+      throw new Error("Config `browser.homePage` must be a valid http(s) URL");
+    }
+    if (protocol !== "http:" && protocol !== "https:") {
+      throw new Error("Config `browser.homePage` must be a valid http(s) URL");
+    }
+  }
+  return {
+    allowPopups: allowPopups ?? DEFAULT_BROWSER.allowPopups,
+    ...(rawHomePage === undefined ? {} : { homePage: rawHomePage }),
+  };
+}
+
+/** The `remote:` section as it stands with nothing in jarvis.yaml. Exported
+ *  so settings-io can tell "never written" from "written" — see
+ *  DEFAULT_TERMINAL's note. */
+export const DEFAULT_REMOTE: RemoteConfig = {
+  enabled: false,
+  bindAddress: "127.0.0.1",
+  port: 7717,
+  sidecarProxy: false,
+  tls: {},
+  push: { enabled: false, includeProjectNames: false },
+  idleDisableMinutes: 0,
+};
+
+const BIND_ADDRESS_ERROR =
+  "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname";
+
+function parseRemote(rawRemote: unknown): RemoteConfig {
+  // Fresh nested objects, not DEFAULT_REMOTE's own: a caller mutating the
+  // parsed config must not be able to change what "default" means for
+  // settings-io's comparison.
+  const defaults = (): RemoteConfig => ({
+    ...DEFAULT_REMOTE,
+    tls: {},
+    push: { ...DEFAULT_REMOTE.push },
+  });
+  if (rawRemote === undefined || rawRemote === null) return defaults();
+  if (typeof rawRemote !== "object" || Array.isArray(rawRemote)) {
+    throw new Error("Config `remote` must be an object");
+  }
+  const remote = rawRemote as Record<string, unknown>;
+
+  const flag = (key: "enabled" | "sidecarProxy"): boolean => {
+    const value = remote[key];
+    if (value === undefined) return DEFAULT_REMOTE[key];
+    if (typeof value !== "boolean") {
+      throw new Error(`Config \`remote.${key}\` must be true or false`);
+    }
+    return value;
+  };
+
+  const bindAddress = remote["bindAddress"];
+  // isIP, not a pattern: it is the same parser the listener will hand the
+  // address to, so "accepted here" and "bindable there" cannot disagree.
+  // 0.0.0.0 and :: pass — binding every interface is a legitimate choice,
+  // and Settings warns about it rather than refusing it.
+  if (bindAddress !== undefined && (typeof bindAddress !== "string" || isIP(bindAddress) === 0)) {
+    throw new Error(BIND_ADDRESS_ERROR);
+  }
+
+  const port = remote["port"];
+  if (
+    port !== undefined &&
+    (typeof port !== "number" || !Number.isInteger(port) || port < 0 || port > 65535)
+  ) {
+    throw new Error("Config `remote.port` must be a whole number from 0 to 65535");
+  }
+
+  const idle = remote["idleDisableMinutes"];
+  // 0 is meaningful — it is "never" — so the floor is 0, as in performance:.
+  // The ceiling, 10080, is one week in minutes: past that the setting stops
+  // meaning "disable while idle" and starts meaning "disabled" (ruling 32).
+  if (
+    idle !== undefined &&
+    (typeof idle !== "number" || !Number.isInteger(idle) || idle < 0 || idle > 10080)
+  ) {
+    throw new Error(
+      "Config `remote.idleDisableMinutes` must be a whole number of minutes from 0 to 10080",
+    );
+  }
+
+  return {
+    enabled: flag("enabled"),
+    bindAddress: typeof bindAddress === "string" ? bindAddress : DEFAULT_REMOTE.bindAddress,
+    port: typeof port === "number" ? port : DEFAULT_REMOTE.port,
+    sidecarProxy: flag("sidecarProxy"),
+    tls: parseRemoteTls(remote["tls"]),
+    push: parseRemotePush(remote["push"]),
+    idleDisableMinutes: typeof idle === "number" ? idle : DEFAULT_REMOTE.idleDisableMinutes,
+  };
+}
+
+function parseRemoteTls(rawTls: unknown): RemoteConfig["tls"] {
+  if (rawTls === undefined || rawTls === null) return {};
+  if (typeof rawTls !== "object" || Array.isArray(rawTls)) {
+    throw new Error("Config `remote.tls` must be an object");
+  }
+  const tls = rawTls as Record<string, unknown>;
+  const path = (key: "certPath" | "keyPath"): string | undefined => {
+    const value = tls[key];
+    // `~` in YAML is null, and the spec's own example spells "absent" that way.
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string" || value === "") {
+      throw new Error(`Config \`remote.tls.${key}\` must be a non-empty string`);
+    }
+    return expandTilde(value);
+  };
+  const certPath = path("certPath");
+  const keyPath = path("keyPath");
+  // A certificate without its key (or the reverse) can never be served;
+  // saying so at load beats a bridge that fails the first time it starts.
+  if (certPath === undefined || keyPath === undefined) {
+    if (certPath !== keyPath) {
+      throw new Error("Config `remote.tls.certPath` and `remote.tls.keyPath` must be set together");
+    }
+    return {};
+  }
+  return { certPath, keyPath };
+}
+
+function parseRemotePush(rawPush: unknown): RemoteConfig["push"] {
+  if (rawPush === undefined || rawPush === null) return { ...DEFAULT_REMOTE.push };
+  if (typeof rawPush !== "object" || Array.isArray(rawPush)) {
+    throw new Error("Config `remote.push` must be an object");
+  }
+  const push = rawPush as Record<string, unknown>;
+  const flag = (key: "enabled" | "includeProjectNames"): boolean => {
+    const value = push[key];
+    if (value === undefined) return DEFAULT_REMOTE.push[key];
+    if (typeof value !== "boolean") {
+      throw new Error(`Config \`remote.push.${key}\` must be true or false`);
+    }
+    return value;
+  };
+  return { enabled: flag("enabled"), includeProjectNames: flag("includeProjectNames") };
 }
 
 function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: string } {
@@ -652,12 +1001,15 @@ function parseDatabases(rawDatabases: unknown, projects: Record<string, string>)
  * will never have an entry, and they keep opening at their own root.
  */
 function parseEditors(rawEditors: unknown, projects: Record<string, string>): EditorsConfig {
-  if (rawEditors === undefined) return {};
+  if (rawEditors === undefined) return Object.create(null) as EditorsConfig;
   if (typeof rawEditors !== "object" || rawEditors === null || Array.isArray(rawEditors)) {
     throw new Error("Config `editors` must be an object");
   }
 
-  const result: EditorsConfig = {};
+  // Object.create(null), same reasoning as parseProjects above (ruling 30):
+  // a project named "constructor" must read back as an own, undefined
+  // entry from this map too, not Object.prototype's method.
+  const result: EditorsConfig = Object.create(null) as EditorsConfig;
   for (const [project, rawList] of Object.entries(rawEditors as Record<string, unknown>)) {
     if (projects[project] === undefined) {
       throw new Error(`Config \`editors\` names no configured project: "${project}"`);
@@ -714,12 +1066,12 @@ function parseEditors(rawEditors: unknown, projects: Record<string, string>): Ed
  * that is missing or renamed surfaces when the button is pressed instead.
  */
 function parseClusters(rawClusters: unknown, projects: Record<string, string>): ClustersConfig {
-  if (rawClusters === undefined) return {};
+  if (rawClusters === undefined) return Object.create(null) as ClustersConfig;
   if (typeof rawClusters !== "object" || rawClusters === null || Array.isArray(rawClusters)) {
     throw new Error("Config `clusters` must be an object");
   }
 
-  const result: ClustersConfig = {};
+  const result: ClustersConfig = Object.create(null) as ClustersConfig;
   for (const [project, rawList] of Object.entries(rawClusters as Record<string, unknown>)) {
     if (projects[project] === undefined) {
       throw new Error(`Config \`clusters\` names no configured project: "${project}"`);
@@ -762,12 +1114,12 @@ function parseClusters(rawClusters: unknown, projects: Record<string, string>): 
  *  within one project are rejected too — the Docker tab keys its rows by
  *  that name, so two rows called "app" would be indistinguishable. */
 function parseDocker(rawDocker: unknown, projects: Record<string, string>): DockerConfig {
-  if (rawDocker === undefined) return {};
+  if (rawDocker === undefined) return Object.create(null) as DockerConfig;
   if (typeof rawDocker !== "object" || rawDocker === null || Array.isArray(rawDocker)) {
     throw new Error("Config `docker` must be an object");
   }
 
-  const result: DockerConfig = {};
+  const result: DockerConfig = Object.create(null) as DockerConfig;
   for (const [project, rawList] of Object.entries(rawDocker as Record<string, unknown>)) {
     if (projects[project] === undefined) {
       throw new Error(`Config \`docker\` names no configured project: "${project}"`);
@@ -818,12 +1170,12 @@ function parseDocker(rawDocker: unknown, projects: Record<string, string>): Dock
  *  subdomain or a tenant id, and the driver decides the host, so no entry
  *  can point the tab at a site of its own choosing. */
 function parseChat(rawChat: unknown, projects: Record<string, string>): ChatConfig {
-  if (rawChat === undefined) return {};
+  if (rawChat === undefined) return Object.create(null) as ChatConfig;
   if (typeof rawChat !== "object" || rawChat === null || Array.isArray(rawChat)) {
     throw new Error("Config `chat` must be an object");
   }
 
-  const result: ChatConfig = {};
+  const result: ChatConfig = Object.create(null) as ChatConfig;
   for (const [project, rawList] of Object.entries(rawChat as Record<string, unknown>)) {
     if (projects[project] === undefined) {
       throw new Error(`Config \`chat\` names no configured project: "${project}"`);
@@ -876,12 +1228,12 @@ function parseChat(rawChat: unknown, projects: Record<string, string>): ChatConf
  *       acme: ./.jarvis/workflows
  */
 function parseWorkflows(rawWorkflows: unknown, projects: Record<string, string>): WorkflowsConfig {
-  if (rawWorkflows === undefined) return {};
+  if (rawWorkflows === undefined) return Object.create(null) as WorkflowsConfig;
   if (typeof rawWorkflows !== "object" || rawWorkflows === null || Array.isArray(rawWorkflows)) {
     throw new Error("Config `workflows` must be an object");
   }
 
-  const result: WorkflowsConfig = {};
+  const result: WorkflowsConfig = Object.create(null) as WorkflowsConfig;
   for (const [project, rawDir] of Object.entries(rawWorkflows as Record<string, unknown>)) {
     if (projects[project] === undefined) {
       throw new Error(`Config \`workflows\` names no configured project: "${project}"`);
@@ -1145,14 +1497,20 @@ function parseVoice(rawVoice: unknown): VoiceConfig {
 }
 
 function parseProjects(rawProjects: unknown): Record<string, string> {
+  // Object.create(null), not `{}`: a project literally named "constructor"
+  // or "__proto__" must read back as an own, undefined entry — never as
+  // Object.prototype's method or as a prototype swap — so every consumer
+  // that tests `projects[name] === undefined` for membership (dispatch.ts,
+  // config.ts's own parseDatabases/parseEditors/... family, ipc.ts) stays
+  // correct no matter what a project is named (ruling 30).
   if (rawProjects === undefined) {
-    return {};
+    return Object.create(null) as Record<string, string>;
   }
   if (typeof rawProjects !== "object" || rawProjects === null || Array.isArray(rawProjects)) {
     throw new Error("Config `projects` must be an object");
   }
 
-  const projects: Record<string, string> = {};
+  const projects: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [name, path] of Object.entries(rawProjects)) {
     // The personal browser is this key with no path behind it, and the
     // whole of its isolation is that `projects` never contains it: every

@@ -14,8 +14,12 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "test": "vitest run",
+    "test:mobile": "pnpm --dir apps/mobile exec vitest run",
+    "test:all": "pnpm run test && pnpm run test:mobile",
     "test:watch": "vitest",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "typecheck:mobile": "pnpm --dir apps/mobile exec tsc --noEmit -p tsconfig.json",
+    "typecheck:all": "pnpm run typecheck && pnpm run typecheck:mobile"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",

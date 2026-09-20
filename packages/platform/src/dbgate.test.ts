@@ -248,6 +248,17 @@ describe("createDbGateManager", () => {
     expect(spawnArgs[0]?.env["PASSWORD"]).toBe("pw-fixed");
   });
 
+  // The proxy (a later task) injects the resulting Authorization header
+  // server-side; without BASIC_AUTH, DbGate falls back to its own JWT
+  // login form and there is nothing for the proxy to inject.
+  it("turns on DbGate's basic auth so a header can answer its login instead of a form", async () => {
+    const { instance, spawnArgs } = manager();
+
+    await instance.open("acme");
+
+    expect(spawnArgs[0]?.env["BASIC_AUTH"]).toBe("1");
+  });
+
   it("seeds the project's declared connections", async () => {
     const { instance, spawnArgs } = manager({
       connectionsFor: () => [{ id: "main", engine: "mysql", host: "127.0.0.1" }],
@@ -399,6 +410,33 @@ describe("createDbGateManager stopping one instance", () => {
     expect(result.ok).toBe(true);
     expect(processes).toHaveLength(2);
     expect(instance.runningKeys()).toEqual(["acme"]);
+  });
+});
+
+describe("credentialFor", () => {
+  it("returns the running instance's credential by port", async () => {
+    const { instance } = manager();
+
+    await instance.open("acme");
+
+    expect(instance.credentialFor(51234)).toEqual({ login: "jarvis", password: "pw-fixed" });
+  });
+
+  it("returns undefined for a port nothing is running on", async () => {
+    const { instance } = manager();
+
+    await instance.open("acme");
+
+    expect(instance.credentialFor(9999)).toBeUndefined();
+  });
+
+  it("returns undefined once the instance has exited", async () => {
+    const { instance, processes } = manager();
+
+    await instance.open("acme");
+    processes[0]?.emitExit(0);
+
+    expect(instance.credentialFor(51234)).toBeUndefined();
   });
 });
 

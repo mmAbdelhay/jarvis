@@ -39,6 +39,7 @@ function layoutDom(): void {
         <select id="session-filter-project"></select>
         <select id="session-filter-agent"></select>
         <div id="session-count"></div>
+        <button id="session-refresh" type="button"></button>
         <div id="session-table-status"></div>
         <table><thead><tr><th data-sort="project"></th><th data-sort="lastActivityAt"></th></tr></thead><tbody id="session-table-body"></tbody></table>
       </div>
@@ -55,6 +56,8 @@ type Jarvis = Pick<
   | "getSessionTranscript"
   | "resumeSession"
   | "getHistory"
+  | "listSessions"
+  | "refreshSessions"
   | "sendSessionInput"
   | "resizeSession"
   | "setVoiceTarget"
@@ -66,6 +69,8 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
     getSessionTranscript: vi.fn(async () => []),
     resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
     getHistory: vi.fn(async () => [] as Session[]),
+    listSessions: vi.fn(async () => [] as Session[]),
+    refreshSessions: vi.fn(async () => ({ jarvis: 0, external: 0, importedTranscripts: 0 })),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -333,12 +338,14 @@ describe("openSession", () => {
       chunk:
         `\u001b]133;A\u0007$ \u001b]133;B\u0007pnpm test\r\n` +
         `\u001b]133;C;pnpm test\u0007ok\r\n\u001b]133;D;0\u0007`,
+      offset: 0,
     });
     appendSessionOutput({
       sessionId: "s1",
       chunk:
         `\u001b]133;A\u0007$ \u001b]133;B\u0007false\r\n` +
         `\u001b]133;C;false\u0007\u001b]133;D;1\u0007`,
+      offset: 0,
     });
 
     expect(pane?.querySelectorAll(".block")).toHaveLength(2);
@@ -363,6 +370,7 @@ describe("openSession", () => {
       chunk:
         `\u001b]133;A\u0007$ \u001b]133;B\u0007first agent\r\n` +
         `\u001b]133;C;first agent\u0007ok\r\n\u001b]133;D;0\u0007`,
+      offset: 0,
     });
     const pane = document.querySelector<HTMLElement>(".terminal-pane");
     expect(pane?.querySelectorAll(".block")).toHaveLength(1);
@@ -382,11 +390,116 @@ describe("openSession", () => {
     const { openSession, appendSessionOutput } = await import("./session-view.js");
 
     await openSession(makeSession());
-    appendSessionOutput({ sessionId: "s1", chunk: "still streaming\r\n" });
+    appendSessionOutput({ sessionId: "s1", chunk: "still streaming\r\n", offset: 0 });
 
     expect(term().text).toBe("still streaming\r\n");
     expect(errors).toHaveBeenCalled();
     errors.mockRestore();
+  });
+
+  // The same race terminal-pane.ts's own write-gate exists for: a push that
+  // arrived while getSessionLog was still in flight is already inside
+  // whatever backlog that call is about to return, so writing it live too
+  // would draw it twice. See `settledId`'s own comment in session-view.ts.
+  describe("the live-output gate", () => {
+    it("drops a push that arrives before the backlog fetch resolves", async () => {
+      let releaseLog: (value: string) => void = () => {};
+      stubJarvis({
+        getSessionLog: vi.fn(
+          () =>
+            new Promise<string>((resolve) => {
+              releaseLog = resolve;
+            }),
+        ),
+      });
+      const { openSession, appendSessionOutput } = await import("./session-view.js");
+
+      const opening = openSession(makeSession({ id: "s1" }));
+      appendSessionOutput({ sessionId: "s1", chunk: "too early\r\n", offset: 0 });
+      expect(term().text).toBe("");
+
+      releaseLog("banner\r\n");
+      await opening;
+
+      // The backlog only, not the dropped push doubled onto it.
+      expect(term().text).toBe("banner\r\n");
+    });
+
+    it("writes a push that arrives after the backlog fetch resolves", async () => {
+      const { openSession, appendSessionOutput } = await import("./session-view.js");
+      await openSession(makeSession({ id: "s1" }));
+
+      appendSessionOutput({ sessionId: "s1", chunk: "on time\r\n", offset: 0 });
+
+      expect(term().text).toBe("on time\r\n");
+    });
+
+    // A slower open's backlog is already discarded by the currentId check
+    // above (see "discards a backlog that arrives after the user switched
+    // sessions") — this is the same race for the gate itself: opening s2
+    // must not let s1's late resolution mark s2 as settled and admit a push
+    // that arrived for s1 before its own fetch ever came back.
+    it("does not let a stale resolution settle the session the user switched to", async () => {
+      let releaseFirst: (value: string) => void = () => {};
+      stubJarvis({
+        getSessionLog: vi.fn((id: string) =>
+          id === "s1"
+            ? new Promise<string>((resolve) => {
+                releaseFirst = resolve;
+              })
+            : Promise.resolve(""),
+        ),
+      });
+      const { openSession, appendSessionOutput } = await import("./session-view.js");
+
+      const first = openSession(makeSession({ id: "s1" }));
+      await openSession(makeSession({ id: "s2" }));
+
+      appendSessionOutput({ sessionId: "s2", chunk: "live for s2\r\n", offset: 0 });
+      expect(term().text).toBe("live for s2\r\n");
+
+      releaseFirst("s1's stale banner\r\n");
+      await first;
+
+      // Neither the stale backlog nor a push mistakenly admitted under it.
+      expect(term().text).toBe("live for s2\r\n");
+    });
+
+    // Reopening the same session must close the gate again: settledId is
+    // module state, so without a reset it would still equal "s1" from the
+    // first open, and a push during the second open's own fetch would pass
+    // the (stale) gate and land both live and in the backlog about to be
+    // written.
+    it("closes the gate again when the same session is reopened", async () => {
+      let releaseLog: (value: string) => void = () => {};
+      const getSessionLog = vi.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            releaseLog = resolve;
+          }),
+      );
+      stubJarvis({ getSessionLog });
+      const { openSession, appendSessionOutput } = await import("./session-view.js");
+
+      // First open resolves normally, settling s1.
+      const first = openSession(makeSession({ id: "s1" }));
+      releaseLog("");
+      await first;
+
+      // Reopen s1: its backlog fetch is pending again.
+      const reopening = openSession(makeSession({ id: "s1" }));
+      appendSessionOutput({ sessionId: "s1", chunk: "too early again\r\n", offset: 0 });
+      expect(term().text).toBe("");
+
+      releaseLog("banner\r\n");
+      await reopening;
+
+      // The backlog only, not the dropped push doubled onto it.
+      expect(term().text).toBe("banner\r\n");
+
+      appendSessionOutput({ sessionId: "s1", chunk: "on time\r\n", offset: 0 });
+      expect(term().text).toBe("banner\r\non time\r\n");
+    });
   });
 });
 
@@ -395,8 +508,8 @@ describe("appendSessionOutput", () => {
     const { openSession, appendSessionOutput } = await import("./session-view.js");
     await openSession(makeSession());
 
-    appendSessionOutput({ sessionId: "s1", chunk: "one\r\n" });
-    appendSessionOutput({ sessionId: "s1", chunk: "two\r\n" });
+    appendSessionOutput({ sessionId: "s1", chunk: "one\r\n", offset: 0 });
+    appendSessionOutput({ sessionId: "s1", chunk: "two\r\n", offset: 0 });
 
     expect(term().text).toBe("one\r\ntwo\r\n");
   });
@@ -408,14 +521,14 @@ describe("appendSessionOutput", () => {
     const { openSession, appendSessionOutput } = await import("./session-view.js");
     await openSession(makeSession({ id: "s1" }));
 
-    appendSessionOutput({ sessionId: "s2", chunk: "other agent\r\n" });
+    appendSessionOutput({ sessionId: "s2", chunk: "other agent\r\n", offset: 0 });
 
     expect(term().text).toBe("");
   });
 
   it("ignores output when no session is open at all", async () => {
     const { appendSessionOutput } = await import("./session-view.js");
-    appendSessionOutput({ sessionId: "s1", chunk: "nobody is watching\r\n" });
+    appendSessionOutput({ sessionId: "s1", chunk: "nobody is watching\r\n", offset: 0 });
 
     expect(FakeTerminal.last).toBeUndefined();
   });
@@ -531,6 +644,127 @@ describe("voice routing", () => {
     expect(document.getElementById("session-voice")?.className).not.toContain(
       "session-voice--listening",
     );
+  });
+});
+
+// A phone may resize the session's pty while the laptop's own Session view
+// is not looking (ruling 11: last writer wins, both sides re-assert). fit()
+// only calls back into hooks.resize on a genuine change of the pane's own
+// cell grid, so without an explicit, unconditional re-assertion the laptop
+// would go on believing its own last-known size forever.
+describe("reassertSessionSize", () => {
+  // [bite-proof: send only when fit reports a change; the test fails]
+  it("sends the pty's current size when a session opens, even though the pane's size did not change", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+
+    // No emitResize() was fired — the emulator's cell grid never changed
+    // from its default. The send must still have gone out.
+    expect(jarvis.resizeSession).toHaveBeenCalledWith("s1", 80, 24);
+  });
+
+  it("sends the current size once when the window regains focus while the Session view is showing", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+    vi.mocked(jarvis.resizeSession).mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(jarvis.resizeSession).toHaveBeenCalledTimes(1);
+    expect(jarvis.resizeSession).toHaveBeenCalledWith("s1", 80, 24);
+  });
+
+  it("sends nothing on focus while another view is showing", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    const { showView } = await import("./views.js");
+    await openSession(makeSession({ id: "s1" }));
+    vi.mocked(jarvis.resizeSession).mockClear();
+
+    showView("dashboard");
+    window.dispatchEvent(new Event("focus"));
+
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing on focus when no session is open", async () => {
+    const jarvis = stubJarvis();
+    await import("./session-view.js");
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing on focus when the pane measures 0x0", async () => {
+    const jarvis = stubJarvis();
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+    term().cols = 0;
+    term().rows = 0;
+    vi.mocked(jarvis.resizeSession).mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+  });
+
+  // Fix round 1, I2: currentView() alone cannot tell a terminal from a
+  // table — both keep the route at "session". Pressing Back leaves the
+  // pane's last-known, non-zero cols/rows sitting there while the table
+  // covers the screen; a focus that trusted currentView() alone would
+  // send that stale size and reflow a terminal nobody on the laptop can
+  // see.
+  it(// [bite-proof: gate on currentView() alone; the test fails]
+  "sends nothing on focus while the session table is showing over a previously open session", async () => {
+    const jarvis = stubJarvis();
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+    await renderSessionTable();
+    vi.mocked(jarvis.resizeSession).mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+  });
+
+  // Fix round 1, I1: nav-session's click handler used to call
+  // reassertSessionSize() synchronously, alongside — not after —
+  // renderSessionTable()'s fire-and-forget promise. Clicked from an
+  // already-open session, that ran while the terminal was still the
+  // thing on screen (currentView() had not moved and terminalVisible had
+  // not yet flipped), so it sent the now-stale size of a terminal about
+  // to be replaced by the table.
+  it(// [bite-proof: call reassertSessionSize() synchronously instead of
+  // chaining it onto renderSessionTable(); the test fails]
+  "does not describe the terminal it is about to hide when nav-session is clicked from an open session", async () => {
+    let resolveHistory: (value: Session[]) => void = () => {};
+    const historyPromise = new Promise<Session[]>((resolve) => {
+      resolveHistory = resolve;
+    });
+    const jarvis = stubJarvis({ getHistory: vi.fn(() => historyPromise) });
+    const { openSession, wireSessionView } = await import("./session-view.js");
+    wireSessionView();
+    await openSession(makeSession({ id: "s1" }));
+    vi.mocked(jarvis.resizeSession).mockClear();
+
+    document.getElementById("nav-session")?.dispatchEvent(new Event("click", { bubbles: true }));
+
+    // getHistory has not resolved yet — the terminal is still what is
+    // on screen, and the re-assert must not have fired against it.
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+
+    resolveHistory([]);
+    await historyPromise;
+    // Let renderSessionTable()'s own continuation, and the .then() the
+    // click handler chained onto it, run.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The table is what settled — no terminal to describe.
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
   });
 });
 
@@ -650,6 +884,24 @@ describe("session table", () => {
     expect(rows()[0]?.textContent).toContain("first");
   });
 
+  // Re-review 2, item 6: a registry agent (jarvis.yaml) with zero sessions
+  // behind it must still appear in the agent filter, not just an agent that
+  // has already run something.
+  it("lists a registry agent with no sessions in the agent filter", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => [makeSession({ id: "a", agentId: "claude-acme" })]),
+    });
+    const { renderSessionTable, setKnownAgents } = await import("./session-view.js");
+    setKnownAgents(["codex"]);
+    await renderSessionTable();
+
+    const options = [
+      ...document.querySelectorAll<HTMLOptionElement>("#session-filter-agent option"),
+    ].map((o) => o.value);
+    expect(options).toContain("codex");
+    expect(options).toContain("claude-acme");
+  });
+
   // The whole point of the table: every row can be picked back up.
   it("gives every row a Resume button", async () => {
     stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "a", state: "done" })]) });
@@ -711,8 +963,100 @@ describe("session table", () => {
     expect(document.getElementById("session-back")?.hidden).toBe(false);
 
     document.getElementById("session-back")?.click();
+    // renderSessionTable() now awaits Promise.allSettled([getHistory(),
+    // listSessions()]) rather than one bare await, which costs one more
+    // microtask hop than a single `await Promise.resolve()` covers.
+    await Promise.resolve();
     await Promise.resolve();
     expect(document.getElementById("session-table")?.hidden).toBe(false);
+  });
+
+  // A row process-scan.ts found running outside Jarvis never comes back
+  // from getHistory() (session-import.ts's own discipline: nothing there
+  // can prove it is still alive) — only from listSessions.
+  it("shows an outside-Jarvis chip and no Resume button for an external row, and never navigates into a terminal", async () => {
+    const getSessionTranscript = vi.fn(async () => [
+      { role: "user" as const, text: "hi", tools: [] },
+    ]);
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({ id: "ext-1234", origin: "external", pid: 1234, agentId: "claude" }),
+      ]),
+      getSessionTranscript,
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    const row = rows()[0];
+    expect(row?.querySelector(".session-chip--external")).not.toBeNull();
+    expect(row?.querySelector("button")).toBeNull();
+
+    row?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Opens the transcript, never a live terminal — no input channel is
+    // touched for a row with no pty behind it.
+    expect(getSessionTranscript).toHaveBeenCalledWith("ext-1234");
+    expect(document.getElementById("session-terminal")?.hidden).toBe(true);
+  });
+
+  it("shows a notice, not a blank terminal, for an external row with no matched transcript", async () => {
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({ id: "ext-1234", origin: "external", pid: 1234 }),
+      ]),
+      getSessionTranscript: vi.fn(async () => []),
+    });
+    const { renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+
+    rows()[0]?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.getElementById("session-transcript")?.hidden).toBe(false);
+    expect(document.getElementById("session-transcript")?.textContent).toMatch(/transcript/i);
+  });
+});
+
+describe("sessions refresh", () => {
+  it("calls sessions:refresh exactly once per click and toggles the spinner", async () => {
+    let resolveRefresh: (value: {
+      jarvis: number;
+      external: number;
+      importedTranscripts: number;
+    }) => void = () => {};
+    const refreshSessions = vi.fn(
+      () =>
+        new Promise<{ jarvis: number; external: number; importedTranscripts: number }>(
+          (resolve) => {
+            resolveRefresh = resolve;
+          },
+        ),
+    );
+    stubJarvis({ refreshSessions });
+    const { wireSessionView } = await import("./session-view.js");
+    wireSessionView();
+
+    const button = document.getElementById("session-refresh") as HTMLButtonElement;
+    button.click();
+
+    expect(refreshSessions).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.classList.contains("icon-btn--spinning")).toBe(true);
+
+    resolveRefresh({ jarvis: 0, external: 0, importedTranscripts: 0 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(button.disabled).toBe(false);
+    expect(button.classList.contains("icon-btn--spinning")).toBe(false);
+
+    button.click();
+    expect(refreshSessions).toHaveBeenCalledTimes(2);
   });
 });
 

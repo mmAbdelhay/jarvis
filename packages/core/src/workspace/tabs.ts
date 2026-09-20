@@ -92,6 +92,26 @@ export class TabStore {
     this.#emit();
   }
 
+  rename(id: TabId, title: string): void {
+    const trimmed = title
+      .replace(/[\p{Cc}\p{Cf}]/gu, "")
+      .trim()
+      .slice(0, 120);
+    this.update(id, { customTitle: trimmed === "" ? undefined : trimmed });
+  }
+
+  move(id: TabId, targetId: TabId, after: boolean): void {
+    if (id === targetId) return;
+    const from = this.#tabs.findIndex((tab) => tab.id === id);
+    const target = this.#tabs.findIndex((tab) => tab.id === targetId);
+    if (from < 0 || target < 0 || this.#tabs[from]?.project !== this.#tabs[target]?.project) return;
+    const [tab] = this.#tabs.splice(from, 1);
+    if (tab === undefined) return;
+    const insertion = this.#tabs.findIndex((candidate) => candidate.id === targetId);
+    this.#tabs.splice(insertion + (after ? 1 : 0), 0, tab);
+    this.#emit();
+  }
+
   leastRecentlyActive(): TabId[] {
     return [...this.#activity];
   }

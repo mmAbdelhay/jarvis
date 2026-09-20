@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCollection,
   createFolder,
@@ -16,6 +17,46 @@ import {
   writeImported,
   writeRequest,
 } from "./bruno.js";
+
+// M12 Task 7 follow-up: writeRequest/writeEnvironment's own atomic-write
+// bite-proof needs a real `rename` that can be made to fail on demand,
+// without breaking every other real fs call this file (and bruno.ts's own
+// writers) make — `node:fs/promises` is an ESM namespace vitest cannot
+// vi.spyOn directly ("Module namespace is not configurable"), so this
+// mocks the whole module through to the real implementation for
+// everything, with `rename` alone routed through a mutable override that
+// defaults to the real `rename` and is set only for the one test that
+// needs it to throw.
+const renameOverride: { impl?: (...args: unknown[]) => Promise<void> } = {};
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: (...args: unknown[]) =>
+      renameOverride.impl
+        ? renameOverride.impl(...args)
+        : actual.rename(...(args as [never, never])),
+  };
+});
+
+/**
+ * Whether this process may create symlinks. On macOS and Linux always; on
+ * Windows only with Developer Mode or the SeCreateSymbolicLink privilege,
+ * without which symlink() fails with EPERM. The tests that need one are
+ * skipped rather than failed there.
+ */
+const canSymlink = ((): boolean => {
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-bruno-symlink-probe-"));
+  try {
+    writeFileSync(join(dir, "target"), "");
+    symlinkSync(join(dir, "target"), join(dir, "link"));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
 
 const made: string[] = [];
 
@@ -230,6 +271,31 @@ describe("readRequest / writeRequest", () => {
     expect(await readFile(path, "utf8")).toBe(REQUEST);
   });
 
+  // M12 Task 7 follow-up (controller ruling: wire writeAtomically into
+  // every live .bru/environment write). [bite-proof: write in place — a
+  // plain `writeFile(path, text)` instead of temp+rename would leave the
+  // original truncated/replaced by whatever the failed write partially
+  // wrote, rather than untouched]
+  it("a write failing mid-way (a failing rename) leaves the original file byte-identical, with no temp file left behind", async () => {
+    const root = await project();
+    const path = join(root, "list.bru");
+    await writeFile(path, REQUEST);
+
+    renameOverride.impl = async () => {
+      throw new Error("boom");
+    };
+    try {
+      await expect(
+        writeRequest(path, { meta: { name: "New", type: "http", seq: "1" } }),
+      ).rejects.toThrow("boom");
+    } finally {
+      renameOverride.impl = undefined;
+    }
+
+    expect(await readFile(path, "utf8")).toBe(REQUEST);
+    expect(await readdir(root)).toEqual(["list.bru"]);
+  });
+
   it("preserves fields Jarvis does not edit", async () => {
     const root = await project();
     const path = join(root, "list.bru");
@@ -251,6 +317,88 @@ describe("readRequest / writeRequest", () => {
     });
 
     expect(await readFile(path, "utf8")).toContain("name: New");
+  });
+
+  // M9 Task 4 fix round, Critical 1 (review): writeRequest is the actual
+  // sink desktop's remote-api.ts's `isCleanScalar` guard exists to protect
+  // — @usebruno/lang's jsonToBruV2 writes every `meta` key straight into
+  // the file with no quoting or escaping at all (`${key}: ${value}\n`), so
+  // a `meta.name` carrying its own newline can close the `meta { ... }`
+  // block and open a `script:pre-request { ... }` block of its own. This
+  // documents the real exploit against the real serializer — the fixed
+  // pipeline (ipc.ts's `save`/`createRequest`/`renameEntry` handlers)
+  // never reaches this function with such a name in the first place,
+  // because prepareRemoteApiRequest and guardedWrite both refuse one
+  // containing a control character before either handler calls writeRequest
+  // at all (see remote-api.test.ts and ipc.test.ts).
+  it("demonstrates the real script-injection exploit a crafted meta.name produces via writeRequest/readRequest, and that an ordinary name never does", async () => {
+    const root = await project();
+    const hostilePath = join(root, "hostile.bru");
+    const craftedName =
+      'x\n}\n\nscript:pre-request {\n console.log("INJECTED")\n}\n\nmeta {\n name: y';
+
+    // The exploit: an unguarded write of this name really does plant a
+    // `script` block a later send would run (main.ts's sendApiRequest,
+    // node:vm) — this is exactly why remote-api.ts's isCleanScalar exists.
+    await writeRequest(hostilePath, {
+      meta: { name: craftedName, type: "http", seq: "1" },
+      http: { method: "get", url: "http://x.test", body: "none", auth: "none" },
+    });
+    const reparsedHostile = await readRequest(hostilePath);
+    expect(reparsedHostile).toHaveProperty("script");
+    expect((reparsedHostile as { script: { req: string } }).script.req).toContain("INJECTED");
+
+    // The same round trip with an ordinary name — the shape every name
+    // that passes isCleanScalar has — never carries a script, tests, or
+    // vars block it was not given, because there is nothing in it for
+    // jsonToBruV2 to misread as the start of a new block.
+    const safePath = join(root, "safe.bru");
+    await writeRequest(safePath, {
+      meta: { name: "List orders", type: "http", seq: "1" },
+      http: { method: "get", url: "http://x.test", body: "none", auth: "none" },
+    });
+    const reparsedSafe = await readRequest(safePath);
+    expect(reparsedSafe).not.toHaveProperty("script");
+    expect(reparsedSafe).not.toHaveProperty("tests");
+    expect(reparsedSafe).not.toHaveProperty("vars");
+  });
+
+  // Fix round 1b (ruling): the same class of raw-write sink as meta.name,
+  // for a header row's own name — jsonToBru.js's `getKeyString` only quotes
+  // a name containing `:`/`"`/`{`/`}`/space, so a bare control character
+  // sails through unquoted, and even a quoted name (this payload contains
+  // `{`/`}`/space, so it is quoted) is written with the newline still
+  // literally inside the quotes rather than escaped. Either way this must
+  // never come back as a script block: the write either fails outright (the
+  // file this particular payload produces does not reparse — @usebruno/lang's
+  // v2 grammar does not accept a raw newline inside a quoted key) or, for a
+  // payload getKeyString leaves unquoted, still must never round-trip into a
+  // `script` property. remote-api.ts's `isCleanScalar` guard on every row
+  // name (headers/params/formUrlEncoded/multipart/assertions,
+  // remote-api.test.ts) is what keeps the real pipeline from ever handing
+  // writeRequest a name shaped like this at all.
+  it("never yields a script block from a header name carrying the crafted injection payload, whichever way the real serializer handles it", async () => {
+    const root = await project();
+    const path = join(root, "hostile-header.bru");
+    const craftedName = 'x\n}\n\nscript:pre-request {\n console.log("INJECTED")\n}';
+
+    await writeRequest(path, {
+      meta: { name: "R", type: "http", seq: "1" },
+      http: { method: "get", url: "http://x.test", body: "none", auth: "none" },
+      headers: [{ name: craftedName, value: "v", enabled: true }],
+    });
+
+    let reparsed: Record<string, unknown> | undefined;
+    try {
+      reparsed = await readRequest(path);
+    } catch {
+      // @usebruno/lang's own grammar refusing to parse the file back is
+      // itself a safe outcome here — the property under test is "never a
+      // script block", and a thrown parse error carries no script block
+      // either.
+      reparsed = undefined;
+    }
+    expect(reparsed === undefined || !("script" in reparsed)).toBe(true);
   });
 });
 
@@ -339,6 +487,103 @@ describe("collection editing", () => {
 
     expect(await listCollections(root)).toContainEqual({ name: "orders-api", path });
   });
+
+  // I3: "." and ".." are legal individual characters in safeFileName's own
+  // allowlist, but as a whole name they are a directory-traversal component
+  // — join(root, "..") walks up a directory.
+  it("keeps an all-dot collection name from escaping the project", async () => {
+    const root = await project();
+
+    const path = await createCollection(root, "..");
+
+    expect(path).toBe(join(root, "untitled"));
+    expect(path.startsWith(`${root}${sep}`)).toBe(true);
+  });
+
+  it("keeps an all-dot folder name contained", async () => {
+    const root = await project();
+    const path = await collection(root, "api");
+
+    const folder = await createFolder(path, "...");
+
+    expect(folder).toBe(join(path, "untitled"));
+  });
+
+  // Each segment is sanitised on its own (safeFileName), so a Postman
+  // folder segment of ".." lands as a plainly-named "untitled" folder
+  // rather than walking up a directory — the per-write containment check
+  // (assertInside, checked for every planned path before any write starts)
+  // is the second, whole-tree guard behind it.
+  it("keeps a Postman import with a '..' folder segment contained, not escaped", async () => {
+    const root = await project();
+
+    const path = await writeImported(root, "Imported", [
+      {
+        segments: ["..", "..", "Escape"],
+        json: {
+          meta: { name: "Escape", type: "http", seq: "1" },
+          http: { method: "get", url: "http://e", body: "none", auth: "none" },
+        },
+      },
+    ]);
+
+    expect(path.startsWith(`${root}${sep}`)).toBe(true);
+    const tree = await readCollection(path);
+    // Both ".." segments became the same "untitled" folder name, nested.
+    expect(tree.root.folders[0]?.name).toBe("untitled");
+    expect(tree.root.folders[0]?.folders[0]?.name).toBe("untitled");
+    expect(tree.root.folders[0]?.folders[0]?.requests[0]?.name).toBe("Escape");
+  });
+
+  // Minor: a pre-existing symlink inside the project pointing outside it —
+  // lexical containment (assertInside) sees only the string path and would
+  // approve this; the realpath-aware check (assertRealInside) must not.
+  it.skipIf(!canSymlink)(
+    "refuses to create a collection whose own name is a pre-existing symlink pointing outside the project",
+    async () => {
+      const root = await project();
+      const outside = await mkdtemp(join(tmpdir(), "jarvis-bruno-outside-"));
+      made.push(outside);
+      // A symlink named exactly like the collection safeFileName("escape-link")
+      // would produce, already sitting in the project and pointing outside it.
+      await symlink(outside, join(root, "escape-link"));
+
+      await expect(createCollection(root, "escape-link")).rejects.toThrow();
+      // Nothing landed in the real, outside directory the symlink points to.
+      const outsideMarker = await readFile(join(outside, "bruno.json")).catch(() => undefined);
+      expect(outsideMarker).toBeUndefined();
+    },
+  );
+
+  it.skipIf(!canSymlink)(
+    "refuses a Postman import whose folder segment is a pre-existing symlink pointing outside the project",
+    async () => {
+      const root = await project();
+      const outside = await mkdtemp(join(tmpdir(), "jarvis-bruno-outside-"));
+      made.push(outside);
+      // The collection directory (and the symlinked folder inside it) must
+      // already exist to prove the escape: writeImported would otherwise
+      // create a plain, real "escape-link" directory itself, never
+      // reaching a symlink at all.
+      const collectionPath = await collection(root, "Imported");
+      await symlink(outside, join(collectionPath, "escape-link"));
+
+      await expect(
+        writeImported(root, "Imported", [
+          {
+            segments: ["escape-link", "Escape"],
+            json: {
+              meta: { name: "Escape", type: "http", seq: "1" },
+              http: { method: "get", url: "http://e", body: "none", auth: "none" },
+            },
+          },
+        ]),
+      ).rejects.toThrow();
+
+      const outsideMarker = await readFile(join(outside, "Escape.bru")).catch(() => undefined);
+      expect(outsideMarker).toBeUndefined();
+    },
+  );
 
   it("writes an environment that reads back with its secrets flagged", async () => {
     const root = await project();

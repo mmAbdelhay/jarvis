@@ -21,6 +21,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Mirrors `srcExclude` in .vitepress/config.ts, as repository-relative paths. */
 const EXCLUDED = [
   "docs/superpowers",
+  "apps",
   "packages",
   "spikes",
   "design",
@@ -32,11 +33,14 @@ const EXCLUDED = [
   ".superpowers",
   ".vitepress",
   ".git",
-  "node_modules",
 ];
 
+// `node_modules` mirrors srcExclude's `**/node_modules/**` — not just the
+// root's, but any workspace package's own (e.g. apps/mobile/node_modules,
+// which pnpm gives its own copy rather than hoisting everything to root).
 const isExcluded = (path) =>
-  EXCLUDED.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  EXCLUDED.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)) ||
+  path.split("/").includes("node_modules");
 
 /** Every markdown file VitePress would turn into a page. */
 function pagesUnder(dir) {

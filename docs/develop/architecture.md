@@ -1,21 +1,64 @@
 # Architecture
 
-Three packages in a pnpm workspace, and the direction of every import between
-them is the whole design.
+Five packages in a pnpm workspace, and the direction of every import between
+them is the whole design — plus a phone app that lives outside the Electron
+diagram entirely. This table is the ground truth (each package's own
+`package.json` `dependencies`, cross-checked against what its `src` actually
+imports):
 
-```
-@jarvis/core        pure logic. No Node, no Electron, no filesystem.
-      ▲
-@jarvis/platform    the machine: processes, ptys, sqlite, git, http, files.
-      ▲
-@jarvis/desktop     Electron. main process + preload + renderer.
-```
+| Package | Imports (workspace) | Role |
+|---|---|---|
+| `@jarvis/wire` | none | the shared wire protocol — no Node, no other package |
+| `@jarvis/core` | none | pure logic — no Node, no Electron, no filesystem |
+| `@jarvis/remote` | `@jarvis/wire` | the remote bridge's transport |
+| `@jarvis/platform` | `@jarvis/core` | the machine: processes, ptys, sqlite, git, http, files |
+| `@jarvis/desktop` | `@jarvis/core`, `@jarvis/platform`, `@jarvis/remote` | Electron: main process + preload + renderer |
+| `apps/mobile` | `@jarvis/wire` (values + types), `@jarvis/core` (type-only) | Expo Router + React Native — never `remote`, `platform` or `desktop` |
 
 `core` knows nothing about the world it runs in, which is what makes the
 orchestrator, the tab store and the URL rules testable without mocking an
 operating system. `platform` is where every side effect lives, always behind an
 injected dependency so the orchestration around it can be tested with a fake.
-`desktop` composes the two and adds the window.
+`desktop` composes core, platform and remote, and adds the window.
+
+**`@jarvis/remote`** is a peer of `platform` that `desktop` also imports. It
+is where the remote bridge's transport lives — the pinned-TLS listener, the
+pairing and device/token machinery, the frame protocol underneath the
+Settings' Remote access panel, and (M11) the sidecar reverse proxy that
+serves `/s/{handle}/…` beside the listener's other two routes, `/rpc` and
+`/pair` — kept out of `platform` so that "what in this app can listen?" has
+a one-directory answer. The proxy hop only ever connects to
+`127.0.0.1:<port>`, so nothing about it changes what this package can reach
+on the network. It never imports `platform`,
+`desktop` or Electron (`remote/src/import-direction.test.ts`). Its source may
+use `node:*`, `@jarvis/wire`, `@jarvis/core`, relative imports inside `src/`,
+and the per-file third-party table enforced by that test: `ws` in `server.ts`
+and `probe-client.ts`, and `@peculiar/x509` plus `reflect-metadata` in
+`certificate.ts`. The only workspace package `remote` imports is `@jarvis/wire`;
+`@jarvis/core` is allowed by the per-file test but not currently imported.
+The import-direction test is the allowlist, not the package diagram's shorthand.
+
+**`@jarvis/wire`** is the fifth package, and the smallest: `PROTOCOL_VERSION`,
+close codes, the `ClientMessage`/`ServerMessage`/pairing-link types, the wire
+patterns (secret, device id, fingerprint, subscription key) and the address
+normaliser, all as pure functions and constants — no `node:*`, no import from
+any other workspace package
+(`packages/wire/src/no-node-imports.test.ts`). `@jarvis/remote` re-exports
+these from its own modules rather than duplicating them, so nothing outside
+`remote` had to change when `wire` was carved out; `apps/mobile` imports the
+same package directly, which is the whole point — a phone client and a
+Node-based bridge speaking one protocol definition instead of a hand-copied
+second one.
+
+**`apps/mobile`** is not part of the Electron diagram above and is not built
+or typechecked by the root `tsc -b`/`vitest run` — it has its own
+`tsconfig.json` and `vitest.config.mts` (see
+[testing](testing.md)). It may import, from the workspace, only
+`@jarvis/wire` (values and types) and, type-only, `@jarvis/core`; never
+`@jarvis/remote`, `@jarvis/platform` or `@jarvis/desktop`, which all assume a
+Node or Electron process the phone does not have.
+
+The session screen renders a display-only xterm page in a locked WebView; native compose and key controls send raw input over the shared client. `apps/mobile/scripts/build-terminal-html.mjs` reads the desktop's vendored terminal bundles and palette only at generation time. The committed page has one hashed script, no network access and LTR terminal layout; tests detect drift from those inputs.
 
 ## Two platforms
 
@@ -53,6 +96,8 @@ src/preload.cts      the only bridge; contextIsolation is on
 src/browser-host.ts  the Workspace's tabs, Electron-free and unit tested
 src/electron-view.ts the one file that constructs a WebContentsView
 src/sidecar-reaper.ts when a sidecar nobody is looking at should be stopped
+src/remote-idle.ts  main-process write-back after the bridge's idle timer fires
+src/remote-access.ts the request, push and audit lane between main and remote
 renderer/            the UI. No Node. Type-only imports from the packages.
 ```
 
@@ -67,6 +112,10 @@ Vitest. `electron-view.ts` is the only place a view is constructed.
 `performance.suspendTabsAfterMinutes` and marks the tab `suspended`. The row
 in `TabStore` is untouched, so nothing about the tab strip changes; `activate`
 sees the flag and builds a new view before showing it.
+
+This is tab suspension; it is separate from the remote bridge's idle
+auto-disable, which closes the listener when no paired phone is connected and
+no pairing activity is keeping it open.
 
 Rebuilding needs one thing the host cannot know. A hosted app's sidecar may
 have been stopped underneath it and restarted on a different free port, so the
@@ -108,6 +157,41 @@ The renderer names things; main resolves them. Where the renderer must see a
 real path — the API collection tree is a view of the filesystem — containment
 replaces concealment: a path may be *shown*, but only a path inside the named
 project is ever *acted on*.
+
+## The phone's three networking layers
+
+`apps/mobile` talks to the laptop through three layers, each replaceable in
+tests without the other two:
+
+1. **`modules/pinned-socket`** — the native Expo module (Swift on iOS,
+   Kotlin on Android) that opens the actual TLS socket and pins it to the
+   one certificate fingerprint the pairing link carried, closing before any
+   frame is sent on a mismatch. It is the only layer that touches a real
+   network, and the only one with no equivalent in the unit suite (see
+   [testing](testing.md)).
+2. **`RpcClient`** (`src/lib/rpc-client.ts`) — a state machine over the
+   `Transport` interface `pinned-socket` implements: hello/welcome,
+   request/response correlation with a drop-surviving queue, subscriptions
+   that re-send after every reconnect, a ping watchdog, and reconnect
+   backoff. It speaks `@jarvis/wire`'s frames and never touches a native
+   module directly — tests drive it through `fake-transport.ts` instead.
+3. **Screens and their stores** (`connection-store.ts`, `dashboard-store.ts`,
+   `pairing.ts`, …) — plain TS modules that turn the client's state and
+   pushes into what a screen renders, each with its own test; the `.tsx`
+   files hold layout only.
+
+`apps/mobile/src/e2e.test.ts` is the one test that drives the two non-native
+layers (`RpcClient` and the screens' stores) together, end to end, for a
+single pairing-to-revocation scenario. `apps/mobile/src/e2e-voice.test.ts`
+does the same for a voice recording.
+
+One path through those layers is not JSON `req`/`res` at all:
+
+| | |
+|---|---|
+| The blob lane | A recording leaves `RpcClient.upload()` as a `blob` header followed by binary frames (ruling 1, M8), lands on `remote/src/connection.ts`'s own blob handling, and reaches `desktop/src/voice-turn.ts` (`handleUtterance`, shared with the desktop's own recorder) and `voice-upload.ts` (the replay-safe handler behind it) — the only two files that turn those bytes into a transcript and a routed turn. |
+| The push lane | A laptop event never reaches the phone as a `req`/`res` at all: `desktop/src/notify.ts`'s `createNotifier` decides whether to notify at all (`shouldNotify`) and builds the bilingual text from `MESSAGES.push*`, and `remote-access.ts`'s `sendPush` hands it straight to `@jarvis/remote`'s Expo sender (`packages/remote/src/push.ts`) — never back down through `RpcClient`. The phone's own `RpcClient` never sees the send; it only receives the OS notification through `expo-notifications`, and on tap, `push-context.tsx`'s handler validates the session against a live `sessions:list` before navigating (M10, ruling 9). |
+| An idle bridge turns itself off | The bridge's idle timer closes the listener, calls `onIdleDisabled`, and `desktop/src/remote-idle.ts` reads the current config and writes `remote.enabled: false` through `writeSettingsFile`; the queued write is then observed by `applyFromDisk`, which calls `apply` (`bridge timer → onIdleDisabled → remote-idle.ts → writeSettingsFile → applyFromDisk → apply`). |
 
 ## Third-party components
 

@@ -11,7 +11,11 @@
       "!spikes",
       "!design",
       "!pnpm-lock.yaml",
-      "!**/*.jsonl"
+      "!**/*.jsonl",
+      "!apps/mobile/ios",
+      "!apps/mobile/android",
+      "!apps/mobile/.expo",
+      "!apps/mobile/src/terminal/terminal-html.generated.ts"
     ]
   },
   "formatter": {

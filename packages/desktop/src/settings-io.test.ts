@@ -23,6 +23,7 @@ const draft: JarvisConfig = {
   chat: {},
   workflows: {},
   headlamp: { binary: "/some/path" },
+  prayer: { enabled: true, location: { latitude: 31.2, longitude: 29.9, name: "Alexandria" } },
   terminal: {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
@@ -47,6 +48,15 @@ const draft: JarvisConfig = {
   },
   browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
+  remote: {
+    enabled: false,
+    bindAddress: "127.0.0.1",
+    port: 7717,
+    sidecarProxy: false,
+    tls: {},
+    push: { enabled: false, includeProjectNames: false },
+    idleDisableMinutes: 0,
+  },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
 
@@ -77,6 +87,15 @@ const fullDraft: JarvisConfig = {
   },
   browser: { allowPopups: false },
   sessions: { importWindowDays: 90 },
+  remote: {
+    enabled: true,
+    bindAddress: "100.84.17.203",
+    port: 0,
+    sidecarProxy: true,
+    tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
+    push: { enabled: true, includeProjectNames: true },
+    idleDisableMinutes: 30,
+  },
 };
 
 /**
@@ -105,10 +124,12 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   terminal: ["terminal"],
   performance: ["performance"],
   browser: ["browser"],
+  prayer: ["prayer"],
   brain: ["brain"],
   voice: ["voice"],
   whisper: ["whisper"],
   sessions: ["sessions"],
+  remote: ["remote"],
   // Computed by parseConfig from the config directory, never a source of
   // truth. See toRawConfig's own note.
   sessionsDbPath: null,
@@ -144,6 +165,31 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.clusters).toEqual(fullDraft.clusters);
     expect(reparsed.docker).toEqual(fullDraft.docker);
     expect(reparsed.chat).toEqual(fullDraft.chat);
+    expect(reparsed.remote).toEqual(fullDraft.remote);
+    expect(reparsed.prayer).toEqual(fullDraft.prayer);
+  });
+
+  it("round-trips prayer.notify, and omits it from the file when unset (defaults apply)", () => {
+    const withNotify: JarvisConfig = {
+      ...draft,
+      prayer: {
+        enabled: true,
+        location: { latitude: 31.2, longitude: 29.9, name: "Alexandria" },
+        notify: { before: false, beforeMinutes: 25, atTime: true },
+      },
+    };
+    const rawWithNotify = toRawConfig(withNotify) as { prayer: Record<string, unknown> };
+    expect(rawWithNotify.prayer["notify"]).toEqual({
+      before: false,
+      beforeMinutes: 25,
+      atTime: true,
+    });
+    expect(parseConfig(rawWithNotify).prayer).toEqual(withNotify.prayer);
+
+    // draft.prayer above has no `notify` key at all — the file must not
+    // grow one just because prayer itself is on.
+    const rawWithoutNotify = toRawConfig(draft) as { prayer: Record<string, unknown> };
+    expect(rawWithoutNotify.prayer).not.toHaveProperty("notify");
   });
 });
 
@@ -311,6 +357,7 @@ describe("writeSettingsFile", () => {
     expect(written).not.toHaveProperty("sessions");
     expect(written).not.toHaveProperty("performance");
     expect(written).not.toHaveProperty("workflows");
+    expect(written).not.toHaveProperty("remote");
   });
 
   it("backs up the previous file before overwriting it", async () => {
@@ -588,5 +635,83 @@ describe("chat round-trip", () => {
     const text = await readFile(path, "utf8");
     expect(text).not.toContain("account");
     expect(parseConfig(parse(text)).chat).toEqual({ acme: [{ name: "Globex", driver: "teams" }] });
+  });
+});
+
+describe("remote round-trip", () => {
+  // An upgrade must never grow a `remote:` section, let alone an open port:
+  // a draft sitting on the defaults writes nothing.
+  it("omits the remote key entirely while every value is the default", () => {
+    expect(toRawConfig(draft)).not.toHaveProperty("remote");
+  });
+
+  it("writes the whole section once any value differs", () => {
+    const raw = toRawConfig({ ...draft, remote: { ...draft.remote, port: 8443 } }) as Record<
+      string,
+      unknown
+    >;
+    expect(raw["remote"]).toEqual({
+      enabled: false,
+      bindAddress: "127.0.0.1",
+      port: 8443,
+      sidecarProxy: false,
+      push: { enabled: false, includeProjectNames: false },
+      idleDisableMinutes: 0,
+    });
+  });
+
+  // `tls: {}` is the self-signed default spelled as noise.
+  it("writes no empty tls key", () => {
+    const raw = toRawConfig({ ...draft, remote: { ...draft.remote, enabled: true } }) as {
+      remote: Record<string, unknown>;
+    };
+    expect(raw.remote).not.toHaveProperty("tls");
+  });
+
+  it("keeps a hand-written remote section across an unrelated Settings save", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    const text = [
+      "agents:",
+      "  claude: {command: claude}",
+      "brain:",
+      "  cwd: /tmp/brain",
+      "remote:",
+      "  enabled: true",
+      "  bindAddress: 100.84.17.203",
+      "  tls:",
+      "    certPath: /certs/m.crt",
+      "    keyPath: /certs/m.key",
+      "",
+    ].join("\n");
+    await writeFile(path, text);
+    const loaded = parseConfig(parse(text));
+
+    const result = await writeSettingsFile(path, {
+      ...loaded,
+      brain: { ...loaded.brain, systemPrompt: "Changed." },
+    });
+
+    expect(result).toEqual({ ok: true });
+    const reloaded = parseConfig(parse(await readFile(path, "utf8")));
+    expect(reloaded.remote).toEqual(loaded.remote);
+    expect(reloaded.remote.tls).toEqual({ certPath: "/certs/m.crt", keyPath: "/certs/m.key" });
+  });
+
+  it("refuses a hostname and leaves the file untouched", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "original: true");
+
+    const result = await writeSettingsFile(path, {
+      ...draft,
+      remote: { ...draft.remote, bindAddress: "localhost" },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      detail: "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    });
+    expect(await readFile(path, "utf8")).toBe("original: true");
   });
 });

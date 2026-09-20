@@ -87,11 +87,25 @@ function compare(a: Session, b: Session, column: SessionSortColumn): number {
   return projectLabel(a).localeCompare(projectLabel(b));
 }
 
-/** Every agent that actually ran one of these sessions, sorted and unique —
- *  the filter offers what the table contains rather than what the config
- *  declares, so it can never list an agent with nothing behind it. */
+/** Every agent that actually ran one of these sessions, sorted and unique.
+ *  Session-only — see `agentOptions` below for what the Sessions view's
+ *  agent filter actually shows. */
 export function agentsIn(sessions: Session[]): string[] {
   return [...new Set(sessions.map((session) => session.agentId))].sort((a, b) =>
     a.localeCompare(b),
   );
+}
+
+/**
+ * The agent filter's full option list: every agent the registry (jarvis.yaml)
+ * declares, plus any agent id a session carries that the registry does not —
+ * one that was since removed, or an import from before it was added. Registry
+ * agents come first, each half sorted on its own, so a config agent with zero
+ * sessions still shows up rather than being a dead end until it has run one.
+ */
+export function agentOptions(sessions: Session[], registryAgents: string[]): string[] {
+  const registry = [...new Set(registryAgents)].sort((a, b) => a.localeCompare(b));
+  const known = new Set(registry);
+  const fromSessions = agentsIn(sessions).filter((id) => !known.has(id));
+  return [...registry, ...fromSessions];
 }

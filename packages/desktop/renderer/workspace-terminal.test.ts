@@ -84,6 +84,10 @@ function harness(buffered = ""): void {
       calls.push({ call: "closeTab", args: [id] });
       return Promise.resolve();
     },
+    reportCommandFinished: (paneKey: string, seconds: number, ok: boolean) => {
+      calls.push({ call: "reportCommandFinished", args: [paneKey, seconds, ok] });
+      return Promise.resolve();
+    },
   };
 }
 
@@ -170,6 +174,7 @@ describe("workspace terminals", () => {
     const tabs = [tab(), tab({ id: "tab-2" })];
     renderWorkspaceTerminals(tabs, "tab-1", "acme");
     renderWorkspaceTerminals(tabs, "tab-2", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     dataListener?.("tab-1", "hello");
 
@@ -187,6 +192,68 @@ describe("workspace terminals", () => {
 
     expect(calls).toContainEqual({ call: "attachTerminal", args: ["tab-1"] });
     expect(FakeTerminal.instances[0]?.text).toBe("$ ");
+  });
+
+  // The race I1 fixes: `terminal:data` streams from the moment the shell
+  // starts, so a push can arrive before this pane's own `terminal:attach`
+  // reply does. Whatever landed in that gap is already inside the backlog
+  // the reply is about to carry, so drawing it live too would draw it
+  // twice — this is the routing (paneFor + writeLive) that drops it.
+  describe("the live-push gate on attach", () => {
+    it("drops a push delivered before attachTerminal resolves", async () => {
+      let resolveAttach: (value: string) => void = () => {};
+      harness();
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["attachTerminal"] = (
+        tabId: string,
+      ) => {
+        calls.push({ call: "attachTerminal", args: [tabId] });
+        return new Promise<string>((resolve) => {
+          resolveAttach = resolve;
+        });
+      };
+      const { renderWorkspaceTerminals } = await load();
+
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      dataListener?.("tab-1", "too early");
+      expect(FakeTerminal.instances[0]?.text).toBe("");
+
+      resolveAttach("");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(FakeTerminal.instances[0]?.text).toBe("");
+    });
+
+    it("writes a push delivered after attachTerminal resolves", async () => {
+      harness("");
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      dataListener?.("tab-1", "right on time");
+
+      expect(FakeTerminal.instances[0]?.text).toBe("right on time");
+    });
+
+    it("writes the backlog exactly once, never doubled by a push that arrived first", async () => {
+      let resolveAttach: (value: string) => void = () => {};
+      harness();
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["attachTerminal"] = (
+        tabId: string,
+      ) => {
+        calls.push({ call: "attachTerminal", args: [tabId] });
+        return new Promise<string>((resolve) => {
+          resolveAttach = resolve;
+        });
+      };
+      const { renderWorkspaceTerminals } = await load();
+
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      dataListener?.("tab-1", "dropped");
+      resolveAttach("$ ");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(FakeTerminal.instances[0]?.text).toBe("$ ");
+    });
   });
 
   // Control bytes verbatim: this is the Ctrl-C that has to reach the pty as
@@ -308,6 +375,7 @@ describe("workspace terminals", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     const pane = document.querySelector<HTMLElement>(".terminal-pane");
     expect(pane?.dataset["state"]).toBe("blocks");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     dataListener?.(
       "tab-1",
@@ -330,6 +398,7 @@ describe("workspace terminals", () => {
     renderWorkspaceTerminals([tab({ detail: LOGIN_TERMINAL_DETAIL })], "tab-1", "acme");
     const pane = document.querySelector<HTMLElement>(".terminal-pane");
     expect(pane?.dataset["state"]).toBe("plain");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     dataListener?.(
       "tab-1",
@@ -337,6 +406,132 @@ describe("workspace terminals", () => {
     );
 
     expect(pane?.querySelectorAll(".block")).toHaveLength(0);
+  });
+
+  // M10 Task 4: the pane's onCommandFinished hook is wired to
+  // window.jarvis.reportCommandFinished, keyed by this pane's own paneKey.
+  it("reports a slow block's duration and status through reportCommandFinished", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 30, home: "/h" });
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const start = 1_700_000_000_000;
+    const dateSpy = vi.spyOn(Date, "now");
+    dateSpy.mockReturnValueOnce(start);
+    dataListener?.("tab-1", `\u001b]133;A\u0007$ \u001b]133;B\u0007ls\u001b]133;C;ls\u0007`);
+    dateSpy.mockReturnValue(start + 45_000);
+    dataListener?.("tab-1", `a b\r\n\u001b]133;D;0\u0007`);
+    dateSpy.mockRestore();
+
+    expect(calls).toContainEqual({
+      call: "reportCommandFinished",
+      args: ["tab-1", 45, true],
+    });
+  });
+});
+
+// A phone may resize a pane's pty while the laptop's own Workspace is not
+// looking (M7 ruling 11: last writer wins, both sides re-assert). fit()
+// only calls back into resizeTerminal on a genuine change of the leaf's own
+// cell grid, so without an explicit, unconditional re-assertion the laptop
+// would go on believing its own last-known size forever.
+describe("reassertVisibleWorkspaceTerminal", () => {
+  beforeEach(() => harness());
+
+  // [bite-proof: send only when fit reports a change; the test fails]
+  it("sends the pty's current size when the terminal tab becomes visible, even though its size did not change", async () => {
+    const { renderWorkspaceTerminals } = await load();
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(calls).toContainEqual({ call: "resizeTerminal", args: ["tab-1", 80, 24] });
+  });
+
+  it("sends the current size once when the window regains focus while the terminal is visible", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    calls = calls.filter((entry) => entry.call !== "resizeTerminal");
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(calls.filter((entry) => entry.call === "resizeTerminal")).toEqual([
+      { call: "resizeTerminal", args: ["tab-1", 80, 24] },
+    ]);
+  });
+
+  // Fix round 1, Important 3: a render that leaves the same tab visible
+  // (e.g. a workspace:update push that changes nothing about which tab is
+  // showing) must send nothing — only a genuine showing transition and the
+  // focus listener do.
+  // [bite-proof: drop the `wasShowing !== showing` guard around
+  // reassertVisibleWorkspaceTerminal() in renderWorkspaceTerminals; the
+  // test fails]
+  it("sends nothing on a second identical render of the already-visible tab", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    calls = calls.filter((entry) => entry.call !== "resizeTerminal");
+
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(calls.some((entry) => entry.call === "resizeTerminal")).toBe(false);
+  });
+
+  // task-7-review.md Important 4: this test's own bite is the `pane ===
+  // undefined` check one line below `visibleTabId === undefined` in
+  // reassertVisibleWorkspaceTerminal() — `panes.get(undefined)` already
+  // resolves to undefined (panes are only ever keyed by real tab id
+  // strings), so the `visibleTabId === undefined` early return above it is
+  // redundant defensively, not independently bite-proof. What this test
+  // does prove is the outer behavior: once a project switch leaves no
+  // terminal tab visible, a later focus event resizes nothing.
+  it("sends nothing on focus once the terminal's project is no longer selected (hidden pane never resizes)", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    renderWorkspaceTerminals([tab()], "tab-1", "storefront"); // a different project: hidden now
+    calls = [];
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(calls.some((entry) => entry.call === "resizeTerminal")).toBe(false);
+  });
+
+  it("sends nothing on focus when the active tab is not a terminal", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab({ kind: "web", url: "https://x.test" })], "tab-1", "acme");
+    calls = [];
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(calls.some((entry) => entry.call === "resizeTerminal")).toBe(false);
+  });
+
+  it("sends nothing on focus before any terminal has ever been rendered", async () => {
+    await load();
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(calls.some((entry) => entry.call === "resizeTerminal")).toBe(false);
+  });
+
+  // Only the visible leaf of the visible tab — a background pane of a split
+  // tab is never resized merely because its sibling is on screen.
+  it("resizes only the focused pane's own leaf when a split tab is visible", async () => {
+    const { renderWorkspaceTerminals } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    calls = [];
+
+    window.dispatchEvent(new Event("focus"));
+
+    const resizes = calls.filter((entry) => entry.call === "resizeTerminal");
+    expect(resizes).toContainEqual({ call: "resizeTerminal", args: ["tab-1", 80, 24] });
+    expect(resizes).toContainEqual({ call: "resizeTerminal", args: ["tab-1:p1", 80, 24] });
   });
 });
 
@@ -497,6 +692,7 @@ describe("terminal key bindings and addons", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     const terminal = FakeTerminal.instances[0];
     if (terminal === undefined) throw new Error("expected a terminal");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     dataListener?.("tab-1", "\x1b]7;file:///proj\x07\x1b]133;A\x07~/p > \x1b]133;B\x07");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -558,6 +754,9 @@ describe("moving around a pane's blocks", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     const pane = document.querySelector<HTMLElement>(".terminal-pane");
     if (pane === null) throw new Error("expected a pane");
+    // finishCommand pushes through dataListener directly, so the pane's own
+    // attach must have settled first — see terminal-pane.ts's write-gate.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     return pane;
   }
 
@@ -661,6 +860,7 @@ describe("completion with the command editor live", () => {
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     const terminal = FakeTerminal.instances[0];
     if (terminal === undefined) throw new Error("expected a terminal");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Drives the pane's own block/editor state machine — real bytes, the
     // way xterm's own parser would hand them to the splitter. The editor
@@ -915,6 +1115,7 @@ describe("the terminal tab's file sidebar", () => {
   it("roots at the focused pane's directory and lists it for that pane", async () => {
     const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
@@ -929,6 +1130,7 @@ describe("the terminal tab's file sidebar", () => {
   it("shows nothing for a pane with no shell integration", async () => {
     const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", "just output\r\n");
     await settle();
@@ -941,6 +1143,7 @@ describe("the terminal tab's file sidebar", () => {
   it("does not re-list when the shell prints another prompt in the same place", async () => {
     const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", CWD("/proj"));
     dataListener?.("tab-1", CWD("/proj"));
@@ -952,6 +1155,7 @@ describe("the terminal tab's file sidebar", () => {
   it("re-roots when the focused pane's shell moves", async () => {
     const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", CWD("/proj"));
     dataListener?.("tab-1", CWD("/proj/src"));
@@ -980,6 +1184,7 @@ describe("the terminal tab's file sidebar", () => {
   it("re-roots to the newly focused pane's last known directory", async () => {
     const { renderWorkspaceTerminals, listed } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
     dataListener?.("tab-1", CWD("/proj"));
     await split("d");
     dataListener?.("tab-1:p1", CWD("/proj/split"));
@@ -998,6 +1203,7 @@ describe("the terminal tab's file sidebar", () => {
   it("takes the sidebar with the tab when the tab is closed", async () => {
     const { renderWorkspaceTerminals } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
 
@@ -1023,6 +1229,7 @@ describe("the terminal tab's file sidebar", () => {
     const { renderWorkspaceTerminals } = await load();
     await settle();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
@@ -1045,6 +1252,7 @@ describe("the terminal tab's file sidebar", () => {
     const { renderWorkspaceTerminals } = await load();
     await settle();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
 
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
@@ -1099,6 +1307,7 @@ describe("dismissing the terminal tab's file sidebar", () => {
   it("closes the sidebar from the command palette", async () => {
     const { renderWorkspaceTerminals } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
     expect(sidebar()?.hidden).toBe(false);
@@ -1114,6 +1323,7 @@ describe("dismissing the terminal tab's file sidebar", () => {
   it("keeps it closed across a cd, and re-opens it on a second toggle", async () => {
     const { renderWorkspaceTerminals } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
     FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
@@ -1156,6 +1366,7 @@ describe("dismissing the terminal tab's file sidebar", () => {
   it("still opens on the first directory after a toggle in a tab that had none", async () => {
     const { renderWorkspaceTerminals } = await tabWithSidebar();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
     // A prompt with no OSC 7: the palette opens, the sidebar has nothing.
     dataListener?.("tab-1", `]133;A$ ]133;B`);
     await settle();

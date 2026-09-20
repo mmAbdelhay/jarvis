@@ -6,10 +6,11 @@
 // inspection-only. app.ts registers its `window.jarvis.on*` callbacks as a
 // side effect of being imported, so each test re-mocks `window.jarvis`,
 // lays down the minimal DOM app.ts's module-top-level code touches
-// (#composer/#composer-send so wireComposer doesn't throw, #clock-time/
-// #clock-date so startClock has somewhere to write, #voice-state itself),
+// (#composer/#composer-send so wireComposer doesn't throw, #clock-time in
+// its .clock container so startClock has somewhere to write, #voice-state),
 // and re-imports the module fresh via vi.resetModules().
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import type { Session, SessionChanges, SessionOutput, SystemMetrics } from "@jarvis/core";
 import type { VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
@@ -44,8 +45,7 @@ async function loadApp(
   vi.resetModules();
   FakeTerminal.last = undefined;
   document.body.innerHTML = `
-    <span id="clock-time"></span>
-    <span id="clock-date"></span>
+    <div class="clock"><span id="clock-time"></span></div>
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
@@ -57,21 +57,31 @@ async function loadApp(
     <span id="cpu-value"></span>
     <div id="cpu-bar"></div>
     <span id="mem-value"></span>
+    <span id="mem-detail"></span>
     <div id="mem-bar"></div>
     <span id="disk-value"></span>
     <span id="disk-total"></span>
+    <div id="disk-bar"></div>
     <span id="uptime-value"></span>
-    <span id="header-cpu"></span>
-    <span id="header-mem"></span>
-    <span id="header-disk"></span>
+    <span id="temp-value"></span>
+    <div id="temp-note" hidden></div>
     <span id="net-down"></span>
     <span id="net-up"></span>
+    <span id="topbar-danger-dot" hidden></span>
     <div id="conversation"></div>
     <section id="presence" class="presence presence--idle"></section>
     <div id="presence-state"></div>
     <div id="presence-hint"></div>
-    <h2 id="centre-title"></h2>
-    <span id="centre-count"></span>
+    <div id="project-label"></div>
+    <div id="project-count"></div>
+    <label id="project-filter-label" for="project-filter"></label>
+    <input id="project-filter" />
+    <div id="project-summary"></div>
+    <div id="agent-orbits"></div>
+    <div id="project-grid"></div>
+    <div id="sessions-summary"></div>
+    <button id="dashboard-sessions-refresh" type="button"></button>
+    <button id="all-sessions-link" type="button"></button>
     <div id="centre-body"></div>
     <button id="history-button"></button>
     <button id="history-close"></button>
@@ -97,6 +107,16 @@ async function loadApp(
     </div>
     <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button"></button>
     <button id="nav-changes" class="nav-btn" type="button"></button>
+    <button id="nav-settings" class="nav-btn" type="button"></button>
+    <button id="remote-pill" class="pill pill--remote" type="button" hidden>
+      <span id="remote-pill-text"></span>
+    </button>
+    <div id="remote-confirm" hidden>
+      <div id="remote-confirm-title"></div>
+      <div id="remote-confirm-body"></div>
+      <button id="remote-confirm-approve" type="button"></button>
+      <button id="remote-confirm-deny" type="button"></button>
+    </div>
     <button id="nav-session" class="nav-btn" type="button"></button>
     <div class="main main--session" id="view-session" hidden>
       <div id="session-view-project"></div>
@@ -104,8 +124,21 @@ async function loadApp(
       <div id="session-view-state"></div>
       <div id="session-view-agent"></div>
       <div id="session-voice" hidden></div>
+      <button id="session-resume" hidden></button>
+      <button id="session-back" hidden></button>
+      <div id="session-detail" hidden></div>
       <div id="session-terminal"></div>
+      <div id="session-transcript" hidden></div>
       <div id="session-empty" hidden></div>
+      <div id="session-table" hidden>
+        <input id="session-search" />
+        <select id="session-filter-project"></select>
+        <select id="session-filter-agent"></select>
+        <div id="session-count"></div>
+        <button id="session-refresh" type="button"></button>
+        <div id="session-table-status"></div>
+        <table><thead><tr><th data-sort="project"></th><th data-sort="lastActivityAt"></th></tr></thead><tbody id="session-table-body"></tbody></table>
+      </div>
     </div>
   `;
 
@@ -126,6 +159,8 @@ async function loadApp(
     openEditor: vi.fn(async () => ({ ok: true, value: "" })),
     openTerminal: vi.fn(async () => ({ ok: true, value: undefined })),
     openApiTab: vi.fn(async () => ({ ok: true, value: undefined })),
+    openTab: vi.fn(async () => undefined),
+    openDockerTab: vi.fn(async () => ({ ok: true, value: undefined })),
     onSessions: (cb: (sessions: Session[]) => void) => {
       callbacks.onSessions = cb;
     },
@@ -152,10 +187,25 @@ async function loadApp(
       callbacks.onNotice = cb;
     },
     getHistory: vi.fn(getHistory),
+    listSessions: vi.fn(async () => [] as Session[]),
+    refreshSessions: vi.fn(async () => ({ jarvis: 0, external: 0, importedTranscripts: 0 })),
+    setWorkspaceVisible: vi.fn(async () => {}),
     gitChanges: vi.fn(gitChanges),
     gitDiff: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
     gitSetStaged: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
     gitCommit: vi.fn(async () => ({ ok: false, text: "not stubbed", language: "en" })),
+    remoteStatus: vi.fn(async () => ({
+      enabled: false,
+      listening: undefined,
+      pairing: { kind: "closed" },
+      devices: [],
+      problem: undefined,
+    })),
+    openRemotePairing: vi.fn(async () => ({ ok: true, value: undefined })),
+    cancelRemotePairing: vi.fn(async () => {}),
+    decideRemotePairing: vi.fn(async () => {}),
+    revokeRemoteDevice: vi.fn(async () => ({ ok: true, value: undefined })),
+    onRemoteStatus: vi.fn(),
   };
 
   await import("./app.js");
@@ -289,6 +339,38 @@ describe("mic button", () => {
   });
 });
 
+// initRemoteStatus is wired at startup exactly like initSettings — inside
+// its own try/catch, so a harness missing its markup (most of the tests
+// above) never breaks the rest of wireNav(). This harness lays the markup
+// down instead, to prove the wiring itself actually happens.
+describe("remote status wiring", () => {
+  it("pulls remoteStatus() and subscribes onRemoteStatus at startup", async () => {
+    await loadApp();
+    const api = window.jarvis as unknown as {
+      remoteStatus: ReturnType<typeof vi.fn>;
+      onRemoteStatus: ReturnType<typeof vi.fn>;
+    };
+    expect(api.remoteStatus).toHaveBeenCalledTimes(1);
+    expect(api.onRemoteStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking the remote pill clicks the Settings nav button", async () => {
+    await loadApp();
+    // Let the initial remoteStatus() promise settle before asserting.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Stubbed rather than left real: the real nav-settings listener drives
+    // openSettings(), which needs the whole Settings route's markup this
+    // harness does not lay down — out of scope for what this test checks,
+    // which is only that the pill forwards its click.
+    const navSettings = document.getElementById("nav-settings") as HTMLButtonElement;
+    navSettings.click = vi.fn();
+    (document.getElementById("remote-pill") as HTMLButtonElement).click();
+    expect(navSettings.click).toHaveBeenCalledTimes(1);
+  });
+});
+
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "s1",
@@ -350,6 +432,19 @@ describe("history panel", () => {
 
     document.getElementById("history-close")?.click();
     expect(overlayEl().hidden).toBe(true);
+  });
+
+  it("hides the native browser while History is open and restores it on close", async () => {
+    await loadApp(async () => []);
+    const { showView } = await import("./views.js");
+    const visible = window.jarvis.setWorkspaceVisible as ReturnType<typeof vi.fn>;
+    showView("workspace");
+    visible.mockClear();
+
+    document.getElementById("history-button")?.click();
+    expect(visible).toHaveBeenLastCalledWith(false);
+    document.getElementById("history-close")?.click();
+    expect(visible).toHaveBeenLastCalledWith(true);
   });
 
   it("stays open on a click inside the panel, and closes only on a click on the scrim itself", async () => {
@@ -669,6 +764,9 @@ describe("opening a session", () => {
     const getSessionLog = vi.fn(async () => "booting…\n");
     const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
 
+    // First update after launch: nothing to auto-open yet.
+    onSessions?.([]);
+    await Promise.resolve();
     onSessions?.([makeSession({ id: "fresh" })]);
     await Promise.resolve();
     await Promise.resolve();
@@ -678,10 +776,46 @@ describe("opening a session", () => {
     expect(FakeTerminal.last?.text).toBe("booting…\n");
   });
 
+  // The bug this fixes: since sessions:refresh + process discovery and the
+  // transcript backfill, the very first sessions:update after launch already
+  // carries rows — the process scan's and the backfill's, not anything the
+  // user just started. Auto-opening the newest of them landed the app on the
+  // Session view instead of the Dashboard at startup.
+  it("does not auto-open anything from the first sessions:update after launch", async () => {
+    const getSessionLog = vi.fn(async () => "");
+    const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([makeSession({ id: "already-running", startedAt: 1000 })]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getSessionLog).not.toHaveBeenCalled();
+    expect(document.getElementById("view-session")?.hidden).not.toBe(false);
+  });
+
+  // Rows found by the process scan (`origin: "external"`, ids `ext-<pid>`)
+  // were discovered, not started by the user — they must never steal the
+  // view even when they are genuinely new after the first update.
+  it("does not auto-open an externally-discovered session", async () => {
+    const getSessionLog = vi.fn(async () => "");
+    const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
+
+    onSessions?.([]);
+    await Promise.resolve();
+    onSessions?.([makeSession({ id: "ext-123", origin: "external" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getSessionLog).not.toHaveBeenCalled();
+  });
+
   it("does not reopen the view when an already-known session merely changes state", async () => {
     const getSessionLog = vi.fn(async () => "");
     const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
 
+    // First update after launch: nothing to auto-open yet.
+    onSessions?.([]);
+    await Promise.resolve();
     onSessions?.([makeSession({ id: "s1", state: "starting" })]);
     await Promise.resolve();
     await Promise.resolve();
@@ -699,6 +833,9 @@ describe("opening a session", () => {
     const getSessionLog = vi.fn(async () => "");
     const { onSessions } = await loadApp(undefined, undefined, getSessionLog);
 
+    // First update after launch: nothing to auto-open yet.
+    onSessions?.([]);
+    await Promise.resolve();
     onSessions?.([
       makeSession({ id: "older", startedAt: 1000 }),
       makeSession({ id: "newer", startedAt: 2000 }),
@@ -784,10 +921,13 @@ describe("opening a session", () => {
   it("streams later output into the open transcript", async () => {
     const { onSessions, onSessionOutput } = await loadApp(undefined, undefined, async () => "");
 
+    // First update after launch: nothing to auto-open yet.
+    onSessions?.([]);
+    await Promise.resolve();
     onSessions?.([makeSession({ id: "s1" })]);
     await Promise.resolve();
     await Promise.resolve();
-    onSessionOutput?.({ sessionId: "s1", chunk: "live line\n" });
+    onSessionOutput?.({ sessionId: "s1", chunk: "live line\n", offset: 0 });
 
     expect(FakeTerminal.last?.text).toBe("live line\n");
   });
@@ -798,7 +938,11 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 6; i += 1) await Promise.resolve();
 }
 
-describe("the header's system strip", () => {
+// board 0 removed CPU/RAM/DISK/network from the topbar entirely — the
+// Dashboard SYSTEM card (#disk-value, #disk-bar, #net-down, #net-up) is now
+// the only place they render, and the topbar carries only a danger dot, lit
+// when the machine is genuinely in trouble. See app.ts's renderMetrics.
+describe("the Dashboard SYSTEM card and the topbar's danger dot", () => {
   const metrics = (over: Partial<SystemMetrics> = {}): SystemMetrics => ({
     cpuPercent: 10,
     memoryUsedBytes: 1,
@@ -811,21 +955,43 @@ describe("the header's system strip", () => {
     ...over,
   });
 
-  // A disk at 98% was stated in exactly the same grey as a disk at 12%.
-  it("marks a nearly full disk", async () => {
+  it("marks a disk at or above 95% critical and lights the topbar dot", async () => {
     const { onMetrics } = await loadApp();
 
-    onMetrics?.(metrics({ diskUsedBytes: 98, diskTotalBytes: 100 }));
+    onMetrics?.(metrics({ diskUsedBytes: 95, diskTotalBytes: 100 }));
 
-    expect(document.getElementById("header-disk")?.className).toContain("bad");
+    expect(document.getElementById("disk-value")?.className).toContain("crit");
+    expect(document.getElementById("disk-bar")?.className).toContain("fill--crit");
+    const dot = document.getElementById("topbar-danger-dot");
+    expect(dot?.hidden).toBe(false);
+    expect(dot?.title).toContain("disk");
   });
 
-  it("warns before it is critical", async () => {
+  // Review of 186389a (Important 1): the sensor note must show when there is
+  // no reading and fold away once one arrives — never stay hidden for good.
+  it("shows the no-sensor note without a temperature and hides it with one", async () => {
     const { onMetrics } = await loadApp();
 
-    onMetrics?.(metrics({ memoryUsedBytes: 91, memoryTotalBytes: 100 }));
+    onMetrics?.(metrics({ cpuTemperatureC: undefined }));
+    const note = document.getElementById("temp-note");
+    expect(note?.hidden).toBe(false);
+    expect(note?.textContent).toContain("temperature sensor");
+    expect(document.getElementById("temp-value")?.textContent).toBe("");
 
-    expect(document.getElementById("header-mem")?.className).toContain("warn");
+    onMetrics?.(metrics({ cpuTemperatureC: 52 }));
+    expect(note?.hidden).toBe(true);
+    expect(document.getElementById("temp-value")?.textContent).toBe("52°");
+  });
+
+  it("warns from 85% until critical, without lighting the danger dot", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ diskUsedBytes: 85, diskTotalBytes: 100 }));
+
+    const disk = document.getElementById("disk-value");
+    expect(disk?.className).toContain("warn");
+    expect(disk?.className).not.toContain("crit");
+    expect(document.getElementById("topbar-danger-dot")?.hidden).toBe(true);
   });
 
   it("says nothing about a machine that is fine", async () => {
@@ -833,9 +999,53 @@ describe("the header's system strip", () => {
 
     onMetrics?.(metrics({ diskUsedBytes: 12, diskTotalBytes: 100 }));
 
-    const disk = document.getElementById("header-disk");
+    const disk = document.getElementById("disk-value");
     expect(disk?.textContent).toBe("12%");
     expect(disk?.className).toBe("");
+    expect(document.getElementById("topbar-danger-dot")?.hidden).toBe(true);
+  });
+
+  it("names CPU when it is the reading that is critical", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ cpuPercent: 96 }));
+
+    const dot = document.getElementById("topbar-danger-dot");
+    expect(dot?.hidden).toBe(false);
+    expect(dot?.title).toContain("CPU");
+    expect(dot?.title).not.toContain("disk");
+  });
+
+  it("always renders network throughput on the SYSTEM card", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ networkDownMbps: 0.3, networkUpMbps: 1.2 }));
+
+    expect(document.getElementById("net-down")?.textContent).toBe("↓0.3");
+    expect(document.getElementById("net-up")?.textContent).toBe("↑1.2");
+  });
+});
+
+describe("the header clock", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-19T18:12:34"));
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("renders HH:MM only and moves the full date to the clock title", async () => {
+    await loadApp();
+    expect(document.getElementById("clock-time")?.textContent).toBe("18:12");
+    expect(document.querySelector<HTMLElement>(".clock")?.title).toContain("19 Sept 2026");
+    expect(document.getElementById("clock-date")).toBeNull();
+  });
+});
+
+describe("topbar no-wrap contract", () => {
+  it("keeps every direct topbar child on one line", () => {
+    const css = readFileSync("packages/desktop/renderer/styles.css", "utf8");
+    expect(css).toMatch(/\.topbar\s*>\s*\*\s*\{[^}]*white-space:\s*nowrap/s);
   });
 });
 
@@ -847,46 +1057,202 @@ describe("the Dashboard's centre", () => {
     onSessions?.([]);
     await settle();
 
-    expect(document.getElementById("centre-title")?.textContent).toBe("Projects");
-    expect([...document.querySelectorAll(".project-row__name")].map((n) => n.textContent)).toEqual([
+    expect([...document.querySelectorAll(".node__name")].map((n) => n.textContent)).toEqual([
       "acme",
       "storefront",
     ]);
   });
 
-  it("gives the centre back to sessions the moment one is running", async () => {
+  // Board 0's second pass keeps both regions on screen always — the old
+  // "sessions replace projects the moment one is running" toggle is gone.
+  it("keeps both the sessions list and the projects grid on screen once something is running", async () => {
     const { onSessions } = await loadApp();
     onSessions?.([]);
     await settle();
 
     onSessions?.([makeSession({ id: "s1", project: "acme" })]);
 
-    expect(document.getElementById("centre-title")?.textContent).toBe("Running");
     expect(document.querySelectorAll("#centre-body .session")).toHaveLength(1);
-    expect(document.querySelectorAll(".project-row")).toHaveLength(0);
+    expect(document.querySelectorAll(".node")).toHaveLength(2);
   });
 
-  it("opens a project's editor, terminal or API tab and goes there", async () => {
+  it("sorts the projects grid running, then waiting, then idle, each alphabetically", async () => {
+    const { onSessions } = await loadApp();
+    // "storefront" alone would already sort before "acme"; making it the one
+    // that is live proves the sort is by status first, not a fallback to name.
+    onSessions?.([makeSession({ id: "s1", project: "storefront", state: "running" })]);
+    await settle();
+
+    expect([...document.querySelectorAll(".node__name")].map((n) => n.textContent)).toEqual([
+      "storefront",
+      "acme",
+    ]);
+  });
+
+  it("gives a live node the live class and an idle one the idle class", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ id: "s1", project: "acme", state: "running" })]);
+    await settle();
+
+    const nodes = [...document.querySelectorAll<HTMLElement>(".node")];
+    const acme = nodes.find((n) => n.querySelector(".node__name")?.textContent === "acme");
+    const storefront = nodes.find(
+      (n) => n.querySelector(".node__name")?.textContent === "storefront",
+    );
+    expect(acme?.className).toContain("live");
+    expect(storefront?.className).toContain("idle");
+  });
+
+  it("gives a waiting session's project the waiting class", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([makeSession({ id: "s1", project: "acme", state: "waiting" })]);
+    await settle();
+
+    const acme = [...document.querySelectorAll<HTMLElement>(".node")].find(
+      (n) => n.querySelector(".node__name")?.textContent === "acme",
+    );
+    expect(acme?.className).toContain("waiting");
+  });
+
+  it("hides a project from the grid once the filter no longer matches its name", async () => {
     const { onSessions } = await loadApp();
     onSessions?.([]);
     await settle();
 
-    document.querySelector<HTMLElement>(".project-row__editor")?.click();
-    document.querySelector<HTMLElement>(".project-row__terminal")?.click();
+    const filter = document.getElementById("project-filter") as HTMLInputElement;
+    filter.value = "store";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect([...document.querySelectorAll(".node__name")].map((n) => n.textContent)).toEqual([
+      "storefront",
+    ]);
+  });
+
+  it("opens a project's editor, terminal, browser or Docker tab and goes there", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    await settle();
+
+    // Round 4: the buttons carry no text of their own any more (that used
+    // to overflow the card as unbounded label text) — found by aria-label
+    // instead, the same string their title carries.
+    const actionButton = (label: string): HTMLElement | undefined =>
+      [...document.querySelectorAll<HTMLElement>(".node__action")].find(
+        (button) => button.getAttribute("aria-label") === label,
+      );
+
+    actionButton(MESSAGES.dashboardActionEditor(PRIMARY_LANGUAGE))?.click();
+    actionButton(MESSAGES.dashboardActionTerminal(PRIMARY_LANGUAGE))?.click();
+    actionButton(MESSAGES.dashboardActionBrowser(PRIMARY_LANGUAGE))?.click();
+    actionButton(MESSAGES.dashboardActionDocker(PRIMARY_LANGUAGE))?.click();
 
     expect(window.jarvis.openEditor).toHaveBeenCalledWith("acme");
     expect(window.jarvis.openTerminal).toHaveBeenCalledWith("acme");
+    expect(window.jarvis.openTab).toHaveBeenCalledWith("acme", expect.any(String));
+    expect(window.jarvis.openDockerTab).toHaveBeenCalledWith("acme");
     // The route change itself is views.ts's job and is tested there; this
     // harness lays down only the routes it exercises.
   });
 
-  // The orb, the rings and the centred wordmark were decoration that said
-  // nothing true about the app.
-  it("no longer draws an orb or a wordmark in the middle", async () => {
+  it("renders a project node's action buttons as icon-only, four per node", async () => {
+    const { onSessions } = await loadApp();
+    onSessions?.([]);
+    await settle();
+
+    const nodes = [...document.querySelectorAll<HTMLElement>(".node")];
+    expect(nodes.length).toBeGreaterThan(0);
+
+    for (const node of nodes) {
+      const buttons = [...node.querySelectorAll<HTMLElement>(".node__action")];
+      expect(buttons).toHaveLength(4);
+      for (const button of buttons) {
+        expect(button.textContent).toBe("");
+        expect(button.getAttribute("aria-label")).not.toBe(null);
+        expect(button.getAttribute("aria-label")).not.toBe("");
+        expect(button.title).toBe(button.getAttribute("aria-label"));
+        expect(button.querySelector("svg")).not.toBeNull();
+      }
+    }
+  });
+
+  // The core stage's orb is real information now (the registry's agents,
+  // orbiting) rather than the decoration an earlier pass removed — so it is
+  // expected to be on screen, unlike the old ".orb"/".brand-title" this test
+  // used to pin the absence of.
+  it("draws the core stage's brain, not the old plain orb classes", async () => {
     await loadApp();
 
     expect(document.querySelector(".orb")).toBeNull();
     expect(document.querySelector(".brand-title")).toBeNull();
+    expect(document.getElementById("presence")?.className).toContain("brain-core");
+  });
+});
+
+describe("the Dashboard SESSIONS card's refresh button", () => {
+  it("calls sessions:refresh once per click and spins while in flight", async () => {
+    await loadApp();
+    const refreshSessions = (
+      window as unknown as { jarvis: { refreshSessions: ReturnType<typeof vi.fn> } }
+    ).jarvis.refreshSessions;
+    let resolveRefresh: (value: {
+      jarvis: number;
+      external: number;
+      importedTranscripts: number;
+    }) => void = () => {};
+    refreshSessions.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    const button = document.getElementById("dashboard-sessions-refresh") as HTMLButtonElement;
+    button.click();
+
+    expect(refreshSessions).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.classList.contains("icon-btn--spinning")).toBe(true);
+
+    resolveRefresh({ jarvis: 0, external: 0, importedTranscripts: 0 });
+    await settle();
+
+    expect(button.disabled).toBe(false);
+    expect(button.classList.contains("icon-btn--spinning")).toBe(false);
+
+    button.click();
+    expect(refreshSessions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the core stage's orbiting agents", () => {
+  // Production reaches setKnownAgentIds() through wireNav()'s own
+  // getSettings().then(...) — unreachable in this harness without mounting
+  // the whole Settings route (initSettings() throws on this harness's
+  // absent #settings-tools, which the outer try/catch swallows before that
+  // call ever fires). setKnownAgentIds is the seam both call sites share;
+  // exercising it directly proves the same thing production's read does.
+  it("draws one chip per registered agent, matching the registry", async () => {
+    await loadApp();
+    const { setKnownAgentIds } = await import("./app.js");
+
+    setKnownAgentIds(["claude", "codex"]);
+
+    const chips = [...document.querySelectorAll("#agent-orbits .satellite")];
+    expect(chips).toHaveLength(2);
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      expect.stringContaining("claude"),
+      expect.stringContaining("codex"),
+    ]);
+  });
+
+  it("redraws to match a shorter registry", async () => {
+    await loadApp();
+    const { setKnownAgentIds } = await import("./app.js");
+
+    setKnownAgentIds(["claude", "codex"]);
+    setKnownAgentIds(["claude"]);
+
+    expect(document.querySelectorAll("#agent-orbits .satellite")).toHaveLength(1);
   });
 });
 
@@ -1040,7 +1406,52 @@ describe("the running-sessions indicator", () => {
     const { onSessions } = await loadApp();
     onSessions?.([makeSession({ state: "running" })]);
     pill().click();
+    // The click handler's own renderSessionTable() is fire-and-forget, so
+    // its showTable() only lands once the mocked getHistory/listSessions
+    // promises it awaits have settled.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(document.getElementById("view-session")?.hidden).toBe(false);
+  });
+
+  // Fix round 1, I1: the pill's click handler used to call
+  // reassertSessionSize() synchronously, alongside — not after —
+  // renderSessionTable()'s own fire-and-forget promise.
+  // renderSessionTable() only actually shows the table, and flips
+  // session-view.ts's terminalVisible to false, once its `getHistory`
+  // await settles; called first, the old code would still see whatever
+  // terminal was open a moment ago and send its about-to-be-stale size.
+  it(// [bite-proof: call reassertSessionSize() synchronously instead of
+  // chaining it onto renderSessionTable(); the test fails]
+  "does not describe the terminal it is about to hide when clicked from an open session", async () => {
+    let resolveHistory: (value: Session[]) => void = () => {};
+    const historyPromise = new Promise<Session[]>((resolve) => {
+      resolveHistory = resolve;
+    });
+    await loadApp(() => historyPromise);
+    const { openSession } = await import("./session-view.js");
+    await openSession(makeSession({ id: "s1" }));
+
+    const jarvis = (window as unknown as { jarvis: { resizeSession: ReturnType<typeof vi.fn> } })
+      .jarvis;
+    jarvis.resizeSession.mockClear();
+
+    pill().click();
+
+    // getHistory has not resolved yet — the terminal is still what is
+    // on screen, and the re-assert must not have fired against it.
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
+
+    resolveHistory([]);
+    await historyPromise;
+    // Let renderSessionTable()'s own continuation, and the .then() the
+    // click handler chained onto it, run.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The table is what settled — no terminal to describe.
+    expect(jarvis.resizeSession).not.toHaveBeenCalled();
   });
 });

@@ -133,6 +133,12 @@ const MAX_DIFF_BYTES = 2_000_000;
  */
 function insideRepo(filePath: string): boolean {
   if (isAbsolute(filePath)) return false;
+  // C3: a path beginning with "-" is never a real repo-relative path — it
+  // is how git's own argument parser reads an option, and every call site
+  // below also passes `--` before its paths as a second, independent
+  // guard. `--pathspec-from-file=<file>` in particular would make git read
+  // and stage an attacker-chosen list of paths out of a file it names.
+  if (filePath.startsWith("-")) return false;
   const normalized = normalize(filePath);
   return !normalized.startsWith("..") && normalized !== ".";
 }
@@ -299,7 +305,10 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
       const opened = await open(repoPath);
       if (!opened.ok) return opened;
       try {
-        await opened.value.add(paths);
+        // `--` separates paths from options, same reasoning as unstage's
+        // `reset -- <paths>` below: insideRepo() already refused a
+        // leading "-", this is the second, independent guard.
+        await opened.value.add(["--", ...paths]);
         return { ok: true, value: null };
       } catch (error) {
         return failure("failed", gitErrorDetail(error, timeoutMs));

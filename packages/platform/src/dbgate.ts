@@ -97,6 +97,12 @@ export type DbGateManager = {
   /** Kills every running instance — called on app quit. Each instance is a
    *  live child process; it does not go away with the window on its own. */
   stopAll(): void;
+  /** The credential of the *running* instance whose URL port is `port` —
+   *  what the desktop's login handler answers Electron's basic-auth
+   *  challenge with. `undefined` for any other port, including a project
+   *  whose spawn is in flight but has not yet landed in `running`: a
+   *  challenge for a port nothing is running on is never one to answer. */
+  credentialFor(port: number): { login: string; password: string } | undefined;
 };
 
 export type DbGateManagerDeps = {
@@ -167,12 +173,24 @@ export function createDbGateManager(deps: DbGateManagerDeps): DbGateManager {
         env: {
           PORT: String(hint),
           WORKSPACE_DIR: workspaceDir,
-          // DbGate listens on 0.0.0.0 with no way to ask for loopback, so
-          // an unguarded instance is reachable from the local network for
-          // as long as it runs. This credential is generated per spawn and
-          // lives only in the child's environment.
+          // DbGate binds every interface and cannot be asked not to: every
+          // branch of dbgate-api's listen (src/main.js, the isNpmDist one is
+          // ours) calls server.listen(port) with no host, and the package
+          // reads no HOST or BIND variable. So an open Database tab is
+          // reachable from the local network for as long as it runs, and this
+          // password is the only thing in front of it. Generated per spawn and
+          // living only in the child's environment — see SECURITY.md.
           LOGIN: "jarvis",
           PASSWORD: password,
+          // why: turns on express-basic-auth in front of every DbGate route
+          // (dbgate-api/src/main.js:104), with LOGIN/PASSWORD as the
+          // authorizer — the proxy injects the resulting Authorization
+          // header server-side and the desktop answers Electron's own
+          // login challenge for it (dbgate-login.ts), so neither the phone
+          // nor the renderer ever needs to know the credential. DbGate's
+          // JWT login middleware is skipped entirely under basic auth
+          // (dbgate-api/src/controllers/auth.js:153).
+          BASIC_AUTH: "1",
           ...connectionEnv(deps.connectionsFor(project), deps.env),
         },
       });
@@ -231,6 +249,16 @@ export function createDbGateManager(deps: DbGateManagerDeps): DbGateManager {
     stopAll() {
       for (const { process } of running.values()) process.kill();
       running.clear();
+    },
+
+    credentialFor(port) {
+      for (const { result } of running.values()) {
+        if (!result.ok) continue;
+        if (Number(new URL(result.url).port) === port) {
+          return { login: result.login, password: result.password };
+        }
+      }
+      return undefined;
     },
   };
 }

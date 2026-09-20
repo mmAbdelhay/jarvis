@@ -1,0 +1,28 @@
+{
+  "name": "@jarvis/remote",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./listen": {
+      "types": "./dist/listen.d.ts",
+      "import": "./dist/listen.js"
+    }
+  },
+  "dependencies": {
+    "@jarvis/wire": "workspace:*",
+    "@peculiar/x509": "2.1.0",
+    "reflect-metadata": "0.2.2",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "8.18.1"
+  }
+}

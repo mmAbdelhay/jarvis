@@ -74,6 +74,16 @@ describe("zshWrapperFiles", () => {
     expect(files[".zshenv"]).toContain("JARVIS_ZDOTDIR=${JARVIS_ZDOTDIR:-$ZDOTDIR}");
   });
 
+  // A Jarvis launched from inside Jarvis's own Terminal tab inherits
+  // $ZDOTDIR already pointing at the wrapper. Without this, a nested
+  // instance has no way to recover the user's real dotfile directory and
+  // regenerates the wrapper pointing at itself — the recursion bug.
+  it("remembers the user's real ZDOTDIR too, for a Jarvis launched from inside Jarvis", () => {
+    for (const name of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
+      expect(files[name]).toContain("export JARVIS_REAL_ZDOTDIR='/home/me'");
+    }
+  });
+
   it("emits the four OSC 133 marks the tracker keys off", () => {
     for (const mark of ["133;%s", "A", "B", "C", "D"]) {
       expect(files[".zshrc"]).toContain(mark);

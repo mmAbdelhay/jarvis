@@ -146,7 +146,7 @@ function ensureTerminal(pane: Pane): Terminal {
   pane.empty = undefined;
   const terminal = new Terminal({
     scrollback: LOG_TAIL_LINES,
-    fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
     fontSize: 12,
     lineHeight: 1.35,
     theme: THEME,

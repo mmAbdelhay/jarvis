@@ -6,6 +6,7 @@ import type {
   SessionStore,
   Spawner,
   StartInput,
+  StreamSnapshot,
 } from "./types.js";
 
 /**
@@ -65,6 +66,10 @@ export class SessionManager {
   // find out why it stopped.
   readonly #logs = new Map<string, string[]>();
   readonly #logSizes = new Map<string, number>();
+  // UTF-16 code units emitted per session since it started — ruling 10.
+  // Never trimmed by #compactLog: `end` must stay the true total even once
+  // retention has cut `text` down to DEAD_LOG_CHARS.
+  readonly #emitted = new Map<string, number>();
   readonly #outputListeners = new Set<(output: SessionOutput) => void>();
   // Tasks waiting for their session to finish starting up, with the timer
   // that will deliver them. Cleared on delivery and on session exit, so a
@@ -205,6 +210,20 @@ export class SessionManager {
     return this.#sessions.get(id);
   }
 
+  /** The OS pids of every agent this manager currently runs, for the
+   *  process scan (process-scan.ts) to exclude — a pty child reported here
+   *  must never also be listed as a session running "outside Jarvis".
+   *  Read from the live ProcessHandle rather than the Session row, since a
+   *  spawner that reports no pid (a test double) must not poison the set
+   *  with `undefined`. */
+  ownedPids(): ReadonlySet<number> {
+    const pids = new Set<number>();
+    for (const handle of this.#processes.values()) {
+      if (handle.pid !== undefined) pids.add(handle.pid);
+    }
+    return pids;
+  }
+
   onChange(listener: (sessions: Session[]) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -232,10 +251,25 @@ export class SessionManager {
     return (this.#logs.get(id) ?? []).join("");
   }
 
+  /**
+   * A cursor onto this session's retained transcript: `text` is `log(id)`,
+   * `end` is the true count of UTF-16 code units emitted since the session
+   * started (ruling 10). An unknown id returns `{ text: "", end: 0 }`, same
+   * as `log`.
+   */
+  snapshot(id: string): StreamSnapshot {
+    return { text: this.log(id), end: this.#emitted.get(id) ?? 0 };
+  }
+
   #onOutput(id: string, chunk: string): void {
+    // `offset` is the count *before* this chunk, so the log append (and the
+    // counter update) must happen before any listener runs — the M1
+    // invariant a listener reading `snapshot().end` relies on.
+    const offset = this.#emitted.get(id) ?? 0;
     this.#appendLog(id, chunk);
+    this.#emitted.set(id, offset + chunk.length);
     this.#armTask(id);
-    for (const listener of [...this.#outputListeners]) listener({ sessionId: id, chunk });
+    for (const listener of [...this.#outputListeners]) listener({ sessionId: id, chunk, offset });
     const summary = lastNonEmptyLine(chunk);
     this.#update(id, {
       state: "running",
@@ -243,20 +277,27 @@ export class SessionManager {
     });
   }
 
+  // Same shape as ShellManager's appendChunk (M5): drop a whole front chunk
+  // only when the remainder — size minus that chunk's own length — is still
+  // at or above the cap, so the retained tail always equals
+  // (old + chunk).slice(-MAX_LOG_CHARS) exactly. Dropping it whenever the
+  // *pre-removal* total merely exceeded the cap (the old condition here)
+  // could throw away a chunk the tail window still cuts through the middle
+  // of, undershooting by up to that chunk's own length.
   #appendLog(id: string, chunk: string): void {
     const chunks = this.#logs.get(id) ?? [];
     chunks.push(chunk);
     let size = (this.#logSizes.get(id) ?? 0) + chunk.length;
-    // Drop whole chunks from the front until the retained total fits. The
-    // last chunk is never dropped, so a single chunk larger than the cap is
-    // truncated from its own front rather than vanishing entirely — losing
-    // the newest output would defeat the point of the transcript.
-    while (size > MAX_LOG_CHARS && chunks.length > 1) {
+    // The last chunk is never dropped, so a single chunk larger than the cap
+    // is truncated from its own front rather than vanishing entirely —
+    // losing the newest output would defeat the point of the transcript.
+    while (chunks.length > 1 && size - (chunks[0]?.length ?? 0) >= MAX_LOG_CHARS) {
       size -= chunks.shift()?.length ?? 0;
     }
     if (size > MAX_LOG_CHARS) {
-      const only = chunks[0] ?? "";
-      chunks[0] = only.slice(only.length - MAX_LOG_CHARS);
+      const excess = size - MAX_LOG_CHARS;
+      const front = chunks[0] ?? "";
+      chunks[0] = front.slice(excess);
       size = MAX_LOG_CHARS;
     }
     this.#logs.set(id, chunks);

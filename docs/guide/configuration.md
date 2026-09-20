@@ -135,7 +135,43 @@ performance:                    # optional; the whole section defaults
 
 browser:                        # optional; the whole section defaults
   allowPopups: true             # false opens window.open popups as tabs instead
+  # homePage: https://example.com  # optional; opens instead of the built-in
+                                 # new-tab page — http(s) only, at most 2048
+                                 # characters, no control characters; absent
+                                 # keeps today's behaviour
+
+prayer:                         # optional; defaults to disabled
+  enabled: true
+  location:                     # optional; Alexandria is used when absent
+    latitude: 31.2001
+    longitude: 29.9187
+    name: Alexandria
+  notify:                       # optional; every field below is the default
+    before: true                 # desktop notification some minutes ahead of each prayer
+    beforeMinutes: 10            # 1-60
+    atTime: true                 # desktop notification right at each prayer's own time
+
+remote:                         # optional; absent means the bridge does not exist
+  enabled: false                # nothing can reach this machine until this is true
+  bindAddress: 127.0.0.1        # an IP address, never a hostname; Settings lists yours
+  port: 7717                    # 0 picks a free port
+  sidecarProxy: false           # Editor, Database and Cluster on the phone; needs a real certificate
+  tls:
+    certPath: ~                 # e.g. from `tailscale cert <machine>.<tailnet>.ts.net`
+    keyPath: ~                  # both absent: self-signed, pinned when you pair
+  push:
+    enabled: false              # the one part involving a third party
+    includeProjectNames: false  # project names in a notification's text
+  idleDisableMinutes: 0         # 0 = never; otherwise turn off after this long idle
 ```
+
+**prayer**: The “Use my location” button asks CoreLocation on macOS. On Linux
+and Windows, Chromium may contact Google's location service and can fail without
+a key; the latitude and longitude fields in Settings provide a permission-free
+fallback. Desktop notifications (a reminder some minutes before each prayer,
+and one right at its own time) are on by default whenever prayer itself is
+enabled — turn either off, or change how many minutes ahead the first one
+fires, from the same Settings section.
 
 ## `performance:` — what Jarvis gives back while you are not looking
 
@@ -156,6 +192,58 @@ turning each off is one number rather than a mode.
 The suspend and stop timers are checked once a minute, so anything can outlive
 its timeout by up to a minute. `terminalScrollback` is read when a pane is
 built, so a change reaches new terminals rather than open ones.
+
+## `remote:` — reaching this machine from your phone
+
+**Nothing listens unless it is enabled and either a device is already paired
+or a pairing window is open.** With `enabled: true` and zero paired devices,
+the bridge stays silent until you click **New code** in Settings — opening a
+pairing window is what opens the listening socket, on `remote.bindAddress`.
+The window (and the socket, if no device ends up paired) closes again after
+120 seconds, or immediately on Cancel — unless a confirmation or a pairing
+connection is still in progress, in which case it stays open up to 60
+seconds longer for that to finish. Once at least one device is paired,
+the bridge listens whenever `enabled` is `true`, independent of any pairing
+window. The Dashboard's topbar carries a listening indicator whenever a
+socket is actually open.
+
+The section is optional, and a new `jarvis.yaml` does not have one: absent
+means off, on `127.0.0.1`, so upgrading Jarvis can never open a port. A
+Settings save leaves the section out again whenever every value is back at its
+default.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `false` | The master switch. |
+| `bindAddress` | `127.0.0.1` | The one address the bridge will listen on. Must be an IP address: `localhost` or a `*.ts.net` name is refused, because a hostname would put a DNS lookup in charge of who can connect. `0.0.0.0` and `::` are allowed and mean every network this machine is on; Settings warns when you pick them. In YAML, `::` must be quoted — `bindAddress: "::"` — because the unquoted form is invalid YAML and the whole config fails to load. |
+| `port` | `7717` | A whole number from 0 to 65535. `0` asks the system for a free port, and the pairing code carries whichever one it got. |
+| `sidecarProxy` | `false` | Lets a paired phone open the Editor, Database and Cluster tabs through an in-app reverse proxy on the bridge listener, at `/s/<handle>/…`. It needs a real, configured certificate with a DNS name (`tls.certPath`/`keyPath` below) because a phone's web view cannot be told to trust a self-signed one: with the toggle on but only a self-signed certificate served, Settings shows a warning and the phone's Editor/Database/Cluster rows answer "needs a real certificate" rather than opening. See [Remote access](remote-access.md) for the `tailscale cert` walkthrough and what the proxy exposes. |
+| `tls.certPath`, `tls.keyPath` | absent | Both or neither, and file paths only — there is no Settings-panel equivalent. Neither means a self-signed certificate, made once and pinned when you pair. A real one comes from `tailscale cert <machine>.<tailnet>.ts.net`; see [Remote access](remote-access.md) for the full walkthrough, including renewal. `~/` is expanded. The pairing link's name, and the sidecar proxy's gate, come from the first DNS name on that certificate that is a plain hostname — not a wildcard; a certificate whose only names are wildcards is treated the same as one with no DNS name at all. |
+| `push.enabled` | `false` | Turns laptop push delivery on when the phone has also enabled notifications and registered a token. A notification carries only a generic bilingual title and body plus `{kind, sessionId?}` in its data — never agent output, a file, a command, a path or a transcript. Pushes keep flowing while `remote.enabled` is false as long as `push.enabled` is true and a registered token exists. See [Remote access](remote-access.md) for what each kind says and when nothing is sent at all. |
+| `push.includeProjectNames` | `false` | Adds the project name to eligible notification text and data. It is controlled by the **include project names** checkbox in Settings. |
+| `idleDisableMinutes` | `0` | A whole number from 0 to 10080 (one week). The Settings idle field turns the bridge off after this many minutes with no connected paired phone and no open pairing code; when it fires, the bridge closes the listener and main only writes `remote.enabled: false` to `jarvis.yaml`. `0` never auto-disables. |
+
+**Settings lists your addresses for you.** "Reachable on" offers two radios:
+**Tailscale** (this machine's `100.x.y.z` tailnet address, disabled with a
+note to install Tailscale when it has none) and **Local Wi-Fi** (its LAN
+address, preferring `en0`/`en1` and skipping bridge/VPN interfaces). When
+`bindAddress` is still `127.0.0.1`, Tailscale is pre-selected if this machine
+has one, otherwise Local Wi-Fi. An **Advanced…** disclosure holds everything
+else — *this machine only*, IPv6 addresses, any other interface, and **Other…**
+for typing an address that is not listed — and opens itself when the saved
+address is one of those. Every address is sorted by range rather than
+interface name, so the list looks the same on macOS, Linux and Windows.
+Link-local addresses (`fe80::…`, `169.254.x.x`) are not offered.
+
+**No Tailscale credential is ever involved.** Install Tailscale on your own
+account at the OS level, restart Jarvis, and its `100.x.y.z` address appears
+in the list. Jarvis needs nothing else from it: no account, API key or auth key.
+
+**While it is on, a paired device can run commands on this machine as you.**
+There is no lower-privilege version of this feature.
+
+See [Remote access](remote-access.md) for the phone side of pairing: the
+confirm step, what the phone can see, and what happens on revocation.
 
 ## Notes that are easy to get wrong
 

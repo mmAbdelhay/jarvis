@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { defaultHistoryPath, installShellIntegration } from "./shell-integration.js";
+import {
+  defaultHistoryPath,
+  installShellIntegration,
+  resolveRealZdotdir,
+} from "./shell-integration.js";
 
 const base = {
   enabled: true,
@@ -114,6 +118,62 @@ describe("installShellIntegration", () => {
       },
     });
     expect(written.every((path) => path.startsWith("/cfg/bash/"))).toBe(true);
+  });
+});
+
+describe("resolveRealZdotdir", () => {
+  const wrapperDir = "/home/u/.config/jarvis/zdotdir";
+  const home = "/home/u";
+
+  it("prefers JARVIS_REAL_ZDOTDIR when set", () => {
+    expect(
+      resolveRealZdotdir(
+        { JARVIS_REAL_ZDOTDIR: "/home/u/real", ZDOTDIR: wrapperDir },
+        wrapperDir,
+        home,
+      ),
+    ).toBe("/home/u/real");
+  });
+
+  it("falls back to ZDOTDIR when it differs from the wrapper directory", () => {
+    expect(resolveRealZdotdir({ ZDOTDIR: "/home/u/custom" }, wrapperDir, home)).toBe(
+      "/home/u/custom",
+    );
+  });
+
+  it("falls back to home when ZDOTDIR is the wrapper directory itself", () => {
+    expect(resolveRealZdotdir({ ZDOTDIR: wrapperDir }, wrapperDir, home)).toBe(home);
+  });
+
+  it("falls back to home when ZDOTDIR is the wrapper directory with a trailing slash", () => {
+    expect(resolveRealZdotdir({ ZDOTDIR: `${wrapperDir}/` }, wrapperDir, home)).toBe(home);
+  });
+
+  it("falls back to home when neither is set", () => {
+    expect(resolveRealZdotdir({}, wrapperDir, home)).toBe(home);
+  });
+
+  // A poisoned or stale JARVIS_REAL_ZDOTDIR must never be able to
+  // regenerate a self-sourcing wrapper — the same "not the wrapper
+  // directory" check applies to it as to ZDOTDIR.
+  it("falls back to ZDOTDIR when JARVIS_REAL_ZDOTDIR is the wrapper directory", () => {
+    expect(
+      resolveRealZdotdir(
+        { JARVIS_REAL_ZDOTDIR: wrapperDir, ZDOTDIR: "/home/u/custom" },
+        wrapperDir,
+        home,
+      ),
+    ).toBe("/home/u/custom");
+  });
+
+  it("falls back to home when both JARVIS_REAL_ZDOTDIR and ZDOTDIR are the wrapper directory", () => {
+    expect(
+      resolveRealZdotdir(
+        { JARVIS_REAL_ZDOTDIR: wrapperDir, ZDOTDIR: wrapperDir },
+        wrapperDir,
+        home,
+      ),
+    ).toBe(home);
   });
 });
 

@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
   createShellManager,
+  EXITED_LOG_CHARS,
   shellArgs,
   shellCommand,
   shellEnv,
   type ShellProcess,
   type ShellSpawner,
 } from "./shell.js";
+
+/**
+ * A small deterministic PRNG (mulberry32) so the retention property test
+ * below is reproducible without pulling in a new dependency.
+ */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 class FakeShell implements ShellProcess {
   written: string[] = [];
@@ -37,7 +53,7 @@ class FakeShell implements ShellProcess {
   }
 }
 
-function manager(options: { maxBufferBytes?: number } = {}) {
+function manager(options: { maxLogChars?: number } = {}) {
   const shells: FakeShell[] = [];
   const spawnArgs: { cwd: string; cols: number; rows: number }[] = [];
   const spawn: ShellSpawner = (args) => {
@@ -71,39 +87,90 @@ describe("createShellManager", () => {
 
   // A shell prints its prompt immediately, well before the renderer has
   // built an xterm for the tab. Losing it would leave the terminal blank
-  // until the first keystroke.
-  it("buffers output written before anything attaches, and replays it once", () => {
+  // until the first keystroke — so the log is read, never drained.
+  it("retains output written before anyone subscribes, and log() does not drain it", () => {
     const { instance, shells } = manager();
     instance.start("tab-1", "/p/acme");
     shells[0]?.emit("$ ");
 
-    const seen: string[] = [];
-    const replayed = instance.attach("tab-1", (chunk) => seen.push(chunk));
+    expect(instance.log("tab-1")).toBe("$ ");
+    expect(instance.log("tab-1")).toBe("$ ");
+  });
+
+  it("returns '' from log() for a tab with no shell", () => {
+    const { instance } = manager();
+
+    expect(instance.log("nope")).toBe("");
+  });
+
+  // The whole point of the change: the laptop's own xterm and a remote
+  // client both watch the same pane, and neither takes it from the other.
+  it("delivers output to every subscriber", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/acme");
+    const first: string[] = [];
+    const second: string[] = [];
+    instance.onOutput(({ chunk }) => first.push(chunk));
+    instance.onOutput(({ chunk }) => second.push(chunk));
+
     shells[0]?.emit("ls\r\n");
 
-    expect(replayed).toBe("$ ");
-    expect(seen).toEqual(["ls\r\n"]);
+    expect(first).toEqual(["ls\r\n"]);
+    expect(second).toEqual(["ls\r\n"]);
   });
 
-  it("replays nothing to a second attach after the buffer is drained", () => {
+  it("names the pane each chunk came from, and keeps two panes apart", () => {
     const { instance, shells } = manager();
     instance.start("tab-1", "/p/acme");
-    shells[0]?.emit("$ ");
-    instance.attach("tab-1", () => {});
+    instance.start("tab-1:pane-2", "/p/acme");
+    const seen: [string, string][] = [];
+    instance.onOutput(({ paneKey, chunk }) => seen.push([paneKey, chunk]));
 
-    expect(instance.attach("tab-1", () => {})).toBe("");
+    shells[0]?.emit("a");
+    shells[1]?.emit("b");
+
+    expect(seen).toEqual([
+      ["tab-1", "a"],
+      ["tab-1:pane-2", "b"],
+    ]);
   });
 
-  it("caps the pre-attach buffer, keeping the most recent output", () => {
-    const { instance, shells } = manager({ maxBufferBytes: 8 });
+  it("stops delivering to a subscriber that unsubscribed", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/acme");
+    const seen: string[] = [];
+    const off = instance.onOutput(({ chunk }) => seen.push(chunk));
+
+    shells[0]?.emit("first");
+    off();
+    shells[0]?.emit("second");
+
+    expect(seen).toEqual(["first"]);
+  });
+
+  it("caps the retained log, keeping the most recent output", () => {
+    const { instance, shells } = manager({ maxLogChars: 8 });
     instance.start("tab-1", "/p/acme");
 
     shells[0]?.emit("0123456789");
-    shells[0]?.emit("abc");
 
-    // 8-byte cap: "0123456789" is trimmed to "23456789", then "abc" is
-    // appended and the head trimmed again.
-    expect(instance.attach("tab-1", () => {})).toBe("56789abc");
+    expect(instance.log("tab-1")).toBe("23456789");
+  });
+
+  it("tells every exit subscriber when the shell exits, and keeps the pane spawnable again", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/acme");
+    const seen: [string, number][] = [];
+    instance.onShellExit(({ paneKey, code }) => seen.push([paneKey, code]));
+
+    shells[0]?.emitExit(3);
+
+    expect(seen).toEqual([["tab-1", 3]]);
+    // An exited pane's key is not forgotten — the tab can still be reopened,
+    // reusing its retained log and offset counter (ruling 11) — but start()
+    // spawns a genuinely new process rather than reusing the dead one.
+    instance.start("tab-1", "/p/acme");
+    expect(shells).toHaveLength(2);
   });
 
   it("routes a write to that tab's shell and no other", () => {
@@ -136,37 +203,21 @@ describe("createShellManager", () => {
     }).not.toThrow();
   });
 
-  it("kills a tab's shell and forgets it", () => {
+  it("kills a tab's shell and forgets it, including its log and offset counter", () => {
     const { instance, shells } = manager();
     instance.start("tab-1", "/p/a");
+    shells[0]?.emit("some output");
 
     instance.kill("tab-1");
+    expect(instance.has("tab-1")).toBe(false);
     instance.start("tab-1", "/p/a");
 
     expect(shells[0]?.killed).toBe(true);
     expect(shells).toHaveLength(2);
+    expect(instance.snapshot("tab-1")).toEqual({ text: "", end: 0 });
   });
 
-  it("tells the attached listener when the shell exits, and forgets it", () => {
-    const { instance, shells } = manager();
-    instance.start("tab-1", "/p/a");
-    let exitCode: number | undefined;
-    instance.attach(
-      "tab-1",
-      () => {},
-      (code) => {
-        exitCode = code;
-      },
-    );
-
-    shells[0]?.emitExit(0);
-    instance.start("tab-1", "/p/a");
-
-    expect(exitCode).toBe(0);
-    expect(shells).toHaveLength(2);
-  });
-
-  it("kills every shell on stopAll", () => {
+  it("kills every shell on stopAll, and forgets every pane", () => {
     const { instance, shells } = manager();
     instance.start("tab-1", "/p/a");
     instance.start("tab-2", "/p/b");
@@ -174,6 +225,214 @@ describe("createShellManager", () => {
     instance.stopAll();
 
     expect(shells.map((shell) => shell.killed)).toEqual([true, true]);
+    expect(instance.has("tab-1")).toBe(false);
+    expect(instance.has("tab-2")).toBe(false);
+  });
+
+  it("lists fresh pane records without cwd or process handles, including retained exited panes", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/private/path");
+    instance.start("tab-1:split-a", "/private/path");
+    shells[1]?.emitExit(0);
+
+    const first = instance.panes();
+    const second = instance.panes();
+
+    expect(first).toEqual([
+      { paneKey: "tab-1", exited: false },
+      { paneKey: "tab-1:split-a", exited: true },
+    ]);
+    expect(second).toEqual(first);
+    expect(second[0]).not.toBe(first[0]);
+    expect(Object.keys(first[0] ?? {}).sort()).toEqual(["exited", "paneKey"]);
+  });
+
+  it("does not list a pane after kill forgets it", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/a");
+    shells[0]?.emitExit(0);
+
+    expect(instance.panes()).toEqual([{ paneKey: "tab-1", exited: true }]);
+
+    instance.kill("tab-1");
+
+    expect(instance.panes()).toEqual([]);
+  });
+
+  it("lets a listener unsubscribe itself mid-dispatch without skipping the next listener", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/acme");
+    const seenA: string[] = [];
+    const seenB: string[] = [];
+    const offA = instance.onOutput(({ chunk }) => {
+      seenA.push(chunk);
+      offA();
+    });
+    instance.onOutput(({ chunk }) => seenB.push(chunk));
+
+    shells[0]?.emit("first");
+    shells[0]?.emit("second");
+
+    expect(seenA).toEqual(["first"]);
+    expect(seenB).toEqual(["first", "second"]);
+  });
+
+  describe("offsets and snapshots", () => {
+    it("gives each chunk its own offset and reports a coherent snapshot", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p/acme");
+      expect(instance.has("tab-1")).toBe(true);
+      const seen: number[] = [];
+      instance.onOutput(({ offset }) => seen.push(offset));
+
+      shells[0]?.emit("ab");
+      shells[0]?.emit("cde");
+
+      expect(seen).toEqual([0, 2]);
+      expect(instance.snapshot("tab-1")).toEqual({ text: "abcde", end: 5 });
+    });
+
+    it("returns an empty snapshot and false has() for an unknown pane", () => {
+      const { instance } = manager();
+      expect(instance.snapshot("nope")).toEqual({ text: "", end: 0 });
+      expect(instance.has("nope")).toBe(false);
+    });
+
+    it("caps the retained log while end keeps counting every emitted character", () => {
+      const { instance, shells } = manager({ maxLogChars: 4 });
+      instance.start("tab-1", "/p");
+
+      shells[0]?.emit("abc");
+      shells[0]?.emit("defg");
+      shells[0]?.emit("h");
+
+      expect(instance.log("tab-1")).toBe("efgh");
+      expect(instance.snapshot("tab-1")).toEqual({ text: "efgh", end: 8 });
+    });
+
+    // Bite-proof: `end` must come from the emitted counter, not from the
+    // retained log's length — a single chunk bigger than the cap would
+    // otherwise report `end` as the (smaller) trimmed log length.
+    it("keeps `end` as the true emitted count even when a single chunk is truncated", () => {
+      const { instance, shells } = manager({ maxLogChars: 4 });
+      instance.start("tab-1", "/p");
+
+      shells[0]?.emit("0123456789");
+
+      expect(instance.log("tab-1")).toBe("6789");
+      expect(instance.snapshot("tab-1").end).toBe(10);
+    });
+
+    it("matches the naive slice-based trim over 500 random chunk sequences", () => {
+      const cap = 10;
+      const { instance, shells } = manager({ maxLogChars: cap });
+      instance.start("tab-1", "/p");
+      const rand = mulberry32(20260917);
+      const alphabet = "abcdefghij";
+      let naive = "";
+
+      for (let i = 0; i < 500; i += 1) {
+        const length = Math.floor(rand() * 6); // 0..5 chars, including empty chunks
+        let chunk = "";
+        for (let j = 0; j < length; j += 1) {
+          chunk += alphabet[Math.floor(rand() * alphabet.length)];
+        }
+        shells[0]?.emit(chunk);
+        naive = (naive + chunk).slice(-cap);
+        expect(instance.log("tab-1")).toBe(naive);
+      }
+    });
+
+    it("updates the log and counter before dispatching to listeners", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p");
+      let seenEnd: number | undefined;
+      let seenLog: string | undefined;
+      instance.onOutput(() => {
+        seenEnd = instance.snapshot("tab-1").end;
+        seenLog = instance.log("tab-1");
+      });
+
+      shells[0]?.emit("hi");
+
+      expect(seenLog).toBe("hi");
+      expect(seenEnd).toBe(2);
+    });
+
+    it("keeps an exited pane's tail retrievable, but refuses writes and resizes to the dead process", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p");
+      const chunk = "x".repeat(1024);
+      for (let i = 0; i < 100; i += 1) shells[0]?.emit(chunk);
+      shells[0]?.emitExit(0);
+
+      expect(instance.has("tab-1")).toBe(true);
+      const log = instance.log("tab-1");
+      expect(log.length).toBe(EXITED_LOG_CHARS);
+      expect(instance.snapshot("tab-1")).toEqual({ text: log, end: 100 * 1024 });
+
+      instance.write("tab-1", "should not land");
+      instance.resize("tab-1", 80, 24);
+      expect(shells[0]?.written).toEqual([]);
+      expect(shells[0]?.resized).toEqual([]);
+    });
+
+    it("forgets a killed pane before its process's own exit event arrives, but still fires listeners once", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p");
+      const seen: number[] = [];
+      instance.onShellExit(({ code }) => seen.push(code));
+
+      instance.kill("tab-1");
+      expect(instance.has("tab-1")).toBe(false);
+      // The pty's own exit event, delivered after kill() already tore the
+      // entry down — a stale event, not a second pane.
+      shells[0]?.emitExit(0);
+
+      expect(instance.has("tab-1")).toBe(false);
+      expect(seen).toEqual([0]);
+    });
+
+    it("spawns a fresh process for an exited pane, continuing the offset where it left off", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p");
+      shells[0]?.emit("hello"); // 5 chars
+      shells[0]?.emitExit(0);
+
+      instance.start("tab-1", "/p");
+      expect(shells).toHaveLength(2);
+
+      const seen: number[] = [];
+      instance.onOutput(({ offset }) => seen.push(offset));
+      shells[1]?.emit("world");
+
+      expect(seen).toEqual([5]);
+    });
+
+    // 64 MiB in 1 KiB chunks. The ceiling is a generous sanity check, not a
+    // bite-proof — see the report for the measured time (old code: 881ms).
+    it("stays fast and correct flooding 64 MiB through in 1 KiB chunks", () => {
+      const { instance, shells } = manager();
+      instance.start("tab-1", "/p");
+
+      const totalChunks = 64 * 1024;
+      const chunkSize = 1024;
+      const chunks: string[] = new Array(totalChunks);
+      for (let i = 0; i < totalChunks; i += 1) {
+        chunks[i] = `${String(i).padStart(8, "0")}${"x".repeat(chunkSize - 8)}`;
+      }
+
+      const startedAt = Date.now();
+      for (const chunk of chunks) shells[0]?.emit(chunk);
+      const elapsed = Date.now() - startedAt;
+
+      const log = instance.log("tab-1");
+      const expectedTail = chunks.join("").slice(-(256 * 1024));
+      expect(log.length).toBe(256 * 1024);
+      expect(log).toBe(expectedTail);
+      expect(instance.snapshot("tab-1").end).toBe(64 * 1024 * 1024);
+      expect(elapsed).toBeLessThan(10_000);
+    }, 20_000);
   });
 });
 

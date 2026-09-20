@@ -1,7 +1,20 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -17,8 +30,35 @@ import {
 } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
+import { createBroadcaster, rendererSink } from "./broadcast.js";
+import { preloadChannelArgs } from "./channels.js";
+import { dbGateLoginAnswer } from "./dbgate-login.js";
+import { createDispatchTable, DESKTOP_ORIGIN } from "./dispatch.js";
+import { handleUtterance, type UtteranceDeps } from "./voice-turn.js";
+import { createBlobTable } from "./remote-blob.js";
+import { createFileUploadHandler, createFileUploadStore } from "./file-upload.js";
+import { createApiExecutor } from "./api-executor.js";
+import {
+  createVoiceUploadHandler,
+  TRANSCODE_TIMEOUT_MS,
+  TRANSCRIBE_TIMEOUT_MS,
+  type VoiceUploadDeps,
+} from "./voice-upload.js";
+import { registerDesktopOnly } from "./desktop-only.js";
+import { createBridge } from "@jarvis/remote";
+import {
+  createSidecarProxy,
+  listenTls,
+  loadCertificate,
+  nodeFs,
+  nodeTimers,
+} from "@jarvis/remote/listen";
+import { createRemoteAccess, type RemoteAccess } from "./remote-access.js";
+import { disableRemoteOnDisk } from "./remote-idle.js";
+import { obtainCertificate, type TailscaleCertDeps } from "./tailscale-cert.js";
+import { createNotifier } from "./notify.js";
+import { createDockerFollowers } from "./docker-followers.js";
 import { createSetupHandlers } from "./ipc.js";
-import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import {
   AgentRegistry,
   ChangeTracker,
@@ -29,7 +69,10 @@ import {
   greetingText,
   scanDirtyProjects,
 } from "@jarvis/core";
-import type { TabKind, WorkspaceTab } from "@jarvis/core";
+// Aliased: electron's own `Session` (webContents session) is imported below
+// under the bare name, and this file's cacheFavicon() already depends on
+// that being the unqualified `Session`.
+import type { Session as CoreSession, TabKind, WorkspaceTab } from "@jarvis/core";
 import {
   audioPlayer,
   MacSpeech,
@@ -65,6 +108,8 @@ import {
   createRealShellSpawner,
   shellCommand,
   createSessionImporter,
+  listAgentProcesses,
+  resolveProject,
   createShellManager,
   createCollection,
   createFolder,
@@ -73,7 +118,6 @@ import {
   createApiStore,
   createAwsSessionChecker,
   createAwsSessionPoller,
-  createCookieJar,
   createRequest,
   deleteEntry,
   dispatcherFor,
@@ -103,12 +147,14 @@ import {
   randomPassword,
   findFreePort,
   readStatusPage,
+  resolveRealZdotdir,
   runCommand,
+  runCommandWithLimits,
+  transcodeToWhisperWavCommand,
   transcribe,
   waitUntilReady,
   withLocalBin,
 } from "@jarvis/platform";
-import type { OAuth2Token } from "@jarvis/platform";
 import {
   buildWiring,
   createApiHandlers,
@@ -123,7 +169,6 @@ import {
   createResumeInTerminalHandler,
   createGitHandlers,
   createSettingsHandlers,
-  isDeclaredContainer,
   PROVIDER_HEALTH_INTERVAL_MS,
   showEditorTab,
 } from "./ipc.js";
@@ -140,18 +185,23 @@ import {
 import {
   DEFAULT_CONFIG_PATH,
   DEFAULT_TERMINAL,
+  mergeConfigInPlace,
+  providerAgentListsEqual,
+  defaultSessionsScanPath,
   defaultWorkflowsDir,
   ensureConfigFile,
   loadConfig,
+  type JarvisConfig,
 } from "./config.js";
+import { parseScan, serializeScan } from "./session-scan-cache.js";
+import { decidePermission } from "./permissions.js";
 import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { LOGIN_TERMINAL_DETAIL } from "./login-terminal.js";
+import { serialize } from "./serialize.js";
 import { writeSettingsFile } from "./settings-io.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { createRecorderDeps, Recorder } from "./recorder.js";
 import { capacityReport, startupReport } from "./startup.js";
-import { toDeviceIndependent } from "./view-bounds.js";
-import type { ReportedRect } from "./ipc.js";
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -287,7 +337,11 @@ app.whenReady().then(async () => {
   // So: a minimal role menu, hidden by autoHideMenuBar below. The roles are
   // not decoration — without them copy and paste stop working in ordinary
   // input fields, which is what makes "just remove the menu" the wrong fix.
-  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(process.platform)));
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      appMenuTemplate(process.platform, () => BrowserWindow.getFocusedWindow()?.reload()),
+    ),
+  );
 
   widevineReady = components
     .whenReady()
@@ -311,7 +365,24 @@ app.whenReady().then(async () => {
     const registry = new AgentRegistry(config.registry);
 
     const providerStore = new ProviderStatusStore(registry.list());
-    const readCapacity = createCapacityReader({ cwd: config.brain.cwd });
+    // agentEnv is declared here, ahead of the capacity reader that closes
+    // over it; the comment explaining it sits with the health check below,
+    // which is what it was first built for.
+    let agentEnv: NodeJS.ProcessEnv = withLocalBin(process.env, process.platform, homedir());
+    const agentEnvReady = loginShellPath(process.env, process.platform)
+      .then((path) => {
+        if (path !== undefined) {
+          agentEnv = withLocalBin({ ...process.env, PATH: path }, process.platform, homedir());
+        }
+      })
+      .catch(() => undefined);
+    // Free, all three sources — a snapshot file, Codex's own logs, one `gh`
+    // call — never a billed query; see capacity-reader.ts. `gh` runs with
+    // agentEnv (the login-shell PATH), so the first refresh waits for it.
+    const readCapacity = createCapacityReader({
+      run: (command, args) => runCommand(command, args, agentEnv),
+      platform: process.platform,
+    });
     const providers = new ProviderMonitor({
       agents: registry.list(),
       store: providerStore,
@@ -321,13 +392,15 @@ app.whenReady().then(async () => {
 
     // Started, never awaited — ruling R35: nothing that touches the network
     // may sit between app-ready and the window existing. The health poll is
-    // free; the capacity refresh is one billed query per readable account and
-    // happens exactly once here, at launch. There is no capacity interval
-    // anywhere in this file, deliberately.
+    // free, and so is the capacity refresh now (a snapshot file per account);
+    // it still happens once here, at launch, and on the panel's refresh
+    // button. There is no capacity interval anywhere in this file.
     void providers.refreshHealth();
-    const capacityPromise = providers.refreshCapacity().catch((error) => {
-      console.error(`Provider capacity refresh failed: ${errorMessage(error)}`);
-    });
+    const capacityPromise = agentEnvReady
+      .then(() => providers.refreshCapacity())
+      .catch((error) => {
+        console.error(`Provider capacity refresh failed: ${errorMessage(error)}`);
+      });
 
     // Started, not awaited: the health probe (bounded per-agent in
     // @jarvis/core, but still a network of spawned processes) must never
@@ -352,14 +425,6 @@ app.whenReady().then(async () => {
     // links what it installs, and macOS's PATH does not carry it even in a
     // login shell — so without this the app cannot find a tool it installed
     // itself a minute earlier. See withLocalBin.
-    let agentEnv: NodeJS.ProcessEnv = withLocalBin(process.env, process.platform, homedir());
-    const agentEnvReady = loginShellPath(process.env, process.platform)
-      .then((path) => {
-        if (path !== undefined) {
-          agentEnv = withLocalBin({ ...process.env, PATH: path }, process.platform, homedir());
-        }
-      })
-      .catch(() => undefined);
 
     const reportPromise = agentEnvReady
       .then(() => startupReport(registry, (command, args) => runCommand(command, args, agentEnv)))
@@ -480,7 +545,7 @@ app.whenReady().then(async () => {
             // naming the Arabic model would send the user to fix something
             // that is not the problem.
             const piperInstalled = existsSync(config.voice.piperBinary);
-            window.webContents.send("turn:new", {
+            broadcast.send("turn:new", {
               role: "assistant",
               text: piperInstalled
                 ? MESSAGES.arabicVoiceUnavailable(PRIMARY_LANGUAGE)
@@ -500,7 +565,7 @@ app.whenReady().then(async () => {
      * length of the text.
      */
     const announceSpeaking = async (text: string, language: "ar" | "en"): Promise<void> => {
-      window.webContents.send("voice:speaking", true);
+      broadcast.send("voice:speaking", true);
       try {
         await speech.speak(text, language);
       } catch (error) {
@@ -512,7 +577,7 @@ app.whenReady().then(async () => {
         // on screen; only the audio is missing, and that is what is logged.
         console.error(`Speech failed (${language}): ${errorMessage(error)}`);
       } finally {
-        window.webContents.send("voice:speaking", false);
+        broadcast.send("voice:speaking", false);
       }
     };
 
@@ -598,10 +663,12 @@ app.whenReady().then(async () => {
 
     const window = new BrowserWindow({
       // Jarvis is the surface you work from, not a panel beside something
-      // else: it opens full screen. The width and height are still worth
-      // stating — they are the size the window restores to the moment
-      // anyone leaves full screen.
-      fullscreen: true,
+      // else: it opens at the full working area — maximized, NOT macOS
+      // fullscreen (the user asked for full width and height without the
+      // separate fullscreen Space). `show: false` + maximize() below, so
+      // the window never flashes at 1440×900 first; that stated size is
+      // what unmaximize restores to.
+      show: false,
       width: 1440,
       height: 900,
       // Linux and Windows draw the menu bar inside the window; macOS never
@@ -615,9 +682,14 @@ app.whenReady().then(async () => {
       icon: iconPath("icon.png"),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
-        // argv rather than an IPC call, because the renderer needs it while
-        // it is deciding what to draw, before any round trip could answer.
-        additionalArguments: firstRun ? ["--jarvis-first-run"] : [],
+        // argv rather than an IPC call, because the renderer needs both
+        // this and the channel table below while it is deciding what to
+        // draw, before any round trip could answer. The channel table
+        // itself has to travel this way too: preload runs sandboxed (see
+        // below) and can't require("./channels.js"), so this is the only
+        // path left to hand it the 118 channel names without pasting them
+        // into preload.cts by hand.
+        additionalArguments: [...(firstRun ? ["--jarvis-first-run"] : []), ...preloadChannelArgs()],
         // This renderer displays untrusted agent output and holds
         // `window.jarvis.send`. These already match Electron 44's implicit
         // defaults; stated explicitly so a future edit that weakens them
@@ -629,6 +701,11 @@ app.whenReady().then(async () => {
     });
 
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    // Hosted views use persist:project-* partitions and never reach this
+    // handler. In the Jarvis session, only geolocation needs caller gating.
+    window.webContents.session.setPermissionRequestHandler((requesting, permission, callback) => {
+      callback(decidePermission(permission, requesting.id === window.webContents.id));
+    });
 
     // Rebuilding a suspended tab is not always just reloading its URL. A
     // hosted app's sidecar may have been stopped underneath it by the reaper
@@ -734,7 +811,7 @@ app.whenReady().then(async () => {
       env,
       home: homedir(),
       fileExists: (path) => existsSync(path),
-      onOutput: (chunk) => window.webContents.send("setup:output", chunk),
+      onOutput: (chunk) => broadcast.local("setup:output", chunk),
       installDeps: (onOutput) => ({
         onOutput,
         home: homedir(),
@@ -801,9 +878,6 @@ app.whenReady().then(async () => {
         },
       }),
     });
-    ipcMain.handle("setup:check", () => setup.check());
-    ipcMain.handle("setup:install", (_event, id: unknown) => setup.install(id));
-
     const database = createDatabaseHandlers({
       dbgate,
       projects: config.projects,
@@ -861,7 +935,7 @@ app.whenReady().then(async () => {
       zdotdirDir: zdotdir,
       bashDir,
       powerShellDir,
-      realZdotdir: process.env["ZDOTDIR"] ?? homedir(),
+      realZdotdir: resolveRealZdotdir(process.env, zdotdir, homedir()),
       home: homedir(),
       write: (path, contents) => writeFile(path, contents, "utf8"),
     });
@@ -883,6 +957,15 @@ app.whenReady().then(async () => {
         process.platform,
       ),
     });
+
+    // Subscribed once here rather than inside terminal:attach, because a
+    // subscription created per attach can only ever have one subscriber —
+    // see the ShellManager change. Every pane's output flows whether or not
+    // anything has asked for a backlog.
+    shells.onOutput(({ paneKey, chunk, offset }) =>
+      broadcast.send("terminal:data", { paneKey, chunk, offset }),
+    );
+    shells.onShellExit(({ paneKey, code }) => broadcast.send("terminal:exit", { paneKey, code }));
 
     // The history file, and the parser that matches it.
     //
@@ -916,149 +999,49 @@ app.whenReady().then(async () => {
     // is what makes CORS irrelevant — see http-runner.ts.
     const apiStore = createApiStore(join(homedir(), ".config/jarvis/api.json"));
 
-    /**
-     * One send, with everything a request can ask for around it: the
-     * project's cookie jar and network settings, its pre-request and
-     * post-response scripts, and an OAuth2 token when the request wants one.
-     *
-     * Assembled here rather than inside http-runner.ts because every piece of
-     * it is a policy decision — which jar, whose settings, whether scripts run
-     * — and the runner's job is only to make the call.
-     */
-    async function sendApiRequest(
-      request: Record<string, unknown>,
-      variables: Record<string, string>,
-      project: string,
-    ) {
-      const state = await apiStore.read(project);
-      const jar = createCookieJar(state.cookies);
-      const settings = state.settings;
-
-      const http = (request["http"] ?? {}) as { method?: string; url?: string; auth?: string };
-      const scriptBlock = (request["script"] ?? {}) as { req?: string; res?: string };
-      const logs: string[] = [];
-      const tests: { name: string; passed: boolean; error?: string }[] = [];
-      let scriptError: string | undefined;
-
-      const scriptRequest = {
-        method: (http.method ?? "get").toUpperCase(),
-        url: http.url ?? "",
-        headers: {},
-        body: request["body"],
-      };
-
-      // The pre-request script runs first, and the variables it sets are
-      // available to the request it precedes — that is the whole point of it.
-      let resolved = { ...variables };
-      if (typeof scriptBlock.req === "string" && scriptBlock.req.trim() !== "") {
-        const outcome = runScript(scriptBlock.req, { variables: resolved, request: scriptRequest });
-        resolved = { ...resolved, ...outcome.variables };
-        logs.push(...outcome.logs);
-        tests.push(...outcome.tests);
-        scriptError = outcome.error;
-      }
-
-      // OAuth2 is fetched after the pre-request script, so a script can set
-      // the client secret the token call needs.
-      let token: OAuth2Token | undefined;
-      if (http.auth === "oauth2") {
-        const config = ((request["auth"] ?? {}) as Record<string, never>)["oauth2"] ?? {};
-        const result = await fetchOAuth2Token(config, resolved, {
-          fetch: apiFetch,
-          now: () => Date.now(),
-          authorize: (url, redirectUri) => authorizeInWorkspace(project, url, redirectUri),
-        });
-        if (!result.ok) {
-          return {
-            response: { failed: true as const, detail: `OAuth2: ${result.detail}`, timeMs: 0 },
-            cookies: jar.list(),
-            scripts: { logs, tests, ...(scriptError === undefined ? {} : { error: scriptError }) },
-          };
-        }
-        token = result.token;
-      }
-
-      const response = await sendRequest(
-        request,
-        resolved,
-        {
-          fetch: apiFetch,
-          now: () => Date.now(),
-          jar,
-          readFile: (path) => readFile(path),
-          multipart: apiMultipart,
-          dispatcherFor,
-          ...(token === undefined ? {} : { token }),
-        },
-        {
-          verifyCertificate: settings.verifyCertificate,
-          timeoutMs: settings.timeoutMs,
-          ...(settings.proxyUrl === "" ? {} : { proxyUrl: settings.proxyUrl }),
-        },
-      );
-
-      // The post-response script and the tests block see the response. A
-      // response body that is JSON arrives parsed, which is what every
-      // example in the wild assumes.
-      if (!("failed" in response)) {
-        let parsed: unknown = response.body;
-        try {
-          parsed = JSON.parse(response.body);
-        } catch {
-          // Not JSON; the script gets the text.
-        }
-        const scriptResponse = {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-          body: parsed,
-          responseTime: response.timeMs,
-        };
-        const after = [scriptBlock.res, request["tests"]].filter(
-          (code): code is string => typeof code === "string" && code.trim() !== "",
-        );
-        for (const code of after) {
-          const outcome = runScript(code, {
-            variables: resolved,
-            request: scriptRequest,
-            response: scriptResponse,
-          });
-          logs.push(...outcome.logs);
-          tests.push(...outcome.tests);
-          scriptError = scriptError ?? outcome.error;
-        }
-      }
-
-      await apiStore.saveCookies(project, jar.list());
-
-      return {
-        response,
-        cookies: jar.list(),
-        ...(logs.length === 0 && tests.length === 0 && scriptError === undefined
-          ? {}
-          : {
-              scripts: {
-                logs,
-                tests,
-                ...(scriptError === undefined ? {} : { error: scriptError }),
-              },
-            }),
-      };
-    }
-
     /** Drives an OAuth2 authorization-code redirect through a Workspace tab:
      *  the app already has a browser, and sending the user to their system
-     *  browser to copy a code back by hand would be the worse product. */
+     *  browser to copy a code back by hand would be the worse product.
+     *  Desktop-only: api-executor.ts never calls this for a remote origin. */
     function authorizeInWorkspace(project: string, url: string, redirectUri = ""): Promise<string> {
       return workspace.openForResult(project, url, redirectUri);
     }
+
+    // One send, with everything a request can ask for around it: the
+    // project's cookie jar and network settings, its pre-request and
+    // post-response scripts, and an OAuth2 token when the request wants one.
+    // Assembled here rather than inside http-runner.ts because every piece of
+    // it is a policy decision — which jar, whose settings, whether scripts
+    // run — and the runner's job is only to make the call.
+    //
+    // The decision itself (api-executor.ts, Important 2/review) is unit-
+    // tested on its own with every one of these deps as a spy; this is only
+    // the wiring, built from state that only exists once Electron is up.
+    const sendApiRequest = createApiExecutor({
+      apiFetch,
+      now: () => Date.now(),
+      runScript,
+      fetchOAuth2Token,
+      sendRequest,
+      readFile: (path: string) => readFile(path),
+      multipart: apiMultipart,
+      dispatcherFor,
+      uploads: { resolve: (deviceId, uploadId) => uploadStore.resolve(deviceId, uploadId) },
+      authorizeInWorkspace: (project, url, redirectUri) =>
+        authorizeInWorkspace(project, url, redirectUri),
+      store: {
+        read: (project) => apiStore.read(project),
+        saveCookies: (project, cookies) => apiStore.saveCookies(project, cookies),
+      },
+    });
 
     const api = createApiHandlers({
       listCollections,
       readCollection,
       readRequest,
       writeRequest,
-      sendRequest: (request, variables, project) => sendApiRequest(request, variables, project),
+      sendRequest: (request, variables, project, remote) =>
+        sendApiRequest(request, variables, project, remote),
       evaluateAssertions,
       toCurl,
       createRequest,
@@ -1074,6 +1057,7 @@ app.whenReady().then(async () => {
       store: apiStore,
       projects: config.projects,
       language: PRIMARY_LANGUAGE,
+      realPath: (path) => realpathSync(path),
     });
 
     const terminal = createTerminalHandlers({
@@ -1260,20 +1244,7 @@ app.whenReady().then(async () => {
       favicons,
       requestFavicon,
       language: PRIMARY_LANGUAGE,
-    });
-
-    const settings = createSettingsHandlers({
-      readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
-      writeConfig: (draft) => writeSettingsFile(DEFAULT_CONFIG_PATH, draft),
-      run: runCommand,
-      // A restart the user did not ask for is the wrong kind of "helpful"
-      // — this only ever fires from the renderer's own Restart button
-      // click, after a save has already succeeded.
-      restart: () => {
-        app.relaunch();
-        app.exit(0);
-      },
-      language: PRIMARY_LANGUAGE,
+      projects: config.projects,
     });
 
     const indexUrl = pathToFileURL(
@@ -1286,6 +1257,368 @@ app.whenReady().then(async () => {
       }
     });
 
+    // The one way out to a client. Centralising also fixes a real latent bug:
+    // of the direct sends this replaces, only the docker:log one checked
+    // isDestroyed(), so every other push would throw on a window that had
+    // gone away. The guard now lives in one place and applies to all of them.
+    const broadcast = createBroadcaster({
+      toRenderer: rendererSink(window),
+    });
+
+    // Sessions the process scan (process-scan.ts) found running outside
+    // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
+    // refreshSessions() call, never written to sessionStore (session-
+    // import.ts's own discipline: nothing here can prove a process is
+    // still alive between one scan and the next, so this is scan-fresh
+    // state, not a persisted claim). It is, however, cached to disk (see
+    // sessionScanPath below) purely so the user's last scan still shows at
+    // the next launch instead of going blank until the next refresh.
+    let externalSessions = new Map<string, CoreSession>();
+
+    // Beside jarvis.yaml — see config.ts's defaultSessionsScanPath().
+    const sessionScanPath = defaultSessionsScanPath();
+
+    // Loaded before the window can be asked for "sessions:list"/pushed a
+    // "sessions:update" (both wired further down, and the startup scan
+    // below is fired but not awaited): the last scan's rows appear
+    // immediately, exactly as they were, rather than the card going blank
+    // until this launch's own scan finishes. Unreadable for any reason —
+    // missing (first run, or nothing ever scanned yet), malformed, a
+    // permission problem — is treated as "nothing cached", same discipline
+    // ensureConfigFile() uses for jarvis.yaml itself: never an error the
+    // user sees.
+    try {
+      const cached = parseScan(await readFile(sessionScanPath, "utf8"));
+      externalSessions = new Map(cached.map((row) => [row.id, row]));
+    } catch {
+      externalSessions = new Map();
+    }
+
+    /** Jarvis's own live sessions plus the last scan's external ones — the
+     *  one list "sessions:list" and "sessions:update" both show. */
+    function mergedSessions(): CoreSession[] {
+      return [...sessions.list(), ...externalSessions.values()];
+    }
+
+    // Temp file + rename: a reader (the load above, on the next launch)
+    // never sees a half-written file, whichever of the two processes gets
+    // there first. Failures are logged and swallowed — a scan the user
+    // triggered must still resolve, and a Dashboard refresh must still
+    // finish, even on a read-only or full disk.
+    async function persistSessionScan(): Promise<void> {
+      const text = serializeScan([...externalSessions.values()]);
+      const tmpPath = `${sessionScanPath}.${process.pid}.tmp`;
+      try {
+        await mkdir(dirname(sessionScanPath), { recursive: true });
+        await writeFile(tmpPath, text, "utf8");
+        await rename(tmpPath, sessionScanPath);
+      } catch (error) {
+        console.error(`Writing cached session scan failed: ${errorMessage(error)}`);
+        await rm(tmpPath, { force: true }).catch(() => undefined);
+      }
+    }
+
+    // Coalesced: a scan mid-flight is shared with any call that arrives
+    // while it runs, rather than starting a second `ps`/`lsof` pass —
+    // Task 3's "a scan must not run concurrently".
+    let sessionRefreshInFlight:
+      | Promise<{ jarvis: number; external: number; importedTranscripts: number }>
+      | undefined;
+
+    async function refreshSessions(): Promise<{
+      jarvis: number;
+      external: number;
+      importedTranscripts: number;
+    }> {
+      if (sessionRefreshInFlight !== undefined) return sessionRefreshInFlight;
+      const run = (async () => {
+        const importedTranscripts = await sessionImporter.backfill();
+
+        const processes = await listAgentProcesses({
+          exec: (command, args) => runCommand(command, args),
+          platform: process.platform,
+          agents: registry.list(),
+          // Never double-count a pty child SessionManager is already
+          // running as also "running outside Jarvis".
+          ownedPids: () => sessions.ownedPids(),
+          jarvisPid: process.pid,
+          now: () => Date.now(),
+        });
+
+        const next = new Map<string, CoreSession>();
+        for (const found of processes) {
+          const transcript =
+            found.cwd === null
+              ? null
+              : await sessionImporter.latestTranscriptFor(found.agentId, found.cwd);
+          const id = `ext-${found.pid}`;
+          next.set(id, {
+            id,
+            project: resolveProject(found.cwd ?? "", config.projects),
+            projectPath: found.cwd ?? "",
+            agentId: found.agentId,
+            state: "running",
+            summary:
+              transcript !== null
+                ? transcript.session.summary
+                : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
+            startedAt: found.startedAt,
+            lastActivityAt: transcript?.session.lastActivityAt ?? Date.now(),
+            ...(transcript === null ? {} : { transcriptPath: transcript.path }),
+            origin: "external",
+            pid: found.pid,
+          });
+        }
+        externalSessions = next;
+        broadcast.send("sessions:update", mergedSessions());
+        await persistSessionScan();
+
+        return {
+          jarvis: sessions.list().length,
+          external: externalSessions.size,
+          importedTranscripts,
+        };
+      })();
+      sessionRefreshInFlight = run;
+      try {
+        return await run;
+      } finally {
+        sessionRefreshInFlight = undefined;
+      }
+    }
+
+    // No scan at startup any more: the user asked for the sessions table to
+    // show the last scan, unchanged, until they press Refresh — and the
+    // cached rows loaded above are exactly that. A startup scan here used
+    // to overwrite them seconds after launch (and drop any process that had
+    // ended meanwhile). The importer's own start() above still backfills
+    // transcripts; only the process discovery is on demand now.
+
+    // The remote bridge. File-mode enforcement (0600/0700 under
+    // ~/.config/jarvis/remote/) is skipped only on win32, same convention
+    // process.platform already follows everywhere else in this file
+    // (platform-convention.test.ts).
+    const remoteEnforceFileModes = process.platform !== "win32";
+    const remoteDir = join(homedir(), ".config/jarvis/remote");
+
+    // Private per-device file staging (M9 Task 3) — a paired phone's
+    // remote:uploadFile and remote:readJsonUpload alike, under the same
+    // ~/.config/jarvis/remote/ tree the bridge's own TLS material lives in.
+    // Declared before remoteAccess/dispatch below: both close over it
+    // (onDeviceRevoked and the uploads dep, respectively).
+    const uploadStore = createFileUploadStore({
+      now: Date.now,
+      randomId: () => randomBytes(16).toString("hex"),
+      baseDir: join(remoteDir, "uploads"),
+      language: PRIMARY_LANGUAGE,
+      log: (line) => console.error(line),
+    });
+
+    // Declared before remoteAccess itself: both createSettingsHandlers
+    // below and the bridge's own onIdleDisabled callback (in
+    // createRemoteAccess's deps, right below) close over this one
+    // `writeConfig` instance, so a Settings save and an idle auto-disable
+    // can never interleave their writes to jarvis.yaml — M12 Task 2's rule
+    // that the disk write goes through "the same serialized writeConfig
+    // closure Settings uses", never a second writer. `remoteAccess` is
+    // assigned a few lines down; `applyFromDisk` only reads it once
+    // actually invoked (after a successful write, always later), by which
+    // time it is always assigned — never referenced synchronously before
+    // that.
+    let remoteAccess: RemoteAccess;
+
+    // I2: a second, dedicated queue for the re-read-and-apply-to-the-bridge
+    // that follows a successful save. Kept separate from the write queue
+    // below (rather than awaited inside it) so a save's own promise still
+    // resolves as soon as the write lands — Settings does not wait on the
+    // bridge to catch up — while still guaranteeing every apply() this
+    // produces runs in the same order the writes that triggered them did.
+    // Each queued turn reads the file fresh *when it runs*, not when it was
+    // enqueued, so two fast saves (On, then Off) can never apply out of
+    // order and leave the bridge listening: whichever apply runs last
+    // always reads whatever is on disk last, and the queue is what makes
+    // "last to run" mean "last enqueued", never "whichever read finished
+    // first".
+    const applyFromDisk = serialize(async () => {
+      const next = await loadConfig(DEFAULT_CONFIG_PATH);
+      await remoteAccess.apply(next.remote);
+    });
+
+    // After a successful write, the file on disk is the only source of
+    // truth for `remote:` (settings:save already pins a remote-origin
+    // draft's own `remote` key to it — dispatch.ts) — so this re-reads
+    // the file rather than trusting `draft.remote`, and applies whatever
+    // that read finds to the live bridge, via the queued applyFromDisk
+    // above. A rejected re-read (or a rejected apply) is logged, never
+    // thrown: the save itself already succeeded, and a phone or the
+    // laptop's own Settings panel is not left hanging on the bridge
+    // catching up.
+    // Serialised (I2): two overlapping saves must never interleave their
+    // own read-then-write, or one can silently undo the other (e.g. the
+    // user turning the bridge off while a stale draft is mid-write).
+    //
+    // Also accepts an updater — `(current) => draft` — for a caller that
+    // must read before it writes, remote-idle.ts above all (M12 Task 12
+    // minor): the read happens right here, inside this same serialized
+    // call, so nothing queued behind it can land between the read and the
+    // write the way a bare outside `readConfig()` followed by a
+    // separately-queued `writeConfig(draft)` could. An updater that hands
+    // back the exact `current` object it was given — remote-idle.ts's own
+    // "already off" no-op — skips the disk write (and the re-apply below)
+    // entirely.
+    const writeConfig = serialize(
+      async (input: JarvisConfig | ((current: JarvisConfig) => JarvisConfig)) => {
+        let draft: JarvisConfig;
+        if (typeof input === "function") {
+          const current = await loadConfig(DEFAULT_CONFIG_PATH);
+          draft = input(current);
+          if (draft === current) return { ok: true as const };
+        } else {
+          draft = input;
+        }
+        const result = await writeSettingsFile(DEFAULT_CONFIG_PATH, draft);
+        if (result.ok) {
+          // Keep the same object identities held by already-running handlers.
+          // Reads on their next operation see the saved values immediately.
+          const next = await loadConfig(DEFAULT_CONFIG_PATH);
+          const previousAgents = registry.list();
+          mergeConfigInPlace(
+            config as unknown as Record<string, unknown>,
+            next as unknown as Record<string, unknown>,
+          );
+          registry.replace(next.registry);
+          const nextAgents = registry.list();
+          if (!providerAgentListsEqual(previousAgents, nextAgents)) {
+            providers.replaceAgents(nextAgents);
+          }
+          void applyFromDisk().catch((error: unknown) => {
+            console.error(`remote bridge: apply after save failed: ${errorMessage(error)}`);
+          });
+        }
+        return result;
+      },
+    );
+
+    remoteAccess = createRemoteAccess({
+      table: () => dispatch,
+      blobs: () => blobTable,
+      broadcast,
+      language: PRIMARY_LANGUAGE,
+      createBridge,
+      io: {
+        dir: remoteDir,
+        fs: nodeFs,
+        random: randomBytes,
+        now: Date.now,
+        timers: nodeTimers,
+        listen: listenTls,
+        loadCertificate: (config) =>
+          loadCertificate(config, {
+            fs: nodeFs,
+            dir: remoteDir,
+            random: randomBytes,
+            now: Date.now,
+            enforceFileModes: remoteEnforceFileModes,
+          }),
+        createProxy: (registry) =>
+          createSidecarProxy({ registry, log: (line) => console.error(line) }),
+        enforceFileModes: remoteEnforceFileModes,
+        log: (line) => console.error(line),
+      },
+      // Backs remoteKeyAuthorizer's pane/session checks. `followers` is
+      // declared further down (it needs `dockerClient` and `broadcast`,
+      // both already in scope here) — safe to reference from these
+      // closures because neither runs until a real subscribe/disconnect
+      // happens, well after the whole window's setup has finished.
+      streams: {
+        hasPane: (paneKey) => shells.has(paneKey),
+        hasSession: (sessionId) => sessions.get(sessionId) !== undefined,
+        followerOwner: (tabId) => followers.ownerOf(tabId),
+      },
+      // A disconnected device's Docker followers are dead weight — nobody
+      // is left to receive their docker:log pushes — so its cap is
+      // reclaimed the same way its terminal/session subscriptions already
+      // are (remote-access.ts's own per-device cleanup).
+      onDeviceDisconnected: (deviceId) => {
+        followers.unfollowOwnedBy(deviceId);
+      },
+      // M9 Task 3: a revoked device's staged files and quota reservation
+      // are reclaimed here — never on a plain disconnect, which leaves them
+      // for their own TTL so an explicit retry still finds them.
+      onDeviceRevoked: (deviceId) => {
+        void uploadStore.revoke(deviceId);
+      },
+      // M12 Task 2: the bridge's own idle timer fired — nothing a phone
+      // can send reaches this path, only the bridge's own timer callback.
+      // Fire-and-forget: disableRemoteOnDisk never throws, so this
+      // callback itself can never throw a rejection (with a filesystem
+      // path in its message or otherwise) into the bridge's own
+      // onIdleDisabled try/catch.
+      onIdleDisabled: () => {
+        void disableRemoteOnDisk({
+          writeConfig,
+          log: (line) => console.error(line),
+        });
+      },
+      // The bridge's own Expo push sender (M10 Task 4) uses the platform's
+      // global fetch — the same one api-executor.ts already relies on
+      // existing — never `@jarvis/platform`'s apiFetch or undici directly.
+      fetch: (url, init) => fetch(url, init),
+    });
+
+    // M10 Task 4: built right after remoteAccess and before wiring.start(),
+    // so no session change or turn produced from here on can slip past the
+    // notifier the way an early turn once slipped past wiring (see the
+    // comment above wiring.start() itself). `context()` is read fresh on
+    // every decision — remoteAccess.pushSettings()/pushTargets()/
+    // watchingDevices always answer the *current* state, never one
+    // captured here.
+    const notifier = createNotifier({
+      sessions,
+      onTurn: (cb) => orchestrator.onTurn(cb),
+      context: () => ({
+        ...remoteAccess.pushSettings(),
+        focused: window.isFocused(),
+        targets: remoteAccess.pushTargets(),
+        watching: remoteAccess.watchingDevices,
+      }),
+      send: (messages) => remoteAccess.sendPush(messages),
+      // M12 Task 3, rule 9: every queued push gets one audit line, via the
+      // same bridge recordPushQueued already reaches for a mutating call —
+      // never the token, the title, the body or the project.
+      audit: (entries) => {
+        for (const e of entries) remoteAccess.recordPushQueued(e.deviceId, e.kind);
+      },
+      now: Date.now,
+      timers: nodeTimers,
+      log: (line) => console.error(line),
+    });
+
+    const settings = createSettingsHandlers({
+      readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
+      // The same hoisted writeConfig instance createRemoteAccess's own
+      // onIdleDisabled callback uses above — never a second writer to
+      // jarvis.yaml. After a successful write, the file on disk is the
+      // only source of truth for `remote:` (settings:save already pins a
+      // remote-origin draft's own `remote` key to it — dispatch.ts) — so
+      // writeConfig re-reads the file rather than trusting `draft.remote`,
+      // and applies whatever that read finds to the live bridge, via the
+      // queued applyFromDisk above it. A rejected re-read (or a rejected
+      // apply) is logged, never thrown: the save itself already succeeded,
+      // and a phone or the laptop's own Settings panel is not left hanging
+      // on the bridge catching up.
+      writeConfig,
+      run: runCommand,
+      // A restart the user did not ask for is the wrong kind of "helpful"
+      // — this only ever fires from the renderer's own Restart button
+      // click, after a save has already succeeded.
+      restart: () => {
+        app.relaunch();
+        app.exit(0);
+      },
+      language: PRIMARY_LANGUAGE,
+    });
+
     // Important 4: wiring is built and started here — before ipcMain
     // handlers are registered, before the recorder/hotkeys exist, and
     // before the window ever loads a page a user could interact with — so
@@ -1296,10 +1629,13 @@ app.whenReady().then(async () => {
     // window was spoken by TTS but never reached "turn:new" — gone, with
     // no replay.
     const wiring = buildWiring({
-      send: (channel, payload) => window.webContents.send(channel, payload),
+      send: broadcast.send,
       readMetrics: createMetricsReader(),
       intervalMs: 2000,
-      onSessionsChange: (cb) => sessions.onChange(cb),
+      // Merged, so a Jarvis session's own state change does not push a
+      // Jarvis-only list and drop every external row until the next
+      // explicit sessions:refresh.
+      onSessionsChange: (cb) => sessions.onChange(() => cb(mergedSessions())),
       onTurn: (cb) => orchestrator.onTurn(cb),
       onChangeCounts: (cb) => changeTracker.onChange(cb),
       onSessionOutput: (cb) => sessions.onOutput(cb),
@@ -1314,8 +1650,12 @@ app.whenReady().then(async () => {
       healthIntervalMs: PROVIDER_HEALTH_INTERVAL_MS,
       // Minimised, or behind the screen lock. Not `isVisible()` alone: a
       // full-screen window on a background Space still reports visible, and
-      // refreshChanges spawns two git processes per repo every tick.
-      isAwake: () => window.isVisible() && !window.isMinimized(),
+      // refreshChanges spawns two git processes per repo every tick. A
+      // hidden window still wakes for a paired phone actually subscribed to
+      // this specific push — a phone watching metrics should not have to
+      // wait for the laptop's own window to be on screen too.
+      isAwake: (channel) =>
+        (window.isVisible() && !window.isMinimized()) || remoteAccess.hasSubscriber(channel),
     });
     wiring.start();
 
@@ -1439,6 +1779,40 @@ app.whenReady().then(async () => {
         }
       };
       safely("wiring", () => wiring.stop());
+      // The bridge's own listener and its sockets — stop() removes the push
+      // sink too (remote-access.ts), so a relaunch never double-sends.
+      //
+      // `void`, not `await`: releaseChildren() itself is synchronous, called
+      // from three unawaitable places (window "closed", app "will-quit",
+      // and a signal handler that calls process.exit() right after it) —
+      // making it async would need "will-quit" to event.preventDefault()
+      // and re-quit once every safely() step's promise settles, which the
+      // signal-handler path can't do at all (there is no listener to
+      // prevent-default there; the process is exiting on its own). So
+      // remoteAccess.stop()'s final audit line (and any other in-flight
+      // config/devices write bridge.stop() awaits) may not finish flushing
+      // to disk before the process actually exits on a fast quit — a real,
+      // accepted gap (M4 final review, minor), not one this fix wave closes.
+      safely("remote bridge", () => {
+        void remoteAccess
+          .stop()
+          .catch((error: unknown) =>
+            console.error(`remote bridge: stop failed: ${errorMessage(error)}`),
+          );
+      });
+      // Clears the notifier's own quiet timers and unsubscribes from
+      // sessions/onTurn — otherwise both outlive the window they were
+      // watching for.
+      safely("notifier", () => notifier.dispose());
+      // M9 Task 3: invalidates every staged device's generation before best-
+      // effort disk cleanup, same fire-and-forget treatment as the bridge's
+      // own stop() above — a fast quit may not see this finish flushing
+      // either, and that is the same accepted gap.
+      safely("uploads", () => {
+        void uploadStore
+          .stop()
+          .catch((error: unknown) => console.error(`uploads: stop failed: ${errorMessage(error)}`));
+      });
       // The idle sweeps. A live interval keeps the event loop open, so a
       // quit that got this far would otherwise sit there ticking.
       safely("idle sweeps", () => clearInterval(sweepTimer));
@@ -1473,11 +1847,20 @@ app.whenReady().then(async () => {
         }
       });
       // Each followed container log is a live `docker logs -f` child.
-      safely("docker logs", () => {
-        for (const follower of logFollowers.values()) follower.close();
-        logFollowers.clear();
-      });
+      safely("docker logs", () => followers.closeAll());
     };
+
+    // DbGate is spawned with BASIC_AUTH=1 (dbgate.ts) and answers with
+    // Electron's own login challenge rather than showing its JWT form —
+    // dbGateLoginAnswer is the pure decision of when it is safe to answer;
+    // this only wires it (ruling 15).
+    app.on("login", (event, _webContents, _details, authInfo, callback) => {
+      const answer = dbGateLoginAnswer(authInfo, dbgate.credentialFor);
+      if (answer !== undefined) {
+        event.preventDefault();
+        callback(answer.login, answer.password);
+      }
+    });
 
     window.on("closed", releaseChildren);
     // Cmd+Q with the window already gone, and every other quit that never
@@ -1498,43 +1881,28 @@ app.whenReady().then(async () => {
       });
     }
 
-    ipcMain.handle("input:send", async (_event, text: string, language: "ar" | "en") => {
-      await orchestrator.handle(text, language);
-    });
-
-    // Pulled on demand when the renderer's history panel opens, not
-    // pushed — there is no live subscriber to keep in sync for a past-
-    // sessions view, only a snapshot to render once per open.
-    ipcMain.handle("history:list", () => sessionStore.history());
-
-    // The Session view's backlog. Like history:list this is pulled on
-    // demand rather than pushed: everything printed *after* the view opens
-    // arrives on the "session:output" channel instead. The renderer only
-    // ever names a session id — it can never ask for output from a process
-    // Jarvis did not itself start.
-    ipcMain.handle("session:log", (_event, sessionId: string) =>
-      typeof sessionId === "string" ? sessions.log(sessionId) : "",
-    );
-
     // A session started in a terminal has no pty backlog — only the
     // transcript the importer recorded a path to. Without this the session
-    // view opened blank for all 89 imported sessions.
+    // view opened blank for all 89 imported sessions. External rows are
+    // included here (never in sessionResume just below): opening a
+    // transcript is read-only, exactly what "outside Jarvis" is still
+    // allowed to do.
     const sessionTranscript = createTranscriptHandler({
-      history: () => sessionStore.history(),
+      history: () => [...sessionStore.history(), ...externalSessions.values()],
       readFile: (path) => readFile(path, "utf8"),
     });
-    // (_event, id), never the bare handler: ipcMain.handle calls its
-    // listener with the invoke event first, so a handler taking the id as
-    // its first parameter silently receives the event instead and refuses
-    // every session.
-    ipcMain.handle("session:transcript", (_event, sessionId: unknown) =>
-      sessionTranscript(sessionId),
-    );
 
     // Continuing a past session in a Workspace Terminal tab: Jarvis opens
     // the tab in the directory the session ran in and types the resume
     // command. The agent then runs as an ordinary terminal process that
     // Jarvis does not own — a real shell, at the cost of no live state.
+    //
+    // `history` deliberately excludes externalSessions (unlike
+    // sessionTranscript above): an "ext-<pid>" id is not a real transcript
+    // id `--resume` understands, and a row already running outside Jarvis
+    // has no business being typed into a second time — resuming it here
+    // would fail unhelpfully at best. history().find() finding nothing for
+    // such an id is exactly cannotResumeSession's refusal path.
     const sessionResume = createResumeInTerminalHandler({
       history: () => sessionStore.history(),
       // Which shell the tab will type this into — the only thing about the
@@ -1561,43 +1929,11 @@ app.whenReady().then(async () => {
       sendInput: (tabId: string, data: string) => terminal.input(tabId, data),
       language: PRIMARY_LANGUAGE,
     });
-    ipcMain.handle("session:resume", (_event, sessionId: unknown, selectedProject: unknown) =>
-      sessionResume(sessionId, selectedProject),
-    );
-
-    // Keystrokes into a session's pty. Validated rather than trusted: the
-    // renderer names a session id, never a process — the main process owns
-    // that mapping, so a compromised renderer can only ever type into a
-    // session Jarvis itself started.
-    ipcMain.handle("session:input", (_event, sessionId: string, data: string) => {
-      if (typeof sessionId !== "string" || typeof data !== "string") return;
-      sessions.write(sessionId, data);
-    });
-
-    // Where a spoken utterance goes. Normally the brain, which decides what
-    // to do with it; but while a session's terminal is open, speaking is
-    // meant to talk to THAT agent — the same thing as typing into it — so
-    // the renderer names the session it is showing and the transcript is
-    // typed there instead. Cleared (undefined) whenever the view is left.
-    let voiceTargetSessionId: string | undefined;
-
-    ipcMain.handle("voice:target", (_event, sessionId: unknown) => {
-      voiceTargetSessionId = typeof sessionId === "string" ? sessionId : undefined;
-    });
-
-    ipcMain.handle("session:resize", (_event, sessionId: string, cols: number, rows: number) => {
-      if (typeof sessionId !== "string") return;
-      if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
-      sessions.resize(sessionId, cols, rows);
-    });
 
     // The main process owns the sessionId -> projectPath mapping, so a
     // compromised renderer can request git data only for a repo a real
     // session is already running against, never an arbitrary path — see
-    // createGitHandlers' own doc comment. Registered here, before
-    // `window.loadFile` below, following the same ordering fix as
-    // "input:send"/"history:list" above and phase 1's Task 12 ruling: a
-    // handler must exist before the page that could invoke it loads.
+    // createGitHandlers' own doc comment.
     const gitHandlers = createGitHandlers({
       git,
       sessions: { get: (id) => sessions.get(id) },
@@ -1605,262 +1941,13 @@ app.whenReady().then(async () => {
       refresh: () => changeTracker.refresh(),
     });
 
-    ipcMain.handle("git:changes", (_event, sessionId: string) => gitHandlers.changes(sessionId));
-    ipcMain.handle("git:diff", (_event, sessionId: string, path: string) =>
-      gitHandlers.fileDiff(sessionId, path),
-    );
-    ipcMain.handle("git:setStaged", (_event, sessionId: string, path: string, staged: boolean) =>
-      gitHandlers.setStaged(sessionId, path, staged),
-    );
-    ipcMain.handle("git:commit", (_event, sessionId: string, message: string) =>
-      gitHandlers.commit(sessionId, message),
-    );
-
-    // Every argument here crosses an untyped IPC boundary. workspace.open
-    // and .navigate go into normalizeInput either way, but a non-string
-    // still must not reach it as if it were one.
-    ipcMain.handle(
-      "workspace:open",
-      (_event, project: unknown, input: unknown, kind: unknown, detail: unknown) => {
-        if (typeof project !== "string" || typeof input !== "string") return;
-        workspace.open(
-          project,
-          input,
-          kind === "editor" || kind === "database" || kind === "cluster" ? kind : "web",
-          typeof detail === "string" ? detail : undefined,
-        );
-      },
-    );
-    ipcMain.handle("workspace:close", (_event, id: unknown) => {
-      if (typeof id !== "string") return;
-      // A terminal tab's shell and a Docker tab's `docker logs -f` are both
-      // child processes of their own; closing the tab has to reap them.
-      // Either call on a tab that has neither is a no-op, so this needs no
-      // test of the tab's kind. The renderer unfollows too when it notices
-      // the tab go away, but a guarantee about a live child process must not
-      // rest on the renderer alone.
-      terminal.close(id);
-      unfollow(id);
-      workspace.close(id);
-    });
-    ipcMain.handle("workspace:activate", (_event, id: unknown) => {
-      if (typeof id === "string") workspace.activate(id);
-    });
-    ipcMain.handle("workspace:navigate", (_event, id: unknown, input: unknown) => {
-      if (typeof id === "string" && typeof input === "string") workspace.navigate(id, input);
-    });
-    ipcMain.handle("workspace:back", (_event, id: unknown) => {
-      if (typeof id === "string") workspace.back(id);
-    });
-    ipcMain.handle("workspace:forward", (_event, id: unknown) => {
-      if (typeof id === "string") workspace.forward(id);
-    });
-    ipcMain.handle("workspace:reload", (_event, id: unknown) => {
-      if (typeof id === "string") workspace.reload(id);
-    });
-    // Which display the window is actually on: dragging Jarvis to a second
-    // screen with a different scale changes the conversion below, and
-    // getDisplayMatching answers for the screen the window occupies rather
-    // than assuming the primary one.
-    const displayScale = (): number => screen.getDisplayMatching(window.getBounds()).scaleFactor;
-
-    // The renderer measures in CSS pixels and a hosted view is placed in
-    // device-independent pixels. Those agree only while the display is not
-    // running a scaled resolution; converting against the window's own
-    // content box is what keeps a page filling its slot on a display where
-    // they do not. See view-bounds.ts.
-    ipcMain.handle("workspace:bounds", (_event, bounds: ReportedRect) =>
-      workspace.setBounds(toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale())),
-    );
-    ipcMain.handle("workspace:devtools", (_event, tabId: unknown, open: unknown) => {
-      if (typeof tabId !== "string" || typeof open !== "boolean") return;
-      workspace.setDevTools(tabId, open);
-    });
-    ipcMain.handle("workspace:devtoolsBounds", (_event, bounds: ReportedRect) =>
-      workspace.setDevToolsBounds(
-        toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale()),
-      ),
-    );
-    ipcMain.handle("workspace:devtoolsDock", (_event, dock: unknown) => {
-      if (isDevToolsDock(dock)) workspace.setDevToolsDock(dock);
-    });
-    // A native menu rather than one the renderer draws: it opens from the
-    // address bar over the page, and a hosted page is a native view painted
-    // above anything in the renderer's DOM. The choice goes back to the
-    // renderer, which owns the layout and remembers it.
-    ipcMain.handle("workspace:devtoolsDockMenu", (_event, current: unknown) => {
-      const item = (dock: DevToolsDock): Electron.MenuItemConstructorOptions => ({
-        label: MESSAGES.devToolsDock(dock, PRIMARY_LANGUAGE),
-        type: "radio",
-        checked: current === dock,
-        click: () => window.webContents.send("workspace:devtoolsDockChosen", dock),
-      });
-      Menu.buildFromTemplate([item("undocked"), item("left"), item("bottom"), item("right")]).popup(
-        { window },
-      );
-    });
-    workspace.onDevToolsClosed((tabId) =>
-      window.webContents.send("workspace:devtoolsClosed", tabId),
-    );
-    ipcMain.handle("workspace:visible", (_event, visible: unknown) =>
-      workspace.setVisible(visible === true),
-    );
-    ipcMain.handle("workspace:hideAll", () => workspace.hideAll());
-    ipcMain.handle("workspace:pip", (_event, tabId: unknown) => {
-      if (typeof tabId === "string") workspace.requestPictureInPicture(tabId);
-    });
-    ipcMain.handle("editor:open", (_event, project: unknown, root: unknown) =>
-      editor.open(
-        typeof project === "string" ? project : "",
-        // Absent means the project directory itself; anything that is not a
-        // string is not a root name and must not be treated as one.
-        typeof root === "string" ? root : undefined,
-      ),
-    );
-    ipcMain.handle("editor:roots", (_event, project: unknown) =>
-      editor.roots(typeof project === "string" ? project : ""),
-    );
-    ipcMain.handle("database:open", (_event, project: unknown) =>
-      database.open(typeof project === "string" ? project : ""),
-    );
-    ipcMain.handle(
-      "cluster:open",
-      (_event, project: unknown, clusterName: unknown, background: unknown) =>
-        cluster.open(
-          typeof project === "string" ? project : "",
-          typeof clusterName === "string" ? clusterName : "",
-          // Anything that is not the literal true is a click: the flag only
-          // ever removes capability (no login terminal, no MFA push), so the
-          // safe reading of a malformed one is the one that asks for less.
-          { background: background === true },
-        ),
-    );
-    ipcMain.handle("cluster:names", (_event, project: unknown) =>
-      cluster.names(typeof project === "string" ? project : ""),
-    );
-    ipcMain.handle("chat:open", (_event, project: unknown, name: unknown) =>
-      chat.open(typeof project === "string" ? project : "", typeof name === "string" ? name : ""),
-    );
-    ipcMain.handle("chat:names", (_event, project: unknown) =>
-      chat.names(typeof project === "string" ? project : ""),
-    );
-
-    // Whether a project already has a Docker tab is the renderer's business,
-    // exactly as it is for the API tab.
-    ipcMain.handle("docker:open", (_event, project: unknown) => {
-      if (typeof project !== "string" || config.projects[project] === undefined) {
-        return {
-          ok: false,
-          text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
-          language: PRIMARY_LANGUAGE,
-        };
-      }
-      workspace.openDocker(project);
-      return { ok: true, value: undefined };
-    });
-    ipcMain.handle("docker:names", (_event, project: unknown) => docker.names(project as string));
-    ipcMain.handle("docker:view", (_event, project: unknown) => docker.view(project as string));
-    ipcMain.handle("docker:containers", () => docker.containers());
-    ipcMain.handle("docker:start", (_event, project: unknown, container: unknown) =>
-      docker.start(project as string, container as string),
-    );
-    ipcMain.handle("docker:stop", (_event, project: unknown, container: unknown) =>
-      docker.stop(project as string, container as string),
-    );
-    ipcMain.handle("docker:restart", (_event, project: unknown, container: unknown) =>
-      docker.restart(project as string, container as string),
-    );
-    ipcMain.handle("docker:composeUp", (_event, project: unknown) =>
-      docker.composeUp(project as string),
-    );
-    ipcMain.handle("docker:composeDown", (_event, project: unknown) =>
-      docker.composeDown(project as string),
-    );
-    ipcMain.handle("docker:shell", (_event, project: unknown, container: unknown) =>
-      docker.shell(project as string, container as string),
-    );
-
-    // One `docker logs -f` per open Docker tab, never per container: the tab
-    // shows one log at a time, and a follower per row would be a process per
-    // container for output nobody is looking at.
-    const logFollowers = new Map<string, { close(): void }>();
-    const unfollow = (tabId: string): void => {
-      logFollowers.get(tabId)?.close();
-      logFollowers.delete(tabId);
-    };
-    ipcMain.handle(
-      "docker:follow",
-      (_event, tabId: unknown, project: unknown, container: unknown) => {
-        if (
-          typeof tabId !== "string" ||
-          typeof project !== "string" ||
-          typeof container !== "string"
-        ) {
-          return {
-            ok: false,
-            text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
-            language: PRIMARY_LANGUAGE,
-          };
-        }
-        // The same check the Docker handlers apply — membership and name
-        // grammar both, from the one shared helper — so `follow` is not the
-        // one door into Docker that enforces a weaker rule than the rest.
-        if (!isDeclaredContainer(config.docker[project], container)) {
-          return {
-            ok: false,
-            text: MESSAGES.dockerUnknownContainer(PRIMARY_LANGUAGE),
-            language: PRIMARY_LANGUAGE,
-          };
-        }
-        unfollow(tabId);
-        logFollowers.set(
-          tabId,
-          dockerClient.follow(container, (chunk) => {
-            if (window.isDestroyed()) return;
-            window.webContents.send("docker:log", { tabId, chunk });
-          }),
-        );
-        return { ok: true, value: undefined };
-      },
-    );
-    ipcMain.handle("docker:unfollow", (_event, tabId: unknown) => {
-      if (typeof tabId === "string") unfollow(tabId);
+    // See docker-followers.ts for why there is one `docker logs -f` per tab.
+    const followers = createDockerFollowers({
+      follow: (container, onChunk) => dockerClient.follow(container, onChunk),
+      send: (tabId, chunk) => broadcast.send("docker:log", { tabId, chunk }),
     });
 
-    // Opening the tab is main's job (only it holds the BrowserHost); deciding
-    // whether one already exists is the renderer's, exactly as it is for the
-    // Editor and Database buttons.
-    ipcMain.handle("api:open", (_event, project: unknown) => {
-      if (typeof project !== "string" || config.projects[project] === undefined) {
-        return {
-          ok: false,
-          text: MESSAGES.unknownProject(PRIMARY_LANGUAGE),
-          language: PRIMARY_LANGUAGE,
-        };
-      }
-      workspace.openApi(project);
-      return { ok: true, value: undefined };
-    });
-    ipcMain.handle("api:collections", (_event, project: unknown) =>
-      api.collections(project as string),
-    );
-    ipcMain.handle("api:tree", (_event, project: unknown, path: unknown) =>
-      api.tree(project as string, path as string),
-    );
-    ipcMain.handle("api:request", (_event, project: unknown, path: unknown) =>
-      api.request(project as string, path as string),
-    );
-    ipcMain.handle("api:save", (_event, project: unknown, path: unknown, json: unknown) =>
-      api.save(project as string, path as string, json as Record<string, unknown>),
-    );
-    ipcMain.handle("api:send", (_event, project: unknown, request: unknown, variables: unknown) =>
-      api.send(
-        project as string,
-        request as Record<string, unknown>,
-        variables as Record<string, string>,
-      ),
-    );
-    ipcMain.handle("voice:list", async () => {
+    async function listVoices() {
       // Each platform's own source of system voices, and nothing where there
       // is none: asking `say -v '?'` on Linux spawns a binary that is not
       // there, waits for it to fail, and returns the same empty list this
@@ -1894,12 +1981,11 @@ app.whenReady().then(async () => {
           : []),
       ];
       return [...piperVoices, ...system];
-    });
+    }
     // The sample is spoken through the same MacSpeech the app uses, so a
     // preview sounds exactly like the thing being chosen — including the
     // Enhanced upgrade, which is the whole point of listening first.
-    ipcMain.handle("voice:preview", (_event, name: unknown, language: unknown) => {
-      if (typeof name !== "string" || name.trim() === "") return;
+    function previewVoice(name: string, language: "ar" | "en"): void {
       const spoken = language === "ar" ? VOICE_SAMPLE.ar : VOICE_SAMPLE.en;
       // PIPER_VOICE is not a `say` voice, so a preview of it has to go through
       // Piper — otherwise the button would demo a different voice than the one
@@ -1923,172 +2009,14 @@ app.whenReady().then(async () => {
       // Off darwin there is no `say` to preview a named system voice with,
       // and the Settings panel does not offer that list there — see
       // renderer/settings.ts.
-      void preview?.speak(spoken, language === "ar" ? "ar" : "en").catch(() => undefined);
-    });
-    ipcMain.handle("api:history", (_event, p: unknown) => api.history(p as string));
-    ipcMain.handle("api:clearHistory", (_event, p: unknown) => api.clearHistory(p as string));
-    ipcMain.handle("api:cookies", (_event, p: unknown) => api.cookies(p as string));
-    ipcMain.handle("api:clearCookies", (_event, p: unknown) => api.clearCookies(p as string));
-    ipcMain.handle(
-      "api:removeCookie",
-      (_event, p: unknown, n: unknown, d: unknown, path: unknown) =>
-        api.removeCookie(p as string, n as string, d as string, path as string),
-    );
-    ipcMain.handle("api:settings", (_event, p: unknown) => api.settings(p as string));
-    ipcMain.handle("api:saveSettings", (_event, p: unknown, settings: unknown) =>
-      api.saveSettings(p as string, settings as never),
-    );
-    // A native picker, for a multipart file field and for importing a
-    // collection. Cancelling returns [] — it is not a failure.
-    ipcMain.handle("dialog:pickFiles", async (_event, options: unknown) => {
-      const multiple = (options as { multiple?: boolean } | undefined)?.multiple === true;
-      const result = await dialog.showOpenDialog(window, {
-        properties: multiple ? ["openFile", "multiSelections"] : ["openFile"],
-      });
-      return result.canceled ? [] : result.filePaths;
-    });
-    ipcMain.handle("dialog:readJson", async (_event, path: unknown) => {
-      if (typeof path !== "string") {
-        return {
-          ok: false,
-          text: MESSAGES.invalidArgument(PRIMARY_LANGUAGE),
-          language: PRIMARY_LANGUAGE,
-        };
-      }
-      try {
-        return { ok: true, value: JSON.parse(await readFile(path, "utf8")) };
-      } catch (error) {
-        return { ok: false, text: errorMessage(error), language: PRIMARY_LANGUAGE };
-      }
-    });
-    ipcMain.handle("api:curl", (_event, p: unknown, request: unknown, variables: unknown) =>
-      api.curl(
-        p as string,
-        request as Record<string, unknown>,
-        variables as Record<string, string>,
-      ),
-    );
-    ipcMain.handle(
-      "api:createRequest",
-      (_event, p: unknown, folder: unknown, name: unknown, seq: unknown) =>
-        api.createRequest(p as string, folder as string, name as string, seq as number),
-    );
-    ipcMain.handle("api:createFolder", (_event, p: unknown, parent: unknown, name: unknown) =>
-      api.createFolder(p as string, parent as string, name as string),
-    );
-    ipcMain.handle(
-      "api:rename",
-      (_event, p: unknown, path: unknown, name: unknown, folder: unknown) =>
-        api.renameEntry(p as string, path as string, name as string, folder === true),
-    );
-    ipcMain.handle("api:delete", (_event, p: unknown, path: unknown) =>
-      api.deleteEntry(p as string, path as string),
-    );
-    ipcMain.handle("api:createCollection", (_event, p: unknown, name: unknown) =>
-      api.createCollection(p as string, name as string),
-    );
-    ipcMain.handle(
-      "api:saveEnvironment",
-      (_event, p: unknown, path: unknown, name: unknown, vars: unknown) =>
-        api.saveEnvironment(p as string, path as string, name as string, vars as never[]),
-    );
-    ipcMain.handle("api:importPostman", (_event, p: unknown, name: unknown, collection: unknown) =>
-      api.importPostman(p as string, name as string, collection),
-    );
-    ipcMain.handle("terminal:open", (_event, project: unknown) =>
-      terminal.open(typeof project === "string" ? project : ""),
-    );
-    // The renderer's xterm for this tab is ready: hand over whatever the
-    // shell printed before it existed, then stream the rest.
-    ipcMain.handle("terminal:attach", (_event, paneKey: unknown) => {
-      if (typeof paneKey !== "string") return "";
-      return shells.attach(
-        paneKey,
-        (chunk) => window.webContents.send("terminal:data", { paneKey, chunk }),
-        (code) => window.webContents.send("terminal:exit", { paneKey, code }),
-      );
-    });
-    // A tab's second (and third…) shell, and the one kill that is not the
-    // tab's own — see TerminalHandlers.split/closePane.
-    ipcMain.handle("terminal:split", (_event, tabId: unknown, paneId: unknown) => {
-      terminal.split(tabId as string, paneId as string);
-    });
-    ipcMain.handle("terminal:closePane", (_event, paneKey: unknown) => {
-      terminal.closePane(paneKey as string);
-    });
-    ipcMain.handle("terminal:suggest", (_event, paneKey: unknown, input: unknown, path: unknown) =>
-      terminal.suggest(paneKey as string, input as string, path as string | undefined),
-    );
-    ipcMain.handle("terminal:history", (_event, paneKey: unknown, limit: unknown) =>
-      terminal.history(paneKey as string, limit as number),
-    );
-    ipcMain.handle("terminal:listDir", (_event, paneKey: unknown, path: unknown) =>
-      terminal.listDir(paneKey as string, path as string),
-    );
-    ipcMain.handle("terminal:openFile", (_event, paneKey: unknown, path: unknown) =>
-      terminal.openFile(paneKey as string, path as string),
-    );
-    ipcMain.handle("terminal:input", (_event, tabId: unknown, data: unknown) => {
-      terminal.input(tabId as string, data as string);
-    });
-    ipcMain.handle("terminal:resize", (_event, tabId: unknown, cols: unknown, rows: unknown) => {
-      terminal.resize(tabId as string, cols as number, rows as number);
-    });
-    ipcMain.handle("terminal:settings", () => terminal.settings());
-    ipcMain.handle("terminal:workflows", (_event, project: unknown) =>
-      terminal.workflows(typeof project === "string" ? project : ""),
-    );
-    ipcMain.handle("terminal:ai", (_event, kind: unknown, text: unknown) =>
-      terminal.terminalAi(kind as "generate" | "explain", text as string),
-    );
-    ipcMain.handle("terminal:chips", (_event, paneKey: unknown, path: unknown) =>
-      // `path` is the renderer's live OSC 7 directory, passed through
-      // untyped exactly like every other argument on this boundary —
-      // chips() decides what to believe about it (see liveCwd).
-      terminal.chips(paneKey as string, path as string | undefined),
-    );
-    ipcMain.handle("bookmarks:list", (_event, project: unknown) =>
-      bookmarks.list(typeof project === "string" ? project : ""),
-    );
-    ipcMain.handle("bookmarks:add", (_event, project: unknown, bookmark: unknown) =>
-      bookmarks.add(typeof project === "string" ? project : "", bookmark as never),
-    );
-    ipcMain.handle("bookmarks:remove", (_event, project: unknown, url: unknown) =>
-      bookmarks.remove(
-        typeof project === "string" ? project : "",
-        typeof url === "string" ? url : "",
-      ),
-    );
-    ipcMain.handle(
-      "bookmarks:setPinned",
-      (_event, project: unknown, url: unknown, pinned: unknown) =>
-        bookmarks.setPinned(project as string, url as string, pinned as boolean),
-    );
-    ipcMain.handle("bookmarks:rename", (_event, project: unknown, url: unknown, title: unknown) =>
-      bookmarks.rename(project as string, url as string, title as string),
-    );
-    ipcMain.handle("bookmarks:reorder", (_event, project: unknown, urls: unknown) =>
-      bookmarks.reorder(project as string, urls as string[]),
-    );
-    ipcMain.handle("settings:read", () => settings.read());
-    ipcMain.handle("settings:save", (_event, draft: unknown) => settings.save(draft));
-    ipcMain.handle("settings:testAgent", (_event, agent: unknown) => settings.testAgent(agent));
-    ipcMain.handle("settings:restart", () => settings.restart());
-    ipcMain.handle("projects:list", () => Object.keys(config.projects));
-
-    // The only user-triggered call in the app that spends money: one billed
-    // query per readable account, guarded by ProviderMonitor's own minimum
-    // interval so a held-down button cannot run up a bill. A direct forward
-    // — no wrapping try/catch, no re-implemented throttle or dedup — so
-    // ProviderMonitor's own coalescing (Task 8) is the only one in effect,
-    // and this handler never rejects on a normal per-account failure.
-    ipcMain.handle("providers:refresh", () => providers.refreshCapacity({ force: true }));
+      void preview?.speak(spoken, language).catch(() => undefined);
+    }
 
     const recorder = new Recorder(createRecorderDeps(process.platform));
 
     function startVoice(): void {
       recorder.start();
-      window.webContents.send("voice:listening", true);
+      broadcast.send("voice:listening", true);
     }
 
     // Alt+Space / Alt+Shift+Space is a press-to-start / press-to-stop-and-send
@@ -2107,7 +2035,7 @@ app.whenReady().then(async () => {
       // the user as a spurious "تعذر تسجيل الصوت: Not recording" turn.
       if (!recorder.isRecording()) return;
 
-      window.webContents.send("voice:listening", false);
+      broadcast.send("voice:listening", false);
 
       // Important 6: the whole turn — recorder stop, transcription, and
       // orchestrator dispatch — is wrapped in one promise chain with a
@@ -2122,6 +2050,218 @@ app.whenReady().then(async () => {
       });
     }
 
+    // See dispatch.ts's "voice:target" comment for where this goes.
+    let voiceTargetSessionId: string | undefined;
+
+    // Every request handler, in one table (dispatch.ts). Registered in a
+    // loop so a second transport can call the same table with a different
+    // Origin.
+    // tailscale-cert.ts's own injected deps, wired to the real
+    // subprocess/filesystem/home directory — the fixed macOS app-bundle CLI
+    // path only applies on darwin (findTailscaleCli), so process.platform is
+    // read here at main.ts's edge, the same place defaultHeadlampBinary
+    // reads it, rather than inside tailscale-cert.ts itself.
+    const tailscaleCertDeps: TailscaleCertDeps = {
+      exec: (command, args, limits) => runCommandWithLimits(command, args, limits),
+      fs: {
+        access: (path) => access(path),
+        mkdir: async (path, options) => {
+          await mkdir(path, options);
+        },
+        chmod: (path, mode) => chmod(path, mode),
+      },
+      homedir,
+      platform: process.platform,
+    };
+
+    const dispatch = createDispatchTable({
+      setup,
+      orchestrator,
+      sessionStore,
+      // Same four methods SessionManager itself implements, plus `list`
+      // overridden to the merged view (mergedSessions()) — everything
+      // else stays a direct call through to the real manager, which is
+      // never fooled about an "ext-<pid>" id: log/snapshot answer their
+      // documented empty default for one, write/resize no-op.
+      sessions: {
+        log: (id) => sessions.log(id),
+        write: (id, data) => sessions.write(id, data),
+        resize: (id, cols, rows) => sessions.resize(id, cols, rows),
+        snapshot: (id) => sessions.snapshot(id),
+        list: () => mergedSessions(),
+      },
+      refreshSessions,
+      sessionTranscript,
+      sessionResume,
+      voice: {
+        setTarget: (id) => {
+          voiceTargetSessionId = id;
+        },
+      },
+      git: gitHandlers,
+      workspace,
+      terminal,
+      shells,
+      followers,
+      editor,
+      database,
+      cluster,
+      chat,
+      docker,
+      projects: config.projects,
+      dockerConfig: config.docker,
+      language: PRIMARY_LANGUAGE,
+      api,
+      voices: { list: listVoices, preview: previewVoice },
+      bookmarks,
+      settings,
+      providers,
+      voiceControl: { start: startVoice, stop: stopVoice },
+      readFile: (path) => readFile(path, "utf8"),
+      uploads: { readJson: uploadStore.readJson },
+      networkInterfaces: () => networkInterfaces(),
+      remote: remoteAccess,
+      sidecars: { publish: remoteAccess.publishSidecar },
+      notifier,
+      tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
+      writeConfig,
+    });
+    for (const [channel, handler] of Object.entries(dispatch)) {
+      ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(args, DESKTOP_ORIGIN));
+    }
+
+    registerDesktopOnly({
+      handle: (channel, listener) => ipcMain.handle(channel, listener),
+      window,
+      screen,
+      dialog,
+      buildMenu: (template) => Menu.buildFromTemplate(template),
+      workspace,
+      chooseDock: (dock) => broadcast.local("workspace:devtoolsDockChosen", dock),
+      language: PRIMARY_LANGUAGE,
+    });
+    workspace.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));
+
+    // Nothing listens until the bridge's own gate (rule 3) says so — this
+    // only ever starts the lifecycle, and its own `apply` decides whether
+    // that opens a socket. Fired and forgotten (never awaited): a slow or
+    // failing bridge start must not hold up the window's first paint, and
+    // any rejection is logged rather than becoming an unhandled one.
+    void remoteAccess
+      .start(config.remote)
+      .catch((error: unknown) =>
+        console.error(`remote bridge: start failed: ${errorMessage(error)}`),
+      );
+
+    // The desktop side of handleUtterance's UtteranceDeps: everything after
+    // transcribe() itself lives in voice-turn.ts now, shared with the
+    // phone's remote:uploadAudio handler (M8 Task 4). Only the transcribe
+    // runner differs per caller — this is the desktop's unchanged one.
+    const utteranceDeps: UtteranceDeps = {
+      transcribe: (wavPath) => transcribe(wavPath, config.whisper, runCommand),
+      sessions: { get: (id) => sessions.get(id), write: (id, data) => sessions.write(id, data) },
+      orchestrator: {
+        handle: (text, language, options) => orchestrator.handle(text, language, options),
+      },
+      broadcast,
+      primaryLanguage: PRIMARY_LANGUAGE,
+      log: (line) => console.error(line),
+    };
+
+    // `runCommandWithLimits` adapted to `CommandRunner`'s shape (`transcribe`
+    // just wants {code, stdout, stderr}) so a phone-origin turn's whisper
+    // call is bounded exactly like its ffmpeg one: killed after
+    // TRANSCRIBE_TIMEOUT_MS, output capped at 1 MiB. A timeout, or a
+    // truncated stream (the 1 MiB cap actually hit — code review M2: an
+    // unreachable case for <=120s of audio, but free to guard), always
+    // comes back with a non-zero code (SIGKILL already yields one via
+    // runCommandWithLimits's own exit-code mapping; the `? 1` is belt-and-
+    // braces) so `transcribe` throws instead of parsing a truncated
+    // mid-decode stdout as though it were a complete transcript.
+    async function limitedWhisperRunner(
+      command: string,
+      args: string[],
+    ): Promise<{ code: number; stdout: string; stderr: string }> {
+      const result = await runCommandWithLimits(command, args, {
+        timeoutMs: TRANSCRIBE_TIMEOUT_MS,
+        maxOutputBytes: 1_048_576,
+      });
+      const forceFailure = result.timedOut || result.truncated;
+      return {
+        code: forceFailure && result.code === 0 ? 1 : result.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    }
+
+    // ruling 4's pinned ffmpeg argv, bounded the same way: killed after
+    // TRANSCODE_TIMEOUT_MS, each stream capped at 64 KiB. `detail` never
+    // crosses the wire (ruling 17) and is not logged either (voice-upload.ts
+    // logs a site category, "failed:transcode", never this string) — it
+    // exists purely to satisfy this function's own declared return shape.
+    // No stderr tail (review I1): a crafted or genuinely erroring input can
+    // put its own path into ffmpeg's stderr (e.g. "No such file or
+    // directory: <path>"), so `detail` carries only the exit code and
+    // whether it was killed for running long — never a byte of stderr.
+    async function transcodeVoiceUpload(
+      input: string,
+      output: string,
+    ): Promise<{ ok: true } | { ok: false; detail: string }> {
+      const { command, args } = transcodeToWhisperWavCommand(input, output);
+      const result = await runCommandWithLimits(command, args, {
+        timeoutMs: TRANSCODE_TIMEOUT_MS,
+        maxOutputBytes: 65_536,
+      });
+      if (result.code === 0 && !result.timedOut) return { ok: true };
+      return { ok: false, detail: `code=${result.code} timedOut=${result.timedOut}` };
+    }
+
+    // The phone's private temp directory (global constraints): a fresh
+    // mkdtemp under os.tmpdir() (Node creates it 0700), one exclusive
+    // 0600 write, removed before the request answers — never a phone-
+    // supplied string in a path.
+    async function makeVoiceTempDir(): Promise<string> {
+      return mkdtemp(join(tmpdir(), "jarvis-voice-"));
+    }
+
+    async function writeVoiceFileExclusive(path: string, bytes: Uint8Array): Promise<void> {
+      await writeFile(path, bytes, { flag: "wx", mode: 0o600 });
+    }
+
+    async function removeVoiceDir(dir: string): Promise<void> {
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch {
+        // Never throws (voice-upload.ts's contract) — a removal that fails
+        // leaves an orphaned temp dir rather than breaking the upload's own
+        // response.
+      }
+    }
+
+    const voiceUploadDeps: VoiceUploadDeps = {
+      now: Date.now,
+      makeTempDir: makeVoiceTempDir,
+      writeFileExclusive: writeVoiceFileExclusive,
+      removeDir: removeVoiceDir,
+      transcode: transcodeVoiceUpload,
+      utterance: (request) =>
+        handleUtterance(request, {
+          ...utteranceDeps,
+          transcribe: (wavPath) => transcribe(wavPath, config.whisper, limitedWhisperRunner),
+        }),
+      language: PRIMARY_LANGUAGE,
+      log: (line) => console.error(line),
+    };
+
+    // The blob channels the bridge accepts (remote-access.ts's blobLimit).
+    // Built once; remote-access.ts calls `blobs()` lazily, so this only has
+    // to exist by the time a phone's first upload arrives, same as
+    // `dispatch` above.
+    const blobTable = createBlobTable({
+      uploadAudio: createVoiceUploadHandler(voiceUploadDeps),
+      uploadFile: createFileUploadHandler(uploadStore, PRIMARY_LANGUAGE),
+    });
+
     async function processVoiceTurn(): Promise<void> {
       let wavPath: string;
       try {
@@ -2129,7 +2269,7 @@ app.whenReady().then(async () => {
       } catch (error) {
         const message = errorMessage(error);
         console.error(`Recorder stop failed: ${message}`);
-        window.webContents.send("turn:new", {
+        broadcast.send("turn:new", {
           role: "assistant",
           text: MESSAGES.recordingFailed(message, PRIMARY_LANGUAGE),
           language: PRIMARY_LANGUAGE,
@@ -2139,60 +2279,11 @@ app.whenReady().then(async () => {
       }
 
       try {
-        // transcribe() throws on a broken transcription pipeline (bad
-        // model path, corrupt wav, missing ffmpeg/whisper binary — a
-        // recording that never started leaves no readable wav behind,
-        // and transcription fails on that missing file) and returns an
-        // empty-text transcript for actual silence — two different
-        // outcomes that must not be collapsed into one another. A broken
-        // pipeline is reported as an assistant turn; silence gets a
-        // brief, non-turn notice so the user knows the hotkey worked and
-        // nothing was heard, rather than the UI just going quiet.
-        let transcript: Awaited<ReturnType<typeof transcribe>>;
-        try {
-          transcript = await transcribe(wavPath, config.whisper, runCommand);
-        } catch (error) {
-          const message = errorMessage(error);
-          console.error(`Transcription failed: ${message}`);
-          window.webContents.send("turn:new", {
-            role: "assistant",
-            text: MESSAGES.transcriptionFailed(message, PRIMARY_LANGUAGE),
-            language: PRIMARY_LANGUAGE,
-            at: Date.now(),
-          });
-          return;
-        }
-
-        if (transcript.text.trim() === "") {
-          const language = transcript.language === "ar" ? "ar" : "en";
-          window.webContents.send("voice:notice", {
-            text: language === "ar" ? "لم يُسمع شيء" : "Didn't catch that",
-            language,
-          });
-          return;
-        }
-        const language = transcript.language === "ar" ? "ar" : "en";
-
-        // A session's terminal is open: type the utterance into it, exactly
-        // as if it had been typed at the keyboard, so the agent cannot tell
-        // speech from typing. The carriage return is what a terminal
-        // receives for Enter. Checked against the live session list rather
-        // than trusted: the renderer's target can name a session that has
-        // since exited, and the utterance must fall back to the brain
-        // rather than vanishing into a dead pty.
-        const target =
-          voiceTargetSessionId === undefined ? undefined : sessions.get(voiceTargetSessionId);
-        if (target !== undefined && target.endedAt === undefined) {
-          sessions.write(target.id, `${transcript.text}\r`);
-          // Echoed as a notice, not a turn: this was not a conversation
-          // with the brain, and the agent's own terminal is about to show
-          // the line. The notice is what confirms the speech was heard and
-          // where it went.
-          window.webContents.send("voice:notice", { text: transcript.text, language });
-          return;
-        }
-
-        await orchestrator.handle(transcript.text, language);
+        const { answered } = await handleUtterance(
+          { wavPath, targetSessionId: voiceTargetSessionId, origin: { kind: "desktop" } },
+          utteranceDeps,
+        );
+        await answered;
       } finally {
         // Recorder owns the wav file it created; nothing else reads it
         // past this point on any of the branches above, so it's always
@@ -2213,13 +2304,6 @@ app.whenReady().then(async () => {
       },
       process.platform,
     );
-
-    // M-b: the renderer's mic button drives the exact same start/stop path
-    // as the global hotkey, so voice has one implementation no matter which
-    // control triggers it — never a second, unwired-looking "click to talk"
-    // affordance beside the real hotkey-driven one.
-    ipcMain.handle("voice:start", () => startVoice());
-    ipcMain.handle("voice:stop", () => stopVoice());
 
     // The recorder and any live sessions are released by releaseChildren,
     // which is already wired to "will-quit" above — and, unlike this
@@ -2252,6 +2336,11 @@ app.whenReady().then(async () => {
 
     await window.loadFile(fileURLToPath(new URL("../../renderer/index.html", import.meta.url)));
 
+    // Maximized, then shown: the full working area without entering the
+    // separate macOS fullscreen Space (see the BrowserWindow options above).
+    window.maximize();
+    window.show();
+
     // globalShortcut.register() does not throw on collision — a combo
     // already claimed by another app (window managers, Alfred, Raycast and
     // input-source switchers commonly claim Alt-combos) makes it return
@@ -2260,7 +2349,7 @@ app.whenReady().then(async () => {
     if (hotkeys.fellBack && hotkeys.active !== undefined) {
       // Taken, and answered rather than merely reported: the keys that do
       // work are named, and the renderer is told so its hints agree.
-      window.webContents.send("turn:new", {
+      broadcast.send("turn:new", {
         role: "assistant",
         text: MESSAGES.hotkeyFallback(
           PRIMARY_HOTKEYS.start,
@@ -2277,7 +2366,7 @@ app.whenReady().then(async () => {
         // means no application can hold one at all, and saying "another app
         // is probably using it" would send them looking for something that
         // does not exist.
-        window.webContents.send("turn:new", {
+        broadcast.send("turn:new", {
           role: "assistant",
           text: isWayland(process.env)
             ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
@@ -2288,7 +2377,7 @@ app.whenReady().then(async () => {
       }
     }
     if (hotkeys.active !== undefined && hotkeys.active !== PRIMARY_HOTKEYS) {
-      window.webContents.send("voice:hotkeys", hotkeys.active);
+      broadcast.send("voice:hotkeys", hotkeys.active);
     }
 
     // The greeting comes first, before the health line: it is instant, it is
@@ -2324,7 +2413,7 @@ app.whenReady().then(async () => {
       },
       PRIMARY_LANGUAGE,
     );
-    window.webContents.send("turn:new", {
+    broadcast.send("turn:new", {
       role: "assistant",
       text: greeting,
       language: PRIMARY_LANGUAGE,
@@ -2335,7 +2424,7 @@ app.whenReady().then(async () => {
     const report = await reportPromise;
     console.log(report.message);
     if (report.message !== "") {
-      window.webContents.send("turn:new", {
+      broadcast.send("turn:new", {
         role: "assistant",
         text: report.message,
         language: "en",
@@ -2343,19 +2432,19 @@ app.whenReady().then(async () => {
       });
     }
 
-    window.webContents.send("providers:update", providers.snapshot());
+    broadcast.send("providers:update", providers.snapshot());
 
     void capacityPromise.then(() => {
       // The capacity refresh takes up to 20s per account, so this callback
-      // can land long after a user who launched, glanced and quit. Sending
-      // on a destroyed webContents throws, and this chain has no catch of
-      // its own — an unhandled rejection in the main process on every quick
-      // quit. There is nothing to report to a window that is gone.
-      if (window.isDestroyed()) return;
-      window.webContents.send("providers:update", providers.snapshot());
+      // can land long after a user who launched, glanced and quit. Nothing
+      // here needs guarding on that any more: every broadcast.send below
+      // goes through rendererSink, which already swallows a destroyed
+      // window on its own — and this push is for every sink, not only the
+      // one window this process happens to have.
+      broadcast.send("providers:update", providers.snapshot());
       const capacity = capacityReport(providers.snapshot(), PRIMARY_LANGUAGE);
       if (capacity === "") return;
-      window.webContents.send("turn:new", {
+      broadcast.send("turn:new", {
         role: "assistant",
         text: capacity,
         language: PRIMARY_LANGUAGE,

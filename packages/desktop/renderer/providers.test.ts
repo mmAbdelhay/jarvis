@@ -27,8 +27,8 @@ function status(overrides: Partial<ProviderStatus> = {}): ProviderStatus {
     vendor: "anthropic",
     capacity: {
       state: "known",
-      fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
-      sevenDay: undefined,
+      primary: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
+      secondary: undefined,
       readAt: Date.parse("2026-08-31T12:12:00.000Z"),
     },
     health: { state: "ok", detail: "All Systems Operational", readAt: NOW },
@@ -59,8 +59,8 @@ describe("renderProviders", () => {
         status({
           capacity: {
             state: "known",
-            fiveHour: { usedPercent: 100, resetsAt: "2026-08-31T14:30:00.000Z" },
-            sevenDay: undefined,
+            primary: { usedPercent: 100, resetsAt: "2026-08-31T14:30:00.000Z" },
+            secondary: undefined,
             readAt: NOW,
           },
         }),
@@ -109,12 +109,29 @@ describe("renderProviders", () => {
     expect(document.querySelector(".provider__note")?.textContent).toMatch(/\d{2}:\d{2}/);
   });
 
+  it("shows a reset more than a day away as a day, not a clock (Copilot's monthly window)", () => {
+    const monthly = status({
+      capacity: {
+        state: "known",
+        primary: { usedPercent: 1, resetsAt: new Date(NOW + 9 * 24 * 60 * 60_000).toISOString() },
+        secondary: undefined,
+        readAt: NOW,
+      },
+    });
+    renderProviders([monthly], NOW);
+    const expected = new Date(NOW + 9 * 24 * 60 * 60_000).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    });
+    expect(document.querySelector(".provider__note")?.textContent).toContain(expected);
+  });
+
   it("marks a reading older than 30 minutes as stale, with its age", () => {
     const old = status({
       capacity: {
         state: "known",
-        fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
+        secondary: undefined,
         readAt: NOW - 90 * 60_000,
       },
     });

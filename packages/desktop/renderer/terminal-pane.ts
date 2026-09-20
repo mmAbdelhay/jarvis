@@ -59,6 +59,13 @@ export type PaneHooks = {
    *  only for a block whose own duration meets `settings.notifyAfterSeconds`
    *  while this pane was not the one being watched. */
   notify: (title: string, body: string) => void;
+  /** M10 Task 4: reports a finished block's own duration and exit status to
+   *  main, so it can decide whether to push a phone — called whenever a
+   *  block's duration meets `settings.notifyAfterSeconds`, whether or not
+   *  this pane is the one being watched (unlike `notify` above, which is
+   *  gated on that). Absent means nothing is ever reported — the Session
+   *  route's pane, which has no push story of its own. */
+  onCommandFinished?: ((seconds: number, ok: boolean) => void) | undefined;
   /** The most recent commands from Jarvis's own command log, newest first —
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
@@ -134,6 +141,16 @@ export type TerminalPane = {
   element: HTMLElement;
   /** Feed it a chunk from the pty. */
   write(chunk: string): void;
+  /**
+   * Feed it a chunk pushed live from the pty, once this pane's attach has
+   * settled. Before that point every live push is already inside the
+   * backlog `attach()` returns — see the comment above the attach call —
+   * so it is dropped rather than written a second time. Callers that
+   * stream `terminal:data`/`session:output` pushes use this instead of
+   * `write`, which stays the ungated entry point for the backlog itself
+   * and for anything else that must land unconditionally.
+   */
+  writeLive(chunk: string): void;
   focus(): void;
   refit(): void;
   /** Drops every frozen block — the elements, not merely their visibility —
@@ -971,6 +988,20 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     return document.hasFocus() && element.contains(document.activeElement);
   }
 
+  /** M10 Task 4: the report main forwards into a possible push — the same
+   *  threshold `notifyIfUnwatched` gates on, but never gated on
+   *  `isWatched()`: main's own notifier decides whether the *laptop's*
+   *  window being watched suppresses a push, and a pane the user is
+   *  looking at right now says nothing about whether their phone is. */
+  function reportCommandFinished(record: BlockRecord): void {
+    const threshold = hooks.settings.notifyAfterSeconds;
+    if (threshold <= 0) return;
+    if (record.endedAt === undefined) return;
+    const durationSeconds = (record.endedAt - record.startedAt) / 1000;
+    if (durationSeconds < threshold) return;
+    hooks.onCommandFinished?.(Math.round(durationSeconds), record.exitCode === 0);
+  }
+
   function notifyIfUnwatched(record: BlockRecord): void {
     const threshold = hooks.settings.notifyAfterSeconds;
     if (threshold <= 0) return;
@@ -991,6 +1022,13 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       home: hooks.settings.home,
       filterToCommand: (command) => attempt(() => nav?.filterToCommand(command)),
       select: (clicked) => attempt(() => nav?.select(clicked)),
+      remove: (target) => {
+        const index = views.indexOf(target);
+        if (index < 0) return;
+        views.splice(index, 1);
+        target.element.remove();
+        attempt(() => nav?.sync(views));
+      },
     });
     views.push(view);
     list.append(view.element);
@@ -1089,6 +1127,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // that follows must happen either way, or the live terminal would go
       // on showing output the block above it is also showing.
       attempt(() => freeze(event.block));
+      // Before the isWatched() check inside notifyIfUnwatched: this report
+      // is never gated on whether the laptop's own pane is being watched.
+      attempt(() => reportCommandFinished(event.block));
       attempt(() => notifyIfUnwatched(event.block));
       // The frozen block now holds what the live terminal was drawing — so
       // the live terminal is cleared. Ordered *behind* xterm's write buffer,
@@ -1176,6 +1217,22 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     liveObserver.observe(live);
   });
 
+  /**
+   * Whether this pane is safe to feed a live push. False until attach()
+   * settles, so `writeLive` drops everything pushed in that gap.
+   *
+   * Why that is safe rather than lossy: Electron only delivers the
+   * `terminal:attach`/`getSessionLog` reply after its handler in main has
+   * returned, and that handler reads the shell's retained log
+   * synchronously. A pty's own data arrives as a separate macrotask, so any
+   * live push the renderer received before this pane's attach promise
+   * resolved was necessarily emitted, in main, before that synchronous
+   * read ran — which means it is already inside `buffered` below. Nothing
+   * pushed before this settles is ever new, so dropping it loses nothing;
+   * only a push that arrives after this flips true is.
+   */
+  let attached = false;
+
   // Whatever the shell printed before this pane existed — its prompt,
   // usually. It goes through write() rather than straight to xterm because
   // it can carry the marks that say where the prompt is.
@@ -1183,15 +1240,21 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     .attach()
     .then((buffered) => {
       if (buffered !== "") write(buffered);
+      attached = true;
     })
     .catch(() => {
-      // No replay. The shell is still there and its next byte still lands.
+      // No replay. The shell is still there and its next byte still lands —
+      // and a failed attach must not leave this pane deaf to it forever.
+      attached = true;
     });
 
   return {
     element,
     terminal,
     write,
+    writeLive: (chunk) => {
+      if (attached) write(chunk);
+    },
     // The editor has the keys whenever it is on screen; the terminal has
     // them every other moment.
     focus: focusPane,

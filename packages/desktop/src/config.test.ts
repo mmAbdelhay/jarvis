@@ -6,7 +6,14 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
-import { defaultSessionsDbPath, ensureConfigFile, loadConfig, parseConfig } from "./config.js";
+import {
+  defaultSessionsDbPath,
+  ensureConfigFile,
+  loadConfig,
+  mergeConfigInPlace,
+  providerAgentListsEqual,
+  parseConfig,
+} from "./config.js";
 
 const valid = {
   agents: { "claude-main": { command: "claude-main", model: "opus", default: true } },
@@ -16,6 +23,89 @@ const valid = {
 };
 
 describe("parseConfig", () => {
+  it("compares provider registries by id, command, and vendor only", () => {
+    const before = [
+      { id: "claude", command: "claude", vendor: "anthropic" as const, model: "old" },
+    ];
+    expect(
+      providerAgentListsEqual(before, [
+        { id: "claude", command: "claude", vendor: "anthropic", model: "new" },
+      ]),
+    ).toBe(true);
+    expect(
+      providerAgentListsEqual(before, [{ id: "claude", command: "other", vendor: "anthropic" }]),
+    ).toBe(false);
+  });
+  it("defaults prayer off and validates configured locations", () => {
+    expect(parseConfig(valid).prayer).toEqual({ enabled: false });
+    expect(
+      parseConfig({
+        ...valid,
+        prayer: {
+          enabled: true,
+          location: { latitude: 31.2, longitude: 29.9, name: "Alexandria" },
+        },
+      }).prayer.enabled,
+    ).toBe(true);
+    for (const prayer of [
+      { enabled: true, location: { latitude: 91, longitude: 0, name: "x" } },
+      { enabled: true, location: { latitude: 0, longitude: 181, name: "x" } },
+      { enabled: true, location: { latitude: 0, longitude: 0, name: "x\u202E" } },
+      { enabled: true, location: { latitude: 0, longitude: 0, name: "x".repeat(61) } },
+    ])
+      expect(() => parseConfig({ ...valid, prayer })).toThrow(/prayer\.location/);
+  });
+
+  it("defaults prayer.notify to before/atTime on and 10 minutes, and validates it when set", () => {
+    // Absent entirely: the field itself is left out, the same way `location`
+    // is — callers resolve the default at the point of use.
+    expect(parseConfig({ ...valid, prayer: { enabled: true } }).prayer.notify).toBeUndefined();
+    // Given but empty: each field falls back independently.
+    expect(parseConfig({ ...valid, prayer: { enabled: true, notify: {} } }).prayer.notify).toEqual({
+      before: true,
+      beforeMinutes: 10,
+      atTime: true,
+    });
+    // Fully specified, non-default values round-trip exactly.
+    expect(
+      parseConfig({
+        ...valid,
+        prayer: { enabled: true, notify: { before: false, beforeMinutes: 25, atTime: false } },
+      }).prayer.notify,
+    ).toEqual({ before: false, beforeMinutes: 25, atTime: false });
+    // One field given, the rest default.
+    expect(
+      parseConfig({ ...valid, prayer: { enabled: true, notify: { beforeMinutes: 1 } } }).prayer
+        .notify,
+    ).toEqual({ before: true, beforeMinutes: 1, atTime: true });
+    for (const notify of [
+      { before: "yes" },
+      { atTime: 1 },
+      { beforeMinutes: 0 },
+      { beforeMinutes: 61 },
+      { beforeMinutes: 5.5 },
+      { beforeMinutes: "10" },
+    ])
+      expect(() => parseConfig({ ...valid, prayer: { enabled: true, notify } })).toThrow(
+        /prayer\.notify/,
+      );
+    expect(() => parseConfig({ ...valid, prayer: { enabled: true, notify: null } })).toThrow(
+      /prayer\.notify/,
+    );
+    expect(() => parseConfig({ ...valid, prayer: { enabled: true, notify: [] } })).toThrow(
+      /prayer\.notify/,
+    );
+  });
+
+  it("merges config while preserving nested and array references", () => {
+    const nested = { stale: true };
+    const list = [1, 2];
+    const target: Record<string, unknown> = { nested, list, primitive: 1, removed: true };
+    mergeConfigInPlace(target, { nested: { fresh: true }, list: [3], primitive: 2 });
+    expect(target).toEqual({ nested: { fresh: true }, list: [3], primitive: 2 });
+    expect(target.nested).toBe(nested);
+    expect(target.list).toBe(list);
+  });
   it("maps agents and routing into a registry config", () => {
     const config = parseConfig(valid);
     expect(config.registry.agents["claude-main"]?.command).toBe("claude-main");
@@ -53,6 +143,16 @@ describe("parseConfig", () => {
   it("leaves absolute project paths untouched", () => {
     const config = parseConfig({ ...valid, projects: { a: "/tmp/a" } });
     expect(config.projects["a"]).toBe("/tmp/a");
+  });
+
+  // [bite-proof: prototype names are not projects] parseProjects building
+  // `{}` instead of `Object.create(null)` fails this.
+  it("builds `projects` with no prototype, so prototype method names read back as undefined", () => {
+    const config = parseConfig(valid);
+    expect(Object.getPrototypeOf(config.projects)).toBe(null);
+    for (const name of ["constructor", "__proto__", "toString"]) {
+      expect(config.projects[name]).toBeUndefined();
+    }
   });
 
   it("throws when agents is missing", () => {
@@ -579,6 +679,37 @@ describe("voice", () => {
     );
   });
 
+  // A new Workspace tab has no home page by default (NEW_TAB_URL, the
+  // renderer's own constant, takes over) — jarvis.yaml can name one instead.
+  it("leaves the home page unset unless jarvis.yaml names one", () => {
+    expect(parseConfig(base).browser.homePage).toBeUndefined();
+    expect(
+      parseConfig({ ...base, browser: { homePage: "https://example.com" } }).browser.homePage,
+    ).toBe("https://example.com");
+    expect(
+      parseConfig({ ...base, browser: { homePage: "http://intranet/" } }).browser.homePage,
+    ).toBe("http://intranet/");
+  });
+
+  it("refuses a home page that is not http(s), too long, or carries control characters", () => {
+    expect(() => parseConfig({ ...base, browser: { homePage: "jarvis://home" } })).toThrow(
+      "Config `browser.homePage` must be a valid http(s) URL",
+    );
+    expect(() => parseConfig({ ...base, browser: { homePage: "not a url" } })).toThrow(
+      "Config `browser.homePage` must be a valid http(s) URL",
+    );
+    expect(() =>
+      parseConfig({ ...base, browser: { homePage: `https://example.com/${"a".repeat(2048)}` } }),
+    ).toThrow(
+      "Config `browser.homePage` must be at most 2048 characters with no control characters",
+    );
+    expect(() =>
+      parseConfig({ ...base, browser: { homePage: "https://example.com/\u0000" } }),
+    ).toThrow(
+      "Config `browser.homePage` must be at most 2048 characters with no control characters",
+    );
+  });
+
   it("takes the configured voices and greetings", () => {
     const config = parseConfig({
       ...base,
@@ -655,6 +786,21 @@ describe("editors", () => {
 
   it("defaults to an empty record when the section is absent", () => {
     expect(parseConfig(base).editors).toEqual({});
+  });
+
+  // [bite-proof: prototype names are not editor roots] parseEditors
+  // building `{}` instead of `Object.create(null)` fails this — a project
+  // literally named "constructor" would read back as Object's constructor
+  // rather than undefined.
+  it("builds `editors` with no prototype, so prototype method names read back as undefined", () => {
+    const config = parseConfig({
+      ...base,
+      editors: { acme: [{ name: "portal-vue", path: "portal-vue" }] },
+    });
+    expect(Object.getPrototypeOf(config.editors)).toBe(null);
+    for (const name of ["constructor", "__proto__", "toString"]) {
+      expect(config.editors[name]).toBeUndefined();
+    }
   });
 
   it("parses a project's editor roots", () => {
@@ -1114,5 +1260,149 @@ describe("workflows", () => {
     expect(() => parseConfig({ ...base, workflows: ["nope"] })).toThrow(
       "Config `workflows` must be an object",
     );
+  });
+});
+
+describe("remote", () => {
+  const base = { agents: { claude: { command: "claude" } }, brain: { cwd: "/tmp/brain" } };
+  const defaults = {
+    enabled: false,
+    bindAddress: "127.0.0.1",
+    port: 7717,
+    sidecarProxy: false,
+    tls: {},
+    push: { enabled: false, includeProjectNames: false },
+    idleDisableMinutes: 0,
+  };
+
+  // The spec's non-negotiable: a fresh jarvis.yaml has no `remote:` section,
+  // and an absent section is the bridge switched off on loopback.
+  it("parses an absent section to the bridge switched off, on loopback", () => {
+    expect(parseConfig(base).remote).toEqual(defaults);
+  });
+
+  it("reads an empty `remote:` line (null) and an empty map as the defaults", () => {
+    expect(parseConfig({ ...base, remote: null }).remote).toEqual(defaults);
+    expect(parseConfig({ ...base, remote: {} }).remote).toEqual(defaults);
+  });
+
+  it("reads every key", () => {
+    const remote = {
+      enabled: true,
+      bindAddress: "100.84.17.203",
+      port: 0,
+      sidecarProxy: true,
+      tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
+      push: { enabled: true, includeProjectNames: true },
+      idleDisableMinutes: 30,
+    };
+    expect(parseConfig({ ...base, remote }).remote).toEqual(remote);
+  });
+
+  it("accepts IPv6 literals and the every-interface addresses", () => {
+    for (const bindAddress of ["::1", "fd7a:115c:a1e0::1", "0.0.0.0", "::"]) {
+      expect(parseConfig({ ...base, remote: { bindAddress } }).remote.bindAddress).toBe(
+        bindAddress,
+      );
+    }
+  });
+
+  it("accepts an IPv4-mapped IPv6 literal", () => {
+    expect(
+      parseConfig({ ...base, remote: { bindAddress: "::ffff:127.0.0.1" } }).remote.bindAddress,
+    ).toBe("::ffff:127.0.0.1");
+  });
+
+  it("expands ~ in the certificate paths", () => {
+    const tls = { certPath: "~/certs/m.crt", keyPath: "~/certs/m.key" };
+    expect(parseConfig({ ...base, remote: { tls } }).remote.tls).toEqual({
+      certPath: join(homedir(), "certs/m.crt"),
+      keyPath: join(homedir(), "certs/m.key"),
+    });
+  });
+
+  // The spec's own example writes both paths as `~`, YAML's null.
+  it("reads the spec's `certPath: ~` and `keyPath: ~` as absent", () => {
+    const raw = parse("remote:\n  enabled: false\n  tls:\n    certPath: ~\n    keyPath: ~\n");
+    expect(parseConfig({ ...base, ...raw }).remote.tls).toEqual({});
+  });
+
+  // The explicit tuple type matters: inferred, `patch` widens to a union
+  // that includes string, and `{ ...base, ...patch }` stops compiling.
+  it.each<[Record<string, unknown>, string]>([
+    [{ remote: "on" }, "Config `remote` must be an object"],
+    [{ remote: ["on"] }, "Config `remote` must be an object"],
+    [{ remote: { enabled: "yes" } }, "Config `remote.enabled` must be true or false"],
+    [{ remote: { enabled: 1 } }, "Config `remote.enabled` must be true or false"],
+    [
+      { remote: { bindAddress: "localhost" } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    [
+      { remote: { bindAddress: "my-mac.tailnet.ts.net" } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    [
+      { remote: { bindAddress: 127001 } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    // Whitespace, the dotted-decimal shorthand (127.1 = 127.0.0.1) and hex
+    // notation are all strings `net.isIP` refuses, so they should refuse the
+    // same way a hostname does — pinning the parser's strictness against a
+    // future swap of `isIP` for a looser regex.
+    [
+      { remote: { bindAddress: " 127.0.0.1 " } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    [
+      { remote: { bindAddress: "127.1" } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    [
+      { remote: { bindAddress: "0x7f000001" } },
+      "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname",
+    ],
+    [{ remote: { port: 70000 } }, "Config `remote.port` must be a whole number from 0 to 65535"],
+    [{ remote: { port: -1 } }, "Config `remote.port` must be a whole number from 0 to 65535"],
+    [{ remote: { port: 77.5 } }, "Config `remote.port` must be a whole number from 0 to 65535"],
+    [{ remote: { port: "7717" } }, "Config `remote.port` must be a whole number from 0 to 65535"],
+    [{ remote: { sidecarProxy: 1 } }, "Config `remote.sidecarProxy` must be true or false"],
+    [{ remote: { tls: "self-signed" } }, "Config `remote.tls` must be an object"],
+    [
+      { remote: { tls: { certPath: "", keyPath: "/k" } } },
+      "Config `remote.tls.certPath` must be a non-empty string",
+    ],
+    [
+      { remote: { tls: { certPath: "/c" } } },
+      "Config `remote.tls.certPath` and `remote.tls.keyPath` must be set together",
+    ],
+    [{ remote: { push: true } }, "Config `remote.push` must be an object"],
+    [
+      { remote: { push: { includeProjectNames: "no" } } },
+      "Config `remote.push.includeProjectNames` must be true or false",
+    ],
+    [
+      { remote: { idleDisableMinutes: -5 } },
+      "Config `remote.idleDisableMinutes` must be a whole number of minutes from 0 to 10080",
+    ],
+    [
+      { remote: { idleDisableMinutes: 1.5 } },
+      "Config `remote.idleDisableMinutes` must be a whole number of minutes from 0 to 10080",
+    ],
+    [
+      { remote: { idleDisableMinutes: 10081 } },
+      "Config `remote.idleDisableMinutes` must be a whole number of minutes from 0 to 10080",
+    ],
+  ])("rejects %j", (patch, message) => {
+    expect(() => parseConfig({ ...base, ...patch })).toThrow(message);
+  });
+
+  it("accepts idleDisableMinutes at its floor (0) and its ceiling (10080)", () => {
+    expect(
+      parseConfig({ ...base, remote: { idleDisableMinutes: 0 } }).remote.idleDisableMinutes,
+    ).toBe(0);
+    expect(
+      parseConfig({ ...base, remote: { idleDisableMinutes: 10080 } }).remote.idleDisableMinutes,
+    ).toBe(10080);
   });
 });

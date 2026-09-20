@@ -108,6 +108,26 @@ describe("toCurl", () => {
     expect(command).toContain("-F 'doc=@/tmp/a.pdf'");
   });
 
+  // Minor (review): a remote call's own multipart value is a staged
+  // upload-id reference, never a path — resolve() would have nothing to
+  // interpolate and nothing on this machine to point `@` at, so the
+  // command says so instead of naming a file that was never here.
+  it("names an uploaded file's copied cURL part with a placeholder, not a path", () => {
+    const command = toCurl(
+      request({
+        http: { method: "post", url: "http://h/upload", body: "multipartForm", auth: "none" },
+        body: {
+          multipartForm: [
+            { name: "doc", value: [{ uploadId: "a".repeat(32) }], type: "file", enabled: true },
+          ],
+        },
+      }),
+      {},
+    );
+
+    expect(command).toContain("-F 'doc=@file(<uploaded>)'");
+  });
+
   it("adds a raw body and a form body", () => {
     expect(
       toCurl(

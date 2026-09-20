@@ -10,6 +10,31 @@ version and the downloads. This file is the index.
 
 Nothing yet.
 
+## [0.1.4] — 2026-09-20
+
+- Phone companion app (`apps/mobile`): pair over the local network or
+  Tailscale, watch and drive sessions, open terminals, review changes, and
+  use the Editor / Database / Cluster tabs on the phone through an
+  authenticated sidecar proxy (real certificate required; issued from
+  Settings via Tailscale).
+- Remote bridge (`@jarvis/remote`): TLS listener with pinned or real
+  certificates, device pairing with per-device tokens, push
+  notifications (opt-in), audit log, idle auto-off. Off by default.
+- Dashboard redesign: the core orb with orbiting agents, glowing threads
+  to centred project cards, wider scrollable Providers panel, session
+  refresh with discovery of agent sessions running outside Jarvis (cached
+  across launches until refreshed).
+- Provider capacity meters read for free for Claude (status-line
+  snapshot), Codex (its own session logs) and Copilot (the CLI's own
+  account via keychain, gh fallback) — never a billed query.
+- Prayer notifications before and at prayer time, configurable in
+  Settings.
+- Workspace: per-project tab strip with rename, colour bands, stable
+  reconcile; the project switcher follows tabs opened from Dashboard
+  cards.
+- Desktop window opens maximized; Settings → Remote access offers Local
+  Wi-Fi or Tailscale with Tailscale certificate issuance built in.
+
 ## [0.1.3] — 2026-09-13
 
 Linux and Windows, a first-run screen that installs what Jarvis needs, and the

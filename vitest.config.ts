@@ -8,6 +8,11 @@ export default defineConfig({
       "@jarvis/platform": fileURLToPath(
         new URL("./packages/platform/src/index.ts", import.meta.url),
       ),
+      "@jarvis/remote/listen": fileURLToPath(
+        new URL("./packages/remote/src/listen.ts", import.meta.url),
+      ),
+      "@jarvis/remote": fileURLToPath(new URL("./packages/remote/src/index.ts", import.meta.url)),
+      "@jarvis/wire": fileURLToPath(new URL("./packages/wire/src/index.ts", import.meta.url)),
     },
   },
   test: {

@@ -1,5 +1,10 @@
 import type { AgentConfig, ProviderVendor } from "../registry/types.js";
-import type { CapacityReading, HealthReading, ProviderStatus } from "./types.js";
+import {
+  type CapacityReading,
+  capacitySupported,
+  type HealthReading,
+  type ProviderStatus,
+} from "./types.js";
 
 type Row = {
   id: string;
@@ -32,10 +37,9 @@ export class ProviderStatusStore {
       status: {
         id: agent.id,
         vendor: agent.vendor,
-        capacity:
-          agent.configDir === undefined
-            ? { state: "unknown", reason: "unsupported" }
-            : { state: "unknown", reason: "never-read" },
+        capacity: capacitySupported(agent)
+          ? { state: "unknown", reason: "never-read" }
+          : { state: "unknown", reason: "unsupported" },
         health: { state: "unknown", detail: "", readAt: undefined },
       },
     }));
@@ -43,6 +47,32 @@ export class ProviderStatusStore {
 
   snapshot(): ProviderStatus[] {
     return this.#rows.map((row) => row.status);
+  }
+
+  replace(agents: readonly AgentConfig[]): void {
+    const existing = new Map(this.#rows.map((row) => [row.id, row]));
+    this.#rows.splice(
+      0,
+      this.#rows.length,
+      ...agents.map(
+        (agent) =>
+          existing.get(agent.id) ?? {
+            id: agent.id,
+            vendor: agent.vendor,
+            configDir: agent.configDir,
+            lastCapacityAttemptAt: undefined,
+            status: {
+              id: agent.id,
+              vendor: agent.vendor,
+              capacity: capacitySupported(agent)
+                ? { state: "unknown" as const, reason: "never-read" as const }
+                : { state: "unknown" as const, reason: "unsupported" as const },
+              health: { state: "unknown" as const, detail: "", readAt: undefined },
+            },
+          },
+      ),
+    );
+    this.#emit();
   }
 
   /**
@@ -62,16 +92,21 @@ export class ProviderStatusStore {
   recordCapacity(id: string, reading: CapacityReading, at: number): void {
     const row = this.#rows.find((candidate) => candidate.id === id);
     if (row === undefined) return;
-    // An account with no config dir can never have a real reading — a caller
-    // offering one is confused, and accepting it would put a number on a row
-    // whose whole point is that no number exists.
-    if (row.configDir === undefined) return;
+    // An account with no capacity source can never have a real reading — a
+    // caller offering one is confused, and accepting it would put a number on
+    // a row whose whole point is that no number exists.
+    if (!capacitySupported(row)) return;
 
     row.lastCapacityAttemptAt = at;
     row.status = {
       ...row.status,
       capacity: reading.ok
-        ? { state: "known", fiveHour: reading.fiveHour, sevenDay: reading.sevenDay, readAt: at }
+        ? {
+            state: "known",
+            primary: reading.primary,
+            secondary: reading.secondary,
+            readAt: reading.readAt ?? at,
+          }
         : { state: "unknown", reason: "unavailable" },
     };
     this.#emit();

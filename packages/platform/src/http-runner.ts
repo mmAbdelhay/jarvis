@@ -21,7 +21,23 @@ export type ApiResponse = {
   unresolved: string[];
 };
 
-export type ApiFailure = { failed: true; detail: string; timeMs: number };
+export type ApiFailure = {
+  failed: true;
+  detail: string;
+  timeMs: number;
+  /** Task 4 fix round (Important 3, review): lets a caller branch on *why*
+   *  a request failed without matching this file's own English `detail`
+   *  text, which is presentation, not a contract, and changes freely.
+   *  Present only for the failure categories a caller needs to tell apart
+   *  from one another — a remote call's own localized response-too-large/
+   *  headers-too-large text, a multipart upload that could not be resolved
+   *  or was over its cap, and (M12 Task 12 minor) a request that never got
+   *  a response within `NetworkOptions.timeoutMs` — the phone can say
+   *  "timed out" instead of showing a raw abort message. Every other
+   *  failure (a bad URL, a transport error) leaves this undefined, same as
+   *  before this field existed. */
+  kind?: "responseTooLarge" | "responseHeadersTooLarge" | "multipartUpload" | "timeout";
+};
 
 export type SendDeps = {
   fetch: typeof fetch;
@@ -31,10 +47,25 @@ export type SendDeps = {
    *  is anonymous. */
   jar?: CookieJar;
   /** Reads a file a multipart body refers to. Injected so the runner stays
-   *  testable without a filesystem. */
+   *  testable without a filesystem. Desktop-only path semantics — a remote
+   *  call (Task 4) never supplies this, so a multipart file value that is
+   *  still a bare string by the time it reaches buildBody can never read
+   *  anything through it there either way. */
   readFile?: (path: string) => Promise<Uint8Array>;
-  /** Resolves a request-relative file path against its collection. */
+  /** Resolves a request-relative file path against its collection. Same
+   *  desktop-only note as readFile. */
   resolvePath?: (path: string) => string;
+  /** Resolves one of this device's own staged upload ids (Task 4,
+   *  file-upload.ts) to its bytes — bound by the caller to the
+   *  authenticated device id, never to anything a request argument names,
+   *  so this can never read another device's staged file. A multipart file
+   *  value that names an id this returns `undefined` for (unknown,
+   *  expired, another device's, or this dependency simply not supplied)
+   *  fails the whole send — see buildBody — rather than silently sending a
+   *  part short a file. */
+  resolveUpload?: (
+    id: string,
+  ) => Promise<{ bytes: Uint8Array; name: string; contentType: string } | undefined>;
   /** Per-request network options: a proxy to go through, whether to insist
    *  on a valid certificate, how long to wait. */
   dispatcherFor?: (options: NetworkOptions) => unknown;
@@ -59,7 +90,69 @@ export type NetworkOptions = {
    *  self-signed certificate; it is never the default. */
   verifyCertificate: boolean;
   timeoutMs: number;
+  /** Bounds how many bytes of the final response body are read from the
+   *  stream before the read is aborted and the send reported failed (Task
+   *  4) — remote calls only; a desktop caller leaves this unset and reads
+   *  the whole body exactly as before. */
+  maxResponseBytes?: number;
+  /** Bounds the serialized size of the final response's own headers,
+   *  checked before the body is read at all — remote calls only, same note
+   *  as maxResponseBytes. */
+  maxResponseHeaderBytes?: number;
 };
+
+/** Distinguishes a multipart body that failed to build — a missing or
+ *  unresolvable upload id, or too many files/bytes — from any other throw
+ *  inside buildBody, so sendRequest can turn only this one into an
+ *  ApiFailure rather than letting every unexpected error do the same. */
+class MultipartUploadError extends Error {}
+
+/** Task 4's own copies of remote-api.ts's MAX_REMOTE_MULTIPART_FILES/BYTES
+ *  — platform cannot import a desktop module, so the aggregate bound
+ *  buildBody enforces against the *real* resolved bytes (as opposed to
+ *  remote-api.ts's own count/shape-only pre-check) is this file's own
+ *  constant. Keep the two numbers in sync by hand if either changes. */
+const MAX_UPLOAD_REF_FILES = 16;
+const MAX_UPLOAD_REF_BYTES = 26_214_400;
+
+/** Reads a Response's body up to `maxBytes`, aborting the read (and the
+ *  underlying stream) the moment more has arrived — never buffering an
+ *  oversized body just to discard it afterward. Falls back to a plain
+ *  `.text()` read, checked after the fact, only for a Response whose body
+ *  is not a stream at all (not a shape real fetch ever returns, but cheap
+ *  to guard against a lightweight test double doing something unusual). */
+async function readBoundedText(response: Response, maxBytes: number): Promise<string | undefined> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) {
+    const text = await response.text();
+    return Buffer.byteLength(text, "utf8") > maxBytes ? undefined : text;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+}
+
+/** name + value + ": " + "\r\n", the same rough accounting a real HTTP
+ *  header line costs on the wire — good enough for a cap meant to bound
+ *  memory, not to reproduce RFC 7230 to the byte. */
+function headerByteLength(headers: Headers): number {
+  let total = 0;
+  for (const [name, value] of headers.entries()) {
+    total += Buffer.byteLength(name, "utf8") + Buffer.byteLength(value, "utf8") + 4;
+  }
+  return total;
+}
 
 type Pair = { name?: string; value?: string; enabled?: boolean };
 
@@ -199,9 +292,23 @@ export async function sendRequest(
   // was changed from POST — leaving the body mode behind — would fail for a
   // reason that has nothing to do with what the user changed.
   const carriesBody = method !== "GET" && method !== "HEAD";
-  const body = carriesBody
-    ? await buildBody(request, http.body, headers, resolve, deps)
-    : undefined;
+  let body: string | FormData | undefined;
+  try {
+    body = carriesBody ? await buildBody(request, http.body, headers, resolve, deps) : undefined;
+  } catch (error) {
+    // A missing/unresolvable upload id, or too many files/bytes — buildBody
+    // is the only thing that throws this, and only for that reason; any
+    // other throw is a bug and propagates as it always did.
+    if (error instanceof MultipartUploadError) {
+      return {
+        failed: true,
+        detail: error.message,
+        timeMs: deps.now() - started,
+        kind: "multipartUpload",
+      };
+    }
+    throw error;
+  }
 
   const settings = (request["settings"] ?? {}) as { timeout?: number };
   const network: NetworkOptions = {
@@ -211,6 +318,12 @@ export async function sendRequest(
         ? settings.timeout
         : (options?.timeoutMs ?? 0),
     ...(options?.proxyUrl === undefined ? {} : { proxyUrl: options.proxyUrl }),
+    ...(options?.maxResponseBytes === undefined
+      ? {}
+      : { maxResponseBytes: options.maxResponseBytes }),
+    ...(options?.maxResponseHeaderBytes === undefined
+      ? {}
+      : { maxResponseHeaderBytes: options.maxResponseHeaderBytes }),
   };
   const dispatcher = deps.dispatcherFor?.(network);
   // A request with no timeout can hang forever, and a UI waiting on it looks
@@ -271,7 +384,34 @@ export async function sendRequest(
         collect(response, current);
       }
     }
-    const text = await response.text();
+    // Task 4: checked before a single body byte is read — a response
+    // carrying more header data than a remote call is allowed to receive is
+    // refused the same way an oversized body is, never truncated or passed
+    // through partially.
+    if (
+      network.maxResponseHeaderBytes !== undefined &&
+      headerByteLength(response.headers) > network.maxResponseHeaderBytes
+    ) {
+      return {
+        failed: true,
+        detail: "Response headers too large.",
+        timeMs: deps.now() - started,
+        kind: "responseHeadersTooLarge",
+      };
+    }
+
+    const text =
+      network.maxResponseBytes === undefined
+        ? await response.text()
+        : await readBoundedText(response, network.maxResponseBytes);
+    if (text === undefined) {
+      return {
+        failed: true,
+        detail: "Response too large.",
+        timeMs: deps.now() - started,
+        kind: "responseTooLarge",
+      };
+    }
     return {
       status: response.status,
       statusText: response.statusText,
@@ -284,8 +424,27 @@ export async function sendRequest(
       unresolved,
     };
   } catch (error) {
-    return { failed: true, detail: failureDetail(error), timeMs: deps.now() - started };
+    return {
+      failed: true,
+      detail: failureDetail(error),
+      timeMs: deps.now() - started,
+      ...(isTimeoutError(error) ? { kind: "timeout" as const } : {}),
+    };
   }
+}
+
+/** True for the abort `AbortSignal.timeout()` raises once `network.timeoutMs`
+ *  elapses — checked by name rather than `instanceof DOMException` (or
+ *  `.name === "AbortError"`, a plain caller-triggered abort's own name,
+ *  which this deliberately does not match: nothing here ever calls
+ *  `.abort()` itself) so a fetch implementation that wraps or subclasses
+ *  the reason is still recognised. */
+function isTimeoutError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "TimeoutError"
+  );
 }
 
 /**
@@ -428,24 +587,58 @@ async function buildBody(
       if (name.toLowerCase() === "content-type") delete headers[name];
     }
     const form = new (deps.multipart?.FormData ?? FormData)();
+    // Task 4: aggregate across every file field in this one multipart body
+    // — the cap is on the whole request, not per field.
+    let uploadRefFiles = 0;
+    let uploadRefBytes = 0;
     for (const field of (body["multipartForm"] as MultipartField[] | undefined) ?? []) {
       if (field.enabled === false || field.name === undefined || field.name.trim() === "") continue;
       const name = resolve(field.name);
 
       if (field.type === "file") {
         const paths = Array.isArray(field.value) ? field.value : [];
+        const FileClass = deps.multipart?.File ?? File;
         for (const path of paths) {
-          const full = deps.resolvePath?.(resolve(path)) ?? resolve(path);
-          const bytes = await deps.readFile?.(full);
-          if (bytes === undefined) continue;
-          const fileName = full.slice(full.lastIndexOf("/") + 1);
-          const FileClass = deps.multipart?.File ?? File;
+          // Desktop-only path semantics, unchanged: a plain string is a
+          // request-relative path, read straight off disk.
+          if (typeof path === "string") {
+            const full = deps.resolvePath?.(resolve(path)) ?? resolve(path);
+            const bytes = await deps.readFile?.(full);
+            if (bytes === undefined) continue;
+            const fileName = full.slice(full.lastIndexOf("/") + 1);
+            form.append(
+              name,
+              new FileClass([bytes as BlobPart], fileName, {
+                ...(field.contentType === undefined || field.contentType === ""
+                  ? {}
+                  : { type: field.contentType }),
+              }),
+            );
+            continue;
+          }
+
+          // Otherwise the only other shape remote-api.ts's
+          // prepareRemoteApiRequest ever produces: {uploadId}. Resolved
+          // through a closure the caller bound to the authenticated device
+          // id (SendDeps.resolveUpload) — an id that cannot be resolved
+          // fails the whole send rather than silently sending a part short
+          // a file (Task 4 Behaviour rule 2).
+          const uploadId = path.uploadId;
+          const resolved = await deps.resolveUpload?.(uploadId);
+          if (resolved === undefined) {
+            throw new MultipartUploadError("Uploaded file not found, or it expired.");
+          }
+          uploadRefFiles += 1;
+          uploadRefBytes += resolved.bytes.length;
+          if (uploadRefFiles > MAX_UPLOAD_REF_FILES || uploadRefBytes > MAX_UPLOAD_REF_BYTES) {
+            throw new MultipartUploadError(
+              "Too many files, or too much file data, in this request.",
+            );
+          }
           form.append(
             name,
-            new FileClass([bytes as BlobPart], fileName, {
-              ...(field.contentType === undefined || field.contentType === ""
-                ? {}
-                : { type: field.contentType }),
+            new FileClass([resolved.bytes as BlobPart], resolved.name, {
+              ...(resolved.contentType === "" ? {} : { type: resolved.contentType }),
             }),
           );
         }
@@ -462,8 +655,12 @@ async function buildBody(
 
 type MultipartField = {
   name?: string;
-  /** A text field carries a string; a file field carries a list of paths. */
-  value?: string | string[];
+  /** A text field carries a string; a file field carries a list of paths —
+   *  desktop-only path semantics, unchanged — or, from a remote call
+   *  (Task 4), a list of this device's own staged upload-id references.
+   *  Never both in the same list: remote-api.ts's prepareRemoteApiRequest
+   *  refuses a mixed array before it ever reaches here. */
+  value?: string | (string | { uploadId: string })[];
   enabled?: boolean;
   type?: string;
   contentType?: string;

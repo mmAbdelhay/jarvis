@@ -81,3 +81,65 @@ The rule is why `parseHeadlamp` returns `undefined` for an absent
 knows nothing about the host, and `main.ts` fills the default in at the edge.
 
 Guarded by `platform-convention.test.ts`.
+
+## No `webContents.send` outside `broadcast.ts`
+
+Renderer pushes go through `desktop/src/broadcast.ts`. It is the single
+boundary that calls `webContents.send`; producers hand it typed payloads
+instead. The source guard keeps a new direct send from bypassing the
+broadcaster's window-destroyed check and centralised push wiring.
+
+## A new invoke channel is written down in every table
+
+A new invoke channel is written down in the `RendererApi` method, the
+`INVOKE_CHANNELS` method-to-wire map, `CHANNEL_POLICY`, `REMOTE_EFFECT`, and
+the dispatch table. `REMOTE_EFFECT` holds only remote-access channels: a
+desktop-only channel must not be added. It is the fourth place that classifies
+a remote channel, recording whether the call is a read, a mutation or an
+input stream for audit purposes, in parallel with the access decision in
+`CHANNEL_POLICY`; its `satisfies Record<RemoteChannel, …>` check makes
+omissions compile-time failures. The dispatch table is where the handler is
+actually selected. The relevant guard tests are `no-direct-send.test.ts`,
+`i18n.test.ts` and `messages.test.ts`.
+
+## Package direction is an allowlist
+
+`@jarvis/remote` may import `node:*`, `@jarvis/wire`, `@jarvis/core`, relative
+imports inside `src/`, and the per-file third-party table enforced by
+`packages/remote/src/import-direction.test.ts`: `ws` in `server.ts` and
+`probe-client.ts`, and `@peculiar/x509` plus `reflect-metadata` in
+`certificate.ts`. In particular it does not import `platform`, `desktop` or
+Electron. The only workspace package `remote` imports is `@jarvis/wire`;
+`@jarvis/core` is allowed by the per-file test but not currently imported.
+`wire` has no `node:*` imports,
+and the phone imports `@jarvis/wire` plus type-only `@jarvis/core`.
+
+## Parse wire values field by field
+
+Every wire value is parsed field by field; never spread input. A parser picks
+the exact fields and validates their types, bounds and allowed strings before
+building the internal value. Unknown or attacker-controlled properties do not
+become internal options merely because they were present on a decoded object.
+
+## Secrets and content never enter logs
+
+Tokens, secrets, output and bodies are never logged or audited. Remote audit
+lines carry only bounded identifiers and outcome words: a mutating channel,
+an input channel's first key per connection, a refused probe, or a queued push
+kind. They do not carry a token, pairing secret, argument, path, command,
+terminal bytes, response, transcript or message body.
+
+## Phone and laptop copy have separate homes
+
+Phone strings live in `apps/mobile/src/lib/i18n.ts`; laptop strings live in
+`packages/desktop/src/messages.ts`. Both languages must be present and `ar`
+must differ from `en` for every new string. A phone screen does not borrow a
+laptop string or hard-code English into a component.
+
+## No left/right styles on the phone
+
+Phone layout uses RTL-aware `start`/`end` and direction-aware content. Do not
+add left/right styles to the phone screens; `rtl-lint.test.ts` checks the app
+and component sources for those physical-direction properties. Terminal,
+diff, cURL and response content may deliberately opt into LTR as content, not
+as a shortcut for laying out the surrounding phone UI.

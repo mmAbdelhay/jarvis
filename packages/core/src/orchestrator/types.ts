@@ -14,6 +14,11 @@ export type Turn = {
   view?: "changes";
   path?: string;
   at: number;
+  // The phone-minted turnId this turn answers, when it was started by a
+  // remote voice upload. Correlates a `turn:new` push back to the upload
+  // that asked for it (ruling 10); absent for every desktop-originated
+  // turn, including a desktop reply to a remote-origin input:send.
+  replyTo?: string;
 };
 
 // `inputSchema` maps each input field name to a one-line description the

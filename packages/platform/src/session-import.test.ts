@@ -851,6 +851,91 @@ describe("createSessionImporter", () => {
 
     expect(setup.closed).toBe(1);
   });
+
+  describe("latestTranscriptFor", () => {
+    // process-scan.ts's own use: a running process was found by pid, and
+    // this is the only way to attach a summary to it — by the exact
+    // directory it is running in, never a project prefix.
+    it("finds the transcript whose cwd matches exactly", async () => {
+      const { deps } = world({
+        [`${DIR}/-Users-u-work-notes/ext-1.jsonl`]: {
+          head: transcript({ id: "ext-1", cwd: "/Users/u/work/notes", prompt: "rename the file" }),
+        },
+      });
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+      );
+
+      expect(found?.session.summary).toBe("rename the file");
+      expect(found?.path).toBe(`${DIR}/-Users-u-work-notes/ext-1.jsonl`);
+    });
+
+    it("picks the most recently active transcript when several match", async () => {
+      const { deps } = world({
+        [`${DIR}/-Users-u-work-notes/old.jsonl`]: {
+          head: transcript({ id: "old", cwd: "/Users/u/work/notes", prompt: "first" }),
+          mtime: NOW - 2 * DAY,
+        },
+        [`${DIR}/-Users-u-work-notes/new.jsonl`]: {
+          head: transcript({ id: "new", cwd: "/Users/u/work/notes", prompt: "second" }),
+          mtime: NOW - DAY,
+        },
+      });
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+      );
+
+      expect(found?.session.summary).toBe("second");
+    });
+
+    it("never matches a cwd that is merely inside it — equality, not resolveProject's prefix rule", async () => {
+      const { deps } = world({
+        [`${DIR}/-Users-u-work-notes-sub/ext-1.jsonl`]: {
+          head: transcript({ id: "ext-1", cwd: "/Users/u/work/notes/sub" }),
+        },
+      });
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+      );
+
+      expect(found).toBeNull();
+    });
+
+    it("returns null for an agent with no configured transcript directory", async () => {
+      const { deps } = world({});
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "no-such-agent",
+        "/Users/u/work/notes",
+      );
+
+      expect(found).toBeNull();
+    });
+
+    it("returns null rather than throwing when the directory cannot be listed", async () => {
+      const { deps } = world(
+        {},
+        {
+          listFiles: async () => {
+            throw new Error("boom");
+          },
+        },
+      );
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+      );
+
+      expect(found).toBeNull();
+    });
+  });
 });
 
 describe("createFsImportDeps", () => {

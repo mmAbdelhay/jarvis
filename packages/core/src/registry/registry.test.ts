@@ -15,6 +15,16 @@ const config: RegistryConfig = {
 };
 
 describe("AgentRegistry.resolve", () => {
+  it("applies saved agents and routing to the same running registry", () => {
+    const registry = new AgentRegistry(config);
+    registry.replace({
+      agents: { new: { command: "new", default: true } },
+      routing: [{ match: { project: "acme" }, agent: "new" }],
+    });
+    expect(registry.list().map((agent) => agent.id)).toEqual(["new"]);
+    expect(registry.resolve({ project: "acme" }).command).toBe("new");
+    expect(() => registry.resolve({ explicitAgent: "claude-main" })).toThrow(UnknownAgentError);
+  });
   it("prefers an explicit agent over every rule", () => {
     const registry = new AgentRegistry(config);
     const agent = registry.resolve({

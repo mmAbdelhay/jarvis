@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { CapacityTarget } from "./types.js";
 import type { AgentConfig, ProviderVendor } from "../registry/types.js";
 import { ProviderStatusStore } from "./store.js";
 import type { ProviderMonitorDeps } from "./monitor.js";
@@ -8,18 +9,20 @@ const AGENTS: AgentConfig[] = [
   { id: "claude-main", command: "claude-main", configDir: "/c/mm", vendor: "anthropic" },
   { id: "claude-acme", command: "claude-acme", configDir: "/c/sd", vendor: "anthropic" },
   { id: "copilot", command: "copilot", vendor: "github" },
+  // No vendor: no capacity source and no health page.
+  { id: "local", command: "ollama" },
 ];
 
 const OK = {
   ok: true as const,
-  fiveHour: { usedPercent: 10, resetsAt: "2026-08-31T14:30:00Z" },
-  sevenDay: undefined,
+  primary: { usedPercent: 10, resetsAt: "2026-08-31T14:30:00Z" },
+  secondary: undefined,
 };
 
 function build(overrides: Partial<ProviderMonitorDeps> = {}) {
   const store = new ProviderStatusStore(AGENTS);
   let clock = 1_000_000;
-  const readCapacity = vi.fn(async (_configDir: string) => OK);
+  const readCapacity = vi.fn(async (_target: CapacityTarget) => OK);
   const readHealth = vi.fn(async (_vendor: ProviderVendor) => ({
     state: "ok" as const,
     detail: "All Systems Operational",
@@ -36,12 +39,24 @@ function build(overrides: Partial<ProviderMonitorDeps> = {}) {
 }
 
 describe("ProviderMonitor.refreshCapacity", () => {
-  it("reads exactly one query per account that has a config dir, and none for the rest", async () => {
+  it("refreshes newly replaced agents instead of the startup registry", async () => {
+    const { monitor, store, readCapacity } = build();
+    monitor.replaceAgents([{ id: "new", command: "new", configDir: "/new", vendor: "openai" }]);
+    await monitor.refreshCapacity({ force: true });
+    expect(readCapacity).toHaveBeenCalledTimes(1);
+    expect(readCapacity).toHaveBeenCalledWith({ id: "new", vendor: "openai", configDir: "/new" });
+    expect(store.snapshot().map((status) => status.id)).toEqual(["new"]);
+  });
+  it("reads exactly one query per account that has a capacity source, and none for the rest", async () => {
     const { monitor, readCapacity } = build();
     await monitor.refreshCapacity();
 
-    expect(readCapacity).toHaveBeenCalledTimes(2);
-    expect(readCapacity.mock.calls.map((call) => call[0])).toEqual(["/c/mm", "/c/sd"]);
+    expect(readCapacity).toHaveBeenCalledTimes(3);
+    expect(readCapacity.mock.calls.map((call) => call[0].id)).toEqual([
+      "claude-main",
+      "claude-acme",
+      "copilot",
+    ]);
   });
 
   it("does not spend a second query inside the minimum interval", async () => {
@@ -51,7 +66,7 @@ describe("ProviderMonitor.refreshCapacity", () => {
     await monitor.refreshCapacity();
 
     // Every read is billed and consumes the very capacity it reports.
-    expect(readCapacity).toHaveBeenCalledTimes(2);
+    expect(readCapacity).toHaveBeenCalledTimes(3);
   });
 
   it("reads again once the minimum interval has passed", async () => {
@@ -59,14 +74,14 @@ describe("ProviderMonitor.refreshCapacity", () => {
     await monitor.refreshCapacity();
     advance(MIN_CAPACITY_REFRESH_MS);
     await monitor.refreshCapacity();
-    expect(readCapacity).toHaveBeenCalledTimes(4);
+    expect(readCapacity).toHaveBeenCalledTimes(6);
   });
 
   it("honours an explicit force, because the user asked", async () => {
     const { monitor, readCapacity } = build();
     await monitor.refreshCapacity();
     await monitor.refreshCapacity({ force: true });
-    expect(readCapacity).toHaveBeenCalledTimes(4);
+    expect(readCapacity).toHaveBeenCalledTimes(6);
   });
 
   it("never runs two refreshes concurrently", async () => {
@@ -83,20 +98,20 @@ describe("ProviderMonitor.refreshCapacity", () => {
     release();
     await Promise.all([first, second]);
 
-    expect(readCapacity).toHaveBeenCalledTimes(2);
+    expect(readCapacity).toHaveBeenCalledTimes(3);
   });
 
   it("lets an explicit force outrun an unforced pass and refresh what it left stale", async () => {
     let gate: Promise<void> = Promise.resolve();
-    const readCapacity = vi.fn(async (_configDir: string) => {
+    const readCapacity = vi.fn(async (_target: CapacityTarget) => {
       await gate;
       return OK;
     });
     const { monitor, advance } = build({ readCapacity });
 
-    // Baseline: both accounts read and become fresh.
+    // Baseline: all three readable accounts read and become fresh.
     await monitor.refreshCapacity();
-    expect(readCapacity).toHaveBeenCalledTimes(2);
+    expect(readCapacity).toHaveBeenCalledTimes(3);
 
     // Push past the throttle window, then re-freshen just "sd" via a
     // piggyback (a real reading, so it resets that account's clock without
@@ -109,27 +124,27 @@ describe("ProviderMonitor.refreshCapacity", () => {
     let release: () => void = () => {};
     gate = new Promise((resolve) => (release = resolve));
 
-    const unforced = monitor.refreshCapacity(); // due: mm only
+    const unforced = monitor.refreshCapacity(); // due: mm and copilot
     const forced = monitor.refreshCapacity({ force: true }); // must await, then force both
     release();
     await Promise.all([unforced, forced]);
 
-    // The unforced pass bills mm once; the forced pass, after awaiting it,
-    // bills its own pass over both accounts — "sd", which the unforced pass
-    // judged not due, is not silently left stale for the caller who
-    // explicitly asked for fresh data.
-    expect(readCapacity).toHaveBeenCalledTimes(2 + 1 + 2);
+    // The unforced pass reads mm and copilot; the forced pass, after
+    // awaiting it, runs its own pass over all three — "sd", which the
+    // unforced pass judged not due, is not silently left stale for the
+    // caller who explicitly asked for fresh data.
+    expect(readCapacity).toHaveBeenCalledTimes(3 + 2 + 3);
     expect(
       readCapacity.mock.calls
-        .slice(3)
-        .map((call) => call[0])
+        .slice(5)
+        .map((call) => call[0].id)
         .sort(),
-    ).toEqual(["/c/mm", "/c/sd"]);
+    ).toEqual(["claude-acme", "claude-main", "copilot"]);
   });
 
   it("records one account's failure without losing the other's reading", async () => {
-    const readCapacity = vi.fn(async (configDir: string) =>
-      configDir === "/c/mm" ? { ok: false as const, reason: "unavailable" as const } : OK,
+    const readCapacity = vi.fn(async (target: CapacityTarget) =>
+      target.configDir === "/c/mm" ? { ok: false as const, reason: "unavailable" as const } : OK,
     );
     const { monitor, store } = build({ readCapacity });
     await monitor.refreshCapacity();
@@ -199,12 +214,12 @@ describe("ProviderMonitor.recordPiggyback", () => {
     // The piggyback is a real reading, so a refresh right after it must not
     // pay for the same number twice.
     await monitor.refreshCapacity();
-    expect(readCapacity.mock.calls.map((call) => call[0])).toEqual(["/c/sd"]);
+    expect(readCapacity.mock.calls.map((call) => call[0].id)).toEqual(["claude-acme", "copilot"]);
   });
 
   it("ignores a piggyback for an account it does not know", () => {
     const { monitor, store } = build();
     expect(() => monitor.recordPiggyback("ghost", OK)).not.toThrow();
-    expect(store.snapshot()).toHaveLength(3);
+    expect(store.snapshot()).toHaveLength(4);
   });
 });

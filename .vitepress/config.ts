@@ -30,6 +30,7 @@ export default defineConfig({
     // scripts/check-docs-pages.mjs checks every built page is git-tracked
     // rather than trusting this list to stay complete.
     "docs/superpowers/**",
+    "apps/**",
     "packages/**",
     "spikes/**",
     "design/**",
@@ -72,6 +73,7 @@ export default defineConfig({
           { text: "The routes", link: "/docs/guide/routes" },
           { text: "Workspace tabs", link: "/docs/guide/workspace-tabs" },
           { text: "The API client", link: "/docs/guide/api-client" },
+          { text: "Remote access", link: "/docs/guide/remote-access" },
           { text: "Troubleshooting", link: "/docs/guide/troubleshooting" },
         ],
       },

@@ -1,5 +1,21 @@
 import type { ProviderVendor } from "../registry/types.js";
 
+/**
+ * Which accounts have a capacity source at all. All of them are free:
+ *  - anthropic: the status-line snapshot in the account's config dir, so a
+ *    Claude account needs a `configDir` to be read;
+ *  - openai: Codex writes its own rate limits into every session log;
+ *  - github: Copilot's quota endpoint, through the already-signed-in `gh`.
+ * Anything else (no vendor) has nothing to read.
+ */
+export function capacitySupported(agent: { vendor?: ProviderVendor; configDir?: string }): boolean {
+  if (agent.vendor === "anthropic") return agent.configDir !== undefined;
+  return agent.vendor === "github" || agent.vendor === "openai";
+}
+
+/** What a capacity reader is handed: enough to pick the source. */
+export type CapacityTarget = { id: string; vendor: ProviderVendor; configDir: string | undefined };
+
 /** One rate-limit window as the provider reports it. */
 export type RateWindow = {
   /** 0-100, as the provider reports utilization. Remaining is `100 - usedPercent`. */
@@ -16,7 +32,17 @@ export type RateWindow = {
  * point where all of that is dropped and never travels further.
  */
 export type CapacityReading =
-  | { ok: true; fiveHour: RateWindow; sevenDay: RateWindow | undefined }
+  | {
+      ok: true;
+      /** The window the meter shows: Claude's and Codex's five-hour window, Copilot's monthly premium-request allowance. */
+      primary: RateWindow;
+      /** The longer window when the provider has one (Claude's and Codex's seven-day). */
+      secondary: RateWindow | undefined;
+      /** Epoch ms the figures were actually taken, when the source knows (a
+       *  status-line snapshot carries its own write time). Absent means "just
+       *  now" — the store then stamps its own clock. */
+      readAt?: number;
+    }
   | { ok: false; reason: "unavailable" };
 
 /**
@@ -31,7 +57,7 @@ export type CapacityReading =
  *                   yet. Every capacity read costs a real, billed round trip.
  */
 export type ProviderCapacity =
-  | { state: "known"; fiveHour: RateWindow; sevenDay: RateWindow | undefined; readAt: number }
+  | { state: "known"; primary: RateWindow; secondary: RateWindow | undefined; readAt: number }
   | { state: "unknown"; reason: "unsupported" | "unavailable" | "never-read" };
 
 export type HealthState = "ok" | "degraded" | "outage" | "unknown";

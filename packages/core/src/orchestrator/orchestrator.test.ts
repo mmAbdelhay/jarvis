@@ -92,6 +92,53 @@ describe("Orchestrator", () => {
     expect(speak).toHaveBeenCalledWith("تمام", "ar");
   });
 
+  // Ruling 5: muting is per turn, not a global flag — a phone turn stays
+  // quiet on the laptop, but its transcript entries are unaffected.
+  // [bite-proof: ignore the option; speak is called regardless]
+  it("does not speak when speakAloud is false, but still records both turns", async () => {
+    const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
+    await orchestrator.handle("hi", "en", { speakAloud: false });
+    expect(speak).not.toHaveBeenCalled();
+    expect(orchestrator.transcript()).toMatchObject([
+      { role: "user", text: "hi" },
+      { role: "assistant", text: "ok" },
+    ]);
+  });
+
+  it("still speaks when no options are given", async () => {
+    const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
+    await orchestrator.handle("hi", "en");
+    expect(speak).toHaveBeenCalledWith("ok", "en");
+  });
+
+  it("carries replyTo on both the user and the assistant turn when given", async () => {
+    const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
+    await orchestrator.handle("hi", "en", { replyTo: "ab12" });
+    const [user, assistant] = orchestrator.transcript();
+    expect(user?.replyTo).toBe("ab12");
+    expect(assistant?.replyTo).toBe("ab12");
+  });
+
+  it("leaves replyTo absent (not undefined-valued) when none is given", async () => {
+    const orchestrator = build(brainReturning({ text: "ok", toolCalls: [] }));
+    await orchestrator.handle("hi", "en");
+    const [user, assistant] = orchestrator.transcript();
+    expect(Object.hasOwn(user ?? {}, "replyTo")).toBe(false);
+    expect(Object.hasOwn(assistant ?? {}, "replyTo")).toBe(false);
+  });
+
+  it("mutes and carries replyTo on the brain-failure turn too", async () => {
+    const orchestrator = build({
+      ask: async () => {
+        throw new Error("rate limited");
+      },
+    });
+    const turn = await orchestrator.handle("hi", "en", { speakAloud: false, replyTo: "cd34" });
+    expect(speak).not.toHaveBeenCalled();
+    expect(turn.replyTo).toBe("cd34");
+    expect(turn.text).toContain("rate limited");
+  });
+
   it("starts a session when the brain calls session.start", async () => {
     const orchestrator = build(
       brainReturning({
@@ -1191,8 +1238,8 @@ describe("git tools", () => {
         vendor: "anthropic",
         capacity: {
           state: "known",
-          fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00Z" },
-          sevenDay: undefined,
+          primary: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00Z" },
+          secondary: undefined,
           readAt: Date.parse("2026-08-31T12:12:00Z"),
         },
         health: { state: "ok", detail: "ok", readAt: 1 },

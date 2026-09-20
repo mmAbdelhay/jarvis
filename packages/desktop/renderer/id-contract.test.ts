@@ -30,6 +30,11 @@ const settingsSource = readFileSync(
   fileURLToPath(new URL("./settings.ts", import.meta.url)),
   "utf8",
 );
+// remote-status.ts's `$()` throws, same contract as app.ts/changes.ts.
+const remoteStatusSource = readFileSync(
+  fileURLToPath(new URL("./remote-status.ts", import.meta.url)),
+  "utf8",
+);
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -49,6 +54,7 @@ describe("$() id contract", () => {
     ...idsPassedTo$(sessionViewSource),
     ...idsPassedTo$(workspaceSource),
     ...idsPassedTo$(settingsSource),
+    ...idsPassedTo$(remoteStatusSource),
   ];
 
   it("finds at least one $() call across the renderer modules (sanity check the extraction itself works)", () => {

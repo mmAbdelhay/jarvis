@@ -12,7 +12,7 @@ beside something else. Leaving full screen restores it to 1440×900.
 What every agent is doing, and what the machine is doing.
 
 <p align="center">
-  <img src="../media/dashboard.png" width="100%" alt="The Dashboard: machine load and provider capacity on the left, the voice indicator and the project list in the middle, the conversation on the right.">
+  <img src="../media/dashboard.png" width="100%" alt="The Dashboard: machine load on the left, the JARVIS core with orbiting agents and threads down to the project cards in the middle, provider capacity on the right, sessions and the conversation below.">
 </p>
 
 <p align="center">
@@ -22,10 +22,16 @@ What every agent is doing, and what the machine is doing.
 
 - **Sessions** — each running agent, its project, its model and its state.
 - **Providers** — each configured account, whether it is reachable, and how
-  much capacity is left. Three different unknowns are reported as three
-  different sentences, never collapsed into one "unknown": a provider that
-  offers no capacity reading, one whose reading failed, and one not yet
-  checked are distinct facts.
+  much capacity is left. Every figure is read for free — never from a billed
+  query: a Claude account from the snapshot its status-line hook writes
+  (`scripts/claude-usage-snapshot.sh`, [Setup §5](../../SETUP.md#5-optional-tools)),
+  Codex from the rate limits it records in its own session logs, Copilot
+  from GitHub's quota endpoint through the signed-in `gh` (premium
+  requests, resetting monthly, so its reset shows as a day). Each row says
+  "as of HH:MM", when its figure was actually taken. Three different unknowns are reported as three different sentences,
+  never collapsed into one "unknown": a provider that offers no capacity
+  reading, one with no snapshot yet, and one not yet checked are distinct
+  facts.
 - **System** — CPU, memory and disk. Memory and disk are `total - available`,
   which is what `df` and Activity Monitor report; a platform's own `used`
   counts cached pages and reads near 100% on a healthy machine. Each reading is

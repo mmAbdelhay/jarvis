@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta
   http-equiv="Content-Security-Policy"
-  content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:"
+  content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
 />
 <title>Jarvis</title>
 <link rel="stylesheet" href="vendor/xterm.css" />
-<link
-  rel="stylesheet"
-  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap"
-/>
+<!-- Manrope (body) and JetBrains Mono (numbers, paths, addresses, terminal),
+     vendored from @fontsource — see vendor/fonts/fonts.css. No Google Fonts
+     link: the CSP above has no network font-src, so a remote stylesheet
+     would fail to load rather than just being slow. -->
+<link rel="stylesheet" href="vendor/fonts.css" />
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -27,10 +28,16 @@
       <button id="nav-workspace" class="nav-btn" type="button">Workspace</button>
       <button id="nav-settings" class="nav-btn" type="button">Settings</button>
     </div>
+    <div class="status-group">
+    <!-- board 0's danger dot: shown only when renderMetrics() finds disk or
+         CPU at/above 95%, named in its own tooltip so "why is there a red
+         dot" has an answer without opening the Dashboard. -->
+    <span id="topbar-danger-dot" class="topbar-danger-dot" hidden></span>
     <!-- Voice's own state lives here now, beside the status dot, rather than
          under a wordmark in the middle of the screen. It is ambient
          information about the app, which is what this strip is for. -->
     <div class="pill"><span class="pill-dot"></span><span id="voice-state">Online</span></div>
+    <span class="topbar-divider" aria-hidden="true"></span>
     <!-- What is running, from wherever you are. The dashboard lists the
          sessions, but this strip is the only thing on screen in every view,
          so a session started in the Workspace was invisible until you went
@@ -40,19 +47,27 @@
       <span id="running-orbs" class="running-orbs" aria-hidden="true"></span>
       <span id="running-count" class="mono">0 running</span>
     </button>
-    <div class="spacer"></div>
+    <span class="topbar-divider" aria-hidden="true"></span>
+    <!-- The bridge's persistent listening indicator (Global Constraints:
+         "Dashboard indicator" — the topbar rather than only the Dashboard,
+         since it is visible from every route, ruling 37). Hidden until
+         remote-status.ts learns the bridge is actually listening. A wifi
+         glyph carries the tri-state colour board 0 asks for (green
+         listening / amber idle-armed / grey off) instead of a plain dot. -->
+    <button id="remote-pill" class="pill pill--remote" type="button" hidden>
+      <svg class="remote-glyph" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+      <span id="remote-pill-text" class="mono" dir="ltr"></span>
+    </button>
+    </div>
+    <div id="header-prayer" class="prayer-chip" hidden>
+      <svg class="prayer-ring" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"></circle>
+        <circle class="prayer-ring-fill" cx="12" cy="12" r="9"></circle>
+      </svg>
+      <span class="prayer-label"></span>
+    </div>
     <div class="clock mono">
-      <span id="clock-time">--:--:--</span><span class="sep">|</span><span id="clock-date" class="date">--</span>
-    </div>
-    <div class="spacer"></div>
-    <div class="sysinfo mono">
-      <span class="unit">CPU</span><span id="header-cpu">--%</span><span class="sep">|</span>
-      <span class="unit">RAM</span><span id="header-mem">--%</span><span class="sep">|</span>
-      <span class="unit">DISK</span><span id="header-disk">--%</span>
-    </div>
-    <div class="spacer"></div>
-    <div class="netinfo mono">
-      <span id="net-down" class="down">↓ 0.0</span><span class="sep">/</span><span id="net-up" class="up">↑ 0.0</span><span class="unit">Mbps</span>
+      <span id="clock-time" dir="ltr">--:--</span>
     </div>
     <button id="history-button" class="icon-btn" type="button" aria-label="Session history">
       <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5M12 7v5l4 2"></path></svg>
@@ -60,46 +75,116 @@
   </div>
 
   <div class="main" id="view-dashboard">
+    <!-- The threads: one glowing curve from the core's trunk to each
+         first-row project card (link-layout.ts computes the geometry,
+         app.ts's layoutLinks writes it). Absolutely positioned under the
+         cards, above the backdrop; pointer-events off so it can never
+         swallow a click. -->
+    <svg id="dash-links" class="dash-links" aria-hidden="true"></svg>
 
-    <div class="col-left">
+    <!-- The drifting dot-grid behind the whole board (design/DashboardBrain.dc.html's
+         .field) — decorative and inert, so it sits behind everything else as an
+         absolutely-positioned layer rather than a grid/flex participant. -->
+    <div class="field" aria-hidden="true"></div>
 
-      <div class="panel">
+    <!-- Row 1: SYSTEM · core stage · PROVIDERS -->
+    <div class="dash-row1">
+
+      <div class="panel system-panel">
         <div class="ph">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#45c8dc" stroke-width="1.7" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"></path></svg>
           <div class="pt">System</div>
+          <div class="spacer"></div>
+          <div id="uptime-value" class="system-uptime mono">—</div>
         </div>
         <div class="system-body">
+          <!-- CPU/RAM/DISK/Network moved here entirely: the topbar's own
+               ambient strip carries no numbers (board 0), only a danger dot
+               when one of them is genuinely critical (renderMetrics in
+               app.ts). This card is the one place the full reading lives. -->
           <div class="metric">
             <div class="metric-head">
               <div class="lbl">CPU</div>
-              <div id="cpu-value" class="mono">0%</div>
+              <div id="cpu-value" class="metric-value mono">0%</div>
+              <div id="temp-value" class="metric-detail mono">—</div>
             </div>
             <div class="bar"><div id="cpu-bar" class="fill" style="width: 0%;"></div></div>
           </div>
           <div class="metric">
             <div class="metric-head">
-              <div class="lbl">MEMORY</div>
-              <div id="mem-value" class="mono">— / —</div>
+              <div class="lbl">Memory</div>
+              <div id="mem-value" class="metric-value mono">0%</div>
+              <div id="mem-detail" class="metric-detail mono">— / —</div>
             </div>
             <div class="bar"><div id="mem-bar" class="fill" style="width: 0%;"></div></div>
           </div>
-          <div class="tiles">
-            <div class="tile">
-              <div class="lbl">DISK</div>
-              <div class="val"><span id="disk-value">—</span><small id="disk-total"></small></div>
+          <div class="metric">
+            <div class="metric-head">
+              <div class="lbl">Disk</div>
+              <div id="disk-value" class="metric-value mono">0%</div>
+              <div id="disk-total" class="metric-detail mono">— / —</div>
             </div>
-            <div class="tile">
-              <div class="lbl">UPTIME</div>
-              <div id="uptime-value" class="val">—</div>
-            </div>
-            <div class="tile">
-              <div class="lbl">TEMP</div>
-              <div class="val" id="temp-value" style="color: var(--text-muted);">—</div>
-            </div>
+            <div class="bar"><div id="disk-bar" class="fill" style="width: 0%;"></div></div>
           </div>
-          <div class="temp-note" id="temp-note"></div>
+          <div class="network-row">
+            <span class="lbl">Network</span>
+            <span id="net-down" class="down mono">↓0.0</span>
+            <span id="net-up" class="up mono">↑0.0</span>
+          </div>
+          <div class="temp-note" id="temp-note" hidden></div>
         </div>
       </div>
+
+      <!-- The core stage: the Dashboard's centre, once a decorative orb and
+           then a plain sessions-or-projects list. It is now the board's own
+           trunk — the presence orb re-skinned as JARVIS's core, with the
+           configured agents orbiting it — sitting above the PROJECTS grid it
+           is visually the root of (design/DashboardBrain.dc.html). Voice
+           state still drives it: presence--idle/listening/thinking/speaking
+           (app.ts's renderPresence) is unchanged, only its skin moved. -->
+      <section class="core-stage">
+        <div class="core-stage__head">
+          <div id="project-label" class="pt">Projects</div>
+          <div id="project-count" class="mono core-stage__count"></div>
+          <div class="spacer"></div>
+          <label for="project-filter" id="project-filter-label" class="sr-only">Filter projects</label>
+          <input id="project-filter" type="text" class="core-stage__filter" placeholder="Filter…" autocomplete="off" />
+          <div id="project-summary" class="mono core-stage__summary"></div>
+        </div>
+
+        <div class="core-stage__orbwrap">
+          <div class="core-stage__orb">
+            <div class="orbital b"></div>
+            <div class="orbital a"></div>
+            <div class="orbital c"></div>
+            <div class="brain-ring"></div>
+            <div class="brain-ring two"></div>
+            <div class="brain-ring three"></div>
+
+            <!-- The agent's presence. It reports a state the app actually
+                 knows — idle, listening, thinking, speaking — which is what
+                 earns it the space; a shape that merely pulsed would be the
+                 decoration this screen had before. presence-state/hint stay
+                 in the DOM for assistive tech and app.test.ts's own
+                 assertions, but carry no visible text now that the board
+                 draws the state as motion instead (see .sr-only below). -->
+            <section id="presence" class="presence presence--idle brain-core">
+              <div class="brain-glow" aria-hidden="true"></div>
+              <svg class="brain-glyph" aria-hidden="true" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3a3.5 3.5 0 0 0-3.4 4.3A3.5 3.5 0 0 0 4 10.5a3.5 3.5 0 0 0 1.6 2.9A3.5 3.5 0 0 0 5 16a3.5 3.5 0 0 0 4.5 3.4V3z"></path><path d="M14.5 3a3.5 3.5 0 0 1 3.4 4.3 3.5 3.5 0 0 1 2.1 3.2 3.5 3.5 0 0 1-1.6 2.9A3.5 3.5 0 0 1 19 16a3.5 3.5 0 0 1-4.5 3.4V3z"></path><path d="M12 3v17"></path></svg>
+              <span class="core-stage__wordmark" aria-hidden="true">JARVIS</span>
+              <div id="presence-state" class="sr-only">Idle</div>
+              <div id="presence-hint" class="sr-only">⌥Space to talk</div>
+            </section>
+
+            <!-- One orbit-track per configured agent, built by
+                 renderAgentOrbits() in app.ts — never a fixed count, since the
+                 registry can name any number of agents. -->
+            <div id="agent-orbits" class="core-stage__orbits"></div>
+          </div>
+          <div class="core-stage__trunk" aria-hidden="true"></div>
+          <div class="trunk-dot" aria-hidden="true"></div>
+        </div>
+      </section>
 
       <div class="panel providers-panel" id="providers-panel">
         <div class="ph" id="providers-head">
@@ -115,63 +200,54 @@
 
     </div>
 
-    <div class="col-center">
+    <!-- The projects grid. Always on screen now — it used to be swapped out
+         for the Sessions list the moment anything was running, which hid the
+         one place you could see what was idle right when you might want to
+         start something else. Built and kept in sync by renderProjectGrid()
+         in app.ts, keyed by project name so a sessions:update tick reuses
+         existing nodes instead of rebuilding the grid. -->
+    <div id="project-grid" class="node-grid"></div>
 
-      <!-- The centre holds what you came to look at: the agents that are
-           running, or — since idle is the state this screen is in most of the
-           time — the projects one could be started in. It used to hold a
-           decorative orb, concentric rings and a letterspaced wordmark, none
-           of which said anything true about the app. Voice is unchanged:
-           ⌥Space still starts it and the header's dot reports listening. -->
-      <!-- The agent's presence. It reports a state the app actually knows —
-           idle, listening, thinking, speaking — which is what earns it the
-           space; a shape that merely pulsed would be the decoration this
-           screen had before. -->
-      <section id="presence" class="presence presence--idle">
-        <div class="presence__orb" aria-hidden="true">
-          <span class="presence__ring presence__ring--outer"></span>
-          <span class="presence__ring presence__ring--inner"></span>
-          <span class="presence__arc"></span>
-          <span class="presence__core"></span>
-        </div>
-        <div class="presence__text">
-          <div id="presence-state" class="presence__state">Idle</div>
-          <div id="presence-hint" class="presence__hint">⌥Space to talk</div>
-        </div>
-      </section>
+    <!-- Row 3: SESSIONS · CONVERSATION -->
+    <div class="dash-row3">
 
-      <section class="centre">
-        <header class="centre__head">
-          <h2 id="centre-title" class="centre__title">Sessions</h2>
-          <span id="centre-count" class="centre__count mono"></span>
-        </header>
+      <div class="panel sessions-panel">
+        <div class="ph">
+          <div class="pt">Sessions</div>
+          <div id="sessions-summary" class="mono sessions-panel__summary"></div>
+          <div class="spacer"></div>
+          <button id="dashboard-sessions-refresh" class="icon-btn" type="button" aria-label="Refresh sessions">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
+          </button>
+          <button id="all-sessions-link" type="button" class="sessions-panel__link">All sessions</button>
+        </div>
         <div id="centre-body" class="centre__body"></div>
-      </section>
-
-    </div>
-
-    <div class="panel col-right">
-      <div class="ph">
-        <div class="pt">Conversation</div>
-        <div class="spacer"></div>
-        <div class="conversation-tag mono">AR · EN</div>
       </div>
 
-      <div id="conversation">
-        <div id="conversation-empty" class="conversation-empty">No conversation yet — type below, or press ⌥Space to start talking and ⌥⇧Space to stop.</div>
+      <div class="panel col-right">
+        <div class="ph">
+          <div class="pt">Conversation</div>
+          <div class="spacer"></div>
+          <div class="conversation-tag mono">AR · EN</div>
+        </div>
+
+        <div id="conversation">
+          <div id="conversation-empty" class="conversation-empty">No conversation yet — type below, or press ⌥Space to start talking and ⌥⇧Space to stop.</div>
+        </div>
+
+        <div class="composer">
+          <button id="mic-button" class="composer__mic" type="button"
+                  aria-label="Start or stop voice input (⌥Space / ⌥⇧Space)">
+            <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+          </button>
+          <input id="composer" type="text" placeholder="Type, or press ⌥Space to talk, ⌥⇧Space to stop…" autocomplete="off" />
+          <button id="composer-send" type="button" aria-label="Send">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
+          </button>
+        </div>
       </div>
 
-      <div class="composer">
-        <button id="mic-button" class="composer__mic" type="button"
-                aria-label="Start or stop voice input (⌥Space / ⌥⇧Space)">
-          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
-        </button>
-        <input id="composer" type="text" placeholder="Type, or press ⌥Space to talk, ⌥⇧Space to stop…" autocomplete="off" />
-        <button id="composer-send" type="button" aria-label="Send">
-          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#060a0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
-        </button>
-      </div>
     </div>
 
   </div>
@@ -247,6 +323,9 @@
         <select id="session-filter-agent" class="session-filter"></select>
         <div class="spacer"></div>
         <div id="session-count" class="session-count mono"></div>
+        <button id="session-refresh" class="icon-btn" type="button" aria-label="Refresh sessions">
+          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
+        </button>
       </div>
       <div id="session-table-status" class="session-table-status mono"></div>
       <table>
@@ -309,17 +388,27 @@
            none is hard-coded here. -->
       <button id="workspace-toggle-bookmarks" class="workspace-nav" type="button">&#9776;</button>
       <span id="workspace-tool-status" class="mono"></span>
-      <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
     </div>
 
     <div id="workspace-browser" class="workspace-browser">
-      <div id="workspace-tabs" class="workspace-tabs"></div>
+      <!-- "+" is the strip's own last child, static here so renderWorkspace
+           (workspace.ts) can clear and rebuild the chips around it with
+           strip.replaceChildren(newTabButton) / insertBefore, rather than
+           living in .workspace-head where an auto margin used to strand it
+           far from the tabs it opens next to. -->
+      <div id="workspace-tabs" class="workspace-tabs">
+        <button id="workspace-new-tab" class="workspace-nav workspace-new-tab" type="button" title="New tab">+</button>
+      </div>
       <div id="workspace-bar" class="workspace-bar">
         <button id="workspace-back" class="workspace-nav" type="button" title="Back">‹</button>
         <button id="workspace-forward" class="workspace-nav" type="button" title="Forward">›</button>
         <button id="workspace-reload" class="workspace-nav" type="button" title="Reload">⟳</button>
-        <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
-               autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+        <div class="workspace-address-wrap">
+          <input id="workspace-address" class="workspace-address mono" type="text" dir="ltr"
+                 autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+          <div id="workspace-loading" class="workspace-loading" role="progressbar"
+               aria-label="Page loading" hidden></div>
+        </div>
         <button id="workspace-toggle-devtools" class="workspace-nav" type="button"
                 title="Open DevTools for this page">&#9881;</button>
         <button id="workspace-bookmark-toggle" class="workspace-nav workspace-bookmark-toggle" type="button"
@@ -492,14 +581,34 @@
 
     <div class="settings-head">
       <div class="pt">Settings</div>
+      <!-- The section nav (board 5): plain anchors into #settings-body's own
+           scroller, `scroll-margin-top` (styles.css) keeping a jumped-to
+           section clear of the sticky filters some panes have above them.
+           settings.ts (wireSettingsNav) toggles --on to whichever link was
+           last clicked; :target alone can't carry that (it only ever
+           matches the section, never the link that pointed at it). -->
+      <nav class="settings-nav" aria-label="Settings sections">
+        <a class="settings-nav-link settings-nav-link--on" href="#settings-section-agents">Agents</a>
+        <a class="settings-nav-link" href="#settings-section-routing">Routing</a>
+        <a class="settings-nav-link" href="#settings-section-projects">Projects</a>
+        <a class="settings-nav-link" href="#settings-section-databases">Databases</a>
+        <a class="settings-nav-link" href="#settings-section-editors">Editor roots</a>
+        <a class="settings-nav-link" href="#settings-section-docker">Docker</a>
+        <a class="settings-nav-link" href="#settings-section-chat">Chat</a>
+        <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
+        <a class="settings-nav-link" href="#settings-section-voice">Voice</a>
+        <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
+        <a class="settings-nav-link" href="#settings-section-browser">Browser</a>
+        <a class="settings-nav-link" href="#settings-section-whisper">Whisper</a>
+        <a id="settings-nav-remote" class="settings-nav-link" href="#settings-section-remote">Remote access</a>
+      </nav>
       <div class="spacer"></div>
+      <div class="settings-head-actions">
+        <button id="settings-tools" class="workspace-nav" type="button">Tools…</button>
+        <button id="settings-restart" class="workspace-nav" type="button" hidden>Restart Jarvis</button>
+        <button id="settings-save" class="workspace-nav workspace-nav--primary" type="button">Save</button>
+      </div>
       <span id="settings-status" class="mono"></span>
-      <button id="settings-tools" class="workspace-nav" type="button"
-              style="width: auto; padding: 0 14px;">Tools…</button>
-      <button id="settings-restart" class="workspace-nav" type="button" hidden
-              style="width: auto; padding: 0 14px;">Restart Jarvis</button>
-      <button id="settings-save" class="workspace-nav" type="button"
-              style="width: auto; padding: 0 14px;">Save</button>
     </div>
 
     <div class="settings-body">
@@ -507,7 +616,7 @@
            across the whole window. -->
       <div class="settings-inner">
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-agents">
         <div class="settings-section-head">
           <div class="lbl">AGENTS</div>
           <button id="settings-agent-add" class="settings-add" type="button">+ Add agent</button>
@@ -515,7 +624,7 @@
         <div id="settings-agents" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-routing">
         <div class="settings-section-head">
           <div class="lbl">ROUTING</div>
           <button id="settings-routing-add" class="settings-add" type="button">+ Add rule</button>
@@ -523,7 +632,7 @@
         <div id="settings-routing" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-projects">
         <div class="settings-section-head">
           <div class="lbl">PROJECTS</div>
           <button id="settings-project-add" class="settings-add" type="button">+ Add project</button>
@@ -531,7 +640,7 @@
         <div id="settings-projects" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-databases">
         <div class="settings-section-head">
           <div class="lbl">DATABASES</div>
           <button id="settings-database-add" class="settings-add" type="button">+ Add connection</button>
@@ -539,7 +648,7 @@
         <div id="settings-databases" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-editors">
         <div class="settings-section-head">
           <div class="lbl">EDITOR ROOTS</div>
           <button id="settings-editor-add" class="settings-add" type="button">+ Add root</button>
@@ -547,7 +656,7 @@
         <div id="settings-editors" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-docker">
         <div class="settings-section-head">
           <div class="lbl">DOCKER</div>
           <button id="settings-docker-autopopulate" class="settings-add" type="button">
@@ -559,7 +668,7 @@
         <div id="settings-docker-picker" class="settings-rows" hidden></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-chat">
         <div class="settings-section-head">
           <div class="lbl">CHAT</div>
           <button id="settings-chat-add" class="settings-add" type="button">+ Add chat</button>
@@ -567,7 +676,7 @@
         <div id="settings-chat" class="settings-rows"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-brain">
         <div class="lbl">BRAIN</div>
         <div class="settings-field">
           <label for="settings-brain-cwd">cwd</label>
@@ -583,7 +692,7 @@
         </div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-voice">
         <div class="lbl">VOICE</div>
         <div class="settings-field">
           <label for="settings-voice-en">english voice</label>
@@ -628,7 +737,41 @@
         </div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-header">
+        <div id="settings-prayer-heading" class="lbl"></div>
+        <div class="settings-field">
+          <span id="settings-prayer-enabled-label"></span>
+          <span class="settings-switch">
+            <input id="settings-prayer-enabled" type="checkbox" aria-labelledby="settings-prayer-enabled-label" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div class="settings-field">
+          <span id="settings-prayer-location"></span>
+          <button id="settings-prayer-locate" class="settings-add" type="button"></button>
+        </div>
+        <div class="settings-field"><span id="settings-prayer-latitude-label"></span><input id="settings-prayer-latitude" type="number" min="-90" max="90" step="any" aria-labelledby="settings-prayer-latitude-label" /></div>
+        <div class="settings-field"><span id="settings-prayer-longitude-label"></span><input id="settings-prayer-longitude" type="number" min="-180" max="180" step="any" aria-labelledby="settings-prayer-longitude-label" /></div>
+        <div id="settings-prayer-note" class="settings-note"></div>
+        <div class="settings-field">
+          <span id="settings-prayer-notify-before-label"></span>
+          <span class="settings-switch">
+            <input id="settings-prayer-notify-before" type="checkbox" aria-labelledby="settings-prayer-notify-before-label" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+          <span id="settings-prayer-notify-minutes-label"></span>
+          <input id="settings-prayer-notify-minutes" type="number" min="1" max="60" step="1" aria-labelledby="settings-prayer-notify-minutes-label" />
+        </div>
+        <div class="settings-field">
+          <span id="settings-prayer-notify-attime-label"></span>
+          <span class="settings-switch">
+            <input id="settings-prayer-notify-attime" type="checkbox" aria-labelledby="settings-prayer-notify-attime-label" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-section-browser">
         <div class="lbl">BROWSER</div>
         <!-- A page's window.open popup — a sign-in window, a Meet window —
              opens as a real window that can still talk to the page that
@@ -641,9 +784,14 @@
             <span class="settings-switch-track" aria-hidden="true"></span>
           </span>
         </div>
+        <div class="settings-field">
+          <label for="settings-browser-homepage">default page</label>
+          <input id="settings-browser-homepage" type="text" class="mono" autocomplete="off" placeholder="https://example.com" />
+        </div>
+        <div class="settings-note">Opens instead of the built-in new-tab page when a new Workspace tab has nothing else to show. Leave blank to keep today's default.</div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="settings-section-whisper">
         <div class="lbl">WHISPER</div>
         <div class="settings-field">
           <label for="settings-whisper-binary">binary path</label>
@@ -653,6 +801,115 @@
           <label for="settings-whisper-model">model path</label>
           <input id="settings-whisper-model" type="text" class="mono" autocomplete="off" />
         </div>
+      </section>
+
+      <!-- Remote access. Every visible string is set from MESSAGES by
+           settings.ts (renderRemote), because this panel is bilingual and
+           markup cannot be. Milestone 3 ships it before the bridge exists:
+           nothing here makes this machine listen. -->
+      <section class="settings-section" id="settings-section-remote">
+        <div id="settings-remote-title" class="lbl"></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-enabled-label" for="settings-remote-enabled"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-enabled" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+          <span id="settings-remote-state"></span>
+        </div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-idle-label" for="settings-remote-idle"></label>
+          <input id="settings-remote-idle" type="text" class="mono" autocomplete="off"
+                 inputmode="numeric" />
+        </div>
+        <div id="settings-remote-idle-note" class="settings-note"></div>
+        <!-- The bridge's own idle-timer status (RemoteStatus.idle, M12 Task
+             1) — rendered by renderRemotePairArea alongside the pairing
+             area, never from the draft. Hidden while there is nothing to
+             say (no status yet, or the timer has never fired/armed). -->
+        <div id="settings-remote-idle-state" class="settings-note" hidden></div>
+        <div class="settings-field">
+          <span id="settings-remote-reachable-label" class="settings-remote-group-label"></span>
+          <div id="settings-remote-choices" class="settings-remote-choices" role="radiogroup"
+               aria-labelledby="settings-remote-reachable-label"></div>
+        </div>
+        <div id="settings-remote-all-note" class="settings-note settings-note--warning" hidden></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-port-label" for="settings-remote-port"></label>
+          <input id="settings-remote-port" type="text" class="mono" autocomplete="off"
+                 inputmode="numeric" />
+        </div>
+        <div id="settings-remote-port-note" class="settings-note"></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-proxy-label" for="settings-remote-proxy"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-proxy" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-proxy-note" class="settings-note"></div>
+        <div id="settings-remote-certificate" class="settings-note" hidden></div>
+        <!-- The Tailscale certificate row (settings.ts renderRemoteCertRow):
+             read from draft.remote.tls, not from the bridge's own live
+             status — unlike settings-remote-certificate above, which
+             describes what is actually being served right now. -->
+        <div class="settings-field">
+          <span id="settings-remote-cert-status" class="settings-note"></span>
+          <button id="settings-remote-cert-button" class="settings-add" type="button"></button>
+        </div>
+        <div id="settings-remote-cert-error" class="settings-note settings-note--warning" hidden></div>
+        <div id="settings-remote-cert-hint" class="settings-note" hidden></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-push-label" for="settings-remote-push"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-push" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-push-note" class="settings-note"></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-push-projects-label" for="settings-remote-push-projects"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-push-projects" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-push-projects-note" class="settings-note"></div>
+        <div id="settings-remote-problem" class="settings-note settings-note--warning" hidden></div>
+        <div class="settings-section-head">
+          <div id="settings-remote-pair-title" class="lbl"></div>
+          <button id="settings-remote-new-code" class="settings-add settings-add--primary" type="button" disabled></button>
+        </div>
+        <div id="settings-remote-pair-note" class="settings-note"></div>
+        <!-- The pairing link itself: rendered ONLY while a pairing window is
+             open, and cleared on any other status (settings.ts renderRemote)
+             — it carries the pairing secret, so it never rides a title,
+             aria-label or console log, and select-all makes it a one-motion
+             copy onto the phone. -->
+        <div id="settings-remote-pair-code" class="mono settings-remote-pair-code" dir="ltr"></div>
+        <!-- The QR is the same pairing link, drawn as an image beside the
+             text (settings.ts renderRemotePairArea) — decorative, not a
+             second source of the secret, so it is hidden from assistive
+             tech; the text above remains the accessible/fallback form. -->
+        <canvas id="remote-pair-qr" class="settings-remote-pair-qr" aria-hidden="true" hidden></canvas>
+        <!-- The pinned certificate's last 4 hex characters — the phone
+             shows the same 4 characters on its confirm step (pair-flow.ts
+             fingerprintTail) so the person pairing can compare the two by
+             eye. Only the tail, never the fingerprint or the secret; drawn
+             and cleared in lockstep with the QR (settings.ts). -->
+        <div id="settings-remote-pair-fingerprint" class="settings-note"></div>
+        <div id="settings-remote-pair-expiry" class="settings-note"></div>
+        <button id="settings-remote-pair-cancel" class="settings-add" type="button" hidden></button>
+        <div id="settings-remote-devices-title" class="lbl"></div>
+        <div id="settings-remote-devices" class="settings-rows"></div>
+        <div id="settings-remote-warning" class="settings-note settings-note--warning"></div>
+        <div id="settings-remote-no-credential" class="settings-note"></div>
       </section>
 
       </div>
@@ -672,6 +929,58 @@
       </div>
       <div class="sessions-body" id="history-list">
         <div class="sessions-empty">No past sessions yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- The pairing spec's "second human step": names the requesting device
+       before a token is ever minted. Its own cascade fix (an author
+       `display: flex` only inside `:not([hidden])`, the same shape
+       .history-overlay uses) rather than inventing a second copy of it —
+       see remote-status.ts for why the device name and warning sentence are
+       built from text nodes with the name in a <bdi>, never innerHTML, and
+       why remote-status.ts also routes away from the Workspace route before
+       ever showing this: `.remote-confirm-overlay`'s z-index only beats
+       other DOM-layered overlays (like #setup-overlay), never a
+       WebContentsView, which is a native child window outside the cascade
+       entirely. -->
+  <div id="remote-confirm" class="remote-confirm-overlay" hidden
+       role="alertdialog" aria-modal="true" aria-labelledby="remote-confirm-title">
+    <div class="remote-confirm-panel">
+      <div class="remote-confirm-head">
+        <div class="remote-confirm-icon" aria-hidden="true">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="7" y="2" width="10" height="20" rx="2.2"></rect>
+            <line x1="11" y1="18" x2="13" y2="18"></line>
+          </svg>
+        </div>
+        <div class="remote-confirm-heading">
+          <div id="remote-confirm-title" class="remote-confirm-title"></div>
+          <div id="remote-confirm-subtitle" class="remote-confirm-subtitle"></div>
+        </div>
+      </div>
+      <div class="remote-confirm-facts">
+        <div class="remote-confirm-fact">
+          <div id="remote-confirm-device-label" class="remote-confirm-fact-label"></div>
+          <div id="remote-confirm-body" class="remote-confirm-fact-value"></div>
+        </div>
+        <div class="remote-confirm-fact">
+          <div id="remote-confirm-from-label" class="remote-confirm-fact-label"></div>
+          <div id="remote-confirm-from" class="remote-confirm-fact-value mono" dir="ltr"></div>
+        </div>
+        <div class="remote-confirm-countdown" aria-hidden="true">
+          <div id="remote-confirm-countdown-bar" class="remote-confirm-countdown-bar"></div>
+        </div>
+      </div>
+      <div class="remote-confirm-warning">
+        <svg class="remote-confirm-warning-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 4 5v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V5l-8-3Z"></path>
+        </svg>
+        <span id="remote-confirm-warning-text"></span>
+      </div>
+      <div class="remote-confirm-actions">
+        <button id="remote-confirm-deny" class="remote-confirm-btn remote-confirm-btn--outline" type="button"></button>
+        <button id="remote-confirm-approve" class="remote-confirm-btn remote-confirm-btn--accent" type="button"></button>
       </div>
     </div>
   </div>

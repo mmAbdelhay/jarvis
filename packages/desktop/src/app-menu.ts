@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from "electron";
+import { MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 
 // The application menu.
 //
@@ -24,7 +25,10 @@ import type { MenuItemConstructorOptions } from "electron";
  * every Mac app has and the only place ⌘Q lives. Elsewhere there is no menu
  * bar to put an app menu in, and Quit belongs beside the edit roles.
  */
-export function appMenuTemplate(platform: NodeJS.Platform): MenuItemConstructorOptions[] {
+export function appMenuTemplate(
+  platform: NodeJS.Platform,
+  reloadJarvis: () => void = () => {},
+): MenuItemConstructorOptions[] {
   const edit: MenuItemConstructorOptions = {
     label: "Edit",
     submenu: [
@@ -46,7 +50,10 @@ export function appMenuTemplate(platform: NodeJS.Platform): MenuItemConstructorO
       // help to somebody who launched it from a desktop icon.
       { role: "toggleDevTools" },
       { type: "separator" },
-      { role: "reload" },
+      // A role:reload item installs Ctrl/Cmd+R for the *Jarvis renderer* even
+      // while a hosted browser page has focus. Keep a menu path for explicit
+      // app reload, without claiming the browser's familiar shortcut.
+      { label: MESSAGES.reloadJarvis(PRIMARY_LANGUAGE), click: reloadJarvis },
     ],
   };
 

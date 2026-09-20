@@ -46,6 +46,13 @@ const HISTORY_LIMIT = 200;
 const panes = new Map<string, Pane>();
 let wired = false;
 
+// M9 Task 7 / M7 ruling 11 (shared pty size, last writer wins): which
+// terminal tab, if any, is the one actually drawn on screen right now —
+// set by renderWorkspaceTerminals below, read by
+// reassertVisibleWorkspaceTerminal() so a window focus event (which has no
+// tab id of its own to hand it) knows what, if anything, to reassert.
+let visibleTabId: string | undefined;
+
 /** How terminals behave: read once for the whole module rather than once per
  *  pane, because a change to jarvis.yaml takes effect on restart anyway.
  *  Until it resolves — and if it never does — a pane is built with these,
@@ -81,7 +88,11 @@ export function initWorkspaceTerminals(): void {
   wired = true;
 
   window.jarvis.onTerminalData((paneKey, chunk) => {
-    paneFor(paneKey)?.write(chunk);
+    // writeLive, not write: a pane drops anything pushed before its own
+    // attach has settled, since that content is already inside the backlog
+    // attach() is about to return — see terminal-pane.ts's own comment on
+    // why that ordering is guaranteed, which is what makes this safe.
+    paneFor(paneKey)?.writeLive(chunk);
   });
 
   window.jarvis.onTerminalExit((paneKey, code) => {
@@ -152,6 +163,16 @@ export function renderWorkspaceTerminals(
   }
   for (const [tabId, pane] of panes) pane.element.hidden = tabId !== showing;
 
+  // Fix round 1, Important 3: reasserting on *every* render (every
+  // workspace:update push, whether or not the visible pane actually
+  // changed) is more than rule 5 asks for — "reasserts... after showing
+  // its Workspace/receiving focus" means a `showing` transition, not every
+  // redraw of the same already-visible tab. `wasShowing` is read before
+  // `visibleTabId` is overwritten below, so a render that leaves the same
+  // tab visible sends nothing here; the focus listener is the only other
+  // caller, unconditionally, as before.
+  const wasShowing = visibleTabId;
+  visibleTabId = showing;
   if (showing === undefined) return;
   const pane = panes.get(showing);
   if (pane === undefined) return;
@@ -159,7 +180,71 @@ export function renderWorkspaceTerminals(
   // which the panes have a real size to be laid out at.
   for (const leaf of pane.tree.panes()) leaf.refit();
   pane.tree.focused().focus();
+  // fit() above only calls back into resize() on a genuine change of a
+  // leaf's own cell grid — see reassertVisibleWorkspaceTerminal()'s own
+  // comment for why an explicit, unconditional send is still needed on a
+  // genuine showing transition.
+  if (wasShowing !== showing) {
+    reassertVisibleWorkspaceTerminal();
+  }
 }
+
+/**
+ * Re-sends the visible terminal tab's current pty size, for every one of
+ * its leaves, unconditionally (M7 ruling 11: last writer wins, both sides
+ * re-assert).
+ *
+ * `leaf.refit()` (called from renderWorkspaceTerminals above, and by each
+ * pane's own ResizeObserver) only calls back into its `resize` hook — and
+ * so only sends `terminal:resize` — on a genuine change of the leaf's own
+ * cell grid. A phone that resized this same pane's pty while the laptop's
+ * Workspace was not looking leaves the laptop believing its old size
+ * forever: nothing about *its* box changed, so fit() alone would never
+ * notice. This sends every visible leaf's real cols/rows whenever the
+ * terminal could plausibly be the thing on screen — a fresh render, or the
+ * window regaining focus — whether or not they changed locally.
+ *
+ * Reads `visibleTabId` rather than taking a tab id, so the window "focus"
+ * listener below (which has none to hand it) can call it too. Only ever
+ * touches the pane that is actually visible right now: a hidden tab, or
+ * another project's terminal, is never resized from here — which is what
+ * keeps a laptop that is not looking at a terminal from undoing a phone's
+ * own sizing of it.
+ */
+function reassertVisibleWorkspaceTerminal(): void {
+  if (visibleTabId === undefined) return;
+  const pane = panes.get(visibleTabId);
+  if (pane === undefined) return;
+  for (const leaf of pane.tree.panes()) {
+    const paneKey = paneKeys.get(leaf);
+    if (paneKey === undefined) continue;
+    const { cols, rows } = leaf.terminal;
+    if (cols < 1 || rows < 1) continue;
+    void window.jarvis.resizeTerminal(paneKey, cols, rows);
+  }
+}
+
+// Registered once, at module init, so a phone-driven resize is picked up
+// even if the window regains focus while some other view is showing over
+// the Workspace — reassertVisibleWorkspaceTerminal() itself declines to
+// send anything in that case (visibleTabId is undefined whenever no
+// terminal tab is the thing on screen).
+//
+// Keyed on `window` itself, rather than left as a bare addEventListener,
+// the same way session-view.ts's own focus listener is: the app only ever
+// loads this module once, but workspace-terminal.test.ts re-imports it
+// fresh (vi.resetModules) for every test while jsdom's `window` outlives
+// all of them, so a plain addEventListener would leave one stale, closed-
+// over listener behind per test. Swapping the listener on each module load
+// keeps exactly one live — the current module's own.
+type FocusHost = typeof window & { __reassertWorkspaceTerminalOnFocus__?: () => void };
+const focusHost = window as FocusHost;
+if (focusHost.__reassertWorkspaceTerminalOnFocus__ !== undefined) {
+  window.removeEventListener("focus", focusHost.__reassertWorkspaceTerminalOnFocus__);
+}
+const handleWorkspaceTerminalFocus = (): void => reassertVisibleWorkspaceTerminal();
+focusHost.__reassertWorkspaceTerminalOnFocus__ = handleWorkspaceTerminalFocus;
+window.addEventListener("focus", handleWorkspaceTerminalFocus);
 
 /**
  * How this tab's panes behave.
@@ -362,11 +447,20 @@ function makePane(
         // Notification unsupported or denied: no less a working terminal.
       }
     },
+    // M10 Task 4: main decides whether this is push-worthy (a paired phone,
+    // push turned on, the laptop's own window unfocused) — this pane only
+    // ever reports the fact, never a command line or any other detail.
+    onCommandFinished: (seconds, ok) =>
+      void window.jarvis.reportCommandFinished(paneKey, seconds, ok),
     // Whatever the shell printed before this pane existed — its prompt,
-    // usually. Buffered by the shell manager exactly for this gap, and
-    // waited for so a split pane never attaches to a shell main has not
-    // started yet: attaching to an unknown key registers no listener at
-    // all, and the pane would stay blank for good.
+    // usually. `started` is waited on only so a split pane's attach does
+    // not race the shell it is attaching to — main's shell registry has to
+    // have the key before `terminal:attach` can read anything back for it.
+    // Attaching itself registers no listener: the live stream has been
+    // flowing since initWorkspaceTerminals ran, before any of this pane
+    // exists, so a slow or unknown key here never leaves the pane blank.
+    // What stops a chunk from landing twice is terminal-pane.ts's own
+    // write-gate on its attach promise, not this wait.
     attach: () =>
       started === undefined
         ? window.jarvis.attachTerminal(paneKey)

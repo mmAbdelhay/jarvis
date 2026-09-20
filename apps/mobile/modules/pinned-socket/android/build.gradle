@@ -1,0 +1,28 @@
+// SDK 57 module shape (mirrors expo-audio / expo-document-picker): the
+// `expo-module-gradle-plugin` supplies compileSdk/minSdk/Kotlin/Expo core
+// dependencies. The pre-SDK-52 `ExpoModulesCorePlugin.gradle` +
+// `applyKotlinExpoModulesCorePlugin()` form no longer sets `compileSdk` under
+// the current Android Gradle Plugin — the first EAS build (2026-09-19) failed
+// with "project ':pinned-socket' does not specify `compileSdk`".
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.pinnedsocket'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.pinnedsocket"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // Pinned to match react-native's own bundled OkHttp
+  // (node_modules/react-native/gradle/libs.versions.toml: okhttp = "4.9.2")
+  // so this module never brings in a second OkHttp version.
+  implementation "com.squareup.okhttp3:okhttp:4.9.2"
+}

@@ -10,7 +10,11 @@ type Pair = { name?: string; value?: string; enabled?: boolean; type?: string };
 
 type MultipartField = {
   name?: string;
-  value?: string | string[];
+  // Minor (review): a remote call's own multipart file value (Task 4) is
+  // never a path — it is one of this device's own staged upload-id
+  // references — so a file field's value can be either shape, same as
+  // http-runner.ts's own MultipartField.
+  value?: string | (string | { uploadId: string })[];
   enabled?: boolean;
   type?: string;
 };
@@ -119,7 +123,13 @@ export function toCurl(
       const name = resolve(field.name);
       if (field.type === "file") {
         for (const path of Array.isArray(field.value) ? field.value : []) {
-          parts.push("-F", quote(`${name}=@${resolve(path)}`));
+          // A remote call's own upload-id reference: there is no local path
+          // this command could read (that is the whole point — see Task
+          // 4's remote-api.ts), so the copied command names the fact
+          // plainly rather than producing a curl line that fails against a
+          // file that was never on this machine.
+          const part = typeof path === "string" ? `@${resolve(path)}` : "@file(<uploaded>)";
+          parts.push("-F", quote(`${name}=${part}`));
         }
         continue;
       }

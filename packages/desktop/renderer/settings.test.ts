@@ -1,7 +1,29 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig, type JarvisConfig } from "../src/config.js";
-import { initSettings, openSettings } from "./settings.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { PERSONAL_PROJECT } from "../src/personal.js";
+import type { BindChoice } from "@jarvis/remote";
+import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { encodeQr, qrToCanvas } from "./vendor/qr.js";
+
+// The real encoder is unit-tested on its own (vendor/qr.test.ts); here we
+// only need to see how settings.ts calls it — with exactly the pairing
+// link, only while a pairing window is open.
+vi.mock("./vendor/qr.js", () => ({
+  encodeQr: vi.fn(() => ({ size: 21, modules: [] })),
+  qrToCanvas: vi.fn(),
+}));
+
+// jsdom implements no canvas context and logs a "not implemented" warning
+// on every getContext("2d") call otherwise — settings.ts's clear-on-closed
+// path calls it on every non-open pairing render, which is most tests in
+// this file. Stub a minimal 2D context once so output stays pristine; the
+// dedicated clearRect test below overrides it for a single call.
+const fakeQrContext = { fillStyle: "", fillRect: () => {}, clearRect: () => {} };
+const qrCanvasGetContext = vi
+  .spyOn(HTMLCanvasElement.prototype, "getContext")
+  .mockReturnValue(fakeQrContext as unknown as CanvasRenderingContext2D);
 
 type Recorded = { call: string; args: unknown[] };
 
@@ -27,6 +49,7 @@ function sample(): JarvisConfig {
     chat: {},
     workflows: {},
     headlamp: { binary: "/some/path" },
+    prayer: { enabled: false },
     terminal: {
       completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
       blocks: { enabled: true, inputEditor: true },
@@ -58,6 +81,15 @@ function sample(): JarvisConfig {
     },
     browser: { allowPopups: true },
     sessions: { importWindowDays: 30 },
+    remote: {
+      enabled: false,
+      bindAddress: "127.0.0.1",
+      port: 7717,
+      sidecarProxy: false,
+      tls: {},
+      push: { enabled: false, includeProjectNames: false },
+      idleDisableMinutes: 0,
+    },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };
 }
@@ -106,8 +138,50 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <textarea id="settings-greeting-en"></textarea>
     <textarea id="settings-greeting-ar"></textarea>
     <input id="settings-allow-popups" type="checkbox" />
+    <input id="settings-browser-homepage" />
     <input id="settings-whisper-binary" />
-    <input id="settings-whisper-model" />`;
+    <input id="settings-whisper-model" />
+    <div id="settings-remote-title"></div>
+    <label id="settings-remote-enabled-label"></label>
+    <input id="settings-remote-enabled" type="checkbox" />
+    <span id="settings-remote-state"></span>
+    <label id="settings-remote-idle-label"></label>
+    <input id="settings-remote-idle" />
+    <div id="settings-remote-idle-note"></div>
+    <div id="settings-remote-idle-state" hidden></div>
+    <span id="settings-remote-reachable-label"></span>
+    <div id="settings-remote-choices"></div>
+    <div id="settings-remote-all-note" hidden></div>
+    <label id="settings-remote-port-label"></label>
+    <input id="settings-remote-port" />
+    <div id="settings-remote-port-note"></div>
+    <label id="settings-remote-proxy-label"></label>
+    <input id="settings-remote-proxy" type="checkbox" />
+    <div id="settings-remote-proxy-note"></div>
+    <div id="settings-remote-certificate" hidden></div>
+    <span id="settings-remote-cert-status"></span>
+    <button id="settings-remote-cert-button"></button>
+    <div id="settings-remote-cert-error" hidden></div>
+    <div id="settings-remote-cert-hint" hidden></div>
+    <label id="settings-remote-push-label"></label>
+    <input id="settings-remote-push" type="checkbox" />
+    <div id="settings-remote-push-note"></div>
+    <label id="settings-remote-push-projects-label"></label>
+    <input id="settings-remote-push-projects" type="checkbox" />
+    <div id="settings-remote-push-projects-note"></div>
+    <div id="settings-remote-problem" hidden></div>
+    <div id="settings-remote-pair-title"></div>
+    <button id="settings-remote-new-code"></button>
+    <div id="settings-remote-pair-note"></div>
+    <div id="settings-remote-pair-code"></div>
+    <canvas id="remote-pair-qr" hidden></canvas>
+    <div id="settings-remote-pair-fingerprint"></div>
+    <div id="settings-remote-pair-expiry"></div>
+    <button id="settings-remote-pair-cancel" hidden></button>
+    <div id="settings-remote-devices-title"></div>
+    <div id="settings-remote-devices"></div>
+    <div id="settings-remote-warning"></div>
+    <div id="settings-remote-no-credential"></div>`;
 
   const calls: Recorded[] = [];
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
@@ -137,6 +211,38 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     },
     restartApp: () => {
       calls.push({ call: "restartApp", args: [] });
+      return Promise.resolve();
+    },
+    remoteBindChoices: () =>
+      Promise.resolve([
+        { address: "127.0.0.1", iface: "lo0", kind: "loopback" },
+        { address: "192.168.100.69", iface: "en0", kind: "lan" },
+        { address: "100.84.17.203", iface: "utun4", kind: "mesh" },
+      ]),
+    remoteStatus: () =>
+      Promise.resolve({
+        enabled: false,
+        listening: undefined,
+        pairing: { kind: "closed" },
+        devices: [],
+        problem: undefined,
+      }),
+    openRemotePairing: () => Promise.resolve({ ok: true, value: undefined }),
+    cancelRemotePairing: () => Promise.resolve(),
+    decideRemotePairing: () => Promise.resolve(),
+    revokeRemoteDevice: () => Promise.resolve({ ok: true, value: undefined }),
+    onRemoteStatus: () => {},
+    tailscaleCert: () => {
+      calls.push({ call: "tailscaleCert", args: [] });
+      return Promise.resolve({
+        ok: true,
+        certPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.crt",
+        keyPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.key",
+        name: "m1.tailnet.ts.net",
+      });
+    },
+    openTab: (...args: unknown[]) => {
+      calls.push({ call: "openTab", args });
       return Promise.resolve();
     },
     dockerContainers: () =>
@@ -395,7 +501,7 @@ describe("Test button", () => {
   });
 });
 
-describe("Save and restart", () => {
+describe("Save and live apply", () => {
   it("sends the whole draft on Save", async () => {
     const { calls } = harness();
     initSettings();
@@ -408,14 +514,29 @@ describe("Save and restart", () => {
     expect(calls[0]?.call).toBe("saveSettings");
   });
 
-  it("shows the restart prompt after a successful save", async () => {
+  it("shows live apply status without a restart prompt after a successful save", async () => {
     await openSettings();
 
     document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
+    expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("keeps a restart option when startup-service settings changed", async () => {
+    await openSettings();
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    cwd.value = "/new/cwd";
+    change(cwd);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(false);
-    expect(document.getElementById("settings-status")?.textContent).toBe("Saved.");
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE),
+    );
   });
 
   it("shows the headline and technical detail on a failed save, without a restart prompt", async () => {
@@ -456,7 +577,9 @@ describe("Save and restart", () => {
     await openSettings();
     document.getElementById("settings-save")?.click();
     await Promise.resolve();
-    expect(document.getElementById("settings-status")?.textContent).toBe("Saved.");
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE),
+    );
 
     const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
     cwd.value = "/new/cwd";
@@ -464,6 +587,19 @@ describe("Save and restart", () => {
 
     expect(document.getElementById("settings-status")?.textContent).toBe("");
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("keeps prayer edits in the draft until Save writes them", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    await savePrayerSettings({ enabled: true });
+    expect(calls).toHaveLength(0);
+
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    expect(savedConfig(calls[0]).prayer).toEqual({ enabled: true });
   });
 });
 
@@ -923,6 +1059,31 @@ describe("voice section", () => {
     expect(saved.browser.allowPopups).toBe(false);
   });
 
+  it("saves a configured default page and clears it back to unset", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const input = document.getElementById("settings-browser-homepage") as HTMLInputElement;
+    input.value = "https://example.com";
+    change(input);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    let saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.browser.homePage).toBe("https://example.com");
+
+    input.value = "  ";
+    change(input);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saves = calls.filter((entry) => entry.call === "saveSettings");
+    saved = saves[saves.length - 1]?.args[0] as JarvisConfig;
+    expect(saved.browser.homePage).toBeUndefined();
+  });
+
   it("saves an edited voice and greeting", async () => {
     const { calls } = harness();
     initSettings();
@@ -1296,5 +1457,1405 @@ describe("settings chat section", () => {
     await openSettings();
 
     expect((document.getElementById("settings-chat-add") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("remote access section", () => {
+  /** The address list arrives after the first render, like the voice list. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  }
+
+  async function open(config: JarvisConfig = sample()): Promise<Recorded[]> {
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+    await settle();
+    return calls;
+  }
+
+  /** Opens with a hand-picked address list instead of the default harness's
+   *  loopback/en0/utun4 trio — for the cases that care whether a Tailscale
+   *  or a Wi-Fi address exists at all. */
+  async function openWithChoices(
+    choices: BindChoice[],
+    config: JarvisConfig = sample(),
+  ): Promise<Recorded[]> {
+    const { calls } = harness(config);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteBindChoices"] = () =>
+      Promise.resolve(choices);
+    initSettings();
+    await openSettings();
+    await settle();
+    return calls;
+  }
+
+  function withRemote(patch: Partial<JarvisConfig["remote"]>): JarvisConfig {
+    const config = sample();
+    return { ...config, remote: { ...config.remote, ...patch } };
+  }
+
+  function radios(): HTMLInputElement[] {
+    return [
+      ...document.querySelectorAll<HTMLInputElement>(
+        '#settings-remote-choices input[type="radio"]',
+      ),
+    ];
+  }
+
+  function radioFor(choice: "tailscale" | "wifi" | "other"): HTMLInputElement {
+    const radio = document.querySelector<HTMLInputElement>(
+      `#settings-remote-choices input[data-choice="${choice}"]`,
+    );
+    if (radio === null) throw new Error(`no ${choice} radio`);
+    return radio;
+  }
+
+  const tailscaleRadio = (): HTMLInputElement => radioFor("tailscale");
+  const wifiRadio = (): HTMLInputElement => radioFor("wifi");
+  const otherRadio = (): HTMLInputElement => radioFor("other");
+
+  function advancedDetails(): HTMLDetailsElement {
+    const details = document.getElementById("settings-remote-advanced");
+    if (details === null) throw new Error("no Advanced… disclosure");
+    return details as HTMLDetailsElement;
+  }
+
+  function otherField(): HTMLInputElement {
+    const field = document.querySelector<HTMLInputElement>(
+      '#settings-remote-choices input[data-field="bindAddress"]',
+    );
+    if (field === null) throw new Error("no Other… address field");
+    return field;
+  }
+
+  /** Clicks Save and returns what the most recent save carried. */
+  async function save(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return savedConfig(calls.filter((entry) => entry.call === "saveSettings").at(-1));
+  }
+
+  const text = (id: string): string | null | undefined => document.getElementById(id)?.textContent;
+
+  it("is off, port 7717, no proxy and no push when jarvis.yaml has no remote section", async () => {
+    await open();
+
+    expect((document.getElementById("settings-remote-enabled") as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect(text("settings-remote-state")).toBe(MESSAGES.remoteState(false, PRIMARY_LANGUAGE));
+    expect((document.getElementById("settings-remote-port") as HTMLInputElement).value).toBe(
+      "7717",
+    );
+    expect((document.getElementById("settings-remote-proxy") as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect((document.getElementById("settings-remote-push") as HTMLInputElement).checked).toBe(
+      false,
+    );
+  });
+
+  it("renders exactly two primary radios, Tailscale then Local Wi-Fi, each labelled and with its address", async () => {
+    await open();
+
+    const primaries = [
+      ...document.querySelectorAll("#settings-remote-choices > .settings-remote-choice--primary"),
+    ];
+    expect(primaries.map((label) => label.textContent)).toEqual([
+      `${MESSAGES.remoteTailscaleLabel(PRIMARY_LANGUAGE)}100.84.17.203`,
+      `${MESSAGES.remoteWifiLabel(PRIMARY_LANGUAGE)}192.168.100.69`,
+    ]);
+  });
+
+  it("pre-selects Tailscale when the saved address is still the config default and this machine has one", async () => {
+    await open();
+
+    expect(tailscaleRadio().checked).toBe(true);
+    expect(tailscaleRadio().value).toBe("100.84.17.203");
+    expect(wifiRadio().checked).toBe(false);
+  });
+
+  it("pre-selects Local Wi-Fi when the saved address is the config default and this machine has no Tailscale address", async () => {
+    await openWithChoices([
+      { address: "127.0.0.1", iface: "lo0", kind: "loopback" },
+      { address: "192.168.100.69", iface: "en0", kind: "lan" },
+    ]);
+
+    expect(wifiRadio().checked).toBe(true);
+    expect(wifiRadio().value).toBe("192.168.100.69");
+  });
+
+  it("disables the Tailscale radio and explains why when this machine has no mesh address", async () => {
+    await openWithChoices([
+      { address: "127.0.0.1", iface: "lo0", kind: "loopback" },
+      { address: "192.168.100.69", iface: "en0", kind: "lan" },
+    ]);
+
+    expect(tailscaleRadio().disabled).toBe(true);
+    expect(text("settings-remote-tailscale-missing")).toBe(
+      MESSAGES.remoteTailscaleMissing(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("collapses everything else — loopback and Other… — behind Advanced…, closed while a primary is selected", async () => {
+    await open();
+
+    expect(advancedDetails().open).toBe(false);
+    const rest = [...advancedDetails().querySelectorAll(".settings-remote-choice")].map(
+      (label) => label.textContent,
+    );
+    expect(rest).toEqual([
+      `${MESSAGES.remoteBindChoiceLabel("loopback", "lo0", PRIMARY_LANGUAGE)}127.0.0.1`,
+      MESSAGES.remoteOtherAddress(PRIMARY_LANGUAGE),
+    ]);
+    expect(otherField().disabled).toBe(true);
+  });
+
+  it("bidi-isolates the OS-given interface name of a choice inside Advanced…", async () => {
+    await openWithChoices([
+      { address: "127.0.0.1", iface: "lo0", kind: "loopback" },
+      { address: "192.168.100.69", iface: "en0", kind: "lan" },
+      { address: "100.84.17.203", iface: "utun4", kind: "mesh" },
+      { address: "192.168.64.1", iface: "bridge0", kind: "lan" },
+    ]);
+
+    const restLabels = advancedDetails().querySelectorAll(".settings-remote-choice");
+    const bridgeLabel = restLabels[1];
+    const isolated = bridgeLabel?.querySelector('bdi, [dir="auto"]');
+    expect(isolated?.textContent).toBe("bridge0");
+  });
+
+  it("gives the Other… address field an accessible name of its own", async () => {
+    await open();
+
+    expect(otherField().getAttribute("aria-label")).toBe(
+      MESSAGES.remoteOtherAddress(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("keeps every shown address left-to-right, listed or typed", async () => {
+    await open();
+
+    const shown = document.querySelectorAll(
+      "#settings-remote-choices .settings-remote-choice .mono",
+    );
+    expect([...shown].every((element) => (element as HTMLElement).dir === "ltr")).toBe(true);
+    expect(otherField().dir).toBe("ltr");
+  });
+
+  it("saves the address picked", async () => {
+    const calls = await open();
+
+    const wifi = wifiRadio();
+    wifi.checked = true;
+    change(wifi);
+
+    expect((await save(calls)).remote.bindAddress).toBe("192.168.100.69");
+    expect(wifiRadio().checked).toBe(true);
+    expect(tailscaleRadio().checked).toBe(false);
+  });
+
+  it("shows a configured address this machine does not list under Other…, with Advanced… open", async () => {
+    await open(withRemote({ bindAddress: "10.1.2.3" }));
+
+    expect(advancedDetails().open).toBe(true);
+    expect(otherRadio().checked).toBe(true);
+    expect(otherField().value).toBe("10.1.2.3");
+    expect(otherField().disabled).toBe(false);
+    expect(tailscaleRadio().checked).toBe(false);
+    expect(wifiRadio().checked).toBe(false);
+  });
+
+  it("opens Advanced… with the matching rest choice selected, not Other…, when the saved address is loopback's literal on a machine with no Tailscale or Wi-Fi address", async () => {
+    await openWithChoices(
+      [{ address: "127.0.0.1", iface: "lo0", kind: "loopback" }],
+      withRemote({ bindAddress: "127.0.0.1" }),
+    );
+
+    expect(advancedDetails().open).toBe(true);
+    expect(otherRadio().checked).toBe(false);
+    const loopback = document.querySelector<HTMLInputElement>(
+      '#settings-remote-advanced input[value="127.0.0.1"]',
+    );
+    expect(loopback?.checked).toBe(true);
+  });
+
+  it("commits a typed address on change, never on input, and keeps Other… picked", async () => {
+    const calls = await open(withRemote({ bindAddress: "10.1.2.3" }));
+
+    const other = otherRadio();
+    other.checked = true;
+    change(other);
+    expect(otherRadio().checked).toBe(true);
+
+    const field = otherField();
+    field.value = "10.9.8.7";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    expect((await save(calls)).remote.bindAddress).toBe("10.1.2.3");
+
+    change(field);
+    expect((await save(calls)).remote.bindAddress).toBe("10.9.8.7");
+    expect(otherRadio().checked).toBe(true);
+  });
+
+  it("snaps the Other… field back to the saved address when emptied, like the port field", async () => {
+    const calls = await open();
+
+    const other = otherRadio();
+    other.checked = true;
+    change(other);
+
+    const field = otherField();
+    field.value = "10.9.8.7";
+    change(field);
+    expect((await save(calls)).remote.bindAddress).toBe("10.9.8.7");
+
+    field.value = "";
+    change(field);
+    expect(field.value).toBe("10.9.8.7");
+    expect((await save(calls)).remote.bindAddress).toBe("10.9.8.7");
+  });
+
+  it("keeps keyboard focus in the radio group across the rebuild a change triggers", async () => {
+    await open();
+
+    const [first, second] = radios();
+    if (first === undefined || second === undefined) throw new Error("need two radios");
+    const secondAddress = second.value;
+    first.focus();
+
+    second.checked = true;
+    change(second);
+
+    const rebuilt = radios().find((radio) => radio.value === secondAddress);
+    expect(document.activeElement).toBe(rebuilt);
+  });
+
+  // Task 4: idleDisableMinutes and push.includeProjectNames are now shown
+  // (settings-remote-idle, settings-remote-push-projects) — tls is the one
+  // that still isn't, so it carries the "the panel doesn't show it" case.
+  it("shows idle auto-disable and project-names on load, and round-trips both plus a still-unshown field through save", async () => {
+    const calls = await open(
+      withRemote({
+        idleDisableMinutes: 30,
+        push: { enabled: false, includeProjectNames: true },
+        tls: { certPath: "/c", keyPath: "/k" },
+      }),
+    );
+
+    expect((document.getElementById("settings-remote-idle") as HTMLInputElement).value).toBe("30");
+    expect(
+      (document.getElementById("settings-remote-push-projects") as HTMLInputElement).checked,
+    ).toBe(true);
+
+    // Change a field the panel does show, so the save is not a no-op.
+    const port = document.getElementById("settings-remote-port") as HTMLInputElement;
+    port.value = "8443";
+    change(port);
+
+    const saved = await save(calls);
+    expect(saved.remote.idleDisableMinutes).toBe(30);
+    expect(saved.remote.push.includeProjectNames).toBe(true);
+    expect(saved.remote.tls).toEqual({ certPath: "/c", keyPath: "/k" });
+  });
+
+  it("commits the idle minutes on change, ignores a non-numeric one, and never commits on input alone", async () => {
+    const calls = await open();
+    const idle = document.getElementById("settings-remote-idle") as HTMLInputElement;
+
+    // Typing without a change event (blur/Enter) must not touch the draft —
+    // the same discipline the bindAddress field's own test proves.
+    idle.value = "45";
+    idle.dispatchEvent(new Event("input", { bubbles: true }));
+    expect((await save(calls)).remote.idleDisableMinutes).toBe(0);
+
+    change(idle);
+    expect(idle.value).toBe("45");
+    expect((await save(calls)).remote.idleDisableMinutes).toBe(45);
+
+    idle.value = "abc";
+    change(idle);
+    expect(idle.value).toBe("45");
+    expect((await save(calls)).remote.idleDisableMinutes).toBe(45);
+  });
+
+  it("commits the project-names checkbox, independent of whether push itself is enabled", async () => {
+    const calls = await open();
+    const checkbox = document.getElementById("settings-remote-push-projects") as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+
+    checkbox.checked = true;
+    change(checkbox);
+
+    expect((await save(calls)).remote.push.includeProjectNames).toBe(true);
+  });
+
+  it("warns only for an address that listens on every interface, in any of its spellings", async () => {
+    await open();
+    expect((document.getElementById("settings-remote-all-note") as HTMLElement).hidden).toBe(true);
+
+    // net.isIP accepts every one of these as "every interface"; the renderer
+    // can't import node:net, so the normaliser must recognise each by hand.
+    // The last five are less common spellings of the same address (an
+    // embedded dotted quad, or the IPv4-mapped unspecified address written
+    // out in full) that a naive "0.0.0.0 or ::" check would miss.
+    for (const address of [
+      "0.0.0.0",
+      "::",
+      "::ffff:0.0.0.0",
+      "0:0:0:0:0:0:0:0",
+      "::0.0.0.0",
+      "0:0:0:0:0:0:0.0.0.0",
+      "::ffff:0:0",
+      "0:0:0:0:0:ffff:0.0.0.0",
+      "0::ffff:0.0.0.0",
+    ]) {
+      await open(withRemote({ bindAddress: address }));
+      const note = document.getElementById("settings-remote-all-note") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(MESSAGES.remoteAllInterfaces(PRIMARY_LANGUAGE));
+    }
+
+    // Non-zero controls: a real address must never trip the warning, even
+    // when it is IPv4-mapped, loopback, or shares a prefix with "::".
+    for (const address of [
+      "100.84.17.203",
+      "10.1.2.3",
+      "0.0.0.1",
+      "::ffff:0.0.0.1",
+      "::ffff:0:1",
+      "::1",
+      "1::",
+    ]) {
+      await open(withRemote({ bindAddress: address }));
+      expect((document.getElementById("settings-remote-all-note") as HTMLElement).hidden).toBe(
+        true,
+      );
+    }
+  });
+
+  it("commits a port as a number, and ignores a non-numeric one", async () => {
+    const calls = await open();
+
+    const port = document.getElementById("settings-remote-port") as HTMLInputElement;
+    port.value = "8443";
+    change(port);
+    port.value = "84x";
+    change(port);
+
+    expect(port.value).toBe("8443");
+    expect((await save(calls)).remote.port).toBe(8443);
+  });
+
+  it("saves it turned on, with the proxy and push notifications", async () => {
+    const calls = await open();
+
+    for (const id of ["settings-remote-enabled", "settings-remote-proxy", "settings-remote-push"]) {
+      const toggle = document.getElementById(id) as HTMLInputElement;
+      toggle.checked = true;
+      change(toggle);
+    }
+
+    expect(text("settings-remote-state")).toBe(MESSAGES.remoteState(true, PRIMARY_LANGUAGE));
+    const saved = await save(calls);
+    expect(saved.remote.enabled).toBe(true);
+    expect(saved.remote.sidecarProxy).toBe(true);
+    expect(saved.remote.push.enabled).toBe(true);
+  });
+
+  it("shows the pairing area disabled while remote access is off, and says why", async () => {
+    await open();
+
+    expect(text("settings-remote-pair-title")).toBe(MESSAGES.remotePairTitle(PRIMARY_LANGUAGE));
+    const button = document.getElementById("settings-remote-new-code") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe(MESSAGES.remoteNewCode(PRIMARY_LANGUAGE));
+    expect(text("settings-remote-pair-note")).toBe(MESSAGES.remotePairSaveFirst(PRIMARY_LANGUAGE));
+  });
+
+  function statusOf(patch: Partial<Parameters<typeof withStatus>[0]>) {
+    return withStatus(patch);
+  }
+
+  function withStatus(patch: {
+    enabled?: boolean;
+    problem?:
+      | "bad-address"
+      | "listen-failed"
+      | "certificate-failed"
+      | "devices-unreadable"
+      | "devices-write-failed";
+    pairing?:
+      | { kind: "closed" }
+      | { kind: "open"; uri: string; expiresAt: number }
+      | {
+          kind: "confirming";
+          requestId: string;
+          deviceName: string;
+          address: string;
+          expiresAt: number;
+        };
+    devices?: {
+      id: string;
+      name: string;
+      pairedAt: number;
+      lastSeenAt: number | undefined;
+      connected: boolean;
+      push?: "ios" | "android";
+    }[];
+    listening?: {
+      host: string;
+      port: number;
+      fingerprint: string;
+      certificate: { source: "self-signed" | "configured"; hostname: string | undefined };
+    };
+    sidecarProxy?: "off" | "needs-certificate" | "on";
+    idle?:
+      | { kind: "armed"; disableAt: number }
+      | { kind: "disabled"; at: number; afterMinutes: number };
+  }) {
+    return {
+      enabled: patch.enabled ?? true,
+      listening: patch.listening,
+      pairing: patch.pairing ?? { kind: "closed" as const },
+      devices: patch.devices ?? [],
+      problem: patch.problem,
+      sidecarProxy: patch.sidecarProxy ?? ("off" as const),
+      idle: patch.idle,
+    };
+  }
+
+  async function openWithStatus(status: ReturnType<typeof withStatus>): Promise<Recorded[]> {
+    const config = sample();
+    const { calls } = harness(config);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(status);
+    initSettings();
+    await openSettings();
+    await settle();
+    return calls;
+  }
+
+  it("enables New code once remote access is enabled and pairing is closed", async () => {
+    await openWithStatus(statusOf({ enabled: true, pairing: { kind: "closed" } }));
+    const button = document.getElementById("settings-remote-new-code") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("keeps New code disabled while devices.json is unreadable, even when enabled", async () => {
+    await openWithStatus(
+      statusOf({ enabled: true, problem: "devices-unreadable", pairing: { kind: "closed" } }),
+    );
+    const button = document.getElementById("settings-remote-new-code") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("clicking New code calls openRemotePairing, and shows a failure's text in the note", async () => {
+    const config = sample();
+    const { calls } = harness(config);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(statusOf({ enabled: true, pairing: { kind: "closed" } }));
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["openRemotePairing"] = (
+      ...args: unknown[]
+    ) => {
+      calls.push({ call: "openRemotePairing", args });
+      return Promise.resolve({ ok: false, text: "T" });
+    };
+    initSettings();
+    await openSettings();
+    await settle();
+
+    document.getElementById("settings-remote-new-code")?.dispatchEvent(new Event("click"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls.some((entry) => entry.call === "openRemotePairing")).toBe(true);
+    expect(text("settings-remote-pair-note")).toBe("T");
+  });
+
+  it("shows the pairing link and a counting-down expiry while a pairing window is open", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      await openWithStatus(
+        statusOf({
+          enabled: true,
+          pairing: { kind: "open", uri: "jarvis-pair://x", expiresAt: now + 120_000 },
+        }),
+      );
+      expect(text("settings-remote-pair-code")).toBe("jarvis-pair://x");
+      expect(text("settings-remote-pair-expiry")).toBe(
+        MESSAGES.remotePairExpires(120, PRIMARY_LANGUAGE),
+      );
+      const cancel = document.getElementById("settings-remote-pair-cancel") as HTMLButtonElement;
+      expect(cancel.hidden).toBe(false);
+
+      vi.advanceTimersByTime(1000);
+      expect(text("settings-remote-pair-expiry")).toBe(
+        MESSAGES.remotePairExpires(119, PRIMARY_LANGUAGE),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("draws the QR from exactly the pairing link, and shows the canvas, while a pairing window is open", async () => {
+    const now = Date.now();
+    vi.mocked(encodeQr).mockClear();
+    vi.mocked(qrToCanvas).mockClear();
+
+    await openWithStatus(
+      statusOf({
+        enabled: true,
+        pairing: { kind: "open", uri: "jarvis-pair://x", expiresAt: now + 120_000 },
+      }),
+    );
+
+    expect(encodeQr).toHaveBeenCalledWith("jarvis-pair://x");
+    expect(qrToCanvas).toHaveBeenCalledTimes(1);
+    const canvas = document.getElementById("remote-pair-qr") as HTMLCanvasElement;
+    expect(canvas.hidden).toBe(false);
+    // The link text stays beside it — unchanged by this task (M4 ruling 34).
+    expect(text("settings-remote-pair-code")).toBe("jarvis-pair://x");
+  });
+
+  it("clears and hides the QR canvas when there is no pairing link", async () => {
+    const clearRect = vi.fn();
+    qrCanvasGetContext.mockReturnValueOnce({ clearRect } as unknown as CanvasRenderingContext2D);
+
+    await openWithStatus(statusOf({ enabled: true, pairing: { kind: "closed" } }));
+
+    expect(clearRect).toHaveBeenCalled();
+    const canvas = document.getElementById("remote-pair-qr") as HTMLCanvasElement;
+    expect(canvas.hidden).toBe(true);
+  });
+
+  it("shows the pairing link's certificate fingerprint tail beside the QR, matching the phone's fingerprintTail", async () => {
+    const now = Date.now();
+    const fingerprint = `${"a".repeat(60)}beef`;
+    const uri = `jarvis://pair?v=1&host=127.0.0.1&port=7717&secret=${"s".repeat(43)}&fp=${fingerprint}`;
+
+    await openWithStatus(
+      statusOf({
+        enabled: true,
+        pairing: { kind: "open", uri, expiresAt: now + 120_000 },
+      }),
+    );
+
+    // Same computation as apps/mobile/src/lib/pair-flow.ts's
+    // fingerprintTail (fingerprint.slice(-4)): this checks the desktop
+    // shows the *same* tail for the *same* fingerprint the phone's
+    // confirm step would show, not merely "some 4 characters".
+    const expectedTail = fingerprint.slice(-4);
+    expect(expectedTail).toBe("beef");
+    expect(text("settings-remote-pair-fingerprint")).toBe(
+      MESSAGES.remotePairFingerprintTail(expectedTail, PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("clears the fingerprint tail when there is no pairing link", async () => {
+    await openWithStatus(statusOf({ enabled: true, pairing: { kind: "closed" } }));
+    expect(text("settings-remote-pair-fingerprint")).toBe("");
+  });
+
+  it("clears the pairing code and expiry, and stops the interval, on a closed status", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const config = sample();
+      const { calls } = harness(config);
+      let status: ReturnType<typeof withStatus> = statusOf({
+        enabled: true,
+        pairing: { kind: "open", uri: "jarvis-pair://x", expiresAt: now + 120_000 },
+      });
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(status);
+      initSettings();
+      await openSettings();
+      await settle();
+      expect(text("settings-remote-pair-code")).toBe("jarvis-pair://x");
+
+      const clearSpy = vi.spyOn(globalThis, "clearInterval");
+      status = statusOf({ enabled: true, pairing: { kind: "closed" } });
+      // A second visit to the route re-pulls remoteStatus() (openSettings'
+      // own refresh) and re-renders the pair area from the new value —
+      // exactly what happens if the window was paired/expired elsewhere and
+      // the user comes back to Settings.
+      await openSettings();
+      await settle();
+
+      expect(text("settings-remote-pair-code")).toBe("");
+      expect(text("settings-remote-pair-expiry")).toBe("");
+      expect(
+        (document.getElementById("settings-remote-pair-cancel") as HTMLButtonElement).hidden,
+      ).toBe(true);
+      expect(clearSpy).toHaveBeenCalled();
+
+      // The interval really did stop, not just get cleared once and
+      // silently rescheduled: nothing repopulates the expiry text.
+      vi.advanceTimersByTime(2000);
+      expect(text("settings-remote-pair-expiry")).toBe("");
+
+      void calls;
+      clearSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-renders the pair area and device list from an onRemoteStatusChange push while Settings is open", async () => {
+    const config = sample();
+    harness(config);
+    // initRemoteStatus (app.ts's real caller of this push path) also wires
+    // the topbar pill and the confirmation dialog — neither exists in this
+    // route's own harness, so they're laid down minimally here too.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<button id="nav-settings"></button>
+       <button id="remote-pill" hidden><span id="remote-pill-text"></span></button>
+       <div id="remote-confirm" hidden>
+         <div id="remote-confirm-title"></div>
+         <div id="remote-confirm-body"></div>
+         <div id="remote-confirm-from"></div>
+         <button id="remote-confirm-approve"></button>
+         <button id="remote-confirm-deny"></button>
+       </div>`,
+    );
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(statusOf({ enabled: true, pairing: { kind: "closed" } }));
+    initSettings();
+    await openSettings();
+    await settle();
+    expect(text("settings-remote-devices")).toBe(MESSAGES.remoteNoDevices(PRIMARY_LANGUAGE));
+
+    // Settings' own initSettings already subscribed onRemoteStatusChange;
+    // driving a push through initRemoteStatus (app.ts's real entry point)
+    // exercises that same subscription end to end, rather than reaching
+    // into settings.ts's internals.
+    const { initRemoteStatus } = await import("./remote-status.js");
+    let pushed: ((status: ReturnType<typeof statusOf>) => void) | undefined;
+    initRemoteStatus({
+      remoteStatus: () => Promise.resolve(statusOf({ enabled: true })),
+      onRemoteStatus: (cb: (status: ReturnType<typeof statusOf>) => void) => {
+        pushed = cb;
+      },
+      decideRemotePairing: () => Promise.resolve(),
+    });
+    await settle();
+
+    pushed?.(
+      statusOf({
+        enabled: true,
+        devices: [
+          { id: "d1", name: "Pushed phone", pairedAt: 0, lastSeenAt: undefined, connected: true },
+        ],
+      }),
+    );
+
+    expect(text("settings-remote-devices")).toContain("Pushed phone");
+  });
+
+  it("lists no paired devices, and says so", async () => {
+    await open();
+
+    expect(text("settings-remote-devices-title")).toBe(
+      MESSAGES.remoteDevicesTitle(PRIMARY_LANGUAGE),
+    );
+    expect(text("settings-remote-devices")).toBe(MESSAGES.remoteNoDevices(PRIMARY_LANGUAGE));
+  });
+
+  it("lists two devices as two rows, and revoking the second calls revokeRemoteDevice with its id", async () => {
+    const config = sample();
+    const { calls } = harness(config);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(
+        statusOf({
+          enabled: true,
+          devices: [
+            { id: "d1", name: "<img src=x>", pairedAt: 0, lastSeenAt: undefined, connected: true },
+            { id: "d2", name: "Ali's iPhone", pairedAt: 0, lastSeenAt: 1000, connected: false },
+          ],
+        }),
+      );
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["revokeRemoteDevice"] = (
+      ...args: unknown[]
+    ) => {
+      calls.push({ call: "revokeRemoteDevice", args });
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const rows = document.querySelectorAll("#settings-remote-devices .settings-row");
+    expect(rows).toHaveLength(2);
+    // The name is never innerHTML'd: a device can name itself anything.
+    expect(rows[0]?.querySelector("img")).toBeNull();
+    expect(rows[0]?.textContent).toContain("<img src=x>");
+
+    const revokeButtons = document.querySelectorAll<HTMLButtonElement>(
+      "#settings-remote-devices .settings-add",
+    );
+    expect(revokeButtons).toHaveLength(2);
+    revokeButtons[1]?.click();
+    await Promise.resolve();
+
+    expect(calls.find((entry) => entry.call === "revokeRemoteDevice")?.args).toEqual(["d2"]);
+  });
+
+  it("disables the Revoke button for the round trip, and shows an ok:false failure's text in the row", async () => {
+    const config = sample();
+    harness(config);
+    let resolveRevoke: ((value: { ok: boolean; text?: string }) => void) | undefined;
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(
+        statusOf({
+          enabled: true,
+          devices: [
+            { id: "d1", name: "Ali's iPhone", pairedAt: 0, lastSeenAt: undefined, connected: true },
+          ],
+        }),
+      );
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["revokeRemoteDevice"] = () =>
+      new Promise((resolve) => {
+        resolveRevoke = resolve;
+      });
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const revoke = document.querySelector<HTMLButtonElement>(
+      "#settings-remote-devices .settings-add",
+    );
+    if (revoke === null) throw new Error("no revoke button");
+    revoke.click();
+    expect(revoke.disabled).toBe(true);
+
+    resolveRevoke?.({ ok: false, text: "T" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(revoke.disabled).toBe(false);
+    expect(document.querySelector("#settings-remote-devices .settings-row")?.textContent).toContain(
+      "T",
+    );
+  });
+
+  it("shows a problem note, hidden when there is none", async () => {
+    const config = sample();
+    harness(config);
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+      Promise.resolve(statusOf({ enabled: true, problem: "devices-unreadable" }));
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const problem = document.getElementById("settings-remote-problem") as HTMLElement;
+    expect(problem.hidden).toBe(false);
+    expect(problem.textContent).toBe(
+      MESSAGES.remoteProblem("devices-unreadable", PRIMARY_LANGUAGE),
+    );
+  });
+
+  describe("the certificate note (Task 4 rule 5)", () => {
+    it("shows nothing while not listening", async () => {
+      await openWithStatus(statusOf({}));
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(true);
+      expect(note.textContent).toBe("");
+    });
+
+    // Review round 1, Important #1: the bridge reports "needs-certificate"
+    // for the whole time the proxy toggle is on and the bridge simply is
+    // not listening yet (disabled, or enabled with zero paired devices) —
+    // not only for a live self-signed/no-SAN certificate. Before the fix
+    // this rendered "the certificate is self-signed or has no DNS name"
+    // about a certificate nobody was serving; `listening === undefined`
+    // must win first and hide the note instead.
+    it("shows nothing while not listening, even when status.sidecarProxy is needs-certificate", async () => {
+      await openWithStatus(statusOf({ sidecarProxy: "needs-certificate" }));
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(true);
+      expect(note.textContent).toBe("");
+    });
+
+    it("shows the real-certificate line for a configured certificate with a DNS name", async () => {
+      await openWithStatus(
+        statusOf({
+          sidecarProxy: "on",
+          listening: {
+            host: "127.0.0.1",
+            port: 7717,
+            fingerprint: "ab",
+            certificate: { source: "configured", hostname: "mac.tail.ts.net" },
+          },
+        }),
+      );
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(
+        MESSAGES.remoteCertificateReal("mac.tail.ts.net", PRIMARY_LANGUAGE),
+      );
+      expect(note.className).not.toContain("settings-note--warning");
+    });
+
+    it("shows the self-signed line while listening on a self-signed certificate and the proxy is off", async () => {
+      await openWithStatus(
+        statusOf({
+          listening: {
+            host: "127.0.0.1",
+            port: 7717,
+            fingerprint: "ab",
+            certificate: { source: "self-signed", hostname: undefined },
+          },
+        }),
+      );
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(MESSAGES.remoteCertificateSelfSigned(PRIMARY_LANGUAGE));
+    });
+
+    // M5: rule 5 routes a *configured* certificate with no DNS SAN to the
+    // same self-signed line as an actually self-signed one — "real" means
+    // both configured AND carrying a hostname.
+    it("shows the self-signed line for a configured certificate with no DNS name", async () => {
+      await openWithStatus(
+        statusOf({
+          listening: {
+            host: "127.0.0.1",
+            port: 7717,
+            fingerprint: "ab",
+            certificate: { source: "configured", hostname: undefined },
+          },
+        }),
+      );
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(MESSAGES.remoteCertificateSelfSigned(PRIMARY_LANGUAGE));
+    });
+
+    it("shows the needs-certificate warning only when status.sidecarProxy is needs-certificate", async () => {
+      await openWithStatus(
+        statusOf({
+          sidecarProxy: "needs-certificate",
+          listening: {
+            host: "127.0.0.1",
+            port: 7717,
+            fingerprint: "ab",
+            certificate: { source: "self-signed", hostname: undefined },
+          },
+        }),
+      );
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(MESSAGES.remoteProxyNeedsCertificate(PRIMARY_LANGUAGE));
+      expect(note.className).toContain("settings-note--warning");
+    });
+
+    // M4: the bracketed claim this test used to carry ("render the warning
+    // from the toggle/draft instead of status.sidecarProxy") was not
+    // exercised by any test — `sample()`'s draft always has the toggle off.
+    // This is that actual case: the draft's toggle is on (an unsaved
+    // change, or one the bridge hasn't caught up to yet) but the bridge's
+    // own status says the proxy is off — status must win, both for the
+    // warning (none shown) and for which certificate line is shown.
+    it("renders from status, not the draft's toggle, when the two disagree", async () => {
+      const config = sample();
+      config.remote = { ...config.remote, sidecarProxy: true };
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(
+          statusOf({
+            sidecarProxy: "off",
+            listening: {
+              host: "127.0.0.1",
+              port: 7717,
+              fingerprint: "ab",
+              certificate: { source: "self-signed", hostname: undefined },
+            },
+          }),
+        );
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const note = document.getElementById("settings-remote-certificate") as HTMLElement;
+      expect(note.hidden).toBe(false);
+      expect(note.textContent).toBe(MESSAGES.remoteCertificateSelfSigned(PRIMARY_LANGUAGE));
+      expect(note.className).not.toContain("settings-note--warning");
+    });
+  });
+
+  describe("the Tailscale certificate row", () => {
+    function els() {
+      return {
+        status: document.getElementById("settings-remote-cert-status") as HTMLElement,
+        button: document.getElementById("settings-remote-cert-button") as HTMLButtonElement,
+        error: document.getElementById("settings-remote-cert-error") as HTMLElement,
+        hint: document.getElementById("settings-remote-cert-hint") as HTMLElement,
+      };
+    }
+
+    it("no certificate: 'Certificate: none' and the Get button", async () => {
+      const config = withRemote({ tls: {} });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const { status, button } = els();
+      expect(status.textContent).toBe(MESSAGES.remoteCertNone(PRIMARY_LANGUAGE));
+      expect(button.textContent).toBe(MESSAGES.remoteCertGetButton(PRIMARY_LANGUAGE));
+    });
+
+    it("a certificate this app issued (under .../tls/<name>.crt): names it, and shows Renew", async () => {
+      const config = withRemote({
+        tls: {
+          certPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.crt",
+          keyPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.key",
+        },
+      });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const { status, button } = els();
+      expect(status.textContent).toBe(
+        MESSAGES.remoteCertNamed("m1.tailnet.ts.net", PRIMARY_LANGUAGE),
+      );
+      expect(button.textContent).toBe(MESSAGES.remoteCertRenewButton(PRIMARY_LANGUAGE));
+    });
+
+    it("a hand-configured certificate elsewhere: shows the raw path, and Renew", async () => {
+      const config = withRemote({
+        tls: { certPath: "/etc/ssl/mac.crt", keyPath: "/etc/ssl/mac.key" },
+      });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const { status, button } = els();
+      expect(status.textContent).toBe(
+        MESSAGES.remoteCertPath("/etc/ssl/mac.crt", PRIMARY_LANGUAGE),
+      );
+      expect(button.textContent).toBe(MESSAGES.remoteCertRenewButton(PRIMARY_LANGUAGE));
+    });
+
+    it("hints to get a certificate when bindAddress is a Tailscale address and none is configured", async () => {
+      const config = withRemote({ bindAddress: "100.84.17.203", tls: {} });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const { hint } = els();
+      expect(hint.hidden).toBe(false);
+      expect(hint.textContent).toBe(MESSAGES.remoteCertHint(PRIMARY_LANGUAGE));
+    });
+
+    it("no hint on a Tailscale address once a certificate is configured", async () => {
+      const config = withRemote({
+        bindAddress: "100.84.17.203",
+        tls: { certPath: "/etc/ssl/mac.crt", keyPath: "/etc/ssl/mac.key" },
+      });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      expect(els().hint.hidden).toBe(true);
+    });
+
+    it("no hint on a non-Tailscale address, even with no certificate", async () => {
+      const config = withRemote({ bindAddress: "192.168.1.20", tls: {} });
+      harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      expect(els().hint.hidden).toBe(true);
+    });
+
+    it("clicking Get: busy state, then a reloaded settings on success — status and the sidecar-proxy switch update", async () => {
+      const config = withRemote({ tls: {}, sidecarProxy: false });
+      const { calls } = harness(config);
+      const reloaded = withRemote({
+        tls: {
+          certPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.crt",
+          keyPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.key",
+        },
+        sidecarProxy: true,
+      });
+      let getSettingsCalls = 0;
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["getSettings"] = () => {
+        getSettingsCalls += 1;
+        return Promise.resolve(getSettingsCalls === 1 ? config : reloaded);
+      };
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const { button, status } = els();
+      button.click();
+      // Busy immediately, before the promise resolves.
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe(MESSAGES.remoteCertBusy("get", PRIMARY_LANGUAGE));
+
+      await settle();
+
+      expect(calls.some((c) => c.call === "tailscaleCert")).toBe(true);
+      expect(getSettingsCalls).toBe(2);
+      expect(status.textContent).toBe(
+        MESSAGES.remoteCertNamed("m1.tailnet.ts.net", PRIMARY_LANGUAGE),
+      );
+      expect(button.textContent).toBe(MESSAGES.remoteCertRenewButton(PRIMARY_LANGUAGE));
+      expect(button.disabled).toBe(false);
+      expect((document.getElementById("settings-remote-proxy") as HTMLInputElement).checked).toBe(
+        true,
+      );
+    });
+
+    it("clicking Renew calls the same channel as Get (no argument selects which)", async () => {
+      const config = withRemote({
+        tls: { certPath: "/etc/ssl/mac.crt", keyPath: "/etc/ssl/mac.key" },
+      });
+      const { calls } = harness(config);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+
+      const call = calls.find((c) => c.call === "tailscaleCert");
+      expect(call?.args).toEqual([]);
+    });
+
+    it("no-tailscale: shows 'Install Tailscale on this Mac', button re-enabled and unchanged", async () => {
+      const config = withRemote({ tls: {} });
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["tailscaleCert"] = () =>
+        Promise.resolve({ ok: false, kind: "no-tailscale", detail: "not installed" });
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+
+      const { status, button, error } = els();
+      expect(error.hidden).toBe(false);
+      expect(error.textContent).toBe(MESSAGES.remoteCertNoTailscale(PRIMARY_LANGUAGE));
+      expect(button.disabled).toBe(false);
+      expect(button.textContent).toBe(MESSAGES.remoteCertGetButton(PRIMARY_LANGUAGE));
+      expect(status.textContent).toBe(MESSAGES.remoteCertNone(PRIMARY_LANGUAGE));
+    });
+
+    it("not-connected: shows 'Connect Tailscale first'", async () => {
+      const config = withRemote({ tls: {} });
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["tailscaleCert"] = () =>
+        Promise.resolve({ ok: false, kind: "not-connected", detail: "stopped" });
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+
+      expect(els().error.textContent).toBe(MESSAGES.remoteCertNotConnected(PRIMARY_LANGUAGE));
+    });
+
+    it("failed: shows the generic text plus the CLI's own detail", async () => {
+      const config = withRemote({ tls: {} });
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["tailscaleCert"] = () =>
+        Promise.resolve({ ok: false, kind: "failed", detail: "some CLI error" });
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+
+      expect(els().error.textContent).toBe(
+        `${MESSAGES.remoteCertFailed(PRIMARY_LANGUAGE)} some CLI error`,
+      );
+    });
+
+    it("https-disabled: renders a clickable link that opens the Tailscale admin console through openTab, never window.open", async () => {
+      const config = withRemote({ tls: {} });
+      const { calls } = harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["tailscaleCert"] = () =>
+        Promise.resolve({ ok: false, kind: "https-disabled", detail: "does not support…" });
+      const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+
+      const { error } = els();
+      expect(error.hidden).toBe(false);
+      const parts = MESSAGES.remoteCertHttpsDisabled(PRIMARY_LANGUAGE);
+      expect(error.textContent).toBe(`${parts.before}${parts.link}${parts.after}`);
+      const link = error.querySelector(".settings-link-button") as HTMLButtonElement;
+      expect(link).not.toBeNull();
+      expect(link.tagName).toBe("BUTTON");
+      expect(link.textContent).toBe(parts.link);
+
+      link.click();
+      await settle();
+
+      expect(windowOpen).not.toHaveBeenCalled();
+      const openTabCall = calls.find((c) => c.call === "openTab");
+      expect(openTabCall?.args).toEqual([
+        PERSONAL_PROJECT,
+        "https://login.tailscale.com/admin/dns",
+      ]);
+      windowOpen.mockRestore();
+    });
+
+    it("a stale error clears on the next click", async () => {
+      const config = withRemote({ tls: {} });
+      harness(config);
+      let first = true;
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["tailscaleCert"] = () => {
+        const outcome = first
+          ? { ok: false, kind: "no-tailscale", detail: "x" }
+          : {
+              ok: true,
+              certPath: "/x/.config/jarvis/tls/m.crt",
+              keyPath: "/x/.config/jarvis/tls/m.key",
+              name: "m",
+            };
+        first = false;
+        return Promise.resolve(outcome);
+      };
+      initSettings();
+      await openSettings();
+      await settle();
+
+      els().button.click();
+      await settle();
+      expect(els().error.hidden).toBe(false);
+
+      els().button.click();
+      // Cleared synchronously, before the second call resolves.
+      expect(els().error.hidden).toBe(true);
+      await settle();
+    });
+  });
+
+  describe("the idle auto-disable state line (Task 4 rule 4)", () => {
+    it("hides the line when status.idle is undefined", async () => {
+      await openWithStatus(statusOf({ enabled: true }));
+      const state = document.getElementById("settings-remote-idle-state") as HTMLElement;
+      expect(state.hidden).toBe(true);
+      expect(state.textContent).toBe("");
+    });
+
+    it("shows the armed line with the formatted disable time", async () => {
+      const disableAt = Date.UTC(2026, 0, 1, 12, 0, 0);
+      await openWithStatus(statusOf({ enabled: true, idle: { kind: "armed", disableAt } }));
+      const state = document.getElementById("settings-remote-idle-state") as HTMLElement;
+      expect(state.hidden).toBe(false);
+      expect(state.textContent).toBe(MESSAGES.remoteIdleArmed(disableAt, PRIMARY_LANGUAGE));
+    });
+
+    // Ruling 5 [bite-proof: skip the draft flip; a subsequent save writes
+    // `enabled: true`]: the bridge already closed its own listener before
+    // this status arrived, so the panel must catch the draft — and the
+    // switch the user sees — up to that fact, not just describe it in a note.
+    it("shows the disabled line and flips the draft's enabled switch off when the draft still says on", async () => {
+      const at = Date.UTC(2026, 0, 1, 12, 0, 0);
+      const config = withRemote({ enabled: true });
+      const { calls } = harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(
+          statusOf({ enabled: true, idle: { kind: "disabled", at, afterMinutes: 30 } }),
+        );
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const enabledCheckbox = document.getElementById(
+        "settings-remote-enabled",
+      ) as HTMLInputElement;
+      expect(enabledCheckbox.checked).toBe(false);
+      expect(text("settings-remote-state")).toBe(MESSAGES.remoteState(false, PRIMARY_LANGUAGE));
+      const state = document.getElementById("settings-remote-idle-state") as HTMLElement;
+      expect(state.hidden).toBe(false);
+      expect(state.textContent).toBe(MESSAGES.remoteIdleDisabled(at, 30, PRIMARY_LANGUAGE));
+
+      // The flip reached the draft, not only the checkbox on screen — a
+      // save now really writes enabled: false.
+      expect((await save(calls)).remote.enabled).toBe(false);
+    });
+
+    it("makes no change and does not loop when the draft is already off", async () => {
+      const at = Date.UTC(2026, 0, 1, 12, 0, 0);
+      const config = withRemote({ enabled: false });
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(
+          statusOf({ enabled: false, idle: { kind: "disabled", at, afterMinutes: 30 } }),
+        );
+      initSettings();
+      await openSettings();
+      await settle();
+
+      // A runaway re-render loop would call renderRemotePairArea (and so
+      // $("settings-remote-idle-state")) far more than the small, fixed
+      // number of times a single openSettings() legitimately does (once
+      // from renderSettings, once from the post-refresh re-render).
+      const getSpy = vi.spyOn(document, "getElementById");
+      await openSettings();
+      await settle();
+      const idleStateReads = getSpy.mock.calls.filter(
+        ([id]) => id === "settings-remote-idle-state",
+      ).length;
+      getSpy.mockRestore();
+
+      expect(idleStateReads).toBeGreaterThan(0);
+      expect(idleStateReads).toBeLessThan(10);
+      const enabledCheckbox = document.getElementById(
+        "settings-remote-enabled",
+      ) as HTMLInputElement;
+      expect(enabledCheckbox.checked).toBe(false);
+    });
+  });
+
+  describe("a device's push status (ruling h)", () => {
+    it("shows a third note naming the platform when the device has registered for push", async () => {
+      const config = sample();
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(
+          statusOf({
+            enabled: true,
+            devices: [
+              {
+                id: "d1",
+                name: "Ali's iPhone",
+                pairedAt: 0,
+                lastSeenAt: undefined,
+                connected: true,
+                push: "ios",
+              },
+            ],
+          }),
+        );
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const row = document.querySelector("#settings-remote-devices .settings-row");
+      expect(row?.textContent).toContain(MESSAGES.remoteDevicePush("ios", PRIMARY_LANGUAGE));
+    });
+
+    it("adds no node at all for a device with no push registration", async () => {
+      const config = sample();
+      harness(config);
+      (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteStatus"] = () =>
+        Promise.resolve(
+          statusOf({
+            enabled: true,
+            devices: [
+              {
+                id: "d1",
+                name: "Ali's iPhone",
+                pairedAt: 0,
+                lastSeenAt: undefined,
+                connected: true,
+              },
+            ],
+          }),
+        );
+      initSettings();
+      await openSettings();
+      await settle();
+
+      const row = document.querySelector("#settings-remote-devices .settings-row");
+      // name, state, revoke, failure — the same count as before this task,
+      // not the 5 a push-registered device's row has.
+      expect(row?.children).toHaveLength(4);
+    });
+  });
+
+  it("keeps focus in the Other… field across a bind-choices rebuild (Minor A)", async () => {
+    await open();
+    otherRadio().checked = true;
+    change(otherRadio());
+    otherField().focus();
+    expect(document.activeElement).toBe(otherField());
+
+    // Typing a new address commits on "change" and rebuilds the whole
+    // group from scratch — before the fix, that rebuild always snapped
+    // focus onto the checked *radio*, even though it started in this field.
+    otherField().value = "10.0.0.9";
+    change(otherField());
+
+    expect(document.activeElement).toBe(otherField());
+  });
+
+  it("carries the warning and the no-credential line", async () => {
+    await open();
+
+    expect(text("settings-remote-warning")).toBe(MESSAGES.remoteWarning(PRIMARY_LANGUAGE));
+    expect(text("settings-remote-no-credential")).toBe(
+      MESSAGES.remoteNoCredential(PRIMARY_LANGUAGE),
+    );
+    expect(text("settings-remote-title")).toBe(MESSAGES.remoteTitle(PRIMARY_LANGUAGE));
+  });
+
+  it("still renders when the address listing fails, with the configured address under Other…", async () => {
+    harness();
+    initSettings();
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["remoteBindChoices"] = () =>
+      Promise.reject(new Error("no listing"));
+    await openSettings();
+    await settle();
+
+    // Tailscale, Local Wi-Fi (both disabled — the list is empty) and Other….
+    expect(radios()).toHaveLength(3);
+    expect(tailscaleRadio().disabled).toBe(true);
+    expect(wifiRadio().disabled).toBe(true);
+    expect(otherRadio().checked).toBe(true);
+    expect(otherField().value).toBe("127.0.0.1");
+  });
+
+  // The thing that matters end to end: what the panel saves, parseConfig loads.
+  it("saves a draft parseConfig accepts", async () => {
+    const calls = await open();
+    const lan = radios().find((radio) => radio.value === "192.168.100.69");
+    if (lan === undefined) throw new Error("no lan radio");
+    lan.checked = true;
+    change(lan);
+
+    const saved = await save(calls);
+    const reparsed = parseConfig({
+      agents: saved.registry.agents,
+      brain: { cwd: saved.brain.cwd },
+      remote: saved.remote,
+    });
+    expect(reparsed.remote.bindAddress).toBe("192.168.100.69");
+  });
+
+  // Task 1 review requirement: toRawConfig treats a draft missing `remote`
+  // as default, so a save that silently dropped the key would erase a
+  // hand-written remote: section. The draft must carry it through untouched.
+  it("carries a hand-written remote section through an unrelated field's save", async () => {
+    const calls = await open(withRemote({ port: 8443 }));
+
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    cwd.value = "/new/cwd";
+    change(cwd);
+
+    expect((await save(calls)).remote.port).toBe(8443);
   });
 });

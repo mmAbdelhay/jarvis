@@ -12,7 +12,7 @@ describe("popup windows", () => {
   // after every sign-in popup.
   it("are not children of the main window", () => {
     const start = source.indexOf("const popupPolicy");
-    const end = source.indexOf("return (partition)");
+    const end = source.indexOf("return (partition, kind)");
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(source.slice(start, end)).not.toMatch(/\bparent\s*:/);

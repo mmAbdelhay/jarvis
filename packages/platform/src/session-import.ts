@@ -427,6 +427,22 @@ export type SessionImporter = {
   start(): Promise<number>;
   /** Closes every watcher — called on app quit. */
   stop(): void;
+  /**
+   * The most recently active transcript for `agentId` whose `cwd` field
+   * equals `cwd` exactly (equality, not `resolveProject`'s prefix match —
+   * this identifies one running process's own directory, not a project it
+   * happens to sit inside), or null when none is found.
+   *
+   * For the process scan (process-scan.ts): a process running outside
+   * Jarvis is found by pid, which no transcript carries, so this is the
+   * only link back to its conversation. Never bounded by
+   * `importWindowDays` — a process still running is worth a transcript
+   * however old the file, unlike backfill()'s own history import.
+   */
+  latestTranscriptFor(
+    agentId: string,
+    cwd: string,
+  ): Promise<{ session: TranscriptSession; path: string } | null>;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -571,6 +587,39 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     stop() {
       for (const watcher of watchers) watcher.close();
       watchers.length = 0;
+    },
+
+    async latestTranscriptFor(agentId, cwd) {
+      const entry = dirs.find((candidate) => candidate.agentId === agentId);
+      if (entry === undefined) return null;
+
+      let files: TranscriptFile[];
+      try {
+        files = await deps.listFiles(entry.dir, entry.format);
+      } catch {
+        return null;
+      }
+
+      const wanted = entry.format === "claude" ? ".jsonl" : "workspace.yaml";
+      let best: { session: TranscriptSession; path: string } | null = null;
+      for (const file of files) {
+        if (!file.path.endsWith(wanted)) continue;
+        let head: string;
+        try {
+          head = await deps.readHead(file.path);
+        } catch {
+          continue;
+        }
+        const session =
+          entry.format === "claude"
+            ? sessionFromTranscript(head, file.path, file.mtime)
+            : sessionFromCopilotWorkspace(head, file.path);
+        if (session === null || session.cwd !== cwd) continue;
+        if (best === null || session.lastActivityAt > best.session.lastActivityAt) {
+          best = { session, path: file.path };
+        }
+      }
+      return best;
     },
   };
 }
