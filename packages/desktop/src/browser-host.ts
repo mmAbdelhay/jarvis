@@ -82,7 +82,7 @@ export type HostedView = {
   requestPictureInPicture(): void;
 };
 
-export type ViewFactory = (partition: string) => HostedView;
+export type ViewFactory = (partition: string, kind: TabKind) => HostedView;
 
 /** Each tab is its own Chromium renderer process — eight is already about a
  *  gigabyte of resident memory. The cap is what stops a popup loop, or a
@@ -282,7 +282,7 @@ export class BrowserHost {
       const tab = this.#store.open(project, target.url, "web");
       this.#store.update(tab.id, { title: `${project} — Authorize` });
 
-      const view = this.#createView(`persist:project-${encodeURIComponent(project)}`);
+      const view = this.#createView(`persist:project-${encodeURIComponent(project)}`, "web");
       this.#views.set(tab.id, view);
 
       let settled = false;
@@ -343,6 +343,14 @@ export class BrowserHost {
     this.#devToolsOpen.delete(id);
     this.#store.close(id);
     this.#syncVisibility();
+  }
+
+  rename(id: TabId, title: string): void {
+    this.#store.rename(id, title);
+  }
+
+  move(id: TabId, targetId: TabId, after: boolean): void {
+    this.#store.move(id, targetId, after);
   }
 
   back(id: TabId): void {
@@ -521,7 +529,10 @@ export class BrowserHost {
    * bounds, painting at 0x0 over the corner of the window.
    */
   #attachView(tabId: TabId, project: string, url: string): void {
-    const view = this.#createView(`persist:project-${encodeURIComponent(project)}`);
+    const view = this.#createView(
+      `persist:project-${encodeURIComponent(project)}`,
+      this.#store.get(tabId)?.kind ?? "web",
+    );
     this.#views.set(tabId, view);
     view.onEvent((event) => this.#onViewEvent(tabId, project, event));
     if (this.#bounds !== undefined) view.setBounds(this.#bounds);

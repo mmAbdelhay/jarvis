@@ -30,8 +30,8 @@ const known: ProviderStatus = {
   vendor: "anthropic",
   capacity: {
     state: "known",
-    fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
-    sevenDay: { usedPercent: 33, resetsAt: "2026-09-02T11:00:00.000Z" },
+    primary: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00.000Z" },
+    secondary: { usedPercent: 33, resetsAt: "2026-09-02T11:00:00.000Z" },
     readAt: Date.parse("2026-08-31T12:12:00.000Z"),
   },
   health: { state: "ok", detail: "All Systems Operational", readAt: 1 },
@@ -43,8 +43,8 @@ const knownZeroRemaining: ProviderStatus = {
   vendor: "anthropic",
   capacity: {
     state: "known",
-    fiveHour: { usedPercent: 100, resetsAt: "2026-09-01T00:00:00.000Z" },
-    sevenDay: undefined,
+    primary: { usedPercent: 100, resetsAt: "2026-09-01T00:00:00.000Z" },
+    secondary: undefined,
     readAt: Date.parse("2026-08-31T23:59:00.000Z"),
   },
   health: { state: "ok", detail: "", readAt: undefined },
@@ -56,8 +56,8 @@ const knownFullRemaining: ProviderStatus = {
   vendor: "anthropic",
   capacity: {
     state: "known",
-    fiveHour: { usedPercent: 0, resetsAt: "2026-09-02T09:05:00.000Z" },
-    sevenDay: undefined,
+    primary: { usedPercent: 0, resetsAt: "2026-09-02T09:05:00.000Z" },
+    secondary: undefined,
     readAt: Date.parse("2026-08-31T08:00:00.000Z"),
   },
   health: { state: "ok", detail: "", readAt: undefined },
@@ -73,8 +73,8 @@ const knownFractional: ProviderStatus = {
   vendor: "anthropic",
   capacity: {
     state: "known",
-    fiveHour: { usedPercent: 62.5, resetsAt: "2026-08-31T18:45:00.000Z" },
-    sevenDay: undefined,
+    primary: { usedPercent: 62.5, resetsAt: "2026-08-31T18:45:00.000Z" },
+    secondary: undefined,
     readAt: Date.parse("2026-08-31T17:30:00.000Z"),
   },
   health: { state: "ok", detail: "", readAt: undefined },
@@ -144,12 +144,17 @@ describe("providerStatusLine — capacity known", () => {
     );
   });
 
+  // A reset more than a day past the reading (this fixture: two days) is a
+  // day, not a clock — the same rule Copilot's monthly window needs.
+  const day = (iso: string): string =>
+    new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
   it("renders 100% remaining exactly, in both languages", () => {
     expect(providerStatusLine(knownFullRemaining, "en")).toBe(
-      `claude-full — 100% left · resets ${clock("2026-09-02T09:05:00.000Z")} · as of ${clock("2026-08-31T08:00:00.000Z")}`,
+      `claude-full — 100% left · resets ${day("2026-09-02T09:05:00.000Z")} · as of ${clock("2026-08-31T08:00:00.000Z")}`,
     );
     expect(providerStatusLine(knownFullRemaining, "ar")).toBe(
-      `claude-full — المتبقي 100% · يتجدد ${clock("2026-09-02T09:05:00.000Z")} · حتى ${clock("2026-08-31T08:00:00.000Z")}`,
+      `claude-full — المتبقي 100% · يتجدد ${day("2026-09-02T09:05:00.000Z")} · حتى ${clock("2026-08-31T08:00:00.000Z")}`,
     );
   });
 
@@ -178,10 +183,10 @@ describe("providerStatusLine — capacity unknown", () => {
   });
 
   it("renders 'unavailable' exactly, in both languages", () => {
-    expect(providerStatusLine(capUnavailable, "en")).toBe(
-      "claude-unavail — capacity couldn't be read",
+    expect(providerStatusLine(capUnavailable, "en")).toBe("claude-unavail — no usage reading yet");
+    expect(providerStatusLine(capUnavailable, "ar")).toBe(
+      "claude-unavail — لا توجد قراءة استخدام بعد",
     );
-    expect(providerStatusLine(capUnavailable, "ar")).toBe("claude-unavail — تعذّرت قراءة السعة");
   });
 
   it("renders 'never-read' exactly, in both languages", () => {
@@ -197,7 +202,7 @@ describe("providerStatusLine — capacity unknown", () => {
     expect(neverReadEn).not.toBe(unsupportedEn);
     expect(unavailableEn).not.toBe(unsupportedEn);
     // never-read must not read like unavailable, or vice versa, in either language.
-    expect(neverReadEn).not.toContain("couldn't be read");
+    expect(neverReadEn).not.toContain("reading yet");
     expect(unavailableEn).not.toContain("not checked yet");
     const unsupportedAr = providerStatusLine(capUnsupported, "ar");
     const unavailableAr = providerStatusLine(capUnavailable, "ar");

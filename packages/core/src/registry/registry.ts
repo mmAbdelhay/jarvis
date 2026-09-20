@@ -4,12 +4,20 @@ export class UnknownAgentError extends Error {}
 
 export class AgentRegistry {
   readonly #agents: Map<string, AgentConfig>;
-  readonly #routing: RoutingRule[];
+  #routing: RoutingRule[];
 
   constructor(config: RegistryConfig) {
     this.#agents = new Map(
       Object.entries(config.agents).map(([id, agent]) => [id, { ...agent, id }]),
     );
+    this.#routing = config.routing ?? [];
+  }
+
+  replace(config: RegistryConfig): void {
+    this.#agents.clear();
+    for (const [id, agent] of Object.entries(config.agents)) {
+      this.#agents.set(id, { ...agent, id });
+    }
     this.#routing = config.routing ?? [];
   }
 

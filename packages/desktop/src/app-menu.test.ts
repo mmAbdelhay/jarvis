@@ -27,6 +27,12 @@ describe("appMenuTemplate", () => {
     }
   });
 
+  it("does not bind the renderer Reload role to Ctrl/Cmd+R", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(roles(platform)).not.toContain("reload");
+    }
+  });
+
   it("gives macOS its app menu first, as every Mac app has", () => {
     expect(appMenuTemplate("darwin")[0]?.role).toBe("appMenu");
   });

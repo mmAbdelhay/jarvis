@@ -82,13 +82,16 @@ class FakeView implements HostedView {
 describe("BrowserHost", () => {
   let views: FakeView[];
   let partitions: string[];
+  let kinds: string[];
   let host: BrowserHost;
 
   beforeEach(() => {
     views = [];
     partitions = [];
-    host = new BrowserHost((partition) => {
+    kinds = [];
+    host = new BrowserHost((partition, kind) => {
       partitions.push(partition);
+      kinds.push(kind);
       const view = new FakeView();
       views.push(view);
       return view;
@@ -101,6 +104,12 @@ describe("BrowserHost", () => {
     expect(views).toHaveLength(1);
     expect(views[0]?.loaded).toEqual(["https://github.com"]);
     expect(host.state().tabs[0]?.url).toBe("https://github.com");
+    expect(kinds).toEqual(["web"]);
+  });
+
+  it("passes hosted-app kind to the view factory for shortcut scoping", () => {
+    host.open("acme", "http://127.0.0.1:8000", "editor");
+    expect(kinds).toEqual(["editor"]);
   });
 
   // The reason this browser exists rather than a link to Chrome: each

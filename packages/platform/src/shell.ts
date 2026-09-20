@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolveWindowsExecutable } from "./executable.js";
 import { createRequire } from "node:module";
 import { userInfo } from "node:os";
+import type { StreamSnapshot } from "@jarvis/core";
 import { DEFAULT_COLS, DEFAULT_ROWS, sanitizedShellEnv } from "./pty.js";
 import { powerShellLaunchArgs } from "./powershell-integration.js";
 import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
@@ -21,14 +22,50 @@ export type ShellProcess = {
 
 export type ShellSpawner = (args: { cwd: string; cols: number; rows: number }) => ShellProcess;
 
+// `offset` is the count of UTF-16 code units emitted for this pane before
+// `chunk` (ruling 10) — a client uses it with snapshot()'s `end` to tell
+// whether a push it just received is one it already has.
+export type ShellOutput = { paneKey: string; chunk: string; offset: number };
+export type ShellExit = { paneKey: string; code: number };
+export type TerminalPaneInfo = { paneKey: string; exited: boolean };
+
+// How much of an exited pane's log survives after its process is gone —
+// same figure as SessionManager's DEAD_LOG_CHARS (48 KiB): the reason to
+// reopen a dead pane is to see how it ended, and that is at the tail.
+export const EXITED_LOG_CHARS = 49_152;
+
 export type ShellManager = {
   /** Starts the shell for `tabId`, rooted at `cwd`. Starting a tab that
    *  already has one is a no-op, not a second shell. */
   start(tabId: string, cwd: string, cols?: number, rows?: number): void;
-  /** Connects a listener to a tab's shell and returns whatever the shell
-   *  printed before anyone was listening — the prompt, usually. The buffer
-   *  is drained by this call: a later attach replays nothing. */
-  attach(tabId: string, onData: (chunk: string) => void, onExit?: (code: number) => void): string;
+  /** Every subscriber sees every pane's output, filtered by `paneKey` on the
+   *  consuming side. One stream rather than a per-pane subscription, for the
+   *  same reason SessionManager.onOutput is one stream: the consumer forwards
+   *  everything to a single channel anyway, and a per-pane subscription would
+   *  need its own teardown on every pane exit. Returns an unsubscribe. */
+  onOutput(listener: (output: ShellOutput) => void): () => void;
+  /** As onOutput, for the exit. Separate from `kill`: this fires when the
+   *  shell goes away for any reason, including the user typing `exit`. */
+  onShellExit(listener: (exit: ShellExit) => void): () => void;
+  /** What this pane has printed, up to the retained cap, as one string.
+   *  **Non-destructive** — reading it twice returns it twice, which is what
+   *  lets a second client open the same pane and see what is on it. An
+   *  unknown pane returns "" rather than throwing: the renderer asks for
+   *  this the moment a tab appears, routinely before the shell has printed
+   *  anything. */
+  log(tabId: string): string;
+  /** A cursor onto this pane's retained output: `text` is `log(tabId)`,
+   *  `end` is the true count of UTF-16 code units emitted since the pane
+   *  started (ruling 10), even once retention has trimmed `text` below
+   *  that. An unknown pane returns `{ text: "", end: 0 }`, same as `log`. */
+  snapshot(tabId: string): StreamSnapshot;
+  /** Whether `tabId` names a pane this manager still knows about — a live
+   *  shell, or one that exited but kept its retained log (ruling 12). False
+   *  once `kill` or `stopAll` has forgotten it. */
+  has(tabId: string): boolean;
+  /** Every live or retained-exited pane the manager still knows about,
+   *  without cwd, process handles or retained output. */
+  panes(): readonly TerminalPaneInfo[];
   write(tabId: string, data: string): void;
   resize(tabId: string, cols: number, rows: number): void;
   /** Kills a tab's shell and forgets it — for a closed tab. */
@@ -40,76 +77,178 @@ export type ShellManager = {
 
 export type ShellManagerDeps = {
   spawn: ShellSpawner;
-  /** How much pre-attach output to keep per tab. A shell's opening prompt is
-   *  a few hundred bytes; this only has to survive the milliseconds before
-   *  the renderer builds an xterm for the new tab. */
-  maxBufferBytes?: number;
+  /** How much of each pane's output is retained so a client opening the pane
+   *  partway through sees what is on the screen. A cap in characters rather
+   *  than lines because a single line has no bounded length — one enormous
+   *  JSON blob must not grow this without limit. */
+  maxLogChars?: number;
 };
 
-const DEFAULT_MAX_BUFFER_BYTES = 64 * 1024;
+const DEFAULT_MAX_LOG_CHARS = 256 * 1024;
 
 type Session = {
   process: ShellProcess;
-  /** Output that arrived before anything attached. Emptied by attach(). */
-  buffer: string;
-  onData: ((chunk: string) => void) | undefined;
-  onExit: ((code: number) => void) | undefined;
+  /** What this pane has printed, capped at maxLogChars (or EXITED_LOG_CHARS
+   *  once exited), oldest chunk first. Never emptied by a read — see
+   *  ShellManager.log. An array rather than one accumulated string so a
+   *  long-lived pane trims by dropping whole chunks from the front, not by
+   *  reslicing the full retained string on every incoming chunk. */
+  chunks: string[];
+  /** Sum of `chunks[*].length`, kept alongside so appendChunk never has to
+   *  re-join the array just to check whether it is over the cap. */
+  size: number;
+  /** UTF-16 code units emitted for this pane since it started (ruling 10).
+   *  Never trimmed by retention — `snapshot().end` must stay the true total
+   *  even once `chunks` has been cut down to the cap. */
+  emitted: number;
+  /** True once the process has exited and this entry is being kept for its
+   *  retained tail (ruling 12) — `write`/`resize` no-op, and `start` on this
+   *  key spawns a new process rather than treating it as already running. */
+  exited: boolean;
 };
+
+/** Appends `chunk` to `session`, trimming from the front (SessionManager's
+ *  #appendLog shape: drop whole chunks off the front, then cut the
+ *  remaining front chunk's own start) so the retained tail is always
+ *  identical to `(old + chunk).slice(-cap)`.
+ *
+ *  The front chunk is only ever dropped *whole* when it lies entirely
+ *  outside the retained window — i.e. `size` stays at or above `cap` once
+ *  it is removed. Dropping it otherwise would undershoot the cap: it is
+ *  the boundary chunk, and the tail window cuts through the middle of it,
+ *  which the final `slice` below handles. */
+function appendChunk(session: Pick<Session, "chunks" | "size">, chunk: string, cap: number): void {
+  session.chunks.push(chunk);
+  session.size += chunk.length;
+  while (session.chunks.length > 1 && session.size - (session.chunks[0]?.length ?? 0) >= cap) {
+    session.size -= session.chunks.shift()?.length ?? 0;
+  }
+  if (session.size > cap) {
+    // The tail window cuts through this (now-front) chunk: drop exactly the
+    // overshoot from its start, not its whole self — other chunks after it,
+    // if any, are already entirely inside the window.
+    const excess = session.size - cap;
+    const front = session.chunks[0] ?? "";
+    session.chunks[0] = front.slice(excess);
+    session.size = cap;
+  }
+}
+
+/** Trims a session's log to its last `cap` characters — mirrors
+ *  SessionManager's #compactLog, used once on exit (see EXITED_LOG_CHARS). */
+function compactChunks(session: Pick<Session, "chunks" | "size">, cap: number): void {
+  const joined = session.chunks.join("");
+  if (joined.length <= cap) return;
+  const tail = joined.slice(joined.length - cap);
+  session.chunks = [tail];
+  session.size = tail.length;
+}
 
 /**
  * One shell per terminal tab, keyed by tab id rather than by project: two
  * terminals in the same project is an ordinary thing to want, and they are
  * separate shells with separate state.
  *
- * The buffer exists because a shell prints its prompt the instant it
+ * The retained log exists because a shell prints its prompt the instant it
  * starts, which is before the renderer has seen the new tab in a workspace
  * update and built an xterm for it. Without it a fresh Terminal tab looks
  * blank until the first keystroke.
  */
 export function createShellManager(deps: ShellManagerDeps): ShellManager {
   const sessions = new Map<string, Session>();
-  const maxBufferBytes = deps.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
+  const outputListeners = new Set<(output: ShellOutput) => void>();
+  const exitListeners = new Set<(exit: ShellExit) => void>();
+  const maxLogChars = deps.maxLogChars ?? DEFAULT_MAX_LOG_CHARS;
 
   return {
     start(tabId, cwd, cols = DEFAULT_COLS, rows = DEFAULT_ROWS) {
-      if (sessions.has(tabId)) return;
+      // A live pane stays a no-op; an exited one (ruling 11) spawns a new
+      // process but keeps its retained chunks and offset counter — the
+      // pane's history did not end just because the process did.
+      const existing = sessions.get(tabId);
+      if (existing !== undefined && !existing.exited) return;
 
       const process = deps.spawn({ cwd, cols, rows });
-      const session: Session = { process, buffer: "", onData: undefined, onExit: undefined };
+      const session: Session =
+        existing === undefined
+          ? { process, chunks: [], size: 0, emitted: 0, exited: false }
+          : {
+              process,
+              // Copied, not aliased: a stale onData from the dead process
+              // (node-pty never fires one after exit, but nothing enforces
+              // that here) must not be able to write into the restarted
+              // session's own array.
+              chunks: [...existing.chunks],
+              size: existing.size,
+              emitted: existing.emitted,
+              exited: false,
+            };
       sessions.set(tabId, session);
 
       process.onData((chunk) => {
-        if (session.onData !== undefined) {
-          session.onData(chunk);
-          return;
-        }
-        // Keep the tail, not the head: what matters to a terminal that has
-        // not drawn yet is the most recent screen state.
-        session.buffer = (session.buffer + chunk).slice(-maxBufferBytes);
+        // `offset` is the count before this chunk, so the log append (and
+        // the counter update) must happen before any listener runs — the
+        // M1 invariant a listener reading snapshot().end relies on.
+        const offset = session.emitted;
+        appendChunk(session, chunk, maxLogChars);
+        session.emitted += chunk.length;
+        // Copied, because a listener may unsubscribe from inside its own call.
+        for (const listener of [...outputListeners]) listener({ paneKey: tabId, chunk, offset });
       });
 
       process.onExit((code) => {
-        sessions.delete(tabId);
-        session.onExit?.(code);
+        // Only retain this entry as "exited" if the map still holds this
+        // exact session object — a stale exit from a process that was
+        // already killed (kill() deleted the entry) or superseded (a
+        // restart replaced it with a new session) does nothing but notify.
+        if (sessions.get(tabId) === session) {
+          session.exited = true;
+          compactChunks(session, EXITED_LOG_CHARS);
+        }
+        for (const listener of [...exitListeners]) listener({ paneKey: tabId, code });
       });
     },
 
-    attach(tabId, onData, onExit) {
+    onOutput(listener) {
+      outputListeners.add(listener);
+      return () => outputListeners.delete(listener);
+    },
+
+    onShellExit(listener) {
+      exitListeners.add(listener);
+      return () => exitListeners.delete(listener);
+    },
+
+    log(tabId) {
+      return (sessions.get(tabId)?.chunks ?? []).join("");
+    },
+
+    snapshot(tabId) {
       const session = sessions.get(tabId);
-      if (session === undefined) return "";
-      session.onData = onData;
-      session.onExit = onExit;
-      const buffered = session.buffer;
-      session.buffer = "";
-      return buffered;
+      return { text: (session?.chunks ?? []).join(""), end: session?.emitted ?? 0 };
+    },
+
+    has(tabId) {
+      return sessions.has(tabId);
+    },
+
+    panes() {
+      return [...sessions.entries()].map(([paneKey, session]) => ({
+        paneKey,
+        exited: session.exited,
+      }));
     },
 
     write(tabId, data) {
-      sessions.get(tabId)?.process.write(data);
+      const session = sessions.get(tabId);
+      if (session === undefined || session.exited) return;
+      session.process.write(data);
     },
 
     resize(tabId, cols, rows) {
-      sessions.get(tabId)?.process.resize(cols, rows);
+      const session = sessions.get(tabId);
+      if (session === undefined || session.exited) return;
+      session.process.resize(cols, rows);
     },
 
     kill(tabId) {

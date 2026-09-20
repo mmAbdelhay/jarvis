@@ -2,5 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist/src", "rootDir": "src", "types": ["node"] },
   "include": ["src"],
-  "references": [{ "path": "../core" }, { "path": "../platform" }]
+  "references": [
+    { "path": "../core" },
+    { "path": "../platform" },
+    { "path": "../remote" },
+    { "path": "../wire" }
+  ]
 }

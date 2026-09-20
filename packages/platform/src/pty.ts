@@ -32,6 +32,7 @@ import { ptySpawnTarget } from "./executable.js";
 const require = createRequire(import.meta.url);
 
 type PtyProcess = {
+  pid: number;
   onData(listener: (data: string) => void): void;
   onExit(listener: (event: { exitCode: number; signal?: number | undefined }) => void): void;
   write(data: string): void;
@@ -297,6 +298,7 @@ export function createPtySpawner(
     });
 
     return {
+      pid: child.pid,
       write: (data: string) => {
         // Writing to a pty whose child is gone throws EIO rather than
         // emitting an error event. Swallowed so a keystroke that loses the

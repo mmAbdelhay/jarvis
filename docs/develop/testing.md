@@ -55,6 +55,26 @@ green suite did not:
   that nothing runnable needs root, that every tool has a detection, that a
   voice downloads both its files — and can prove nothing about whether
   `brew install whisper-cpp` still names a real formula a year from now.
+- The sidecar reverse proxy (M11) against a real WebView. `proxy-rewrite.test.ts`
+  and `proxy.integration.test.ts` (the latter a real loopback HTTP target
+  behind the real TLS listener, `@jarvis/remote`'s second real-network test
+  file after `bridge.integration.test.ts`) prove the proxy's rewriting,
+  cookies and upgrades; they cannot prove that `react-native-webview` on a
+  real device actually renders code-server, keeps a terminal's WebSocket
+  open, or refuses to leave the sidecar's origin — `apps/mobile/README.md`'s
+  manual-pass checklist covers that. Headlamp under the proxy's path prefix
+  specifically is untested even manually in this codebase's own development
+  — `headlamp-server` was never installed on the machine this milestone was
+  built on — so it is a recorded open item rather than a verified path; see
+  the manual pass for what to do if its assets turn out to need it. Two more
+  gaps worth naming rather than rediscovering: the listener's 5 s
+  `requestTimeout` bounds a proxied request's *body* only — a multi-second
+  upload through the proxy (a DbGate import, say) is cut at 5 s, while
+  responses, SSE and upgrades are unaffected, which is expected and not a
+  proxy bug; and `/s/…` while the proxy is unavailable, at the real TLS
+  listener, is exercised only by the double-based `server.test.ts` —
+  `proxy.integration.test.ts` always wires up a real proxy, so that one path
+  is unit-covered rather than integration-covered.
 
 **jsdom is not a browser, and Electron is not jsdom.** `window.prompt` exists
 in jsdom and throws in Electron. Every create and rename in the API tab did
@@ -79,6 +99,64 @@ measuring in the units you think it is.
 Electron instance may be running — a stale one from an earlier build, another
 agent's — and the frontmost window is whichever the OS says. Capture through
 the app's own CDP target, or check geometry numerically.
+
+The suite also cannot see an idle timer against a wall clock; the audit file
+on a real disk across a rotation; a phone's `AppState` transitions on a
+device; `terminate()` against a real WebSocket peer; or whisper's real
+stderr. Those boundaries stay in the manual pass because the doubles prove
+the state-machine decisions without proving the operating system's timing,
+filesystem, native lifecycle, socket or decoder behaviour.
+
+**`apps/mobile` has its own suite, and its own blind spots.** It runs under
+plain Node (`PATH=/opt/homebrew/bin:$PATH npx vitest run --config
+apps/mobile/vitest.config.mts`), separately from the root suite above — no
+real network, no native modules and no React Native renderer, by rule.
+`FakeTransport` stands in for the socket, an injected `Clock` for every
+timer, and an in-memory `SecureStore` for the keychain; `e2e.test.ts` scripts
+one pairing-to-revocation run across the real `RpcClient`, connection store
+and dashboard store together. `e2e-session.test.ts` drives the real session stores and input controller through attach, snapshot/push deduplication, gap markers, raw keys, reconnect without input replay, session completion and subscription cleanup. What that suite cannot see:
+
+- **Certificate pinning itself.** `modules/pinned-socket`'s Swift and Kotlin
+  compare a SHA-256 fingerprint against the presented leaf; nothing in the
+  JS suite ever runs that code; it needs a device or simulator and a real
+  TLS handshake with a mismatching certificate (`apps/mobile/README.md`'s
+  manual-pass checklist).
+- **RTL rendering.** `I18nManager.forceRTL` and the resulting mirrored
+  layout are asserted at the source level only — `rtl-lint.test.ts` greps
+  every `app/` and `src/components/` file for a hard-coded left/right style
+  (`marginLeft`, `right:`, …) rather than `start`/`end` — but never
+  rendered — there is no RN renderer in the suite, so a screen that greps
+  clean but still looks wrong under RTL would not be caught here.
+- **The terminal WebView.** Tests pin the generated page, CSP script hash, navigation gate and per-load ready-message guard, but cannot render xterm inside Android/iOS WebView. Terminal sizing, background/resume, renderer crashes, IME input and real accessibility require the session checks in `apps/mobile/README.md`.
+- **The camera.** `expo-camera`'s scanner is exercised nowhere in the unit
+  suite; the pairing screen's own logic is tested with a fake decode
+  result, never a real frame.
+- **Voice.** `e2e-voice.test.ts` drives the real `RpcClient` and
+  `VoiceController` through record, upload, a spoken reply, a mid-upload
+  drop and a retry — but the recorder, the speaker and the recording file
+  are all fakes, and `remote-voice.integration.test.ts` fakes whisper on
+  the laptop side too. Untested by either suite: real phone recordings on
+  each OS, whisper's actual transcription accuracy, the OS's own speech
+  voices, the iOS audio-route switch between the earpiece and the
+  loudspeaker, and the native `sendBinary` implementations that actually
+  put bytes on the wire — all manual-pass only (`apps/mobile/README.md`).
+- **Push notifications.** `e2e-push.test.ts` drives the real
+  `createPushRegistration` and the pieces `push-context.tsx`'s own tap
+  handler composes (`waitForOpen`, `recordHandledId`, `planNavigation`,
+  `parseSessionList`) over a real `RpcClient`, and
+  `remote-push.integration.test.ts` drives the laptop side the same way
+  `remote-voice.integration.test.ts` does, with a recording `fetch` standing
+  in for Expo's own HTTP API. Neither suite can see: real APNs/FCM delivery,
+  the OS's own permission prompts (and their "denied" vs "denied
+  permanently" split), Expo's receipt timing (`RECEIPT_DELAY_MS` is 15
+  minutes; nothing here waits that long), the Android notification channel's
+  actual appearance, token rotation on a real device, or the credentials
+  (`eas credentials`) configured on EAS — all manual-pass only
+  (`apps/mobile/README.md`).
+- Everything the desktop side's blind spots above already name — a real
+  socket close code arriving from a real TLS stack, an app actually
+  backgrounded and resumed, a phone on a real LAN reaching a real laptop —
+  applies here too, per the manual pass.
 
 So: for anything that touches a real boundary, drive the built app or send a
 real request.

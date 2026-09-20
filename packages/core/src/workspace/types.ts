@@ -43,6 +43,8 @@ export type WorkspaceTab = {
   /** The page's own title, or "" until it reports one. Fixed at open time
    *  for a hosted-app tab and never overwritten after that — see TabKind. */
   title: string;
+  /** User-chosen label; page title updates no longer replace it. */
+  customTitle?: string;
   /** What this hosted-app tab is *of*, when its kind alone does not say:
    *  the editor root a code-server tab is rooted at. Set at open time and
    *  part of the title, but kept as its own field so the renderer can tell

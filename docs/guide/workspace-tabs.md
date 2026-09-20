@@ -22,6 +22,10 @@ an editor or a shell the way they navigate a website.
 
 ## The browser
 
+<p align="center">
+  <img src="../media/workspace-browser.png" width="100%" alt="The Workspace browser: a project's tab strip, address bar and bookmarks sidebar around an ordinary web page.">
+</p>
+
 An address bar, back/forward/reload, and per-project bookmarks kept in
 `~/.config/jarvis/bookmarks.json`. Clicking a bookmark the project already has
 open activates that tab rather than opening a second copy.
@@ -182,6 +186,10 @@ project whose editor is already open is not warmed again.
 
 ## Database
 
+<p align="center">
+  <img src="../media/workspace-database.png" width="100%" alt="The Database tab: DbGate running inside Jarvis, choosing a connection type for a new connection.">
+</p>
+
 Spawns `dbgate-serve` for the project — a full SQL client: schema tree, data
 grid, query editor. Connections come from the `databases:` section of
 `jarvis.yaml` (see [configuration](configuration.md)), and a project that
@@ -198,6 +206,10 @@ bind to loopback, unlike code-server; the credential is the mitigation. It is
 a per-spawn random value and changes when Jarvis restarts.
 
 ## Cluster
+
+<p align="center">
+  <img src="../media/workspace-cluster.png" width="100%" alt="The Cluster tab: Headlamp running inside Jarvis — cluster overview, pod counts and warning events. Cluster and workload names are blurred.">
+</p>
 
 Spawns `headlamp-server` for the project and opens it as a tab — a Kubernetes
 cluster browser in the shape of Lens or OpenLens, scoped to the clusters the
@@ -243,6 +255,10 @@ Like the Editor tab, the server binds to `127.0.0.1` only — no generated
 login, because loopback is the whole mitigation.
 
 ## Docker
+
+<p align="center">
+  <img src="../media/workspace-docker.png" width="100%" alt="The Docker tab: the project's containers on the left, the selected container's logs on the right. Container names and log contents are blurred.">
+</p>
 
 One tab per project, listing the containers `docker:` maps to it, under a
 count of how many of them are up. Each row is led by a dot — filled when the
@@ -569,6 +585,10 @@ See **[configuration](configuration.md)** for `historyPath` and
 `commandLogPath`.
 
 ## API
+
+<p align="center">
+  <img src="../media/workspace-api.png" width="100%" alt="The API tab: a request builder over the project's Bruno collections — folders of requests on the left, the request under edit on the right. Collection names are blurred.">
+</p>
 
 A request builder over the project's own Bruno collections. See
 **[the API client](api-client.md)**.

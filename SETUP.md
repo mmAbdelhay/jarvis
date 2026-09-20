@@ -128,6 +128,41 @@ voice:
 With neither, replies are shown and not spoken, and Jarvis says which key
 would fix it.
 
+**Capacity meters (optional, free).** The Providers panel shows how much of
+each account's allowance is left, and never asks a model for it (that would
+cost a billed query each time). Codex needs nothing: it records its own rate
+limits in its session logs. Copilot needs nothing on macOS either — the
+meter asks as the Copilot CLI's own signed-in account (its keychain token;
+approve the one-time keychain prompt) and falls back to `gh` (`gh auth
+login`) elsewhere.
+A Claude account reads the figures Claude Code already hands its status line. Point each account's status line at the
+hook, in that account's `settings.json` (`~/.claude/settings.json`, or the
+config dir the account uses):
+
+```json
+"statusLine": { "type": "command", "command": "sh /path/to/jarvis/scripts/claude-usage-snapshot.sh" }
+```
+
+Already have a status line? Keep it and add one line near its top:
+`input=$(cat); printf '%s' "$input" | sh /path/to/jarvis/scripts/claude-usage-snapshot.sh >/dev/null`.
+The meter fills in the next time that account renders its status line
+(open Claude Code once); until then the row says "no usage reading yet".
+
+**Phone (optional).** The companion app (`apps/mobile`) pairs with Settings →
+Remote access; the Editor, Database and Cluster tabs additionally need a real
+certificate to open on the phone at all:
+
+1. Install [Tailscale](https://tailscale.com/) on both this machine and the
+   phone, and sign both into the same tailnet.
+2. In the Tailscale admin console, turn on **HTTPS certificates** (DNS →
+   HTTPS Certificates) for the tailnet.
+3. In Settings → Remote access, click **Get certificate from Tailscale**,
+   then turn the sidecar proxy on (it turns on by itself once the
+   certificate is issued).
+
+See [Remote access](docs/guide/remote-access.md) for pairing itself and what
+each tab needs.
+
 ## 6. Check it works
 
 ```bash

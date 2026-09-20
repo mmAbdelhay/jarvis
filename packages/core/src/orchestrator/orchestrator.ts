@@ -144,6 +144,14 @@ export type OrchestratorOptions = {
   };
 };
 
+// Per-turn options (ruling 5): a flag set around a remote turn and cleared
+// in a finally would mute (or un-mute) an overlapping desktop hotkey turn,
+// because the brain call takes seconds. An option on the call itself has
+// no such race. `replyTo` carries a phone-minted turnId through to both
+// the user and assistant turns it produces, so a `turn:new` push can be
+// correlated back to the upload that asked for it (ruling 10).
+export type HandleOptions = { speakAloud?: boolean; replyTo?: string };
+
 export class Orchestrator {
   readonly #options: OrchestratorOptions;
   readonly #turns: Turn[] = [];
@@ -153,15 +161,21 @@ export class Orchestrator {
     this.#options = options;
   }
 
-  async handle(text: string, language: "ar" | "en"): Promise<Turn> {
-    this.#record({ role: "user", text, language, at: Date.now() });
+  async handle(text: string, language: "ar" | "en", options?: HandleOptions): Promise<Turn> {
+    this.#record({
+      role: "user",
+      text,
+      language,
+      at: Date.now(),
+      ...(options?.replyTo === undefined ? {} : { replyTo: options.replyTo }),
+    });
 
     let reply: BrainReply;
     try {
       reply = await this.#options.brain.ask({ text, tools: TOOLS, context: this.#context() });
     } catch (error) {
       const message = MESSAGES.brainFailed(errorMessage(error), language);
-      return this.#answer(message, language, {});
+      return this.#answer(message, language, {}, options);
     }
 
     let context: ToolContext = {};
@@ -175,7 +189,7 @@ export class Orchestrator {
 
     const note = notes.join(" ");
     const spoken = note === "" ? reply.text : `${reply.text} ${note}`.trim();
-    return this.#answer(spoken, language, context);
+    return this.#answer(spoken, language, context, options);
   }
 
   transcript(): Turn[] {
@@ -421,13 +435,27 @@ export class Orchestrator {
     };
   }
 
-  async #answer(text: string, language: "ar" | "en", context: ToolContext): Promise<Turn> {
-    const turn: Turn = { role: "assistant", text, language, at: Date.now(), ...context };
+  async #answer(
+    text: string,
+    language: "ar" | "en",
+    context: ToolContext,
+    options?: HandleOptions,
+  ): Promise<Turn> {
+    const turn: Turn = {
+      role: "assistant",
+      text,
+      language,
+      at: Date.now(),
+      ...context,
+      ...(options?.replyTo === undefined ? {} : { replyTo: options.replyTo }),
+    };
     this.#record(turn);
-    try {
-      await this.#options.speak(text, language);
-    } catch {
-      // A TTS failure must not fail a turn the transcript already recorded as succeeded.
+    if (options?.speakAloud !== false) {
+      try {
+        await this.#options.speak(text, language);
+      } catch {
+        // A TTS failure must not fail a turn the transcript already recorded as succeeded.
+      }
     }
     return turn;
   }

@@ -15,11 +15,14 @@ import {
   type Session,
   type SessionChanges,
   type SessionOutput,
+  type StreamSnapshot,
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { BindChoice, RemoteStatus } from "@jarvis/remote";
+import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
 import {
   checkPrerequisites,
   installFor,
@@ -33,6 +36,7 @@ import {
   eksUpdateKubeconfigArgs,
   loadWorkflows,
   parseTranscript,
+  pathPrefix,
   profileForContext,
 } from "@jarvis/platform";
 import type {
@@ -68,9 +72,23 @@ import type {
   WorkflowsConfig,
 } from "@jarvis/platform";
 import { MAX_PINNED } from "@jarvis/platform";
+import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
+import type { TailscaleCertResult } from "./tailscale-cert.js";
+import {
+  isCleanScalar,
+  prepareRemoteApiRequest,
+  prepareRemoteApiSave,
+  stripEphemeralUploadRefs,
+  type RemoteApiContext,
+} from "./remote-api.js";
+import {
+  MAX_IMPORT_REQUESTS,
+  validateRemoteImport,
+  validateRemoteImportScalars,
+} from "./remote-import-guard.js";
 
 export type VoiceNotice = { text: string; language: "ar" | "en" };
 
@@ -90,7 +108,9 @@ export type IpcChannels = {
   "workspace:update": WorkspaceState;
   // Keyed by shell key, not by tab: a split tab has one of these per pane,
   // and the key is "<tabId>:<paneId>" for every pane but the tab's first.
-  "terminal:data": { paneKey: string; chunk: string };
+  // `offset` is the count of UTF-16 code units emitted for this pane before
+  // `chunk` (ruling 10) — see ShellOutput.
+  "terminal:data": { paneKey: string; chunk: string; offset: number };
   "terminal:exit": { paneKey: string; code: number };
 };
 
@@ -333,6 +353,11 @@ export type RendererApi = {
   onMetrics(cb: (m: SystemMetrics) => void): void;
   onSessions(cb: (s: Session[]) => void): void;
   onTurn(cb: (t: Turn) => void): void;
+  // Read-only recovery for a phone that missed a turn:new push while
+  // disconnected (M8 ruling 10): the last TURNS_LIST_MAX turns. The
+  // renderer never calls this — it already gets turn:new live — this
+  // exists so a phone can pull it on focus and after every reconnect.
+  listTurns(): Promise<Turn[]>;
   onListening(cb: (listening: boolean) => void): void;
   /** True while an utterance is being spoken. The renderer cannot time this
    *  itself: it knows the text, not how long saying it takes. */
@@ -347,6 +372,20 @@ export type RendererApi = {
   // not pushed like sessions:update — there is no live subscriber to keep
   // in sync, only a snapshot to render once.
   getHistory(): Promise<Session[]>;
+  // The live session list, pullable (M7 ruling 10): the same Session[] the
+  // "sessions:update" push carries. The renderer does not call this — it
+  // already gets sessions:update — this exists so a phone can render the
+  // session table before the first push arrives. Read-only: no filtering,
+  // no projection, no argument coercion.
+  listSessions(): Promise<Session[]>;
+  /**
+   * Re-imports any new transcripts and re-scans the process table for
+   * agent processes running outside Jarvis (process-scan.ts), then
+   * broadcasts the merged result on "sessions:update" — this only needs to
+   * be awaited to know the scan has finished; the renderer's own session
+   * views re-render from the push, same as any other sessions:update.
+   */
+  refreshSessions(): Promise<{ jarvis: number; external: number; importedTranscripts: number }>;
   // Git. Each returns a GitViewResult, never rejects for a git-level problem:
   // the spec requires a git error to be shown in the Changes view and never
   // to block the assistant.
@@ -368,6 +407,17 @@ export type RendererApi = {
    * before its process has written anything.
    */
   getSessionLog(sessionId: string): Promise<string>;
+  /**
+   * A cursor onto one session's retained transcript: `text` is
+   * `getSessionLog(sessionId)`, `end` is the true count of UTF-16 code
+   * units emitted since the session started, even once retention has
+   * trimmed `text` below that (ruling 10). Exists for the phone client
+   * (M7): it subscribes to `session:output` first, then reads this, then
+   * drops any push already covered by `end` — the desktop renderer never
+   * calls it, since its own attach path (getSessionLog) already runs
+   * before its subscription instead of after.
+   */
+  sessionSnapshot(sessionId: string): Promise<StreamSnapshot>;
   /** The recorded conversation of a session imported from a transcript, as
    *  turns the view lays out itself. Empty for a session Jarvis spawned,
    *  which has a pty backlog instead. */
@@ -422,6 +472,8 @@ export type RendererApi = {
   ): Promise<void>;
   closeTab(id: string): Promise<void>;
   activateTab(id: string): Promise<void>;
+  renameTab(id: string, title: string): Promise<void>;
+  moveTab(id: string, targetId: string, after: boolean): Promise<void>;
   navigateTab(id: string, input: string): Promise<void>;
   tabBack(id: string): Promise<void>;
   tabForward(id: string): Promise<void>;
@@ -455,6 +507,12 @@ export type RendererApi = {
    *  tabs, other routes and other applications. Offered only while the
    *  tab's `hasPlayingVideo` is set; a second call puts the video back. */
   requestPictureInPicture(tabId: string): Promise<void>;
+  /** Pulls the current Workspace tab snapshot without changing laptop focus,
+   *  navigation or tab state. A paired phone uses this before any
+   *  workspace:update push has arrived. */
+  workspaceSnapshot(): Promise<WorkspaceState>;
+  /** Lists retained panes belonging to one current terminal tab. */
+  terminalPanes(tabId: string): Promise<TerminalPaneInfo[]>;
   onWorkspace(cb: (state: WorkspaceState) => void): void;
   /** Ensures a code-server instance is running for `project`, rooted at the
    *  configured editor root named `root` (the project directory itself when
@@ -466,8 +524,9 @@ export type RendererApi = {
    *  Empty for a project that declares none, which is most of them. */
   editorRoots(project: string): Promise<string[]>;
   /** Ensures a DbGate instance is running for `project` and returns its URL
-   *  plus the credential it is guarded with — call openTab(project, url,
-   *  "database") with the result to actually show it. */
+   *  — call openTab(project, url, "database") with the result to actually
+   *  show it. The credential DbGate is guarded with never reaches here;
+   *  Electron's own `login` event answers the challenge instead. */
   openDatabase(project: string): Promise<GitViewResult<DatabaseCredentials>>;
   /** Ensures a headlamp-server instance is running for `project` and returns
    *  the URL of one of its configured clusters — call
@@ -612,6 +671,15 @@ export type RendererApi = {
   pickFiles(options?: { multiple?: boolean }): Promise<string[]>;
   /** Reads a JSON file the user picked, for importing a collection. */
   readJsonFile(path: string): Promise<GitViewResult<unknown>>;
+  /** Decodes a file this same device already staged with `remote:
+   *  uploadFile` (file-upload.ts) — the phone's own path to "a JSON file
+   *  the user picked", since it has no filesystem for `readJsonFile` to
+   *  read from. Bounded the same way api:importPostman's own remote guard
+   *  is: size, JSON depth/node count, and no `__proto__`/`prototype`/
+   *  `constructor` key. Desktop-only in practice — dispatch.ts refuses this
+   *  for a desktop origin, which has `readJsonFile` instead — but reachable
+   *  through this same interface either way. */
+  readJsonUpload(fileId: string): Promise<GitViewResult<unknown>>;
   apiCurl(
     project: string,
     request: Record<string, unknown>,
@@ -657,6 +725,14 @@ export type RendererApi = {
    *  "<tabId>:<paneId>" for every pane split off it. */
   onTerminalData(cb: (paneKey: string, chunk: string) => void): void;
   onTerminalExit(cb: (paneKey: string, code: number) => void): void;
+  /**
+   * A cursor onto one pane's retained output — the same shape and purpose
+   * as sessionSnapshot, for a Terminal pane instead of a session. Exists
+   * for the phone client (M7, ruling 10's attach rule): the desktop
+   * renderer's own attach path is attachTerminal, called before it
+   * subscribes, so it never needs this either.
+   */
+  terminalSnapshot(paneKey: string): Promise<StreamSnapshot>;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */
   splitTerminal(tabId: string, paneId: string): Promise<void>;
@@ -683,10 +759,54 @@ export type RendererApi = {
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;
+  /** This machine's addresses a paired phone could be told to reach,
+   *  classified for Settings' "Reachable on" picker. Read afresh on every
+   *  call, so a VPN brought up while Jarvis runs appears the next time
+   *  Settings opens. Desktop-only by policy. */
+  remoteBindChoices(): Promise<BindChoice[]>;
+  /** The bridge's current status — closed defaults before the bridge has
+   *  ever started. Desktop-only by policy: this is what drives Settings'
+   *  own "reachable on" / paired-devices panel, and it carries more than a
+   *  phone has any business reading anyway (every paired device's name and
+   *  id, a pairing window's own secret) — none of which a phone can read
+   *  any other way either, since the wire protocol has no message that
+   *  sends a RemoteStatus down the bridge socket at all. */
+  remoteStatus(): Promise<RemoteStatus>;
+  /** Opens a 120s pairing window. `disabled`/`unavailable` come back as a
+   *  GitViewResult so Settings can show why, the same shape every other
+   *  panel failure already uses. */
+  openRemotePairing(): Promise<GitViewResult<undefined>>;
+  cancelRemotePairing(): Promise<void>;
+  /** The laptop's second human step (spec): names the requesting device
+   *  before a token is ever minted. */
+  decideRemotePairing(requestId: string, approve: boolean): Promise<void>;
+  revokeRemoteDevice(deviceId: string): Promise<GitViewResult<undefined>>;
+  /** Pushed on every bridge state change (remote-access.ts's `onStatus`),
+   *  local to this window only. */
+  onRemoteStatus(cb: (status: RemoteStatus) => void): void;
+  /** Registers this device's Expo push token — remote-legal, and acts only
+   *  on the calling device: the laptop never learns any device id but the
+   *  authenticated one, whatever this call's own arguments carry. */
+  registerPush(registration: PushRegistration): Promise<PushRegisterResult>;
+  /** Clears this device's own registration; ignored either way. */
+  unregisterPush(): Promise<void>;
+  /** Finds Tailscale, reads this machine's own MagicDNS name, and runs
+   *  `tailscale cert` for it (tailscale-cert.ts) — then writes
+   *  `remote.tls.certPath`/`keyPath` and turns `remote.sidecarProxy` on,
+   *  through the same serialized write path Settings' own save uses.
+   *  Desktop-only by policy: this is a laptop-controlled-tool config
+   *  change, the same class settings:save/testAgent already are. A "Renew"
+   *  click calls this exact same channel — `tailscale cert` renews an
+   *  existing name in place. */
+  tailscaleCert(): Promise<TailscaleCertResult>;
+  /** A slow terminal block's own duration and exit status, for main's
+   *  notifier to weigh a push against — desktop-only, and never the
+   *  command that ran. */
+  reportCommandFinished(paneKey: string, seconds: number, ok: boolean): Promise<void>;
 };
 
 export type WiringDeps = {
-  send(channel: string, payload: unknown): void;
+  send<C extends keyof IpcChannels>(channel: C, payload: IpcChannels[C]): void;
   readMetrics(): Promise<SystemMetrics>;
   intervalMs: number;
   onSessionsChange(cb: (sessions: Session[]) => void): () => void;
@@ -709,8 +829,15 @@ export type WiringDeps = {
    *  Optional, and true by default, so a caller that does not care keeps the
    *  behaviour it had. The health poll is deliberately *not* gated by it: it
    *  is a five-minute read of free status pages, it costs nothing, and its
-   *  whole value is being current the moment you look. */
-  isAwake?(): boolean;
+   *  whole value is being current the moment you look.
+   *
+   *  Named by which push it is gating, not called bare: a remote device
+   *  subscribed to metrics:update should wake that tick even while the
+   *  window itself is hidden, without also forcing the pricier git:counts
+   *  tick awake for a phone that never asked for it (main.ts's isAwake
+   *  checks `bridge.hasSubscriber(channel)` in addition to window
+   *  visibility). */
+  isAwake?(channel: "metrics:update" | "git:counts"): boolean;
 };
 
 export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
@@ -741,7 +868,7 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       }, deps.healthIntervalMs);
 
       timer = setInterval(() => {
-        if (!isAwake()) return;
+        if (!isAwake("metrics:update")) return;
         deps
           .readMetrics()
           .then((metrics) => deps.send("metrics:update", metrics))
@@ -751,7 +878,7 @@ export function buildWiring(deps: WiringDeps): { start(): void; stop(): void } {
       }, deps.intervalMs);
 
       changesTimer = setInterval(() => {
-        if (!isAwake()) return;
+        if (!isAwake("git:counts")) return;
         void deps.refreshChanges();
       }, deps.changesIntervalMs);
     },
@@ -911,13 +1038,25 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
   };
 }
 
-export type DatabaseCredentials = { url: string; login: string; password: string };
+// M4: the desktop-origin `database:open` reply carries only the URL — the
+// renderer never reads a DbGate login/password (Electron's own `login`
+// event, dbgate-login.ts, answers the challenge instead), so this is the
+// only shape that may cross the IPC boundary to the renderer.
+export type DatabaseCredentials = { url: string };
+
+/** What DbGateManager.open() actually returns, kept intact through
+ *  DatabaseHandlers.open() because dispatch.ts's remote branch needs the
+ *  login/password to build the sidecar proxy's basic auth (ruling 3). The
+ *  desktop branch narrows this down to DatabaseCredentials before it
+ *  reaches the renderer; the remote branch narrows it too, after using it. */
+export type DbGateCredential = DatabaseCredentials & { login: string; password: string };
 
 export type DatabaseHandlers = {
   /** Ensures a DbGate instance is running for `project` and returns its URL
-   *  plus the credential that instance is guarded with — the renderer then
-   *  opens the URL as a "database" tab and shows the credential. */
-  open(project: string): Promise<GitViewResult<DatabaseCredentials>>;
+   *  plus the credential that instance is guarded with. Neither the
+   *  desktop-origin nor the remote-origin IPC reply carries the credential
+   *  onward — see DbGateCredential. */
+  open(project: string): Promise<GitViewResult<DbGateCredential>>;
 };
 
 export type DatabaseHandlerDeps = {
@@ -1323,7 +1462,7 @@ const CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
  *  entry carrying shell metacharacters through to `shell()`, which types the
  *  name into a live pty; the grammar test alone would let any well-named
  *  container on the machine be driven from a project that never declared it.
- *  Exported because main.ts's `docker:follow` needs exactly this check too,
+ *  Exported because dispatch.ts's `docker:follow` needs exactly this check too,
  *  and an inline second copy of it drifted from this one once already. */
 export function isDeclaredContainer(
   entries: readonly DockerEntry[] | undefined,
@@ -1596,7 +1735,11 @@ export type TerminalHandlers = {
    *  so a split pane completes against its own shell. Empty is an ordinary
    *  answer — a closed dropdown, and zsh's own Tab completion behaving
    *  exactly as it does today. */
-  suggest(paneKey: string, input: string, path?: string): Promise<string[]>;
+  /** `remote` is true only for a call that arrived over the bridge (I5):
+   *  it additionally requires `cwd` to resolve inside the pane's project
+   *  and refuses an absolute or `~/`-prefixed typed path outright, rather
+   *  than the desktop renderer's full-disk completion. */
+  suggest(paneKey: string, input: string, path?: string, remote?: boolean): Promise<string[]>;
   /** The most recent commands from Jarvis's own command log, newest first
    *  and deduplicated — what ↑/↓ in the command editor walk. `paneKey` is a
    *  shell key (a tab id today, "<tabId>:<paneId>" once splits arrive),
@@ -2116,7 +2259,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       deps.shells.kill(paneKey);
     },
 
-    async suggest(paneKey, input, path) {
+    async suggest(paneKey, input, path, remote) {
       const completion = deps.completion;
       if (completion === undefined || !completion.enabled) return [];
       // Both cross an untyped IPC boundary, checked before anything else —
@@ -2131,11 +2274,41 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // completes against its own shell rather than its tab's first. This
       // is the shell's *starting* directory only; `path` above is what the
       // renderer says the shell is in right now, and takes priority when
-      // it is supplied — no containment check here, unlike chips: a typed
-      // path completes exactly as the shell sitting next to it would `ls`
-      // it, absolute prefixes included, and always has.
-      const cwd = path ?? directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      // it is supplied — no containment check here for the desktop
+      // renderer, unlike chips: a typed path completes exactly as the
+      // shell sitting next to it would `ls` it, absolute prefixes included,
+      // and always has. A remote origin does not get that trust (I5): see
+      // below.
+      const start = directoryOf(paneKey.split(":")[0] ?? paneKey);
+      const cwd = path ?? directories.get(paneKey) ?? start;
       if (cwd === undefined) return [];
+      // I5: a phone's shell is still this laptop's own shell, but nothing
+      // says a phone may browse outside the project that pane belongs to.
+      // The cwd itself must stay inside the pane's project, and a typed
+      // absolute or `~/`-prefixed path (which desktop's resolveDirectory
+      // happily lists from disk root or $HOME) is refused outright rather
+      // than partially honoured — there is no directory outside the
+      // project this may ever list for a remote origin.
+      if (remote === true) {
+        const files = deps.files;
+        if (files === undefined) return [];
+        const project = projectFor(start ?? cwd);
+        if (project === undefined) return [];
+        if (resolveWithin(project.dir, cwd, files.realPath) === undefined) return [];
+        // Not just "absolute or ~/" (a relative prefix like `../../../etc/`
+        // is neither, and completion-source.ts's resolveDirectory still
+        // walks it straight out of cwd) and not just `cwd` itself (an
+        // in-project symlink pointing outside would pass that check and
+        // still list outside once resolved) — the actual directory this
+        // prefix would make completion.ts's listing() read is what has to
+        // stay inside the project, resolved through the same realpath
+        // containment check as everything else.
+        const prefix = pathPrefix(input);
+        if (prefix !== undefined) {
+          const listedDir = resolveDirectory(cwd, prefix);
+          if (resolveWithin(project.dir, listedDir, files.realPath) === undefined) return [];
+        }
+      }
       try {
         return await completion.source.suggest(cwd, input);
       } catch {
@@ -2419,7 +2592,12 @@ export type ApiHandlers = ApiEditHandlers & {
   collections(project: string): Promise<GitViewResult<BrunoCollection[]>>;
   tree(project: string, collectionPath: string): Promise<GitViewResult<BrunoTree>>;
   request(project: string, path: string): Promise<GitViewResult<Record<string, unknown>>>;
-  save(project: string, path: string, json: Record<string, unknown>): Promise<GitViewResult<void>>;
+  save(
+    project: string,
+    path: string,
+    json: Record<string, unknown>,
+    remote?: RemoteApiContext,
+  ): Promise<GitViewResult<void>>;
   /** Sends the request and, when it answers, evaluates its assert block
    *  against the response. The two travel together because assertions are
    *  about a response that main already has in hand — asking for them
@@ -2428,6 +2606,7 @@ export type ApiHandlers = ApiEditHandlers & {
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
+    remote?: RemoteApiContext,
   ): Promise<GitViewResult<ApiSendResult>>;
   history(project: string): Promise<GitViewResult<HistoryEntry[]>>;
   clearHistory(project: string): Promise<GitViewResult<void>>;
@@ -2482,8 +2661,20 @@ export type ApiEditHandlers = {
     name: string,
     variables: BrunoVariable[],
   ): Promise<GitViewResult<string>>;
-  /** Reads a Postman export and writes it as a new collection. */
-  importPostman(project: string, name: string, collection: unknown): Promise<GitViewResult<string>>;
+  /** Reads a Postman export and writes it as a new collection. `remote`
+   *  (M9 Task 3) is true only for a phone-originated call — dispatch.ts
+   *  passes `origin.kind === "remote"` straight through — and gates the
+   *  bounded-import guard: `validateRemoteImport` over the raw `collection`
+   *  before conversion even runs, and a MAX_IMPORT_REQUESTS cap on
+   *  `postmanToRequests`'s own output before anything is written. A
+   *  desktop-origin call (the Import button, reading a file the user picked
+   *  off their own disk) is unbounded, same as before this task. */
+  importPostman(
+    project: string,
+    name: string,
+    collection: unknown,
+    remote: boolean,
+  ): Promise<GitViewResult<string>>;
 };
 
 export type ApiHandlerDeps = {
@@ -2497,6 +2688,7 @@ export type ApiHandlerDeps = {
     request: Record<string, unknown>,
     variables: Record<string, string>,
     project: string,
+    remote?: RemoteApiContext,
   ) => Promise<{
     response: ApiResponse | ApiFailure;
     scripts?: { logs: string[]; tests: ScriptResult["tests"]; error?: string };
@@ -2535,6 +2727,11 @@ export type ApiHandlerDeps = {
   writeImported: (projectPath: string, name: string, requests: readonly never[]) => Promise<string>;
   projects: Readonly<Record<string, string>>;
   language: "ar" | "en";
+  /** Symlink-resolving containment (I3): the same `realpathSync` every other
+   *  path check in this file uses via `resolveWithin`, so a `.bru` tree
+   *  entry that turns out to be a symlink pointing outside the project
+   *  cannot be read, written, renamed or deleted through this handler. */
+  realPath: (path: string) => string;
 };
 
 /**
@@ -2561,18 +2758,47 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
     return isString(project) ? deps.projects[project] : undefined;
   }
 
-  /** True only if `path` is inside `root`. resolve() collapses any `..`
-   *  first, so a traversal cannot smuggle its way past the prefix test, and
-   *  the separator guards against `/p/acme-other` passing for
-   *  `/p/acme`. */
+  /** True only if `path` is inside `root`. Delegates to `resolveWithin`
+   *  (I3) — the same realpath-based check every other containment test in
+   *  this file uses — so a `.bru` entry that is really a symlink pointing
+   *  outside the project cannot pass here just because its own name looks
+   *  contained. */
   function contains(root: string, path: unknown): boolean {
     if (!isString(path)) return false;
-    const resolved = resolve(path);
-    return resolved === resolve(root) || resolved.startsWith(`${resolve(root)}${sep}`);
+    return resolveWithin(root, path, deps.realPath) !== undefined;
   }
 
-  /** Shared by every write: the project must be known, the path must be
-   *  inside it, and the name must be something. */
+  /** True only if `path` resolves to `root` itself — the collection root,
+   *  never a request or subfolder inside it. Shared by delete and rename,
+   *  which must both refuse to act on the root the same way. */
+  function isCollectionRoot(root: string, path: string): boolean {
+    const resolvedRoot = resolveWithin(root, root, deps.realPath);
+    const resolvedPath = resolveWithin(root, path, deps.realPath);
+    return resolvedRoot !== undefined && resolvedRoot === resolvedPath;
+  }
+
+  /** True only if `path` sits inside one of the project's own collections —
+   *  a directory `api:collections` actually lists (a `bruno.json` root) —
+   *  never merely under the project directory. A stray path under the
+   *  project but outside every collection (a leftover file beside one, a
+   *  directory with no `bruno.json` of its own) is contained by the
+   *  project without being contained by anything `deps.listCollections`
+   *  would ever return, and every write below must refuse it the same way
+   *  it already refuses a path outside the project altogether. */
+  async function containedInCollection(root: string, path: unknown): Promise<boolean> {
+    if (!contains(root, path)) return false;
+    try {
+      const collections = await deps.listCollections(root);
+      return collections.some(
+        (collection) => resolveWithin(collection.path, path as string, deps.realPath) !== undefined,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /** Shared by every write: the project must be known, the path must sit
+   *  inside one of its actual collections, and the name must be something. */
   async function guardedWrite(
     project: string,
     path: string,
@@ -2580,8 +2806,14 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
     write: () => Promise<string>,
   ): Promise<GitViewResult<string>> {
     const root = rootFor(project);
-    if (root === undefined || !contains(root, path)) return unknownProject();
+    if (root === undefined || !(await containedInCollection(root, path))) return unknownProject();
     if (!isString(name) || name.trim() === "") return fail(MESSAGES.invalidArgument(deps.language));
+    // Ruling 2026-09-19b: createRequest/renameRequest write `name` straight
+    // into a .bru file's `meta.name` — the same raw, unescaped sink
+    // prepareRemoteApiRequest's own meta.name guard closes for api:send/
+    // api:save — so a control character is refused here the same way,
+    // before either handler ever gets a chance to reach it.
+    if (!isCleanScalar(name)) return fail(MESSAGES.invalidArgument(deps.language));
     try {
       return { ok: true, value: await write() };
     } catch {
@@ -2679,14 +2911,37 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
       }
     },
 
-    async save(project, path, json) {
+    async save(project, path, json, remote) {
       const root = rootFor(project);
       if (root === undefined) return unknownProject();
-      if (!contains(root, path)) return unknownProject();
+      if (!(await containedInCollection(root, path))) return unknownProject();
       if (typeof json !== "object" || json === null)
         return fail(MESSAGES.invalidArgument(deps.language));
+      if (remote === undefined) {
+        try {
+          await deps.writeRequest(path, json);
+          return { ok: true, value: undefined };
+        } catch {
+          return fail(MESSAGES.apiUnavailable(deps.language));
+        }
+      }
+      // A remote save starts from the request this application already
+      // wrote — never from `json`, the phone's own submitted object — for
+      // every field outside the executable whitelist, so meta.seq/meta.type/
+      // docs/vars/settings/an inactive body block survive a save exactly as
+      // prepareRemoteApiSave documents. The path guard above has already
+      // proved that this request exists inside a real collection.
+      let onDisk: Record<string, unknown>;
       try {
-        await deps.writeRequest(path, json);
+        onDisk = await deps.readRequest(path);
+      } catch {
+        return fail(MESSAGES.apiUnavailable(deps.language));
+      }
+      const prepared = prepareRemoteApiSave(onDisk, json);
+      if (!prepared.ok) return prepared;
+      const saved = stripEphemeralUploadRefs(prepared.value);
+      try {
+        await deps.writeRequest(path, saved);
         return { ok: true, value: undefined };
       } catch {
         return fail(MESSAGES.apiUnavailable(deps.language));
@@ -2704,6 +2959,13 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
     },
 
     async renameEntry(project, path, name, isFolder) {
+      const root = rootFor(project);
+      // Never the collection root itself, same reasoning as deleteEntry:
+      // renaming it out from under listCollections/readCollection would
+      // silently orphan the whole tree from the project's view.
+      if (root !== undefined && isString(path) && isCollectionRoot(root, path)) {
+        return unknownProject();
+      }
       return guardedWrite(project, path, name, () =>
         isFolder === true ? deps.renameFolder(path, name) : deps.renameRequest(path, name),
       );
@@ -2711,11 +2973,11 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
 
     async deleteEntry(project, path) {
       const root = rootFor(project);
-      if (root === undefined || !contains(root, path)) return unknownProject();
+      if (root === undefined || !(await containedInCollection(root, path))) return unknownProject();
       // Never the collection root itself: deleting that from a tree view is
       // a mis-click away from removing every request in it, and the
       // filesystem is the right place for that decision.
-      if (resolve(path) === resolve(root)) return unknownProject();
+      if (isCollectionRoot(root, path)) return unknownProject();
       try {
         await deps.deleteEntry(path);
         return { ok: true, value: undefined };
@@ -2738,8 +3000,29 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
 
     async saveEnvironment(project, collectionPath, name, variables) {
       const root = rootFor(project);
-      if (root === undefined || !contains(root, collectionPath)) return unknownProject();
+      if (root === undefined || !(await containedInCollection(root, collectionPath))) {
+        return unknownProject();
+      }
       if (!isString(name) || name.trim() === "" || !Array.isArray(variables)) {
+        return fail(MESSAGES.invalidArgument(deps.language));
+      }
+      // Fix round 1b (ruling, "environment names"): dispatch.ts casts this
+      // channel's `variables` argument with `as never[]`, so nothing above
+      // has actually checked a variable's own `name` — and
+      // @usebruno/lang's envJsonToBruV2 writes it completely raw
+      // (`${prefix}${name}: ${getValueString(value)}`, no getKeyString, no
+      // quoting at all), the same sink shape as meta.name. `api:saveEnvironment`
+      // is remote-allowed with no origin distinction, so this applies to
+      // every caller alike — a control character in a variable's name is
+      // never legitimate from either origin.
+      if (
+        variables.some((variable) => {
+          const raw = variable as unknown;
+          const varName =
+            typeof raw === "object" && raw !== null ? (raw as { name?: unknown }).name : undefined;
+          return !isString(varName) || !isCleanScalar(varName);
+        })
+      ) {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       try {
@@ -2749,43 +3032,62 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
       }
     },
 
-    async importPostman(project, name, collection) {
+    async importPostman(project, name, collection, remote) {
       const root = rootFor(project);
       if (root === undefined) return unknownProject();
+      if (remote && !validateRemoteImport(collection)) {
+        return fail(MESSAGES.remoteImportRejected(deps.language));
+      }
       try {
         const converted = deps.postmanToRequests(collection);
+        if (remote && converted.requests.length > MAX_IMPORT_REQUESTS) {
+          return fail(MESSAGES.remoteImportRejected(deps.language));
+        }
+        // Fix round 2, Critical class (review): the raw collection passed
+        // validateRemoteImport's shape bounds above, but postmanToRequests's
+        // own *output* — an item name, a header/param key, a basic-auth
+        // username/password — still lands straight in the same raw
+        // meta.name/row-name/auth-scalar sinks prepareRemoteApiRequest
+        // guards for api:send/api:save. Checked here, after conversion and
+        // before anything is written, so the whole import is refused on the
+        // first control character rather than any name being silently
+        // mutated.
+        if (remote && !validateRemoteImportScalars(converted.requests)) {
+          return fail(MESSAGES.remoteImportRejected(deps.language));
+        }
         const target = isString(name) && name.trim() !== "" ? name : converted.name;
         return {
           ok: true,
           value: await deps.writeImported(root, target, converted.requests as readonly never[]),
         };
-      } catch (error) {
-        // The importer's own message ("Only Postman Collection v2.0 and
-        // v2.1 are supported") is the useful part here, unlike a runner's
-        // internal detail — an import fails for reasons about the file the
-        // user chose, and they are the one who can fix it.
-        return {
-          ok: false,
-          text: error instanceof Error ? error.message : MESSAGES.apiUnavailable(deps.language),
-          language: deps.language,
-        };
+      } catch {
+        // Fixed text, never `error.message` (I3): the importer's and
+        // writeImported's own errors can carry absolute filesystem paths
+        // (a rejected containment check, an fs error), which must never
+        // reach the wire verbatim.
+        return fail(MESSAGES.apiUnavailable(deps.language));
       }
     },
 
-    async send(project, request, variables) {
+    async send(project, request, variables, remote) {
       if (rootFor(project) === undefined) return unknownProject();
       if (typeof request !== "object" || request === null) {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
+      const prepared =
+        remote === undefined ? undefined : prepareRemoteApiRequest(request, variables);
+      if (prepared !== undefined && !prepared.ok) return prepared;
+      const safeRequest = prepared?.value.request ?? request;
+      const safeVariables = prepared?.value.variables ?? variables ?? {};
       try {
-        const outcome = await deps.sendRequest(request, variables ?? {}, project);
+        const outcome = await deps.sendRequest(safeRequest, safeVariables, project, remote);
         const { response } = outcome;
-        const assertions = Array.isArray(request["assertions"])
-          ? (request["assertions"] as { name?: string; value?: string; enabled?: boolean }[])
+        const assertions = Array.isArray(safeRequest["assertions"])
+          ? (safeRequest["assertions"] as { name?: string; value?: string; enabled?: boolean }[])
           : [];
 
-        const meta = (request["meta"] ?? {}) as { name?: string };
-        const http = (request["http"] ?? {}) as { method?: string; url?: string };
+        const meta = (safeRequest["meta"] ?? {}) as { name?: string };
+        const http = (safeRequest["http"] ?? {}) as { method?: string; url?: string };
         const state = await deps.store.read(project);
         const history =
           "failed" in response
@@ -2857,12 +3159,42 @@ export type BookmarksHandlerDeps = {
    *  icon lands in the cache and the next listBookmarks carries it. */
   requestFavicon(project: string, url: string): void;
   language: "ar" | "en";
+  /** Known project names, checked only by `add` (I5 minor): the other
+   *  methods stay as documented above (any string project name, since
+   *  there is no filesystem behind this boundary to protect) — `add` is
+   *  the one call that can grow a bookmarks.json under a project name a
+   *  phone made up, rather than acting on an existing entry. */
+  projects: Readonly<Record<string, string>>;
 };
 
-function isBookmark(value: unknown): value is Bookmark {
-  if (typeof value !== "object" || value === null) return false;
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Rebuilds a bookmark from exactly its own checked fields — `url` (must
+ *  parse as http/https, never `javascript:` or a bare string a renderer
+ *  happened to send), `title`, and the two optional fields — rather than
+ *  passing an untyped object straight to the store, which would carry
+ *  through any extra property a caller attached. */
+function toBookmark(value: unknown): Bookmark | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
-  return isString(candidate["url"]) && isString(candidate["title"]);
+  const url = candidate["url"];
+  const title = candidate["title"];
+  if (!isString(url) || !isHttpUrl(url) || !isString(title)) return undefined;
+  const pinned = candidate["pinned"];
+  const order = candidate["order"];
+  return {
+    url,
+    title,
+    ...(typeof pinned === "boolean" ? { pinned } : {}),
+    ...(typeof order === "number" && Number.isFinite(order) ? { order } : {}),
+  };
 }
 
 /**
@@ -2917,10 +3249,12 @@ export function createBookmarksHandlers(deps: BookmarksHandlerDeps): BookmarksHa
     },
 
     async add(project, bookmark) {
-      if (!isString(project) || !isBookmark(bookmark)) {
+      if (!isString(project) || !Object.hasOwn(deps.projects, project)) {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
-      const result = await deps.store.add(project, bookmark);
+      const clean = toBookmark(bookmark);
+      if (clean === undefined) return fail(MESSAGES.invalidArgument(deps.language));
+      const result = await deps.store.add(project, clean);
       return result.ok
         ? { ok: true, value: await withIcons(project, result.value) }
         : translate(result.detail);

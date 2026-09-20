@@ -11,6 +11,12 @@ import type {
 } from "@jarvis/platform";
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { PERSONAL_PROJECT } from "../src/personal.js";
+import type { BindChoice, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
+import { isMeshAddress, primaryBindChoices } from "./remote-bind.js";
+import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remote-status.js";
+import { encodeQr, qrToCanvas } from "./vendor/qr.js";
+import { syncPrayerSettings } from "./prayer.js";
 
 // Settings' own route. One in-memory draft, edited in place and re-rendered
 // wholesale on every mutation — every field commits on "change" (blur or
@@ -26,36 +32,120 @@ const $ = (id: string): HTMLElement => {
 };
 
 let draft: JarvisConfig | undefined;
+let savedBaseline: JarvisConfig | undefined;
+
+/** The bridge's own status, distinct from `draft.remote` (the config the
+ *  user is editing): this is what it is actually doing right now — closed
+ *  by default until either latestRemoteStatus() or a real remoteStatus()
+ *  call supplies one. */
+const DEFAULT_REMOTE_STATUS: RemoteStatus = {
+  enabled: false,
+  listening: undefined,
+  pairing: { kind: "closed" },
+  devices: [],
+  problem: undefined,
+  // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
+  sidecarProxy: "off",
+};
+let remoteStatusCache: RemoteStatus | undefined;
+
+// The pairing QR: rendered at a small internal resolution and scaled up to
+// its fixed 176px CSS box (styles.css, image-rendering: pixelated) rather
+// than one canvas pixel per module — a version-10 code is 65 modules wide
+// including the quiet zone, and 3px/module keeps the browser's upscaling
+// crisp without a huge backing bitmap.
+const QR_MODULE_PX = 3;
+const QR_QUIET_ZONE_MODULES = 4;
+
+/** The last 4 hex characters of the pairing link's `fp` (fingerprint)
+ *  query parameter — the same value, computed the same way
+ *  (`fingerprint.slice(-4)`), as the phone's own `fingerprintTail`
+ *  (apps/mobile/src/lib/pair-flow.ts). Parsed from the link text with
+ *  the browser's own `URLSearchParams` rather than `@jarvis/wire`'s
+ *  `parsePairingUri`: the renderer may only ever `import type` from a
+ *  workspace package (no-value-imports.test.ts) since it runs in a
+ *  browser context that lacks the Node built-ins those packages use, so
+ *  a value import of the real parser is not an option here — and the
+ *  fingerprint is already in the same `status.pairing.uri` the link text
+ *  and the QR both come from, so no new field or channel is needed
+ *  either. Returns undefined for a URI that doesn't carry a well-formed
+ *  `fp` param — the caller then shows nothing rather than a stray tail. */
+function fingerprintTailFromUri(uri: string): string | undefined {
+  const queryIndex = uri.indexOf("?");
+  if (queryIndex === -1) return undefined;
+  const fingerprint = new URLSearchParams(uri.slice(queryIndex + 1)).get("fp");
+  if (fingerprint === null || fingerprint.length < 4) return undefined;
+  return fingerprint.slice(-4);
+}
 
 /** Called once, at app start (app.ts), same as initWorkspace — wires the
  *  static single-field controls and the three "+ Add" buttons. openSettings
  *  (below) only ever fetches and renders; it is called every time the
  *  Settings nav button is clicked, and must never re-attach listeners to
  *  elements that already have them. */
+/** The section nav (board 5): plain anchors, so a click still jumps the
+ *  scroller with no JS at all if this never runs — this only adds the
+ *  active-link highlight `:target` can't give the *link* (it matches the
+ *  section, never the anchor that pointed at it). */
+function wireSettingsNav(): void {
+  const links = document.querySelectorAll<HTMLAnchorElement>(".settings-nav-link");
+  for (const link of links) {
+    link.addEventListener("click", () => {
+      for (const other of links) other.classList.toggle("settings-nav-link--on", other === link);
+    });
+  }
+}
+
 export function initSettings(): void {
   wireStaticFields();
+  wireSettingsNav();
+  // Reopens the prerequisites screen. It shows itself on a first run and
+  // when something required is missing; this is how a user reaches it the
+  // rest of the time — after installing a tool, or to see what a tab wants.
+  // Moved here from openSettings (M3 carry-over): openSettings runs on every
+  // nav click, and a listener re-attached there would fire once per past
+  // visit to the route.
+  $("settings-tools").addEventListener("click", () => {
+    void openSetup(window.jarvis);
+  });
+  // Attached once, for the app's lifetime — not per openSettings — so it
+  // never stacks. It re-renders only the pair area and the device list:
+  // a push can arrive while some other Settings field is mid-edit, and a
+  // full renderSettings() would blow that away.
+  onRemoteStatusChange((status) => {
+    remoteStatusCache = status;
+    renderRemotePairArea();
+    renderPairedDevices();
+  });
 }
 
 export async function openSettings(): Promise<void> {
   clearSaveStatus();
+  otherBindPicked = false;
+  // Whatever remote-status.ts already knows, shown immediately — the pair
+  // area and device list do not wait on a fresh round trip to draw.
+  remoteStatusCache = latestRemoteStatus();
   draft = await window.jarvis.getSettings();
+  savedBaseline = structuredClone(draft);
   renderSettings();
-  // Re-read every time rather than once: a voice installed in System
-  // Settings while Jarvis is open should appear the next time this route is
-  // opened, not the next time the app restarts. After the first render, so
-  // the section appears immediately and fills in when the listing arrives.
-  // Reopens the prerequisites screen. It shows itself on a first run and
-  // when something required is missing; this is how a user reaches it the
-  // rest of the time — after installing a tool, or to see what a tab wants.
-  $("settings-tools").addEventListener("click", () => {
-    void openSetup(window.jarvis);
-  });
 
   void loadVoices();
+  void loadBindChoices();
+  // Then refreshed: remoteStatus() is a pull, distinct from the onRemoteStatus
+  // push above — a value paired or revoked from a phone while this window
+  // was elsewhere is otherwise not visible until the next push.
+  try {
+    remoteStatusCache = await window.jarvis.remoteStatus();
+  } catch {
+    // The cached value (from latestRemoteStatus(), or default-closed) stands.
+  }
+  renderRemotePairArea();
+  renderPairedDevices();
 }
 
 function renderSettings(): void {
   if (draft === undefined) return;
+  syncPrayerSettings(draft.prayer);
   renderAgents();
   renderRouting();
   renderProjects();
@@ -67,11 +157,13 @@ function renderSettings(): void {
   renderVoice();
   renderBrowser();
   renderWhisper();
+  renderRemote();
 }
 
 function renderBrowser(): void {
   if (draft === undefined) return;
   ($("settings-allow-popups") as HTMLInputElement).checked = draft.browser.allowPopups;
+  ($("settings-browser-homepage") as HTMLInputElement).value = draft.browser.homePage ?? "";
 }
 
 function clearSaveStatus(): void {
@@ -1184,10 +1276,803 @@ function renderWhisper(): void {
   ($("settings-whisper-model") as HTMLInputElement).value = draft.whisper.modelPath;
 }
 
+// ---------------------------------------------------------- Remote access
+
+/** This machine's addresses, re-read every time Settings opens — a VPN
+ *  brought up while Jarvis runs should be in the list the next time. */
+let bindChoiceList: BindChoice[] = [];
+
+/** Whether "Other…" is the picked radio. Held apart from the draft: picking
+ *  it changes nothing until an address is typed, and the re-render in
+ *  between must not snap the selection back to the listed address. */
+let otherBindPicked = false;
+
+/** config.ts's DEFAULT_REMOTE.bindAddress, restated: that module pulls in
+ *  node:net (isIP) and cannot be imported by value here (no-value-imports),
+ *  and the address itself is loopback's own fixed literal, not a value that
+ *  could drift out from under a hand-copied string. */
+const DEFAULT_BIND_ADDRESS = "127.0.0.1";
+
+function renderRemote(): void {
+  if (draft === undefined) return;
+  const remote = draft.remote;
+  const language = PRIMARY_LANGUAGE;
+
+  $("settings-remote-title").textContent = MESSAGES.remoteTitle(language);
+  // The section nav's own label for this section (board 5) — the section
+  // itself is bilingual, so the link pointing at it has to be too. Looked
+  // up separately from the throwing `$()` above: settings.test.ts's harness
+  // lays down the section's own fields without the nav around them, and
+  // that harness's coverage of this section must not need the nav too.
+  const navLabel = document.getElementById("settings-nav-remote");
+  if (navLabel) navLabel.textContent = MESSAGES.remoteTitle(language);
+  $("settings-remote-enabled-label").textContent = MESSAGES.remoteEnabledLabel(language);
+  $("settings-remote-reachable-label").textContent = MESSAGES.remoteReachableOn(language);
+  $("settings-remote-port-label").textContent = MESSAGES.remotePortLabel(language);
+  $("settings-remote-port-note").textContent = MESSAGES.remotePortNote(language);
+  $("settings-remote-proxy-label").textContent = MESSAGES.remoteProxyLabel(language);
+  $("settings-remote-proxy-note").textContent = MESSAGES.remoteProxyNote(language);
+  $("settings-remote-push-label").textContent = MESSAGES.remotePushLabel(language);
+  $("settings-remote-push-note").textContent = MESSAGES.remotePushNote(language);
+  $("settings-remote-idle-label").textContent = MESSAGES.remoteIdleLabel(language);
+  $("settings-remote-idle-note").textContent = MESSAGES.remoteIdleNote(language);
+  $("settings-remote-push-projects-label").textContent = MESSAGES.remotePushProjectsLabel(language);
+  $("settings-remote-push-projects-note").textContent = MESSAGES.remotePushProjectsNote(language);
+  $("settings-remote-pair-title").textContent = MESSAGES.remotePairTitle(language);
+  $("settings-remote-devices-title").textContent = MESSAGES.remoteDevicesTitle(language);
+  $("settings-remote-warning").textContent = MESSAGES.remoteWarning(language);
+  $("settings-remote-no-credential").textContent = MESSAGES.remoteNoCredential(language);
+  ($("settings-remote-pair-cancel") as HTMLButtonElement).textContent =
+    MESSAGES.remotePairCancel(language);
+
+  ($("settings-remote-enabled") as HTMLInputElement).checked = remote.enabled;
+  $("settings-remote-state").textContent = MESSAGES.remoteState(remote.enabled, language);
+  ($("settings-remote-port") as HTMLInputElement).value = String(remote.port);
+  ($("settings-remote-proxy") as HTMLInputElement).checked = remote.sidecarProxy;
+  certBusy = false;
+  clearRemoteCertError();
+  renderRemoteCertRow();
+  ($("settings-remote-push") as HTMLInputElement).checked = remote.push.enabled;
+  ($("settings-remote-idle") as HTMLInputElement).value = String(remote.idleDisableMinutes);
+  ($("settings-remote-push-projects") as HTMLInputElement).checked =
+    remote.push.includeProjectNames;
+
+  $("settings-remote-new-code").textContent = MESSAGES.remoteNewCode(language);
+
+  renderBindChoices();
+  renderRemotePairArea();
+  renderPairedDevices();
+}
+
+/** The 1s countdown on an open pairing window's expiry — at most one timer
+ *  running at a time, stopped on any non-open status. */
+let expiryTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopExpiryTimer(): void {
+  if (expiryTimer !== undefined) clearInterval(expiryTimer);
+  expiryTimer = undefined;
+}
+
+function updateExpiryText(expiresAt: number): void {
+  const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+  $("settings-remote-pair-expiry").textContent = MESSAGES.remotePairExpires(
+    seconds,
+    PRIMARY_LANGUAGE,
+  );
+}
+
+function startExpiryTimer(expiresAt: number): void {
+  stopExpiryTimer();
+  updateExpiryText(expiresAt);
+  expiryTimer = setInterval(() => updateExpiryText(expiresAt), 1000);
+}
+
+function renderRemotePairArea(): void {
+  const language = PRIMARY_LANGUAGE;
+  const status = remoteStatusCache ?? DEFAULT_REMOTE_STATUS;
+
+  const newCode = $("settings-remote-new-code") as HTMLButtonElement;
+  newCode.disabled = !(
+    status.enabled &&
+    status.problem !== "devices-unreadable" &&
+    status.pairing.kind === "closed"
+  );
+
+  const codeEl = $("settings-remote-pair-code");
+  const cancelBtn = $("settings-remote-pair-cancel") as HTMLButtonElement;
+  const note = $("settings-remote-pair-note");
+  const qrCanvas = $("remote-pair-qr") as HTMLCanvasElement;
+  const fingerprintEl = $("settings-remote-pair-fingerprint");
+
+  stopExpiryTimer();
+
+  if (status.pairing.kind === "open") {
+    codeEl.textContent = status.pairing.uri;
+    startExpiryTimer(status.pairing.expiresAt);
+    cancelBtn.hidden = false;
+    note.textContent = MESSAGES.remotePairInstructions(language);
+    // The QR encodes the same secret-bearing link already shown as text
+    // above — drawn only here, only from this remote:update-fed status, and
+    // never toDataURL'd, saved or logged (M4 ruling 34's fallback stays the
+    // link text, for a QR the phone's camera can't read).
+    qrToCanvas(qrCanvas, encodeQr(status.pairing.uri), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+    qrCanvas.hidden = false;
+    // Only the tail, never the fingerprint or the secret — see
+    // fingerprintTailFromUri's own comment for why it doesn't import the
+    // real parser.
+    const tail = fingerprintTailFromUri(status.pairing.uri);
+    fingerprintEl.textContent =
+      tail === undefined ? "" : MESSAGES.remotePairFingerprintTail(tail, language);
+  } else {
+    codeEl.textContent = "";
+    $("settings-remote-pair-expiry").textContent = "";
+    cancelBtn.hidden = true;
+    qrCanvas.getContext("2d")?.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+    qrCanvas.hidden = true;
+    fingerprintEl.textContent = "";
+    if (status.pairing.kind === "confirming") {
+      const parts = MESSAGES.remotePairWaitingParts(language);
+      note.replaceChildren(withNameInBdi(parts.before, status.pairing.deviceName, parts.after));
+    } else if (!status.enabled) {
+      note.textContent = MESSAGES.remotePairSaveFirst(language);
+    } else {
+      note.textContent = "";
+    }
+  }
+
+  const problem = $("settings-remote-problem");
+  problem.hidden = status.problem === undefined;
+  if (status.problem !== undefined) {
+    problem.textContent = MESSAGES.remoteProblem(status.problem, language);
+  }
+
+  renderRemoteCertificateNote(status);
+  renderRemoteIdleState(status);
+}
+
+/** Task 4 rule 4: the bridge's own idle-timer status (RemoteStatus.idle,
+ *  M12 Task 1) — rendered from `status` only, same reason
+ *  renderRemoteCertificateNote is: what the bridge is doing right now, not
+ *  what an unsaved draft asks for.
+ *
+ *  Ruling 5's draft flip lives here rather than in a separate effect: the
+ *  bridge closed its own listener before this status ever arrived (M12
+ *  global constraint — "off stays off, and off-by-itself is honest"), so
+ *  the panel's job is only to catch the draft and the enabled switch up to
+ *  a fact that already happened. It never calls renderSettings() or
+ *  renderRemote() — only the two elements it touches directly — so a
+ *  status that keeps reporting "disabled" (the record persists until the
+ *  next `enabled: true` apply, per bridge.ts) can never loop: the `if
+ *  (draft.remote.enabled)` guard makes the second and every later call a
+ *  no-op once the draft already agrees. */
+function renderRemoteIdleState(status: RemoteStatus): void {
+  const language = PRIMARY_LANGUAGE;
+  const state = $("settings-remote-idle-state");
+  const idle = status.idle;
+
+  if (idle === undefined) {
+    state.textContent = "";
+    state.hidden = true;
+    return;
+  }
+
+  if (idle.kind === "armed") {
+    state.textContent = MESSAGES.remoteIdleArmed(idle.disableAt, language);
+    state.hidden = false;
+    return;
+  }
+
+  state.textContent = MESSAGES.remoteIdleDisabled(idle.at, idle.afterMinutes, language);
+  state.hidden = false;
+
+  if (draft?.remote.enabled) {
+    draft.remote.enabled = false;
+    ($("settings-remote-enabled") as HTMLInputElement).checked = false;
+    $("settings-remote-state").textContent = MESSAGES.remoteState(false, language);
+  }
+}
+
+/** Task 4 rule 5: the sidecar proxy's certificate state, under its toggle.
+ *  Rendered from `status` only, never from the draft — a config change
+ *  the user hasn't saved yet says nothing about what the bridge is
+ *  actually serving right now.
+ *
+ *  `status.listening === undefined` is checked FIRST, before
+ *  `sidecarProxy === "needs-certificate"` (review round 1, Important #1):
+ *  the bridge reports `needs-certificate` for the whole time the toggle is
+ *  on and it simply is not listening yet (disabled, or enabled with zero
+ *  paired devices) — bridge.ts's own gate, not only for a live self-signed
+ *  or no-SAN certificate. Testing the warning first would assert "the
+ *  certificate is self-signed or has no DNS name" about a certificate
+ *  nobody is serving. Once `listening` is defined, `needs-certificate`
+ *  takes priority over the plain certificate description: it is the more
+ *  actionable fact (those tabs are unavailable) and already names the same
+ *  certificate problem a self-signed/no-SAN note would. */
+function renderRemoteCertificateNote(status: RemoteStatus): void {
+  const language = PRIMARY_LANGUAGE;
+  const note = $("settings-remote-certificate");
+
+  if (status.listening === undefined) {
+    note.textContent = "";
+    note.className = "settings-note";
+    note.hidden = true;
+    return;
+  }
+
+  if (status.sidecarProxy === "needs-certificate") {
+    note.textContent = MESSAGES.remoteProxyNeedsCertificate(language);
+    note.className = "settings-note settings-note--warning";
+    note.hidden = false;
+    return;
+  }
+
+  const { certificate } = status.listening;
+  note.textContent =
+    certificate.source === "configured" && certificate.hostname !== undefined
+      ? MESSAGES.remoteCertificateReal(certificate.hostname, language)
+      : MESSAGES.remoteCertificateSelfSigned(language);
+  note.className = "settings-note";
+  note.hidden = false;
+}
+
+// ------------------------------------------------------- Tailscale cert row
+
+// Opened through the existing external-link path (workspace.ts/
+// session-view.ts's own openLink handlers): a Workspace tab under the
+// reserved personal-browser project, never window.open — the main window's
+// webContents denies every window.open/target=_blank outright
+// (main.ts's setWindowOpenHandler), so a real anchor or window.open here
+// would silently do nothing.
+const TAILSCALE_ADMIN_URL = "https://login.tailscale.com/admin/dns";
+
+/** True while a Get/Renew click is in flight — disables the button and
+ *  swaps its label, same discipline testAgentRow's "…" state and the
+ *  revoke button's disable-for-the-round-trip use elsewhere in this file. */
+let certBusy = false;
+
+/** The certificate's own name, read back from the path this module's own
+ *  `remote:tailscaleCert` channel writes (tailscale-cert.ts's
+ *  `<dir>/tls/<name>.crt`) — undefined for anything else (a hand-configured
+ *  path, or no certificate at all), which falls back to showing the raw
+ *  path instead. A pure string parse: no filesystem access, so it still
+ *  works after Settings has been reopened and the draft is all that is left. */
+function tailscaleCertNameFromPath(certPath: string): string | undefined {
+  const parts = certPath.split(/[/\\]/);
+  const file = parts[parts.length - 1];
+  const dir = parts[parts.length - 2];
+  if (dir !== "tls" || file === undefined || !file.endsWith(".crt")) return undefined;
+  const name = file.slice(0, -".crt".length);
+  return name === "" ? undefined : name;
+}
+
+/** The status text and Get/Renew button under the sidecar proxy switch,
+ *  plus the Tailscale hint beneath it — all read from `draft.remote`, the
+ *  same status-not-live-bridge discipline the port/idle/push fields above
+ *  already follow (unlike renderRemoteCertificateNote, which describes what
+ *  the bridge is actually serving right now). */
+function renderRemoteCertRow(): void {
+  if (draft === undefined) return;
+  const language = PRIMARY_LANGUAGE;
+  const { tls, bindAddress } = draft.remote;
+  const hasCert = tls.certPath !== undefined && tls.keyPath !== undefined;
+
+  const status = $("settings-remote-cert-status");
+  if (!hasCert) {
+    status.textContent = MESSAGES.remoteCertNone(language);
+  } else {
+    const certPath = tls.certPath as string;
+    const name = tailscaleCertNameFromPath(certPath);
+    status.textContent =
+      name !== undefined
+        ? MESSAGES.remoteCertNamed(name, language)
+        : MESSAGES.remoteCertPath(certPath, language);
+  }
+
+  const button = $("settings-remote-cert-button") as HTMLButtonElement;
+  button.disabled = certBusy;
+  if (!certBusy) {
+    button.textContent = hasCert
+      ? MESSAGES.remoteCertRenewButton(language)
+      : MESSAGES.remoteCertGetButton(language);
+  }
+
+  const hint = $("settings-remote-cert-hint");
+  const showHint = !hasCert && isMeshAddress(bindAddress);
+  hint.hidden = !showHint;
+  hint.textContent = showHint ? MESSAGES.remoteCertHint(language) : "";
+}
+
+/** Renders `remote:tailscaleCert`'s failure into the error row beneath the
+ *  button — a plain sentence for every kind except https-disabled, whose
+ *  middle clause becomes a clickable control that opens the Tailscale admin
+ *  console the same way every other in-app link does. */
+function renderRemoteCertError(
+  result: Extract<Awaited<ReturnType<typeof window.jarvis.tailscaleCert>>, { ok: false }>,
+): void {
+  const language = PRIMARY_LANGUAGE;
+  const error = $("settings-remote-cert-error");
+  error.hidden = false;
+
+  if (result.kind === "no-tailscale") {
+    error.textContent = MESSAGES.remoteCertNoTailscale(language);
+    return;
+  }
+  if (result.kind === "not-connected") {
+    error.textContent = MESSAGES.remoteCertNotConnected(language);
+    return;
+  }
+  if (result.kind === "https-disabled") {
+    const parts = MESSAGES.remoteCertHttpsDisabled(language);
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "settings-link-button";
+    link.textContent = parts.link;
+    link.addEventListener("click", () => {
+      void window.jarvis.openTab(PERSONAL_PROJECT, TAILSCALE_ADMIN_URL);
+    });
+    error.replaceChildren(
+      document.createTextNode(parts.before),
+      link,
+      document.createTextNode(parts.after),
+    );
+    return;
+  }
+  error.textContent = `${MESSAGES.remoteCertFailed(language)} ${result.detail}`;
+}
+
+function clearRemoteCertError(): void {
+  const error = $("settings-remote-cert-error");
+  error.replaceChildren();
+  error.hidden = true;
+}
+
+/** Round 3: the saved address still being the config default means nobody
+ *  has ever picked one, so the picker proposes the best one rather than
+ *  making a first-time user hunt for Tailscale/Wi-Fi behind Advanced… —
+ *  Tailscale first, Wi-Fi when this machine has no tailnet address. Called
+ *  only once per open, right after a fresh bindChoiceList arrives (see
+ *  loadBindChoices): re-running it on every render would fight a later,
+ *  deliberate pick of "This machine only" back to loopback's own literal
+ *  address, since that pick is indistinguishable on disk from "never
+ *  touched". Nothing here reaches jarvis.yaml on its own — like every other
+ *  field in this file, it only changes what Save would write. */
+function applyDefaultBindSelection(): void {
+  if (draft === undefined || draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
+  const { tailscale, wifi } = primaryBindChoices(bindChoiceList);
+  const preferred = tailscale ?? wifi;
+  if (preferred !== undefined) draft.remote.bindAddress = preferred.address;
+}
+
+function renderBindChoices(): void {
+  if (draft === undefined) return;
+  const address = draft.remote.bindAddress;
+  const container = $("settings-remote-choices");
+  // Arrow-key navigation drives this group one radio at a time; each change
+  // rebuilds it from scratch, so without this the second arrow press has
+  // nothing to move because focus already fell to <body>. Scoped to an
+  // actual radio (M3 Minor A): `container.contains(activeElement)` used to
+  // be true for the "Other…" text field too (it lives inside this same
+  // container), which stole focus away from that field back onto a radio
+  // the instant it rebuilt — see the sibling check below for that field.
+  const activeElement = document.activeElement;
+  const hadFocusInGroup =
+    activeElement instanceof HTMLInputElement &&
+    activeElement.type === "radio" &&
+    container.contains(activeElement);
+  const hadFocusInOtherField =
+    activeElement instanceof HTMLInputElement &&
+    activeElement.dataset["field"] === "bindAddress" &&
+    container.contains(activeElement);
+  container.replaceChildren();
+
+  const { tailscale, wifi, rest } = primaryBindChoices(bindChoiceList);
+  const listed = bindChoiceList.some((choice) => choice.address === address);
+  const otherChecked = otherBindPicked || !listed;
+
+  const tailscaleChecked =
+    !otherChecked && tailscale !== undefined && tailscale.address === address;
+  const wifiChecked = !otherChecked && wifi !== undefined && wifi.address === address;
+
+  const tailscaleRadio = bindRadio(
+    MESSAGES.remoteTailscaleLabel(PRIMARY_LANGUAGE),
+    tailscale?.address ?? "",
+    tailscaleChecked,
+    () => {
+      if (draft === undefined || tailscale === undefined) return;
+      otherBindPicked = false;
+      draft.remote.bindAddress = tailscale.address;
+    },
+    { disabled: tailscale === undefined, dataChoice: "tailscale" },
+  );
+  tailscaleRadio.classList.add("settings-remote-choice--primary");
+  container.append(tailscaleRadio);
+  if (tailscale === undefined) {
+    const missing = document.createElement("div");
+    missing.className = "settings-note";
+    missing.id = "settings-remote-tailscale-missing";
+    missing.textContent = MESSAGES.remoteTailscaleMissing(PRIMARY_LANGUAGE);
+    container.append(missing);
+  }
+
+  const wifiRadio = bindRadio(
+    MESSAGES.remoteWifiLabel(PRIMARY_LANGUAGE),
+    wifi?.address ?? "",
+    wifiChecked,
+    () => {
+      if (draft === undefined || wifi === undefined) return;
+      otherBindPicked = false;
+      draft.remote.bindAddress = wifi.address;
+    },
+    { disabled: wifi === undefined, dataChoice: "wifi" },
+  );
+  wifiRadio.classList.add("settings-remote-choice--primary");
+  container.append(wifiRadio);
+
+  // Everything else — loopback, IPv6, a second interface, Other… — behind
+  // one disclosure, open by itself only when the saved address is one of
+  // these rather than a primary: a custom or less-common choice should be
+  // visible the moment the panel opens, not hunted for.
+  const advanced = document.createElement("details");
+  advanced.id = "settings-remote-advanced";
+  advanced.className = "settings-remote-advanced";
+  advanced.open = !tailscaleChecked && !wifiChecked;
+  const summary = document.createElement("summary");
+  summary.textContent = MESSAGES.remoteAdvancedLabel(PRIMARY_LANGUAGE);
+  advanced.append(summary);
+
+  const advancedBody = document.createElement("div");
+  advancedBody.className = "settings-remote-advanced-body";
+
+  for (const choice of rest) {
+    advancedBody.append(
+      bindRadio(
+        bindChoiceCaption(choice, PRIMARY_LANGUAGE),
+        choice.address,
+        !otherChecked && choice.address === address,
+        () => {
+          if (draft === undefined) return;
+          otherBindPicked = false;
+          draft.remote.bindAddress = choice.address;
+        },
+      ),
+    );
+  }
+
+  // A plain wrapper, not a <label> around both: the address field must not
+  // sit inside a label whose implicit click target is the radio — the same
+  // reason the Docker picker keeps its <select> out of one.
+  const other = document.createElement("div");
+  other.className = "settings-remote-other";
+  const otherLabel = bindRadio(
+    MESSAGES.remoteOtherAddress(PRIMARY_LANGUAGE),
+    "",
+    otherChecked,
+    () => {
+      otherBindPicked = true;
+    },
+    { dataChoice: "other" },
+  );
+
+  const field = document.createElement("input");
+  field.type = "text";
+  field.className = "mono";
+  field.autocomplete = "off";
+  field.dataset["field"] = "bindAddress";
+  field.placeholder = MESSAGES.remoteOtherPlaceholder(PRIMARY_LANGUAGE);
+  // The radio beside it is the only labelled control in this row — its own
+  // accessible name is "Other…", not "the address", so this field needs one
+  // of its own rather than inheriting the radio's.
+  field.setAttribute("aria-label", MESSAGES.remoteOtherAddress(PRIMARY_LANGUAGE));
+  // An IP literal reads left-to-right regardless of the panel's own
+  // direction, same reason the listed choices' address span gets this below.
+  field.dir = "ltr";
+  field.value = otherChecked ? address : "";
+  field.disabled = !otherChecked;
+  field.addEventListener("change", () => {
+    if (draft === undefined) return;
+    const typed = field.value.trim();
+    // An emptied field is not an address, so the last one stands — and the
+    // field must show that, the same snap-back the port field does, so the
+    // panel never displays an address different from the one it will save.
+    // A hostname is committed and refused by Save's one validation pass,
+    // with the reason — parseConfig owns the IP-literal rule, not this field.
+    if (typed === "") {
+      field.value = draft.remote.bindAddress;
+      return;
+    }
+    draft.remote.bindAddress = typed;
+    clearSaveStatus();
+    renderBindChoices();
+  });
+  other.append(otherLabel, field);
+  advancedBody.append(other);
+  advanced.append(advancedBody);
+  container.append(advanced);
+
+  if (hadFocusInGroup) {
+    container.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
+  } else if (hadFocusInOtherField) {
+    field.focus();
+  }
+
+  const allNote = $("settings-remote-all-note");
+  allNote.textContent = MESSAGES.remoteAllInterfaces(PRIMARY_LANGUAGE);
+  allNote.hidden = !isEveryInterfaceAddress(address);
+
+  // The Tailscale hint depends on bindAddress, which this function just
+  // possibly changed — kept live as the picker is used, not only at open.
+  renderRemoteCertRow();
+}
+
+/** One radio in the picker, with its label and (for a listed choice) the
+ *  address itself, which is the thing a user actually recognises. `caption`
+ *  is a string for a plain label (the two primaries, "Other…") or a Node for
+ *  a listed choice in Advanced…, whose caption isolates the OS-given
+ *  interface name (bindChoiceCaption). */
+function bindRadio(
+  caption: string | Node,
+  address: string,
+  checked: boolean,
+  onPick: () => void,
+  options?: { disabled?: boolean; dataChoice?: string },
+): HTMLElement {
+  const label = document.createElement("label");
+  label.className = "settings-remote-choice";
+  const radio = document.createElement("input");
+  radio.type = "radio";
+  radio.name = "settings-remote-bind";
+  radio.value = address;
+  radio.checked = checked;
+  radio.disabled = options?.disabled ?? false;
+  if (options?.dataChoice !== undefined) radio.dataset["choice"] = options.dataChoice;
+  radio.addEventListener("change", () => {
+    if (!radio.checked) return;
+    onPick();
+    clearSaveStatus();
+    renderBindChoices();
+  });
+  const text = document.createElement("span");
+  if (typeof caption === "string") text.textContent = caption;
+  else text.append(caption);
+  label.append(radio, text);
+  if (address !== "") {
+    const shown = document.createElement("span");
+    shown.className = "mono";
+    // An IPv6 literal is long and reads left-to-right; without this an
+    // Arabic label around it can reorder it visually.
+    shown.dir = "ltr";
+    shown.textContent = address;
+    label.append(shown);
+  }
+  return label;
+}
+
+/** A choice's caption, with its OS-given interface name bidi-isolated: a
+ *  Latin adapter name ("vEthernet (WSL)") that ends in digits or punctuation
+ *  can otherwise reorder visually inside the Arabic label around it. Built
+ *  from `remoteBindChoiceLabel(kind, "", language)` (the name alone) plus the
+ *  same " — iface" join messages.ts uses, so the combined text matches
+ *  MESSAGES.remoteBindChoiceLabel(kind, iface, language) exactly. */
+function bindChoiceCaption(choice: BindChoice, language: "ar" | "en"): Node {
+  // remoteBindChoiceLabel ignores iface entirely for "loopback" (always
+  // "This machine only"/"هذا الجهاز فقط"), so there is no iface name to
+  // isolate — matching that here keeps the reconstructed text identical to
+  // calling remoteBindChoiceLabel(kind, iface, language) directly.
+  if (choice.kind === "loopback" || choice.iface === "") {
+    return document.createTextNode(
+      MESSAGES.remoteBindChoiceLabel(choice.kind, choice.iface, language),
+    );
+  }
+  const fragment = document.createDocumentFragment();
+  fragment.append(
+    document.createTextNode(`${MESSAGES.remoteBindChoiceLabel(choice.kind, "", language)} — `),
+  );
+  const iface = document.createElement("bdi");
+  iface.textContent = choice.iface;
+  fragment.append(iface);
+  return fragment;
+}
+
+/** Devices are milestone 4's devices.json, and deliberately not jarvis.yaml
+ *  (a Settings save rewrites that file wholesale) — RemoteStatus.devices is
+ *  the only source for this list. */
+function renderPairedDevices(): void {
+  const status = remoteStatusCache ?? DEFAULT_REMOTE_STATUS;
+  const container = $("settings-remote-devices");
+
+  if (status.devices.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "settings-note";
+    empty.textContent = MESSAGES.remoteNoDevices(PRIMARY_LANGUAGE);
+    container.replaceChildren(empty);
+    return;
+  }
+
+  container.replaceChildren(...status.devices.map((device) => deviceRow(device)));
+}
+
+function deviceRow(device: RemoteDeviceStatus): HTMLElement {
+  const language = PRIMARY_LANGUAGE;
+  const row = document.createElement("div");
+  row.className = "settings-row";
+
+  const name = document.createElement("bdi");
+  name.textContent = device.name;
+  row.append(name);
+
+  const state = document.createElement("span");
+  state.className = "settings-note";
+  state.textContent = device.connected
+    ? MESSAGES.remoteDeviceConnected(language)
+    : device.lastSeenAt !== undefined
+      ? MESSAGES.remoteDeviceLastSeen(device.lastSeenAt, language)
+      : MESSAGES.remoteDeviceNeverSeen(language);
+  row.append(state);
+
+  // Ruling h: a third note, only when this device has actually registered
+  // for push — never an empty node for one that hasn't (platform-only,
+  // mirroring RemoteDeviceStatus.push; the token itself never reaches here).
+  if (device.push !== undefined) {
+    const push = document.createElement("span");
+    push.className = "settings-note";
+    push.textContent = MESSAGES.remoteDevicePush(device.push, language);
+    row.append(push);
+  }
+
+  const failure = document.createElement("span");
+  failure.className = "settings-note settings-note--warning";
+
+  const revoke = document.createElement("button");
+  revoke.type = "button";
+  // Danger, not the neutral "+ Add" styling every other .settings-add
+  // button carries — board 5's PAIRED DEVICES card draws this one outlined
+  // in the danger colour, since unlike an add it cannot be undone.
+  revoke.className = "settings-add settings-add--danger";
+  revoke.textContent = MESSAGES.remoteRevoke(language);
+  revoke.addEventListener("click", () => {
+    // Disabled for the round trip: a second click before the first
+    // resolves would revoke the same device twice (harmless on the bridge
+    // side, but a stray double-request over IPC for no reason).
+    revoke.disabled = true;
+    void window.jarvis
+      .revokeRemoteDevice(device.id)
+      .then((result) => {
+        if (!result.ok) {
+          failure.textContent = result.text;
+          revoke.disabled = false;
+        }
+        // A success re-renders via the next RemoteStatus push (the device
+        // drops out of the list), so the button is left disabled rather
+        // than re-enabled on a row that is about to disappear.
+      })
+      .catch((error: unknown) => {
+        console.error(`settings: revokeRemoteDevice failed: ${String(error)}`);
+        revoke.disabled = false;
+      });
+  });
+  row.append(revoke, failure);
+
+  return row;
+}
+
+async function loadBindChoices(): Promise<void> {
+  try {
+    bindChoiceList = await window.jarvis.remoteBindChoices();
+  } catch {
+    // Without a listing the configured address still shows, under "Other…":
+    // the picker degrades rather than the route breaking.
+    bindChoiceList = [];
+  }
+  applyDefaultBindSelection();
+  renderBindChoices();
+}
+
+// "Every interface" — the many spellings meaning "listen on all of them",
+// which net.isIP accepts (0.0.0.0, ::, ::ffff:0.0.0.0, a fully spelled
+// 0:0:0:0:0:0:0:0, and less common ones such as ::0.0.0.0 or
+// 0:0:0:0:0:ffff:0.0.0.0 among them). The renderer can't import node:net
+// (renderer/no-value-imports.test.ts bars a value import from any workspace
+// package that wraps it, and this is Node core besides), so the spellings
+// that matter are recognised by hand from a normalised address.
+function isEveryInterfaceAddress(address: string): boolean {
+  const bare = address.split("%")[0] ?? ""; // a zone id names the interface, not the address
+  if (isZeroIPv4(bare)) return true;
+  const groups = expandIPv6(bare);
+  if (groups === undefined) return false;
+  if (groups.every((group) => group === 0)) return true;
+  // The IPv4-mapped unspecified address, ::ffff:0.0.0.0 and its equivalent
+  // spellings: the mapping marker (0xffff) in group 5 is deliberately
+  // non-zero, so it needs its own check rather than falling out of the
+  // plain "every group is zero" one above.
+  return (
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0xffff &&
+    groups[6] === 0 &&
+    groups[7] === 0
+  );
+}
+
+function isZeroIPv4(address: string): boolean {
+  const octets = address.split(".");
+  return (
+    octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part) && Number(part) === 0)
+  );
+}
+
+/** The address's eight 16-bit groups if it is IPv6-shaped, expanding a "::"
+ *  run into position and a trailing IPv4-mapped dotted quad (as in
+ *  "::ffff:0.0.0.0" or "0:0:0:0:0:0:0.0.0.0") into its two 16-bit halves;
+ *  undefined for anything else, including malformed input — this never
+ *  throws. Unlike an "is every group zero" check, the IPv4-mapped check
+ *  above cares which group is which, so — unlike an earlier version of this
+ *  function — the zero-fill for "::" is spliced into its real position,
+ *  not merely appended. */
+function expandIPv6(address: string): number[] | undefined {
+  if (!address.includes(":")) return undefined;
+  const halves = address.split("::");
+  if (halves.length > 2) return undefined;
+  const compressed = halves.length === 2;
+
+  const splitHex = (part: string | undefined): string[] =>
+    part === undefined || part === "" ? [] : part.split(":");
+  const head = splitHex(halves[0]);
+  const tail = splitHex(halves[1]);
+
+  // A mapped IPv4 dotted quad is always the address's final token, so it is
+  // the last token of whichever half is written last: tail when compressed
+  // (and non-empty), head otherwise.
+  const dest = tail.length > 0 ? tail : head;
+  const lastToken = dest.at(-1);
+  if (lastToken?.includes(".")) {
+    const mapped = ipv4ToHextets(lastToken);
+    if (mapped === undefined) return undefined;
+    dest.splice(dest.length - 1, 1, ...mapped);
+  }
+
+  if (![...head, ...tail].every((group) => /^[0-9a-f]{1,4}$/i.test(group))) return undefined;
+  const missing = 8 - head.length - tail.length;
+  if (compressed ? missing < 1 : missing !== 0) return undefined;
+  const zeros = Array<string>(compressed ? missing : 0).fill("0");
+  return [...head, ...zeros, ...tail].map((group) => Number.parseInt(group, 16));
+}
+
+/** A dotted IPv4 quad's two 16-bit words, or undefined if it is not one. */
+function ipv4ToHextets(dotted: string): [string, string] | undefined {
+  const octets = dotted.split(".");
+  if (
+    octets.length !== 4 ||
+    !octets.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  ) {
+    return undefined;
+  }
+  const [a = 0, b = 0, c = 0, d = 0] = octets.map(Number);
+  return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+}
+
 // --------------------------------------------------------- Save / restart
 
-async function saveSettings(): Promise<void> {
+export async function saveSettings(): Promise<void> {
   if (draft === undefined) return;
+  // These services are constructed at startup. Their running instances cannot
+  // safely be swapped by mutating the config object, so keep the restart
+  // affordance only when one of their inputs actually changed.
+  const restartKeys = [
+    "brain",
+    "voice",
+    "whisper",
+    "terminal",
+    "performance",
+    "sessions",
+    "headlamp",
+  ] as const;
+  const baseline = savedBaseline;
+  const restartRequired =
+    baseline !== undefined &&
+    restartKeys.some((key) => JSON.stringify(baseline[key]) !== JSON.stringify(draft?.[key]));
   const result = await window.jarvis.saveSettings(draft);
   const status = $("settings-status");
   if (!result.ok) {
@@ -1195,9 +2080,19 @@ async function saveSettings(): Promise<void> {
     status.classList.add("settings-status--error");
     return;
   }
-  status.textContent = MESSAGES.settingsSaved(PRIMARY_LANGUAGE);
+  status.textContent = restartRequired
+    ? MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE)
+    : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
   status.classList.remove("settings-status--error");
-  ($("settings-restart") as HTMLElement).hidden = false;
+  ($("settings-restart") as HTMLElement).hidden = !restartRequired;
+  savedBaseline = structuredClone(draft);
+  window.dispatchEvent(new Event("jarvis:settings-saved"));
+}
+
+export async function savePrayerSettings(prayer: JarvisConfig["prayer"]): Promise<void> {
+  if (draft === undefined) return;
+  draft.prayer = prayer;
+  clearSaveStatus();
 }
 
 // Wired once, the first time Settings is ever opened — these are static
@@ -1264,6 +2159,13 @@ function wireStaticFields(): void {
     draft.browser.allowPopups = ($("settings-allow-popups") as HTMLInputElement).checked;
     clearSaveStatus();
   });
+  $("settings-browser-homepage").addEventListener("change", () => {
+    if (draft === undefined) return;
+    const value = ($("settings-browser-homepage") as HTMLInputElement).value.trim();
+    if (value === "") delete draft.browser.homePage;
+    else draft.browser.homePage = value;
+    clearSaveStatus();
+  });
   $("settings-speak-greeting").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.voice.speakGreeting = ($("settings-speak-greeting") as HTMLInputElement).checked;
@@ -1278,6 +2180,108 @@ function wireStaticFields(): void {
     if (draft === undefined) return;
     draft.voice.greeting.ar = ($("settings-greeting-ar") as HTMLTextAreaElement).value;
     clearSaveStatus();
+  });
+
+  $("settings-remote-enabled").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.enabled = ($("settings-remote-enabled") as HTMLInputElement).checked;
+    $("settings-remote-state").textContent = MESSAGES.remoteState(
+      draft.remote.enabled,
+      PRIMARY_LANGUAGE,
+    );
+    clearSaveStatus();
+  });
+  $("settings-remote-port").addEventListener("change", () => {
+    if (draft === undefined) return;
+    const field = $("settings-remote-port") as HTMLInputElement;
+    const typed = field.value.trim();
+    const port = Number(typed);
+    // A database row's port follows the same rule: a half-typed value is not
+    // written into the draft as NaN. A number out of range is committed and
+    // refused by Save's validation, which names the allowed range.
+    if (typed !== "" && Number.isFinite(port)) draft.remote.port = port;
+    field.value = String(draft.remote.port);
+    clearSaveStatus();
+  });
+  $("settings-remote-proxy").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.sidecarProxy = ($("settings-remote-proxy") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
+  $("settings-remote-cert-button").addEventListener("click", () => {
+    if (draft === undefined || certBusy) return;
+    const isRenew = draft.remote.tls.certPath !== undefined;
+    certBusy = true;
+    clearRemoteCertError();
+    const button = $("settings-remote-cert-button") as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = MESSAGES.remoteCertBusy(isRenew ? "renew" : "get", PRIMARY_LANGUAGE);
+    void window.jarvis
+      .tailscaleCert()
+      .then(async (result) => {
+        certBusy = false;
+        if (result.ok) {
+          // The channel already wrote remote.tls and remote.sidecarProxy
+          // to disk (dispatch.ts) — the draft in memory here is now stale
+          // for exactly those two fields, so it is replaced wholesale from
+          // the file rather than patched, the same freshness rule every
+          // other cross-process write in this app (a Settings save itself)
+          // already follows.
+          draft = await window.jarvis.getSettings();
+          savedBaseline = structuredClone(draft);
+          renderRemote();
+          return;
+        }
+        renderRemoteCertError(result);
+        renderRemoteCertRow();
+      })
+      .catch((error: unknown) => {
+        console.error(`settings: tailscaleCert failed: ${String(error)}`);
+        certBusy = false;
+        renderRemoteCertRow();
+      });
+  });
+  $("settings-remote-push").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.push.enabled = ($("settings-remote-push") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
+  $("settings-remote-idle").addEventListener("change", () => {
+    if (draft === undefined) return;
+    const field = $("settings-remote-idle") as HTMLInputElement;
+    const typed = field.value.trim();
+    const minutes = Number(typed);
+    // Same rule as the port field: a half-typed value never becomes NaN in
+    // the draft. Range and integer-ness are Save's own validation, whose
+    // message names the allowed range (0 to IDLE_DISABLE_MAX_MINUTES).
+    if (typed !== "" && Number.isFinite(minutes)) draft.remote.idleDisableMinutes = minutes;
+    field.value = String(draft.remote.idleDisableMinutes);
+    clearSaveStatus();
+  });
+  // Ruling b: left enabled even while push itself is off — the note beside
+  // it (remotePushProjectsNote) explains that an off setting still means
+  // nothing, since no notification is sent for it to affect.
+  $("settings-remote-push-projects").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.push.includeProjectNames = (
+      $("settings-remote-push-projects") as HTMLInputElement
+    ).checked;
+    clearSaveStatus();
+  });
+  $("settings-remote-new-code").addEventListener("click", () => {
+    void window.jarvis
+      .openRemotePairing()
+      .then((result) => {
+        if (!result.ok) $("settings-remote-pair-note").textContent = result.text;
+      })
+      .catch((error: unknown) => {
+        console.error(`settings: openRemotePairing failed: ${String(error)}`);
+      });
+  });
+  $("settings-remote-pair-cancel").addEventListener("click", () => {
+    void window.jarvis.cancelRemotePairing().catch((error: unknown) => {
+      console.error(`settings: cancelRemotePairing failed: ${String(error)}`);
+    });
   });
 
   $("settings-agent-add").addEventListener("click", () => {

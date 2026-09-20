@@ -124,6 +124,15 @@ describe("a terminal pane", () => {
     expect(p.blocks().map((view) => view.record.command)).toEqual(["a", "b"]);
   });
 
+  it("deletes a finished block from the pane without affecting the terminal stream", () => {
+    const p = pane();
+    p.write(`${A}$ ${B}a\r\n${C("a")}one\r\n${D(0)}` + `${A}$ ${B}b\r\n${C("b")}two\r\n${D(0)}`);
+    p.blocks()[0]?.element.querySelector<HTMLElement>('[data-action="delete"]')?.click();
+    expect(p.blocks().map((view) => view.record.command)).toEqual(["b"]);
+    expect(p.element.querySelectorAll(".block")).toHaveLength(1);
+    expect(FakeTerminal.instances[0]?.written.join("")).toContain("one\r\n");
+  });
+
   // A mark can be torn in half by the read boundary. The splitter holds the
   // fragment back, so the pane must not have written it as plain bytes — and
   // must still see the command it named.
@@ -324,6 +333,77 @@ describe("a terminal pane", () => {
     const p = pane(undefined, { onCwd });
     p.write(`${CWD("/repo/src")}${A}$ ${B}`);
     expect(onCwd).toHaveBeenCalledWith("/repo/src");
+  });
+});
+
+// terminal:data (and session:output) pushes go through writeLive, not
+// write — write stays the ungated entry point the backlog itself uses. The
+// race this gate exists for: `terminal:attach` returns the shell's whole
+// retained log, but the push stream has been flowing since the shell
+// started, so a chunk that arrived between this pane's creation and its own
+// attach resolving would otherwise be drawn once by the live handler and
+// once more inside the backlog. See the "why" comment on `attached` in
+// terminal-pane.ts.
+describe("a pane's live-push gate", () => {
+  function gatedPane(attach: () => Promise<string>) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    return createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach,
+      settings: {
+        blocks: false,
+        inputEditor: false,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+    });
+  }
+
+  it("drops a live push that arrives before attach resolves", async () => {
+    let resolveAttach: (value: string) => void = () => {};
+    const p = gatedPane(() => new Promise<string>((resolve) => (resolveAttach = resolve)));
+
+    p.writeLive("too early");
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("");
+
+    resolveAttach("");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("");
+  });
+
+  it("writes the backlog exactly once, never doubled by a push that arrived first", async () => {
+    let resolveAttach: (value: string) => void = () => {};
+    const p = gatedPane(() => new Promise<string>((resolve) => (resolveAttach = resolve)));
+
+    p.writeLive("dropped");
+    resolveAttach("$ ");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("$ ");
+  });
+
+  it("writes a live push that arrives after attach resolves", async () => {
+    const p = gatedPane(async () => "");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    p.writeLive("right on time");
+
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("right on time");
+  });
+
+  // A failed attach must not leave the pane permanently deaf: the shell is
+  // still there, and its next byte still has to land.
+  it("opens the gate even when attach rejects", async () => {
+    const p = gatedPane(() => Promise.reject(new Error("no replay")));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    p.writeLive("still streaming");
+
+    expect(FakeTerminal.instances[0]?.written.join("")).toBe("still streaming");
   });
 });
 
@@ -1861,6 +1941,105 @@ describe("notifications", () => {
     runCommand(p, 10_000);
 
     expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+// M10 Task 4: the same duration/threshold check as `notify` above, but
+// reported to `onCommandFinished` regardless of whether the pane itself is
+// watched — main's own notifier is what decides whether a push follows.
+describe("onCommandFinished", () => {
+  function commandFinishedPane(notifyAfterSeconds: number) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const onCommandFinished = vi.fn();
+    const p = createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: false,
+        notifyAfterSeconds,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+      onCommandFinished,
+    });
+    return { p, onCommandFinished };
+  }
+
+  function focus(p: ReturnType<typeof commandFinishedPane>["p"]): void {
+    p.element.tabIndex = -1;
+    p.element.focus();
+  }
+
+  function runCommand(
+    p: ReturnType<typeof commandFinishedPane>["p"],
+    seconds: number,
+    exitCode = 0,
+  ): void {
+    const start = 1_700_000_000_000;
+    const dateSpy = vi.spyOn(Date, "now");
+    dateSpy.mockReturnValueOnce(start);
+    p.write(`${A}$ ${B}${C("ls -la")}`);
+    dateSpy.mockReturnValue(start + seconds * 1000);
+    p.write(`a b\r\n${D(exitCode)}`);
+    dateSpy.mockRestore();
+  }
+
+  // [bite-proof: gate this on isWatched(); this fails]
+  it("calls onCommandFinished even when the pane is watched", () => {
+    const { p, onCommandFinished } = commandFinishedPane(30);
+    focus(p);
+
+    runCommand(p, 45);
+
+    expect(onCommandFinished).toHaveBeenCalledWith(45, true);
+  });
+
+  it("does not call onCommandFinished for a fast block", () => {
+    const { p, onCommandFinished } = commandFinishedPane(30);
+
+    runCommand(p, 10);
+
+    expect(onCommandFinished).not.toHaveBeenCalled();
+  });
+
+  it("never calls onCommandFinished when notifyAfterSeconds is 0", () => {
+    const { p, onCommandFinished } = commandFinishedPane(0);
+
+    runCommand(p, 10_000);
+
+    expect(onCommandFinished).not.toHaveBeenCalled();
+  });
+
+  it("reports ok:false for a non-zero exit code", () => {
+    const { p, onCommandFinished } = commandFinishedPane(30);
+
+    runCommand(p, 45, 2);
+
+    expect(onCommandFinished).toHaveBeenCalledWith(45, false);
+  });
+
+  it("never throws when no onCommandFinished hook is given", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const p = createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: false,
+        notifyAfterSeconds: 30,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+    });
+
+    expect(() => runCommand(p, 45)).not.toThrow();
   });
 });
 

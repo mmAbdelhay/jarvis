@@ -25,7 +25,7 @@ Settings          everything jarvis.yaml holds, edited in place
 ```
 
 <p align="center">
-  <img src="./docs/media/dashboard.png" width="100%" alt="The Dashboard: machine load and provider capacity on the left, the voice indicator and the project list in the middle, the conversation on the right.">
+  <img src="./docs/media/dashboard.png" width="100%" alt="The Dashboard: machine load on the left, the JARVIS core with orbiting agents and threads down to the project cards in the middle, provider capacity on the right, sessions and the conversation below.">
 </p>
 
 <p align="center">
@@ -52,6 +52,12 @@ agent's stdin.
 <p align="center">
   <sub>Every session Jarvis has ever run, across every project. Prompts, project names and agent accounts are blurred — the table, the states and the timestamps are the running app.</sub>
 </p>
+
+**Comes with you.** A companion phone app pairs with the desktop over your
+local network or a [Tailscale](https://tailscale.com/) tailnet: sessions,
+terminals, changes, and the Editor / Database / Cluster tabs, from the
+phone, over one authenticated TLS connection that is off by default. See
+[Remote access](docs/guide/remote-access.md).
 
 **Keeps the work in one window.** The Workspace opens a project's files in an
 editor, its tables in a database client, its endpoints in an API client, its
@@ -95,6 +101,10 @@ to Applications. Two things are worth knowing before you do:
   System Settings → Privacy & Security and press **Open Anyway**, or run
   `xattr -dr com.apple.quarantine /Applications/Jarvis.app`. This is what
   ad-hoc signing costs; nothing about the app changes either way.
+
+**Android phone (optional)** — grab `jarvis-mobile-<version>.apk` from the
+same releases page, install it on the phone, and pair from Settings →
+Remote access on the desktop ([how](docs/guide/remote-access.md)).
 
 **Linux** — grab the `.AppImage`, make it executable, and run it. There is
 nothing to install and no package manager involved:
@@ -175,11 +185,12 @@ files, rendered — so the links below work whether you read them here or there.
 - [The routes](docs/guide/routes.md) — Dashboard, Changes, Session, Workspace, Settings
 - [Workspace tabs](docs/guide/workspace-tabs.md) — browser, Editor, Database, Terminal, API
 - [The API client](docs/guide/api-client.md) — collections, environments, scripts, auth, cookies
+- [Remote access](docs/guide/remote-access.md) — pairing the phone app, Tailscale, certificates, the audit log
 - [Troubleshooting](docs/guide/troubleshooting.md) — what breaks, and what it means
 
 **Working on it**
 
-- [Architecture](docs/develop/architecture.md) — the three packages and what may import what
+- [Architecture](docs/develop/architecture.md) — the four packages and what may import what
 - [Conventions](docs/develop/conventions.md) — the rules this codebase enforces, and why each exists
 - [Testing](docs/develop/testing.md) — what is tested where, and what tests cannot see
 - [Adding a Workspace tab](docs/develop/adding-a-tab.md) — the pattern, end to end
@@ -207,10 +218,12 @@ stale.
 
 ## How it is built
 
-Three packages, and the rule that keeps them apart: `core` holds the logic and
+Four packages, and the rule that keeps them apart: `core` holds the logic and
 imports nothing from the others; `platform` owns everything that touches the
-machine — processes, ptys, git, the filesystem; `desktop` is Electron's main
-process and the renderer, and it is the only one allowed to know about either.
+machine — processes, ptys, git, the filesystem; `remote` is the remote
+bridge's transport and imports only `core`; `desktop` is Electron's main
+process and the renderer, and it is the only one allowed to know about the
+others.
 [Architecture](docs/develop/architecture.md) states what may import what and
 why the boundary is worth having.
 
@@ -228,23 +241,79 @@ and read by a fresh reviewer before the next begins.
 ## What it exposes
 
 Jarvis is built for one person on one machine, and most of it touches no
-network at all. Three things are worth knowing before you run it somewhere
+network at all. Five things are worth knowing before you run it somewhere
 shared.
 
 **The Database tab is reachable from your network while it is open.**
 DbGate always listens on `0.0.0.0` and offers no bind-address option, so an
 open Database tab is reachable from any machine that can reach yours. It is
-guarded by a per-spawn random password shown in the status line, and the
-instance stops when the tab closes. On a café or office network, that
-password is the only thing between your databases and everyone else.
+guarded by a per-spawn random password — the desktop's own Database tab now
+logs itself in with it automatically (`BASIC_AUTH=1`, answered through
+Electron's `login` event), so the password no longer needs to be read off
+the status line there, but it is still the only thing standing between your
+databases and everyone else on the network: the instance still binds every
+interface and stops only when the tab closes. On a café or office network,
+that password is the whole of your protection.
 
 **The Editor tab runs without authentication, on loopback only.**
 `code-server` is started with `--auth none` bound to `127.0.0.1`, so nothing
-outside this machine's own processes can reach it.
+outside this machine's own processes can reach it — except through the
+sidecar proxy below, which fronts it with a per-device cookie for a paired
+phone.
 
 **Agents run as you.** Every session is a real process under a real pty with
 your environment, your PATH and your credentials — that is what the app is
 for, and it is worth saying out loud. Jarvis adds no sandbox of its own.
+
+**The mobile remote bridge is off by default, and reachable only on purpose.**
+It never listens unless `remote.enabled` is turned on *and* either a device
+is already paired or a pairing window is open, and only on the one address
+`remote.bindAddress` names (loopback by default) — never every interface
+unless you explicitly configure that. When it does listen, it speaks TLS 1.3
+to a certificate the phone pins, or, with a named certificate, trusts by
+name on first pairing, and pairing itself needs a second step on this
+machine: a confirmation dialog naming the requesting device, which you
+approve or deny. Once paired, that phone can run commands on this machine
+as you, exactly like an agent session — see "Agents run as you" above — so
+treat a paired phone the way you would treat a second person with your
+terminal. With the laptop's self-signed default certificate, or a
+configured certificate with no DNS name, the phone pins that exact
+certificate at pairing time; a key-pair regeneration changes the
+fingerprint and every phone paired that way has to pair again. With a
+*configured* certificate that carries a DNS name
+(`remote.tls.certPath`/`keyPath`, e.g. from `tailscale cert`), the pairing
+link carries that name instead, and the phone trusts it through the OS's own
+trust store rather than pinning it — a renewal under the same name needs
+only a bridge restart (Off/On, or restart Jarvis), no re-pairing. Once
+paired, the phone can also watch terminal and agent output live, and a slow
+phone gets output dropped (and marked) rather than slowing the laptop. The
+Dashboard's topbar shows a persistent indicator whenever the bridge is
+actually listening, and any paired device can be revoked from
+**Settings → Remote access** — this also cuts any of that device's sidecar
+tabs it had open, not just its main connection. A companion phone app lives
+in `apps/mobile`; once paired it shows the laptop's projects, live system
+metrics and running sessions, and can type into a running agent's terminal.
+A paired phone can also send voice recordings of up to 4 MiB, which the
+laptop decodes with `ffmpeg` in a private temporary folder and deletes as
+soon as they are transcribed. With push notifications turned on at both
+ends, the laptop sends short generic notifications (kind of event and,
+optionally, the project name — never output, commands or paths) through
+Expo's push service to the paired phone.
+
+Left alone with no phone connected, the bridge can switch itself off after a configurable idle time and says so in Settings.
+
+**The sidecar proxy lets a phone paired with a named certificate open the
+Editor, Database and Cluster tabs too, cookie-scoped and per device.**
+With `remote.sidecarProxy` on and a configured certificate carrying a DNS
+name, opening one of those tabs from the phone gets it a one-time URL under
+`/s/<a random handle>/…` — never the sidecar's own port — authenticated
+after that by an `HttpOnly; Secure; SameSite=Strict` cookie scoped to that
+handle. A handle lives at most 24 hours and at most 8 at a time per device,
+and every one of a device's handles (and its live sidecar connections, mid-
+stream) is destroyed the moment that device is revoked. See [Remote
+access](docs/guide/remote-access.md) for the three ways a pairing can be
+reached and the `tailscale cert` walkthrough, and [Security](SECURITY.md)
+for what is in scope.
 
 ## Licence
 

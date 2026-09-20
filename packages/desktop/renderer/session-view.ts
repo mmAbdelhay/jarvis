@@ -1,7 +1,7 @@
 import type { Session, SessionOutput } from "@jarvis/core";
 import type { TranscriptEntry } from "@jarvis/platform";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { showView } from "./views.js";
+import { currentView, showView } from "./views.js";
 import {
   detectLanguage,
   dominantLanguage,
@@ -11,7 +11,7 @@ import {
 } from "./format.js";
 import {
   NO_PROJECT,
-  agentsIn,
+  agentOptions,
   filterSessions,
   sortSessions,
   type SessionSortColumn,
@@ -45,6 +45,24 @@ let pane: TerminalPane | undefined;
 let currentId: string | undefined;
 /** The open session's project, for links clicked in its terminal. */
 let currentProject: string | undefined;
+/**
+ * The session whose backlog fetch has actually settled — never ahead of
+ * `currentId`, which flips the instant `openSession` is called and long
+ * before its `getSessionLog` await returns.
+ *
+ * `appendSessionOutput` drops a push unless both agree, for the same
+ * reason terminal-pane.ts's own write-gate drops a live `terminal:data`
+ * push before attach settles: Electron only delivers `getSessionLog`'s
+ * reply after main's handler — which reads the log synchronously — has
+ * returned, and a session's own pty output arrives as a separate
+ * macrotask. So any push received before this session's fetch resolved was
+ * necessarily emitted before that read ran, and is already in the backlog;
+ * only a push after that point is new. Keeping this as its own variable,
+ * rather than a boolean, is what keeps a slower `openSession` call that
+ * resolves after the user has switched away from marking the *new*
+ * session's stale backlog as settled.
+ */
+let settledId: string | undefined;
 
 /** How terminals behave. Read once for the module, exactly as
  *  workspace-terminal.ts reads it and for the same reason: a change to
@@ -77,6 +95,19 @@ try {
 export function openSessionId(): string | undefined {
   return currentId;
 }
+
+/**
+ * Whether the pane's live terminal — as opposed to the session table or a
+ * transcript — is the thing actually on screen right now.
+ *
+ * Set by `showTable()` (false: the table is up) and `showSurface()` (true
+ * only for `"terminal"`, never `"transcript"`, which shows a recorded
+ * conversation with no pty behind it). `reassertSessionSize()` reads this:
+ * sending a phone-visible size to a laptop that is looking at the table or
+ * a transcript would reflow a terminal nobody on the laptop can see, which
+ * is exactly what ruling 11's "when the view is shown" does not mean.
+ */
+let terminalVisible = false;
 
 /**
  * Tells the main process where speech should go: into this session's
@@ -217,6 +248,57 @@ function refit(): void {
   pane?.refit();
 }
 
+/**
+ * Re-sends the open session's current pty size, unconditionally (ruling
+ * 11: last writer wins, both sides re-assert).
+ *
+ * fit() only calls back into resize() on a genuine change of the pane's
+ * own cell grid, so a phone that resized the pty while this view was not
+ * looking leaves the laptop believing its old size forever — refit() alone
+ * would never notice, since nothing about *this* pane's box changed. This
+ * sends the laptop's real cols/rows every time the view could plausibly be
+ * shown, whether or not they changed.
+ *
+ * On a genuine box change, `refit()` above already made the pane's own
+ * `resize` hook send this exact size through its own path; the explicit
+ * send below then repeats it. That is harmless — `resizeSession` is
+ * idempotent — and is what covers the "unchanged locally" case the hook
+ * never fires for at all.
+ */
+export function reassertSessionSize(): void {
+  refit();
+  if (currentId === undefined) return;
+  if (pane === undefined) return;
+  if (currentView() !== "session") return;
+  // The table and a transcript both leave `currentView()` at "session" —
+  // only `terminalVisible` tells the two apart from a terminal actually on
+  // screen.
+  if (!terminalVisible) return;
+  const { cols, rows } = pane.terminal;
+  if (cols < 1 || rows < 1) return;
+  void window.jarvis.resizeSession(currentId, cols, rows);
+}
+
+// Registered once, at module init, so a phone-driven resize is picked up
+// even if the window regains focus while some other view is on screen —
+// reassertSessionSize itself is what declines to send in that case.
+//
+// Keyed on `window` itself, rather than left as a bare addEventListener:
+// the app only ever loads this module once, but session-view.test.ts
+// re-imports it fresh (vi.resetModules) for every test while jsdom's
+// `window` outlives all of them, so a plain addEventListener would leave
+// one stale, closed-over listener behind per test. Swapping the listener
+// on each module load keeps exactly one live — the current module's own —
+// the same singleton the production app has.
+type FocusHost = typeof window & { __reassertSessionSizeOnFocus__?: () => void };
+const focusHost = window as FocusHost;
+if (focusHost.__reassertSessionSizeOnFocus__ !== undefined) {
+  window.removeEventListener("focus", focusHost.__reassertSessionSizeOnFocus__);
+}
+const handleWindowFocus = (): void => reassertSessionSize();
+focusHost.__reassertSessionSizeOnFocus__ = handleWindowFocus;
+window.addEventListener("focus", handleWindowFocus);
+
 /** Clears the live terminal's screen once everything already queued for its
  *  parser has been drawn — see the call site for why the ordering matters.
  *  Never throws: a terminal that will not take the write leaves the screen
@@ -259,11 +341,29 @@ export async function renderSessionTable(): Promise<void> {
   const body = $("session-table-body");
   if (table === null || body === null) return;
 
-  try {
-    loaded = await window.jarvis.getHistory();
-  } catch (error) {
-    console.error(`Failed to load sessions: ${errorMessage(error)}`);
+  // Both in parallel, one await point: getHistory() is sessionStore's own
+  // record (Jarvis's sessions plus whatever the transcript importer has
+  // read, never a row process-scan.ts found — session-import.ts's own
+  // discipline is that nothing there can prove a live process, so it is
+  // never persisted); listSessions is the merged live list, of which only
+  // the "external" rows are new here — its Jarvis half duplicates what
+  // getHistory() already returned.
+  const [history, live] = await Promise.allSettled([
+    window.jarvis.getHistory(),
+    window.jarvis.listSessions(),
+  ]);
+
+  if (history.status === "fulfilled") {
+    loaded = history.value;
+  } else {
+    console.error(`Failed to load sessions: ${errorMessage(history.reason)}`);
     loaded = [];
+  }
+
+  if (live.status === "fulfilled") {
+    loaded = [...loaded, ...live.value.filter((session) => session.origin === "external")];
+  } else {
+    console.error(`Failed to load external sessions: ${errorMessage(live.reason)}`);
   }
 
   showTable();
@@ -278,8 +378,20 @@ let loaded: Session[] = [];
 let sortColumn: SessionSortColumn = "lastActivityAt";
 let sortDirection: SortDirection = "desc";
 
-/** The filters offer what the table actually contains — an agent with no
- *  sessions behind it would be a dead end. */
+/** Registry agent ids (jarvis.yaml), independent of whether any of them has
+ *  run a session yet — app.ts sets this from getSettings() at load and
+ *  again after every Save, the same snapshot pattern prayer.ts's own
+ *  setPrayerSnapshot uses. */
+let knownAgents: string[] = [];
+export function setKnownAgents(agents: string[]): void {
+  knownAgents = agents;
+}
+
+/** The project filter offers what the table actually contains — a project
+ *  with no sessions would be a dead end. The agent filter is different on
+ *  purpose: it also offers every registry agent, even one with nothing
+ *  behind it yet, so a freshly added agent is not a dead end until it has
+ *  run something (see agentOptions). */
 function fillFilterOptions(): void {
   const projectSelect = $("session-filter-project") as HTMLSelectElement | null;
   if (projectSelect !== null) {
@@ -297,7 +409,7 @@ function fillFilterOptions(): void {
     const chosen = agentSelect.value;
     agentSelect.replaceChildren(
       option("", "All agents"),
-      ...agentsIn(loaded).map((id) => option(id, id)),
+      ...agentOptions(loaded, knownAgents).map((id) => option(id, id)),
     );
     agentSelect.value = chosen;
   }
@@ -424,19 +536,33 @@ function buildSessionTableRow(session: Session): HTMLElement {
   // The exact moment is one hover away; "4m ago" is what the row is read for.
   when.title = formatEndedAt(session.lastActivityAt);
 
+  // A row process-scan.ts found running outside Jarvis: read-only, so it
+  // gets a chip in place of the state Jarvis cannot actually observe for
+  // it, and no Resume button — there is no transcript id Jarvis minted to
+  // resume, and the process is already running.
+  const external = session.origin === "external";
+  if (external) {
+    const chip = document.createElement("span");
+    chip.className = "session-chip session-chip--external";
+    chip.textContent = MESSAGES.sessionOutsideJarvis(PRIMARY_LANGUAGE);
+    meta.append(chip);
+  }
+
   const actions = document.createElement("td");
   actions.className = "session-cell-actions";
-  const resume = document.createElement("button");
-  resume.type = "button";
-  resume.className = "session-table-resume";
-  resume.textContent = "Resume";
-  resume.addEventListener("click", (event) => {
-    // The row opens the transcript; the button continues the session. Both
-    // are useful and they must not fire together.
-    event.stopPropagation();
-    void resumeInTerminal(session.id);
-  });
-  actions.append(resume);
+  if (!external) {
+    const resume = document.createElement("button");
+    resume.type = "button";
+    resume.className = "session-table-resume";
+    resume.textContent = "Resume";
+    resume.addEventListener("click", (event) => {
+      // The row opens the transcript; the button continues the session.
+      // Both are useful and they must not fire together.
+      event.stopPropagation();
+      void resumeInTerminal(session.id);
+    });
+    actions.append(resume);
+  }
 
   row.append(main, agent, state, when, actions);
   row.addEventListener("click", () => void openSession(session));
@@ -495,6 +621,9 @@ function showTable(): void {
   if (back !== null) back.hidden = true;
   const empty = $("session-empty");
   if (empty !== null) empty.hidden = true;
+  // Whatever session was open, its terminal is no longer what is on
+  // screen — see `terminalVisible`'s own comment.
+  terminalVisible = false;
   showView("session");
 }
 
@@ -521,12 +650,26 @@ function showTerminal(): void {
 
 export async function openSession(session: Session): Promise<void> {
   currentId = session.id;
+  // Reopening the same id must close the gate again: settledId otherwise
+  // still equals this session's id from the last time it was open, so a
+  // push arriving during this fresh getSessionLog await would pass the
+  // gate and land both live and in the backlog about to be written.
+  settledId = undefined;
   // The *configured* project, not the display label: this drives
   // openTab(), and there is no workspace to open for a directory that is
   // not a project.
   currentProject = session.project ?? undefined;
   renderHeader(session);
   showView("session");
+
+  // A row outside Jarvis has no pty and nothing Jarvis can type into — only
+  // a transcript, when the scan matched one, or a plain notice when it did
+  // not. No pane, no voice target: there is no input affordance to give.
+  if (session.origin === "external") {
+    await openExternalSession(session);
+    return;
+  }
+
   showTerminal();
   setVoiceTarget(session.id);
 
@@ -570,6 +713,10 @@ export async function openSession(session: Session): Promise<void> {
   // different session — without this its backlog would land in the other
   // session's terminal.
   if (currentId !== session.id) return;
+  // The fetch above has settled for this exact session: from here on a
+  // live push for it is new, not a duplicate of what was just read — see
+  // `settledId`'s own comment for why that ordering holds.
+  settledId = session.id;
 
   // A session Jarvis spawned replays its pty backlog into the emulator —
   // that output really is a terminal's. One started in a terminal has no pty
@@ -596,6 +743,48 @@ export async function openSession(session: Session): Promise<void> {
   // command finished before the view was opened is still a block.
   if (backlog !== "") view?.write(backlog);
   view?.focus();
+  // The backlog write has settled: tell the pty this session's real size,
+  // even if it matches what the pane already had (ruling 11) — a phone may
+  // have resized it while nothing on the laptop was open to notice.
+  reassertSessionSize();
+}
+
+/**
+ * A row process-scan.ts found running outside Jarvis. It has no pty
+ * backlog to read — getSessionLog would only ever answer "" for one — so
+ * this goes straight for whatever transcript the scan matched, and shows a
+ * notice when it found none rather than a blank live-looking terminal
+ * nothing is actually attached to.
+ */
+async function openExternalSession(session: Session): Promise<void> {
+  setDetailVisible(true);
+  const back = $("session-back");
+  if (back !== null) {
+    back.hidden = false;
+    back.onclick = () => void renderSessionTable();
+  }
+  // No pty behind this row at all — see `terminalVisible`'s own comment.
+  terminalVisible = false;
+
+  let entries: TranscriptEntry[] = [];
+  try {
+    entries = await window.jarvis.getSessionTranscript(session.id);
+  } catch (error) {
+    console.error(`Failed to load session transcript: ${errorMessage(error)}`);
+  }
+  if (currentId !== session.id) return;
+  if (entries.length > 0) {
+    renderTranscriptView(entries);
+    return;
+  }
+
+  const view = $("session-transcript");
+  if (view === null) return;
+  const notice = document.createElement("div");
+  notice.className = "session-transcript-notice";
+  notice.textContent = MESSAGES.sessionNoTranscript(PRIMARY_LANGUAGE);
+  view.replaceChildren(notice);
+  showSurface("transcript");
 }
 
 /** One chunk from the "session:output" channel. Ignored unless it belongs
@@ -603,6 +792,10 @@ export async function openSession(session: Session): Promise<void> {
  *  since the main process has no idea which one is open. */
 export function appendSessionOutput(output: SessionOutput): void {
   if (output.sessionId !== currentId) return;
+  // Dropped until this session's own backlog fetch has settled — see
+  // `settledId`'s comment for why a push before that point is redundant
+  // with the backlog rather than lost.
+  if (output.sessionId !== settledId) return;
   pane?.write(output.chunk);
 }
 
@@ -620,7 +813,14 @@ export function wireSessionView(): void {
     // The table, always — Session is the list of sessions, and a session's
     // terminal is what you get by picking one. Reopening whatever happened
     // to be loaded made the view depend on invisible state.
-    void renderSessionTable();
+    //
+    // reassertSessionSize() is chained onto the table's own render rather
+    // than called alongside it: renderSessionTable() only shows the table
+    // — and terminalVisible only turns false — after its `getHistory`
+    // await settles. Calling it straight away would still see the
+    // terminal that was open a moment ago and send its now-stale size,
+    // describing a terminal that is about to be hidden.
+    void renderSessionTable().then(() => reassertSessionSize());
     claimVoice();
   });
 
@@ -649,6 +849,46 @@ export function wireSessionView(): void {
   $("session-terminal")?.addEventListener("click", () => pane?.focus());
 
   window.addEventListener("resize", () => refit());
+
+  // The table is pulled (getHistory + listSessions above), never pushed —
+  // unlike the Dashboard SESSIONS card, which redraws on its own from the
+  // "sessions:update" the scan already broadcasts, this one needs an
+  // explicit re-render once the scan settles.
+  wireSessionsRefresh($("session-refresh"), () => void renderSessionTable());
+}
+
+/**
+ * Wires a Refresh button to sessions:refresh — the Sessions view header and
+ * the Dashboard SESSIONS card header both use this, since both trigger the
+ * exact same scan. Disabled and spinning for the duration of the call;
+ * `afterRefresh` runs once it settles, for a caller (the Session table)
+ * that is pulled rather than redrawn by the "sessions:update" push the scan
+ * itself broadcasts. Takes the element rather than an id — the caller does
+ * its own `$(id)` lookup, so id-contract.test.ts still sees the literal.
+ */
+export function wireSessionsRefresh(button: HTMLElement | null, afterRefresh?: () => void): void {
+  if (button === null || !(button instanceof HTMLButtonElement)) return;
+  button.setAttribute("aria-label", MESSAGES.refreshSessions(PRIMARY_LANGUAGE));
+  button.addEventListener("click", () => {
+    void runSessionsRefresh(button, afterRefresh);
+  });
+}
+
+async function runSessionsRefresh(
+  button: HTMLButtonElement,
+  afterRefresh?: () => void,
+): Promise<void> {
+  button.disabled = true;
+  button.classList.add("icon-btn--spinning");
+  try {
+    await window.jarvis.refreshSessions();
+  } catch (error) {
+    console.error(`Sessions refresh failed: ${errorMessage(error)}`);
+  } finally {
+    button.disabled = false;
+    button.classList.remove("icon-btn--spinning");
+  }
+  afterRefresh?.();
 }
 
 function renderHeader(session: Session): void {
@@ -740,6 +980,8 @@ function showSurface(which: "terminal" | "transcript"): void {
   if (terminalHost !== null) terminalHost.hidden = which !== "terminal";
   const transcript = $("session-transcript");
   if (transcript !== null) transcript.hidden = which !== "transcript";
+  // A transcript has no pty behind it — see `terminalVisible`'s own comment.
+  terminalVisible = which === "terminal";
 }
 
 /** Sets text and direction together — an Arabic project name must not be

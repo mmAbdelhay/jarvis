@@ -1,4 +1,5 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { BrowserConfig } from "../src/config.js";
 import type { DevToolsDock } from "../src/browser-host.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
@@ -34,9 +35,24 @@ const $ = (id: string): HTMLElement => {
 // BrowserHost.open would silently no-op — so a new tab needs a real
 // default to open, with the address bar left selected so typing over it
 // is the very next thing the user can do.
-const NEW_TAB_URL = "https://duckduckgo.com";
+// Exported so the Dashboard's project cards (app.ts's buildProjectRow) can
+// open the same blank tab their own "+" button does, without a second
+// magic string to keep in sync with this one.
+export const NEW_TAB_URL = "https://duckduckgo.com";
+
+// The saved `browser:` settings, mirrored here the same way prayer.ts
+// mirrors PrayerConfig — set once at load and again after every Save
+// (app.ts), so a new tab opens the configured home page without a round
+// trip through main for something the renderer already has.
+let browserSnapshot: BrowserConfig = { allowPopups: true };
+export function setBrowserSnapshot(value: BrowserConfig): void {
+  browserSnapshot = value;
+}
 
 let latest: WorkspaceState = { tabs: [], activeTabId: undefined };
+/** The activeTabId the last render saw — renderWorkspace follows the
+ *  switcher to a tab's project only when this changes. */
+let followedActiveTabId: string | undefined;
 
 function activeTab(): WorkspaceTab | undefined {
   return latest.tabs.find((tab) => tab.id === latest.activeTabId);
@@ -103,8 +119,8 @@ function renderProjectTools(): void {
     status.textContent = reason;
     status.classList.remove("workspace-tool-status--error");
   } else if (status.textContent === reason) {
-    // Only our own text is cleared: the status line also carries a DbGate
-    // login the user still has to type.
+    // Only our own text is cleared — the status line is shared with other
+    // tool feedback (starting/error text for the editor, database, etc.).
     status.textContent = "";
   }
 }
@@ -199,11 +215,47 @@ function colorFor(project: string): string {
  *  instead of picking arbitrarily. */
 const lastActiveTabByProject = new Map<string, string>();
 
+/** One tab chip's live DOM identity plus the means to catch it up to a new
+ *  WorkspaceTab, kept across renders in `tabChips` below (round 3) — the
+ *  reconcile that replaced renderWorkspace's old
+ *  `strip.replaceChildren(newTabButton)` rebuild, which tore down and
+ *  recreated every chip (drag handlers, context menu, the works) on every
+ *  `workspace:update`, flashing the strip and destroying an in-progress
+ *  inline rename's `<input>` out from under a keystroke. */
+type TabChipHandle = {
+  element: HTMLElement;
+  update: (tab: WorkspaceTab, activeTabId: string | undefined) => void;
+};
+
+/** Keyed by tab id, so a tab's chip survives every render its tab survives
+ *  — including while its project is collapsed behind another one's pill,
+ *  so switching back to it does not lose whatever the chip was mid-doing.
+ *  Pruned in renderWorkspace to the tabs actually still open. */
+const tabChips = new Map<string, TabChipHandle>();
+
 /** Selects `project` and shows whatever it was last on: its remembered
  *  tab if that tab still exists, any other of its open tabs otherwise, or
  *  nothing (hideAll) if it has none open at all. Shared by the project
  *  <select> and by clicking a collapsed project pill in the tab strip. */
 async function switchToProject(project: string): Promise<void> {
+  const remembered = lastActiveTabByProject.get(project);
+  const target =
+    latest.tabs.find((tab) => tab.id === remembered && tab.project === project) ??
+    latest.tabs.find((tab) => tab.project === project);
+  if (target !== undefined) void window.jarvis.activateTab(target.id);
+  else void window.jarvis.hideAllTabs();
+
+  await selectProjectChrome(project);
+}
+
+/** Everything about the chrome that belongs to the selected project — the
+ *  switcher's own value, the per-project menus and buttons, the bookmarks —
+ *  without touching which tab is active. switchToProject adds the
+ *  activation; renderWorkspace calls this alone when a tab activated from
+ *  outside this view (a Dashboard card's shortcut, the Session view) turns
+ *  out to belong to another project, so the switcher follows the tab
+ *  instead of still naming the project it showed a moment ago. */
+async function selectProjectChrome(project: string): Promise<void> {
   ($("workspace-project") as HTMLSelectElement).value = project;
   // The menu lists one project's roots; leaving it up over another project
   // would open a root the selector no longer shows.
@@ -215,13 +267,6 @@ async function switchToProject(project: string): Promise<void> {
   // And again for the chat menu, whose items close over the old project in
   // exactly the same way.
   closeChatMenu();
-
-  const remembered = lastActiveTabByProject.get(project);
-  const target =
-    latest.tabs.find((tab) => tab.id === remembered && tab.project === project) ??
-    latest.tabs.find((tab) => tab.project === project);
-  if (target !== undefined) void window.jarvis.activateTab(target.id);
-  else void window.jarvis.hideAllTabs();
 
   renderProjectTools();
   void renderClusterButton();
@@ -978,7 +1023,7 @@ export function initWorkspace(projects: string[]): void {
   });
 
   $("workspace-new-tab").addEventListener("click", () => {
-    void window.jarvis.openTab(selectedProject(), NEW_TAB_URL);
+    void window.jarvis.openTab(selectedProject(), browserSnapshot.homePage ?? NEW_TAB_URL);
     address.focus();
     address.select();
   });
@@ -993,6 +1038,15 @@ export function initWorkspace(projects: string[]): void {
   $("workspace-reload").addEventListener("click", () => {
     const tab = activeTab();
     if (tab !== undefined) void window.jarvis.tabReload(tab.id);
+  });
+  $("view-workspace").addEventListener("keydown", (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.defaultPrevented || event.altKey || event.shiftKey) return;
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "r") return;
+    const tab = activeTab();
+    if (tab?.kind !== "web") return;
+    event.preventDefault();
+    void window.jarvis.tabReload(tab.id);
   });
 
   // The overlay does not move with the layout, so every reflow has to be
@@ -1099,11 +1153,28 @@ export function initWorkspace(projects: string[]): void {
   void refreshBookmarks();
 }
 
+/** Refreshes the project choices after Settings saves, without wiring the
+ * Workspace's one-time event listeners a second time. */
+export function refreshWorkspaceProjects(projects: string[]): void {
+  const select = $("workspace-project") as HTMLSelectElement;
+  const previous = select.value;
+  select.replaceChildren();
+  for (const project of [...projects, PERSONAL_PROJECT]) {
+    colorFor(project);
+    const option = document.createElement("option");
+    option.value = project;
+    option.textContent = projectLabel(project);
+    select.append(option);
+  }
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  renderWorkspace(latest);
+}
+
 /** The Editor button. A project that configures no `editors:` roots opens
  *  at its own directory, exactly as it always did; one root opens straight
  *  into it; two or more offer a menu, since picking is the whole point of
  *  having configured them. The roots are re-read on every click rather than
- *  cached, so a config change needs no more than the Settings restart. */
+ *  cached, so a saved config change takes effect on the next click. */
 async function openEditor(): Promise<void> {
   // A second click on the button is "put that menu away", not "open it
   // again" — the only other way out would be clicking a root.
@@ -1442,8 +1513,9 @@ function preWarm(kind: "editor" | "database" | "cluster"): void {
  *  browser is not a separate surface, just a hosted page like the editor.
  *
  *  DbGate has no bind-address option and always listens on 0.0.0.0, so its
- *  instances are guarded by a login generated at spawn; the credential goes
- *  into the status line, since the user has to type it once per instance. */
+ *  instances are guarded by a login generated at spawn. The desktop answers
+ *  that login itself (Electron's `login` event, main.ts), so the tab opens
+ *  already authenticated and the credential is never shown here. */
 async function openDatabase(): Promise<void> {
   const project = selectedProject();
 
@@ -1468,11 +1540,7 @@ async function openDatabase(): Promise<void> {
     return;
   }
 
-  status.textContent = MESSAGES.databaseLogin(
-    result.value.login,
-    result.value.password,
-    PRIMARY_LANGUAGE,
-  );
+  status.textContent = "";
   void window.jarvis.openTab(project, result.value.url, "database");
 }
 
@@ -1570,17 +1638,123 @@ function renderDocker(
   dockerAttached = showing;
 }
 
-function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTMLElement {
+/** Hides a chip's own context menu, undoing openTabMenu below. Shared by
+ *  every item's click and by the light-dismiss `toggle` event, the same
+ *  split block-view.ts's hideMoreMenu uses for the block "more" menu. */
+function hideTabMenu(menu: HTMLElement): void {
+  if (typeof menu.hidePopover === "function") {
+    try {
+      menu.hidePopover();
+    } catch {
+      // Already light-dismissed (an outside click, or Escape).
+    }
+  }
+  menu.hidden = true;
+}
+
+/** Opens a chip's context menu in the top layer, positioned off the click
+ *  that asked for it — same Popover API and clamped placement as the
+ *  block's own "more" menu (block-view.ts), so a chip near the window's
+ *  edge never draws off screen. */
+function openTabMenu(menu: HTMLElement, event: MouseEvent): void {
+  menu.hidden = false;
+  if (typeof menu.showPopover !== "function") return;
+  menu.showPopover();
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
+}
+
+/** Builds one tab chip and the `update` closure that catches it up to a
+ *  later WorkspaceTab, so the strip's reconcile (renderWorkspace) can reuse
+ *  the same element — and the same drag/context-menu listeners, attached
+ *  here exactly once — across every render the tab survives.
+ *
+ *  `tab` is a `let`, reassigned by `update`: every closure below
+ *  (drag/drop, click, the menu items, startRename) reads it live rather
+ *  than a value frozen at creation, so a chip built for one WorkspaceTab
+ *  keeps acting on the current one after a reuse. Only `tab.id` actually
+ *  needs that — it never changes for a chip kept in `tabChips` by that same
+ *  id — but reading the whole object uniformly is what keeps startRename's
+ *  `tab.customTitle` fallback correct after a rename or a title push. */
+function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined): TabChipHandle {
+  let tab = initialTab;
+  // True while the inline rename `<input>` has replaced `title` in the DOM
+  // — update() must not touch `title`'s text then, or it would overwrite
+  // what the user is mid-typing the moment an unrelated push (a loading
+  // flag, another tab's title) triggers a re-render.
+  let renaming = false;
+
   const element = document.createElement("div");
   element.className = "workspace-tab";
-  element.style.setProperty("--tab-color", colorFor(tab.project));
-  element.classList.toggle("workspace-tab--on", tab.id === activeTabId);
+  element.draggable = true;
+  // Right-click reaches the same rename the double-click below starts, plus
+  // Reload and Close — discoverable without knowing double-click renames at
+  // all, which the title below also now says outright.
+  element.title = MESSAGES.tabRenameHint(PRIMARY_LANGUAGE);
+  element.addEventListener("dragstart", (event) => {
+    event.dataTransfer?.setData("text/x-jarvis-tab", tab.id);
+    if (event.dataTransfer !== null) event.dataTransfer.effectAllowed = "move";
+  });
+  element.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes("text/x-jarvis-tab")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  });
+  element.addEventListener("drop", (event) => {
+    const source = event.dataTransfer?.getData("text/x-jarvis-tab");
+    if (!source || source === tab.id) return;
+    event.preventDefault();
+    const after = event.clientX >= element.getBoundingClientRect().left + element.clientWidth / 2;
+    void window.jarvis.moveTab(source, tab.id, after);
+  });
   element.addEventListener("click", () => void window.jarvis.activateTab(tab.id));
 
   const title = document.createElement("span");
   title.className = "workspace-tab-title";
-  // A page picks its own title; it is text here and nothing else.
-  title.textContent = tab.title === "" ? tab.url : tab.title;
+
+  const currentTitle = (): string => tab.customTitle ?? (tab.title === "" ? tab.url : tab.title);
+
+  // Shared by the double-click below and the menu's own Rename item, so
+  // there is exactly one way an inline rename actually starts.
+  const startRename = (): void => {
+    const input = document.createElement("input");
+    input.className = "workspace-tab-rename";
+    input.setAttribute("aria-label", MESSAGES.renameTab(PRIMARY_LANGUAGE));
+    input.value = tab.customTitle ?? title.textContent ?? "";
+    title.replaceWith(input);
+    element.draggable = false;
+    renaming = true;
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save: boolean): void => {
+      if (done) return;
+      done = true;
+      if (save) void window.jarvis.renameTab(tab.id, input.value);
+      input.replaceWith(title);
+      element.draggable = true;
+      renaming = false;
+      // A push may have landed while the field was open and been withheld
+      // from `title` the whole time (see update() below) — catch it up now
+      // that the span is back in the DOM.
+      title.textContent = currentTitle();
+    };
+    input.addEventListener("keydown", (key) => {
+      key.stopPropagation();
+      if (key.key === "Enter") finish(true);
+      if (key.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("click", (click) => click.stopPropagation());
+  };
+
+  element.addEventListener("dblclick", (event) => {
+    if ((event.target as HTMLElement).closest(".workspace-tab-close") !== null) return;
+    event.stopPropagation();
+    startRename();
+  });
 
   const close = document.createElement("span");
   close.className = "workspace-tab-close";
@@ -1592,8 +1766,59 @@ function renderTabChip(tab: WorkspaceTab, activeTabId: string | undefined): HTML
     void window.jarvis.closeTab(tab.id);
   });
 
-  element.append(title, close);
-  return element;
+  const menu = document.createElement("div");
+  menu.className = "workspace-tab-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("popover", "auto");
+  menu.hidden = true;
+  menu.addEventListener("toggle", () => {
+    if (menu.matches(":popover-open")) return;
+    menu.hidden = true;
+  });
+  // Without this a click inside the menu bubbles to `element` and activates
+  // the tab underneath it on its way out, same reason `close` above stops it.
+  menu.addEventListener("click", (event) => event.stopPropagation());
+
+  const menuItem = (label: string, run: () => void): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "workspace-tab-menu-item";
+    button.setAttribute("role", "menuitem");
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      hideTabMenu(menu);
+      run();
+    });
+    return button;
+  };
+
+  menu.append(
+    menuItem(MESSAGES.tabMenuRename(PRIMARY_LANGUAGE), startRename),
+    menuItem(MESSAGES.tabMenuReload(PRIMARY_LANGUAGE), () => void window.jarvis.tabReload(tab.id)),
+    menuItem(MESSAGES.tabMenuClose(PRIMARY_LANGUAGE), () => void window.jarvis.closeTab(tab.id)),
+  );
+
+  element.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openTabMenu(menu, event);
+  });
+
+  element.append(title, close, menu);
+
+  const update = (nextTab: WorkspaceTab, nextActiveTabId: string | undefined): void => {
+    tab = nextTab;
+    element.style.setProperty("--tab-color", colorFor(tab.project));
+    element.classList.toggle("workspace-tab--on", tab.id === nextActiveTabId);
+    element.classList.toggle("workspace-tab--loading", tab.loading);
+    // A page picks its own title; it is text here and nothing else — but
+    // never while the rename input is standing in for this span (see
+    // `renaming` above).
+    if (!renaming) title.textContent = currentTitle();
+  };
+  update(tab, activeTabId);
+
+  return { element, update };
 }
 
 function renderCollapsedGroup(project: string, count: number): HTMLElement {
@@ -1620,11 +1845,33 @@ export function renderWorkspace(state: WorkspaceState): void {
   const activeTabForState = state.tabs.find((tab) => tab.id === state.activeTabId);
   if (activeTabForState !== undefined) {
     lastActiveTabByProject.set(activeTabForState.project, activeTabForState.id);
+    // The switcher follows a NEWLY activated tab: a Terminal opened from a
+    // Dashboard card lands here with its own project active, and the
+    // <select> used to keep showing whichever project it showed last. Only
+    // on a change of active tab — hideAll() (switching to a project with no
+    // open tabs) deliberately keeps the old tab active, and following it
+    // there would snap the switcher straight back.
+    if (
+      state.activeTabId !== followedActiveTabId &&
+      selectedProject() !== activeTabForState.project
+    ) {
+      void selectProjectChrome(activeTabForState.project);
+    }
   }
+  followedActiveTabId = state.activeTabId;
 
   const selected = selectedProject();
+  // The project switcher's own leading edge picks up the selected project's
+  // colour, the same palette a tab chip's top band uses — colorFor never
+  // reassigns one, so the switcher and every one of that project's chips
+  // always agree.
+  if (selected !== "") $("workspace-project").style.setProperty("--tab-color", colorFor(selected));
   const strip = $("workspace-tabs");
-  strip.replaceChildren();
+  // "+" is the strip's own static last child (index.html), found by id
+  // rather than kept from a previous render — nothing here ever moves it
+  // after this, so it stays the insertion point for every chip and pill,
+  // immediately after the last one, for the same reason it always has been.
+  const newTabButton = $("workspace-new-tab");
 
   // Every project with at least one open tab gets a slot: the selected
   // one expands into its individual tabs, every other one collapses into a
@@ -1637,18 +1884,57 @@ export function renderWorkspace(state: WorkspaceState): void {
     byProject.set(tab.project, group);
   }
 
+  // A keyed reconcile (round 3), replacing the old
+  // `strip.replaceChildren(newTabButton)` + full rebuild: that tore down
+  // and recreated every chip on every `workspace:update` — a loading
+  // toggle, a title push, anything — which flashed the strip and destroyed
+  // an in-progress inline rename's `<input>` mid-keystroke. tabChips keeps
+  // one chip per open tab id across renders; a collapsed-group pill is
+  // cheap enough (and rare enough to need reusing) to still build fresh.
+  const liveTabIds = new Set(state.tabs.map((openTab) => openTab.id));
+  for (const id of [...tabChips.keys()]) {
+    if (!liveTabIds.has(id)) tabChips.delete(id);
+  }
+
+  const targetElements: HTMLElement[] = [];
   for (const [project, tabs] of byProject) {
     if (project === selected) {
-      for (const tab of tabs) strip.append(renderTabChip(tab, state.activeTabId));
+      for (const tab of tabs) {
+        let chip = tabChips.get(tab.id);
+        if (chip === undefined) {
+          chip = createTabChip(tab, state.activeTabId);
+          tabChips.set(tab.id, chip);
+        } else {
+          chip.update(tab, state.activeTabId);
+        }
+        targetElements.push(chip.element);
+      }
     } else {
-      strip.append(renderCollapsedGroup(project, tabs.length));
+      targetElements.push(renderCollapsedGroup(project, tabs.length));
     }
   }
 
-  // "+" lives permanently in the workspace head, not in this strip — so
-  // there is nothing to relocate here. The strip itself just hides when it
-  // would otherwise be an empty padded band with no tabs in it.
-  strip.hidden = state.tabs.length === 0;
+  // Drop whatever is on screen but not wanted any more: a chip for a tab
+  // that just closed or whose project just collapsed behind another one's
+  // pill, or last render's now-stale collapsed-group pill.
+  const wanted = new Set<Element>(targetElements);
+  for (const child of [...strip.children]) {
+    if (child !== newTabButton && !wanted.has(child)) strip.removeChild(child);
+  }
+
+  // Reorder only where the order actually changed: each slot is compared
+  // against the strip's *current* live children (re-read every iteration,
+  // since an insertBefore just above shifts everything after it), so an
+  // element already sitting in the right place is never touched.
+  targetElements.forEach((element, index) => {
+    if (strip.children[index] !== element) {
+      strip.insertBefore(element, strip.children[index] ?? newTabButton);
+    }
+  });
+
+  // The strip is never hidden any more: with no tabs open it still shows
+  // the lone "+", always reachable, the same guarantee the old
+  // workspace-head placement made a different way.
 
   const tab = activeTab();
 
@@ -1662,6 +1948,8 @@ export function renderWorkspace(state: WorkspaceState): void {
   // something.
   const hostedApp = tab !== undefined && tab.kind !== "web";
   ($("workspace-bar") as HTMLElement).hidden = hostedApp;
+  ($("workspace-loading") as HTMLElement).hidden =
+    tab?.kind !== "web" || tab.loading !== true || tab.error !== undefined;
   renderBookmarksVisibility(hostedApp);
 
   const address = $("workspace-address") as HTMLInputElement;
@@ -1739,6 +2027,11 @@ export function renderWorkspace(state: WorkspaceState): void {
     strip.hidden = true;
     ($("workspace-bar") as HTMLElement).hidden = true;
     renderBookmarksVisibility(true);
+  } else {
+    // The strip is never hidden for any other reason now (re-review 2, item
+    // 1 — it always shows at least the lone "+"), so leaving full screen is
+    // the one case left that has to put it back explicitly.
+    strip.hidden = false;
   }
 
   // Hiding the address bar above the page, or the bookmarks sidebar beside

@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["PinnedSocketModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.pinnedsocket.PinnedSocketModule"]
+  }
+}

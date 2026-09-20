@@ -1,6 +1,12 @@
 import type { AgentConfig, ProviderVendor } from "../registry/types.js";
 import type { ProviderStatusStore } from "./store.js";
-import type { CapacityReading, HealthReading, ProviderStatus } from "./types.js";
+import {
+  type CapacityReading,
+  type CapacityTarget,
+  capacitySupported,
+  type HealthReading,
+  type ProviderStatus,
+} from "./types.js";
 
 /**
  * The floor between two PAID capacity reads of the same account. It is not a
@@ -13,8 +19,8 @@ export const MIN_CAPACITY_REFRESH_MS = 60_000;
 export type ProviderMonitorDeps = {
   agents: readonly AgentConfig[];
   store: ProviderStatusStore;
-  /** Costs a real, billed API round trip. See platform/capacity.ts. */
-  readCapacity(configDir: string): Promise<CapacityReading>;
+  /** Free — a local file, a local log, or one signed-in API call; see platform/capacity-reader.ts. */
+  readCapacity(target: CapacityTarget): Promise<CapacityReading>;
   /** Free: an unauthenticated public JSON endpoint. */
   readHealth(vendor: ProviderVendor): Promise<HealthReading>;
   now?(): number;
@@ -36,6 +42,7 @@ export type ProviderMonitorDeps = {
  */
 export class ProviderMonitor {
   readonly #deps: ProviderMonitorDeps;
+  #agents: readonly AgentConfig[];
   #refreshing: Promise<void> | undefined;
   // Whether the in-flight #refreshing pass (if any) was itself a forced
   // pass. Only relevant while #refreshing is defined; read alongside it to
@@ -45,6 +52,12 @@ export class ProviderMonitor {
 
   constructor(deps: ProviderMonitorDeps) {
     this.#deps = deps;
+    this.#agents = deps.agents;
+  }
+
+  replaceAgents(agents: readonly AgentConfig[]): void {
+    this.#agents = agents;
+    this.#deps.store.replace(agents);
   }
 
   snapshot(): ProviderStatus[] {
@@ -62,7 +75,7 @@ export class ProviderMonitor {
   async refreshHealth(): Promise<void> {
     const vendors = [
       ...new Set(
-        this.#deps.agents
+        this.#agents
           .map((agent) => agent.vendor)
           .filter((vendor): vendor is ProviderVendor => vendor !== undefined),
       ),
@@ -132,10 +145,10 @@ export class ProviderMonitor {
     // refreshCapacity above) coalescing with an in-flight *unforced* pass.
     // It does not bypass coalescing with another in-flight *forced* pass
     // (same intent, so riding it is correct) and it does not read an
-    // account that has no configDir — there is nothing honest to force
-    // there.
-    const due = this.#deps.agents.filter((agent) => {
-      if (agent.configDir === undefined) return false;
+    // account that has no capacity source — there is nothing honest to
+    // force there.
+    const due = this.#agents.filter((agent) => {
+      if (!capacitySupported(agent)) return false;
       if (force) return true;
       const last = this.#deps.store.lastCapacityReadAt(agent.id);
       return last === undefined || now - last >= MIN_CAPACITY_REFRESH_MS;
@@ -143,12 +156,16 @@ export class ProviderMonitor {
 
     await Promise.all(
       due.map(async (agent) => {
-        const configDir = agent.configDir;
-        if (configDir === undefined) return;
+        const vendor = agent.vendor;
+        if (vendor === undefined) return;
 
         let reading: CapacityReading;
         try {
-          reading = await this.#deps.readCapacity(configDir);
+          reading = await this.#deps.readCapacity({
+            id: agent.id,
+            vendor,
+            configDir: agent.configDir,
+          });
         } catch {
           // readCapacity is contracted to resolve with { ok: false } rather
           // than throw, but Phase 1's Task 4 fix round and P11's hardening
@@ -169,8 +186,8 @@ export class ProviderMonitor {
    * would spend a query buying the number we were just handed for free.
    */
   recordPiggyback(agentId: string, reading: CapacityReading): void {
-    const agent = this.#deps.agents.find((candidate) => candidate.id === agentId);
-    if (agent === undefined || agent.configDir === undefined) return;
+    const agent = this.#agents.find((candidate) => candidate.id === agentId);
+    if (agent === undefined || !capacitySupported(agent)) return;
     // recordCapacity itself resets the store's lastCapacityAttemptAt, which
     // is the single source of truth refreshCapacity's due-filter reads —
     // there is no separate clock here to keep in sync with it.

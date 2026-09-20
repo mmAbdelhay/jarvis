@@ -811,6 +811,41 @@ describe("createGitProvider() staging and commit", () => {
     expect(outcome.ok).toBe(false);
   });
 
+  // C3: a path beginning with "-" would otherwise be read by git itself as
+  // an option rather than a pathspec — `--pathspec-from-file=/abs/path`
+  // makes git read arbitrary paths out of a file it names, leaking its
+  // lines back through the staged-file list. insideRepo() must refuse this
+  // before it ever reaches the git binary.
+  it("refuses a staged path beginning with '-' (option injection) before it reaches git", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().stage(dir, ["--pathspec-from-file=/etc/passwd"]);
+    expect(outcome.ok).toBe(false);
+    // Asserted on the error text, not just ok:false: git itself would also
+    // fail on this (a pathspec read out of /etc/passwd rarely matches a
+    // tracked file) but only *after* reading and echoing the file's
+    // content back into its own "fatal: pathspec '<line>' did not match"
+    // stderr — which is itself the leak. Refused here means git was never
+    // invoked at all.
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error.detail).toContain("outside the repository");
+    const status = await simpleGit(dir).status();
+    expect(status.staged).toEqual([]);
+  });
+
+  it("refuses an unstage path beginning with '-'", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().unstage(dir, ["-x"]);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("still stages a normal path unaffected by the '-' guard", async () => {
+    const dir = await makeRepo();
+    const provider = createGitProvider();
+    await writeFile(join(dir, "brand-new2.txt"), "content\n", "utf8");
+    const outcome = await provider.stage(dir, ["brand-new2.txt"]);
+    expect(outcome).toEqual({ ok: true, value: null });
+  });
+
   it("is a no-op staging an already-staged file", async () => {
     const dir = await makeRepo();
     const provider = createGitProvider();

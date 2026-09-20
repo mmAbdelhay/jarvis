@@ -33,6 +33,24 @@ describe("electron-builder.yml", () => {
     expect(c.files.join(" ")).not.toContain("claude-agent-sdk");
   });
 
+  it("excludes the probe client from the bundle", async () => {
+    // scripts/remote-probe.mjs is a manual-pass CLI tool, never imported by
+    // main.ts — shipping it would be dead weight with no runtime path that
+    // ever loads it.
+    const c = (await config()) as unknown as { files: string[] };
+    expect(c.files).toContain("!**/node_modules/@jarvis/remote/dist/probe-client.*");
+  });
+
+  it("excludes the probe CLI script and @jarvis/remote's TypeScript sources", async () => {
+    // scripts/remote-probe.mjs (the manual-pass CLI's own entry point,
+    // beside the excluded dist/probe-client.* above) and src/ (build
+    // inputs — nothing at runtime reads them) are both dead weight in a
+    // shipped app.
+    const c = (await config()) as unknown as { files: string[] };
+    expect(c.files).toContain("!**/node_modules/@jarvis/remote/scripts/**");
+    expect(c.files).toContain("!**/node_modules/@jarvis/remote/src/**");
+  });
+
   it("ships the renderer's runtime assets, both copies of vendor included", async () => {
     // index.html is loaded from the source tree, not from dist, so renderer/
     // is a runtime asset. A missing vendor file is not a crash — it is a

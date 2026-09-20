@@ -49,8 +49,8 @@ describe("capacityReport", () => {
     vendor: "anthropic",
     capacity: {
       state: "known",
-      fiveHour: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00Z" },
-      sevenDay: undefined,
+      primary: { usedPercent: 62, resetsAt: "2026-08-31T14:30:00Z" },
+      secondary: undefined,
       readAt: Date.parse("2026-08-31T12:12:00Z"),
     },
     health: { state: "ok", detail: "ok", readAt: 1 },

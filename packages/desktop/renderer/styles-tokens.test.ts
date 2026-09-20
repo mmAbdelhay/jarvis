@@ -84,8 +84,13 @@ describe("typography", () => {
     expect(css).not.toMatch(/font-family:[^;]*Space Grotesk/);
   });
 
-  it("loads the UI face it actually uses", () => {
-    expect(html).toContain("family=Inter");
+  // The 2026 redesign moved off a Google Fonts request entirely — the CSP
+  // has no network font-src, so index.html links the vendored stylesheet
+  // instead of naming a family on a remote request.
+  it("loads the UI face it actually uses, vendored rather than over the network", () => {
+    expect(html).toContain('href="vendor/fonts.css"');
+    expect(html).not.toContain("fonts.googleapis.com");
+    expect(tokenBlock).toMatch(/--font-ui:\s*Manrope/);
   });
 });
 
@@ -95,6 +100,51 @@ describe("the stylesheet's home", () => {
   it("is linked rather than inlined", () => {
     expect(html).toContain('href="./styles.css"');
     expect(html).not.toContain("<style>");
+  });
+});
+
+// Re-review 2, item 5: the board 0 redesign section (after the token block)
+// is the layer that actually paints — it comes later in the cascade than
+// the original .workspace-tab rules above it, so a colour band restored in
+// the earlier rule alone would never reach the screen. `.at(-1)` below reads
+// whichever declaration of each selector is LAST in the file, i.e. the one
+// that wins.
+describe("workspace tab colour band", () => {
+  it("gives every tab chip a 2px top band in --tab-color, in the rule that actually wins", () => {
+    const chipRule = rules.match(/\.workspace-tab\s*\{[^}]*\}/g)?.at(-1) ?? "";
+    expect(chipRule).toContain("border-block-start: 2px solid var(--tab-color");
+  });
+
+  it("lets the active chip's own rule add the hairline sides without wiping that band", () => {
+    const activeRule = rules.match(/\.workspace-tab--on\s*\{[^}]*\}/g)?.at(-1) ?? "";
+    // A `border:` shorthand here would reset every side, including the top
+    // band .workspace-tab just set — exactly the bug this pins.
+    expect(activeRule).not.toContain("border:");
+    expect(activeRule).toContain("border-inline");
+  });
+
+  it("colours the project switcher's own leading edge the same way", () => {
+    const switcherRule = rules.match(/\.workspace-project\s*\{[^}]*\}/g)?.at(-1) ?? "";
+    expect(switcherRule).toContain("border-inline-start: 3px solid var(--tab-color");
+  });
+});
+
+// The board 0 brain redesign (2026-09-19-desktop-redesign) replaced the
+// two/three-column `.centre__body--grid` (idle projects only, swapped in for
+// the Sessions list) with `.node-grid` — always on screen, self-sizing via
+// `repeat(auto-fill, minmax(172px, 1fr))` rather than a fixed column count,
+// so it never needs the old breakpoint-driven column switch.
+describe("dashboard projects grid", () => {
+  it("auto-fits centred columns of 172-232px instead of a fixed column count", () => {
+    const gridRule = rules.match(/\.node-grid\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(gridRule).toContain("grid-template-columns: repeat(auto-fit, minmax(172px, 232px))");
+    expect(gridRule).toContain("justify-content: center");
+    expect(gridRule).toContain("gap: 14px 10px");
+  });
+
+  it("scrolls its own overflow rather than stretching .main past its clipped height", () => {
+    const gridRule = rules.match(/\.node-grid\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(gridRule).toMatch(/overflow-y:\s*auto/);
   });
 });
 

@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- No permissions or components: the namespace comes from build.gradle
+       (AGP 7+); this module opens outbound wss:// sockets only, which needs
+       no manifest entry beyond the app's existing INTERNET permission. -->
+</manifest>

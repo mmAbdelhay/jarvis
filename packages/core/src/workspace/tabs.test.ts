@@ -69,6 +69,43 @@ describe("TabStore", () => {
     ]);
   });
 
+  it("renames a tab without changing its page title and clears a blank rename", () => {
+    const tabs = store();
+    tabs.open("a", "https://one.example");
+    tabs.update("tab-1", { title: "Page title" });
+    tabs.rename("tab-1", "  My tab  ");
+    expect(tabs.get("tab-1")).toMatchObject({ title: "Page title", customTitle: "My tab" });
+    tabs.rename("tab-1", "  ");
+    expect(tabs.get("tab-1")?.customTitle).toBeUndefined();
+  });
+
+  it("strips control and formatting characters from a custom title", () => {
+    const tabs = store();
+    tabs.open("a", "https://one.example");
+    tabs.rename("tab-1", " safe\u202Eevil ");
+    expect(tabs.get("tab-1")?.customTitle).toBe("safeevil");
+  });
+
+  it("moves a tab before or after a peer without changing the active tab", () => {
+    const tabs = store();
+    tabs.open("a", "one");
+    tabs.open("a", "two");
+    tabs.open("a", "three");
+    tabs.move("tab-1", "tab-3", true);
+    expect(tabs.snapshot().tabs.map((tab) => tab.id)).toEqual(["tab-2", "tab-3", "tab-1"]);
+    expect(tabs.snapshot().activeTabId).toBe("tab-3");
+    tabs.move("tab-1", "tab-2", false);
+    expect(tabs.snapshot().tabs.map((tab) => tab.id)).toEqual(["tab-1", "tab-2", "tab-3"]);
+  });
+
+  it("does not move tabs across projects", () => {
+    const tabs = store();
+    tabs.open("a", "one");
+    tabs.open("b", "two");
+    tabs.move("tab-1", "tab-2", true);
+    expect(tabs.snapshot().tabs.map((tab) => tab.id)).toEqual(["tab-1", "tab-2"]);
+  });
+
   it("applies a patch to one tab only", () => {
     const tabs = store();
     tabs.open("a", "https://one.example");

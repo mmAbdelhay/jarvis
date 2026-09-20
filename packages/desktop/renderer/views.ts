@@ -57,8 +57,9 @@ export function showView(name: ViewName): void {
   syncHostedView();
 }
 
-function syncHostedView(): void {
+export function syncHostedView(): void {
   // Optional-chained: several renderer test harnesses run with no bridge at
   // all, and a route change must not throw there.
-  void window.jarvis?.setWorkspaceVisible?.(view === "workspace");
+  const historyOpen = document.getElementById("history-overlay")?.hasAttribute("hidden") === false;
+  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && !historyOpen);
 }

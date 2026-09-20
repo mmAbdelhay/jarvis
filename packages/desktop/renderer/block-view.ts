@@ -9,6 +9,7 @@
 
 import { renderOutput } from "./block-render.js";
 import type { BlockRecord } from "./terminal-blocks.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 
 export type BlockViewHooks = {
   cols: number;
@@ -21,6 +22,8 @@ export type BlockViewHooks = {
   /** The more menu's "Filter to this command" — narrows the block list down
    *  to blocks that ran this exact command. Wired to the pane's BlockNav. */
   filterToCommand: (command: string) => void;
+  /** Removes this finished block from the pane, not from shell history. */
+  remove?: (view: BlockView) => void;
   /** Makes this block the selected one — what clicking its header does,
    *  and the only pointer route to the palette's "Copy output" and
    *  "Re-run command", which act on the selection. Wired to the pane's
@@ -168,12 +171,24 @@ function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView
 
   const moreButton = actionButton("block-more", "⋯", "More");
   moreButton.setAttribute("aria-expanded", "false");
-  const menu = buildMoreMenu(record, hooks);
+  const menu = buildMoreMenu(record, hooks, view, moreButton);
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
     const next = menu.hidden; // opening if it was hidden
-    menu.hidden = !next;
-    moreButton.setAttribute("aria-expanded", String(next));
+    if (!next) {
+      hideMoreMenu(menu, moreButton);
+      return;
+    }
+    menu.hidden = false;
+    moreButton.setAttribute("aria-expanded", "true");
+    if (typeof menu.showPopover === "function") {
+      menu.showPopover();
+      const anchor = moreButton.getBoundingClientRect();
+      const width = menu.offsetWidth;
+      const height = menu.offsetHeight;
+      menu.style.left = `${Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8))}px`;
+      menu.style.top = `${anchor.bottom + height + 8 > window.innerHeight ? Math.max(8, anchor.top - height - 2) : anchor.bottom + 2}px`;
+    }
   });
 
   actions.append(collapseButton, copyButton, rerunButton, moreButton);
@@ -185,19 +200,42 @@ function buildHeader(record: BlockRecord, hooks: BlockViewHooks, view: BlockView
   return wrap;
 }
 
-/** copy command, copy both, and filter to this command. */
-function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement {
+function hideMoreMenu(menu: HTMLElement, moreButton: HTMLElement): void {
+  if (typeof menu.hidePopover === "function") {
+    try {
+      menu.hidePopover();
+    } catch {
+      // The menu may have been light-dismissed already.
+    }
+  }
+  menu.hidden = true;
+  moreButton.setAttribute("aria-expanded", "false");
+}
+
+/** copy command, copy both, filter, and delete this finished block. */
+function buildMoreMenu(
+  record: BlockRecord,
+  hooks: BlockViewHooks,
+  view: BlockView,
+  moreButton: HTMLElement,
+): HTMLElement {
   const menu = document.createElement("div");
   menu.className = "block-more-menu";
   menu.setAttribute("role", "menu");
+  menu.setAttribute("popover", "auto");
   menu.hidden = true;
+  menu.addEventListener("toggle", () => {
+    if (menu.matches(":popover-open")) return;
+    menu.hidden = true;
+    moreButton.setAttribute("aria-expanded", "false");
+  });
 
   const copyCommand = actionButton("block-more-item", "Copy command", "Copy command");
   copyCommand.dataset["action"] = "copy-command";
   copyCommand.addEventListener("click", (event) => {
     event.stopPropagation();
     hooks.copy(record.command);
-    menu.hidden = true;
+    hideMoreMenu(menu, moreButton);
   });
 
   const copyBoth = actionButton("block-more-item", "Copy both", "Copy command and output");
@@ -205,7 +243,7 @@ function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement 
   copyBoth.addEventListener("click", (event) => {
     event.stopPropagation();
     hooks.copy(`${record.command}\n${record.output}`);
-    menu.hidden = true;
+    hideMoreMenu(menu, moreButton);
   });
 
   const filter = actionButton(
@@ -217,10 +255,22 @@ function buildMoreMenu(record: BlockRecord, hooks: BlockViewHooks): HTMLElement 
   filter.addEventListener("click", (event) => {
     event.stopPropagation();
     hooks.filterToCommand(record.command);
-    menu.hidden = true;
+    hideMoreMenu(menu, moreButton);
   });
 
-  menu.append(copyCommand, copyBoth, filter);
+  const remove = actionButton(
+    "block-more-item",
+    MESSAGES.deleteBlock(PRIMARY_LANGUAGE),
+    MESSAGES.deleteBlockTitle(PRIMARY_LANGUAGE),
+  );
+  remove.dataset["action"] = "delete";
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    hideMoreMenu(menu, moreButton);
+    hooks.remove?.(view);
+  });
+
+  menu.append(copyCommand, copyBoth, filter, remove);
   return menu;
 }
 

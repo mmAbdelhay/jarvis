@@ -1,6 +1,7 @@
+import { randomBytes } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import lang from "@usebruno/lang";
 import type { ImportedRequest } from "./postman-import.js";
 
@@ -207,18 +208,100 @@ export async function readRequest(path: string): Promise<Record<string, unknown>
   return bruToJsonV2(await readFile(path, "utf8")) as Record<string, unknown>;
 }
 
+/**
+ * Writes `text` to `path` without ever leaving `path` itself truncated or
+ * half-written (M12 Task 7, wiring the M9 T4 minor "non-atomic remote
+ * save" — desktop and remote origins share this one writer, so both get
+ * the same guarantee). Writes a temp file in the *same directory* as
+ * `path` (so the final `rename` is same-filesystem, and therefore atomic —
+ * a cross-filesystem rename is not), then renames it into place; on any
+ * failure — the write itself, or the rename — the temp file is removed and
+ * `path` is never touched, so a caller that already had a request/
+ * environment file on disk keeps exactly what it had before this call,
+ * byte for byte.
+ */
+export async function writeAtomically(path: string, text: string): Promise<void> {
+  const dir = dirname(path);
+  const tempPath = join(dir, `.${basename(path)}.tmp-${randomBytes(8).toString("hex")}`);
+  try {
+    let mode: number | undefined;
+    try {
+      mode = (await stat(path)).mode & 0o777;
+    } catch {
+      // A first write has no existing mode to preserve.
+    }
+    await writeFile(tempPath, text, mode === undefined ? "utf8" : { encoding: "utf8", mode });
+    await rename(tempPath, path);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
+}
+
 /** Serialises one request back to .bru. The only writer of the format —
  *  and the reason an untouched request produces no diff. */
 export async function writeRequest(path: string, json: Record<string, unknown>): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
-  await writeFile(path, jsonToBruV2(json), "utf8");
+  await writeAtomically(path, jsonToBruV2(json));
 }
 
 /** A filename that cannot escape its directory or collide with the shell.
  *  A request is named by the user; the file it lands in is not. */
 function safeFileName(name: string): string {
   const cleaned = name.replace(/[^A-Za-z0-9 ._-]/g, "-").trim();
-  return cleaned === "" ? "untitled" : cleaned;
+  // I3: "." and ".." (and any name made only of dots, like "...") are legal
+  // characters individually but a real path-traversal component together —
+  // `join(parent, "..")` walks up a directory. Neither a bare "." nor ".."
+  // is a name anyone would choose on purpose, so both become "untitled"
+  // exactly like an empty name does.
+  return cleaned === "" || /^\.+$/.test(cleaned) ? "untitled" : cleaned;
+}
+
+/** Throws unless `target` really resolves inside `root`. A lexical check
+ *  only (no realpath): every path here is one this module is about to
+ *  *create*, so there is nothing on disk yet to resolve a symlink against —
+ *  safeFileName() is what keeps a single path segment from containing a
+ *  traversal; this is the second, whole-path guard against segments that
+ *  combine to walk out regardless. */
+function assertInside(root: string, target: string): void {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  const prefix = resolvedRoot.endsWith(sep) ? resolvedRoot : `${resolvedRoot}${sep}`;
+  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(prefix)) {
+    throw new Error("path escapes the project");
+  }
+}
+
+/**
+ * `assertInside`'s lexical check plus the filesystem half: walks up from
+ * `target` to its nearest *existing* ancestor (the target itself is one
+ * this module is about to create, so it and any new intermediate
+ * directories never exist yet — only an already-existing segment can be a
+ * symlink) and requires that ancestor's realpath to stay inside `root`'s
+ * own realpath. Without this, a pre-existing in-project symlink (e.g. a
+ * folder named exactly like a real one, but pointing at `/tmp/evil`) would
+ * pass the lexical check and still write outside the project once the
+ * symlink is followed.
+ */
+async function assertRealInside(root: string, target: string): Promise<void> {
+  assertInside(root, target);
+  const realRoot = await realpath(resolve(root));
+  const prefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+  let candidate = resolve(target);
+  for (;;) {
+    try {
+      const real = await realpath(candidate);
+      if (real !== realRoot && !real.startsWith(prefix)) {
+        throw new Error("path escapes the project");
+      }
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw new Error("path escapes the project");
+      candidate = parent;
+    }
+  }
 }
 
 /** Creates an empty GET request in `folderPath`, and returns its path. */
@@ -273,6 +356,7 @@ export async function deleteEntry(path: string): Promise<void> {
  *  is discoverable by listCollections and openable by Bruno desktop. */
 export async function createCollection(projectPath: string, name: string): Promise<string> {
   const path = join(projectPath, safeFileName(name));
+  await assertRealInside(projectPath, path);
   await mkdir(join(path, ENVIRONMENTS_DIR), { recursive: true });
   await writeFile(
     join(path, MARKER),
@@ -292,7 +376,7 @@ export async function writeEnvironment(
 ): Promise<string> {
   const path = join(collectionPath, ENVIRONMENTS_DIR, `${safeFileName(name)}.bru`);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, envJsonToBruV2({ variables }), "utf8");
+  await writeAtomically(path, envJsonToBruV2({ variables }));
   return path;
 }
 
@@ -303,22 +387,39 @@ export async function writeImported(
   name: string,
   requests: readonly ImportedRequest[],
 ): Promise<string> {
-  const collectionPath = await createCollection(projectPath, name);
+  // I3: every target path is resolved and checked *before* anything is
+  // written — a Postman collection with a nested `..` segment must fail
+  // whole, not after it has already created some of the tree.
+  const collectionPath = join(projectPath, safeFileName(name));
+  await assertRealInside(projectPath, collectionPath);
 
-  let seq = 1;
+  const planned: { folder: string; filePath: string; json: Record<string, unknown> }[] = [];
   for (const request of requests) {
     const segments = [...request.segments];
-    const fileName = segments.pop() ?? `request-${seq}`;
+    const fileName = segments.pop() ?? "request";
     const folder = segments.reduce(
       (path, segment) => join(path, safeFileName(segment)),
       collectionPath,
     );
-    await mkdir(folder, { recursive: true });
+    const filePath = join(folder, `${safeFileName(fileName)}.bru`);
+    // Real-path checked against the *project* root, not just the
+    // collection path: the collection itself is checked above, but a
+    // symlinked subfolder anywhere in a deeply nested Postman folder tree
+    // must be caught the same way.
+    await assertRealInside(projectPath, folder);
+    await assertRealInside(projectPath, filePath);
+    planned.push({ folder, filePath, json: request.json });
+  }
 
-    const json = { ...request.json };
+  await createCollection(projectPath, name);
+
+  let seq = 1;
+  for (const { folder, filePath, json: rawJson } of planned) {
+    await mkdir(folder, { recursive: true });
+    const json = { ...rawJson };
     const meta = (json["meta"] ?? {}) as Record<string, unknown>;
     json["meta"] = { ...meta, seq: String(seq) };
-    await writeRequest(join(folder, `${safeFileName(fileName)}.bru`), json);
+    await writeRequest(filePath, json);
     seq += 1;
   }
 

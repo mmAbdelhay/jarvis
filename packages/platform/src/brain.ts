@@ -1,6 +1,7 @@
 import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
 import type { Brain, BrainContext, BrainReply, CapacityReading, ToolSpec } from "@jarvis/core";
 import { parseUsage } from "./capacity.js";
+import { resolveClaudeExecutable } from "./sdk-executable.js";
 
 const TOOL_BLOCK = /```jarvis-tool\s*\n([\s\S]*?)\n```/g;
 
@@ -179,8 +180,11 @@ export function createBrain(config: BrainConfig): Brain {
       const env = { ...process.env };
       delete env["ANTHROPIC_API_KEY"];
 
+      const executable = resolveClaudeExecutable();
       const options: Options = {
         cwd: config.cwd,
+        // The packaged app keeps the SDK binary outside app.asar (sdk-executable.ts).
+        ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
         // SDK isolation mode: no project/user/local settings, hooks, or
         // skills leak into the orchestrator's own conversation.
         settingSources: [],

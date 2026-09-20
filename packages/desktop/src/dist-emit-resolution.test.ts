@@ -26,11 +26,13 @@ function listJsFiles(dir: string): string[] {
     const stat = statSync(full);
     if (stat.isDirectory()) {
       out.push(...listJsFiles(full));
-    } else if (entry.endsWith(".js") && entry !== "dist-emit-resolution.test.js") {
-      // Excluded: this test's own emitted output contains illustrative
-      // import specifiers inside comments (documenting the regex below),
-      // which the naive regex below would otherwise mistake for real
-      // imports of this file.
+    } else if (entry.endsWith(".js") && !entry.endsWith(".test.js")) {
+      // Emitted test files are excluded: they're never part of the shipped
+      // module graph (nothing requires/imports them at runtime), and they
+      // may carry illustrative specifiers in strings or comments — this
+      // file's own regex docs above, and preload-sandbox.test's
+      // string-literal guard cases (`'import { A } from "./x";'`) — that
+      // the naive regex below would otherwise mistake for real imports.
       out.push(full);
     }
   }

@@ -208,6 +208,24 @@ describe("a block", () => {
     expect(more?.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("opens the more menu in the top layer so scrolling cannot clip it", () => {
+    const view = createBlockView(record(), hooks());
+    const menu = view.element.querySelector<HTMLElement>(".block-more-menu");
+    const showPopover = vi.fn();
+    if (menu === null) throw new Error("missing menu");
+    menu.showPopover = showPopover;
+    view.element.querySelector<HTMLElement>(".block-more")?.click();
+    expect(showPopover).toHaveBeenCalledOnce();
+  });
+
+  it("offers Delete for a finished block", () => {
+    const remove = vi.fn();
+    const view = createBlockView(record(), { ...hooks(), remove });
+    view.element.querySelector<HTMLElement>(".block-more")?.click();
+    view.element.querySelector<HTMLElement>('[data-action="delete"]')?.click();
+    expect(remove).toHaveBeenCalledWith(view);
+  });
+
   it("leaves the cwd unchanged when home is empty", () => {
     const view = createBlockView(record({ cwd: "/Users/x/projects/jarvis" }), {
       ...hooks(),

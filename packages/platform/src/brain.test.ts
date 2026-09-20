@@ -382,8 +382,8 @@ describe("capacity piggyback", () => {
 
     expect(onUsage).toHaveBeenCalledWith("claude-main", {
       ok: true,
-      fiveHour: { usedPercent: 12, resetsAt: "2026-08-31T14:30:00Z" },
-      sevenDay: undefined,
+      primary: { usedPercent: 12, resetsAt: "2026-08-31T14:30:00Z" },
+      secondary: undefined,
     });
     expect(onUsage).toHaveBeenCalledTimes(1);
   });

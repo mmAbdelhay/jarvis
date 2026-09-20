@@ -4,7 +4,8 @@ import { ProviderStatusStore } from "./store.js";
 
 const AGENTS: AgentConfig[] = [
   { id: "claude-main", command: "claude-main", configDir: "/c/mm", vendor: "anthropic" },
-  { id: "copilot", command: "copilot", vendor: "github" },
+  // No vendor: nothing to read capacity from (a local model, say).
+  { id: "copilot", command: "copilot" },
 ];
 
 // The user's real configuration: three accounts share the anthropic vendor.
@@ -17,15 +18,63 @@ const MULTI_ANTHROPIC_AGENTS: AgentConfig[] = [
 ];
 
 describe("ProviderStatusStore", () => {
+  it("rebuilds provider rows after a live registry replacement", () => {
+    const store = new ProviderStatusStore(AGENTS);
+    const listener = vi.fn();
+    store.onChange(listener);
+    store.replace([{ id: "new-agent", command: "new", configDir: "/new", vendor: "openai" }]);
+    expect(store.snapshot().map((status) => status.id)).toEqual(["new-agent"]);
+    expect(listener).toHaveBeenCalledWith(store.snapshot());
+  });
+  it("keeps readings for retained ids while adding and removing provider rows", () => {
+    const store = new ProviderStatusStore(AGENTS);
+    store.recordCapacity(
+      "claude-main",
+      {
+        ok: true,
+        primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        secondary: undefined,
+      },
+      1_000,
+    );
+
+    store.replace([
+      { id: "claude-main", command: "renamed-wrapper", configDir: "/c/new", vendor: "openai" },
+      { id: "new-agent", command: "new", configDir: "/new", vendor: "openai" },
+    ]);
+
+    expect(store.snapshot()).toEqual([
+      expect.objectContaining({
+        id: "claude-main",
+        capacity: expect.objectContaining({ state: "known", readAt: 1_000 }),
+      }),
+      expect.objectContaining({
+        id: "new-agent",
+        capacity: { state: "unknown", reason: "never-read" },
+      }),
+    ]);
+    expect(store.lastCapacityReadAt("claude-main")).toBe(1_000);
+    expect(store.snapshot().some((status) => status.id === "copilot")).toBe(false);
+  });
   it("starts every account unknown, distinguishing never-read from unsupported", () => {
     const store = new ProviderStatusStore(AGENTS);
     const [mm, copilot] = store.snapshot();
 
     expect(mm?.capacity).toEqual({ state: "unknown", reason: "never-read" });
-    // No configDir means there is no way to ask at all — a different fact
-    // from "we haven't asked yet", and the panel says so differently.
+    // No capacity source (capacitySupported) means there is no way to ask
+    // at all — a different fact from "we haven't asked yet", and the panel
+    // says so differently. A Copilot or Codex account IS readable (its
+    // vendor names a free source), and a Claude account only with a configDir.
     expect(copilot?.capacity).toEqual({ state: "unknown", reason: "unsupported" });
     expect(mm?.health).toEqual({ state: "unknown", detail: "", readAt: undefined });
+    const [gh, oa, claudeNoDir] = new ProviderStatusStore([
+      { id: "gh", command: "copilot", vendor: "github" },
+      { id: "oa", command: "codex", vendor: "openai" },
+      { id: "claude-nodir", command: "claude", vendor: "anthropic" },
+    ]).snapshot();
+    expect(gh?.capacity).toEqual({ state: "unknown", reason: "never-read" });
+    expect(oa?.capacity).toEqual({ state: "unknown", reason: "never-read" });
+    expect(claudeNoDir?.capacity).toEqual({ state: "unknown", reason: "unsupported" });
   });
 
   it("keeps the account list and its order from the registry", () => {
@@ -41,16 +90,16 @@ describe("ProviderStatusStore", () => {
       "claude-main",
       {
         ok: true,
-        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        secondary: undefined,
       },
       1_000,
     );
 
     expect(store.snapshot()[0]?.capacity).toEqual({
       state: "known",
-      fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-      sevenDay: undefined,
+      primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+      secondary: undefined,
       readAt: 1_000,
     });
     expect(store.lastCapacityReadAt("claude-main")).toBe(1_000);
@@ -62,8 +111,8 @@ describe("ProviderStatusStore", () => {
       "claude-main",
       {
         ok: true,
-        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        secondary: undefined,
       },
       1_000,
     );
@@ -80,8 +129,8 @@ describe("ProviderStatusStore", () => {
       "copilot",
       {
         ok: true,
-        fiveHour: { usedPercent: 1, resetsAt: "2026-08-31T14:30:00Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 1, resetsAt: "2026-08-31T14:30:00Z" },
+        secondary: undefined,
       },
       1_000,
     );
@@ -112,8 +161,8 @@ describe("ProviderStatusStore", () => {
       "claude-main",
       {
         ok: true,
-        fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+        secondary: undefined,
       },
       1_000,
     );
@@ -121,8 +170,8 @@ describe("ProviderStatusStore", () => {
       "claude-acme",
       {
         ok: true,
-        fiveHour: { usedPercent: 42, resetsAt: "2026-08-31T15:00:00Z" },
-        sevenDay: undefined,
+        primary: { usedPercent: 42, resetsAt: "2026-08-31T15:00:00Z" },
+        secondary: undefined,
       },
       1_500,
     );
@@ -178,8 +227,8 @@ describe("ProviderStatusStore", () => {
         "claude-main",
         {
           ok: true,
-          fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-          sevenDay: undefined,
+          primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+          secondary: undefined,
         },
         1_000,
       );
@@ -194,8 +243,8 @@ describe("ProviderStatusStore", () => {
         "claude-main",
         {
           ok: true,
-          fiveHour: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
-          sevenDay: undefined,
+          primary: { usedPercent: 9, resetsAt: "2026-08-31T14:30:00Z" },
+          secondary: undefined,
         },
         1_000,
       );

@@ -51,11 +51,22 @@ files:
   - "!dist/**/*.test.d.ts"
   - "!dist/**/*.d.ts"
   - "!**/*.tsbuildinfo"
-  # The same for the two workspace packages, which arrive through
+  # The same for the other workspace packages, which arrive through
   # node_modules (as pnpm symlinks that electron-builder follows and
   # materialises into the archive) and so escape the globs above.
   - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
   - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
+  # The probe client is a manual-pass CLI tool (scripts/remote-probe.mjs),
+  # never imported by main.ts — shipping it in the bundle would be dead
+  # weight with no runtime path that ever loads it.
+  - "!**/node_modules/@jarvis/remote/dist/probe-client.*"
+  - "!**/node_modules/@jarvis/remote/scripts/**"
+  # @jarvis/remote's own TypeScript sources — build inputs, not a runtime
+  # asset, and (unlike the dist/**/*.d.ts exclusion two lines up, which
+  # covers every workspace package) nothing here excludes any other
+  # package's src/ yet, so this is scoped to the one package this task
+  # touches rather than silently widening what every other package ships.
+  - "!**/node_modules/@jarvis/remote/src/**"
   # (@anthropic-ai/claude-agent-sdk's per-platform runtimes are excluded in
   # each target's own `files:` below, not here — see the note above `mac:`.)
 
@@ -147,6 +158,8 @@ mac:
   category: public.app-category.developer-tools
   icon: assets/icon.icns
   identity: null
+  extendInfo:
+    NSLocationWhenInUseUsageDescription: "Show prayer times for your current location when you choose Use my location."
   # Jarvis spawns agents and shells that read the user's files, and its
   # renderer talks to local services. The hardened runtime would need
   # entitlements and a real signing identity to allow that; with an ad-hoc

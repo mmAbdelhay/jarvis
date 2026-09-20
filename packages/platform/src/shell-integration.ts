@@ -6,6 +6,7 @@
 // This is the one place that has to know they all exist, so main.ts asks a
 // single question and gets a single answer.
 
+import { resolve } from "node:path";
 import { installBashIntegration, isBash } from "./bash-integration.js";
 import {
   installPowerShellIntegration,
@@ -42,6 +43,38 @@ export type ShellIntegrationDeps = {
   home: string;
   write: (path: string, contents: string) => Promise<void>;
 };
+
+/**
+ * The user's real zsh dotfile directory, from the environment this process
+ * inherited.
+ *
+ * Three cases, in order:
+ * - `JARVIS_REAL_ZDOTDIR` is set and is not itself the wrapper directory:
+ *   this process was launched by a Jarvis wrapper that already recorded the
+ *   user's real directory (see `chain()` in zsh-integration.ts), so trust
+ *   it over anything else in the environment.
+ * - `ZDOTDIR` is set and differs from `wrapperDir`: an ordinary user
+ *   customisation, honoured as before.
+ * - Otherwise, `home`: covers an unset (or wrapper-pointing) `ZDOTDIR`, a
+ *   poisoned or stale `JARVIS_REAL_ZDOTDIR`, and the bug this closes — a
+ *   Jarvis launched from inside Jarvis's own Terminal tab (a dev build
+ *   started from that tab, or any shell that inherited the pty's env)
+ *   inherits `$ZDOTDIR` already pointing at the wrapper itself. Taking that
+ *   value at face value would regenerate the wrapper pointing at itself,
+ *   and every zsh started under it would recurse into its own `.zshenv`
+ *   until the shell gave up. Paths are compared with `path.resolve` so a
+ *   trailing slash cannot defeat the comparison.
+ */
+export function resolveRealZdotdir(
+  env: Record<string, string | undefined>,
+  wrapperDir: string,
+  home: string,
+): string {
+  const usable = (dir: string | undefined): dir is string =>
+    !!dir && resolve(dir) !== resolve(wrapperDir);
+  const candidate = [env["JARVIS_REAL_ZDOTDIR"], env["ZDOTDIR"]].find(usable);
+  return candidate ?? home;
+}
 
 /**
  * Installs the wrapper for whichever shell the user has, and returns what to

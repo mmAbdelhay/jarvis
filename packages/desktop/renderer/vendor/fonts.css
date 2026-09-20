@@ -1,0 +1,14 @@
+/* Fontsource 5.3.0 (Manrope + JetBrains Mono), SIL Open Font License 1.1.
+   The eight woff2 files beside this one are pulled from node_modules by
+   scripts/copy-vendor.mjs (latin subset, weights 400/500/600/700 only —
+   the weights the UI actually sets), the same "pinned copy, checked in"
+   treatment as ./adhan.mjs and ./xterm.mjs. No Google Fonts request: the
+   CSP has no network font-src. */
+@font-face { font-family: Manrope; font-style: normal; font-display: swap; font-weight: 400; src: url("./manrope-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: Manrope; font-style: normal; font-display: swap; font-weight: 500; src: url("./manrope-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: Manrope; font-style: normal; font-display: swap; font-weight: 600; src: url("./manrope-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: Manrope; font-style: normal; font-display: swap; font-weight: 700; src: url("./manrope-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-display: swap; font-weight: 400; src: url("./jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-display: swap; font-weight: 500; src: url("./jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-display: swap; font-weight: 600; src: url("./jetbrains-mono-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-display: swap; font-weight: 700; src: url("./jetbrains-mono-latin-700-normal.woff2") format("woff2"); }

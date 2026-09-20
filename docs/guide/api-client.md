@@ -96,6 +96,24 @@ set it.
 a timeout, and whether to verify certificates. Verification is on unless you
 turn it off.
 
+## From the paired phone
+
+The same collections, requests and environments are reachable from a paired
+phone (see [remote access](remote-access.md)) — sending and saving work the
+same way, with three differences the phone-side trust boundary enforces: a
+send from the phone never runs `script:pre-request`/`script:post-response`
+or `tests`, and never starts an OAuth2 grant (those stay laptop-only); the
+laptop never reads a path off the phone's request for a multipart file
+field — the file is uploaded first, and the request carries only the id
+that upload returns; and a save from the phone never writes a script or
+hook block, only the fields the phone's own editor can actually show.
+Importing a Postman collection from the phone goes through the same upload
+step, but only a phone-originated import is bounded — a cap on how many
+requests it may produce, a decoded size/depth/node-count check, and a scan
+for control characters in the names and values the conversion produces; the
+same import triggered locally from the laptop's own file picker carries
+none of those bounds.
+
 ## What is not here
 
 No cookie *editor* (only viewing and deleting), no code generation beyond

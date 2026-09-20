@@ -3,6 +3,23 @@ import { SessionManager } from "./manager.js";
 import type { ProcessHandle, Session, SessionStore, Spawner } from "./types.js";
 import type { AgentConfig } from "../registry/types.js";
 
+/**
+ * Deterministic PRNG (mulberry32) — the same technique as
+ * packages/platform/src/shell.test.ts's retention property test, reproduced
+ * here rather than imported: core has no dependency on platform, even in
+ * tests, and this is a dozen lines.
+ */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 class FakeStore implements SessionStore {
   rows = new Map<string, Session>();
   upsert(session: Session): void {
@@ -36,6 +53,7 @@ class FakeProcess implements ProcessHandle {
   written: string[] = [];
   killed = false;
   resizes: { cols: number; rows: number }[] = [];
+  pid?: number;
   #output: ((chunk: string) => void)[] = [];
   #exit: ((code: number) => void)[] = [];
 
@@ -95,6 +113,24 @@ describe("SessionManager", () => {
     const session = manager.start({ project: "acme", projectPath: "/p/acme", agent });
 
     expect(seen).toEqual([session.id]);
+  });
+
+  // process-scan.ts's exclusion of Jarvis's own pty children depends on
+  // this: a pid it cannot see would show up a second time as a session
+  // "running outside Jarvis".
+  it("reports the pid of every session it currently runs", () => {
+    const other = new FakeProcess();
+    other.pid = 222;
+    fake.pid = 111;
+    const manager = new SessionManager(() => fake);
+    manager.start({ project: "a", projectPath: "/a", agent });
+    expect(manager.ownedPids()).toEqual(new Set([111]));
+  });
+
+  it("omits a session whose spawner reports no pid", () => {
+    const manager = new SessionManager(spawner);
+    manager.start({ project: "a", projectPath: "/a", agent });
+    expect(manager.ownedPids()).toEqual(new Set());
   });
 
   it("gives each session a distinct id", () => {
@@ -339,7 +375,7 @@ describe("SessionManager", () => {
 
     it("streams each chunk to output subscribers tagged with its session", () => {
       const manager = new SessionManager(spawner);
-      const seen: { sessionId: string; chunk: string }[] = [];
+      const seen: { sessionId: string; chunk: string; offset: number }[] = [];
       manager.onOutput((output) => seen.push(output));
 
       const session = manager.start({
@@ -349,7 +385,21 @@ describe("SessionManager", () => {
       });
       fake.emitOutput("hello\n");
 
-      expect(seen).toEqual([{ sessionId: session.id, chunk: "hello\n" }]);
+      expect(seen).toEqual([{ sessionId: session.id, chunk: "hello\n", offset: 0 }]);
+    });
+
+    // Ruling 10: offset counts UTF-16 code units emitted since the session
+    // started, so a client that missed a push can tell how much it lost.
+    it("tags each output chunk with the offset it started at", () => {
+      const manager = new SessionManager(spawner);
+      const seen: number[] = [];
+      manager.onOutput((output) => seen.push(output.offset));
+
+      manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+      fake.emitOutput("hello "); // 6 UTF-16 units
+      fake.emitOutput("world"); // 5 more
+
+      expect(seen).toEqual([0, 6]);
     });
 
     it("stops delivering to a subscriber after it unsubscribes", () => {
@@ -401,6 +451,37 @@ describe("SessionManager", () => {
       expect(log.endsWith("TAIL")).toBe(true);
     });
 
+    // M5 ruling 13's slice-equivalence invariant (packages/platform/src/
+    // shell.ts's appendChunk), applied to SessionManager's own #appendLog:
+    // the retained log must equal (old + chunk).slice(-cap) *exactly* after
+    // every chunk, not just once things settle. MAX_LOG_CHARS is not
+    // injectable here the way ShellManager's maxLogChars is, so — per the
+    // brief — the draws are chunks up to 1.5x the real cap rather than many
+    // tiny ones against a small cap: every draw exercises the front-of-array
+    // trim path, and most cross the cap on their own.
+    // [bite-proof: revert #appendLog's while condition back to
+    // `size > MAX_LOG_CHARS && chunks.length > 1` and this fails — the
+    // retained text undershoots the naive slice by up to one whole chunk]
+    it("matches (old + chunk).slice(-cap) exactly across chunks drawn longer than the cap", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+      const cap = 256 * 1024;
+      const rand = mulberry32(20260919);
+      let naive = "";
+
+      for (let i = 0; i < 30; i += 1) {
+        const length = Math.floor(rand() * cap * 1.5) + 1;
+        const chunk = String.fromCharCode(97 + (i % 26)).repeat(length);
+        fake.emitOutput(chunk);
+        naive = (naive + chunk).slice(-cap);
+        expect(manager.log(session.id)).toBe(naive);
+      }
+    });
+
     // 256 KB per session is ~512 KB resident (JS strings are UTF-16), kept
     // after exit on purpose and with nothing bounding how many dead sessions
     // pile up across a day. The end is the part anyone opens a dead
@@ -422,6 +503,30 @@ describe("SessionManager", () => {
       const log = manager.log(session.id);
       expect(log.length).toBeLessThanOrEqual(48 * 1024);
       expect(log.endsWith("the last thing it said\n")).toBe(true);
+    });
+
+    // A uniform body (all "z") cannot distinguish "the right length" from
+    // "the right content" — any off-by-one at the chunk boundary would still
+    // read as an all-"z" string. Non-uniform chunks pin down the exact tail.
+    it("compacts to the exact tail slice when the pre-exit chunks are non-uniform", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({
+        project: "acme",
+        projectPath: "/tmp/acme",
+        agent,
+      });
+
+      const chunkA = "A".repeat(140 * 1024);
+      const chunkB = "B".repeat(90 * 1024);
+      const chunkC = "the last thing it said\n";
+      fake.emitOutput(chunkA);
+      fake.emitOutput(chunkB);
+      fake.emitOutput(chunkC);
+      const naiveTail = (chunkA + chunkB + chunkC).slice(-(48 * 1024));
+
+      fake.emitExit(1);
+
+      expect(manager.log(session.id)).toBe(naiveTail);
     });
 
     it("leaves a running session's log alone", () => {
@@ -451,6 +556,39 @@ describe("SessionManager", () => {
       fake.emitExit(0);
 
       expect(manager.log(session.id)).toBe("all done\n");
+    });
+  });
+
+  describe("snapshot", () => {
+    it("returns an empty snapshot for an unknown session", () => {
+      const manager = new SessionManager(spawner);
+      expect(manager.snapshot("no-such-session")).toEqual({ text: "", end: 0 });
+    });
+
+    it("reports the retained text and the true emitted count", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+      fake.emitOutput("hello ");
+      fake.emitOutput("world");
+
+      expect(manager.snapshot(session.id)).toEqual({ text: "hello world", end: 11 });
+    });
+
+    // Compaction on exit (#compactLog) shortens the retained text but must
+    // never shrink `end` — a client computes what it missed from `end`, not
+    // from how much text survived.
+    it("keeps `end` at the true total after a dead session's log gets compacted", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+
+      fake.emitOutput("z".repeat(200 * 1024));
+      fake.emitOutput("the last thing it said\n");
+      const totalEmitted = 200 * 1024 + "the last thing it said\n".length;
+      fake.emitExit(1);
+
+      const snap = manager.snapshot(session.id);
+      expect(snap.text.length).toBe(48 * 1024);
+      expect(snap.end).toBe(totalEmitted);
     });
   });
 });

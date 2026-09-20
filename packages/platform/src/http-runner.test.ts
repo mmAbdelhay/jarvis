@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCookieJar } from "./cookies.js";
 import { interpolate, sendRequest } from "./http-runner.js";
 
@@ -73,6 +73,136 @@ describe("interpolate", () => {
 });
 
 describe("sendRequest", () => {
+  it.each([
+    ["accepts exactly 16 files", 16, 1024, false, true],
+    ["refuses a 17th file", 17, 1, true, false],
+    ["accepts exactly 25 MiB", 16, 0, false, true],
+    ["refuses an aggregate over 25 MiB", 16, 0, true, false],
+  ])("%s", async (_label, fileCount, fileSize, overBytes, shouldFetch) => {
+    const { captured, deps } = harness();
+    const oneMiB = 1024 * 1024;
+    const sizes = overBytes
+      ? // Fix wave 2: the "over 25 MiB" row must be a true aggregate —
+        // exactly MAX_REMOTE_MULTIPART_FILES (16) files, none of them
+        // individually suspicious, summing to one byte over the cap —
+        // never a single oversized file, which would only prove the cap
+        // catches one huge upload rather than the sum of many ordinary
+        // ones. Every other overBytes case (the 17-file row) still gets
+        // the original single-file shape.
+        fileSize === 0 && fileCount === 16
+        ? [...Array.from({ length: fileCount - 1 }, () => oneMiB), oneMiB + 9 * oneMiB + 1]
+        : [25 * oneMiB + 1]
+      : fileSize > 0
+        ? Array.from({ length: fileCount }, () => fileSize)
+        : [
+            ...Array.from({ length: fileCount - 1 }, () => oneMiB),
+            oneMiB + (fileCount === 16 ? 9 * oneMiB : 0),
+          ];
+    const result = await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/upload", body: "multipartForm", auth: "none" },
+        body: {
+          multipartForm: [
+            {
+              name: "file",
+              type: "file",
+              value: sizes.map(() => ({ uploadId: "a".repeat(32) })),
+            },
+          ],
+        },
+      },
+      {},
+      {
+        ...deps,
+        resolveUpload: async (_uploadId) => {
+          const size = sizes.shift();
+          if (size === undefined) throw new Error("test upload size missing");
+          return {
+            bytes: new Uint8Array(size),
+            name: "file.bin",
+            contentType: "application/octet-stream",
+          };
+        },
+      },
+    );
+
+    expect("failed" in result && result.failed === true ? result.kind : undefined).toBe(
+      shouldFetch ? undefined : "multipartUpload",
+    );
+    expect(captured).toHaveLength(shouldFetch ? 1 : 0);
+  });
+
+  it("cancels a remote response stream as soon as its body exceeds the cap", async () => {
+    const cancelled = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("1234"));
+        controller.enqueue(new TextEncoder().encode("5"));
+      },
+      cancel: cancelled,
+    });
+    const { deps } = harness(new Response(body, { status: 200 }));
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps, {
+      verifyCertificate: true,
+      timeoutMs: 1,
+      maxResponseBytes: 4,
+    });
+
+    // Important 3 (review): a caller branches on `kind`, not this English
+    // text — the text is free to change without breaking anything that
+    // localizes it.
+    expect(result).toMatchObject({
+      failed: true,
+      detail: "Response too large.",
+      kind: "responseTooLarge",
+    });
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("refuses oversized remote response headers before reading the body", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull: vi.fn(() => {
+        throw new Error("body must not be read");
+      }),
+    });
+    const { deps } = harness(new Response(body, { headers: { x: "1234" } }));
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps, {
+      verifyCertificate: true,
+      timeoutMs: 1,
+      maxResponseHeaderBytes: 8,
+    });
+
+    expect(result).toMatchObject({
+      failed: true,
+      detail: "Response headers too large.",
+      kind: "responseHeadersTooLarge",
+    });
+  });
+
+  it("does not fetch when a remote upload id is absent or expired", async () => {
+    const { captured, deps } = harness();
+
+    const result = await sendRequest(
+      {
+        ...get(),
+        http: { method: "post", url: "http://h/upload", body: "multipartForm", auth: "none" },
+        body: { multipartForm: [{ name: "file", type: "file", value: [{ uploadId: "expired" }] }] },
+      },
+      {},
+      { ...deps, resolveUpload: async () => undefined },
+    );
+
+    expect(result).toMatchObject({
+      failed: true,
+      detail: "Uploaded file not found, or it expired.",
+      kind: "multipartUpload",
+    });
+    expect(captured).toEqual([]);
+  });
+
   it("interpolates the URL and issues the request", async () => {
     const { captured, deps } = harness();
 
@@ -725,6 +855,43 @@ describe("sendRequest: graphql, files, cookies and network options", () => {
     });
 
     expect(initOf(captured).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  // M12 Task 12 minor: fetch rejecting with the same DOMException shape
+  // AbortSignal.timeout() raises (name "TimeoutError") is reported with
+  // kind: "timeout", so a caller can say "timed out" instead of showing
+  // whatever text a raw abort carries.
+  it("reports kind: 'timeout' when fetch rejects with a TimeoutError abort", async () => {
+    const timeoutError = Object.assign(new Error("The operation was aborted due to timeout"), {
+      name: "TimeoutError",
+    });
+    const { deps } = harness(timeoutError);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps, {
+      verifyCertificate: true,
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({ failed: true, kind: "timeout" });
+  });
+
+  // A plain caller-triggered abort ("AbortError") is not the same thing as
+  // a timeout — nothing in this module ever calls .abort() itself, but a
+  // fetch implementation could still reject that way, and it must not be
+  // mistaken for kind: "timeout".
+  it("leaves kind undefined for an ordinary AbortError, not TimeoutError", async () => {
+    const abortError = Object.assign(new Error("The operation was aborted"), {
+      name: "AbortError",
+    });
+    const { deps } = harness(abortError);
+
+    const result = await sendRequest(get(), { base: "http://h" }, deps, {
+      verifyCertificate: true,
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({ failed: true });
+    expect("failed" in result && result.failed === true ? result.kind : undefined).toBeUndefined();
   });
 });
 

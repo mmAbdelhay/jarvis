@@ -13,7 +13,12 @@ import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { initWorkspace, renderWorkspace, reportWorkspaceBounds } from "./workspace.js";
+import {
+  initWorkspace,
+  renderWorkspace,
+  reportWorkspaceBounds,
+  setBrowserSnapshot,
+} from "./workspace.js";
 
 type Recorded = { call: string; args: unknown[] };
 
@@ -35,9 +40,10 @@ function harness(): Recorded[] {
       <div id="workspace-docker" hidden></div>
       <button id="workspace-toggle-bookmarks"></button>
       <span id="workspace-tool-status"></span>
-      <button id="workspace-new-tab"></button>
       <div id="workspace-browser">
-        <div id="workspace-tabs"></div>
+        <div id="workspace-tabs">
+          <button id="workspace-new-tab"></button>
+        </div>
         <div id="workspace-bar">
           <button id="workspace-back"></button>
           <button id="workspace-forward"></button>
@@ -47,6 +53,7 @@ function harness(): Recorded[] {
           <button id="workspace-bookmark-toggle"></button>
           <button id="workspace-pip" hidden></button>
         </div>
+        <div id="workspace-loading" hidden></div>
         <div id="workspace-error" hidden></div>
         <div id="workspace-stage">
           <div id="workspace-body">
@@ -140,6 +147,8 @@ function harness(): Recorded[] {
     tabBack: record("tabBack"),
     tabForward: record("tabForward"),
     tabReload: record("tabReload"),
+    renameTab: record("renameTab"),
+    moveTab: record("moveTab"),
     setWorkspaceBounds: record("setWorkspaceBounds"),
     setDevTools: record("setDevTools"),
     setDevToolsBounds: record("setDevToolsBounds"),
@@ -169,7 +178,7 @@ function harness(): Recorded[] {
     openDatabase: () =>
       Promise.resolve({
         ok: true,
-        value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw-fixed" },
+        value: { url: "http://127.0.0.1:51234/" },
       }),
     openTerminal: recordOk("openTerminal"),
     openApiTab: recordOk("openApiTab"),
@@ -295,6 +304,117 @@ describe("workspace chrome", () => {
     expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(2);
   });
 
+  // Round 3: the strip used to rebuild every chip from scratch on every
+  // render (strip.replaceChildren(newTabButton) + recreate), which flashed
+  // the strip and — worse — tore an in-progress inline rename's <input> out
+  // from under a keystroke the instant an unrelated push (a loading flag, a
+  // title from the page) arrived. These four cover the keyed reconcile that
+  // replaced it.
+  describe("the tab strip's keyed reconcile (round 3)", () => {
+    it("keeps the same chip elements across two renders of the same tabs", () => {
+      renderWorkspace({ tabs: [tab(), tab({ id: "tab-2" })], activeTabId: "tab-1" });
+      const before = [...document.querySelectorAll("#workspace-tabs .workspace-tab")];
+
+      renderWorkspace({ tabs: [tab(), tab({ id: "tab-2" })], activeTabId: "tab-1" });
+      const after = [...document.querySelectorAll("#workspace-tabs .workspace-tab")];
+
+      expect(after).toEqual(before);
+    });
+
+    it("keeps a chip's title span node across renders, not just its text", () => {
+      renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+      const titleBefore = document.querySelector(".workspace-tab-title");
+
+      renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+
+      expect(document.querySelector(".workspace-tab-title")).toBe(titleBefore);
+    });
+
+    it("survives an intervening render while the rename input is open, and Enter still renames", () => {
+      renderWorkspace({ tabs: [tab({ title: "Page" })], activeTabId: "tab-1" });
+      const chip = document.querySelector<HTMLElement>(".workspace-tab");
+      chip?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      const input = chip?.querySelector<HTMLInputElement>(".workspace-tab-rename");
+      expect(input).not.toBeNull();
+      if (input) input.value = "Renamed mid-typing";
+
+      // An unrelated push — the loading flag flipping — must not rebuild
+      // this chip, or the input above would be destroyed along with it.
+      renderWorkspace({ tabs: [tab({ title: "Page", loading: true })], activeTabId: "tab-1" });
+
+      const stillOpen = document.querySelector<HTMLInputElement>(".workspace-tab-rename");
+      expect(stillOpen).toBe(input);
+      expect(stillOpen?.value).toBe("Renamed mid-typing");
+      // The title span is detached while the input stands in for it — still
+      // true after the intervening render, which is the point.
+      expect(document.querySelector(".workspace-tab-title")).toBeNull();
+
+      stillOpen?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(calls).toContainEqual({ call: "renameTab", args: ["tab-1", "Renamed mid-typing"] });
+      // The span comes back, caught up to what update() withheld from it.
+      expect(document.querySelector(".workspace-tab-title")?.textContent).toBe("Page");
+    });
+
+    it("removes a closed tab's chip and reorders the rest to match", () => {
+      renderWorkspace({
+        tabs: [tab(), tab({ id: "tab-2" }), tab({ id: "tab-3" })],
+        activeTabId: "tab-1",
+      });
+      const chip2 = document.querySelectorAll<HTMLElement>(".workspace-tab")[1];
+      const chip3 = document.querySelectorAll<HTMLElement>(".workspace-tab")[2];
+
+      // tab-1 closes, and tab-3 moves ahead of tab-2 — both a removal and a
+      // reorder in the same render.
+      renderWorkspace({ tabs: [tab({ id: "tab-3" }), tab({ id: "tab-2" })], activeTabId: "tab-3" });
+
+      const chips = [...document.querySelectorAll<HTMLElement>(".workspace-tab")];
+      expect(chips).toEqual([chip3, chip2]);
+      // The "+" button stays the strip's last child throughout.
+      expect(document.getElementById("workspace-tabs")?.lastElementChild?.id).toBe(
+        "workspace-new-tab",
+      );
+    });
+
+    it("toggles the loading indicator in place, without recreating the chip", () => {
+      renderWorkspace({ tabs: [tab({ loading: false })], activeTabId: "tab-1" });
+      const chip = document.querySelector(".workspace-tab");
+      expect(chip?.classList.contains("workspace-tab--loading")).toBe(false);
+
+      renderWorkspace({ tabs: [tab({ loading: true })], activeTabId: "tab-1" });
+      expect(document.querySelector(".workspace-tab")).toBe(chip);
+      expect(chip?.classList.contains("workspace-tab--loading")).toBe(true);
+
+      renderWorkspace({ tabs: [tab({ loading: false })], activeTabId: "tab-1" });
+      expect(document.querySelector(".workspace-tab")).toBe(chip);
+      expect(chip?.classList.contains("workspace-tab--loading")).toBe(false);
+    });
+  });
+
+  it("shows loading below the address only for the active web page", () => {
+    const loading = document.getElementById("workspace-loading");
+    renderWorkspace({ tabs: [tab({ loading: true })], activeTabId: "tab-1" });
+    expect(loading?.hidden).toBe(false);
+    renderWorkspace({ tabs: [tab({ loading: false })], activeTabId: "tab-1" });
+    expect(loading?.hidden).toBe(true);
+    renderWorkspace({ tabs: [tab({ loading: true, error: "failed" })], activeTabId: "tab-1" });
+    expect(loading?.hidden).toBe(true);
+    renderWorkspace({ tabs: [tab({ loading: true, kind: "terminal" })], activeTabId: "tab-1" });
+    expect(loading?.hidden).toBe(true);
+  });
+
+  it("routes Ctrl+R from browser chrome to the active page", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const event = new KeyboardEvent("keydown", {
+      key: "r",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.getElementById("workspace-address")?.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(calls).toContainEqual({ call: "tabReload", args: ["tab-1"] });
+  });
+
   // The selected project ("acme", the first <option>, per beforeEach)
   // shows its tabs individually; every other project with an open tab
   // collapses into one pill instead of stacking every tab from every
@@ -306,6 +426,16 @@ describe("workspace chrome", () => {
     });
 
     expect(document.querySelectorAll("#workspace-tabs .workspace-tab")).toHaveLength(1);
+  });
+
+  it("moves the project switcher to the active tab's project when a tab of another project is activated from outside (a Dashboard card's shortcut) [bite-proof: leave the <select> alone and this stays on acme]", () => {
+    renderWorkspace({
+      tabs: [tab({ project: "acme" }), tab({ id: "tab-2", project: "storefront" })],
+      activeTabId: "tab-2",
+    });
+
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+    expect(select.value).toBe("storefront");
   });
 
   it("collapses a non-selected project's tabs into one labeled, counted pill", () => {
@@ -334,6 +464,17 @@ describe("workspace chrome", () => {
     expect(active.style.getPropertyValue("--tab-color")).not.toBe("");
     expect(active.style.getPropertyValue("--tab-color")).not.toBe(
       collapsed.style.getPropertyValue("--tab-color"),
+    );
+  });
+
+  it("colours the project switcher's own edge with the selected project's colour", () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+
+    const select = document.getElementById("workspace-project") as HTMLElement;
+    const chip = document.querySelector(".workspace-tab") as HTMLElement;
+    expect(select.style.getPropertyValue("--tab-color")).not.toBe("");
+    expect(select.style.getPropertyValue("--tab-color")).toBe(
+      chip.style.getPropertyValue("--tab-color"),
     );
   });
 
@@ -471,9 +612,9 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-bookmarks")?.hasAttribute("hidden")).toBe(true);
   });
 
-  // "+" has a fixed spot in the workspace head — it is never relocated by
-  // renderWorkspace, regardless of how many tabs are open or what kind the
-  // active one is.
+  // "+" has a fixed spot at the end of the tab strip (re-review 2, item 1)
+  // — it is never relocated by renderWorkspace, regardless of how many tabs
+  // are open or what kind the active one is.
   it("keeps + visible in its fixed spot with no tabs open", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
@@ -488,18 +629,28 @@ describe("workspace chrome", () => {
     expect(document.getElementById("workspace-new-tab")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("hides the tab strip when no tabs are open anywhere", () => {
+  // The strip itself is never hidden any more (re-review 2, item 1): with
+  // no tabs open it still shows the lone "+", which is what keeps it
+  // reachable without a second home for it back in the workspace head.
+  it("keeps the strip showing the lone + when no tabs are open anywhere", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
-    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
+    expect(
+      document
+        .getElementById("workspace-tabs")
+        ?.contains(document.getElementById("workspace-new-tab") ?? null),
+    ).toBe(true);
   });
 
-  it("shows the tab strip once a tab exists", () => {
+  it("puts + immediately after the last chip once a tab exists", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
 
-    expect(document.getElementById("workspace-tabs")?.hasAttribute("hidden")).toBe(false);
+    const strip = document.getElementById("workspace-tabs");
+    expect(strip?.hasAttribute("hidden")).toBe(false);
+    expect(strip?.lastElementChild?.id).toBe("workspace-new-tab");
   });
 
   it("puts the active tab's URL in the address bar", () => {
@@ -570,6 +721,31 @@ describe("workspace chrome", () => {
     expect(call?.args[1]).not.toBe("");
   });
 
+  // Re-review 2, item 3: a configured browser.homePage takes over from
+  // NEW_TAB_URL, through the same openTab call "+" always used — no new
+  // channel, just a different string.
+  it("opens the configured home page instead of the built-in one, once set", () => {
+    setBrowserSnapshot({ allowPopups: true, homePage: "https://intranet.example.com/" });
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-new-tab")?.click();
+
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "https://intranet.example.com/"],
+    });
+  });
+
+  it("falls back to the built-in new-tab page with no home page configured", () => {
+    setBrowserSnapshot({ allowPopups: true });
+    renderWorkspace({ tabs: [], activeTabId: undefined });
+
+    document.getElementById("workspace-new-tab")?.click();
+
+    const call = calls.find((entry) => entry.call === "openTab");
+    expect(call?.args[1]).not.toBe("https://intranet.example.com/");
+  });
+
   it("selects the address bar's text after opening a new tab, ready to be typed over", () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
     const address = document.getElementById("workspace-address") as HTMLInputElement;
@@ -597,6 +773,95 @@ describe("workspace chrome", () => {
     document.querySelectorAll<HTMLElement>(".workspace-tab")[1]?.click();
 
     expect(calls).toContainEqual({ call: "activateTab", args: ["tab-2"] });
+  });
+
+  it("renames a tab on double click and displays its custom label", () => {
+    renderWorkspace({ tabs: [tab({ title: "Page" })], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    chip?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const input = chip?.querySelector<HTMLInputElement>(".workspace-tab-rename");
+    expect(input?.getAttribute("aria-label")).toBe(MESSAGES.renameTab(PRIMARY_LANGUAGE));
+    expect(chip?.draggable).toBe(false);
+    expect(input?.value).toBe("Page");
+    if (input) input.value = "Mine";
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(chip?.draggable).toBe(true);
+    expect(calls).toContainEqual({ call: "renameTab", args: ["tab-1", "Mine"] });
+    renderWorkspace({ tabs: [tab({ title: "Page", customTitle: "Mine" })], activeTabId: "tab-1" });
+    expect(document.querySelector(".workspace-tab-title")?.textContent).toBe("Mine");
+  });
+
+  it("names double-click as the way to rename in the chip's own tooltip", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    expect(chip?.title).toBe(MESSAGES.tabRenameHint(PRIMARY_LANGUAGE));
+  });
+
+  it("opens a Rename/Reload/Close menu on right-click", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    const menu = chip?.querySelector<HTMLElement>(".workspace-tab-menu");
+    expect(menu?.hidden).toBe(true);
+
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+
+    expect(menu?.hidden).toBe(false);
+    const labels = [...(menu?.querySelectorAll(".workspace-tab-menu-item") ?? [])].map(
+      (item) => item.textContent,
+    );
+    expect(labels).toEqual([
+      MESSAGES.tabMenuRename(PRIMARY_LANGUAGE),
+      MESSAGES.tabMenuReload(PRIMARY_LANGUAGE),
+      MESSAGES.tabMenuClose(PRIMARY_LANGUAGE),
+    ]);
+  });
+
+  it("opens the inline rename input from the context menu's Rename item", () => {
+    renderWorkspace({ tabs: [tab({ title: "Page" })], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const menu = chip?.querySelector<HTMLElement>(".workspace-tab-menu");
+    const rename = [
+      ...(menu?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
+    ].find((item) => item.textContent === MESSAGES.tabMenuRename(PRIMARY_LANGUAGE));
+
+    rename?.click();
+
+    expect(menu?.hidden).toBe(true);
+    expect(chip?.querySelector(".workspace-tab-rename")).not.toBeNull();
+  });
+
+  it("reloads and closes a tab from its context menu", () => {
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const items = [
+      ...(chip?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
+    ];
+
+    items.find((item) => item.textContent === MESSAGES.tabMenuReload(PRIMARY_LANGUAGE))?.click();
+    expect(calls).toContainEqual({ call: "tabReload", args: ["tab-1"] });
+
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    items.find((item) => item.textContent === MESSAGES.tabMenuClose(PRIMARY_LANGUAGE))?.click();
+    expect(calls).toContainEqual({ call: "closeTab", args: ["tab-1"] });
+  });
+
+  it("moves a dropped tab after the target tab", () => {
+    renderWorkspace({ tabs: [tab(), tab({ id: "tab-2" })], activeTabId: "tab-1" });
+    const chips = document.querySelectorAll<HTMLElement>(".workspace-tab");
+    const target = chips[1];
+    expect(target?.draggable).toBe(true);
+    if (!target) return;
+    Object.defineProperty(target, "clientWidth", { value: 100 });
+    target.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", {
+      value: { getData: () => "tab-1" },
+    });
+    Object.defineProperty(event, "clientX", { value: 75 });
+    target.dispatchEvent(event);
+    expect(calls).toContainEqual({ call: "moveTab", args: ["tab-1", "tab-2", true] });
   });
 
   it("closes a tab from its close control without activating it", () => {
@@ -2213,7 +2478,7 @@ describe("starting a hosted app says so", () => {
         release = () =>
           resolve({
             ok: true,
-            value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
+            value: { url: "http://127.0.0.1:51234/" },
           });
       });
     const button = document.getElementById("workspace-open-database") as HTMLButtonElement;
@@ -2271,7 +2536,7 @@ describe("pre-warming a hosted app on hover", () => {
       warmed.push(`database:${project}`);
       return Promise.resolve({
         ok: true,
-        value: { url: "http://127.0.0.1:51234/", login: "jarvis", password: "pw" },
+        value: { url: "http://127.0.0.1:51234/" },
       });
     };
     jarvis["openCluster"] = (project: string, name: string, background?: boolean) => {
@@ -2447,15 +2712,19 @@ describe("open in database", () => {
     });
   });
 
-  it("shows the instance's login in the shared status line", async () => {
+  // The desktop answers DbGate's login itself (Electron's `login` event),
+  // so the tab opens already authenticated and nothing is left to show.
+  it("clears the status line on success instead of showing the credential", async () => {
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     document.getElementById("workspace-open-database")?.click();
     await flush();
 
-    expect(document.getElementById("workspace-tool-status")?.textContent).toBe(
-      "login jarvis · password pw-fixed",
-    );
+    expect(document.getElementById("workspace-tool-status")?.textContent).toBe("");
+    expect(calls).toContainEqual({
+      call: "openTab",
+      args: ["acme", "http://127.0.0.1:51234/", "database"],
+    });
   });
 
   // Reopening a project that already has a Database tab is a tab switch,

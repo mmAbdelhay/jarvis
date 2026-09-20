@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "apps/*"
 
 # pnpm 10.28.2 honours onlyBuiltDependencies here, but ~/.npmrc sets
 # ignore-scripts=true as a blanket pre-gate that makes this list inert

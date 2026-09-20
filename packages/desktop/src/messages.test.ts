@@ -1,11 +1,54 @@
 import { describe, expect, it } from "vitest";
 import { PREREQUISITES } from "@jarvis/platform";
+import { REMOTE_ERROR_CODES } from "@jarvis/remote";
+import { PUSH_KINDS } from "@jarvis/wire";
 import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
 // strings beside @jarvis/core's bilingual MESSAGES table — every string a
 // person can see or hear must survive Arabic.
 describe("MESSAGES", () => {
+  it("localises settings-save, menu, block, and every prayer string", () => {
+    const unary = [
+      MESSAGES.settingsSavedLive,
+      MESSAGES.settingsSavedRestart,
+      MESSAGES.reloadJarvis,
+      MESSAGES.deleteBlock,
+      MESSAGES.deleteBlockTitle,
+      MESSAGES.prayerHeading,
+      MESSAGES.prayerShow,
+      MESSAGES.prayerLatitude,
+      MESSAGES.prayerLongitude,
+      MESSAGES.prayerUseLocation,
+      MESSAGES.prayerLocationNote,
+      MESSAGES.prayerNotifyBefore,
+      MESSAGES.prayerNotifyBeforeMinutes,
+      MESSAGES.prayerNotifyAtTime,
+      MESSAGES.prayerAlexandria,
+      MESSAGES.prayerCustomLocation,
+      MESSAGES.prayerUnavailable,
+      MESSAGES.prayerLocating,
+      MESSAGES.prayerCurrentLocation,
+      MESSAGES.renameTab,
+      MESSAGES.tabRenameHint,
+      MESSAGES.tabMenuRename,
+      MESSAGES.tabMenuReload,
+      MESSAGES.tabMenuClose,
+    ];
+    for (const message of unary) expect(message("ar")).not.toBe(message("en"));
+    expect(MESSAGES.prayerDenied("Alexandria", "ar")).not.toBe(
+      MESSAGES.prayerDenied("Alexandria", "en"),
+    );
+    expect(MESSAGES.prayerNext("Fajr", "2h", "ar")).not.toBe(
+      MESSAGES.prayerNext("Fajr", "2h", "en"),
+    );
+    expect(MESSAGES.prayerNow("Fajr", "ar")).not.toBe(MESSAGES.prayerNow("Fajr", "en"));
+    expect(MESSAGES.prayerTitle("Alexandria", "Fajr", "ar")).not.toBe(
+      MESSAGES.prayerTitle("Alexandria", "Fajr", "en"),
+    );
+    expect(MESSAGES.prayerName("Fajr", "ar")).not.toBe(MESSAGES.prayerName("Fajr", "en"));
+    expect(MESSAGES.prayerDuration(1, 2, "ar")).not.toBe(MESSAGES.prayerDuration(1, 2, "en"));
+  });
   it("renders the hotkey collision message in English", () => {
     expect(MESSAGES.hotkeyCollision("Alt+Space", "en")).toContain("Alt+Space");
     expect(MESSAGES.hotkeyCollision("Alt+Space", "en")).toContain("shortcut");
@@ -23,11 +66,34 @@ describe("MESSAGES", () => {
     expect(MESSAGES.recordingFailed("x", "ar")).toContain("تسجيل");
   });
 
-  it("renders the transcription-failed message in both languages", () => {
-    expect(MESSAGES.transcriptionFailed("whisper-cli exited with code 1", "en")).toContain(
-      "whisper-cli exited with code 1",
-    );
-    expect(MESSAGES.transcriptionFailed("x", "ar")).toContain("تحويل الصوت");
+  // M12 Task 7 (ruling 10, "voice leak"): no detail argument any more — a
+  // desktop-origin transcription failure's own detail never reaches
+  // turn:new, which every subscribed client (remote-paired phones
+  // included) can see.
+  it("renders the transcription-failed message in both languages, non-empty, distinct and detail-free", () => {
+    const en = MESSAGES.transcriptionFailed("en");
+    const ar = MESSAGES.transcriptionFailed("ar");
+    expect(en).not.toBe("");
+    expect(ar).not.toBe("");
+    expect(en).not.toBe(ar);
+    expect(ar).toContain("تحويل الصوت");
+  });
+
+  it("renders the nothing-heard notice in both languages, non-empty and distinct", () => {
+    const en = MESSAGES.nothingHeard("en");
+    const ar = MESSAGES.nothingHeard("ar");
+    expect(en).not.toBe("");
+    expect(ar).not.toBe("");
+    expect(en).not.toBe(ar);
+  });
+
+  // Ruling 17: generic on purpose — never contains the laptop-side detail.
+  it("renders the voice-turn-failed message in both languages, with no detail argument", () => {
+    const en = MESSAGES.voiceTurnFailed("en");
+    const ar = MESSAGES.voiceTurnFailed("ar");
+    expect(en).not.toBe("");
+    expect(ar).not.toBe("");
+    expect(en).not.toBe(ar);
   });
 
   // The personal browser's three strings: the name in the project
@@ -129,6 +195,33 @@ describe("unknownSession", () => {
   });
 });
 
+describe("remoteErrorText", () => {
+  it("is non-empty and distinct between languages for every wire error code", () => {
+    // Iterates @jarvis/remote's own REMOTE_ERROR_CODES rather than a hand
+    // list, so a code added to the wire protocol without a translation here
+    // fails this test rather than shipping an English-only (or silently
+    // missing) sentence.
+    for (const code of REMOTE_ERROR_CODES) {
+      const en = MESSAGES.remoteErrorText(code, "en");
+      const ar = MESSAGES.remoteErrorText(code, "ar");
+      expect(en.length).toBeGreaterThan(0);
+      expect(ar.length).toBeGreaterThan(0);
+      expect(en).not.toBe(ar);
+    }
+  });
+});
+
+describe("remote:pair result strings", () => {
+  it("are bilingual", () => {
+    expect(MESSAGES.remotePairingDisabled("en").length).toBeGreaterThan(0);
+    expect(MESSAGES.remotePairingDisabled("ar").length).toBeGreaterThan(0);
+    expect(MESSAGES.remotePairingUnavailable("en").length).toBeGreaterThan(0);
+    expect(MESSAGES.remotePairingUnavailable("ar").length).toBeGreaterThan(0);
+    expect(MESSAGES.remoteRevokeFailed("en").length).toBeGreaterThan(0);
+    expect(MESSAGES.remoteRevokeFailed("ar").length).toBeGreaterThan(0);
+  });
+});
+
 describe("invalidArgument", () => {
   it("renders in both languages without echoing anything back", () => {
     expect(MESSAGES.invalidArgument("en").length).toBeGreaterThan(0);
@@ -215,6 +308,47 @@ describe("provider panel strings", () => {
   });
 });
 
+describe("dashboard core-stage strings", () => {
+  it("has an Arabic and an English form for every simple label", () => {
+    for (const key of [
+      "dashboardProjectsLabel",
+      "dashboardFilterPlaceholder",
+      "dashboardFilterLabel",
+      "dashboardAllSessions",
+      "dashboardNodeWaiting",
+      "dashboardIdle",
+      "dashboardNoProjects",
+      "dashboardNoMatches",
+      "dashboardNoSessions",
+      "dashboardActionTerminal",
+      "dashboardActionEditor",
+      "dashboardActionBrowser",
+      "dashboardActionDocker",
+    ] as const) {
+      expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
+      expect(MESSAGES[key]("ar")).not.toBe("");
+      expect(MESSAGES[key]("en")).not.toBe("");
+    }
+  });
+
+  it("states running and waiting counts distinctly in both languages", () => {
+    expect(MESSAGES.dashboardRunningWaiting(2, 1, "en")).toBe("2 running · 1 waiting");
+    expect(MESSAGES.dashboardRunningWaiting(2, 1, "ar")).not.toBe(
+      MESSAGES.dashboardRunningWaiting(2, 1, "en"),
+    );
+  });
+
+  it("counts a node's own running badge distinctly in both languages", () => {
+    expect(MESSAGES.dashboardNodeRunning(1, "en")).toBe("1 running");
+    expect(MESSAGES.dashboardNodeRunning(1, "ar")).not.toBe(MESSAGES.dashboardNodeRunning(1, "en"));
+  });
+
+  it("names an idle node's dirty-file count distinctly in both languages", () => {
+    expect(MESSAGES.dashboardIdleDirty(6, "en")).toBe("6 changed");
+    expect(MESSAGES.dashboardIdleDirty(6, "ar")).not.toBe(MESSAGES.dashboardIdleDirty(6, "en"));
+  });
+});
+
 // A hosted app's start is a real wait (measured: 1.9-2.3s warm, up to 21.6s
 // for a cold DbGate), so it gets said out loud — in both languages, like
 // every other string a person can see.
@@ -287,6 +421,14 @@ describe("docker messages", () => {
       expect(message("ar")).not.toBe(message("en"));
       expect(message("ar")).not.toBe("");
     }
+  });
+
+  // docker:follow's per-device cap (docker-followers.ts,
+  // MAX_REMOTE_FOLLOWERS_PER_DEVICE).
+  it("dockerFollowLimit is non-empty in both languages and they differ", () => {
+    expect(MESSAGES.dockerFollowLimit("en")).not.toBe("");
+    expect(MESSAGES.dockerFollowLimit("ar")).not.toBe("");
+    expect(MESSAGES.dockerFollowLimit("ar")).not.toBe(MESSAGES.dockerFollowLimit("en"));
   });
 });
 
@@ -389,5 +531,291 @@ describe("prerequisite wording", () => {
     expect(MESSAGES.setupInstallCount(2, "ar")).toContain("أداتين");
     expect(MESSAGES.setupInstallCount(3, "ar")).toContain("أدوات");
     expect(MESSAGES.setupInstallCount(3, "en")).toBe("Install 3 selected");
+  });
+});
+
+describe("the remote access panel", () => {
+  const plain = [
+    "remoteTitle",
+    "remoteEnabledLabel",
+    "remoteReachableOn",
+    "remoteTailscaleLabel",
+    "remoteWifiLabel",
+    "remoteTailscaleMissing",
+    "remoteAdvancedLabel",
+    "remoteOtherAddress",
+    "remoteOtherPlaceholder",
+    "remoteAllInterfaces",
+    "remotePortLabel",
+    "remotePortNote",
+    "remoteProxyLabel",
+    "remoteProxyNote",
+    "remotePushLabel",
+    "remotePushNote",
+    "remoteIdleLabel",
+    "remoteIdleNote",
+    "remotePushProjectsLabel",
+    "remotePushProjectsNote",
+    "remotePairTitle",
+    "remoteNewCode",
+    "remotePairSaveFirst",
+    "remotePairInstructions",
+    "remotePairCancel",
+    "remoteDevicesTitle",
+    "remoteNoDevices",
+    "remoteDeviceConnected",
+    "remoteDeviceNeverSeen",
+    "remoteRevoke",
+    "remoteConfirmTitle",
+    "remoteConfirmSubtitle",
+    "remoteConfirmDeviceLabel",
+    "remoteConfirmFromLabel",
+    "remoteConfirmApprove",
+    "remoteConfirmDeny",
+    "remoteWarning",
+    "remoteNoCredential",
+  ] as const;
+
+  it.each(plain)("%s says something in both languages, and the Arabic is Arabic", (key) => {
+    const en = MESSAGES[key]("en");
+    const ar = MESSAGES[key]("ar");
+    expect(en.trim()).not.toBe("");
+    expect(ar).toMatch(/[؀-ۿ]/);
+    expect(ar).not.toBe(en);
+  });
+
+  // The spec's sentence, verbatim: it is the honest framing of the feature.
+  it("carries the spec's warning", () => {
+    expect(MESSAGES.remoteWarning("en")).toContain(
+      "While this is on, a paired device can run commands on this machine as you.",
+    );
+    expect(MESSAGES.remoteWarning("ar")).toContain("باسمك");
+  });
+
+  it("says no Tailscale credential is ever involved", () => {
+    expect(MESSAGES.remoteNoCredential("en")).toContain("No Tailscale credential is ever involved");
+    expect(MESSAGES.remoteNoCredential("ar")).toContain("بيانات اعتماد خاصة بـ Tailscale");
+  });
+
+  it("names the switch's state", () => {
+    expect(MESSAGES.remoteState(true, "en")).toBe("On");
+    expect(MESSAGES.remoteState(false, "en")).toBe("Off");
+    expect(MESSAGES.remoteState(true, "ar")).toBe("مفعّل");
+    expect(MESSAGES.remoteState(false, "ar")).toBe("متوقف");
+  });
+
+  it("is gone: remotePairUnavailable was replaced by remotePairSaveFirst/remotePairInstructions", () => {
+    expect((MESSAGES as Record<string, unknown>)["remotePairUnavailable"]).toBeUndefined();
+  });
+
+  it("formats the pairing expiry as minutes:seconds", () => {
+    expect(MESSAGES.remotePairExpires(107, "en")).toContain("1:47");
+    expect(MESSAGES.remotePairExpires(120, "en")).toContain("2:00");
+    expect(MESSAGES.remotePairExpires(107, "ar")).not.toBe(MESSAGES.remotePairExpires(107, "en"));
+  });
+
+  it("names the requesting device while waiting for confirmation", () => {
+    expect(MESSAGES.remotePairWaiting("Ali's iPhone", "en")).toContain("Ali's iPhone");
+    expect(MESSAGES.remotePairWaiting("Ali's iPhone", "ar")).toContain("Ali's iPhone");
+    expect(MESSAGES.remotePairWaiting("x", "ar")).not.toBe(MESSAGES.remotePairWaiting("x", "en"));
+  });
+
+  it("remotePairWaitingParts splits on the template's own placeholder, not the name", () => {
+    const parts = MESSAGES.remotePairWaitingParts("ar");
+    expect(`${parts.before}الجهاز${parts.after}`).toBe(MESSAGES.remotePairWaiting("الجهاز", "ar"));
+    expect(parts.before + parts.after).not.toContain("{name}");
+  });
+
+  it("covers all five RemoteProblem values, bilingually and distinctly", () => {
+    const problems = [
+      "bad-address",
+      "listen-failed",
+      "certificate-failed",
+      "devices-unreadable",
+      "devices-write-failed",
+    ] as const;
+    for (const problem of problems) {
+      const en = MESSAGES.remoteProblem(problem, "en");
+      const ar = MESSAGES.remoteProblem(problem, "ar");
+      expect(en.trim()).not.toBe("");
+      expect(ar).toMatch(/[؀-ۿ]/);
+      expect(ar).not.toBe(en);
+    }
+  });
+
+  it("builds the indicator text from host, port and whether pairing is open", () => {
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, false, "en")).toContain("127.0.0.1:7717");
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "en")).toBe(
+      MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "en"),
+    );
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "en")).toContain("127.0.0.1:7717");
+    // Pairing-open reads differently from plain listening (same language,
+    // same address) — not just a different translation of the same fact.
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "en")).not.toBe(
+      MESSAGES.remoteIndicator("127.0.0.1", 7717, false, "en"),
+    );
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "ar")).not.toBe(
+      MESSAGES.remoteIndicator("127.0.0.1", 7717, true, "en"),
+    );
+    // ...and so does plain listening: it carries a state word too, not a
+    // bare host:port that would be identical in both languages.
+    expect(MESSAGES.remoteIndicator("127.0.0.1", 7717, false, "ar")).not.toBe(
+      MESSAGES.remoteIndicator("127.0.0.1", 7717, false, "en"),
+    );
+    expect(MESSAGES.remoteIndicatorTitle(2, "ar")).not.toBe(MESSAGES.remoteIndicatorTitle(2, "en"));
+  });
+
+  it("names the requester in the confirmation body", () => {
+    expect(MESSAGES.remoteConfirmBody("Probe laptop", "en")).toContain("Probe laptop");
+    expect(MESSAGES.remoteConfirmBody("Probe laptop", "ar")).toContain("Probe laptop");
+    expect(MESSAGES.remoteConfirmBody("x", "ar")).not.toBe(MESSAGES.remoteConfirmBody("x", "en"));
+  });
+
+  it("remoteConfirmBodyParts splits on the template's own placeholder, not the name — a name equal to the template's own word still lands at the real interpolation point", () => {
+    const parts = MESSAGES.remoteConfirmBodyParts("ar");
+    expect(`${parts.before}الجهاز${parts.after}`).toBe(MESSAGES.remoteConfirmBody("الجهاز", "ar"));
+    expect(parts.before + parts.after).not.toContain("{name}");
+  });
+
+  it("formats a device's last-seen instant, localised per language", () => {
+    const at = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(MESSAGES.remoteDeviceLastSeen(at, "en")).toContain("2026");
+    expect(MESSAGES.remoteDeviceLastSeen(at, "ar")).toContain("2026");
+    expect(MESSAGES.remoteDeviceLastSeen(at, "ar")).not.toBe(
+      MESSAGES.remoteDeviceLastSeen(at, "en"),
+    );
+  });
+
+  it("formats the idle-armed state with the disable time (M12 Task 4)", () => {
+    const disableAt = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(MESSAGES.remoteIdleArmed(disableAt, "en")).toContain("2026");
+    expect(MESSAGES.remoteIdleArmed(disableAt, "ar")).toContain("2026");
+    expect(MESSAGES.remoteIdleArmed(disableAt, "ar")).not.toBe(
+      MESSAGES.remoteIdleArmed(disableAt, "en"),
+    );
+  });
+
+  it("embeds the minute count in the idle-disabled state, in both languages (M12 Task 4)", () => {
+    const at = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(MESSAGES.remoteIdleDisabled(at, 30, "en")).toContain("2026");
+    expect(MESSAGES.remoteIdleDisabled(at, 30, "en")).toContain("30");
+    expect(MESSAGES.remoteIdleDisabled(at, 30, "ar")).toContain("30");
+    expect(MESSAGES.remoteIdleDisabled(at, 30, "ar")).not.toBe(
+      MESSAGES.remoteIdleDisabled(at, 30, "en"),
+    );
+  });
+
+  it.each([
+    [1, "دقيقة واحدة"],
+    [2, "دقيقتين"],
+    [3, "3 دقائق"],
+    [10, "10 دقائق"],
+    [11, "11 دقيقة"],
+  ])("uses the Arabic minute grammar for %s", (minutes, phrase) => {
+    expect(MESSAGES.remoteIdleDisabled(Date.UTC(2026, 0, 1, 12), minutes, "ar")).toContain(phrase);
+  });
+
+  it("names the platform in remoteDevicePush, bilingually (ruling h)", () => {
+    expect(MESSAGES.remoteDevicePush("ios", "en")).toBe("Notifications on (iPhone)");
+    expect(MESSAGES.remoteDevicePush("android", "en")).toContain("Android");
+    expect(MESSAGES.remoteDevicePush("ios", "ar")).not.toBe(MESSAGES.remoteDevicePush("ios", "en"));
+    expect(MESSAGES.remoteDevicePush("android", "ar")).not.toBe(
+      MESSAGES.remoteDevicePush("android", "en"),
+    );
+    expect(MESSAGES.remoteDevicePush("ios", "ar")).not.toBe(
+      MESSAGES.remoteDevicePush("android", "ar"),
+    );
+  });
+
+  it.each([
+    ["loopback", "lo0", "en", "This machine only"],
+    ["lan", "en0", "en", "Local network — en0"],
+    ["mesh", "utun4", "en", "Tailscale — utun4"],
+    ["other", "eth0", "en", "Other network — eth0"],
+    ["lan", "", "en", "Local network"],
+    ["loopback", "lo0", "ar", "هذا الحاسوب فقط"],
+    ["lan", "en0", "ar", "الشبكة المحلية — en0"],
+    ["mesh", "utun4", "ar", "شبكة Tailscale — utun4"],
+    ["other", "eth0", "ar", "شبكة أخرى — eth0"],
+  ] as const)("labels a %s address on %j in %s", (kind, iface, language, expected) => {
+    expect(MESSAGES.remoteBindChoiceLabel(kind, iface, language)).toBe(expected);
+  });
+});
+
+// M10 Task 3: the push catalogue — the only bilingual text a notification's
+// title/body ever carry. pushBody's `project` argument must never leak
+// anything but the project name itself, and command-finished's `detail`
+// must never carry the command.
+describe("push notification catalogue", () => {
+  it("names the app in both languages for pushTitle", () => {
+    expect(MESSAGES.pushTitle("en")).toBe("Jarvis");
+    expect(MESSAGES.pushTitle("ar")).toBe("جارفيس");
+  });
+
+  it("is non-empty and distinct between languages for every PushKind", () => {
+    for (const kind of PUSH_KINDS) {
+      const en = MESSAGES.pushBody(kind, undefined, "en", { ok: true, seconds: 60 });
+      const ar = MESSAGES.pushBody(kind, undefined, "ar", { ok: true, seconds: 60 });
+      expect(en.length).toBeGreaterThan(0);
+      expect(ar.length).toBeGreaterThan(0);
+      expect(en).not.toBe(ar);
+    }
+  });
+
+  it("includes the project name for a session-* kind only when given", () => {
+    expect(MESSAGES.pushBody("session-done", "acme", "en", undefined)).toContain("acme");
+    expect(MESSAGES.pushBody("session-done", undefined, "en", undefined)).not.toContain(
+      "undefined",
+    );
+  });
+
+  it("rounds command-finished's seconds to minutes and never echoes the raw seconds", () => {
+    const text = MESSAGES.pushBody("command-finished", undefined, "en", {
+      ok: false,
+      seconds: 150,
+    });
+    expect(text).toContain("3");
+    expect(text).not.toContain("150");
+    expect(text).toMatch(/fail/i);
+  });
+
+  // Deferred minor: command-finished with no detail must never fabricate a
+  // duration or a success/failure it was never told.
+  it("gives a neutral command-finished body when detail is undefined", () => {
+    const en = MESSAGES.pushBody("command-finished", undefined, "en", undefined);
+    const ar = MESSAGES.pushBody("command-finished", undefined, "ar", undefined);
+    expect(en).not.toMatch(/succeed|fail/i);
+    expect(en).not.toMatch(/\d/);
+    expect(ar).not.toMatch(/نجح|فشل/);
+    expect(ar).not.toMatch(/\d/);
+  });
+
+  it("starts the Arabic command-finished body with انتهى تنفيذ أمر, with and without detail", () => {
+    expect(
+      MESSAGES.pushBody("command-finished", undefined, "ar", { ok: true, seconds: 60 }),
+    ).toMatch(/^انتهى تنفيذ أمر/);
+    expect(MESSAGES.pushBody("command-finished", undefined, "ar", undefined)).toMatch(
+      /^انتهى تنفيذ أمر/,
+    );
+  });
+
+  it("never leaks a project name for a kind that carries none", () => {
+    expect(
+      MESSAGES.pushBody("command-finished", "acme", "en", { ok: true, seconds: 60 }),
+    ).not.toContain("acme");
+    expect(MESSAGES.pushBody("reply", "acme", "en", undefined)).not.toContain("acme");
+  });
+
+  it("says why registration failed, in both languages, and this is the laptop's only registered:false text", () => {
+    expect(MESSAGES.pushRegisterInvalid("en")).toBe(
+      "This device could not be registered for notifications",
+    );
+    expect(MESSAGES.pushRegisterInvalid("ar").length).toBeGreaterThan(0);
+    expect(MESSAGES.pushRegisterInvalid("ar")).not.toBe(MESSAGES.pushRegisterInvalid("en"));
+  });
+
+  it("declares exactly these three push* builders", () => {
+    const pushKeys = Object.keys(MESSAGES).filter((key) => key.startsWith("push"));
+    expect(pushKeys.sort()).toEqual(["pushBody", "pushRegisterInvalid", "pushTitle"]);
   });
 });

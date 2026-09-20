@@ -1,9 +1,12 @@
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
 import { stringify } from "yaml";
-import type { JarvisConfig } from "./config.js";
+import { writeAtomically } from "@jarvis/platform";
+import type { JarvisConfig, RemoteConfig } from "./config.js";
 import {
   DEFAULT_BROWSER,
   DEFAULT_PERFORMANCE,
+  DEFAULT_PRAYER,
+  DEFAULT_REMOTE,
   DEFAULT_SESSIONS,
   DEFAULT_TERMINAL,
   parseConfig,
@@ -83,6 +86,15 @@ function stableJson(value: unknown): string {
   });
 }
 
+/** `remote:` as it goes into the file. An empty `tls:` is the self-signed
+ *  default written out as noise, so it is left out — and a key a renderer
+ *  draft carried as `undefined` counts as empty, because YAML would drop
+ *  the value and keep a bare `tls: {}`. */
+function rawRemote(remote: RemoteConfig): unknown {
+  const { tls, ...rest } = remote;
+  return Object.values(tls ?? {}).every((value) => value === undefined) ? rest : remote;
+}
+
 export function toRawConfig(config: JarvisConfig): unknown {
   return {
     agents: config.registry.agents,
@@ -124,6 +136,7 @@ export function toRawConfig(config: JarvisConfig): unknown {
       ? {}
       : { performance: config.performance }),
     ...(isDefault(config.browser, DEFAULT_BROWSER) ? {} : { browser: config.browser }),
+    ...(isDefault(config.prayer, DEFAULT_PRAYER) ? {} : { prayer: config.prayer }),
     // The three sections below were missing from this list until 2026-09-06,
     // which meant every save through the Settings route silently deleted
     // them from the user's jarvis.yaml — recoverable only from the
@@ -133,6 +146,12 @@ export function toRawConfig(config: JarvisConfig): unknown {
     ...(Object.keys(config.workflows ?? {}).length === 0 ? {} : { workflows: config.workflows }),
     ...(isDefault(config.terminal, DEFAULT_TERMINAL) ? {} : { terminal: config.terminal }),
     ...(isDefault(config.sessions, DEFAULT_SESSIONS) ? {} : { sessions: config.sessions }),
+    // Never written at its defaults, by the rule `sessions:` follows — and
+    // here it is load-bearing rather than tidy: the spec requires that a
+    // fresh jarvis.yaml has no `remote:` section, so opening Settings and
+    // saving must not grow one. Absent parses to "off, on loopback", so
+    // nothing is lost by leaving it out.
+    ...(isDefault(config.remote, DEFAULT_REMOTE) ? {} : { remote: rawRemote(config.remote) }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,
@@ -166,6 +185,6 @@ export async function writeSettingsFile(
     // way, there is nothing to preserve).
   }
 
-  await writeFile(path, stringify(toRawConfig(validated.value)), "utf8");
+  await writeAtomically(path, stringify(toRawConfig(validated.value)));
   return { ok: true };
 }

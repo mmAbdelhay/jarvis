@@ -12,5 +12,5 @@
     "composite": true
   },
   "include": ["."],
-  "references": [{ "path": ".." }, { "path": "../../core" }]
+  "references": [{ "path": ".." }, { "path": "../../core" }, { "path": "../../remote" }]
 }

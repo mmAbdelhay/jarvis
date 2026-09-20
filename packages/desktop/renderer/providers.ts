@@ -26,6 +26,16 @@ function clock(at: string | number): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
+/** A reset within the next day reads as a clock time; a farther one (Copilot's monthly window) as a day, since "resets 00:00" would be false ten times over. */
+function resetLabel(at: string, now: number): string {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "—";
+  if (date.getTime() - now < DAY_MS) return clock(at);
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function unknownNote(reason: "unsupported" | "unavailable" | "never-read"): string {
   if (reason === "unsupported") return MESSAGES.capacityUnsupported(PRIMARY_LANGUAGE);
   if (reason === "unavailable") return MESSAGES.capacityUnavailable(PRIMARY_LANGUAGE);
@@ -73,7 +83,7 @@ function buildRow(status: ProviderStatus, now: number): HTMLElement {
   note.className = "provider__note mono";
 
   if (status.capacity.state === "known") {
-    const left = remainingPercent(status.capacity.fiveHour);
+    const left = remainingPercent(status.capacity.primary);
     value.textContent = `${left}%`;
     if (left === 0) value.classList.add("provider__value--empty");
 
@@ -89,7 +99,10 @@ function buildRow(status: ProviderStatus, now: number): HTMLElement {
     row.append(bar);
 
     const parts = [
-      MESSAGES.capacityResetsAt(clock(status.capacity.fiveHour.resetsAt), PRIMARY_LANGUAGE),
+      MESSAGES.capacityResetsAt(
+        resetLabel(status.capacity.primary.resetsAt, now),
+        PRIMARY_LANGUAGE,
+      ),
       MESSAGES.capacityAsOf(clock(status.capacity.readAt), PRIMARY_LANGUAGE),
     ];
     const age = now - status.capacity.readAt;

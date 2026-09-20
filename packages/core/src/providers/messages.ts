@@ -29,6 +29,16 @@ function clock(iso: string | number): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A reset within a day of the reading is a clock time; a farther one (Copilot's monthly window) is a day, e.g. "1 Oct". */
+function resetLabel(iso: string, readAt: number): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  if (date.getTime() - readAt < DAY_MS) return clock(iso);
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 const HEALTH_NOTE: Record<"degraded" | "outage" | "unknown", Record<Language, string>> = {
   degraded: { ar: "الخدمة متعثرة", en: "service degraded" },
   outage: { ar: "الخدمة متوقفة", en: "service down" },
@@ -40,7 +50,10 @@ const UNKNOWN_CAPACITY: Record<
   Record<Language, string>
 > = {
   unsupported: { ar: "لا يوفّر قراءة للسعة", en: "no capacity reading available" },
-  unavailable: { ar: "تعذّرت قراءة السعة", en: "capacity couldn't be read" },
+  // Every source is free and local-ish (a snapshot file, Codex's logs, the
+  // signed-in gh — SETUP.md §5); "unavailable" means that account's source
+  // has produced nothing yet, so say that rather than "failed".
+  unavailable: { ar: "لا توجد قراءة استخدام بعد", en: "no usage reading yet" },
   "never-read": { ar: "لم تُقرأ السعة بعد", en: "capacity not checked yet" },
 };
 
@@ -48,8 +61,8 @@ function capacityClause(status: ProviderStatus, language: Language): string {
   const { capacity } = status;
   if (capacity.state === "unknown") return UNKNOWN_CAPACITY[capacity.reason][language];
 
-  const left = remainingPercent(capacity.fiveHour);
-  const resets = clock(capacity.fiveHour.resetsAt);
+  const left = remainingPercent(capacity.primary);
+  const resets = resetLabel(capacity.primary.resetsAt, capacity.readAt);
   const readAt = clock(capacity.readAt);
   return language === "ar"
     ? `المتبقي ${left}% · يتجدد ${resets} · حتى ${readAt}`

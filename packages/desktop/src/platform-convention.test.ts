@@ -13,12 +13,15 @@ import { describe, expect, it } from "vitest";
 // main.ts and preload.cts are the impure edges: they read it once and pass it
 // down. pty.ts reads it inside ensureSpawnHelperExecutable, which is resolving
 // a path in the running process's own node_modules and has nothing to hand it
-// in from.
-const ALLOWED = new Set(["main.ts", "preload.cts", "pty.ts"]);
+// in from. sdk-executable.ts is the same case: it names the Agent SDK's
+// per-platform binary package next to the SDK this process loaded, and its
+// pure parts take platform/arch as parameters and are tested for all of them.
+const ALLOWED = new Set(["main.ts", "preload.cts", "pty.ts", "sdk-executable.ts"]);
 
 const ROOTS = [
   "packages/core/src",
   "packages/platform/src",
+  "packages/remote/src",
   "packages/desktop/src",
   "packages/desktop/renderer",
 ];

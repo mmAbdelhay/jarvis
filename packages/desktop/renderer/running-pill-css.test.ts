@@ -24,3 +24,31 @@ describe("the running-sessions pill", () => {
     expect(css).toMatch(/\.pill--running\.pill--idle \{/);
   });
 });
+
+describe("M3 Settings polish carried into M4", () => {
+  it("the Off/On state label is no longer monospace", () => {
+    const state = html.match(/<span id="settings-remote-state"[^>]*>/)?.[0] ?? "";
+    expect(state).not.toBe("");
+    expect(state).not.toMatch(/class="[^"]*\bmono\b/);
+  });
+
+  it("disabled .settings-add buttons (e.g. New code while off) get the dimmed style", () => {
+    expect(css).toMatch(/\.settings-add:disabled \{/);
+  });
+});
+
+describe("the remote-bridge listening pill", () => {
+  // Unlike the running-sessions pill, this one really is hidden until the
+  // bridge reports it is listening — so it needs the opposite guard from
+  // running-pill above: an explicit `display: none` that out-cascades
+  // `.pill`'s own unconditional `display: flex`.
+  it("is hidden at first paint", () => {
+    const pill = html.match(/<button id="remote-pill"[^>]*>/)?.[0] ?? "";
+    expect(pill).not.toBe("");
+    expect(pill).toMatch(/\shidden[\s>]/);
+  });
+
+  it("has a [hidden] override in the CSS", () => {
+    expect(css).toMatch(/\.pill--remote\[hidden\] \{[^}]*display:\s*none/);
+  });
+});

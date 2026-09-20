@@ -132,8 +132,12 @@ export function createCompletionSource(deps: CompletionSourceDeps): CompletionSo
   };
 }
 
-/** The directory a typed path prefix names, from the terminal's own cwd. */
-function resolveDirectory(cwd: string, prefix: string): string {
+/** The directory a typed path prefix names, from the terminal's own cwd.
+ *  Exported so ipc.ts's `suggest` can compute exactly the directory a
+ *  remote origin's completion would list and check *that* for containment
+ *  (I5) — not just `cwd` itself, which a relative prefix (`../../../etc/`)
+ *  or a `~/`-prefix can walk away from without ever being absolute. */
+export function resolveDirectory(cwd: string, prefix: string): string {
   if (prefix.startsWith("~/")) return join(homedir(), prefix.slice(2));
   if (prefix === "~/") return homedir();
   return isAbsolute(prefix) ? resolve(prefix) : resolve(cwd, prefix);

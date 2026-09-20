@@ -1,8 +1,31 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, realpathSync } from "node:fs";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// M12 Task 7 follow-up: the "goes through the atomic writer" test below
+// needs a real `rename` that can be made to fail on demand, without
+// breaking every other real fs call this file (and bruno.ts's own
+// writers, reached through the real writeRequest this file's "real
+// serializer" describe block wires in) make — `node:fs/promises` is an
+// ESM namespace vitest cannot vi.spyOn directly ("Module namespace is not
+// configurable"), so this mocks the whole module through to the real
+// implementation for everything, with `rename` alone routed through a
+// mutable override that defaults to the real `rename` and is set only for
+// the one test that needs it to throw.
+const renameOverride: { impl?: (...args: unknown[]) => Promise<void> } = {};
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: (...args: unknown[]) =>
+      renameOverride.impl
+        ? renameOverride.impl(...args)
+        : actual.rename(...(args as [never, never])),
+  };
+});
 import {
   buildWiring,
   createBookmarksHandlers,
@@ -42,6 +65,7 @@ import type {
   ShellManager,
   WorkflowsConfig,
 } from "@jarvis/platform";
+import { readRequest, writeRequest } from "@jarvis/platform";
 import type {
   AgentConfig,
   AgentHealth,
@@ -183,6 +207,42 @@ describe("buildWiring", () => {
     expect(refreshChanges).toHaveBeenCalledTimes(2);
 
     wiring.stop();
+  });
+
+  // [bite-proof: ignore the channel argument] isAwake is asked per-tick,
+  // named by which push it is gating — a remote-subscribed phone can wake
+  // the metrics tick without also forcing the (much pricier) changes tick.
+  // Collapsing both ticks' calls to the same `isAwake()` (dropping the
+  // channel argument) fails this: refreshChanges would run too, since the
+  // one fake answers true for any call with no channel to distinguish.
+  it("asks isAwake by channel name, not just whether the window is hidden", async () => {
+    const readMetrics = vi.fn(async () => ({
+      cpuPercent: 10,
+      memoryUsedBytes: 1,
+      memoryTotalBytes: 2,
+      diskUsedBytes: 1,
+      diskTotalBytes: 2,
+      networkDownMbps: 0,
+      networkUpMbps: 0,
+      uptimeSeconds: 1,
+    }));
+    const refreshChanges = vi.fn(async () => {});
+
+    const wiring = buildWiring({
+      ...baseDeps([]),
+      readMetrics,
+      refreshChanges,
+      intervalMs: 10,
+      changesIntervalMs: 10,
+      isAwake: (channel) => channel === "metrics:update",
+    });
+
+    wiring.start();
+    await vi.advanceTimersByTimeAsync(10);
+    wiring.stop();
+
+    expect(readMetrics).toHaveBeenCalledTimes(1);
+    expect(refreshChanges).not.toHaveBeenCalled();
   });
 
   // The status pages are free, the poll is five-minutely, and its whole
@@ -700,8 +760,8 @@ describe("provider wiring", () => {
 });
 
 // Acceptance test for "the renderer must not be able to spend without
-// limit". `refreshProviders()` reaches main.ts's `providers:refresh`
-// ipcMain.handle (wired in Task 11's composition, outside ipc.ts's scope —
+// limit". `refreshProviders()` reaches dispatch.ts's `providers:refresh`
+// handler (wired in Task 11's composition, outside ipc.ts's scope —
 // see the pinned "never puts capacity on a timer" test above, which keeps
 // ipc.ts itself from ever calling ProviderMonitor#refreshCapacity
 // directly). That handler's only correct shape is a direct forward to
@@ -735,15 +795,15 @@ describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not b
       () =>
         new Promise<{
           ok: true;
-          fiveHour: { usedPercent: number; resetsAt: string };
-          sevenDay: undefined;
+          primary: { usedPercent: number; resetsAt: string };
+          secondary: undefined;
         }>((resolve) => {
           setTimeout(
             () =>
               resolve({
                 ok: true,
-                fiveHour: { usedPercent: 10, resetsAt: "2026-01-01T00:00:00Z" },
-                sevenDay: undefined,
+                primary: { usedPercent: 10, resetsAt: "2026-01-01T00:00:00Z" },
+                secondary: undefined,
               }),
             10,
           );
@@ -772,7 +832,7 @@ describe("renderer-triggered capacity spend is bounded by ProviderMonitor, not b
 describe("buildWiring session output", () => {
   it("forwards each output chunk to the renderer's session:output channel", () => {
     const sent: { channel: string; payload: unknown }[] = [];
-    let emit: ((output: { sessionId: string; chunk: string }) => void) | undefined;
+    let emit: ((output: { sessionId: string; chunk: string; offset: number }) => void) | undefined;
     const wiring = buildWiring({
       ...baseDeps(sent),
       onSessionOutput: (cb) => {
@@ -782,12 +842,12 @@ describe("buildWiring session output", () => {
     });
     wiring.start();
 
-    emit?.({ sessionId: "s1", chunk: "hello\n" });
+    emit?.({ sessionId: "s1", chunk: "hello\n", offset: 0 });
     wiring.stop();
 
     expect(sent).toContainEqual({
       channel: "session:output",
-      payload: { sessionId: "s1", chunk: "hello\n" },
+      payload: { sessionId: "s1", chunk: "hello\n", offset: 0 },
     });
   });
 
@@ -1044,6 +1104,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     expect(await handlers.list("acme")).toEqual({
@@ -1058,11 +1119,79 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.add("acme", { url: "https://github.com", title: "GitHub" });
 
     expect(result).toEqual({ ok: true, value: [{ url: "https://github.com", title: "GitHub" }] });
+  });
+
+  // I5 minor: `add` requires a known project — unlike list/remove/etc,
+  // this is the one call that can grow bookmarks.json under a made-up
+  // project name.
+  it("refuses to add a bookmark for an unknown project", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+      projects: { acme: "/p/acme" },
+    });
+
+    const result = await handlers.add("nope", { url: "https://github.com", title: "GitHub" });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a non-http(s) bookmark url", async () => {
+    const handlers = createBookmarksHandlers({
+      store: store(),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+      projects: { acme: "/p/acme" },
+    });
+
+    const result = await handlers.add("acme", {
+      url: "javascript:alert(1)",
+      title: "Hostile",
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("rebuilds the bookmark from only its checked fields, dropping extras", async () => {
+    let stored: unknown;
+    const handlers = createBookmarksHandlers({
+      store: store({
+        add: (_project, bookmark) => {
+          stored = bookmark;
+          return Promise.resolve({ ok: true, value: [bookmark] });
+        },
+      }),
+      favicons: noFavicons(),
+      requestFavicon: () => undefined,
+      language: "en",
+      projects: { acme: "/p/acme" },
+    });
+
+    await handlers.add("acme", {
+      url: "https://github.com",
+      title: "GitHub",
+      pinned: true,
+      order: 3,
+      __proto__: { polluted: true },
+      extra: "unexpected",
+    } as unknown as Bookmark);
+
+    expect(stored).toEqual({
+      url: "https://github.com",
+      title: "GitHub",
+      pinned: true,
+      order: 3,
+    });
+    expect(Object.hasOwn(stored as object, "extra")).toBe(false);
   });
 
   it("removes a bookmark", async () => {
@@ -1077,6 +1206,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     await handlers.remove("acme", "https://github.com");
@@ -1090,6 +1220,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.list(undefined as unknown as string);
@@ -1103,6 +1234,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.add("acme", { url: "https://github.com" } as unknown as Bookmark);
@@ -1116,6 +1248,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.add("acme", { url: "https://github.com", title: "GitHub" });
@@ -1137,6 +1270,7 @@ describe("bookmarks handlers", () => {
       },
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.rename("acme", "https://a.test/", "Netflix");
@@ -1159,6 +1293,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.rename("acme", "https://a.test/", 7 as unknown as string);
@@ -1173,6 +1308,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.rename("acme", "https://a.test/", " ");
@@ -1193,6 +1329,7 @@ describe("bookmarks handlers", () => {
       },
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.list("p");
@@ -1213,6 +1350,7 @@ describe("bookmarks handlers", () => {
       },
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.list("p");
@@ -1234,6 +1372,7 @@ describe("bookmarks handlers", () => {
       },
       requestFavicon: (project, url) => requested.push({ project, url }),
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     await handlers.list("acme");
@@ -1247,6 +1386,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.setPinned("p", "https://a.test/", true);
@@ -1264,6 +1404,7 @@ describe("bookmarks handlers", () => {
       favicons: noFavicons(),
       requestFavicon: () => undefined,
       language: "en",
+      projects: { acme: "/p/acme", p: "/p/p" },
     });
 
     const result = await handlers.reorder("p", ["https://a.test/", 7] as unknown as string[]);
@@ -1282,6 +1423,7 @@ const sampleConfig: JarvisConfig = {
   docker: {},
   workflows: {},
   headlamp: { binary: "/some/path" },
+  prayer: { enabled: false },
   terminal: {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
@@ -1306,6 +1448,15 @@ const sampleConfig: JarvisConfig = {
   },
   browser: { allowPopups: true },
   sessions: { importWindowDays: 30 },
+  remote: {
+    enabled: false,
+    bindAddress: "127.0.0.1",
+    port: 7717,
+    sidecarProxy: false,
+    tls: {},
+    push: { enabled: false, includeProjectNames: false },
+    idleDisableMinutes: 0,
+  },
   sessionsDbPath: "/tmp/sessions.db",
 };
 
@@ -1443,6 +1594,7 @@ describe("database handlers", () => {
       stop: () => {},
       runningKeys: () => [],
       stopAll: () => {},
+      credentialFor: () => undefined,
       ...overrides,
     };
   }
@@ -1827,7 +1979,12 @@ describe("terminal handlers", () => {
       killed,
       manager: {
         start: (tabId, cwd) => started.push({ tabId, cwd }),
-        attach: () => "",
+        onOutput: () => () => {},
+        onShellExit: () => () => {},
+        log: () => "",
+        snapshot: () => ({ text: "", end: 0 }),
+        has: () => false,
+        panes: () => [],
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
         kill: (tabId) => killed.push(tabId),
@@ -2311,6 +2468,158 @@ describe("terminal handlers", () => {
 
     expect(await handlers.suggest(7 as unknown as string, "git")).toEqual([]);
     expect(await handlers.suggest("tab-7", 7 as unknown as string)).toEqual([]);
+  });
+
+  // I5: a remote origin's cwd must stay inside the pane's project, and it
+  // must never get the desktop's full-disk completion for an absolute or
+  // `~/`-prefixed typed path.
+  function completingRemote(
+    completion: TerminalHandlerDeps["completion"],
+    realPath: (path: string) => string = (path) => path,
+  ): ReturnType<typeof createTerminalHandlers> {
+    const { manager } = shells();
+    return createTerminalHandlers({
+      shells: manager,
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+      terminalScrollback: 5000,
+      completion,
+      files: { readDir: () => [], realPath },
+    });
+  }
+
+  it("suggests normally for a remote origin whose cwd stays inside the project", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completingRemote({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["git status"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta", "/p/acme/sub", true)).toEqual(["git status"]);
+    expect(asked).toEqual([["/p/acme/sub", "git sta"]]);
+  });
+
+  it("refuses a remote origin's cwd that resolves outside the project", async () => {
+    const handlers = completingRemote({
+      enabled: true,
+      source: { suggest: async () => ["git status"], history: async () => [] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "git sta", "/etc", true)).toEqual([]);
+  });
+
+  it("refuses a remote origin's absolute-path completion prefix", async () => {
+    const handlers = completingRemote({
+      enabled: true,
+      source: { suggest: async () => ["/etc/passwd"], history: async () => [] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cat /etc/", undefined, true)).toEqual([]);
+  });
+
+  it("refuses a remote origin's ~/-prefixed completion prefix", async () => {
+    const handlers = completingRemote({
+      enabled: true,
+      source: { suggest: async () => ["~/.ssh/id_rsa"], history: async () => [] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cat ~/", undefined, true)).toEqual([]);
+  });
+
+  // Not absolute, not `~/` — but completion-source.ts's own resolveDirectory
+  // still resolves a relative prefix against cwd with plain `resolve()`,
+  // which walks straight out of the project on `..`. Neither of the two
+  // string checks above (absolute / ~-prefix) would have caught this.
+  it("refuses a remote origin's relative-traversal completion prefix (../../../../etc/)", async () => {
+    const handlers = completingRemote({
+      enabled: true,
+      source: { suggest: async () => ["/etc/passwd"], history: async () => [] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cat ../../../../etc/", undefined, true)).toEqual([]);
+  });
+
+  it("refuses a remote origin's ./../../ completion prefix", async () => {
+    const handlers = completingRemote({
+      enabled: true,
+      source: { suggest: async () => ["/etc/passwd"], history: async () => [] },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cat ./../../", undefined, true)).toEqual([]);
+  });
+
+  // An in-project symlink whose target resolves outside the project: cwd
+  // itself passes the lexical containment check, but the directory the
+  // typed prefix names is really outside once realpath is followed.
+  // The injected realpath double below matches only the literal POSIX
+  // fixture path ("/p/acme/escape-link/out"); resolveDirectory's real join
+  // computes a backslash-joined path on win32, so the double's `===` check
+  // never fires there and the escape it exists to prove goes untested — a
+  // test-fixture limitation (see POSIX_FIXTURES above), not evidence the
+  // production containment check itself is Windows-broken.
+  it.skipIf(!POSIX_FIXTURES)(
+    "refuses a remote origin's completion prefix through an in-project symlink pointing outside",
+    async () => {
+      const handlers = completingRemote(
+        {
+          enabled: true,
+          source: { suggest: async () => ["/etc/passwd"], history: async () => [] },
+        },
+        (path: string) => (path === "/p/acme/escape-link/out" ? "/etc/out" : path),
+      );
+      handlers.open("acme");
+
+      expect(await handlers.suggest("tab-7", "cat escape-link/out/", undefined, true)).toEqual([]);
+    },
+  );
+
+  it("still allows an ordinary relative prefix that stays inside the project", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completingRemote({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["packages/"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cd packages/", undefined, true)).toEqual(["packages/"]);
+  });
+
+  it("desktop origin (remote omitted) keeps full-disk completion for the same input", async () => {
+    const asked: [string, string][] = [];
+    const handlers = completingRemote({
+      enabled: true,
+      source: {
+        suggest: async (cwd, input) => {
+          asked.push([cwd, input]);
+          return ["/etc/passwd"];
+        },
+        history: async () => [],
+      },
+    });
+    handlers.open("acme");
+
+    expect(await handlers.suggest("tab-7", "cat /etc/")).toEqual(["/etc/passwd"]);
+    expect(asked).toEqual([["/p/acme", "cat /etc/"]]);
   });
 
   // ↑/↓ in the command editor walk Jarvis's own command log, so the line the
@@ -4002,6 +4311,7 @@ describe("api handlers", () => {
         }),
       projects: { acme: "/p/acme" },
       language: "en",
+      realPath: (path: string) => path,
       ...overrides,
     };
     return { api: createApiHandlers(deps), saved };
@@ -4037,6 +4347,20 @@ describe("api handlers", () => {
     expect((await api.request("acme", "/p/acme/api/list.bru")).ok).toBe(true);
   });
 
+  // M12 Task 7: an ipc.test.ts case for the readRequest fallback — a
+  // readRequest failure (any reason; api.request draws no ENOENT
+  // distinction, unlike save's own onDisk fold) wraps into the generic,
+  // already-localised apiUnavailable text, never the dependency's own
+  // message.
+  it("wraps a readRequest failure behind the generic apiUnavailable text", async () => {
+    const { api } = handlers({ readRequest: () => Promise.reject(new Error("boom")) });
+
+    const result = await api.request("acme", "/p/acme/api/list.bru");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.text).not.toContain("boom");
+  });
+
   it("refuses to save outside the project, without touching the store", async () => {
     const { api, saved } = handlers();
 
@@ -4054,12 +4378,216 @@ describe("api handlers", () => {
     expect(saved).toEqual([{ path: "/p/acme/api/list.bru", json: { meta: { name: "R" } } }]);
   });
 
+  // M12 Task 12 item 1: a path under the project but outside every
+  // collection `api:collections` actually lists must be refused, not just
+  // a path outside the project altogether — the same rule for a
+  // desktop-origin save (no `remote`) and a remote-origin one.
+  it("refuses to save a path under the project but outside every collection, from either origin", async () => {
+    const { api, saved } = handlers();
+
+    const desktop = await api.save("acme", "/p/acme/stray.bru", { meta: { name: "R" } });
+    const remote = await api.save(
+      "acme",
+      "/p/acme/stray.bru",
+      { meta: { name: "R" } },
+      { deviceId: "device-a" },
+    );
+
+    expect(desktop.ok).toBe(false);
+    expect(remote.ok).toBe(false);
+    expect(saved).toEqual([]);
+  });
+
   it("sends a request and returns the response", async () => {
     const { api } = handlers();
 
     const result = await api.send("acme", { meta: {} }, {});
 
     expect(result.ok && result.value.response).toMatchObject({ status: 200, timeMs: 5 });
+  });
+
+  it("sanitizes a remote request before execution and keeps executable hooks out of history", async () => {
+    const sentRequests: Record<string, unknown>[] = [];
+    const sendRequest = vi.fn(async (sentRequest: Record<string, unknown>) => {
+      sentRequests.push(sentRequest);
+      return {
+        response: {
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          body: "{}",
+          timeMs: 5,
+          bytes: 2,
+          unresolved: [],
+        },
+        cookies: [],
+      };
+    });
+    const { api } = handlers({ sendRequest });
+    const request = {
+      meta: { name: "safe" },
+      http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+      script: { req: "throw new Error('must not run')", event: { after: "also removed" } },
+      tests: "throw new Error('must not run')",
+      assertions: [{ name: "status", value: "200", enabled: true }],
+    };
+
+    const result = await api.send("acme", request, {}, { deviceId: "device-a" });
+
+    expect(result.ok).toBe(true);
+    expect(sendRequest).toHaveBeenCalledWith(
+      expect.not.objectContaining({ script: expect.anything(), tests: expect.anything() }),
+      {},
+      "acme",
+      { deviceId: "device-a" },
+    );
+    const sent = sentRequests[0];
+    if (sent === undefined) throw new Error("expected the request executor to run");
+    expect(sent["assertions"]).toEqual([{ name: "status", value: "200", enabled: true }]);
+  });
+
+  it("refuses remote OAuth before calling the request executor", async () => {
+    const sendRequest = vi.fn();
+    const { api } = handlers({ sendRequest });
+
+    const result = await api.send(
+      "acme",
+      { http: { method: "get", url: "https://api.test", body: "none", auth: "oauth2" } },
+      {},
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+
+  it("removes hooks and ephemeral upload ids before a remote save", async () => {
+    const { api, saved } = handlers();
+    const uploadId = "a".repeat(32);
+
+    const result = await api.save(
+      "acme",
+      "/p/acme/api/list.bru",
+      {
+        http: { method: "post", url: "https://api.test", body: "multipartForm", auth: "none" },
+        script: { req: "process.exit()" },
+        tests: "process.exit()",
+        body: { multipartForm: [{ name: "file", type: "file", value: [{ uploadId }] }] },
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(saved).toEqual([
+      {
+        path: "/p/acme/api/list.bru",
+        json: expect.objectContaining({
+          body: { multipartForm: [{ name: "file", type: "file", value: [] }] },
+        }),
+      },
+    ]);
+    expect(saved[0]?.json).not.toHaveProperty("script");
+    expect(saved[0]?.json).not.toHaveProperty("tests");
+  });
+
+  // Critical 2 (review): a remote save used to persist only the executable
+  // whitelist, silently discarding everything else the on-disk request
+  // carried. It now starts from `readRequest`'s own parse of that file for
+  // every durable field outside the whitelist — seq (display order), type,
+  // docs, vars, settings, and a body block for a mode other than the one
+  // being saved — none of it ever taken from the phone's own submitted
+  // object.
+  it("preserves seq, type, docs, vars, settings and inactive body blocks across a remote save", async () => {
+    const onDisk = {
+      meta: { name: "old", seq: "3", type: "http" },
+      http: { method: "get", url: "https://api.test", body: "json", auth: "none" },
+      body: { json: "{}", text: "old text body" },
+      docs: "Some docs",
+      vars: { req: [{ name: "token", value: "abc", enabled: true }] },
+      settings: { encodeUrl: true },
+      script: { req: "process.exit()" },
+      tests: "process.exit()",
+    };
+    const { api, saved } = handlers({ readRequest: () => Promise.resolve(onDisk) });
+
+    const result = await api.save(
+      "acme",
+      "/p/acme/api/list.bru",
+      {
+        meta: { name: "new" },
+        http: { method: "get", url: "https://api.test", body: "json", auth: "none" },
+        body: { json: '{"a":1}' },
+        script: { req: "process.exit()" },
+        tests: "process.exit()",
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(true);
+    const json = saved[0]?.json as Record<string, unknown>;
+    expect(json).toMatchObject({
+      meta: { name: "new", seq: "3", type: "http" },
+      docs: "Some docs",
+      vars: { req: [{ name: "token", value: "abc", enabled: true }] },
+      settings: { encodeUrl: true },
+      body: { json: '{"a":1}', text: "old text body" },
+    });
+    expect(json).not.toHaveProperty("script");
+    expect(json).not.toHaveProperty("tests");
+  });
+
+  // Final fix wave, Minor 3: there is no first-time-save path any more. A
+  // request file that does not exist fails containment (realpath throws)
+  // before readRequest is ever consulted, and the phone gets the same
+  // "unknown project" refusal every escape attempt gets — phones create
+  // requests through api:createRequest, never through save.
+  it("refuses a remote save whose path does not exist as unknownProject, before readRequest runs", async () => {
+    const enoent = Object.assign(new Error("no such file"), { code: "ENOENT" });
+    let reads = 0;
+    const { api, saved } = handlers({
+      readRequest: () => {
+        reads += 1;
+        return Promise.reject(enoent);
+      },
+      realPath: (path) => {
+        if (path.endsWith("list.bru")) throw enoent;
+        return path;
+      },
+    });
+
+    const result = await api.save(
+      "acme",
+      "/p/acme/api/list.bru",
+      {
+        meta: { name: "New" },
+        http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ ok: false, text: MESSAGES.unknownProject("en") });
+    expect(reads).toBe(0);
+    expect(saved).toEqual([]);
+  });
+
+  it("refuses a remote save outright when readRequest fails for a reason other than a missing file", async () => {
+    const { api, saved } = handlers({
+      readRequest: () => Promise.reject(new Error("Line 3, col 1: unexpected token")),
+    });
+
+    const result = await api.save(
+      "acme",
+      "/p/acme/api/list.bru",
+      {
+        meta: { name: "New" },
+        http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(saved).toEqual([]);
   });
 
   it("wraps a runner that throws behind one localised headline", async () => {
@@ -4077,11 +4605,231 @@ describe("api handlers", () => {
   });
 });
 
+// Fix round 2, items 2 and 3 (review): every earlier `save` test above
+// mocks `readRequest`/`writeRequest`, which proves prepareRemoteApiSave's
+// own logic but never exercises the real `@usebruno/lang` serializer this
+// whole guard exists because of. This describe block wires `createApiHandlers`
+// to the real `writeRequest`/`readRequest` from `@jarvis/platform`, against
+// a real temp directory, so a remote `api:save` is proven end to end: a
+// crafted name is refused before anything is written, a clean save
+// round-trips, and the C2 residual fields (meta.tags, an inactive graphql/
+// formUrlEncoded/multipartForm/file body block, every on-disk auth.*
+// sub-block) survive through the real .bru file.
+describe("api handlers — remote api:save against the real serializer", () => {
+  const made: string[] = [];
+  afterEach(async () => {
+    for (const dir of made.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  async function realHandlers(
+    placeholder: Record<string, unknown> | undefined = {
+      meta: { name: "placeholder", type: "http", seq: "1" },
+      http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+    },
+  ) {
+    const root = await mkdtemp(join(tmpdir(), "jarvis-remote-save-"));
+    made.push(root);
+    await writeFile(join(root, "bruno.json"), JSON.stringify({ name: "api", type: "collection" }));
+    const requestPath = join(root, "list.bru");
+    // resolveWithin's containment check (ipc.ts) resolves every path with
+    // realpathSync, which throws for a path that does not exist yet — the
+    // same as the real app, where api:save is only ever called on a
+    // request api:createRequest already created. A placeholder file here
+    // is what makes this describe block's real realPath wiring exercise
+    // the same code path the real app does, rather than the mocked
+    // `realPath: (path) => path` identity every other describe block uses.
+    if (placeholder !== undefined) await writeRequest(requestPath, placeholder);
+
+    const deps: ApiHandlerDeps = {
+      listCollections: () => Promise.resolve([{ name: "api", path: root }]),
+      readCollection: () => Promise.reject(new Error("unused")),
+      readRequest,
+      writeRequest,
+      sendRequest: () => Promise.reject(new Error("unused")),
+      truncateBody: (body: string) => body,
+      evaluateAssertions: () => [],
+      toCurl: () => "",
+      store: {
+        read: () =>
+          Promise.resolve({
+            history: [],
+            cookies: [],
+            settings: { proxyUrl: "", verifyCertificate: true, timeoutMs: 30_000 },
+          }),
+        addHistory: (_project, entry) => Promise.resolve([entry]),
+        clearHistory: () => Promise.resolve(),
+        saveCookies: () => Promise.resolve(),
+        saveSettings: (_project, settings) => Promise.resolve(settings),
+      },
+      createRequest: () => Promise.reject(new Error("unused")),
+      createFolder: () => Promise.reject(new Error("unused")),
+      renameRequest: () => Promise.reject(new Error("unused")),
+      renameFolder: () => Promise.reject(new Error("unused")),
+      deleteEntry: () => Promise.reject(new Error("unused")),
+      createCollection: () => Promise.reject(new Error("unused")),
+      writeEnvironment: () => Promise.reject(new Error("unused")),
+      postmanToRequests: () => ({ name: "x", requests: [] }),
+      writeImported: () => Promise.reject(new Error("unused")),
+      projects: { acme: root },
+      language: "en",
+      realPath: (path: string) => realpathSync(path),
+    };
+    return { api: createApiHandlers(deps), root, requestPath, readRequest };
+  }
+
+  it("refuses a remote save whose meta.name carries the crafted script-injection payload, leaving the on-disk file untouched", async () => {
+    const { api, requestPath, readRequest: read } = await realHandlers();
+    const craftedName = 'x\n}\n\nscript:pre-request {\n console.log("INJECTED")\n}';
+
+    const result = await api.save(
+      "acme",
+      requestPath,
+      {
+        meta: { name: craftedName },
+        http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(false);
+    // The refused save never called writeRequest at all — the on-disk file
+    // is exactly the placeholder realHandlers() wrote, not a corrupted or
+    // partially-applied version of the crafted request, and carries no
+    // script/tests/vars either way.
+    const onDisk = await read(requestPath);
+    expect(onDisk).toMatchObject({ meta: { name: "placeholder" } });
+    expect(onDisk).not.toHaveProperty("script");
+    expect(onDisk).not.toHaveProperty("tests");
+    expect(onDisk).not.toHaveProperty("vars");
+  });
+
+  it("refuses a remote save whose header name carries a control character, leaving the on-disk file untouched", async () => {
+    const { api, requestPath, readRequest: read } = await realHandlers();
+
+    const result = await api.save(
+      "acme",
+      requestPath,
+      {
+        meta: { name: "R" },
+        http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+        headers: [{ name: "x\ny", value: "v", enabled: true }],
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(false);
+    const onDisk = await read(requestPath);
+    expect(onDisk).toMatchObject({ meta: { name: "placeholder" } });
+  });
+
+  it("round-trips a clean remote save through the real serializer, with no script/tests", async () => {
+    const { api, requestPath, readRequest } = await realHandlers();
+
+    const result = await api.save(
+      "acme",
+      requestPath,
+      {
+        meta: { name: "List orders" },
+        http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+        headers: [{ name: "Accept", value: "application/json", enabled: true }],
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(true);
+    const reparsed = await readRequest(requestPath);
+    expect(reparsed).toMatchObject({ meta: { name: "List orders" } });
+    expect(reparsed).not.toHaveProperty("script");
+    expect(reparsed).not.toHaveProperty("tests");
+  });
+
+  // M12 Task 7 follow-up (controller ruling: wire writeAtomically into
+  // every live .bru/environment write): api:save's own writeRequest call
+  // goes through the same atomic writer bruno.test.ts proves directly — a
+  // failing rename here leaves the on-disk request exactly as it was
+  // before this save, never truncated or half-written, and no temp file
+  // survives next to it.
+  it("a remote save goes through the atomic writer: a failing rename leaves the on-disk request untouched, no temp file left behind", async () => {
+    const { api, root, requestPath } = await realHandlers();
+
+    renameOverride.impl = async () => {
+      throw new Error("boom");
+    };
+    let result: Awaited<ReturnType<typeof api.save>>;
+    try {
+      result = await api.save(
+        "acme",
+        requestPath,
+        {
+          meta: { name: "New name" },
+          http: { method: "get", url: "https://api.test", body: "none", auth: "none" },
+        },
+        { deviceId: "device-a" },
+      );
+    } finally {
+      renameOverride.impl = undefined;
+    }
+
+    expect(result.ok).toBe(false);
+    const onDisk = await readRequest(requestPath);
+    expect(onDisk).toMatchObject({ meta: { name: "placeholder" } });
+    // Only the collection marker and the one request file remain — no
+    // `.list.bru.tmp-*` left behind by the failed write.
+    expect(await readdir(root)).toEqual(["bruno.json", "list.bru"]);
+  });
+
+  it("preserves meta.tags, an inactive graphql/formUrlEncoded/multipartForm/file body block, and every other on-disk auth block through a real remote save", async () => {
+    const { api, requestPath, readRequest } = await realHandlers();
+    await writeRequest(requestPath, {
+      meta: { name: "old", type: "http", seq: "1", tags: ["orders", "v2"] },
+      http: { method: "get", url: "https://api.test", body: "json", auth: "bearer" },
+      body: {
+        json: "{}",
+        graphql: { query: "{ a }", variables: '{"b":1}' },
+        formUrlEncoded: [{ name: "f", value: "1", enabled: true }],
+        multipartForm: [{ name: "m", type: "text", value: "v", enabled: true }],
+      },
+      auth: {
+        bearer: { token: "old-token" },
+        oauth2: { grantType: "client_credentials", clientId: "id", clientSecret: "secret" },
+      },
+    });
+
+    const result = await api.save(
+      "acme",
+      requestPath,
+      {
+        meta: { name: "new" },
+        http: { method: "get", url: "https://api.test", body: "json", auth: "bearer" },
+        body: { json: '{"a":1}' },
+        auth: { bearer: { token: "new-token" } },
+      },
+      { deviceId: "device-a" },
+    );
+
+    expect(result.ok).toBe(true);
+    const reparsed = (await readRequest(requestPath)) as Record<string, unknown>;
+    expect(reparsed).toMatchObject({
+      meta: { name: "new", tags: ["orders", "v2"] },
+      body: {
+        json: '{"a":1}',
+        graphql: { query: "{ a }", variables: '{"b":1}' },
+        formUrlEncoded: [{ name: "f", value: "1", enabled: true }],
+        multipartForm: [{ name: "m", type: "text", value: "v", enabled: true }],
+      },
+      auth: {
+        bearer: { token: "new-token" },
+        oauth2: { grantType: "client_credentials", clientId: "id", clientSecret: "secret" },
+      },
+    });
+  });
+});
+
 describe("api editing handlers", () => {
   function handlers(overrides: Partial<ApiHandlerDeps> = {}) {
     const deleted: string[] = [];
     const deps: ApiHandlerDeps = {
-      listCollections: () => Promise.resolve([]),
+      listCollections: () => Promise.resolve([{ name: "api", path: "/p/acme/api" }]),
       readCollection: () => Promise.reject(new Error("unused")),
       readRequest: () => Promise.reject(new Error("unused")),
       writeRequest: () => Promise.resolve(),
@@ -4116,6 +4864,7 @@ describe("api editing handlers", () => {
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
       projects: { acme: "/p/acme" },
       language: "en",
+      realPath: (path: string) => path,
       ...overrides,
     };
     return { api: createApiHandlers(deps), deleted };
@@ -4136,10 +4885,45 @@ describe("api editing handlers", () => {
     expect((await api.createRequest("acme", "/tmp", "New", 1)).ok).toBe(false);
   });
 
+  // M12 Task 12 item 1: the project root itself sits under the project but
+  // outside every collection `api:collections` lists — creating there must
+  // be refused the same way as a path truly outside the project.
+  it("refuses to create a request under the project but outside every collection", async () => {
+    const { api } = handlers();
+
+    expect((await api.createRequest("acme", "/p/acme", "New", 1)).ok).toBe(false);
+  });
+
   it("refuses a blank name", async () => {
     const { api } = handlers();
 
     expect((await api.createRequest("acme", "/p/acme/api", "   ", 1)).ok).toBe(false);
+  });
+
+  // M12 Task 12 item 1: createFolder is guardedWrite's other caller — same
+  // collection-containment rule.
+  it("refuses to create a folder under the project but outside every collection", async () => {
+    const { api } = handlers();
+
+    expect((await api.createFolder("acme", "/p/acme", "New")).ok).toBe(false);
+  });
+
+  // Ruling 2026-09-19b: createRequest writes `name` straight into the new
+  // file's `meta.name` — @usebruno/lang's jsonToBruV2 writes that key raw,
+  // with no quoting — so the same control-character rule
+  // prepareRemoteApiRequest applies to a remote api:save's meta.name
+  // applies here too, before the write ever happens.
+  it("refuses a name carrying a control character that would inject a script block into the new file", async () => {
+    const { api } = handlers();
+
+    const result = await api.createRequest(
+      "acme",
+      "/p/acme/api",
+      'x\n}\n\nscript:pre-request {\n console.log("INJECTED")\n}\n\nmeta {\n name: y',
+      1,
+    );
+
+    expect(result.ok).toBe(false);
   });
 
   it("renames a request or a folder depending on which it is", async () => {
@@ -4155,12 +4939,38 @@ describe("api editing handlers", () => {
     });
   });
 
+  it("refuses a rename carrying a control character in the new name", async () => {
+    const { api } = handlers();
+
+    const result = await api.renameEntry("acme", "/p/acme/api/a.bru", "x\ny", false);
+
+    expect(result.ok).toBe(false);
+  });
+
+  // M12 Task 12 item 1: a stray file sitting beside the collection, under
+  // the project but outside it, is refused the same as a path truly
+  // outside the project.
+  it("refuses to rename a path under the project but outside every collection", async () => {
+    const { api } = handlers();
+
+    const result = await api.renameEntry("acme", "/p/acme/stray.bru", "B", false);
+
+    expect(result.ok).toBe(false);
+  });
+
   it("deletes inside the project", async () => {
     const { api, deleted } = handlers();
 
     await api.deleteEntry("acme", "/p/acme/api/a.bru");
 
     expect(deleted).toEqual(["/p/acme/api/a.bru"]);
+  });
+
+  it("refuses to delete a path under the project but outside every collection", async () => {
+    const { api, deleted } = handlers();
+
+    expect((await api.deleteEntry("acme", "/p/acme/stray.bru")).ok).toBe(false);
+    expect(deleted).toEqual([]);
   });
 
   // A mis-click in a tree view must not be able to remove the project root.
@@ -4197,55 +5007,241 @@ describe("api editing handlers", () => {
     ).toEqual({ ok: true, value: "/p/acme/api/environments/local.bru" });
   });
 
+  it("refuses to save an environment outside every listed collection", async () => {
+    const { api } = handlers();
+
+    expect(
+      await api.saveEnvironment("acme", "/p/acme/other-dir", "x", [
+        { name: "base", value: "http://h", enabled: true, secret: false },
+      ]),
+    ).toMatchObject({ ok: false });
+  });
+
+  // Fix round 1b (ruling, "environment names"): dispatch.ts casts this
+  // channel's variables argument with `as never[]`, so nothing upstream has
+  // checked a variable's own `name` — and @usebruno/lang's envJsonToBruV2
+  // writes it completely raw, the same sink shape as meta.name.
+  // api:saveEnvironment is remote-allowed with no origin split, so this
+  // applies to every caller.
+  it("refuses to save an environment whose variable name carries a control character", async () => {
+    const { api } = handlers();
+
+    const result = await api.saveEnvironment("acme", "/p/acme/api", "local", [
+      { name: "x\ny", value: "v", enabled: true, secret: false },
+    ]);
+
+    expect(result.ok).toBe(false);
+  });
+
+  // M12 Task 7: isCleanScalar refuses ''' (@usebruno/lang's raw-string
+  // delimiter, jsonToBru.js's getValueString) the same way it refuses a
+  // control character — the identical raw envJsonToBruV2 sink.
+  it("refuses to save an environment whose variable name carries the ''' raw-string delimiter", async () => {
+    const { api } = handlers();
+
+    const result = await api.saveEnvironment("acme", "/p/acme/api", "local", [
+      { name: "x'''y", value: "v", enabled: true, secret: false },
+    ]);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses to save an environment whose variable is malformed", async () => {
+    const { api } = handlers();
+
+    const result = await api.saveEnvironment("acme", "/p/acme/api", "local", [null] as unknown as {
+      name: string;
+      value: string;
+      enabled: boolean;
+      secret: boolean;
+    }[]);
+
+    expect(result.ok).toBe(false);
+  });
+
   it("imports a Postman collection", async () => {
     const { api } = handlers();
 
-    expect(await api.importPostman("acme", "", {})).toEqual({
+    expect(await api.importPostman("acme", "", {}, false)).toEqual({
       ok: true,
       value: "/p/acme/Imported",
     });
   });
 
-  // An import fails for reasons about the file the user chose, and they are
-  // the one who can fix it — so that message survives rather than being
-  // replaced by a generic headline.
-  it("passes the importer's own message through on a bad file", async () => {
+  // M9 Task 3: a remote call still imports an ordinary, small collection —
+  // the guard is bounds, not a blanket refusal of remote imports.
+  it("imports a Postman collection from a remote origin, within bounds", async () => {
+    const { api } = handlers();
+
+    expect(await api.importPostman("acme", "", { item: [] }, true)).toEqual({
+      ok: true,
+      value: "/p/acme/Imported",
+    });
+  });
+
+  // [bite-proof: "direct import bypass attempt" — validates even when no
+  // upload/blob is involved at all, straight off the RPC's own args]
+  it("refuses a remote import whose raw collection carries a __proto__ key, before conversion ever runs", async () => {
+    const postmanToRequests = vi.fn(() => ({ name: "x", requests: [] }));
+    const { api } = handlers({ postmanToRequests });
+
+    const hostile = JSON.parse('{"item":[{"__proto__":{"polluted":true}}]}');
+    const result = await api.importPostman("acme", "", hostile, true);
+
+    expect(result.ok).toBe(false);
+    expect(postmanToRequests).not.toHaveBeenCalled();
+  });
+
+  // Fix round 2, Critical class (review): postmanToRequests's own output —
+  // not the raw collection validateRemoteImport already bounds — can carry
+  // a control character straight into the same raw meta.name sink
+  // prepareRemoteApiRequest guards for api:send/api:save. Checked after
+  // conversion, before anything is written.
+  it("refuses a remote import whose converted item name carries a control character, before anything is written", async () => {
+    const postmanToRequests = vi.fn(() => ({
+      name: "x",
+      requests: [
+        {
+          segments: ["hostile"],
+          json: { meta: { name: "x\n}\n\nscript:pre-request {\n console.log(1)\n}" } },
+        },
+      ],
+    }));
+    const writeImported = vi.fn(async () => "/p/acme/Imported");
+    const { api } = handlers({ postmanToRequests, writeImported });
+
+    const result = await api.importPostman("acme", "", {}, true);
+
+    expect(result.ok).toBe(false);
+    expect(writeImported).not.toHaveBeenCalled();
+  });
+
+  it("accepts a remote import whose converted requests are all clean", async () => {
+    const postmanToRequests = vi.fn(() => ({
+      name: "x",
+      requests: [{ segments: ["ok"], json: { meta: { name: "ok" } } }],
+    }));
+    const writeImported = vi.fn(async () => "/p/acme/Imported");
+    const { api } = handlers({ postmanToRequests, writeImported });
+
+    const result = await api.importPostman("acme", "", {}, true);
+
+    expect(result.ok).toBe(true);
+    expect(writeImported).toHaveBeenCalledTimes(1);
+  });
+
+  // [bite-proof: MAX_IMPORT_REQUESTS — checked against postmanToRequests's
+  // own output, only for a remote origin]
+  it("refuses a remote import whose converted output exceeds MAX_IMPORT_REQUESTS", async () => {
+    const manyRequests = Array.from({ length: 1_001 }, (_, i) => ({
+      segments: [`r${i}`],
+      json: {},
+    }));
+    const postmanToRequests = vi.fn(() => ({ name: "x", requests: manyRequests }));
+    const writeImported = vi.fn(async () => "/p/acme/Imported");
+    const { api } = handlers({ postmanToRequests, writeImported });
+
+    const result = await api.importPostman("acme", "", {}, true);
+
+    expect(result.ok).toBe(false);
+    expect(writeImported).not.toHaveBeenCalled();
+  });
+
+  // [bite-proof: MAX_IMPORT_REQUESTS boundary — exactly 1000 is still
+  // accepted, only 1001 is refused]
+  it("accepts a remote import whose converted output is exactly MAX_IMPORT_REQUESTS (1000) requests", async () => {
+    const exactlyMax = Array.from({ length: 1_000 }, (_, i) => ({
+      segments: [`r${i}`],
+      json: {},
+    }));
+    const postmanToRequests = vi.fn(() => ({ name: "x", requests: exactlyMax }));
+    const writeImported = vi.fn(async () => "/p/acme/Imported");
+    const { api } = handlers({ postmanToRequests, writeImported });
+
+    const result = await api.importPostman("acme", "", {}, true);
+
+    expect(result.ok).toBe(true);
+    expect(writeImported).toHaveBeenCalledTimes(1);
+  });
+
+  // The same 1,001-request collection is unbounded for a desktop origin —
+  // this task never restricts the existing Import button.
+  it("accepts a large converted output from a desktop origin", async () => {
+    const manyRequests = Array.from({ length: 1_001 }, (_, i) => ({
+      segments: [`r${i}`],
+      json: {},
+    }));
+    const postmanToRequests = vi.fn(() => ({ name: "x", requests: manyRequests }));
+    const { api } = handlers({ postmanToRequests });
+
+    const result = await api.importPostman("acme", "", {}, false);
+
+    expect(result.ok).toBe(true);
+  });
+
+  // I3: the importer's or writeImported's own error can carry an absolute
+  // filesystem path (a rejected containment check, an fs error) — a bad
+  // Postman file gets the same fixed, bilingual failure text as any other
+  // import failure, never `error.message` verbatim.
+  it("replaces a throwing importer's own message with a fixed, bilingual text", async () => {
     const { api } = handlers({
       postmanToRequests: () => {
-        throw new Error("Only Postman Collection v2.0 and v2.1 are supported");
+        throw new Error("ENOENT: /Users/alice/secret-project/collection.json");
       },
     });
 
-    expect(await api.importPostman("acme", "", {})).toEqual({
-      ok: false,
-      text: "Only Postman Collection v2.0 and v2.1 are supported",
-      language: "en",
-    });
+    const result = await api.importPostman("acme", "", {}, false);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.text).not.toContain("/Users/alice");
+    expect(result.text).not.toContain("ENOENT");
   });
+
+  // Never the collection root itself, same guard as delete: renaming it out
+  // from under listCollections would silently orphan the whole tree.
+  it("refuses to rename the collection root itself", async () => {
+    const { api } = handlers();
+
+    expect((await api.renameEntry("acme", "/p/acme", "renamed", true)).ok).toBe(false);
+  });
+
+  // I3: contains() is realpath-based (resolveWithin) — a tree entry that
+  // is really a symlink pointing outside the project must be refused even
+  // though its own path string looks contained.
+  //
+  // Both `it`s below inject a realPath double keyed on the literal POSIX
+  // fixture path ("/p/acme/api/link"); the real join the handlers build the
+  // path with is backslash-joined on win32, so the double's `===` never
+  // matches there and the escape it exists to prove goes untested — a
+  // test-fixture limitation (see POSIX_FIXTURES above), not evidence the
+  // production containment check itself is Windows-broken.
+  it.skipIf(!POSIX_FIXTURES)(
+    "refuses a rename when the path is a symlink resolving outside the project",
+    async () => {
+      const { api } = handlers({
+        realPath: (path: string) => (path === "/p/acme/api/link" ? "/etc/passwd" : path),
+      });
+
+      expect((await api.renameEntry("acme", "/p/acme/api/link", "renamed", false)).ok).toBe(false);
+    },
+  );
+
+  it.skipIf(!POSIX_FIXTURES)(
+    "refuses a delete when the path is a symlink resolving outside the project",
+    async () => {
+      const { api, deleted } = handlers({
+        realPath: (path: string) => (path === "/p/acme/api/link" ? "/etc/passwd" : path),
+      });
+
+      expect((await api.deleteEntry("acme", "/p/acme/api/link")).ok).toBe(false);
+      expect(deleted).toEqual([]);
+    },
+  );
 });
 
-// Pinned the same way the "never puts capacity on a timer" test above is,
-// and for the same kind of reason: closing a tab must reap its child
-// processes main-side, whatever the renderer does or fails to do. The
-// composition in main.ts has no seam a unit test can reach, so the
-// guarantee is pinned against its source instead of left uncovered.
-describe("workspace:close reaps a closed tab's children", () => {
-  const source = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
-  const handler = source.slice(source.indexOf('ipcMain.handle("workspace:close"'));
-  const body = handler.slice(0, handler.indexOf("workspace.close(id);"));
-
-  it("kills the tab's shell", () => {
-    expect(body).toContain("terminal.close(id);");
-  });
-
-  it("stops the tab's `docker logs -f`, rather than trusting the renderer to", () => {
-    expect(body).toContain("unfollow(id);");
-  });
-});
-
-// The one check both the Docker handlers and main.ts's `docker:follow` use.
+// The one check both the Docker handlers and dispatch.ts's `docker:follow` use.
 // It is exported precisely so those two cannot drift apart again: the inline
-// copy in main.ts had lost the grammar half of it.
+// copy had lost the grammar half of it.
 describe("isDeclaredContainer", () => {
   const entries = [{ name: "app", container: "acme-app-1" }];
 
@@ -4904,21 +5900,4 @@ describe("createResumeInTerminalHandler", () => {
     const { handler } = harness(past());
     expect((await handler("not-a-session", "app")).ok).toBe(false);
   });
-});
-
-describe("main.ts ipc registrations", () => {
-  const mainSource = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
-
-  for (const channel of ["session:transcript", "session:resume"]) {
-    it(`passes the argument, not the event, to the ${channel} handler`, () => {
-      const escaped = channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const match = new RegExp(`ipcMain\\.handle\\(\\s*"${escaped}",\\s*([^\\n]*)`).exec(
-        mainSource,
-      );
-      expect(match, `no ipcMain.handle for ${channel}`).not.toBeNull();
-      // Either an inline arrow that names the event first, or nothing —
-      // handing the factory's function straight to ipcMain is the bug.
-      expect(match?.[1]).toMatch(/\(\s*_?event/);
-    });
-  }
 });

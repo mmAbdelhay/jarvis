@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { basename } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createSpawner, runCommand } from "./spawn.js";
+import { createSpawner, runCommand, runCommandWithLimits } from "./spawn.js";
 import type { AgentConfig } from "@jarvis/core";
 
 describe("runCommand", () => {
@@ -29,6 +29,24 @@ describe("runCommand", () => {
   it("runs with a caller-supplied environment instead of the inherited one", async () => {
     const result = await runCommand("sh", ["-c", 'printf %s "$MARKER"'], { MARKER: "hi" });
     expect(result.stdout).toBe("hi");
+  });
+
+  // M12 Task 12 minor: '€' is 3 bytes in UTF-8 (E2 82 AC). Writing its
+  // first two bytes, then — after a real event-loop tick, so the read side
+  // gets a genuinely separate "data" event rather than one coalesced read
+  // — its last byte, is exactly the split a naive `Buffer#toString()` per
+  // chunk gets wrong: each half decodes on its own and becomes its own
+  // U+FFFD. A StringDecoder held across chunks reassembles the one
+  // character instead.
+  it("never turns a UTF-8 character split across two writes into replacement characters", async () => {
+    const script = [
+      "process.stdout.write(Buffer.from([0xe2, 0x82]));",
+      "setTimeout(() => process.stdout.write(Buffer.from([0xac])), 20);",
+    ].join("");
+    const result = await runCommand(process.execPath, ["-e", script]);
+
+    expect(result.stdout).toBe("€");
+    expect(result.stdout).not.toContain("�");
   });
 });
 
@@ -82,6 +100,18 @@ describe("createSpawner", () => {
     } finally {
       handle.kill();
     }
+  }, 10_000);
+
+  it("flushes an incomplete trailing UTF-8 sequence as a replacement character", async () => {
+    const script = "process.stdout.write(Buffer.from([0xe2]));";
+    const agent: AgentConfig = { id: "partial-utf8", command: "node", args: ["-e", script] };
+    const handle = createSpawner()(agent, process.cwd());
+
+    const chunks: string[] = [];
+    handle.onOutput((chunk) => chunks.push(chunk));
+    await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    expect(chunks.join(""), "final line should expose the incomplete sequence").toContain("�");
   }, 10_000);
 
   it("dispatches exit exactly once when the process fails to spawn", async () => {
@@ -155,6 +185,25 @@ describe("createSpawner", () => {
     expect(joined).toContain("BBB-stderr-tail");
   }, 10_000);
 
+  // M12 Task 12 minor: same split-character scenario as runCommand's own
+  // test above, through the line-forwarding path instead.
+  it("never turns a UTF-8 character split across two writes into replacement characters", async () => {
+    const script = [
+      "process.stdout.write(Buffer.from([0xe2, 0x82]));",
+      "setTimeout(() => process.stdout.write(Buffer.from([0xac, 0x0a])), 20);",
+    ].join("");
+    const agent: AgentConfig = { id: "split-utf8", command: "node", args: ["-e", script] };
+    const handle = createSpawner()(agent, process.cwd());
+
+    const chunks: string[] = [];
+    handle.onOutput((chunk) => chunks.push(chunk));
+    await new Promise<number>((resolve) => handle.onExit(resolve));
+
+    const joined = chunks.join("");
+    expect(joined).toContain("€");
+    expect(joined).not.toContain("�");
+  }, 10_000);
+
   it("writes data to the child process stdin", async () => {
     const agent: AgentConfig = { id: "cat", command: "cat" };
     const handle = createSpawner()(agent, process.cwd());
@@ -200,5 +249,106 @@ describe("createSpawner", () => {
     await new Promise<number>((resolve) => handle.onExit(resolve));
 
     expect(chunks.join("")).toContain("marker-value");
+  });
+});
+
+describe("runCommandWithLimits", () => {
+  it("kills a child that outlives the timeout and reports timedOut", async () => {
+    const started = Date.now();
+    const result = await runCommandWithLimits(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 5000)"],
+      { timeoutMs: 200, maxOutputBytes: 1024 },
+    );
+
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("caps each stream at maxOutputBytes and reports truncated", async () => {
+    const script = "process.stdout.write('a'.repeat(200 * 1024))";
+    const result = await runCommandWithLimits(process.execPath, ["-e", script], {
+      timeoutMs: 5000,
+      maxOutputBytes: 1024,
+    });
+
+    expect(result.stdout.length).toBeLessThanOrEqual(1024);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("rejects for a command that does not exist", async () => {
+    await expect(
+      runCommandWithLimits("jarvis-not-a-real-binary", [], {
+        timeoutMs: 1000,
+        maxOutputBytes: 1024,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("resolves normally for a quick, small command", async () => {
+    const result = await runCommandWithLimits(
+      process.execPath,
+      ["-e", "process.stdout.write('hi')"],
+      {
+        timeoutMs: 5000,
+        maxOutputBytes: 1024,
+      },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("hi");
+    expect(result.timedOut).toBe(false);
+    expect(result.truncated).toBe(false);
+  });
+
+  // Bite-proof: comparing `current.length` (UTF-16 code units) against
+  // maxOutputBytes — instead of Buffer.byteLength(current, "utf8") — lets a
+  // stream of 3-byte UTF-8 characters (each one UTF-16 code unit) retain up
+  // to maxOutputBytes *characters*, i.e. up to 3x the byte cap.
+  it("caps retained bytes, not code units, for a non-ASCII stream", async () => {
+    const euro = "€"; // '€': 3 bytes in UTF-8, 1 UTF-16 code unit.
+    const script = `process.stdout.write(${JSON.stringify(euro)}.repeat(2000))`;
+    const result = await runCommandWithLimits(process.execPath, ["-e", script], {
+      timeoutMs: 5000,
+      maxOutputBytes: 1024,
+    });
+
+    expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(1024);
+    expect(result.truncated).toBe(true);
+  });
+
+  // A cap that lands mid-character must cut before it, not through it: a
+  // naive byte-indexed slice of the UTF-8 encoding (or a code-unit slice
+  // through a surrogate pair) can split one code point across the boundary,
+  // leaving a lone surrogate or a broken multi-byte sequence in the output.
+  it("never splits a code point when truncating a multi-byte stream", async () => {
+    const emoji = "\u{1F600}"; // 😀: 4 bytes in UTF-8, a surrogate pair (2 UTF-16 units).
+    const script = `process.stdout.write(${JSON.stringify(emoji)}.repeat(500))`;
+    const result = await runCommandWithLimits(process.execPath, ["-e", script], {
+      timeoutMs: 5000,
+      maxOutputBytes: 999, // Not a multiple of 4 — forces a mid-character boundary if cut naively.
+    });
+
+    expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(999);
+    // No lone surrogate: every code point in the retained text is a whole,
+    // intact emoji, and each one is 2 UTF-16 units, so the total is even.
+    expect(result.stdout.length % 2).toBe(0);
+    expect([...result.stdout].every((codePoint) => codePoint === emoji)).toBe(true);
+  });
+
+  // M12 Task 12 minor: same split-character scenario as runCommand's own
+  // test above, through the byte-capped path instead.
+  it("never turns a UTF-8 character split across two writes into replacement characters", async () => {
+    const script = [
+      "process.stdout.write(Buffer.from([0xe2, 0x82]));",
+      "setTimeout(() => process.stdout.write(Buffer.from([0xac])), 20);",
+    ].join("");
+    const result = await runCommandWithLimits(process.execPath, ["-e", script], {
+      timeoutMs: 5000,
+      maxOutputBytes: 1024,
+    });
+
+    expect(result.stdout).toBe("€");
+    expect(result.stdout).not.toContain("�");
   });
 });

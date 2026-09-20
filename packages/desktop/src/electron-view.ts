@@ -106,7 +106,7 @@ export function createElectronViewFactory(
     },
   };
 
-  return (partition) => {
+  return (partition, kind) => {
     const view = new WebContentsView({
       webPreferences: {
         partition,
@@ -123,6 +123,21 @@ export function createElectronViewFactory(
     view.setVisible(false);
 
     const contents = view.webContents;
+    // A focused hosted page receives the accelerator before Jarvis's renderer
+    // can see it. Claim it here so Ctrl/Cmd+R reloads this view only.
+    contents.on("before-input-event", (event, input) => {
+      if (kind !== "web") return;
+      if (
+        input.type !== "keyDown" ||
+        input.key.toLowerCase() !== "r" ||
+        !(input.control || input.meta) ||
+        input.alt ||
+        input.shift
+      )
+        return;
+      event.preventDefault();
+      contents.reload();
+    });
 
     // Hosted pages must not look like an Electron app to themselves — see
     // hostedUserAgent. Set on the WebContents rather than the session so it

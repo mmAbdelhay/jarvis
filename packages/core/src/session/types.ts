@@ -57,6 +57,19 @@ export type Session = {
   insertions?: number;
   deletions?: number;
   changedFiles?: number;
+  /**
+   * Whether this row is a session Jarvis spawned itself or one the process
+   * scan (process-scan.ts) found running outside it. Absent means
+   * "jarvis" — every existing row and every call site that builds a
+   * `Session` predates this field, and defaulting the omission to the
+   * common case is what keeps them all unchanged.
+   */
+  origin?: "jarvis" | "external";
+  /** The OS pid an "external" row was found under. Absent for a Jarvis
+   *  session, which is identified by `id` instead — its pty is not
+   *  guaranteed to still be the same OS process by the time anything reads
+   *  this back (SessionManager never sets it on its own rows). */
+  pid?: number;
 };
 
 /**
@@ -125,6 +138,15 @@ export interface ProcessHandle {
   onOutput(listener: (chunk: string) => void): void;
   onExit(listener: (code: number) => void): void;
   /**
+   * The OS pid this process runs under, when the spawner can report one.
+   * SessionManager.ownedPids() reads this — it is how the process scan
+   * (process-scan.ts) tells a Jarvis-spawned agent from one the user
+   * started themselves, without which every pty child would also show up
+   * as "running outside Jarvis". Optional because not every spawner runs a
+   * real child process (a test double has nothing to report).
+   */
+  pid?: number;
+  /**
    * Tell the process its terminal is now `cols` x `rows`. Optional because
    * not every Spawner runs its child under a pty — a plain piped process
    * has no window size to change. A terminal UI (Claude Code's included)
@@ -154,11 +176,28 @@ export type Spawner = (
  * One chunk of a session's output as it is emitted. `chunk` is exactly what
  * the process wrote (newline-terminated lines, or a trailing partial line
  * flushed at close) — never re-wrapped or trimmed, so the transcript a user
- * reads is byte-for-byte what the agent printed.
+ * reads is byte-for-byte what the agent printed. `offset` is the count of
+ * UTF-16 code units emitted for this session before `chunk` (ruling 10) — a
+ * client that reconnects mid-stream uses it, together with `snapshot()`'s
+ * `end`, to tell whether a push it just received is one it already has.
  */
 export type SessionOutput = {
   sessionId: string;
   chunk: string;
+  offset: number;
+};
+
+/**
+ * A cursor onto a pane's or session's retained output, returned by
+ * `snapshot()`. `text` is whatever tail is still retained (never more than
+ * the manager's cap); `end` is the true count of UTF-16 code units emitted
+ * since the pane/session started, even once retention has trimmed `text`
+ * down to less than that. A client attaches by reading `snapshot()` first,
+ * then dropping any already-covered push using `end` (ruling 10).
+ */
+export type StreamSnapshot = {
+  text: string;
+  end: number;
 };
 
 export type StartInput = {

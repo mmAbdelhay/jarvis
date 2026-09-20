@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@jarvis/core";
-import { NO_PROJECT, agentsIn, filterSessions, sortSessions } from "./session-filter.js";
+import {
+  NO_PROJECT,
+  agentOptions,
+  agentsIn,
+  filterSessions,
+  sortSessions,
+} from "./session-filter.js";
 
 function session(over: Partial<Session> = {}): Session {
   return {
@@ -148,5 +154,26 @@ describe("agentsIn", () => {
     expect(
       agentsIn([session({ agentId: "b" }), session({ agentId: "a" }), session({ agentId: "b" })]),
     ).toEqual(["a", "b"]);
+  });
+});
+
+describe("agentOptions", () => {
+  // The bug this fixes: a registry agent (e.g. a newly added `codex` in
+  // jarvis.yaml) with zero sessions behind it must still show up.
+  it("includes a registry agent that has never run a session", () => {
+    expect(agentOptions([], ["codex"])).toEqual(["codex"]);
+  });
+
+  it("lists registry agents first, then session-only agents, each sorted", () => {
+    expect(
+      agentOptions(
+        [session({ agentId: "z" }), session({ agentId: "claude" })],
+        ["codex", "claude"],
+      ),
+    ).toEqual(["claude", "codex", "z"]);
+  });
+
+  it("never lists a registry agent twice, even if it also ran a session", () => {
+    expect(agentOptions([session({ agentId: "codex" })], ["codex"])).toEqual(["codex"]);
   });
 });

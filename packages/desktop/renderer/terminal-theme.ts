@@ -33,7 +33,7 @@ export const TERMINAL_THEME = {
 };
 
 export const TERMINAL_FONT = {
-  fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
   fontSize: 12,
   lineHeight: 1.35,
 };
