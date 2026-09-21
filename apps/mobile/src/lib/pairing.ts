@@ -13,7 +13,6 @@
 import {
   CLOSE,
   DEVICE_ID_PATTERN,
-  HANDSHAKE_TIMEOUT_MS,
   type PairClientMessage,
   type PairingLink,
   PROTOCOL_VERSION,
@@ -59,6 +58,15 @@ export type PairDeps = {
 // The laptop's own confirmation dialog times out at 60s (M4); this gives
 // the phone's wait UI margin beyond that (global-constraints.md).
 const PAIR_WAIT_MS = 75_000;
+
+// Connect deadline for the pairing dial specifically — NOT wire's shared
+// HANDSHAKE_TIMEOUT_MS (5s), which the desktop also uses for its own
+// post-TLS handshake budget. A phone's first dial of a Tailscale peer can
+// spend seconds on MagicDNS plus a cold tunnel path (a real iPad trace
+// showed 2.6s before TCP even connected) before TLS starts; 5s cut real
+// attempts short. Pairing is interactive and rare — a longer spinner
+// beats a false "unreachable".
+export const PAIR_CONNECT_TIMEOUT_MS = 15_000;
 
 /**
  * `0.0.0.0` / `::` — an unspecified bind the phone cannot dial (ruling 12).
@@ -175,8 +183,16 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
       timeoutTimer = deps.clock.setTimeout(() => {
         timeoutTimer = undefined;
         socket?.close(CLOSE.normal, "connect timeout");
-        settle({ ok: false, reason: "unreachable" });
-      }, HANDSHAKE_TIMEOUT_MS);
+        // Fixed detail: this path has no transport error event to keep,
+        // and "hung until the deadline" vs "died with an OS error" is
+        // exactly the distinction a screenshot of the pair screen needs
+        // to carry.
+        settle({
+          ok: false,
+          reason: "unreachable",
+          detail: `no connection within ${PAIR_CONNECT_TIMEOUT_MS / 1000}s`,
+        });
+      }, PAIR_CONNECT_TIMEOUT_MS);
     }
 
     function onEvent(event: TransportEvent): void {

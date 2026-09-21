@@ -544,9 +544,19 @@ export default function PairScreen() {
       )}
 
       {phase.kind === "success" && <Text style={styles.label}>{t(language, "pair.success")}</Text>}
+
+      <Text style={styles.buildLabel}>{BUILD_LABEL}</Text>
     </View>
   );
 }
+
+// The installed build, identifiable at a glance (sideload betas all used
+// to report 0.0.0, which made "did the update actually install?"
+// unanswerable on a device with no debugger).
+const BUILD_TAG = (Constants.expoConfig?.extra as { build?: unknown } | undefined)?.build;
+const BUILD_LABEL = `${Constants.expoConfig?.version ?? "?"}${
+  typeof BUILD_TAG === "string" ? ` (${BUILD_TAG})` : ""
+}`;
 
 const styles = StyleSheet.create({
   container: {
@@ -656,5 +666,11 @@ const styles = StyleSheet.create({
     color: theme.colors.textDim,
     fontSize: theme.font.size.sm,
     textAlign: "center",
+  },
+  buildLabel: {
+    color: theme.colors.textFaint,
+    fontSize: theme.font.size.sm,
+    textAlign: "center",
+    marginTop: 12,
   },
 });

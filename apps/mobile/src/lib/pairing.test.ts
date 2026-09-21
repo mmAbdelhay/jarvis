@@ -1,10 +1,10 @@
-import { CLOSE, HANDSHAKE_TIMEOUT_MS, PROTOCOL_VERSION, encodeMessage } from "@jarvis/wire";
+import { CLOSE, PROTOCOL_VERSION, encodeMessage } from "@jarvis/wire";
 import type { PairingLink } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { createFakeClock } from "./clock";
 import type { FakeSocket } from "./fake-transport";
 import { createFakeTransport } from "./fake-transport";
-import { needsHost, pair, pairWithFallback, withHost } from "./pairing";
+import { PAIR_CONNECT_TIMEOUT_MS, needsHost, pair, pairWithFallback, withHost } from "./pairing";
 import type { PairOutcome } from "./pairing";
 import type { Transport, TransportEvent, TransportSocket } from "./transport";
 
@@ -245,18 +245,22 @@ describe("pair", () => {
   });
 
   it(
-    "maps no `open` within HANDSHAKE_TIMEOUT_MS of the call to unreachable " +
+    "maps no `open` within PAIR_CONNECT_TIMEOUT_MS of the call to unreachable " +
       "[bite-proof: drop the pre-open deadline and this test times out instead of resolving]",
     async () => {
       const { transport, clock, deps } = setup();
       const promise = pair(deps, LINK, DEVICE_NAME);
       // No socket.emit({kind: "open"}) at all — the transport never connects.
-      clock.advance(HANDSHAKE_TIMEOUT_MS - 1);
+      clock.advance(PAIR_CONNECT_TIMEOUT_MS - 1);
       const socket = latestSocket(transport);
       expect(socket.closedWith).toBeUndefined();
 
       clock.advance(1);
-      await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+      await expect(promise).resolves.toEqual({
+        ok: false,
+        reason: "unreachable",
+        detail: `no connection within ${PAIR_CONNECT_TIMEOUT_MS / 1000}s`,
+      });
       expect(socket.closedWith).toBeDefined();
     },
   );
@@ -308,7 +312,7 @@ describe("pair", () => {
       // post-open timer that the synchronous `open` handler already armed
       // — advancing past the 5s mark would then wrongly settle
       // "unreachable" even though pairing had already moved past "open".
-      clock.advance(HANDSHAKE_TIMEOUT_MS);
+      clock.advance(PAIR_CONNECT_TIMEOUT_MS);
       expect(settled).toBe(false);
 
       // The state machine is still coherent afterwards: once `deps.transport.open()`
