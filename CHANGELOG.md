@@ -8,7 +8,18 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
-Nothing yet.
+- iPhone and iPad, for free: every release now carries an unsigned IPA
+  built by CI, installable with AltStore or SideStore under your own free
+  Apple ID (7-day refresh, no push notifications — the app says so in
+  Settings instead of failing silently). An AltStore/SideStore source
+  feed serves updates; the docs gain a full
+  [iPhone and iPad](docs/guide/ios-install.md) guide, including the
+  Tailscale/SideStore VPN toggle automation.
+- iPad runs as a real tablet app (`ios.supportsTablet`), not a scaled-up
+  iPhone one.
+- Sideloaded builds warn before they expire: a Dashboard banner under
+  2 days and a local notification a day ahead, read straight from the
+  embedded provisioning profile.
 
 ## [0.1.4] — 2026-09-20
 
