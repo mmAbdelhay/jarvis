@@ -85,9 +85,14 @@ jobs:
           path: source-generator
           sparse-checkout: scripts/update-altstore-source.mjs
 
+      # Best-effort: the preview is informational (nothing here is pushed),
+      # so a missing script — a tag or default branch that predates it —
+      # must never fail a build whose IPA already uploaded.
       - name: Refresh AltStore source preview
         run: |
-          node scripts/update-altstore-source.mjs
+          node source-generator/scripts/update-altstore-source.mjs ||
+            node scripts/update-altstore-source.mjs ||
+            echo "source preview skipped (script not present on this ref)"
           echo '### AltStore source update required' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo 'Regenerate `public/altstore/source.json` from the release assets and merge the change.' >> "$GITHUB_STEP_SUMMARY"
