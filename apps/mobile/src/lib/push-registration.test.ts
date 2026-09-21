@@ -79,6 +79,8 @@ function createFakeAdapter(overrides: Partial<NotificationsAdapter> = {}): Notif
     setForegroundHandler: vi.fn(),
     platform: vi.fn(() => "ios" as const),
     setAutoServerRegistrationEnabled: vi.fn(async () => {}),
+    scheduleLocal: vi.fn(async () => {}),
+    cancelScheduledLocal: vi.fn(async () => {}),
     tokenListeners,
     emitToken(_token: string) {
       for (const cb of [...tokenListeners]) cb();

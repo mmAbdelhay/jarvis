@@ -41,4 +41,16 @@ export type NotificationsAdapter = {
    *  to call it with `true`: getExpoPushTokenAsync re-enables auto-registration
    *  after every successful token fetch. */
   setAutoServerRegistrationEnabled(enabled: boolean): Promise<void>;
+  /** Free-signing plan, work item 3: on-device (local) notifications for
+   * the provisioning-expiry warning. Local scheduling needs no push
+   * entitlement, so it works on sideloaded iOS builds where
+   * getExpoPushToken fails. Cancel with the same identifier keeps
+   * re-scheduling idempotent across launches. */
+  scheduleLocal(input: {
+    identifier: string;
+    title: string;
+    body: string;
+    date: Date;
+  }): Promise<void>;
+  cancelScheduledLocal(identifier: string): Promise<void>;
 };

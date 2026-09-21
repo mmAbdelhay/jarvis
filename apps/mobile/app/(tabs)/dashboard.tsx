@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MetricTile } from "@/components/MetricTile";
@@ -14,6 +14,7 @@ import { STRINGS, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { loadPairing } from "@/lib/pairing-record";
+import { armNativeExpiryWarning } from "@/lib/native-provisioning";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import { theme } from "@/lib/theme";
@@ -63,6 +64,21 @@ export default function DashboardScreen() {
     setRefreshing(true);
     void store.refresh().finally(() => setRefreshing(false));
   }, [store]);
+  // Free-signing plan, work item 3: sideloaded builds die 7 days after
+  // signing. armNativeExpiryWarning caches after its first call, so this
+  // costs one profile read per app run; the banner only appears when the
+  // embedded profile says fewer than 2 days remain (never on Android or
+  // store builds — no profile, state.warn stays false).
+  const [expiryDays, setExpiryDays] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void armNativeExpiryWarning(language).then((state) => {
+      if (!cancelled && state.warn) setExpiryDays(state.daysLeft);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
   const openProjectTerminal = useCallback(
     async (projectName: string) => {
       setTerminalError(undefined);
@@ -106,6 +122,13 @@ export default function DashboardScreen() {
         />
       }
     >
+      {expiryDays !== undefined && (
+        <View style={styles.expiryBanner}>
+          <Text style={styles.expiryBannerText}>
+            {t(language, "expiry.banner", { days: expiryDays })}
+          </Text>
+        </View>
+      )}
       <View style={styles.header}>
         <Text style={styles.brand}>JARVIS</Text>
         <View style={styles.connection}>
@@ -259,6 +282,20 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.ground },
   content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24, gap: 18 },
+  expiryBanner: {
+    borderWidth: 1,
+    borderColor: theme.colors.warning,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  expiryBannerText: {
+    color: theme.colors.warning,
+    fontFamily: theme.font.semibold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   header: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 },
   brand: {
     color: theme.colors.text,
