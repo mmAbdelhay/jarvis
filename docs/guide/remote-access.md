@@ -141,10 +141,11 @@ A companion phone app (`apps/mobile` in the repository) pairs with
 
 **Installing it.** Android: download `jarvis-mobile-<version>.apk` from the
 [releases page](https://github.com/mmAbdelhay/jarvis/releases), open it on
-the phone and allow the install (it is not on a store). iOS has no
-prebuilt binary — build it from source with EAS; `apps/mobile/README.md`
-has the walkthrough, which is also the path for a development build on
-either platform.
+the phone and allow the install (it is not on a store). iPhone and iPad:
+sideload the `jarvis-mobile-<version>.ipa` from the same page with
+AltStore or SideStore and a free Apple ID — the limits and the full
+walkthrough are in [iPhone and iPad](ios-install.md). Development builds
+on either platform go through `apps/mobile/README.md`.
 
 <p align="center">
   <img src="../media/phone-dashboard.png" width="32%" alt="The phone app's Dashboard: CPU, memory and disk, running sessions, and per-project shortcuts.">

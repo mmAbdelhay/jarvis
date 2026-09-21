@@ -79,6 +79,8 @@ function createFakeAdapter(overrides: Partial<NotificationsAdapter> = {}): Notif
     setForegroundHandler: vi.fn(),
     platform: vi.fn(() => "ios" as const),
     setAutoServerRegistrationEnabled: vi.fn(async () => {}),
+    scheduleLocal: vi.fn(async () => {}),
+    cancelScheduledLocal: vi.fn(async () => {}),
     tokenListeners,
     emitToken(_token: string) {
       for (const cb of [...tokenListeners]) cb();
@@ -394,6 +396,34 @@ describe("createPushRegistration: setEnabled(true)", () => {
     const joined = logs.join("\n");
     expect(joined).toContain("TypeError");
     expect(joined).not.toContain("secret-shaped message");
+    // Free-signing plan, work item 2: this is the sideloaded-iOS signature
+    // the Settings screen keys its note off.
+    expect(reg.get().tokenFetchFailed).toBe(true);
+  });
+
+  test("tokenFetchFailed clears on the next attempt and stays off after a successful fetch", async () => {
+    const { deps, fakeClient, fakeAdapter } = baseDeps();
+    fakeClient.setState("open");
+    fakeClient.setScripted(async () => ({
+      ok: true,
+      value: { registered: true, laptopEnabled: true },
+    }));
+    let throwOnce = true;
+    fakeAdapter.getExpoPushToken = vi.fn(async () => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error("stripped entitlement");
+      }
+      return "ExponentPushToken[abc12345]";
+    });
+    const reg = createPushRegistration(deps);
+
+    await reg.setEnabled(true);
+    expect(reg.get().tokenFetchFailed).toBe(true);
+
+    await reg.setEnabled(true);
+    expect(reg.get().tokenFetchFailed).toBeUndefined();
+    expect(reg.get()).toMatchObject({ phase: "on", registered: true });
   });
 });
 

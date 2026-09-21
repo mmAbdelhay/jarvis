@@ -31,6 +31,8 @@ function createFakeModules(overrides: Partial<NativeModules["Notifications"]> = 
       addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
       addNotificationResponseReceivedListener: vi.fn(() => ({ remove: vi.fn() })),
       getLastNotificationResponseAsync: vi.fn(async () => null),
+      scheduleNotificationAsync: vi.fn(async () => "id-1"),
+      cancelScheduledNotificationAsync: vi.fn(async () => {}),
       setNotificationHandler: vi.fn(),
       AndroidImportance: { DEFAULT: 3 },
       ...overrides,
@@ -278,5 +280,32 @@ describe("buildNotificationsAdapter: setForegroundHandler", () => {
     adapter.setForegroundHandler();
 
     expect(setNotificationHandler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("buildNotificationsAdapter: local scheduling (free-signing plan, work item 3)", () => {
+  test("scheduleLocal maps onto scheduleNotificationAsync's date-trigger shape", async () => {
+    const modules = createFakeModules();
+    const adapter = buildNotificationsAdapter(() => modules);
+    const date = new Date("2026-09-27T10:00:00Z");
+
+    await adapter.scheduleLocal({ identifier: "provisioning-expiry", title: "t", body: "b", date });
+
+    expect(modules.Notifications.scheduleNotificationAsync).toHaveBeenCalledWith({
+      identifier: "provisioning-expiry",
+      content: { title: "t", body: "b" },
+      trigger: { type: "date", date },
+    });
+  });
+
+  test("cancelScheduledLocal forwards the identifier", async () => {
+    const modules = createFakeModules();
+    const adapter = buildNotificationsAdapter(() => modules);
+
+    await adapter.cancelScheduledLocal("provisioning-expiry");
+
+    expect(modules.Notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith(
+      "provisioning-expiry",
+    );
   });
 });

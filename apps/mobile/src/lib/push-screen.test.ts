@@ -73,6 +73,37 @@ describe("notificationsStatusKey", () => {
     expect(notificationsStatusKey(view("on", undefined, true))).toBe("settings.notifications.on");
   });
 
+  // iOS sideload note (free-signing plan, work item 2): tokenFetchFailed on
+  // iOS beats the generic keys, but only in the two shapes a stripped push
+  // entitlement can actually produce (enable() -> unavailable, resume ->
+  // on+unregistered). Android and other phases are untouched.
+  it("tokenFetchFailed on iOS -> sideloaded, for unavailable and on+unregistered only", () => {
+    const failed = (phase: PushPhase, registered: boolean): PushView => ({
+      phase,
+      laptopEnabled: undefined,
+      registered,
+      tokenFetchFailed: true,
+    });
+    expect(notificationsStatusKey(failed("unavailable", false), "ios")).toBe(
+      "settings.notifications.sideloaded",
+    );
+    expect(notificationsStatusKey(failed("on", false), "ios")).toBe(
+      "settings.notifications.sideloaded",
+    );
+    // Android: ordinary keys — a failed token fetch there is a real bug.
+    expect(notificationsStatusKey(failed("unavailable", false), "android")).toBe(
+      "settings.notifications.unavailable",
+    );
+    // Registered means a token existed; the flag must not shadow "on".
+    expect(notificationsStatusKey(failed("on", true), "ios")).toBe("settings.notifications.on");
+    // Other phases keep their own keys even with the flag set.
+    expect(notificationsStatusKey(failed("denied", false), "ios")).toBe(
+      "settings.notifications.denied",
+    );
+    // The sideloaded key exists in STRINGS.
+    expect(STRINGS["settings.notifications.sideloaded"]).toBeDefined();
+  });
+
   it("every returned key exists in STRINGS, for every phase x laptopEnabled x registered", () => {
     for (const phase of ALL_PHASES) {
       for (const laptopEnabled of LAPTOP_ENABLED_VALUES) {
