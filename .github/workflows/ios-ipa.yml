@@ -86,7 +86,6 @@ jobs:
           sparse-checkout: scripts/update-altstore-source.mjs
 
       - name: Refresh AltStore source preview
-        working-directory: source-generator
         run: |
           node scripts/update-altstore-source.mjs
           echo '### AltStore source update required' >> "$GITHUB_STEP_SUMMARY"
