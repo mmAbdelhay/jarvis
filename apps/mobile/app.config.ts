@@ -39,6 +39,10 @@ const config: ExpoConfig = {
   // Architecture is the only architecture from SDK 52 on, nothing to opt into.
   ios: {
     bundleIdentifier: "dev.jarvis.mobile",
+    // Without this the app installs on iPad as a scaled-up iPhone app.
+    // The JS-level portrait lock (app/_layout.tsx) still applies; the
+    // sidecar WebView screen still unlocks on focus.
+    supportsTablet: true,
     infoPlist: {
       NSCameraUsageDescription:
         "Jarvis uses the camera to scan the pairing QR code shown by the desktop app. / يستخدم Jarvis الكاميرا لمسح رمز الاقتران المعروض في تطبيق سطح المكتب.",
