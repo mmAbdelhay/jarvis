@@ -26,14 +26,21 @@ A signature made with a free Apple ID only works on devices tied to that
 Apple ID — nobody can sign once and hand out a working app. Pick one of
 the three routes below.
 
-## Route A: AltStore + AltServer (Mac or Windows nearby)
+## Route A: AltStore Classic + AltServer (Mac or Windows nearby)
 
 Best when the desktop that runs Jarvis is a Mac or Windows machine on
 your home network — refreshes happen over plain Wi-Fi in the background,
 and **Tailscale can stay on**, since no VPN is involved.
 
-1. Install [AltServer](https://altstore.io) on the computer and keep it
-   running (it lives in the menu bar / tray).
+> **AltStore Classic, not AltStore PAL.** The AltStore site leads with
+> PAL, its app-marketplace edition that only exists where the law forces
+> Apple to allow marketplaces (the EU, Japan, Brazil). Ignore it —
+> **AltStore Classic** is the sideloading tool, it works worldwide, and
+> it is what this page means everywhere it says AltStore.
+
+1. Install [AltServer](https://altstore.io) on the computer (pick
+   **AltStore Classic** on the site) and keep it running (it lives in
+   the menu bar / tray).
 2. Install AltStore onto the iPhone/iPad through AltServer (connect the
    device over USB once; enable Wi-Fi sync when it offers).
 3. In AltStore on the device, add the Jarvis source —
