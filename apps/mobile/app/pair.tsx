@@ -30,7 +30,7 @@ import {
   phaseAfterCheck,
   shouldDrainPairingLink,
 } from "@/lib/pair-flow";
-import { pair, type PairOutcome, withHost } from "@/lib/pairing";
+import { type PairOutcome, pairWithFallback, withHost } from "@/lib/pairing";
 import { subscribePairingLink, takePairingLink } from "@/lib/pairing-link-holder";
 import {
   clearPairing,
@@ -69,7 +69,7 @@ type Phase =
   | { kind: "needsHost"; invalid?: boolean }
   | { kind: "confirm"; host: string; port: number; fingerprintTail: string; name?: string }
   | { kind: "waiting" }
-  | { kind: "error"; failure: ScreenFailure }
+  | { kind: "error"; failure: ScreenFailure; detail?: string }
   | { kind: "success" };
 
 // Exhaustive: every `PairOutcome` failure reason and every screen-only
@@ -257,13 +257,13 @@ export default function PairScreen() {
       // for the outcome.
       pendingLinkRef.current = null;
       safeSetPhase({ kind: "waiting" });
-      const outcome = await pair(
+      const outcome = await pairWithFallback(
         { transport, clock: realClock, client: CLIENT_STRING },
         link,
         name,
       );
       if (!outcome.ok) {
-        safeSetPhase({ kind: "error", failure: outcome.reason });
+        safeSetPhase({ kind: "error", failure: outcome.reason, detail: outcome.detail });
         return;
       }
       try {
@@ -531,6 +531,9 @@ export default function PairScreen() {
       {phase.kind === "error" && (
         <>
           <Text style={styles.errorText}>{t(language, errorKey(phase.failure))}</Text>
+          {phase.detail !== undefined && phase.detail !== "" && (
+            <Text style={styles.errorDetail}>{phase.detail}</Text>
+          )}
           <TouchableOpacity
             style={styles.button}
             onPress={phase.failure === "check-failed" ? () => void checkAlreadyPaired() : retry}
@@ -645,6 +648,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: theme.colors.danger,
     fontSize: theme.font.size.md,
+    textAlign: "center",
+  },
+  // PairOutcome.detail — raw OS error text, deliberately small and dim:
+  // a debugging clue, not user copy.
+  errorDetail: {
+    color: theme.colors.textDim,
+    fontSize: theme.font.size.sm,
     textAlign: "center",
   },
 });

@@ -42,6 +42,12 @@ export type PairOutcome =
         | "busy"
         | "timeout"
         | "protocol";
+      /** The transport's last raw error message before the failure, when
+       * one was emitted — shown small under the friendly copy so a device
+       * that can't be debugged any other way (a sideloaded iPhone with no
+       * Xcode attached) still says WHY. Never carries the secret: transport
+       * error text comes from the OS socket layer, which never sees it. */
+      detail?: string;
     };
 
 export type PairDeps = {
@@ -127,6 +133,10 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
     let settled = false;
     let opened = false;
     let timeoutTimer: unknown;
+    // Kept for PairOutcome.detail (see its doc): the transport's error
+    // events are otherwise diagnostic-only, but on a failure the last one
+    // is the only clue a device without a debugger ever surfaces.
+    let lastErrorMessage: string | undefined;
 
     function settle(outcome: PairOutcome): void {
       if (settled) return;
@@ -134,6 +144,9 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
       if (timeoutTimer !== undefined) {
         deps.clock.clearTimeout(timeoutTimer);
         timeoutTimer = undefined;
+      }
+      if (!outcome.ok && lastErrorMessage !== undefined && outcome.detail === undefined) {
+        outcome = { ...outcome, detail: lastErrorMessage };
       }
       resolve(outcome);
     }
@@ -237,9 +250,45 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
         }
         case "error":
           // Diagnostic only (transport.ts): the close that always follows
-          // carries the real code/reason this function acts on.
+          // carries the real code/reason this function acts on. The text
+          // is kept for PairOutcome.detail, nothing more.
+          if (event.message !== "") {
+            lastErrorMessage = event.message;
+          }
           return;
       }
     }
   });
+}
+
+/**
+ * `pair()`, with the pinned-IP fallback (first hit on a sideloaded iPad:
+ * the OS WebSocket's system-trust dial of the DNS `name` failed where the
+ * pinned native socket to the same box works). A system-trust link always
+ * carries the fingerprint too, so when the by-name dial dies without the
+ * server ever answering — reason "unreachable", the socket never opened,
+ * the secret never sent — the same link is retried once, pinned by IP,
+ * name dropped. A success on that path stores a record WITHOUT `name`, so
+ * every later session socket takes the pinned path too instead of
+ * re-failing by name on each reconnect.
+ *
+ * Only "unreachable" falls back: every other failure means the server was
+ * reached (denied/expired/busy consumed the one-shot secret; "fingerprint"
+ * means the wrong box or an interceptor — retrying would be wrong twice).
+ * A fallback failure reports the original by-name failure (its detail
+ * included), except a fingerprint mismatch, which always surfaces.
+ */
+export async function pairWithFallback(
+  deps: PairDeps,
+  link: PairingLink,
+  deviceName: string,
+): Promise<PairOutcome> {
+  const byName = await pair(deps, link, deviceName);
+  if (byName.ok || link.name === undefined) return byName;
+  if (byName.reason !== "unreachable") return byName;
+  if (isUnspecifiedAddress(link.host)) return byName;
+  const { name: _dropped, ...pinnedOnly } = link;
+  const pinned = await pair(deps, pinnedOnly, deviceName);
+  if (pinned.ok) return pinned;
+  return pinned.reason === "fingerprint" ? pinned : byName;
 }
