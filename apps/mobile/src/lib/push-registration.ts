@@ -43,6 +43,13 @@ export type PushView = {
   // i18n.ts, same discipline as every other server-text field in this app.
   serverText?: string;
   language?: Language;
+  // iOS sideload detection (free-signing plan, work item 2): free Apple-ID
+  // signing strips the aps-environment entitlement, so on a sideloaded
+  // build `getExpoPushToken` always throws even though permission was
+  // granted on a real device. This flag records exactly that shape —
+  // permission fine, device fine, token fetch failed — so the Settings
+  // screen can say "sideloaded build" instead of a generic unavailable.
+  tokenFetchFailed?: boolean;
 };
 
 export type PushPrefs = { notifications: boolean; pushRegistered: boolean };
@@ -195,9 +202,13 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
       token = await fetchToken(projectId);
     } catch (error) {
       deps.log(`push: token fetch failed kind=${errorKind(error)}`);
-      setView({ phase: "on", registered: false });
+      setView({ phase: "on", registered: false, tokenFetchFailed: true });
       return;
     }
+    // A fetch that succeeds after an earlier failure (transient native
+    // hiccup, not a stripped entitlement) must not keep showing the
+    // sideload note.
+    if (view.tokenFetchFailed === true) setView({ tokenFetchFailed: undefined });
     // Disposed while the fetch above was in flight — nothing left to
     // register for; a disposed controller must never make its first RPC
     // call after the fact.
@@ -284,7 +295,9 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
   });
 
   async function enable(): Promise<void> {
-    setView({ phase: "requesting" });
+    // `tokenFetchFailed` cleared on every fresh attempt — the sideload
+    // note must reflect this attempt, not a previous one's failure.
+    setView({ phase: "requesting", tokenFetchFailed: undefined });
 
     if (!deps.adapter.isDevice() || deps.adapter.projectId() === undefined) {
       await deps.prefs.set({ notifications: false });
@@ -339,7 +352,10 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
     } catch (error) {
       deps.log(`push: token fetch failed kind=${errorKind(error)}`);
       await deps.prefs.set({ notifications: false });
-      setView({ phase: "unavailable" });
+      // Permission granted, real device, project id present — yet no
+      // token. On iOS that is the sideloaded-build signature (see
+      // PushView.tokenFetchFailed).
+      setView({ phase: "unavailable", tokenFetchFailed: true });
       return;
     }
 
@@ -370,6 +386,7 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
       serverText: undefined,
       language: undefined,
       laptopEnabled: undefined,
+      tokenFetchFailed: undefined,
     });
     // M12 Task 12 minor: tells expo-notifications to stop posting this
     // device's token to Expo's own server on its own, in the background,

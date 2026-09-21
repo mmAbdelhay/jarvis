@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -101,7 +102,10 @@ export default function SettingsScreen() {
   // laptop's own bilingual text verbatim, in its own direction, when
   // present — same discipline as voice.tsx's server-text notice — and
   // falls back to the plain i18n key text (or nothing) otherwise.
-  const notificationsKey = notificationsStatusKey(view.notifications);
+  const notificationsKey = notificationsStatusKey(
+    view.notifications,
+    Platform.OS === "ios" ? "ios" : "android",
+  );
   const notificationsServerText =
     view.notifications.phase === "error" ? view.notifications.serverText : undefined;
   const notificationsText =

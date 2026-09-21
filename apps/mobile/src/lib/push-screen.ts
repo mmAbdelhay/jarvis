@@ -9,8 +9,25 @@ import type { PushView } from "./push-registration";
  * Rule 3: the status line under the switch. `off` shows nothing. `on`
  * checks the laptop-disabled and not-yet-registered cases before falling
  * back to a plain "on"; every other phase maps to its own fixed key.
+ *
+ * iOS sideload case (free-signing plan, work item 2): a token fetch that
+ * failed on a real iOS device with permission granted means the push
+ * entitlement was stripped by free signing — the status line names that
+ * instead of the generic "unavailable"/"pending" it would otherwise show.
+ * `platform` comes from the screen (Platform.OS); Android never takes
+ * this branch, its token fetches fail for ordinary reasons.
  */
-export function notificationsStatusKey(view: PushView): MessageKey | undefined {
+export function notificationsStatusKey(
+  view: PushView,
+  platform?: "ios" | "android",
+): MessageKey | undefined {
+  if (
+    view.tokenFetchFailed === true &&
+    platform === "ios" &&
+    (view.phase === "unavailable" || (view.phase === "on" && view.registered === false))
+  ) {
+    return "settings.notifications.sideloaded";
+  }
   switch (view.phase) {
     case "off":
       return undefined;

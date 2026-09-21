@@ -153,6 +153,13 @@ export const STRINGS = {
     en: "Not available on this device or build",
     ar: "غير متاحة على هذا الجهاز أو هذا الإصدار",
   },
+  // iOS sideloaded builds (AltStore/SideStore/personal-team Xcode): free
+  // signing strips the push entitlement, so the token fetch always fails.
+  // Named explicitly so users don't chase a bug that isn't one.
+  "settings.notifications.sideloaded": {
+    en: "Not available on sideloaded iOS builds — free signing has no push permission. Everything else works.",
+    ar: "غير متاحة في إصدارات iOS المثبّتة جانبيًا — التوقيع المجاني لا يدعم إشعارات الدفع. كل شيء آخر يعمل.",
+  },
   "settings.notifications.pending": {
     en: "Will register when connected",
     ar: "ستُسجَّل عند الاتصال",
