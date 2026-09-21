@@ -92,7 +92,10 @@ android`; this profile produces an APK to sideload. Allow roughly 20 minutes
 for a cloud build. iOS internal distribution needs both the registered UDID
 and a paid Apple Developer Program account for ad hoc signing; TestFlight also
 requires that paid Apple account. The free Expo account alone suffices for an
-Android APK build.
+Android APK build. **Running on an iPhone or iPad without paying** is a
+different path entirely — an unsigned IPA sideloaded with AltStore/SideStore,
+or a personal-team Xcode build over USB — documented in
+[iPhone and iPad](../../docs/guide/ios-install.md).
 
 Install the resulting build on the phone. From `apps/mobile`, run
 `npx expo start --dev-client` and scan its QR with the installed app. Keep the
