@@ -2328,6 +2328,53 @@ describe("createBridge: passkeys (Phase 0)", () => {
     }
   });
 
+  it("a passkey stored across a sign-out is taken back through the full invalidation: a login made with it meanwhile dies too", async () => {
+    const { h, bridge, a, b } = await setup({ webOrigin: ORIGIN });
+    const authenticator = softAuthenticator({ rpId: NAME, origin: ORIGIN });
+    await login(a.handlers, a.socket);
+    const begin = await ask(a, 1, "auth:passkeyRegisterBegin", [{ password: OWNER_TEST_PASSWORD }]);
+    const { challenge } = begin.v as { challenge: string };
+
+    // Hold the next owner.json write: the passkey sits in memory meanwhile.
+    const rename = h.fs.rename;
+    let release: (() => void) | undefined;
+    h.fs.rename = async (from, to) => {
+      if (to === OWNER_PATH && release === undefined) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return rename(from, to);
+    };
+    a.handlers?.onText(
+      reqFrame(2, "auth:passkeyRegisterFinish", [
+        { ...authenticator.register(challenge), label: "Raced" },
+      ]),
+    );
+    for (let i = 0; i < 50 && release === undefined; i++) await flush();
+    expect(release).toBeDefined();
+
+    await bridge.signOutEverywhere();
+    // Another connection logs in with the not-yet-rolled-back credential.
+    const loginBegin = await ask(b, 1, "auth:passkeyBegin");
+    b.handlers?.onText(
+      reqFrame(2, "auth:passkeyFinish", [
+        authenticator.assert((loginBegin.v as { challenge: string }).challenge),
+      ]),
+    );
+    await flush();
+    release?.();
+    for (let i = 0; i < 50; i++) await flush();
+
+    expect(a.socket.sent).toContainEqual(expect.objectContaining({ id: 2, code: "forbidden" }));
+    expect(bridge.ownerStatus().passkeys).toEqual([]);
+    b.socket.sent = [];
+    expect(await ask(b, 3, "projects:list")).toMatchObject({ t: "err", id: 3, code: "locked" });
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain('signed-out-all reason="passkey-deleted"');
+    expect(lines).not.toContain("passkey-added");
+  });
+
   it("registers over one connection, refreshes desktop Settings, logs in with it over another, and a deleted passkey stops working", async () => {
     const { h, bridge, a, b } = await setup({ webOrigin: ORIGIN });
     const authenticator = softAuthenticator({ rpId: NAME, origin: ORIGIN });

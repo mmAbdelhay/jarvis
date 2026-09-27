@@ -50,6 +50,7 @@ async function makeHarness(
   const audit = { record: (event: AuditEvent) => events.push(event) };
   const log = vi.fn<(line: string) => void>();
   const onPasskeyAdded = vi.fn();
+  const removePasskey = vi.fn((credentialId: string) => owner.deletePasskey(credentialId));
   const webOrigin = "webOrigin" in options ? options.webOrigin : ORIGIN;
   const rpId = "rpId" in options ? options.rpId : RP_ID;
   const auth = createOwnerAuth({
@@ -64,8 +65,20 @@ async function makeHarness(
     rpId: () => rpId,
     webOrigin: () => webOrigin,
     onPasskeyAdded,
+    removePasskey,
   });
-  return { clock, fs, owner, makeOwner, sessions, auth, events, log, onPasskeyAdded };
+  return {
+    clock,
+    fs,
+    owner,
+    makeOwner,
+    sessions,
+    auth,
+    events,
+    log,
+    onPasskeyAdded,
+    removePasskey,
+  };
 }
 
 type Harness = Awaited<ReturnType<typeof makeHarness>>;
@@ -136,6 +149,15 @@ describe("passkeys: unsupported until the relying party is known", () => {
       ).toEqual({ kind: "error", code: "unsupported" });
     },
   );
+});
+
+describe("passkeys: relying party", () => {
+  it("answers the certificate name lower-cased as the rpId", async () => {
+    const h = await makeHarness({ rpId: RP_ID.toUpperCase() });
+    expect(
+      answerOf<{ rpId: string }>(await h.auth.handle("auth:passkeyBegin", {}, ctx())).rpId,
+    ).toBe(RP_ID);
+  });
 });
 
 describe("passkeys: registration", () => {
@@ -272,6 +294,40 @@ describe("passkeys: registration", () => {
       ),
     ).toEqual(FORBIDDEN);
     expect(h.owner.listPasskeys()).toEqual([]);
+    expect(h.onPasskeyAdded).not.toHaveBeenCalled();
+  });
+});
+
+describe("passkeys: registration across an invalidation", () => {
+  it("passkeyRegisterBegin is refused when an invalidation lands while the password is checked", async () => {
+    const h = await makeHarness();
+    const context = await unlocked(h);
+    const pending = h.auth.handle("auth:passkeyRegisterBegin", { password: PASSWORD }, context);
+    h.auth.invalidate();
+    expect(await pending).toEqual(FORBIDDEN);
+  });
+
+  it("a passkey stored while an invalidation lands is taken back out through removePasskey", async () => {
+    const h = await makeHarness();
+    const context = await unlocked(h);
+    const authenticator = softAuthenticator({ rpId: RP_ID, origin: ORIGIN });
+    const options = answerOf<{ challenge: string }>(
+      await h.auth.handle("auth:passkeyRegisterBegin", { password: PASSWORD }, context),
+    );
+    const pending = h.auth.handle(
+      "auth:passkeyRegisterFinish",
+      { ...authenticator.register(options.challenge), label: "Raced" },
+      context,
+    );
+    // addPasskey has stored it in memory and is waiting on its write.
+    expect(h.owner.listPasskeys()).toHaveLength(1);
+    h.auth.invalidate();
+
+    expect(await pending).toEqual(FORBIDDEN);
+    await h.owner.flushed();
+    expect(h.removePasskey).toHaveBeenCalledWith(authenticator.credentialId);
+    expect(h.owner.listPasskeys()).toEqual([]);
+    expect(h.events.some((event) => event.kind === "passkey-added")).toBe(false);
     expect(h.onPasskeyAdded).not.toHaveBeenCalled();
   });
 });

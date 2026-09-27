@@ -437,6 +437,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       ownerVersion += 1;
       emit();
     },
+    removePasskey: (credentialId) => deletePasskey(credentialId),
     audit: auditLog,
     log: deps.log,
     lockFamily(familyId, reason) {

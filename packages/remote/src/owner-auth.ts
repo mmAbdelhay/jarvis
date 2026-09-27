@@ -139,6 +139,13 @@ export type OwnerAuthDeps = {
   webOrigin?(): string | undefined;
   /** A passkey was just registered remotely (desktop Settings refreshes). */
   onPasskeyAdded?(): void;
+  /**
+   * Takes back a passkey stored across an invalidation. The bridge runs its
+   * full passkey delete (every session revoked, every connection locked,
+   * sidecars torn down), so a login made with the credential while it was
+   * briefly stored dies with it. Defaults to `owner.deletePasskey`.
+   */
+  removePasskey?(credentialId: string): Promise<unknown>;
 };
 
 const AUTH_CHANNEL_SET: ReadonlySet<string> = new Set(AUTH_CHANNELS);
@@ -224,7 +231,9 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       return undefined;
     }
     if (url.protocol !== "https:" || url.hostname !== rpId.toLowerCase()) return undefined;
-    return { rpId, origin: url.origin };
+    // The hostname is already lower case: the rpIdHash a browser signs is
+    // over the lower-case name, whatever case the certificate carries.
+    return { rpId: url.hostname, origin: url.origin };
   }
 
   /** `undefined` when both the running and the waiting slots are full. */
@@ -414,11 +423,16 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     // The new count is in memory the moment this is called (no await
     // between the lookup above and here), so a concurrent assertion of the
     // same credential is checked against it; only the write lands later.
+    // A failed write is logged and the login goes ahead: the count holds
+    // in memory, but after a restart the older on-disk count is back in
+    // force, re-opening the window a cloned authenticator could use.
     try {
       await owner.updateSignCount(passkey.credentialId, verified.signCount);
     } catch {
       log("owner-auth: persisting a passkey sign count failed");
     }
+    // A lockout that started while the count was written refuses it.
+    if (!limits.allow(device.id, source)) return refuseLockedOut(device.id, source);
     return openSession(context, startedAt, "passkey");
   }
 
@@ -501,10 +515,12 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       return INTERNAL;
     }
     // An invalidation (password change, sign out everywhere) that landed
-    // while the passkey was written wins: the passkey is taken back out.
+    // while the passkey was written wins: the passkey is taken back out,
+    // through the same invalidation a desktop delete runs.
     if (generation !== startedAt) {
       try {
-        await owner.deletePasskey(verified.credentialId);
+        if (deps.removePasskey !== undefined) await deps.removePasskey(verified.credentialId);
+        else await owner.deletePasskey(verified.credentialId);
       } catch {
         log("owner-auth: removing a stale passkey failed");
       }
