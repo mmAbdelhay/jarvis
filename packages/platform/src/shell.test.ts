@@ -193,6 +193,19 @@ describe("createShellManager", () => {
     expect(shells[0]?.resized).toEqual([[120, 40]]);
   });
 
+  // Bug 8: a remote (phone) client renders at the pty's real size rather
+  // than guessing from its own screen — the snapshot is where it learns
+  // that size on attach.
+  it("includes the last resize's cols/rows in the snapshot", () => {
+    const { instance } = manager();
+    instance.start("tab-1", "/p/a");
+    expect(instance.snapshot("tab-1")).toEqual({ text: "", end: 0 });
+
+    instance.resize("tab-1", 120, 40);
+
+    expect(instance.snapshot("tab-1")).toEqual({ text: "", end: 0, cols: 120, rows: 40 });
+  });
+
   it("ignores a write, resize or kill for a tab with no shell", () => {
     const { instance } = manager();
 

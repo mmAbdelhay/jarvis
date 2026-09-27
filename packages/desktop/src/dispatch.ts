@@ -313,6 +313,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     bookmarks,
     settings,
   } = deps;
+  // Bug 8: the desktop owns a pane/session's terminal size once it has set
+  // one. A phone's `terminal:resize`/`session:resize` otherwise resizes the
+  // one shared pty to phone width, squeezing the desktop's own view of it —
+  // remembering which ids the desktop itself has already sized is what lets
+  // a remote resize keep applying only to a pane/session opened solely from
+  // the phone (never sized by the desktop). "Desktop" vs "remote" comes
+  // from `origin`, which the dispatch path derives itself and a payload
+  // cannot spoof — never a flag read out of `args`.
+  const desktopSizedPanes = new Set<string>();
+  const desktopSizedSessions = new Set<string>();
   return {
     "setup:check": () => setup.check(),
     "setup:install": ([id]) => setup.install(id),
@@ -447,9 +457,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "voice:target": ([sessionId]) => {
       deps.voice.setTarget(typeof sessionId === "string" ? sessionId : undefined);
     },
-    "session:resize": ([sessionId, cols, rows]) => {
+    "session:resize": ([sessionId, cols, rows], origin) => {
       if (typeof sessionId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
+      if (origin.kind === "remote") {
+        // The desktop already claimed this session's size — a remote
+        // resize is dropped rather than shrinking the pty to phone width.
+        if (desktopSizedSessions.has(sessionId)) return;
+      } else {
+        desktopSizedSessions.add(sessionId);
+      }
       sessions.resize(sessionId, cols, rows);
     },
     "git:changes": ([sessionId]) => git.changes(sessionId as string),
@@ -482,6 +499,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       deps.terminal.close(id);
       deps.followers.unfollow(id, DESKTOP_OWNER);
       workspace.close(id);
+      // Bug 8: a closed tab's id is free to be a fresh pane again (a new
+      // tab can reuse workspace ids over a long session) — forgetting it
+      // here is what lets that fresh pane start unowned rather than
+      // inheriting a stale "the desktop already sized this" from the tab
+      // that used to have this id.
+      desktopSizedPanes.delete(id);
     },
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
@@ -818,6 +841,9 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     },
     "terminal:closePane": ([paneKey]) => {
       terminal.closePane(paneKey as string);
+      // Bug 8: same reasoning as workspace:close above, for a split's own
+      // pane key rather than its tab's.
+      desktopSizedPanes.delete(paneKey as string);
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(
@@ -832,9 +858,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },
-    "terminal:resize": ([tabId, cols, rows]) => {
+    "terminal:resize": ([tabId, cols, rows], origin) => {
       if (typeof tabId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
+      if (origin.kind === "remote") {
+        // The desktop already claimed this pane's size — see the comment
+        // by `desktopSizedPanes`'s declaration.
+        if (desktopSizedPanes.has(tabId)) return;
+      } else {
+        desktopSizedPanes.add(tabId);
+      }
       terminal.resize(tabId, cols, rows);
     },
     "terminal:settings": () => terminal.settings(),

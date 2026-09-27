@@ -70,6 +70,12 @@ export class SessionManager {
   // Never trimmed by #compactLog: `end` must stay the true total even once
   // retention has cut `text` down to DEAD_LOG_CHARS.
   readonly #emitted = new Map<string, number>();
+  // Bug 8: the last cols/rows a resize actually set for this session — kept
+  // forever, same lifetime as #logs/#emitted, so a client attaching well
+  // after the session started (or ended) still learns its real size rather
+  // than guessing. Populated only by `resize`, and only for a session
+  // #processes still knows about — see that method's own comment.
+  readonly #sizes = new Map<string, { cols: number; rows: number }>();
   readonly #outputListeners = new Set<(output: SessionOutput) => void>();
   // Tasks waiting for their session to finish starting up, with the timer
   // that will deliver them. Cleared on delivery and on session exit, so a
@@ -192,7 +198,13 @@ export class SessionManager {
    * after a session has ended.
    */
   resize(id: string, cols: number, rows: number): void {
-    this.#processes.get(id)?.resize?.(cols, rows);
+    const handle = this.#processes.get(id);
+    if (handle === undefined) return;
+    // Recorded even when `handle.resize` itself is absent (a piped process
+    // with no pty): the caller's own idea of this session's size is real
+    // regardless of whether there was a terminal underneath to tell.
+    this.#sizes.set(id, { cols, rows });
+    handle.resize?.(cols, rows);
   }
 
   kill(id: string): void {
@@ -258,7 +270,12 @@ export class SessionManager {
    * as `log`.
    */
   snapshot(id: string): StreamSnapshot {
-    return { text: this.log(id), end: this.#emitted.get(id) ?? 0 };
+    const size = this.#sizes.get(id);
+    return {
+      text: this.log(id),
+      end: this.#emitted.get(id) ?? 0,
+      ...(size === undefined ? {} : size),
+    };
   }
 
   #onOutput(id: string, chunk: string): void {

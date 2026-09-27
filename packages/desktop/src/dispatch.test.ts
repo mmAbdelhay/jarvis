@@ -348,6 +348,78 @@ describe("dispatch table: sessions and git", () => {
     expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 80, 24);
   });
 
+  // Bug 8: the desktop owns a pane/session's terminal size once it has set
+  // one — a phone's own resize must not squeeze the desktop's pane back
+  // down to phone width. "Desktop" vs "remote" comes from the dispatch
+  // path's own `origin` (never spoofable via a payload field), never a
+  // flag the caller supplies.
+  describe("terminal:resize / session:resize ownership (bug 8)", () => {
+    it("ignores a remote resize once the desktop has sized this pane", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(1);
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 120, 40);
+    });
+
+    it("applies a remote resize to a pane the desktop has never sized", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(1);
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 40, 100);
+    });
+
+    it("still applies a later desktop resize after an earlier remote one", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+      await call(table, "terminal:resize", "t1", 120, 40);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(2);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t1", 120, 40);
+    });
+
+    it("ignores a remote session:resize once the desktop has sized this session", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "session:resize", "s1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "session:resize", "s1", 40, 100);
+
+      expect(deps.sessions.resize).toHaveBeenCalledTimes(1);
+      expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 120, 40);
+    });
+
+    it("applies a remote session:resize to a session the desktop has never sized", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "session:resize", "s1", 40, 100);
+
+      expect(deps.sessions.resize).toHaveBeenCalledTimes(1);
+      expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 40, 100);
+    });
+
+    it("tracks ownership separately per pane/session id", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t2", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(2);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(1, "t1", 120, 40);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t2", 40, 100);
+    });
+  });
+
   // Replaces ipc.test.ts's "passes the argument, not the event" source grep:
   // the table receives args only, so there is no event to pass by mistake.
   it("session:transcript and session:resume receive the arguments, not an event", async () => {

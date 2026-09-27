@@ -595,6 +595,30 @@ describe("SessionManager", () => {
       expect(snap.text.length).toBe(48 * 1024);
       expect(snap.end).toBe(totalEmitted);
     });
+
+    // Bug 8: a remote (phone) client renders at the pty's real size rather
+    // than guessing from its own screen — the snapshot is where it learns
+    // that size on attach.
+    it("omits cols/rows until a resize has landed", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+
+      expect(manager.snapshot(session.id)).toEqual({ text: "", end: 0 });
+    });
+
+    it("includes the last resize's cols/rows once one has landed", () => {
+      const manager = new SessionManager(spawner);
+      const session = manager.start({ project: "acme", projectPath: "/tmp/acme", agent });
+
+      manager.resize(session.id, 120, 40);
+
+      expect(manager.snapshot(session.id)).toEqual({
+        text: "",
+        end: 0,
+        cols: 120,
+        rows: 40,
+      });
+    });
   });
 });
 

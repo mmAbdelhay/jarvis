@@ -263,6 +263,14 @@ export type SessionOutput = {
 export type StreamSnapshot = {
   text: string;
   end: number;
+  /** The pty's current size, present only once a resize (from either the
+   *  desktop or a phone) has actually landed for this session/pane — see
+   *  SessionManager.resize / ShellManager.resize. A remote (phone) client
+   *  uses this to render at the pty's real size instead of guessing from
+   *  its own screen (bug 8); omitted rather than a guessed default so a
+   *  client can tell "not yet known" apart from a real size. */
+  cols?: number;
+  rows?: number;
 };
 
 export type StartInput = {

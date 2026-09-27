@@ -105,6 +105,14 @@ type Session = {
    *  retained tail (ruling 12) — `write`/`resize` no-op, and `start` on this
    *  key spawns a new process rather than treating it as already running. */
   exited: boolean;
+  /** The last size a resize actually set for this pane (bug 8) — undefined
+   *  until the first one lands. Named `termSize`, not `size`, to keep it
+   *  distinct from the retained-log byte count above. Carried across an
+   *  exited pane's restart the same way `chunks`/`emitted` are, and wiped
+   *  by `kill` along with the rest of the entry; a remote (phone) client
+   *  uses it to render at the pty's real size instead of guessing from its
+   *  own screen. */
+  termSize?: { cols: number; rows: number };
 };
 
 /** Appends `chunk` to `session`, trimming from the front (SessionManager's
@@ -182,6 +190,7 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
               size: existing.size,
               emitted: existing.emitted,
               exited: false,
+              ...(existing.termSize === undefined ? {} : { termSize: existing.termSize }),
             };
       sessions.set(tabId, session);
 
@@ -225,7 +234,11 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
 
     snapshot(tabId) {
       const session = sessions.get(tabId);
-      return { text: (session?.chunks ?? []).join(""), end: session?.emitted ?? 0 };
+      return {
+        text: (session?.chunks ?? []).join(""),
+        end: session?.emitted ?? 0,
+        ...(session?.termSize === undefined ? {} : session.termSize),
+      };
     },
 
     has(tabId) {
@@ -248,6 +261,7 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
     resize(tabId, cols, rows) {
       const session = sessions.get(tabId);
       if (session === undefined || session.exited) return;
+      session.termSize = { cols, rows };
       session.process.resize(cols, rows);
     },
 
