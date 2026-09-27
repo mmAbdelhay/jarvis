@@ -10,6 +10,7 @@
 // locked until the owner logs in over the auth:* channels below. A v1 app
 // gets the version-mismatch close instead of a silently locked connection.
 export const PROTOCOL_VERSION = 2;
+export const NATIVE_ORIGIN = "jarvis-app://native";
 
 export const MAX_TEXT_FRAME_BYTES = 1_048_576;
 export const MAX_PAIR_FRAME_BYTES = 4_096;

@@ -12,7 +12,7 @@
 // a scriptable fake — the mobile test suite runs with no RN renderer and
 // no real network (global-constraints.md).
 
-import { isHostname } from "@jarvis/wire";
+import { isHostname, NATIVE_ORIGIN } from "@jarvis/wire";
 import type { Transport, TransportSocket, Trust } from "./transport";
 
 export type WebSocketLike = {
@@ -28,7 +28,11 @@ export type WebSocketLike = {
   onerror: ((event: { message?: string }) => void) | null;
 };
 
-export type WebSocketFactory = (url: string) => WebSocketLike;
+export type WebSocketFactory = (
+  url: string,
+  protocols?: string | string[],
+  options?: { headers: { Origin: string } },
+) => WebSocketLike;
 
 // The W3C/RFC 6455 `readyState` for an open socket — the only state `send`
 // is allowed to actually forward data in.
@@ -114,7 +118,10 @@ export function createSystemTransport(factory: WebSocketFactory): Transport {
         };
       }
 
-      const ws = factory(url);
+      // RN's WebSocket otherwise sends an Origin derived from the URL on
+      // both platforms (the bridge's own origin), which the bridge refuses;
+      // an explicit `Origin` header replaces it (task-10 report).
+      const ws = factory(url, undefined, { headers: { Origin: NATIVE_ORIGIN } });
       let closed = false;
       let droppedNonStringFrames = 0;
 
@@ -182,8 +189,13 @@ export function createSystemTransport(factory: WebSocketFactory): Transport {
   };
 }
 
+// React Native's WebSocket constructor takes a third `options` argument
+// (Libraries/WebSocket/WebSocket.js) that the DOM lib typing lacks.
+type ReactNativeWebSocketConstructor = new (...args: Parameters<WebSocketFactory>) => WebSocketLike;
+
 // The real transport: React Native's own global `WebSocket` (the OS trust
 // store) — no pin, no native module, no per-socket bypass.
-export const systemTransport: Transport = createSystemTransport(
-  (url) => new globalThis.WebSocket(url) as unknown as WebSocketLike,
-);
+export const systemTransport: Transport = createSystemTransport((url, protocols, options) => {
+  const ReactNativeWebSocket = globalThis.WebSocket as unknown as ReactNativeWebSocketConstructor;
+  return new ReactNativeWebSocket(url, protocols, options);
+});

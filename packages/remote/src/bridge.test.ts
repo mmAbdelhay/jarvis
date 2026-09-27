@@ -137,6 +137,7 @@ function makeHarness(
     handle?: RequestHandler;
     authorizeKey?: AuthorizeKey;
     createProxy?: (registry: SidecarRegistry) => SidecarProxy | undefined;
+    webOrigin?: () => string | undefined;
     auditPolicy?: (channel: string) => AuditPolicy;
     /** Phase 0: every harness starts with an owner password already set
      *  (the bridge never listens without one) unless this is false. */
@@ -191,6 +192,7 @@ function makeHarness(
     listen,
     loadCertificate,
     createProxy,
+    webOrigin: opts.webOrigin,
     handle,
     policies: new Map([
       ["metrics:update", { kind: "latest" as const }],
@@ -336,6 +338,19 @@ describe("createBridge: off by default", () => {
 
     h.listenCalls[0]?.log("test line");
     expect(h.log).toHaveBeenCalledWith("test line");
+  });
+
+  it("threads the current web Origin getter to the listener", async () => {
+    let origin: string | undefined = "https://mac.tail.ts.net:4318";
+    const h = makeHarness({ webOrigin: () => origin });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+
+    await bridge.apply(ON_127());
+
+    expect(h.listenCalls[0]?.webOrigin?.()).toBe("https://mac.tail.ts.net:4318");
+    origin = undefined;
+    expect(h.listenCalls[0]?.webOrigin?.()).toBeUndefined();
   });
 
   it("an IPv4-mapped bindAddress listens on plain IPv4", async () => {

@@ -13,6 +13,7 @@ import type { Listen, ListenOptions, Listener } from "./bridge.js";
 import { describeError } from "./io.js";
 import type { SocketLike } from "./io.js";
 import { MAX_TEXT_FRAME_BYTES } from "./protocol.js";
+import { originAllowed } from "./origin.js";
 import { parseProxyPath } from "./proxy-rewrite.js";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -137,6 +138,10 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
           options.proxy.handleUpgrade(request, socket, head);
           return;
         }
+        socket.destroy();
+        return;
+      }
+      if (!originAllowed(request.headers.origin, options.webOrigin?.())) {
         socket.destroy();
         return;
       }

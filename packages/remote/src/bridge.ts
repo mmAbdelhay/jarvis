@@ -86,6 +86,10 @@ export type ListenOptions = {
   // config (rule 5) — `listenTls` routes `/s/...` requests/upgrades to it
   // and destroys everything else under that path when it is `undefined`.
   proxy: SidecarProxy | undefined;
+  // The web client's origin while the web gate is on, read per upgrade;
+  // `undefined` (or an absent getter) means only no-Origin and the native
+  // Origin pass the `/rpc` and `/pair` check (origin.ts).
+  webOrigin?: () => string | undefined;
   onSocket(kind: "rpc" | "pair", socket: SocketLike, remoteAddress: string): SessionHandlers;
   log(line: string): void;
 };
@@ -205,6 +209,7 @@ export type BridgeDeps = {
   listen: Listen;
   loadCertificate(config: CertificateConfig): Promise<CertificateMaterial>;
   createProxy(registry: SidecarRegistry): SidecarProxy | undefined;
+  webOrigin?: () => string | undefined;
   handle: RequestHandler;
   policies: ChannelPolicies;
   authorizeKey: AuthorizeKey;
@@ -717,6 +722,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             cert: material.cert,
             key: material.key,
             proxy,
+            webOrigin: deps.webOrigin ?? (() => undefined),
             onSocket,
             log: deps.log,
           });

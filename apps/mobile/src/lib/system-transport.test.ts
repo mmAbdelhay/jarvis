@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { NATIVE_ORIGIN } from "@jarvis/wire";
+import { describe, expect, it, vi } from "vitest";
 import { createSystemTransport } from "./system-transport";
 import type { WebSocketFactory, WebSocketLike } from "./system-transport";
 import type { TransportEvent } from "./transport";
@@ -44,6 +45,14 @@ function setup() {
 }
 
 describe("createSystemTransport: accepted target", () => {
+  it("passes the native Origin in React Native's WebSocket options", () => {
+    const factory = vi.fn<WebSocketFactory>(() => new FakeWebSocket());
+    createSystemTransport(factory).open(SYSTEM_URL, { kind: "system" }, () => {});
+
+    expect(factory).toHaveBeenCalledWith(SYSTEM_URL, undefined, {
+      headers: { Origin: NATIVE_ORIGIN },
+    });
+  });
   it("routes onopen/onmessage(string)/onclose to onEvent, and constructs exactly one real socket", () => {
     const { transport, sockets } = setup();
     const events: TransportEvent[] = [];
