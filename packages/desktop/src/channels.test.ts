@@ -61,6 +61,7 @@ describe("the channel table", () => {
       "voice:speaking",
       "workspace:devtoolsClosed",
       "workspace:devtoolsDockChosen",
+      "workspace:tabRename",
       "workspace:update",
     ]);
   });

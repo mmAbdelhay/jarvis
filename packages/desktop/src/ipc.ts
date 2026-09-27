@@ -511,6 +511,11 @@ export type RendererApi = {
   /** A tab's DevTools closed without the renderer asking: the user closed
    *  their undocked window. */
   onDevToolsClosed(cb: (tabId: string) => void): void;
+  /** Pops a chip's native Rename/Reload/Close menu at (x, y) — the click's
+   *  own clientX/clientY. Reload and Close run in main directly; Rename
+   *  arrives back on onTabRename so the renderer's own inline input opens. */
+  tabMenu(tabId: string, x: number, y: number): Promise<void>;
+  onTabRename(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;

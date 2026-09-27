@@ -135,13 +135,14 @@ export type SidecarPublisher = {
       };
 };
 
-/** The four handlers that hold a BrowserWindow, the screen, a native dialog
+/** The five handlers that hold a BrowserWindow, the screen, a native dialog
  *  or a native menu. They can never run for a phone, so they never enter the
  *  table — desktop-only.ts registers them. */
 export type ElectronBoundChannel =
   | "workspace:bounds"
   | "workspace:devtoolsBounds"
   | "workspace:devtoolsDockMenu"
+  | "workspace:tabMenu"
   | "dialog:pickFiles";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;

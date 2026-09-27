@@ -2156,6 +2156,13 @@ app.whenReady().then(async () => {
       buildMenu: (template) => Menu.buildFromTemplate(template),
       workspace,
       chooseDock: (dock) => broadcast.local("workspace:devtoolsDockChosen", dock),
+      // Bug 2: the tab menu's Reload and Close run the same dispatch table
+      // entries workspace:reload/workspace:close already do (terminal
+      // close, follower unfollow, desktopSizedPanes cleanup for close) —
+      // called directly rather than duplicated here.
+      reloadTab: (tabId) => void dispatch["workspace:reload"]([tabId], DESKTOP_ORIGIN),
+      closeTab: (tabId) => void dispatch["workspace:close"]([tabId], DESKTOP_ORIGIN),
+      startTabRename: (tabId) => broadcast.local("workspace:tabRename", tabId),
       language: PRIMARY_LANGUAGE,
     });
     workspace.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));

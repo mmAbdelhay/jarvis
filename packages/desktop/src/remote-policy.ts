@@ -76,6 +76,10 @@ export const CHANNEL_POLICY = {
   "workspace:devtoolsBounds": "desktop-only",
   "workspace:devtoolsDock": "desktop-only",
   "workspace:devtoolsDockMenu": "desktop-only",
+  // Bug 2: pops a native menu over the LAPTOP's own window at a laptop
+  // screen coordinate — the same class of laptop-screen concern
+  // workspace:devtoolsDockMenu is desktop-only for.
+  "workspace:tabMenu": "desktop-only",
   "workspace:visible": "desktop-only",
   "workspace:hideAll": "desktop-only",
   "workspace:pip": "desktop-only",

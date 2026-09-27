@@ -140,6 +140,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     showDevToolsDockMenu: vi.fn(async () => {}),
     onDevToolsDockChosen: vi.fn(),
     onDevToolsClosed: vi.fn(),
+    tabMenu: vi.fn(async () => {}),
+    onTabRename: vi.fn(),
     attachTerminal: vi.fn(async () => ""),
     terminalPanes: vi.fn(async () => []),
     terminalSnapshot: vi.fn(async () => ({ text: "", end: 0 })),

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { currentView, showView, syncHostedView } from "./views.js";
+import { currentView, showView } from "./views.js";
 
 // Minimal harness, same shape as app.test.ts's: lay down the ids showView
 // touches and nothing else.
@@ -104,27 +104,6 @@ describe("showView", () => {
     showView("session");
 
     expect(calls).toEqual([false, false]);
-  });
-
-  // Bug 2: a tab's right-click menu is a DOM popover, but hosted tabs
-  // (web/editor/database/cluster/chat) paint above it as a native view, so
-  // the menu was invisible underneath. syncHostedView must sink the hosted
-  // view for as long as the menu is open, the same way it already does for
-  // the history overlay.
-  it("hides the hosted view while a tab's context menu is open, and restores it once closed", () => {
-    const calls = stubBridge();
-    showView("workspace");
-
-    const menu = document.createElement("div");
-    menu.className = "workspace-tab-menu";
-    menu.hidden = false;
-    document.body.appendChild(menu);
-    syncHostedView();
-    expect(calls.at(-1)).toBe(false);
-
-    menu.hidden = true;
-    syncHostedView();
-    expect(calls.at(-1)).toBe(true);
   });
 
   // app.test.ts's harness does not stub the bridge, and a missing view

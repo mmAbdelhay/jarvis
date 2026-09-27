@@ -7,7 +7,8 @@
 // tsc error, never a channel a phone silently never receives (or, worse,
 // silently does). "desktop-only" channels are this window's own chrome or
 // name a local child process a phone never started (setup:output,
-// voice:hotkeys, the two DevTools notices, remote:update); every other
+// voice:hotkeys, the two DevTools notices, the tab-rename notice,
+// remote:update); every other
 // channel gets a real ChannelPolicy.
 //
 // The three stream channels (terminal:data, session:output, docker:log)
@@ -92,6 +93,8 @@ export const REMOTE_PUSH_POLICY: {
   // This window's own chrome — a phone has no DevTools dock to be told about.
   "workspace:devtoolsDockChosen": "desktop-only",
   "workspace:devtoolsClosed": "desktop-only",
+  // A phone has no chip of its own on the laptop's tab strip to rename.
+  "workspace:tabRename": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",

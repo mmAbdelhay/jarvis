@@ -61,10 +61,5 @@ export function syncHostedView(): void {
   // Optional-chained: several renderer test harnesses run with no bridge at
   // all, and a route change must not throw there.
   const historyOpen = document.getElementById("history-overlay")?.hasAttribute("hidden") === false;
-  // A tab's right-click menu is a DOM popover, but the hosted view paints
-  // above the whole renderer regardless — same problem the history overlay
-  // solves above. Any open `.workspace-tab-menu` (there's at most one at a
-  // time) must sink the hosted view the same way.
-  const tabMenuOpen = document.querySelector(".workspace-tab-menu:not([hidden])") !== null;
-  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && !historyOpen && !tabMenuOpen);
+  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && !historyOpen);
 }

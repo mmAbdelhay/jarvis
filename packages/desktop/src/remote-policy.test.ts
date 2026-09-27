@@ -31,6 +31,7 @@ describe("remote policy", () => {
     "workspace:devtoolsBounds",
     "workspace:devtoolsDock",
     "workspace:devtoolsDockMenu",
+    "workspace:tabMenu",
     "workspace:visible",
     "workspace:hideAll",
     "workspace:pip",

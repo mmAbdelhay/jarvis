@@ -19,7 +19,6 @@ import {
   reportWorkspaceBounds,
   setBrowserSnapshot,
 } from "./workspace.js";
-import { showView } from "./views.js";
 
 type Recorded = { call: string; args: unknown[] };
 
@@ -160,6 +159,10 @@ function harness(): Recorded[] {
     },
     onDevToolsClosed: (cb: (tabId: string) => void) => {
       devToolsHooks.closed = cb;
+    },
+    tabMenu: record("tabMenu"),
+    onTabRename: (cb: (tabId: string) => void) => {
+      tabMenuHooks.rename = cb;
     },
     setWorkspaceVisible: record("setWorkspaceVisible"),
     hideAllTabs: record("hideAllTabs"),
@@ -798,75 +801,49 @@ describe("workspace chrome", () => {
     expect(chip?.title).toBe(MESSAGES.tabRenameHint(PRIMARY_LANGUAGE));
   });
 
-  it("opens a Rename/Reload/Close menu on right-click", () => {
+  // Bug 2: a DOM popover menu used to open here, but a hosted tab's
+  // WebContentsView paints above the whole renderer regardless of any
+  // popover's top layer — the hosted view had to be sunk to show it, which
+  // dismissed the popover in the same stroke. A native Electron menu (main's
+  // desktop-only.ts) has no such problem, so the chip only asks main to pop
+  // it at the click's own point.
+  it("asks main for the tab menu at the click's own point, on right-click", () => {
     renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
     const chip = document.querySelector<HTMLElement>(".workspace-tab");
-    const menu = chip?.querySelector<HTMLElement>(".workspace-tab-menu");
-    expect(menu?.hidden).toBe(true);
 
-    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 42, clientY: 24 }));
 
-    expect(menu?.hidden).toBe(false);
-    const labels = [...(menu?.querySelectorAll(".workspace-tab-menu-item") ?? [])].map(
-      (item) => item.textContent,
-    );
-    expect(labels).toEqual([
-      MESSAGES.tabMenuRename(PRIMARY_LANGUAGE),
-      MESSAGES.tabMenuReload(PRIMARY_LANGUAGE),
-      MESSAGES.tabMenuClose(PRIMARY_LANGUAGE),
-    ]);
+    expect(calls).toContainEqual({ call: "tabMenu", args: ["tab-1", 42, 24] });
   });
 
-  // Bug 2: the menu is a DOM popover, but hosted tabs (web/editor/database/
-  // cluster/chat) paint above it as a native WebContentsView, so it was
-  // invisible underneath. The hosted view must sink for as long as the menu
-  // is open and come back once it closes.
-  it("sinks the hosted view while the tab's context menu is open, and restores it on close", () => {
-    showView("workspace");
-    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
-    const chip = document.querySelector<HTMLElement>(".workspace-tab");
-    const visibility = (): unknown[] =>
-      calls.filter((call) => call.call === "setWorkspaceVisible").map((call) => call.args[0]);
-
-    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
-    expect(visibility().at(-1)).toBe(false);
-
-    const items = [
-      ...(chip?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
-    ];
-    items.find((item) => item.textContent === MESSAGES.tabMenuReload(PRIMARY_LANGUAGE))?.click();
-    expect(visibility().at(-1)).toBe(true);
-  });
-
-  it("opens the inline rename input from the context menu's Rename item", () => {
+  it("starts the inline rename input once main pushes back this tab's rename request", () => {
     renderWorkspace({ tabs: [tab({ title: "Page" })], activeTabId: "tab-1" });
     const chip = document.querySelector<HTMLElement>(".workspace-tab");
-    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    const menu = chip?.querySelector<HTMLElement>(".workspace-tab-menu");
-    const rename = [
-      ...(menu?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
-    ].find((item) => item.textContent === MESSAGES.tabMenuRename(PRIMARY_LANGUAGE));
 
-    rename?.click();
+    tabMenuHooks.rename?.("tab-1");
 
-    expect(menu?.hidden).toBe(true);
-    expect(chip?.querySelector(".workspace-tab-rename")).not.toBeNull();
+    const input = chip?.querySelector<HTMLInputElement>(".workspace-tab-rename");
+    expect(input).not.toBeNull();
+    // tabChips (and each chip's own `renaming` flag) are module state that
+    // outlives this test — same reason the double-click rename test below
+    // finishes its own input — so a later test's chip for this same id must
+    // not still be mid-rename.
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
 
-  it("reloads and closes a tab from its context menu", () => {
-    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
-    const chip = document.querySelector<HTMLElement>(".workspace-tab");
-    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    const items = [
-      ...(chip?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
-    ];
+  it("targets exactly the chip named in the rename push", () => {
+    renderWorkspace({
+      tabs: [tab({ id: "tab-1", title: "One" }), tab({ id: "tab-2", title: "Two" })],
+      activeTabId: "tab-1",
+    });
+    const chips = document.querySelectorAll<HTMLElement>(".workspace-tab");
 
-    items.find((item) => item.textContent === MESSAGES.tabMenuReload(PRIMARY_LANGUAGE))?.click();
-    expect(calls).toContainEqual({ call: "tabReload", args: ["tab-1"] });
+    tabMenuHooks.rename?.("tab-2");
 
-    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    items.find((item) => item.textContent === MESSAGES.tabMenuClose(PRIMARY_LANGUAGE))?.click();
-    expect(calls).toContainEqual({ call: "closeTab", args: ["tab-1"] });
+    expect(chips[0]?.querySelector(".workspace-tab-rename")).toBeNull();
+    const input = chips[1]?.querySelector<HTMLInputElement>(".workspace-tab-rename");
+    expect(input).not.toBeNull();
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
 
   it("moves a dropped tab after the target tab", () => {
@@ -2967,6 +2944,11 @@ const devToolsHooks: {
   dockChosen?: (dock: DevToolsDock) => void;
   closed?: (tabId: string) => void;
 } = {};
+
+/** What main pushes at the renderer once the native tab menu's Rename item
+ *  is clicked (bug 2), captured by the harness so a test can play main's
+ *  part. */
+const tabMenuHooks: { rename?: (tabId: string) => void } = {};
 
 describe("devtools panel", () => {
   let calls: Recorded[];
