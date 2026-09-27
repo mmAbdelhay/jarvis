@@ -1,16 +1,5 @@
 import Constants from "expo-constants";
-import {
-  Manrope_400Regular,
-  Manrope_500Medium,
-  Manrope_600SemiBold,
-  Manrope_700Bold,
-  useFonts,
-} from "@expo-google-fonts/manrope";
-import {
-  JetBrainsMono_400Regular,
-  JetBrainsMono_500Medium,
-  JetBrainsMono_600SemiBold,
-} from "@expo-google-fonts/jetbrains-mono";
+import { useFonts } from "expo-font";
 import { Stack, usePathname, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,6 +7,7 @@ import type React from "react";
 import { AppState, I18nManager, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
+import { APP_FONTS } from "@/lib/app-fonts";
 import { appActivityFor } from "@/lib/app-lifecycle";
 import { createAuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
@@ -68,15 +58,7 @@ function Providers(props: { children: React.ReactNode }): React.JSX.Element {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
-    Manrope_400Regular,
-    Manrope_500Medium,
-    Manrope_600SemiBold,
-    Manrope_700Bold,
-    JetBrainsMono_400Regular,
-    JetBrainsMono_500Medium,
-    JetBrainsMono_600SemiBold,
-  });
+  const [fontsLoaded] = useFonts(APP_FONTS);
   const [language, setLanguage] = useState<Language | null>(null);
   const router = useRouter();
   const pathname = usePathname();

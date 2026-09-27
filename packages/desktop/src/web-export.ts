@@ -38,10 +38,16 @@ function sameFile(a: Stats, b: Stats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
 
-/** The node implementation. Nothing is followed: symlinks and other
- *  non-files are left out of the listing, and a read lstat()s every step
- *  below the root, so the export can never serve anything outside its own
- *  directory — even if the tree changes between listing and reading. */
+/** The node implementation. Symlinks and other non-files are left out of
+ *  the listing, and a read lstat()s the root, every directory below it and
+ *  the file itself, so a symlink that is there when the file is read —
+ *  including one swapped in after listing — is refused.
+ *
+ *  Not closed: a directory swapped for a symlink in the instant between its
+ *  lstat() and the open(). Node has no openat()/O_BENEATH to walk the tree
+ *  race-free, and whoever can rewrite <resources>/web mid-read can already
+ *  replace the files themselves. O_NOFOLLOW and the lstat/fstat identity
+ *  check below cover only the last component. */
 export const nodeWebExportFs: WebExportFs = {
   async listFiles(dir) {
     await requireDirectory(dir, "the export root");
@@ -68,7 +74,7 @@ export const nodeWebExportFs: WebExportFs = {
     if (!before.isFile()) throw refuse(`${name} is not a regular file`);
     if (before.size > maxBytes) return undefined;
     // O_NOFOLLOW where the platform has it (not Windows); the fstat below
-    // catches a swap on every platform.
+    // catches the file itself being swapped on every platform.
     const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const opened = await handle.stat();

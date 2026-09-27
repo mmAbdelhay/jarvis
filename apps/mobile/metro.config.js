@@ -1,5 +1,7 @@
+const { existsSync } = require("node:fs");
 const path = require("node:path");
 const { getDefaultConfig } = require("expo/metro-config");
+const { vendoredWebAsset } = require("./scripts/web-export-paths.cjs");
 
 const projectRoot = __dirname;
 const repoRoot = path.resolve(projectRoot, "../..");
@@ -18,5 +20,25 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, "node_modules"),
   path.resolve(repoRoot, "node_modules"),
 ];
+
+// Web only: an image that resolves inside node_modules (expo-router's own
+// icons) is served from its vendored copy in assets/web-vendor, so the
+// export writes it at a short path instead of under
+// assets/__node_modules/.pnpm/... — see scripts/web-export-paths.cjs.
+// Native builds resolve exactly as before.
+const webVendorDir = path.resolve(projectRoot, "assets", "web-vendor");
+const upstreamResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const resolution = (upstreamResolveRequest ?? context.resolveRequest)(
+    context,
+    moduleName,
+    platform,
+  );
+  if (platform !== "web" || resolution.type !== "assetFiles") return resolution;
+  return {
+    ...resolution,
+    filePaths: vendoredWebAsset(resolution.filePaths, webVendorDir, existsSync),
+  };
+};
 
 module.exports = config;
