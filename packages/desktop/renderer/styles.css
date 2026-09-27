@@ -2605,6 +2605,7 @@
   }
 
   .settings-row input[type="text"],
+  .settings-row input[type="number"],
   .settings-row select {
     font: inherit;
     font-size: 13px;
@@ -2615,9 +2616,14 @@
     padding: 5px var(--s2);
     width: 100%;
     min-width: 0;
+    /* Without this a number input's spin buttons render in the light UA
+       style regardless of --text/--background above, which only cover the
+       text itself. */
+    color-scheme: dark;
   }
 
   .settings-row input[type="text"]:focus,
+  .settings-row input[type="number"]:focus,
   .settings-row select:focus {
     outline: none;
     border-color: var(--accent);
@@ -2674,6 +2680,7 @@
     flex-shrink: 0;
   }
   .settings-field input[type="text"],
+  .settings-field input[type="number"],
   .settings-field select {
     font: inherit;
     font-size: 12px;
@@ -2684,6 +2691,9 @@
     padding: 6px 10px;
     flex-grow: 1;
     max-width: 480px;
+    /* Prayer latitude/longitude/notify-minutes are type="number" — without
+       this their spin buttons render in the light UA style. */
+    color-scheme: dark;
   }
   /* The first switch in Settings. Built from a real checkbox so it keeps
      the keyboard and the accessibility tree it was born with — the input
