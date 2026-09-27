@@ -493,9 +493,16 @@ export function mergeConfigInPlace(
   target: Record<string, unknown>,
   next: Record<string, unknown>,
 ): void {
+  if (target === next) return;
   for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
   for (const [key, newValue] of Object.entries(next)) {
     const oldValue = target[key];
+    // Already the same object — most often two parses that both fell back
+    // to one shared default. Nothing to fold in, and falling through to the
+    // nested-object branch below would delete destination's keys before
+    // "copying" newValue's back in — but destination and newValue are one
+    // object, so that delete empties the very thing being copied from.
+    if (oldValue === newValue) continue;
     if (Array.isArray(oldValue) && Array.isArray(newValue)) {
       oldValue.splice(0, oldValue.length, ...newValue);
     } else if (
@@ -507,8 +514,13 @@ export function mergeConfigInPlace(
       !Array.isArray(newValue)
     ) {
       const destination = oldValue as Record<string, unknown>;
+      // Snapshot newValue's own entries before touching destination: if
+      // newValue is reachable from destination through some other alias,
+      // deleting destination's keys first must not also empty the values
+      // about to be copied in.
+      const incoming = Object.entries(newValue as Record<string, unknown>);
       for (const nested of Object.keys(destination)) delete destination[nested];
-      Object.assign(destination, newValue);
+      for (const [nestedKey, nestedValue] of incoming) destination[nestedKey] = nestedValue;
     } else target[key] = newValue;
   }
 }
@@ -1324,7 +1336,15 @@ export const DEFAULT_SESSIONS: JarvisConfig["sessions"] = {
 };
 
 function parseTerminal(rawTerminal: unknown): TerminalConfig {
-  const defaults: TerminalConfig = DEFAULT_TERMINAL;
+  // A fresh deep copy every call: DEFAULT_TERMINAL — and its nested
+  // completion/blocks objects — must never be handed out by reference.
+  // main.ts's writeConfig folds a freshly loaded config into the live one
+  // with mergeConfigInPlace, which deletes an object's own keys before
+  // copying the other's in; if two parses of a file without `terminal:`
+  // both handed back the very same DEFAULT_TERMINAL object, that merge
+  // would permanently empty the module-level constant for the rest of the
+  // process (see config.test.ts's "config defaults survive..." suite).
+  const defaults: TerminalConfig = structuredClone(DEFAULT_TERMINAL);
   if (rawTerminal === undefined) return defaults;
   if (typeof rawTerminal !== "object" || rawTerminal === null || Array.isArray(rawTerminal)) {
     throw new Error("Config `terminal` must be an object");

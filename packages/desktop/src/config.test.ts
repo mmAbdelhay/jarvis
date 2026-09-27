@@ -7,6 +7,12 @@ import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import {
+  DEFAULT_BROWSER,
+  DEFAULT_PERFORMANCE,
+  DEFAULT_PRAYER,
+  DEFAULT_REMOTE,
+  DEFAULT_SESSIONS,
+  DEFAULT_TERMINAL,
   defaultSessionsDbPath,
   ensureConfigFile,
   loadConfig,
@@ -105,6 +111,20 @@ describe("parseConfig", () => {
     expect(target).toEqual({ nested: { fresh: true }, list: [3], primitive: 2 });
     expect(target.nested).toBe(nested);
     expect(target.list).toBe(list);
+  });
+
+  it("keeps a nested object's values in place when target and next alias the very same object", () => {
+    // Regression: the old implementation deleted destination's own keys and
+    // then Object.assign'd newValue's keys in — if oldValue and newValue are
+    // literally the same object (two parses that both fell back to one
+    // shared default, say), the delete empties newValue too, and the
+    // "copy" that follows copies nothing back in.
+    const shared = { historyPath: "/keep/me" };
+    const target: Record<string, unknown> = { terminal: shared };
+    const next: Record<string, unknown> = { terminal: shared };
+    mergeConfigInPlace(target, next);
+    expect(target.terminal).toBe(shared);
+    expect(shared).toEqual({ historyPath: "/keep/me" });
   });
   it("maps agents and routing into a registry config", () => {
     const config = parseConfig(valid);
@@ -1215,6 +1235,80 @@ describe("terminal blocks and notifications", () => {
     const raw = { ...base, terminal: { notifyAfterSeconds: "soon" } };
 
     expect(() => parseConfig(raw)).toThrow(/terminal\.notifyAfterSeconds/);
+  });
+});
+
+// Regression for the bug where saving Settings twice threw "Cannot read
+// properties of undefined (reading 'historyPath')": parseTerminal (and its
+// completion/blocks sub-parsers) used to hand back the shared DEFAULT_TERMINAL
+// object — and its nested completion/blocks objects — by reference whenever
+// `terminal:` (or a sub-section of it) was absent. main.ts's writeConfig
+// then folds a freshly loaded config into the live one with
+// mergeConfigInPlace, which deletes an object's own keys before copying the
+// other's in; when both sides were the very same DEFAULT_TERMINAL object,
+// that permanently emptied it for the rest of the process, so the next
+// save's parseTerminalCompletion read `.historyPath` off `undefined`.
+describe("config defaults survive being parsed and merged repeatedly", () => {
+  const base = {
+    agents: { "claude-main": { command: "claude-main", default: true } },
+    brain: { cwd: "/tmp/brain" },
+  };
+
+  it("parses terminal twice into non-identical objects, all the way down", () => {
+    const first = parseConfig(base).terminal;
+    const second = parseConfig(base).terminal;
+
+    expect(first).not.toBe(second);
+    expect(first.completion).not.toBe(second.completion);
+    expect(first.blocks).not.toBe(second.blocks);
+    expect(first).toEqual(second);
+  });
+
+  it("does not corrupt DEFAULT_TERMINAL when two saves are folded together with mergeConfigInPlace", () => {
+    const before = structuredClone(DEFAULT_TERMINAL);
+    const first = parseConfig(base) as unknown as Record<string, unknown>;
+    const second = parseConfig(base) as unknown as Record<string, unknown>;
+
+    mergeConfigInPlace(first, second);
+
+    expect(DEFAULT_TERMINAL).toEqual(before);
+  });
+
+  it("leaves every other DEFAULT_* section untouched by the same merge", () => {
+    const beforePerformance = structuredClone(DEFAULT_PERFORMANCE);
+    const beforeBrowser = structuredClone(DEFAULT_BROWSER);
+    const beforePrayer = structuredClone(DEFAULT_PRAYER);
+    const beforeSessions = structuredClone(DEFAULT_SESSIONS);
+    const beforeRemote = structuredClone(DEFAULT_REMOTE);
+
+    const first = parseConfig(base) as unknown as Record<string, unknown>;
+    const second = parseConfig(base) as unknown as Record<string, unknown>;
+    mergeConfigInPlace(first, second);
+
+    expect(DEFAULT_PERFORMANCE).toEqual(beforePerformance);
+    expect(DEFAULT_BROWSER).toEqual(beforeBrowser);
+    expect(DEFAULT_PRAYER).toEqual(beforePrayer);
+    expect(DEFAULT_SESSIONS).toEqual(beforeSessions);
+    expect(DEFAULT_REMOTE).toEqual(beforeRemote);
+  });
+
+  it("survives a second save that writes a terminal section, without throwing", () => {
+    // Save 1: no `terminal:` in either the currently-running config or the
+    // freshly loaded one — both fall back to defaults.
+    const current = parseConfig(base);
+    const currentRecord = current as unknown as Record<string, unknown>;
+    const firstSave = parseConfig(base) as unknown as Record<string, unknown>;
+    mergeConfigInPlace(currentRecord, firstSave);
+
+    // Save 2: this time the file being loaded back has a `terminal:` section
+    // — this is exactly the load that used to throw.
+    const secondSave = parseConfig({
+      ...base,
+      terminal: { completion: { historyPath: "/tmp/custom_history" } },
+    }) as unknown as Record<string, unknown>;
+
+    expect(() => mergeConfigInPlace(currentRecord, secondSave)).not.toThrow();
+    expect(current.terminal.completion.historyPath).toBe("/tmp/custom_history");
   });
 });
 
