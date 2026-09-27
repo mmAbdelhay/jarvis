@@ -193,6 +193,46 @@ One path through those layers is not JSON `req`/`res` at all:
 | The push lane | A laptop event never reaches the phone as a `req`/`res` at all: `desktop/src/notify.ts`'s `createNotifier` decides whether to notify at all (`shouldNotify`) and builds the bilingual text from `MESSAGES.push*`, and `remote-access.ts`'s `sendPush` hands it straight to `@jarvis/remote`'s Expo sender (`packages/remote/src/push.ts`) — never back down through `RpcClient`. The phone's own `RpcClient` never sees the send; it only receives the OS notification through `expo-notifications`, and on tap, `push-context.tsx`'s handler validates the session against a live `sessions:list` before navigating (M10, ruling 9). |
 | An idle bridge turns itself off | The bridge's idle timer closes the listener, calls `onIdleDisabled`, and `desktop/src/remote-idle.ts` reads the current config and writes `remote.enabled: false` through `writeSettingsFile`; the queued write is then observed by `applyFromDisk`, which calls `apply` (`bridge timer → onIdleDisabled → remote-idle.ts → writeSettingsFile → applyFromDisk → apply`). |
 
+## Plan panel
+
+A plan — a Claude Code plan-mode scratch file, the plan a session's own
+transcript last referenced, or a repo `docs/superpowers/{specs,plans}` file —
+renders block-by-block in a pane beside the terminal tab instead of as raw
+text. `@jarvis/core`'s `plans/blocks.ts` (`parsePlan`, `replaceBlock`) turns
+markdown into `PlanBlock`s addressed by markdown-it's own line ranges, each
+with a content-derived, FNV-1a-hashed id stable enough that editing one block
+leaves every other block's id — and therefore its comments — untouched;
+`replaceBlock` splices a single block back into the file byte-for-byte,
+preserving the rest of it (CRLF, trailing newline) unchanged. `plans/comments.ts`
+anchors a comment to a block by id first, falling back to a normalized
+substring match of the quoted text so a comment survives most edits to the
+block it was made on, and formats a set of comments into the single numbered
+message the panel pastes into the terminal.
+
+`@jarvis/platform`'s `plans.ts` (`createPlanFiles`) is the only thing that
+touches disk: `list` discovers a session's plan, plan-mode scratch files and
+repo specs/plans; `isAllowed` is the path guard every read and write goes
+through — real-path resolved, `.md`-only, confined to the known plan-mode
+directories or a `docs/superpowers/{specs,plans}` ancestry — so a remote
+caller can never point a read or write at an arbitrary file; `writeBlock` is
+an mtime-checked, per-file-queued, write-to-temp-then-rename update that
+reports a `conflict` rather than silently clobbering a concurrent edit.
+`plan-comments.ts` (`createPlanCommentStore`) is a separate JSON store at
+`~/.config/jarvis/plan-comments.json`, following the bookmark store's own
+corrupt-file-preserving, atomic-write shape. On the desktop side, `plans:*`
+IPC (`channels.ts`, `dispatch.ts`) sits behind the same remote-policy table as
+every other tab, and `plans:send` pastes `formatFeedback`'s message into the
+pane through a bracketed-paste helper (`bracketed.ts`) that strips control
+bytes — plan text and comment bodies are file/user content the terminal does
+not otherwise trust as input. `apps/mobile` reaches the same surface over the
+wire (`lib/plans-store.ts`, `src/plan/*`), so a paired phone gets read,
+comment and send parity with the desktop panel, never a reduced view of it.
+
+| Channel | Remote |
+|---|---|
+| `plans:list`, `plans:read`, `plans:writeBlock`, `plans:comments`, `plans:addComment`, `plans:updateComment`, `plans:deleteComment`, `plans:send` | remote — the same content parity this table gives sessions/git/bookmarks; each path is re-checked against `PlanFiles.isAllowed` in the handler regardless of origin, so this only decides whether a phone may call the channel at all |
+| `plans:openLink` | desktop-only — runs Electron's `shell.openExternal` on the laptop; a paired phone opens a plan's links with its own OS |
+
 ## Third-party components
 
 | | | |
