@@ -1,5 +1,6 @@
 import { watch as watchDir, type FSWatcher, type Stats } from "node:fs";
 import * as fsPromises from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
 import { parsePlan, replaceBlock, type PlanBlock } from "@jarvis/core";
@@ -69,6 +70,7 @@ const MAX_PLAN_BYTES = 1024 * 1024;
 const SESSION_TAIL_BYTES = 512 * 1024;
 const PLAN_LINK = /\/plans\/[A-Za-z0-9._-]+\.md/g;
 const WATCH_DEBOUNCE_MS = 150;
+const WATCH_RESCAN_MS = 5000;
 const PLAN_MODE_LIMIT = 10;
 const REPO_LIMIT = 20;
 
@@ -76,6 +78,18 @@ type FsDeps = typeof fsPromises;
 
 function isEnoent(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+/** Strips any trailing `/` or `\` (but never collapses a bare root). A
+ *  `configDir` ending in a separator would otherwise leave `anthropicBases`
+ *  holding a string with a redundant trailing slash — harmless everywhere
+ *  a path goes through `join()` (it normalizes), but fatal to
+ *  `resolveSessionMatch`'s raw `preceding.endsWith(base)` check, which
+ *  compares against the base as literal text. */
+function stripTrailingSep(value: string): string {
+  let end = value.length;
+  while (end > 1 && (value[end - 1] === "/" || value[end - 1] === "\\")) end--;
+  return value.slice(0, end);
 }
 
 /** Every distinct anthropic account's base config directory, in agent order —
@@ -86,7 +100,7 @@ function anthropicBases(agents: readonly AgentConfig[], home: string): string[] 
   const bases: string[] = [];
   for (const agent of agents) {
     if (agent.vendor !== "anthropic") continue;
-    const base = agent.configDir ?? join(home, ".claude");
+    const base = stripTrailingSep(agent.configDir ?? join(home, ".claude"));
     if (seen.has(base)) continue;
     seen.add(base);
     bases.push(base);
@@ -294,6 +308,8 @@ export function createPlanFiles(deps: {
   const fs = deps.fs ?? fsPromises;
 
   async function resolveAllowed(path: string): Promise<string | null> {
+    if (!isAbsolute(path)) return null;
+
     let real: string;
     try {
       real = await fs.realpath(path);
@@ -301,6 +317,14 @@ export function createPlanFiles(deps: {
       return null;
     }
     if (!real.endsWith(".md")) return null;
+
+    let info: Stats;
+    try {
+      info = await fs.stat(real);
+    } catch {
+      return null;
+    }
+    if (!info.isFile()) return null;
 
     for (const dir of plansDirsOf(agents(), home)) {
       let realDir: string;
@@ -323,6 +347,31 @@ export function createPlanFiles(deps: {
     } catch (error) {
       if (isEnoent(error)) return { ok: false, result: { ok: false, reason: "not-found" } };
       return { ok: false, result: { ok: false, reason: "io", detail: String(error) } };
+    }
+  }
+
+  // Per-file write queue, keyed by realpath: `writeBlock` reads the current
+  // mtime, decides ok/conflict, and writes, and two concurrent calls for the
+  // same file must not both read the same stale mtime and both decide "ok" —
+  // a lost update. Each call's own turn waits for the previous one *on that
+  // file* to fully settle before it starts; unrelated files are never
+  // blocked by each other. The map entry is removed once no call is
+  // queued behind it, so it never grows for files no longer being written.
+  const writeQueues = new Map<string, Promise<void>>();
+
+  async function withWriteQueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prior = writeQueues.get(key) ?? Promise.resolve();
+    let releaseNext: () => void = () => {};
+    const nextTurn = new Promise<void>((resolve) => {
+      releaseNext = resolve;
+    });
+    writeQueues.set(key, nextTurn);
+    try {
+      await prior.catch(() => {});
+      return await fn();
+    } finally {
+      releaseNext();
+      if (writeQueues.get(key) === nextTurn) writeQueues.delete(key);
     }
   }
 
@@ -351,69 +400,116 @@ export function createPlanFiles(deps: {
     },
 
     async read(path) {
-      const allowed = await resolveAllowed(path);
-      if (allowed === null) return { ok: false, reason: "forbidden" };
+      // Every I/O call below targets `real` (the guard's own resolved
+      // path), never the caller's `path` again — the guard already proved
+      // `real` is the file that was actually vetted, and re-deriving it
+      // from `path` a second time (a second `realpath`/symlink traversal)
+      // would just be a second TOCTOU window for no benefit. `path` itself
+      // is used only for what the caller gets back.
+      const real = await resolveAllowed(path);
+      if (real === null) return { ok: false, reason: "forbidden" };
 
-      const statted = await statOrReason(path);
-      if (!statted.ok) return statted.result;
-      if (statted.info.size > MAX_PLAN_BYTES) return { ok: false, reason: "too-large" };
-
+      let handle: Awaited<ReturnType<FsDeps["open"]>>;
       try {
-        const content = await fs.readFile(path, "utf8");
+        handle = await fs.open(real, "r");
+      } catch (error) {
+        if (isEnoent(error)) return { ok: false, reason: "not-found" };
+        return { ok: false, reason: "io", detail: String(error) };
+      }
+      try {
+        const info = await handle.stat();
+        // Read at most one byte past the cap: enough to tell "too large"
+        // apart from "exactly at the cap" without ever buffering a whole
+        // oversized file just to reject it.
+        const buffer = Buffer.alloc(MAX_PLAN_BYTES + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        if (bytesRead > MAX_PLAN_BYTES) return { ok: false, reason: "too-large" };
+        const content = buffer.subarray(0, bytesRead).toString("utf8");
         return {
           ok: true,
-          value: { path, mtimeMs: statted.info.mtimeMs, blocks: parsePlan(content) },
+          value: { path, mtimeMs: info.mtimeMs, blocks: parsePlan(content) },
         };
       } catch (error) {
         return { ok: false, reason: "io", detail: String(error) };
+      } finally {
+        await handle.close();
       }
     },
 
     async writeBlock(path, blockId, newSource, baseMtimeMs) {
-      const allowed = await resolveAllowed(path);
-      if (allowed === null) return { ok: false, reason: "forbidden" };
+      const real = await resolveAllowed(path);
+      if (real === null) return { ok: false, reason: "forbidden" };
 
-      const statted = await statOrReason(path);
-      if (!statted.ok) return statted.result;
+      // Everything past this point — the mtime check, the read, the write —
+      // runs one call at a time per file, serialized on `real`. Without
+      // this, two concurrent calls could both stat the same pre-write
+      // mtime, both see it match their own `baseMtimeMs`, and both decide
+      // "ok" — the second one's write silently discarding the first's.
+      return withWriteQueue(real, async () => {
+        const statted = await statOrReason(real);
+        if (!statted.ok) return statted.result;
+        if (statted.info.size > MAX_PLAN_BYTES) return { ok: false, reason: "too-large" };
 
-      let content: string;
-      try {
-        content = await fs.readFile(path, "utf8");
-      } catch (error) {
-        return { ok: false, reason: "io", detail: String(error) };
-      }
-      const blocks = parsePlan(content);
-      const doc: PlanDoc = { path, mtimeMs: statted.info.mtimeMs, blocks };
+        let content: string;
+        try {
+          content = await fs.readFile(real, "utf8");
+        } catch (error) {
+          return { ok: false, reason: "io", detail: String(error) };
+        }
+        const blocks = parsePlan(content);
+        const doc: PlanDoc = { path, mtimeMs: statted.info.mtimeMs, blocks };
 
-      if (statted.info.mtimeMs !== baseMtimeMs) return { ok: false, reason: "conflict", doc };
+        if (statted.info.mtimeMs !== baseMtimeMs) return { ok: false, reason: "conflict", doc };
 
-      const block = blocks.find((candidate) => candidate.id === blockId);
-      if (block === undefined) return { ok: false, reason: "missing-block", doc };
+        const block = blocks.find((candidate) => candidate.id === blockId);
+        if (block === undefined) return { ok: false, reason: "missing-block", doc };
 
-      const updated = replaceBlock(content, block, newSource);
-      const dir = dirname(path);
-      const tempPath = join(dir, `.${basename(path)}.jarvis-tmp`);
-      try {
-        await fs.writeFile(tempPath, updated, "utf8");
-        await fs.rename(tempPath, path);
-      } catch (error) {
-        await fs.rm(tempPath, { force: true }).catch(() => {});
-        return { ok: false, reason: "io", detail: String(error) };
-      }
+        const updated = replaceBlock(content, block, newSource);
+        if (Buffer.byteLength(updated, "utf8") > MAX_PLAN_BYTES) {
+          return { ok: false, reason: "too-large" };
+        }
 
-      const newStatted = await statOrReason(path);
-      if (!newStatted.ok) return newStatted.result;
-      return {
-        ok: true,
-        value: { path, mtimeMs: newStatted.info.mtimeMs, blocks: parsePlan(updated) },
-      };
+        const dir = dirname(real);
+        // A name unique per call (pid + random suffix), not just per file:
+        // the in-process queue above already serializes calls from this
+        // process, but a *second* process (another Jarvis window) writing
+        // the same plan has no shared queue, and a shared temp name would
+        // let one process's write clobber the other's mid-write. `wx`
+        // additionally refuses to write through an existing file of that
+        // exact name, rather than silently truncating it.
+        const tempPath = join(
+          dir,
+          `.${basename(real)}.${process.pid}-${randomBytes(6).toString("hex")}.jarvis-tmp`,
+        );
+        try {
+          await fs.writeFile(tempPath, updated, {
+            encoding: "utf8",
+            flag: "wx",
+            mode: statted.info.mode & 0o777,
+          });
+          await fs.rename(tempPath, real);
+        } catch (error) {
+          await fs.rm(tempPath, { force: true }).catch(() => {});
+          return { ok: false, reason: "io", detail: String(error) };
+        }
+
+        const newStatted = await statOrReason(real);
+        if (!newStatted.ok) return newStatted.result;
+        return {
+          ok: true,
+          value: { path, mtimeMs: newStatted.info.mtimeMs, blocks: parsePlan(updated) },
+        };
+      });
     },
 
     watch(onChange, cwds) {
       let disposed = false;
       let loggedError = false;
       const timers = new Map<string, NodeJS.Timeout>();
-      const watchers: FSWatcher[] = [];
+      // Keyed by directory, so a later rescan can tell which directories
+      // are already watched (leave alone) versus gone (close) versus new
+      // (attach) — a plain array couldn't answer any of those.
+      const activeWatchers = new Map<string, FSWatcher>();
 
       const logOnce = (message: string): void => {
         if (loggedError) return;
@@ -434,7 +530,7 @@ export function createPlanFiles(deps: {
       };
 
       const attach = (dir: string): void => {
-        if (disposed) return;
+        if (disposed || activeWatchers.has(dir)) return;
         let watcher: FSWatcher;
         try {
           watcher = watchDir(dir, (_event, filename) => {
@@ -443,41 +539,73 @@ export function createPlanFiles(deps: {
             scheduleChange(join(dir, name));
           });
         } catch {
+          // `dirExists` already confirmed this directory is there, so a
+          // throw here is a genuine race or permission problem, not the
+          // ordinary "doesn't exist yet" case.
           logOnce(`[plans] failed to watch ${dir}`);
           return;
         }
         watcher.on("error", () => {
           logOnce(`[plans] watch error on ${dir}`);
           watcher.close();
+          activeWatchers.delete(dir);
         });
         if (disposed) {
           watcher.close();
           return;
         }
-        watchers.push(watcher);
+        activeWatchers.set(dir, watcher);
       };
 
-      for (const dir of plansDirsOf(agents(), home)) attach(dir);
+      const detach = (dir: string): void => {
+        const watcher = activeWatchers.get(dir);
+        if (watcher === undefined) return;
+        watcher.close();
+        activeWatchers.delete(dir);
+      };
 
-      for (const cwd of cwds()) {
-        for (const kind of ["specs", "plans"] as const) {
-          const dir = join(cwd, "docs", "superpowers", kind);
-          fs.stat(dir)
-            .then((info) => {
-              if (info.isDirectory()) attach(dir);
-            })
-            .catch(() => {
-              // Nothing there yet — not every project has repo plans.
-            });
+      const dirExists = async (dir: string): Promise<boolean> => {
+        try {
+          return (await fs.stat(dir)).isDirectory();
+        } catch {
+          return false;
         }
-      }
+      };
+
+      // Every plans dir, plus every existing `<cwd>/docs/superpowers/
+      // {specs,plans}` for the *current* `cwds()` — re-read on every
+      // reconcile, not just at setup, since the set of open projects and
+      // the directories that exist under them both change over time.
+      const reconcile = async (): Promise<void> => {
+        if (disposed) return;
+        const candidates = [
+          ...plansDirsOf(agents(), home),
+          ...cwds().flatMap((cwd) =>
+            (["specs", "plans"] as const).map((kind) => join(cwd, "docs", "superpowers", kind)),
+          ),
+        ];
+        const desired = new Set<string>();
+        for (const dir of candidates) {
+          if (await dirExists(dir)) desired.add(dir);
+        }
+        if (disposed) return;
+
+        for (const dir of desired) attach(dir);
+        for (const dir of [...activeWatchers.keys()]) {
+          if (!desired.has(dir)) detach(dir);
+        }
+      };
+
+      void reconcile();
+      const rescan = setInterval(() => void reconcile(), WATCH_RESCAN_MS);
 
       return () => {
         disposed = true;
+        clearInterval(rescan);
         for (const timer of timers.values()) clearTimeout(timer);
         timers.clear();
-        for (const watcher of watchers) watcher.close();
-        watchers.length = 0;
+        for (const watcher of activeWatchers.values()) watcher.close();
+        activeWatchers.clear();
       };
     },
   };

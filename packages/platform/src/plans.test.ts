@@ -1,5 +1,6 @@
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -188,6 +189,55 @@ describe("list — session", () => {
     expect(list.session).toBeUndefined();
     expect(list.planMode.map((entry) => entry.name)).toEqual(["solo.md"]);
   });
+
+  it("does not match a plan reference whose prefix is a different, non-base directory", async () => {
+    const base = await tempDir("session-other-base");
+    const cwd = await tempDir("session-other-cwd");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    // A real file that happens to share its name with the one the
+    // transcript names — under an unrelated "/other" prefix, not this
+    // module's own base. The filename matching alone must not be enough.
+    await writeFile(join(plansDir, "shared-name.md"), "# shared\n");
+
+    const transcriptDir = join(base, "projects", claudeProjectSlug(cwd));
+    await mkdir(transcriptDir, { recursive: true });
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "See /other/plans/shared-name.md for details." }],
+      },
+    });
+    await writeFile(join(transcriptDir, "abc.jsonl"), `${line}\n`);
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const list = await planFiles.list(cwd);
+
+    expect(list.session).toBeUndefined();
+    expect(list.planMode.map((entry) => entry.name)).toEqual(["shared-name.md"]);
+  });
+
+  it("finds the session plan even when configDir has a trailing separator", async () => {
+    const base = await tempDir("session-trailing-base");
+    const cwd = await tempDir("session-trailing-cwd");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(plansDir, "session-found.md"), "# Found\n\nBody text.\n");
+
+    const transcriptDir = join(base, "projects", claudeProjectSlug(cwd));
+    await mkdir(transcriptDir, { recursive: true });
+    const fixture = (await SESSION_FIXTURE).replaceAll("__BASE__", base).replaceAll("__CWD__", cwd);
+    await writeFile(join(transcriptDir, "abc.jsonl"), fixture);
+
+    const agents: AgentConfig[] = [
+      { id: "claude", command: "claude", vendor: "anthropic", configDir: `${base}/` },
+    ];
+    const planFiles = createPlanFiles({ agents: () => agents, home: base });
+    const list = await planFiles.list(cwd);
+
+    expect(list.session?.path).toBe(join(plansDir, "session-found.md"));
+  });
 });
 
 describe("isAllowed — path guard", () => {
@@ -236,10 +286,33 @@ describe("isAllowed — path guard", () => {
     const plansDir = join(base, "plans");
     await mkdir(plansDir, { recursive: true });
     await writeFile(join(base, "evil.md"), "# evil\n");
-    const path = join(plansDir, "..", "evil.md");
+    // A raw string containing a literal ".." component — path.join() would
+    // normalize it away before the guard ever saw it, silently passing a
+    // path that never actually exercised the traversal check.
+    const path = `${plansDir}/../evil.md`;
 
     const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
     expect(await planFiles.isAllowed(path)).toBe(false);
+  });
+
+  it("rejects a relative path even when it would resolve to an allowed file", async () => {
+    const base = await tempDir("guard-relative-base");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(plansDir, "ok.md"), "# ok\n");
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    expect(await planFiles.isAllowed(join("plans", "ok.md"))).toBe(false);
+  });
+
+  it("rejects a directory whose name ends in .md", async () => {
+    const base = await tempDir("guard-dir-base");
+    const plansDir = join(base, "plans");
+    const dirLikeMd = join(plansDir, "adir.md");
+    await mkdir(dirLikeMd, { recursive: true });
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    expect(await planFiles.isAllowed(dirLikeMd)).toBe(false);
   });
 
   it.skipIf(!canSymlink)("rejects a symlink inside a plans dir that escapes it", async () => {
@@ -301,6 +374,27 @@ describe("read", () => {
       expect(result.value.blocks.map((b) => b.kind)).toEqual(["heading", "paragraph"]);
     }
   });
+
+  it.skipIf(!canSymlink)(
+    "does I/O on the guard's resolved realpath but reports the caller's own path",
+    async () => {
+      const base = await tempDir("read-symlink-base");
+      const plansDir = join(base, "plans");
+      await mkdir(plansDir, { recursive: true });
+      const real = join(plansDir, "real.md");
+      await writeFile(real, "# Real\n\nBody.\n");
+      const link = join(plansDir, "link.md");
+      await symlink(real, link);
+
+      const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+      const result = await planFiles.read(link);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.path).toBe(link);
+        expect(result.value.blocks.map((b) => b.kind)).toEqual(["heading", "paragraph"]);
+      }
+    },
+  );
 });
 
 describe("writeBlock", () => {
@@ -322,6 +416,82 @@ describe("writeBlock", () => {
     const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
     return { path, source, mtimeMs: info.mtimeMs, planFiles };
   }
+
+  it("returns forbidden for a path outside every allowed location", async () => {
+    const base = await tempDir("write-forbidden-base");
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const result = await planFiles.writeBlock("/etc/hosts", "whatever-id", "x", 0);
+    expect(result).toEqual({ ok: false, reason: "forbidden" });
+  });
+
+  it("returns too-large when the target file is already over 1 MiB", async () => {
+    const base = await tempDir("write-too-large-base");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const path = join(plansDir, "huge.md");
+    await writeFile(path, "x".repeat(1024 * 1024 + 10));
+    const info = await stat(path);
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const result = await planFiles.writeBlock(path, "whatever-id", "y", info.mtimeMs);
+    expect(result).toEqual({ ok: false, reason: "too-large" });
+  });
+
+  it("returns too-large without writing when the edit would push the file over 1 MiB", async () => {
+    const { path, source, mtimeMs, planFiles } = await planWithFile("write-grows-too-large");
+    const blocks = parsePlan(source);
+    const paragraph = blocks.find((b) => b.kind === "paragraph");
+    if (paragraph === undefined) throw new Error("fixture has no paragraph block");
+
+    const huge = "y".repeat(1024 * 1024 + 10);
+    const result = await planFiles.writeBlock(path, paragraph.id, huge, mtimeMs);
+    expect(result).toEqual({ ok: false, reason: "too-large" });
+
+    expect(await readFile(path, "utf8")).toBe(source);
+  });
+
+  it("preserves the file's mode across a write", async () => {
+    const { path, source, mtimeMs, planFiles } = await planWithFile("write-mode");
+    await chmod(path, 0o640);
+    const blocks = parsePlan(source);
+    const heading = blocks.find((b) => b.kind === "heading");
+    if (heading === undefined) throw new Error("fixture has no heading block");
+
+    const result = await planFiles.writeBlock(path, heading.id, "# New", mtimeMs);
+    expect(result.ok).toBe(true);
+
+    const info = await stat(path);
+    expect(info.mode & 0o777).toBe(0o640);
+  });
+
+  it("serializes concurrent writes to the same file: exactly one succeeds", async () => {
+    const { path, source, mtimeMs, planFiles } = await planWithFile("write-concurrent");
+    const blocks = parsePlan(source);
+    const heading = blocks.find((b) => b.kind === "heading");
+    const paragraph = blocks.find((b) => b.kind === "paragraph");
+    if (heading === undefined || paragraph === undefined) {
+      throw new Error("fixture is missing a heading or paragraph block");
+    }
+
+    const [resultA, resultB] = await Promise.all([
+      planFiles.writeBlock(path, heading.id, "# Edit A", mtimeMs),
+      planFiles.writeBlock(path, paragraph.id, "Edit B.", mtimeMs),
+    ]);
+
+    const oks = [resultA, resultB].filter((r) => r.ok);
+    const conflicts = [resultA, resultB].filter((r) => !r.ok && r.reason === "conflict");
+    expect(oks).toHaveLength(1);
+    expect(conflicts).toHaveLength(1);
+
+    const written = await readFile(path, "utf8");
+    if (resultA.ok) {
+      expect(written).toContain("# Edit A");
+      expect(written).not.toContain("Edit B.");
+    } else {
+      expect(written).toContain("Edit B.");
+      expect(written).not.toContain("# Edit A");
+    }
+  });
 
   it("replaces one block's source and leaves every other line identical", async () => {
     const { path, source, mtimeMs, planFiles } = await planWithFile("write-ok");
@@ -410,4 +580,35 @@ describe("watch", () => {
 
     expect(changes.filter((p) => p === path)).toHaveLength(1);
   }, 10000);
+
+  it("picks up a repo dir that starts existing after setup, on its next 5 s rescan", async () => {
+    const base = await tempDir("watch-rescan-base");
+    const cwd = await tempDir("watch-rescan-cwd");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const changes: string[] = [];
+    const dispose = planFiles.watch(
+      (changed) => changes.push(changed),
+      () => [cwd],
+    );
+
+    try {
+      // The repo dir does not exist at watch() setup time.
+      const specsDir = join(cwd, "docs", "superpowers", "specs");
+      await mkdir(specsDir, { recursive: true });
+
+      // Wait past one 5 s rescan so the now-existing dir gets a watcher.
+      await new Promise((resolve) => setTimeout(resolve, 5300));
+
+      const path = join(specsDir, "new-spec.md");
+      await writeFile(path, "# new\n");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(changes).toContain(path);
+    } finally {
+      dispose();
+    }
+  }, 15000);
 });
