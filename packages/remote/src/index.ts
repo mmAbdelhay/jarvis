@@ -114,6 +114,13 @@ export type { Headers } from "./proxy-rewrite.js";
 // listener in (same rule server.ts/listen.ts already follow).
 export type { SidecarProxy, SidecarProxyDeps } from "./proxy.js";
 export {
+  ACCESS_TTL_MS,
+  createSessionStore,
+  REFRESH_ABSOLUTE_TTL_MS,
+  REFRESH_IDLE_TTL_MS,
+} from "./sessions.js";
+export type { IssuedSession, RefreshResult, SessionStore } from "./sessions.js";
+export {
   COOKIE_PATTERN,
   createSidecarRegistry,
   HANDLE_MAX_AGE_MS,
