@@ -1,0 +1,166 @@
+import { describe, expect, it } from "vitest";
+import { parsePlan, replaceBlock } from "./blocks.js";
+
+describe("parsePlan — block kinds and line ranges", () => {
+  const src = [
+    "# Heading",
+    "",
+    "A paragraph.",
+    "",
+    "- item one",
+    "- item two",
+    "",
+    "```js",
+    "code();",
+    "```",
+    "",
+    "| a | b |",
+    "|---|---|",
+    "| 1 | 2 |",
+    "",
+    "> a quote",
+    "",
+    "---",
+    "",
+  ].join("\n");
+  const blocks = parsePlan(src);
+
+  it("produces one block per construct, in order", () => {
+    expect(blocks.map((b) => b.kind)).toEqual([
+      "heading",
+      "paragraph",
+      "list",
+      "code",
+      "table",
+      "quote",
+      "hr",
+    ]);
+  });
+
+  it("gives each block markdown-it's own line range", () => {
+    expect(blocks.map((b) => [b.start, b.end])).toEqual([
+      [0, 1],
+      [2, 3],
+      [4, 7],
+      [7, 10],
+      [11, 14],
+      [15, 16],
+      [17, 18],
+    ]);
+  });
+
+  it("records the heading level", () => {
+    expect(blocks[0]?.level).toBe(1);
+  });
+
+  it("every other block leaves level undefined", () => {
+    expect(blocks[1]?.level).toBeUndefined();
+  });
+});
+
+describe("parsePlan — block ids", () => {
+  it("identical paragraphs get ids suffixed -0 and -1", () => {
+    const blocks = parsePlan("Same text.\n\nSame text.\n");
+    const first = blocks[0];
+    const second = blocks[1];
+    expect(first?.id.endsWith("-0")).toBe(true);
+    expect(second?.id.endsWith("-1")).toBe(true);
+    expect(first?.id.split("-")[0]).toBe(second?.id.split("-")[0]);
+  });
+
+  it("editing one duplicate leaves the other's id unchanged", () => {
+    const before = parsePlan("Same text.\n\nSame text.\n");
+    const after = parsePlan("Same text.\n\nEdited.\n");
+    expect(after[0]?.id).toBe(before[0]?.id);
+  });
+});
+
+describe("replaceBlock", () => {
+  const doc = `${Array.from({ length: 10 }, (_, i) => `Paragraph ${i}.`).join("\n\n")}\n`;
+
+  it("replaces only the target block's lines; every other line is byte-identical", () => {
+    const blocks = parsePlan(doc);
+    const target = blocks[2];
+    if (target === undefined) throw new Error("expected block 2");
+    const lines = doc.split("\n");
+    const result = replaceBlock(doc, target, "Replaced A.\nReplaced B.");
+    const resultLines = result.split("\n");
+
+    expect(resultLines.slice(0, target.start)).toEqual(lines.slice(0, target.start));
+    const newLineCount = target.end - target.start + 1; // "Replaced A." + "Replaced B."
+    expect(resultLines.slice(target.start, target.start + newLineCount)).toEqual([
+      "Replaced A.",
+      "Replaced B.",
+    ]);
+    expect(resultLines.slice(target.start + newLineCount)).toEqual(lines.slice(target.end));
+  });
+
+  it("preserves CRLF line endings outside the replaced range", () => {
+    const crlf = `${Array.from({ length: 3 }, (_, i) => `Paragraph ${i}.`).join("\r\n\r\n")}\r\n`;
+    const lines = crlf.split("\n");
+    const blocks = parsePlan(crlf);
+    const target = blocks[1];
+    if (target === undefined) throw new Error("expected block 1");
+    const result = replaceBlock(crlf, target, "Replaced.");
+    const resultLines = result.split("\n");
+
+    // The untouched lines — before and after the replaced block — keep their
+    // original trailing \r exactly.
+    expect(resultLines.slice(0, target.start)).toEqual(lines.slice(0, target.start));
+    expect(resultLines.slice(target.start + 1)).toEqual(lines.slice(target.end));
+    expect(resultLines[0]?.endsWith("\r")).toBe(true);
+  });
+
+  it("leaves a no-trailing-newline file without one", () => {
+    const noTrailingNewline = "Paragraph 0.\n\nParagraph 1.";
+    const blocks = parsePlan(noTrailingNewline);
+    const last = blocks[1];
+    if (last === undefined) throw new Error("expected block 1");
+    const result = replaceBlock(noTrailingNewline, last, "New last.");
+    expect(result.endsWith("\n")).toBe(false);
+    expect(result).toBe("Paragraph 0.\n\nNew last.");
+  });
+});
+
+describe("parsePlan — HTML safety and links", () => {
+  it("escapes a raw <script> tag instead of rendering it", () => {
+    const blocks = parsePlan("Text with <script>alert(1)</script> inside.");
+    expect(blocks[0]?.html).toContain("&lt;script&gt;");
+    expect(blocks[0]?.html).not.toContain("<script>");
+  });
+
+  it("renders no href for a javascript: link", () => {
+    const blocks = parsePlan("[x](javascript:alert(1))");
+    expect(blocks[0]?.html).not.toContain("href");
+  });
+
+  it("gives every link rel=noopener noreferrer and target=_blank", () => {
+    const blocks = parsePlan("[ok](https://example.com) and https://example.org bare.");
+    expect(blocks[0]?.html).toContain('rel="noopener noreferrer"');
+    expect(blocks[0]?.html).toContain('target="_blank"');
+    expect((blocks[0]?.html.match(/<a /g) ?? []).length).toBe(2);
+  });
+});
+
+describe("parsePlan — task list checkboxes", () => {
+  it("renders [ ] and [x] list items as disabled checkboxes", () => {
+    const blocks = parsePlan("- [ ] todo\n- [x] done\n");
+    const html = blocks[0]?.html ?? "";
+    expect(html).toContain('<input type="checkbox" disabled>');
+    expect(html).toContain('<input type="checkbox" checked disabled>');
+    expect(html).not.toContain("[ ]");
+    expect(html).not.toContain("[x]");
+  });
+});
+
+describe("parsePlan — front matter", () => {
+  it("becomes a single other block rendered as <pre>", () => {
+    const blocks = parsePlan("---\ntitle: x\n---\n\n# Heading\n");
+    expect(blocks[0]?.kind).toBe("other");
+    expect(blocks[0]?.start).toBe(0);
+    expect(blocks[0]?.end).toBe(3);
+    expect(blocks[0]?.html).toBe("<pre>---\ntitle: x\n---</pre>");
+    expect(blocks[1]?.kind).toBe("heading");
+    expect(blocks[1]?.start).toBe(4);
+  });
+});
