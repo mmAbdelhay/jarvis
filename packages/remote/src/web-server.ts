@@ -91,6 +91,15 @@ function safePath(url: string): string | undefined {
   return path;
 }
 
+/** Host lines as sent; Node's parsed `headers.host` keeps only the first of duplicates. */
+function hostLineCount(rawHeaders: readonly string[]): number {
+  let count = 0;
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    if (rawHeaders[i]?.toLowerCase() === "host") count++;
+  }
+  return count;
+}
+
 export function createWebRequestHandler(
   options: RequestHandlerOptions,
 ): (request: IncomingMessage, response: ServerResponse) => void {
@@ -100,6 +109,7 @@ export function createWebRequestHandler(
     // when Connection also says upgrade, so this closes the other half.
     if (
       request.headers.host !== expectedHost ||
+      hostLineCount(request.rawHeaders) !== 1 ||
       (request.method !== "GET" && request.method !== "HEAD") ||
       request.headers.upgrade !== undefined
     ) {
@@ -175,6 +185,9 @@ export function listenWeb(
       cert: options.cert,
       key: options.key,
       minVersion: "TLSv1.3",
+      // Node's default answers a Host-less HTTP/1.1 request with its own
+      // "400 Bad Request" before the handler runs; the handler drops it instead.
+      requireHostHeader: false,
       handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
       requestTimeout: REQUEST_TIMEOUT_MS,
       headersTimeout: HEADERS_TIMEOUT_MS,

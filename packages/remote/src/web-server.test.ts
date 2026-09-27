@@ -31,13 +31,18 @@ type FakeSocket = { destroy: ReturnType<typeof vi.fn> };
 function request(
   overrides: Partial<IncomingMessage> = {},
 ): IncomingMessage & { socket: FakeSocket } {
-  return {
+  const merged = {
     method: "GET",
     url: "/index.html",
     headers: { host: "jarvis.test:8443" },
     socket: { destroy: vi.fn() },
     ...overrides,
-  } as IncomingMessage & { socket: FakeSocket };
+  };
+  // Node's parsed `headers` keeps only the first Host; `rawHeaders` keeps every line.
+  const rawHeaders =
+    overrides.rawHeaders ??
+    Object.entries(merged.headers).flatMap(([name, value]) => [name, String(value)]);
+  return { ...merged, rawHeaders } as IncomingMessage & { socket: FakeSocket };
 }
 
 function response(): ServerResponse & {
@@ -192,6 +197,13 @@ describe("createWebRequestHandler", () => {
     ["encoded backslash", { url: "/%5cindex.html" }],
     ["encoded NUL", { url: "/asset%00.js" }],
     ["malformed encoding", { url: "/asset%ZZ" }],
+    [
+      "duplicate Host",
+      {
+        headers: { host: "jarvis.test:8443" },
+        rawHeaders: ["Host", "jarvis.test:8443", "host", "evil.test:8443"],
+      },
+    ],
     [
       "Upgrade header on a plain request",
       { headers: { host: "jarvis.test:8443", upgrade: "websocket" } },
@@ -355,10 +367,22 @@ describe("listenWeb over real TLS", () => {
       'If-None-Match: "index-etag"\r\n',
     );
     expect(reply.startsWith("HTTP/1.1 304")).toBe(true);
+    expect(reply).toContain('ETag: "index-etag"');
+    // Zero body bytes: the reply ends at the blank line closing the headers.
+    expect(reply.indexOf("\r\n\r\n")).toBe(reply.length - 4);
   });
 
   it.each([
     ["wrong Host", () => get("/index.html", `evil.test:${listener.port}`)],
+    [
+      "missing Host",
+      () => rawExchange(listener.port, "GET /index.html HTTP/1.1\r\nConnection: close\r\n\r\n"),
+    ],
+    [
+      "duplicate Host",
+      () =>
+        get("/index.html", `jarvis.test:${listener.port}`, `Host: evil.test:${listener.port}\r\n`),
+    ],
     ["IP Host", () => get("/index.html", `127.0.0.1:${listener.port}`)],
     [
       "POST",
