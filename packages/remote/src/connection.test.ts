@@ -215,17 +215,17 @@ describe("createConnection: before hello", () => {
     expect(clock.pending()).toBe(0);
   });
 
-  it("wrong token with v2 closes 4401 (credentials checked first)", () => {
+  it("wrong token with v1 closes 4401 (credentials checked first)", () => {
     const { clock, socket, connection, onAuthFailed } = makeHarness();
-    connection.onText(helloFrame({ token: WRONG_TOKEN, v: 2 }));
+    connection.onText(helloFrame({ token: WRONG_TOKEN, v: 1 }));
     expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
     expect(onAuthFailed).toHaveBeenCalledWith("bad-credentials");
     expect(clock.pending()).toBe(0);
   });
 
-  it("right token with v2 closes 4426 with no onAuthFailed", () => {
+  it("a v1 hello (right token) closes CLOSE.versionMismatch (4426) with no onAuthFailed", () => {
     const { clock, socket, connection, onAuthFailed } = makeHarness();
-    connection.onText(helloFrame({ v: 2 }));
+    connection.onText(helloFrame({ v: 1 }));
     expect(socket.closed).toEqual({ code: CLOSE.versionMismatch, reason: "" });
     expect(onAuthFailed).not.toHaveBeenCalled();
     expect(clock.pending()).toBe(0);

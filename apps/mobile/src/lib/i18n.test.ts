@@ -22,6 +22,11 @@ describe("STRINGS", () => {
   // a later edit can't silently reintroduce it. `nav.voice` left this list
   // with the 2026-09-19 redesign: the Voice tab reads it through
   // `t(language, `nav.${name}`)` in app/(tabs)/_layout.tsx, so it is live.
+  it("conn.incompatible tells the owner to update the Jarvis app (protocol v2), in both languages", () => {
+    expect(STRINGS["conn.incompatible"].en).toContain("Update the Jarvis app");
+    expect(STRINGS["conn.incompatible"].ar).toContain("حدّث تطبيق Jarvis");
+  });
+
   it("voice.targetSession stays removed", () => {
     const keys = Object.keys(STRINGS);
     expect(keys).not.toContain("voice.targetSession");

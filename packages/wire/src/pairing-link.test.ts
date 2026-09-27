@@ -16,7 +16,7 @@ describe("pairing URI", () => {
     expect(parsePairingUri(formatPairingUri(link))).toEqual(link);
   });
 
-  const validFields = { v: "1", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
+  const validFields = { v: "2", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
   const uriWith = (scheme: string, overrides: Partial<typeof validFields> = {}) => {
     const params = new URLSearchParams({ ...validFields, ...overrides });
     return `${scheme}pair?${params.toString()}`;
@@ -28,7 +28,7 @@ describe("pairing URI", () => {
     ["port 65536", uriWith("jarvis://", { port: "65536" })],
     ["a 42-char secret", uriWith("jarvis://", { secret: "A".repeat(42) })],
     ["an upper-case fingerprint", uriWith("jarvis://", { fp: "A".repeat(64) })],
-    ["a wrong v", uriWith("jarvis://", { v: "2" })],
+    ["a wrong v", uriWith("jarvis://", { v: "1" })],
   ])("refuses %s", (_label, uri) => {
     expect(parsePairingUri(uri)).toBeUndefined();
   });
@@ -80,9 +80,9 @@ describe("pairing URI name (rule 2)", () => {
     expect(formatPairingUri(withName)).toBe(`${formatPairingUri(link)}&name=mac.tail.ts.net`);
   });
 
-  it("formatPairingUri without name is byte-identical to M6's output", () => {
+  it("formatPairingUri without name keeps M6's field order (at protocol v2)", () => {
     expect(formatPairingUri(link)).toBe(
-      `jarvis://pair?v=1&host=127.0.0.1&port=8443&secret=${TOKEN}&fp=${FINGERPRINT}`,
+      `jarvis://pair?v=2&host=127.0.0.1&port=8443&secret=${TOKEN}&fp=${FINGERPRINT}`,
     );
   });
 

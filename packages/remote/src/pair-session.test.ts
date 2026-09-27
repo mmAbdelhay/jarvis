@@ -267,11 +267,11 @@ describe("createPairSession", () => {
     expect(pairing.status().kind).toBe("open");
   });
 
-  it("[bite-proof: version before secret] a v:2 frame closes 4426 and the window stays open, even with the right secret", () => {
+  it("[bite-proof: version before secret] a v:1 frame closes 4426 and the window stays open, even with the right secret", () => {
     const { pairing, socket, session } = makeHarness();
     const { secret } = pairing.open();
 
-    session.onText(pairFrame(secret, "Phone", 2));
+    session.onText(pairFrame(secret, "Phone", 1));
 
     expect(socket.closed?.code).toBe(4426);
     expect(pairing.status().kind).toBe("open");

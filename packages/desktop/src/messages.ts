@@ -1163,6 +1163,10 @@ export const MESSAGES = {
         ar: "هذا النوع من الطلبات غير مدعوم.",
         en: "That kind of request is not supported.",
       },
+      locked: {
+        ar: "سجّل الدخول إلى جارفيس أولًا.",
+        en: "Log in to Jarvis first.",
+      },
     };
     return text[code][language];
   },

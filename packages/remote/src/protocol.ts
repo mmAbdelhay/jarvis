@@ -44,12 +44,23 @@ export type {
   SubTarget,
 } from "@jarvis/wire";
 import {
+  AUTH_TOKEN_PATTERN,
   DEVICE_ID_PATTERN,
+  MAX_ATTESTATION_OBJECT_LENGTH,
   MAX_PAIR_FRAME_BYTES,
+  MAX_PASSKEY_FIELD_LENGTH,
+  MAX_PASSKEY_LABEL_LENGTH,
+  MAX_PASSWORD_LENGTH,
   MAX_TEXT_FRAME_BYTES,
   SECRET_PATTERN,
 } from "@jarvis/wire";
-import type { ClientMessage, PairClientMessage, SubTarget } from "@jarvis/wire";
+import type {
+  AuthArgs,
+  AuthChannel,
+  ClientMessage,
+  PairClientMessage,
+  SubTarget,
+} from "@jarvis/wire";
 
 export const REQUEST_WINDOW_MS = 10_000;
 export const MAX_REQUESTS_PER_WINDOW = 200;
@@ -213,4 +224,120 @@ export function parsePairMessage(text: string): PairClientMessage | undefined {
     return { t: "pair", v, secret, deviceName, client };
   }
   return undefined;
+}
+
+// Unpadded base64url, as WebAuthn's JSON encoding produces it.
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+// No control, format (bidi overrides, zero-widths), surrogate, private-use or
+// unassigned code points, and no line/paragraph separators.
+const UNPRINTABLE_PATTERN = /[\p{C}\p{Zl}\p{Zp}]/u;
+
+function isPassword(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= MAX_PASSWORD_LENGTH;
+}
+
+function isAuthToken(value: unknown): value is string {
+  return typeof value === "string" && AUTH_TOKEN_PATTERN.test(value);
+}
+
+function isBase64Url(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length <= maxLength && BASE64URL_PATTERN.test(value);
+}
+
+function isPasskeyLabel(value: unknown): value is string {
+  // Two UTF-16 units per code point at most: rejects a huge string before
+  // the regex or the code-point spread ever walks it.
+  if (typeof value !== "string" || value.length > MAX_PASSKEY_LABEL_LENGTH * 2) return false;
+  if (UNPRINTABLE_PATTERN.test(value)) return false;
+  const codePoints = [...value].length;
+  return codePoints >= 1 && codePoints <= MAX_PASSKEY_LABEL_LENGTH;
+}
+
+/**
+ * An auth request's `a` array: at most one plain-object argument (absent
+ * means `{}`). Returns the object, or `undefined` when the shape is wrong.
+ */
+function singleArgObject(args: readonly unknown[]): Record<string, unknown> | undefined {
+  if (args.length === 0) return {};
+  if (args.length !== 1) return undefined;
+  const [arg] = args;
+  if (typeof arg !== "object" || arg === null || Array.isArray(arg)) return undefined;
+  return arg as Record<string, unknown>;
+}
+
+/**
+ * Validates an `auth:*` request's arguments. Pure and never throws; the
+ * result is rebuilt field by field (see the header comment), so extra keys
+ * and an own `__proto__` go nowhere. `undefined` means the request is a
+ * `bad-request` — including a channel that isn't an auth channel.
+ */
+export function parseAuthArgs<C extends AuthChannel>(
+  channel: C,
+  args: readonly unknown[],
+): AuthArgs[C] | undefined;
+export function parseAuthArgs(
+  channel: string,
+  args: readonly unknown[],
+): AuthArgs[AuthChannel] | undefined;
+export function parseAuthArgs(
+  channel: string,
+  args: readonly unknown[],
+): AuthArgs[AuthChannel] | undefined {
+  const arg = singleArgObject(args);
+  if (arg === undefined) return undefined;
+  switch (channel) {
+    case "auth:status":
+    case "auth:passkeyBegin":
+    case "auth:logout":
+      return {};
+    case "auth:login":
+    case "auth:passkeyRegisterBegin": {
+      const { password } = arg;
+      return isPassword(password) ? { password } : undefined;
+    }
+    case "auth:refresh": {
+      const { refreshToken } = arg;
+      return isAuthToken(refreshToken) ? { refreshToken } : undefined;
+    }
+    case "auth:resume": {
+      const { accessToken } = arg;
+      return isAuthToken(accessToken) ? { accessToken } : undefined;
+    }
+    case "auth:passkeyFinish": {
+      const { credentialId, clientDataJSON, authenticatorData, signature, userHandle } = arg;
+      if (
+        !isBase64Url(credentialId, MAX_PASSKEY_FIELD_LENGTH) ||
+        !isBase64Url(clientDataJSON, MAX_PASSKEY_FIELD_LENGTH) ||
+        !isBase64Url(authenticatorData, MAX_PASSKEY_FIELD_LENGTH) ||
+        !isBase64Url(signature, MAX_PASSKEY_FIELD_LENGTH)
+      ) {
+        return undefined;
+      }
+      const result: AuthArgs["auth:passkeyFinish"] = {
+        credentialId,
+        clientDataJSON,
+        authenticatorData,
+        signature,
+      };
+      if (userHandle !== undefined) {
+        if (!isBase64Url(userHandle, MAX_PASSKEY_FIELD_LENGTH)) return undefined;
+        result.userHandle = userHandle;
+      }
+      return result;
+    }
+    case "auth:passkeyRegisterFinish": {
+      const { credentialId, clientDataJSON, attestationObject, label } = arg;
+      if (
+        isBase64Url(credentialId, MAX_PASSKEY_FIELD_LENGTH) &&
+        isBase64Url(clientDataJSON, MAX_PASSKEY_FIELD_LENGTH) &&
+        isBase64Url(attestationObject, MAX_ATTESTATION_OBJECT_LENGTH) &&
+        isPasskeyLabel(label)
+      ) {
+        return { credentialId, clientDataJSON, attestationObject, label };
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
 }

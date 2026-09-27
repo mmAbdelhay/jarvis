@@ -311,8 +311,8 @@ export const STRINGS = {
     ar: "تم إلغاء اقتران هذا الهاتف.",
   },
   "conn.incompatible": {
-    en: "Update Jarvis on this phone and your computer to keep them in sync.",
-    ar: "حدّث Jarvis على هذا الهاتف وجهاز الكمبيوتر لإبقائهما متزامنين.",
+    en: "Update the Jarvis app. If it's already up to date, update Jarvis on your computer.",
+    ar: "حدّث تطبيق Jarvis. إذا كان محدّثًا بالفعل، فحدّث Jarvis على جهاز الكمبيوتر.",
   },
   "conn.pinMismatch": {
     en: "The computer's certificate doesn't match the one this phone paired with. If you didn't change the computer, someone may be intercepting the connection. Tap \"Pair again\" if this continues.",
