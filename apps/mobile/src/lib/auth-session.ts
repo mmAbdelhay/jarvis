@@ -14,7 +14,11 @@
 //   right after a lost reply: keep the token held, never guess). So the stored
 //   copy is always the newest: it is written before the new access token
 //   is used, and if that write fails the stale stored copy is deleted.
-// - Refreshes are serialized: one `auth:refresh` in flight at a time.
+// - Refreshes are serialized: one `auth:refresh` in flight at a time. In
+//   the browser, tabs share one stored token, so every rotation also runs
+//   under a cross-tab lock and, with "Keep me signed in" on, re-reads the
+//   stored token inside it: a newer one means another tab rotated, and the
+//   copy in memory is already spent.
 // - The idle lock is client-side only: the access token and the in-memory
 //   refresh token are dropped (the stored one stays for biometric unlock).
 // - Log lines are fixed text: never a token or a password.
@@ -55,6 +59,9 @@ export type RefreshStoredFlag = {
 };
 
 export type AuthLockCause = "idle" | AuthLockReason;
+
+/** Runs `task` while holding the one cross-tab refresh lock (refresh-lock.web.ts). */
+export type RefreshLock = <T>(task: () => Promise<T>) => Promise<T>;
 
 export type UnlockOutcome =
   | "unlocked"
@@ -111,6 +118,10 @@ export type AuthSessionDeps = {
    *  the foreground never re-arms `autoPrompt`. Native keeps the stored
    *  token behind the device-owner check at every unlock. */
   storedUnlockAtLaunchOnly?: boolean;
+  /** The browser build (final review I2): tabs share `refreshStore`, so
+   *  each rotation holds this lock and prefers the stored token over the
+   *  one in memory. Native has one process and passes none. */
+  refreshLock?: RefreshLock;
   idleMs: number;
   log(line: string): void;
 };
@@ -380,12 +391,26 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     return true;
   }
 
-  /** The one `auth:refresh` path (serialized). */
+  /** Under the cross-tab lock with the stored token allowed: the stored
+   *  copy when there is one (another tab may have rotated it), else `token`. */
+  async function newestToken(token: string): Promise<string> {
+    if (!(await hasPasscode())) return token;
+    try {
+      return (await deps.refreshStore.get(REFRESH_TOKEN_KEY)) ?? token;
+    } catch {
+      return token;
+    }
+  }
+
+  /** The one `auth:refresh` path (serialized, across tabs too). */
   function refreshWith(token: string): Promise<UnlockOutcome> {
     if (refreshing !== undefined) return refreshing;
+    const lock = deps.refreshLock;
     const run = async (): Promise<UnlockOutcome> => {
       const startedEpoch = epoch;
-      const result = await deps.rpc.call("auth:refresh", [{ refreshToken: token }]);
+      const presented = lock === undefined ? token : await newestToken(token);
+      if (startedEpoch !== epoch) return "failed";
+      const result = await deps.rpc.call("auth:refresh", [{ refreshToken: presented }]);
       if (result.ok) {
         const tokens = parseTokens(result.value);
         if (tokens === undefined) {
@@ -403,7 +428,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
       }
       return failureOutcome(result);
     };
-    refreshing = run().finally(() => {
+    refreshing = (lock === undefined ? run() : lock(run)).finally(() => {
       refreshing = undefined;
     });
     return refreshing;
@@ -561,13 +586,22 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
       await deleteStored();
       // A deleted record may linger on disk: spend the token it held with
       // one rotation, keeping the new pair in memory only (the gate is off,
-      // so adoptTokens stores nothing).
-      if (refreshToken !== undefined) await refreshWith(refreshToken);
+      // so adoptTokens stores nothing). A rotation already in flight may
+      // have stored its token before the switch: wait for it, then rotate
+      // once more so that one is spent too (final review D2).
+      if (refreshing !== undefined) await refreshing;
+      if (refreshToken !== undefined) await rotateForPolicy(refreshToken);
       return;
     }
     // Rotating (single-flight) stores the fresh token through adoptTokens,
     // so no write here can ever race a rotation with an older token.
-    if (refreshToken !== undefined) await refreshWith(refreshToken);
+    if (refreshToken !== undefined) await rotateForPolicy(refreshToken);
+  }
+
+  /** A refused rotation leaves nothing to unlock with (final review D1). */
+  async function rotateForPolicy(token: string): Promise<void> {
+    const outcome = await refreshWith(token);
+    if (outcome === "password-required") lockLocally("signed-out");
   }
 
   /** Local effects first, so an offline (or hanging) `auth:logout` can

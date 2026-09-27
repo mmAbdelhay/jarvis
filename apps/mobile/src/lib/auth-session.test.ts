@@ -1,7 +1,7 @@
 import { AUTH_STATE_CHANNEL } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
-import type { DeviceAuth } from "./auth-session";
+import type { DeviceAuth, RefreshLock } from "./auth-session";
 import { createFakeClock } from "./clock";
 import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
@@ -168,7 +168,8 @@ function createStoredFlagDouble() {
 }
 
 async function flush(): Promise<void> {
-  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  // Deep enough for a rotation queued behind the cross-tab lock double.
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
 function setup(
@@ -942,5 +943,199 @@ describe("auth-session: browser, the stored token only signs in at page load", (
     const before = double.calls.length;
     expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
     expect(double.calls.slice(before).map((call) => call.channel)).toEqual(["auth:refresh"]);
+  });
+});
+
+/** Web Locks' exclusive mode, in one process: one task at a time, in request order. */
+function createLockDouble() {
+  let tail: Promise<unknown> = Promise.resolve();
+  let requests = 0;
+  const lock: RefreshLock = (task) => {
+    requests += 1;
+    const run = tail.then(task);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+  return { lock, requests: () => requests };
+}
+
+/** The laptop's one refresh family: only its newest token rotates; any
+ *  older one is reuse (owner-auth.ts revokes the family on it). */
+function createFamilyDouble() {
+  const state = { current: undefined as string | undefined, reuse: 0, issued: [] as string[] };
+  let held: Promise<void> | undefined;
+  function issue(now: number): RpcResult {
+    const tokens = {
+      accessToken: token(),
+      refreshToken: token(),
+      accessExpiresAt: now + ACCESS_TTL,
+    };
+    state.current = tokens.refreshToken;
+    state.issued.push(tokens.refreshToken);
+    return { ok: true, value: tokens };
+  }
+  return {
+    state,
+    /** Holds every refresh reply until the returned release runs. */
+    hold(): () => void {
+      let release = () => {};
+      held = new Promise<void>((resolve) => {
+        release = () => {
+          held = undefined;
+          resolve();
+        };
+      });
+      return release;
+    },
+    async answer(channel: string, args: unknown[], now: number): Promise<RpcResult | undefined> {
+      if (channel === "auth:login") return issue(now);
+      if (channel !== "auth:refresh") return undefined;
+      const presented = (args[0] as { refreshToken?: string }).refreshToken;
+      if (held !== undefined) await held;
+      if (presented !== state.current) {
+        state.reuse += 1;
+        state.current = undefined;
+        return {
+          ok: false,
+          error: { kind: "remote", code: "forbidden", text: "x", language: "en" },
+        };
+      }
+      return issue(now);
+    },
+  };
+}
+
+/** Browser tabs over one IndexedDB store, one prefs file, one Web Locks
+ *  manager and one laptop, "Keep me signed in" on. */
+function browserTabs() {
+  const events: string[] = [];
+  const store = createStoreDouble(events);
+  const flag = createStoredFlagDouble();
+  const locks = createLockDouble();
+  const family = createFamilyDouble();
+  const setting = { keep: true };
+  function open() {
+    const clock = createFakeClock();
+    const double = createRpcDouble(clock);
+    const call = double.rpc.call;
+    double.rpc.call = async (channel, args) => {
+      const answer = await family.answer(channel, args, clock.now());
+      if (answer === undefined) return call(channel, args);
+      double.calls.push({ channel, args });
+      return answer;
+    };
+    const session = createAuthSession({
+      rpc: double.rpc,
+      clock,
+      refreshStore: store.store,
+      refreshStoredFlag: flag.flag,
+      deviceAuth: createWebDeviceAuth(async () => setting.keep),
+      storedUnlockAtLaunchOnly: true,
+      refreshLock: locks.lock,
+      idleMs: IDLE,
+      log: () => {},
+    });
+    return { clock, double, session };
+  }
+  return { store, flag, locks, family, setting, open };
+}
+
+describe("auth-session: browser tabs sharing one stored token (final review I2)", () => {
+  it("a tab whose stored token another tab rotated refreshes with the stored one, never its stale copy", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    expect(await a.session.unlockWithPassword("pw")).toBe("unlocked");
+    const t1 = tabs.store.values.get(REFRESH_TOKEN_KEY);
+
+    // Tab B loads and signs in with the stored token: T1 -> T2.
+    const b = tabs.open();
+    expect(await b.session.unlockWithStoredRefresh()).toBe("unlocked");
+    expect(tokenArg(b.double.calls[0], "refreshToken")).toBe(t1);
+    const t2 = tabs.store.values.get(REFRESH_TOKEN_KEY);
+
+    // Tab A's scheduled refresh still holds T1 in memory.
+    a.clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(tokenArg(a.double.calls[1], "refreshToken")).toBe(t2);
+
+    // And tab B's in turn picks up what tab A stored.
+    const t3 = tabs.store.values.get(REFRESH_TOKEN_KEY);
+    b.clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(tokenArg(b.double.calls[1], "refreshToken")).toBe(t3);
+
+    expect(tabs.family.state.reuse).toBe(0);
+    expect(a.double.rpc.state()).toBe("open");
+    expect(b.double.rpc.state()).toBe("open");
+    // Tab B's sign-in and both scheduled refreshes; a password login takes no lock.
+    expect(tabs.locks.requests()).toBe(3);
+  });
+
+  it("a launch sign-in racing another tab's rotation waits for it and uses the rotated token", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const release = tabs.family.hold();
+    a.clock.advance(ACCESS_TTL * 0.8); // tab A's rotation is now in flight
+    await flush();
+
+    const b = tabs.open();
+    const signIn = b.session.unlockWithStoredRefresh();
+    await flush();
+    release();
+    expect(await signIn).toBe("unlocked");
+
+    // Login issued T1, tab A's rotation T2, tab B's sign-in T3: tab B read
+    // T1 before tab A stored T2, and still sent T2.
+    const [t1, t2] = tabs.family.state.issued;
+    expect(tokenArg(a.double.calls[1], "refreshToken")).toBe(t1);
+    expect(tokenArg(b.double.calls[0], "refreshToken")).toBe(t2);
+    expect(tabs.family.state.reuse).toBe(0);
+  });
+});
+
+describe("auth-session: storagePolicyChanged edge cases (final review D1, D2)", () => {
+  it("a refused rotation locks locally as signed-out", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    browser.double.reply("auth:refresh", {
+      ok: false,
+      error: { kind: "remote", code: "forbidden", text: "x", language: "en" },
+    });
+    browser.setting.keep = false;
+    await browser.session.storagePolicyChanged();
+    expect(browser.session.get()).toMatchObject({ lockedLocally: true, lockCause: "signed-out" });
+    expect(browser.double.rpc.state()).toBe("locked");
+  });
+
+  it("turned off during a rotation: waits for it, then rotates again so no token ever stored stays live", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    let answer: (result: RpcResult) => void = () => {};
+    browser.double.reply(
+      "auth:refresh",
+      new Promise<RpcResult>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    browser.clock.advance(ACCESS_TTL * 0.8); // the scheduled rotation is in flight
+    await flush();
+    const inFlight = browser.double.tokensFor();
+    const rotated = (inFlight as { value: { refreshToken: string } }).value.refreshToken;
+
+    browser.setting.keep = false;
+    const changed = browser.session.storagePolicyChanged();
+    await flush();
+    answer(inFlight);
+    await changed;
+
+    expect(browser.double.calls.map((call) => call.channel)).toEqual([
+      "auth:login",
+      "auth:refresh",
+      "auth:refresh",
+    ]);
+    expect(tokenArg(browser.double.calls[2], "refreshToken")).toBe(rotated);
+    expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    expect(browser.double.rpc.state()).toBe("open");
   });
 });

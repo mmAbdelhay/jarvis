@@ -24,6 +24,7 @@ import { filePrefsStore } from "@/lib/prefs-file";
 import { createRefreshStoredFlag, DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
+import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
 import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
@@ -98,6 +99,8 @@ export default function RootLayout() {
       // Browser: the stored token only signs in at page load; an idle lock
       // needs a passkey or the password.
       storedUnlockAtLaunchOnly: PLATFORM === "web",
+      // Browser: tabs share the stored token, so rotations take turns.
+      refreshLock,
       idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
       log: (line) => console.log(line),
     });
