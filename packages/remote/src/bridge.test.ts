@@ -1,6 +1,14 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { Bridge, BridgeDeps, Listen, ListenOptions, RemoteStatus } from "./bridge.js";
+import type {
+  Bridge,
+  BridgeDeps,
+  Listen,
+  ListenOptions,
+  ListenWeb,
+  WebListenOptions,
+  RemoteStatus,
+} from "./bridge.js";
 import { createBridge, IDLE_DISABLE_MAX_MINUTES } from "./bridge.js";
 import type { CertificateMaterial } from "./certificate.js";
 import { fakeClock } from "./clock-double.js";
@@ -21,6 +29,7 @@ import { ACCESS_TTL_MS } from "./sessions.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
 import { FakeSocket } from "./socket-double.js";
 import { softAuthenticator } from "./webauthn-double.js";
+import type { WebManifest } from "./web-server.js";
 
 const DIR = "/remote";
 // createBridge builds both paths with `join(deps.dir, …)` (bridge.ts), which
@@ -44,6 +53,7 @@ const ON_127: (port?: number) => Parameters<Bridge["apply"]>[0] = (port = 7717) 
   port,
   sidecarProxy: false,
   tls: {},
+  web: { enabled: false, port: port + 1 },
 });
 
 /** `CERT` with a different `source`/`dnsNames` — the four combinations the sidecar gate depends on. */
@@ -127,6 +137,32 @@ function makeListen(opts: { fail?: boolean; closeFails?: boolean } = {}): {
   return { listen, calls, listeners };
 }
 
+const WEB_MANIFEST: WebManifest = new Map([
+  ["/index.html", { bytes: Buffer.from("<!doctype html>"), type: "text/html", etag: '"e"' }],
+]);
+
+function makeListenWeb(opts: { fail?: boolean } = {}): {
+  listenWeb: ListenWeb;
+  calls: WebListenOptions[];
+  listeners: FakeListener[];
+} {
+  const calls: WebListenOptions[] = [];
+  const listeners: FakeListener[] = [];
+  const listenWeb: ListenWeb = vi.fn(async (options: WebListenOptions) => {
+    calls.push(options);
+    if (opts.fail) throw new Error("EADDRINUSE");
+    const entry: FakeListener = { port: options.port, closed: false };
+    listeners.push(entry);
+    return {
+      port: entry.port,
+      async close() {
+        entry.closed = true;
+      },
+    };
+  });
+  return { listenWeb, calls, listeners };
+}
+
 function makeHarness(
   opts: {
     fs?: ReturnType<typeof memoryFs>;
@@ -137,7 +173,9 @@ function makeHarness(
     handle?: RequestHandler;
     authorizeKey?: AuthorizeKey;
     createProxy?: (registry: SidecarRegistry) => SidecarProxy | undefined;
-    webOrigin?: () => string | undefined;
+    webListenFails?: boolean;
+    /** What `loadWebManifest` answers; "throws" makes it reject. Defaults to a built one. */
+    webManifest?: WebManifest | undefined | "throws";
     auditPolicy?: (channel: string) => AuditPolicy;
     /** Phase 0: every harness starts with an owner password already set
      *  (the bridge never listens without one) unless this is false. */
@@ -158,6 +196,16 @@ function makeHarness(
   } = makeListen({
     fail: opts.listenFails,
     closeFails: opts.closeFails,
+  });
+  const {
+    listenWeb,
+    calls: webListenCalls,
+    listeners: webListeners,
+  } = makeListenWeb({ fail: opts.webListenFails });
+  const webManifest = "webManifest" in opts ? opts.webManifest : WEB_MANIFEST;
+  const loadWebManifest = vi.fn(async () => {
+    if (webManifest === "throws") throw new Error("manifest unreadable");
+    return webManifest;
   });
   const loadCertificate = vi.fn(async () => {
     if (opts.certFails) throw new Error("certificate failed");
@@ -192,7 +240,8 @@ function makeHarness(
     listen,
     loadCertificate,
     createProxy,
-    webOrigin: opts.webOrigin,
+    listenWeb,
+    loadWebManifest,
     handle,
     policies: new Map([
       ["metrics:update", { kind: "latest" as const }],
@@ -217,6 +266,9 @@ function makeHarness(
     random,
     listenCalls,
     listeners,
+    webListenCalls,
+    webListeners,
+    loadWebManifest,
     loadCertificate,
     createProxy,
     onStatus,
@@ -290,6 +342,7 @@ describe("createBridge: off by default", () => {
       port: 7717,
       sidecarProxy: false,
       tls: {},
+      web: { enabled: false, port: 7718 },
     });
 
     expect(h.listenCalls).toEqual([]);
@@ -340,19 +393,6 @@ describe("createBridge: off by default", () => {
     expect(h.log).toHaveBeenCalledWith("test line");
   });
 
-  it("threads the current web Origin getter to the listener", async () => {
-    let origin: string | undefined = "https://mac.tail.ts.net:4318";
-    const h = makeHarness({ webOrigin: () => origin });
-    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
-    const bridge = await createBridge(h.deps);
-
-    await bridge.apply(ON_127());
-
-    expect(h.listenCalls[0]?.webOrigin?.()).toBe("https://mac.tail.ts.net:4318");
-    origin = undefined;
-    expect(h.listenCalls[0]?.webOrigin?.()).toBeUndefined();
-  });
-
   it("an IPv4-mapped bindAddress listens on plain IPv4", async () => {
     const h = makeHarness();
     await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
@@ -364,6 +404,7 @@ describe("createBridge: off by default", () => {
       port: 7717,
       sidecarProxy: false,
       tls: {},
+      web: { enabled: false, port: 7718 },
     });
 
     expect(h.listenCalls[0]?.host).toBe("127.0.0.1");
@@ -380,6 +421,7 @@ describe("createBridge: off by default", () => {
       port: 7717,
       sidecarProxy: false,
       tls: {},
+      web: { enabled: false, port: 7718 },
     });
 
     expect(h.listenCalls).toEqual([]);
@@ -404,6 +446,7 @@ describe("createBridge: listener lifecycle", () => {
       port: 7717,
       sidecarProxy: false,
       tls: {},
+      web: { enabled: false, port: 7718 },
     });
 
     expect(h.listeners[0]?.closed).toBe(true);
@@ -424,6 +467,7 @@ describe("createBridge: listener lifecycle", () => {
         port: 7717,
         sidecarProxy: false,
         tls: {},
+        web: { enabled: false, port: 7718 },
       }),
     ).resolves.toBeUndefined();
 
@@ -1545,6 +1589,7 @@ describe("createBridge: idle auto-disable (M12 Task 1)", () => {
     port: 7717,
     sidecarProxy: false,
     tls: {},
+    web: { enabled: false, port: 7718 },
   };
 
   it("IDLE_DISABLE_MAX_MINUTES is 10_080 — config.ts's validator uses the same ceiling ('...from 0 to 10080'); the two must never drift apart", () => {
@@ -2319,15 +2364,13 @@ describe("createBridge: passkeys (Phase 0)", () => {
     throw new Error(`${ch} never answered`);
   }
 
-  async function setup(options: { cert?: CertificateMaterial; webOrigin?: string } = {}) {
+  /** `web: true` turns the web listener on at port 8443 — the passkeys'
+   *  origin comes only from it, never from a dependency of its own. */
+  async function setup(options: { cert?: CertificateMaterial; web?: boolean } = {}) {
     const h = makeHarness({ cert: options.cert ?? certWith("configured", [NAME]) });
-    if (options.webOrigin !== undefined) {
-      const origin = options.webOrigin;
-      h.deps.webOrigin = () => origin;
-    }
     const [one, two] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone", "Laptop"]);
     const bridge = await createBridge(h.deps);
-    await bridge.apply(ON_127());
+    await bridge.apply({ ...ON_127(), web: { enabled: options.web ?? false, port: 8443 } });
     const connect = (device: { deviceId: string; token: string } | undefined, source: string) => {
       const socket = new FakeSocket();
       const handlers = h.listenCalls[0]?.onSocket("rpc", socket, source);
@@ -2338,8 +2381,8 @@ describe("createBridge: passkeys (Phase 0)", () => {
     return { h, bridge, a: connect(one, "10.0.0.5:1"), b: connect(two, "10.0.0.6:1") };
   }
 
-  it("answers unsupported without a web origin, or with a self-signed certificate", async () => {
-    for (const options of [{}, { cert: certWith("self-signed", []), webOrigin: ORIGIN }]) {
+  it("answers unsupported while the web listener is off, or with a self-signed certificate", async () => {
+    for (const options of [{}, { cert: certWith("self-signed", []), web: true }]) {
       const { a } = await setup(options);
       await login(a.handlers, a.socket);
       expect(await ask(a, 1, "auth:passkeyBegin")).toMatchObject({ code: "unsupported" });
@@ -2349,8 +2392,22 @@ describe("createBridge: passkeys (Phase 0)", () => {
     }
   });
 
+  it("passkey ceremonies become supported once the web listener turns on", async () => {
+    const { bridge, a } = await setup();
+    await login(a.handlers, a.socket);
+    const args = [{ password: OWNER_TEST_PASSWORD }];
+    expect(await ask(a, 1, "auth:passkeyRegisterBegin", args)).toMatchObject({
+      code: "unsupported",
+    });
+    await bridge.apply({ ...ON_127(), web: { enabled: true, port: 8443 } });
+    expect(await ask(a, 2, "auth:passkeyRegisterBegin", args)).toMatchObject({
+      t: "res",
+      v: { challenge: expect.any(String) },
+    });
+  });
+
   it("a passkey stored across a sign-out is taken back through the full invalidation: a login made with it meanwhile dies too", async () => {
-    const { h, bridge, a, b } = await setup({ webOrigin: ORIGIN });
+    const { h, bridge, a, b } = await setup({ web: true });
     const authenticator = softAuthenticator({ rpId: NAME, origin: ORIGIN });
     await login(a.handlers, a.socket);
     const begin = await ask(a, 1, "auth:passkeyRegisterBegin", [{ password: OWNER_TEST_PASSWORD }]);
@@ -2397,7 +2454,8 @@ describe("createBridge: passkeys (Phase 0)", () => {
   });
 
   it("registers over one connection, refreshes desktop Settings, logs in with it over another, and a deleted passkey stops working", async () => {
-    const { h, bridge, a, b } = await setup({ webOrigin: ORIGIN });
+    const { h, bridge, a, b } = await setup({ web: true });
+    expect(bridge.status().web).toEqual({ kind: "on", port: 8443, origin: ORIGIN });
     const authenticator = softAuthenticator({ rpId: NAME, origin: ORIGIN });
     await login(a.handlers, a.socket);
     const versionBefore = bridge.status().ownerVersion;
@@ -2444,5 +2502,216 @@ describe("createBridge: passkeys (Phase 0)", () => {
         authenticator.assert((retry.v as { challenge: string }).challenge),
       ]),
     ).toMatchObject({ t: "err", id: 5, code: "forbidden" });
+  });
+});
+
+describe("createBridge: web listener (Phase 1)", () => {
+  const NAME = "laptop.tailnet.ts.net";
+  const CONFIGURED = certWith("configured", [NAME]);
+  const WEB_ON = (port = 7717): Parameters<Bridge["apply"]>[0] => ({
+    ...ON_127(port),
+    web: { enabled: true, port: port + 1 },
+  });
+
+  async function start(
+    options: Parameters<typeof makeHarness>[0] = {},
+    config: Parameters<Bridge["apply"]>[0] = WEB_ON(),
+  ) {
+    const h = makeHarness({ cert: CONFIGURED, ...options });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(config);
+    return { h, bridge };
+  }
+
+  it("with every condition met, listens beside the bridge and feeds the Origin check its origin", async () => {
+    const { h, bridge } = await start();
+
+    expect(h.webListenCalls).toEqual([
+      {
+        host: "127.0.0.1",
+        port: 7718,
+        cert: "CERT",
+        key: "KEY",
+        name: NAME,
+        manifest: WEB_MANIFEST,
+        bridgePort: 7717,
+      },
+    ]);
+    expect(bridge.status().web).toEqual({
+      kind: "on",
+      port: 7718,
+      origin: `https://${NAME}:7718`,
+    });
+    expect(h.listenCalls[0]?.webOrigin()).toBe(`https://${NAME}:7718`);
+    expect(h.onStatus.mock.calls.at(-1)?.[0].web).toEqual(bridge.status().web);
+  });
+
+  it("port 443 gives the origin without a port, as a browser sends it", async () => {
+    const { h, bridge } = await start({}, { ...ON_127(), web: { enabled: true, port: 443 } });
+    expect(bridge.status().web).toEqual({ kind: "on", port: 443, origin: `https://${NAME}` });
+    expect(h.listenCalls[0]?.webOrigin()).toBe(`https://${NAME}`);
+  });
+
+  it.each<[string, Parameters<typeof makeHarness>[0], Parameters<Bridge["apply"]>[0], unknown]>([
+    ["web disabled", {}, ON_127(), { kind: "off" }],
+    ["bridge disabled", {}, { ...WEB_ON(), enabled: false }, { kind: "off" }],
+    [
+      "a self-signed certificate",
+      { cert: certWith("self-signed", []) },
+      WEB_ON(),
+      { kind: "needs-certificate" },
+    ],
+    [
+      "a configured certificate with no DNS name",
+      { cert: certWith("configured", []) },
+      WEB_ON(),
+      { kind: "needs-certificate" },
+    ],
+    [
+      "a configured certificate whose only name is a wildcard",
+      { cert: certWith("configured", ["*.tailnet.ts.net"]) },
+      WEB_ON(),
+      { kind: "needs-certificate" },
+    ],
+    ["no web export", { webManifest: undefined }, WEB_ON(), { kind: "not-built" }],
+    ["an unreadable web export", { webManifest: "throws" }, WEB_ON(), { kind: "not-built" }],
+    [
+      "the bridge's own port",
+      {},
+      { ...ON_127(), web: { enabled: true, port: 7717 } },
+      { kind: "off", reason: "port-conflict" },
+    ],
+  ])("%s: no web listener, the matching web status", async (_name, options, config, expected) => {
+    const { h, bridge } = await start(options, config);
+    expect(h.webListenCalls).toEqual([]);
+    expect(bridge.status().web).toEqual(expected);
+    expect(h.listenCalls[0]?.webOrigin()).toBeUndefined();
+  });
+
+  it("no owner password: neither listener runs, web status needs-owner-password", async () => {
+    const { h, bridge } = await start({ ownerPassword: false });
+    expect(h.listenCalls).toEqual([]);
+    expect(h.webListenCalls).toEqual([]);
+    expect(bridge.status().web).toEqual({ kind: "needs-owner-password" });
+  });
+
+  it("bridge not listening (no device, no pairing window): web status off, no listener", async () => {
+    const h = makeHarness({ cert: CONFIGURED });
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(WEB_ON());
+    expect(h.listenCalls).toEqual([]);
+    expect(h.webListenCalls).toEqual([]);
+    expect(bridge.status().web).toEqual({ kind: "off" });
+  });
+
+  it("a missing loadWebManifest or listenWeb dependency reads as not-built", async () => {
+    for (const missing of ["loadWebManifest", "listenWeb"] as const) {
+      const h = makeHarness({ cert: CONFIGURED });
+      delete h.deps[missing];
+      await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+      const bridge = await createBridge(h.deps);
+      await bridge.apply(WEB_ON());
+      expect(bridge.status().web).toEqual({ kind: "not-built" });
+      expect(bridge.status().listening).toBeDefined();
+    }
+  });
+
+  it("apply(OFF) closes the web listener before the bridge's, and the origin goes with it", async () => {
+    const h = makeHarness({ cert: CONFIGURED });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const closeOrder: string[] = [];
+    const recordClose =
+      <O>(name: string, start: (options: O) => Promise<{ port: number; close(): Promise<void> }>) =>
+      async (options: O) => {
+        const started = await start(options);
+        return {
+          port: started.port,
+          async close() {
+            closeOrder.push(name);
+            await started.close();
+          },
+        };
+      };
+    h.deps.listen = recordClose("bridge", h.deps.listen);
+    h.deps.listenWeb = recordClose("web", h.deps.listenWeb as ListenWeb);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(WEB_ON());
+    const getter = h.listenCalls[0]?.webOrigin;
+    expect(getter?.()).toBe(`https://${NAME}:7718`);
+
+    await bridge.apply({ ...WEB_ON(), enabled: false });
+    expect(closeOrder).toEqual(["web", "bridge"]);
+    expect(h.webListeners[0]?.closed).toBe(true);
+    expect(h.listeners[0]?.closed).toBe(true);
+    expect(getter?.()).toBeUndefined();
+    expect(bridge.status().web).toEqual({ kind: "off" });
+  });
+
+  it("turning web off alone closes only the web listener", async () => {
+    const { h, bridge } = await start();
+    await bridge.apply(ON_127());
+    expect(h.webListeners[0]?.closed).toBe(true);
+    expect(h.listeners[0]?.closed).toBe(false);
+    expect(h.listenCalls[0]?.webOrigin()).toBeUndefined();
+  });
+
+  it("re-applying the same config keeps the one web listener", async () => {
+    const { h, bridge } = await start();
+    await bridge.apply(WEB_ON());
+    expect(h.webListenCalls).toHaveLength(1);
+    expect(h.webListeners[0]?.closed).toBe(false);
+  });
+
+  it("a bridge restart on a new port restarts the web listener with the new bridgePort", async () => {
+    const { h, bridge } = await start();
+    await bridge.apply({ ...ON_127(9000), web: { enabled: true, port: 7718 } });
+    expect(h.webListeners[0]?.closed).toBe(true);
+    expect(h.webListenCalls[1]).toMatchObject({ port: 7718, bridgePort: 9000 });
+    expect(bridge.status().web).toMatchObject({ kind: "on", port: 7718 });
+  });
+
+  it("stop() closes the web listener", async () => {
+    const { h, bridge } = await start();
+    await bridge.stop();
+    expect(h.webListeners[0]?.closed).toBe(true);
+    expect(bridge.status().web).toEqual({ kind: "off" });
+  });
+
+  it("idle auto-disable closes the web listener", async () => {
+    const { h, bridge } = await start({}, { ...WEB_ON(), idleDisableMinutes: 1 });
+    expect(bridge.status().web).toMatchObject({ kind: "on" });
+    h.clock.advance(60_000);
+    await flush();
+    expect(h.listeners[0]?.closed).toBe(true);
+    expect(h.webListeners[0]?.closed).toBe(true);
+    expect(bridge.status().web).toEqual({ kind: "off" });
+    expect(h.listenCalls[0]?.webOrigin()).toBeUndefined();
+  });
+
+  it("a web port bind failure leaves the bridge up, reads off/listen-failed, audits, and is retried on the next apply", async () => {
+    const { h, bridge } = await start({ webListenFails: true });
+    expect(bridge.status().listening).toBeDefined();
+    expect(bridge.status().problem).toBeUndefined();
+    expect(bridge.status().web).toEqual({ kind: "off", reason: "listen-failed" });
+    expect(h.listenCalls[0]?.webOrigin()).toBeUndefined();
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining("web listen failed"));
+    expect((await auditLines(h.fs)).join("\n")).toContain(" error ");
+
+    // Not retried on every unrelated reconcile...
+    await bridge.openPairing();
+    expect(h.webListenCalls).toHaveLength(1);
+    // ...but a fresh apply tries again.
+    await bridge.apply(WEB_ON());
+    expect(h.webListenCalls).toHaveLength(2);
+    expect(h.listeners[0]?.closed).toBe(false);
+  });
+
+  it("a web export built after the first attempt is picked up by the next apply", async () => {
+    const { h, bridge } = await start({ webManifest: undefined });
+    expect(bridge.status().web).toEqual({ kind: "not-built" });
+    h.loadWebManifest.mockResolvedValue(WEB_MANIFEST);
+    await bridge.apply(WEB_ON());
+    expect(bridge.status().web).toMatchObject({ kind: "on" });
   });
 });

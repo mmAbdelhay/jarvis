@@ -49,6 +49,9 @@ import type { SidecarProxy } from "./proxy.js";
 import { CLOSE, formatPairingUri } from "./protocol.js";
 import { createSidecarRegistry } from "./sidecar-registry.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
+// Type-only, like proxy.ts above: web-server.ts (node:https) stays
+// unreachable from this file's value imports.
+import type { WebManifest } from "./web-server.js";
 
 export type BridgeConfig = {
   enabled: boolean;
@@ -63,6 +66,12 @@ export type BridgeConfig = {
    * value through `apply()`. Absent is treated exactly like `0`.
    */
   idleDisableMinutes?: number;
+  /**
+   * Phase 1: the static web client listener beside the bridge. `port` is
+   * the effective port (the desktop computes it; it must differ from
+   * `port`). The listener runs only while the web gate is "on".
+   */
+  web: { enabled: boolean; port: number };
 };
 
 /**
@@ -86,10 +95,10 @@ export type ListenOptions = {
   // config (rule 5) — `listenTls` routes `/s/...` requests/upgrades to it
   // and destroys everything else under that path when it is `undefined`.
   proxy: SidecarProxy | undefined;
-  // The web client's origin while the web gate is on, read per upgrade;
-  // `undefined` (or an absent getter) means only no-Origin and the native
-  // Origin pass the `/rpc` and `/pair` check (origin.ts).
-  webOrigin?: () => string | undefined;
+  // The web client's origin while the web listener is up, read per
+  // upgrade; `undefined` means only no-Origin and the native Origin pass
+  // the `/rpc` and `/pair` check (origin.ts).
+  webOrigin: () => string | undefined;
   onSocket(kind: "rpc" | "pair", socket: SocketLike, remoteAddress: string): SessionHandlers;
   log(line: string): void;
 };
@@ -97,6 +106,31 @@ export type ListenOptions = {
 export type Listener = { port: number; close(): Promise<void> };
 
 export type Listen = (options: ListenOptions) => Promise<Listener>;
+
+/** What the bridge hands `listenWeb` (web-server.ts's `listenWeb` accepts it). */
+export type WebListenOptions = {
+  host: string;
+  port: number;
+  cert: string;
+  key: string;
+  /** The certificate's DNS name: the only Host the listener answers. */
+  name: string;
+  manifest: WebManifest;
+  /** The bridge's bound port, for the CSP's `connect-src`. */
+  bridgePort: number;
+};
+
+export type ListenWeb = (options: WebListenOptions) => Promise<Listener>;
+
+/**
+ * Phase 1's web gate. `off` covers a disabled toggle, a bridge that isn't
+ * listening, and the two failures `reason` names: the web port equal to
+ * the bridge's own, or the web port failing to bind (the bridge stays up).
+ */
+export type RemoteWebStatus =
+  | { kind: "off"; reason?: "port-conflict" | "listen-failed" }
+  | { kind: "needs-certificate" | "needs-owner-password" | "not-built" }
+  | { kind: "on"; port: number; origin: string };
 
 export type RemoteProblem =
   | "bad-address"
@@ -193,6 +227,12 @@ export type RemoteStatus = {
    * Settings re-reads `ownerStatus()` without being reopened.
    */
   ownerVersion?: number;
+  /**
+   * Phase 1: the web client listener's gate. Optional in the type for the
+   * same reason as `idle` (Task 9 wires the desktop's consumers);
+   * `status()` always sets it.
+   */
+  web?: RemoteWebStatus;
 };
 
 /** The non-`undefined` half of `RemoteStatus.listening` — the shape this module's own `listening` variable holds. */
@@ -236,12 +276,17 @@ export type BridgeDeps = {
    *  again. Optional; defaults to a no-op. */
   notifyDesktop?(kind: DesktopNoticeKind, deviceName?: string): void;
   /**
-   * Phase 0: the web listener's origin (`https://<name>:<port>`), the
-   * passkey ceremonies' expected origin. The web listener arrives in
-   * Phase 1; until it answers, passkeys are `unsupported`. Optional;
-   * defaults to always `undefined`.
+   * Phase 1: starts the static web listener (listen.ts's `listenWeb`).
+   * Optional until the desktop wires it (Task 9); absent reads as
+   * "not-built".
    */
-  webOrigin?(): string | undefined;
+  listenWeb?: ListenWeb;
+  /**
+   * Phase 1: the built web export, or `undefined` when there is none
+   * ("not-built"). A rejection is treated the same, never thrown into the
+   * lifecycle. Optional until the desktop wires it (Task 9).
+   */
+  loadWebManifest?(): Promise<WebManifest | undefined>;
 };
 
 export type Bridge = {
@@ -332,6 +377,11 @@ function computeSidecarGate(
     return "needs-certificate";
   }
   return "on";
+}
+
+/** A browser's Origin for `https://name:port` leaves out the default port. */
+function webOriginFor(name: string, port: number): string {
+  return port === 443 ? `https://${name}` : `https://${name}:${port}`;
 }
 
 /**
@@ -438,7 +488,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // self-signed one's, which no browser would accept for WebAuthn.
     rpId: () =>
       listening?.certificate.source === "configured" ? listening.certificate.hostname : undefined,
-    webOrigin: () => deps.webOrigin?.(),
+    webOrigin: () => webListening?.origin,
     onPasskeyAdded() {
       ownerVersion += 1;
       emit();
@@ -480,6 +530,17 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   // response) — `undefined` whenever nothing is listening or the gate
   // wasn't "on" for it, exactly mirroring `listening`.
   let currentProxy: SidecarProxy | undefined;
+  // Phase 1: the web listener. `webKey` is the gate key last *attempted*
+  // (success, not-built or bind failure alike), so a failed attempt is not
+  // retried on every unrelated reconcile — only when the key changes or
+  // the next `apply()` clears it. `webOutcome` is that attempt's failure.
+  let webListener: Listener | undefined;
+  let webListening: { port: number; origin: string } | undefined;
+  let webKey: string | undefined;
+  let webOutcome: "not-built" | "listen-failed" | undefined;
+  // The certificate the current bridge listener serves — the web listener
+  // serves the same one.
+  let listenerMaterial: { cert: string; key: string } | undefined;
   let queue: Promise<void> = Promise.resolve();
 
   // M12 Task 1: the bridge's own idle timer. `idleSince` is set the moment
@@ -654,10 +715,15 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         : undefined;
 
     if (desiredKey !== listenerKey) {
+      // The web listener goes first: it never outlives (or briefly
+      // outlasts) the bridge listener its page talks to.
+      await closeWeb();
+      webKey = undefined;
       const oldListener = listener;
       listener = undefined;
       listening = undefined;
       listenerKey = undefined;
+      listenerMaterial = undefined;
       currentProxy = undefined;
       if (oldListener !== undefined) {
         hub.closeAll(CLOSE.goingAway);
@@ -721,7 +787,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             cert: material.cert,
             key: material.key,
             proxy,
-            webOrigin: deps.webOrigin ?? (() => undefined),
+            webOrigin: () => webListening?.origin,
             onSocket,
             log: deps.log,
           });
@@ -736,6 +802,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
 
         listener = newListener;
         listenerKey = desiredKey;
+        listenerMaterial = { cert: material.cert, key: material.key };
         currentProxy = proxy;
         listening = {
           host,
@@ -758,8 +825,108 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       }
     }
 
+    await reconcileWeb();
     checkIdle();
     emit();
+  }
+
+  /** The configured certificate's DNS name the web gate needs, if the live listener has one. */
+  function webHostname(): string | undefined {
+    return listening?.certificate.source === "configured"
+      ? listening.certificate.hostname
+      : undefined;
+  }
+
+  async function closeWeb(): Promise<void> {
+    const old = webListener;
+    webListener = undefined;
+    webListening = undefined;
+    if (old === undefined) return;
+    try {
+      await old.close();
+    } catch (error) {
+      deps.log(`bridge: web listener close failed: ${describeError(error)}`);
+    }
+  }
+
+  /**
+   * Phase 1's web gate, run at the end of every `step()`: the web listener
+   * runs only beside a live bridge listener, with the toggle on, a web port
+   * other than the bridge's, a configured certificate carrying a DNS name,
+   * an owner password, and a built export. A bind failure here is the web
+   * listener's alone — the bridge stays up.
+   */
+  async function reconcileWeb(): Promise<void> {
+    const hostname = webHostname();
+    const wantedKey =
+      config !== undefined &&
+      listener !== undefined &&
+      listening !== undefined &&
+      listenerMaterial !== undefined &&
+      config.web.enabled &&
+      config.web.port !== listening.port &&
+      hostname !== undefined &&
+      owner.hasPassword()
+        ? JSON.stringify([listenerKey, config.web.port])
+        : undefined;
+    if (wantedKey === webKey) return;
+
+    await closeWeb();
+    webKey = wantedKey;
+    webOutcome = undefined;
+    if (
+      wantedKey === undefined ||
+      config === undefined ||
+      listening === undefined ||
+      listenerMaterial === undefined ||
+      hostname === undefined
+    ) {
+      return;
+    }
+
+    let manifest: WebManifest | undefined;
+    try {
+      manifest = await deps.loadWebManifest?.();
+    } catch (error) {
+      deps.log(`bridge: loadWebManifest failed: ${describeError(error)}`);
+      manifest = undefined;
+    }
+    if (manifest === undefined || deps.listenWeb === undefined) {
+      webOutcome = "not-built";
+      return;
+    }
+
+    try {
+      const started = await deps.listenWeb({
+        host: listening.host,
+        port: config.web.port,
+        cert: listenerMaterial.cert,
+        key: listenerMaterial.key,
+        name: hostname,
+        manifest,
+        bridgePort: listening.port,
+      });
+      webListener = started;
+      webListening = { port: started.port, origin: webOriginFor(hostname, started.port) };
+    } catch (error) {
+      webOutcome = "listen-failed";
+      deps.log(`bridge: web listen failed: ${describeError(error)}`);
+      auditLog.record({ kind: "error", detail: `web listen failed: ${describeError(error)}` });
+    }
+  }
+
+  function webStatus(): RemoteWebStatus {
+    if (webListening !== undefined) return { kind: "on", ...webListening };
+    if (config === undefined || !config.enabled || stopped || idleDisabled || !config.web.enabled) {
+      return { kind: "off" };
+    }
+    if (!owner.hasPassword()) return { kind: "needs-owner-password" };
+    if (listening === undefined) return { kind: "off" };
+    if (config.web.port === listening.port) return { kind: "off", reason: "port-conflict" };
+    if (webHostname() === undefined) return { kind: "needs-certificate" };
+    if (webOutcome === "not-built") return { kind: "not-built" };
+    if (webOutcome === "listen-failed") return { kind: "off", reason: "listen-failed" };
+    return { kind: "off" };
   }
 
   function onSocket(
@@ -923,6 +1090,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       sidecarProxy: sidecarProxyStatus(),
       idle: idleStatusValue(),
       ownerVersion,
+      web: webStatus(),
     };
   }
 
@@ -941,6 +1109,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // (rule 5's next sentence): it survives an `enabled: false` apply and
     // is cleared only by one with `enabled: true`, or by `stop()`.
     idleDisabled = false;
+    // A web attempt that ended not-built or failed to bind is tried again
+    // on every apply (the export may have been built since, the port
+    // freed); a running web listener is left alone.
+    if (webListener === undefined) webKey = undefined;
     effectiveIdleMinutes = resolveIdleDisableMinutes(newConfig.idleDisableMinutes, deps.log);
     if (newConfig.enabled) idleDisabledRecord = undefined;
     config = {
@@ -948,6 +1120,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       bindAddress: newConfig.bindAddress,
       port: newConfig.port,
       sidecarProxy: newConfig.sidecarProxy,
+      web: { enabled: newConfig.web.enabled, port: newConfig.web.port },
       tls: {
         ...(newConfig.tls.certPath !== undefined ? { certPath: newConfig.tls.certPath } : {}),
         ...(newConfig.tls.keyPath !== undefined ? { keyPath: newConfig.tls.keyPath } : {}),

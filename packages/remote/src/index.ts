@@ -15,6 +15,7 @@ export type {
   Listen,
   ListenOptions,
   Listener,
+  ListenWeb,
   OwnerPasswordError,
   OwnerStatus,
   PairingResult,
@@ -23,9 +24,14 @@ export type {
   RemotePairingStatus,
   RemoteProblem,
   RemoteStatus,
+  RemoteWebStatus,
   SetOwnerPasswordResult,
+  WebListenOptions,
 } from "./bridge.js";
 export type { OwnerHashParams, PasskeyRecord } from "./owner.js";
+// Type-only: web-server.ts (node:https) is value-reachable only through
+// `@jarvis/remote/listen`, like server.ts.
+export type { ListenWebOptions, WebAsset, WebManifest } from "./web-server.js";
 export {
   createOwnerAuth,
   isAuthChannel,

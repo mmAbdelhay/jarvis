@@ -211,6 +211,8 @@ function toBridgeConfig(config: RemoteConfig): BridgeConfig {
     port: config.port,
     sidecarProxy: config.sidecarProxy,
     idleDisableMinutes: config.idleDisableMinutes,
+    // Phase 1: off until Task 9 parses `remote.web` from jarvis.yaml.
+    web: { enabled: false, port: config.port + 1 },
     tls: {
       ...(config.tls.certPath !== undefined ? { certPath: config.tls.certPath } : {}),
       ...(config.tls.keyPath !== undefined ? { keyPath: config.tls.keyPath } : {}),

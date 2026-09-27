@@ -330,6 +330,7 @@ describe("createRemoteAccess: bridge creation", () => {
       port: 0,
       sidecarProxy: false,
       idleDisableMinutes: 0,
+      web: { enabled: false, port: 1 },
       tls: {},
     });
   });
@@ -367,6 +368,7 @@ describe("createRemoteAccess: bridge creation", () => {
       port: 4200,
       sidecarProxy: false,
       idleDisableMinutes: 0,
+      web: { enabled: false, port: 4201 },
       tls: {},
     });
   });

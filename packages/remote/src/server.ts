@@ -71,6 +71,10 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
       cert: options.cert,
       key: options.key,
       minVersion: "TLSv1.3",
+      // Node's default answers a Host-less HTTP/1.1 request with its own
+      // "400 Bad Request" before any handler runs — a banner before auth.
+      // Off, the request reaches the handlers below and gets a dead wire.
+      requireHostHeader: false,
       handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
       requestTimeout: REQUEST_TIMEOUT_MS,
       headersTimeout: HEADERS_TIMEOUT_MS,
@@ -141,7 +145,7 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
         socket.destroy();
         return;
       }
-      if (!originAllowed(request.headers.origin, options.webOrigin?.())) {
+      if (!originAllowed(request.headers.origin, options.webOrigin())) {
         socket.destroy();
         return;
       }

@@ -52,6 +52,7 @@ describe("listenTls", () => {
       cert: "cert",
       key: "key",
       proxy: undefined,
+      webOrigin: () => undefined,
       onSocket: () => ({ onText: () => {}, onBinary: () => {}, onClose: () => {} }),
       log: () => {},
     });
@@ -102,7 +103,7 @@ describe("listenTls: sidecar proxy routing", () => {
       cert: "cert",
       key: "key",
       proxy,
-      webOrigin,
+      webOrigin: webOrigin ?? (() => undefined),
       onSocket: () => ({ onText: () => {}, onBinary: () => {}, onClose: () => {} }),
       log: () => {},
     });
