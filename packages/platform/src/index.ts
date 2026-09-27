@@ -49,3 +49,4 @@ export * from "./dbgate.js";
 export * from "./docker.js";
 export * from "./chat.js";
 export * from "./workflows.js";
+export * from "./plans.js";
