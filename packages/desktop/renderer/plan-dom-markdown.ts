@@ -127,14 +127,49 @@ function inlineToMarkdown(el: Element, source: string): string {
   return childNodesToMarkdown(el.childNodes, source);
 }
 
+/**
+ * Fix round 1, C1: a live contenteditable can end up holding more than one
+ * top-level p/div/h1-6 child — an Enter or paste the edit-mode handlers
+ * didn't fully intercept, an IME commit, browser-specific quirks — even
+ * though plan-panel.ts's own keydown/paste handlers try to keep a
+ * paragraph/heading down to exactly one. `el.querySelector(...)` only ever
+ * finds the *first* such node in document order, silently discarding
+ * everything after it; this instead collects every top-level text-block
+ * child and, when there's more than one, joins them with a hard break
+ * rather than keeping only the first.
+ */
+function topLevelTextBlocks(el: HTMLElement): HTMLElement[] {
+  return Array.from(el.children).filter((child): child is HTMLElement => {
+    const tag = child.tagName.toLowerCase();
+    return tag === "p" || tag === "div" || /^h[1-6]$/.test(tag);
+  });
+}
+
+function joinedOrSingleInline(
+  el: HTMLElement,
+  fallback: Element,
+  source: string,
+  joiner: string,
+): string {
+  const blocks = topLevelTextBlocks(el);
+  if (blocks.length > 1) {
+    return blocks.map((block) => inlineToMarkdown(block, source)).join(joiner);
+  }
+  return inlineToMarkdown(fallback, source);
+}
+
+// Fix round 2, item 6 (controller ruling): a heading is single-line — it
+// can never legitimately contain a hard break — so its own defensive join
+// uses a plain space; paragraph's keeps the hard break, since a paragraph
+// genuinely can.
 function headingToMarkdown(el: HTMLElement, level: number, source: string): string {
   const heading = el.querySelector("h1,h2,h3,h4,h5,h6") ?? el;
-  return `${"#".repeat(Math.max(level, 1))} ${inlineToMarkdown(heading, source)}`;
+  return `${"#".repeat(Math.max(level, 1))} ${joinedOrSingleInline(el, heading, source, " ")}`;
 }
 
 function paragraphToMarkdown(el: HTMLElement, source: string): string {
   const paragraph = el.querySelector("p") ?? el;
-  return inlineToMarkdown(paragraph, source);
+  return joinedOrSingleInline(el, paragraph, source, "  \n");
 }
 
 function quoteLines(content: string): string {
@@ -144,9 +179,34 @@ function quoteLines(content: string): string {
     .join("\n");
 }
 
+/**
+ * Fix round 2, item 7: the same category of bug C1 fixed for paragraph/
+ * heading — `:scope > p` only ever collected real `<p>` children, silently
+ * dropping a stray top-level `<div>` or bare text node beside them (an
+ * unintercepted Enter/paste edge case, same as C1's). Collects every
+ * top-level node that stands for its own paragraph — `<p>`, `<div>`, or a
+ * non-blank text node — in document order, so nothing beside the real
+ * paragraphs gets lost.
+ */
+function quoteParagraphNodes(quote: Element): ChildNode[] {
+  return Array.from(quote.childNodes).filter((node) => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as Element).tagName.toLowerCase();
+      return tag === "p" || tag === "div";
+    }
+    return node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "";
+  });
+}
+
+function quoteParagraphToMarkdown(node: ChildNode, source: string): string {
+  return node.nodeType === Node.TEXT_NODE
+    ? escapeIfNeeded(node.textContent ?? "", source)
+    : inlineToMarkdown(node as Element, source);
+}
+
 function quoteToMarkdown(el: HTMLElement, source: string): string {
   const quote = el.querySelector("blockquote") ?? el;
-  const paragraphs = Array.from(quote.querySelectorAll(":scope > p"));
+  const paragraphs = quoteParagraphNodes(quote);
   if (paragraphs.length === 0) {
     return quoteLines(inlineToMarkdown(quote, source));
   }
@@ -154,7 +214,7 @@ function quoteToMarkdown(el: HTMLElement, source: string): string {
   // separates them with a bare `>` line, which quoteLines only produces
   // *inside* a block (for a `<br>` line break) — so the separator between
   // paragraphs is joined in explicitly here, once, rather than per line.
-  return paragraphs.map((p) => quoteLines(inlineToMarkdown(p, source))).join("\n>\n");
+  return paragraphs.map((node) => quoteLines(quoteParagraphToMarkdown(node, source))).join("\n>\n");
 }
 
 function detectBulletMarker(source: string): string {

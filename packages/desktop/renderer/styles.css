@@ -4923,3 +4923,153 @@
 .plan-panel__orphaned { flex-direction: column; color: var(--text-muted); }
 .plan-panel__orphan-label { color: var(--warn); font-size: 10px; text-transform: uppercase; }
 .plan-panel__tray-actions { justify-content: flex-end; }
+
+/* Task 7b: in-place block editing. */
+
+.plan-panel__unsaved,
+.plan-panel__disk-changed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--r-control);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.plan-panel__unsaved { color: var(--accent-text); background: var(--accent-quiet); }
+
+.plan-panel__unsaved::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.plan-panel__disk-changed { color: var(--warn); background: var(--warn-quiet); }
+
+.plan-block-edit {
+  /* padding, not margin: `.plan-panel .plan-block > :first-child` (above)
+     zeroes a first child's margin-block-start, and this wrapper always is
+     one — padding is untouched by that rule and still reserves room for
+     the toolbar, which sits above it via inset-block-end: 100%. */
+  position: relative;
+  padding-block-start: var(--s5);
+}
+
+.plan-block-edit__rich,
+.plan-block-edit__code,
+.plan-block-edit__raw {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--r-control);
+  padding: var(--s2);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.plan-block-edit__code,
+.plan-block-edit__raw {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.plan-block-edit__toolbar {
+  position: absolute;
+  z-index: 2;
+  inset-block-end: 100%;
+  inset-inline-start: 0;
+  margin-block-end: var(--s1);
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface-raised);
+  box-shadow: 0 var(--s1) var(--s3) var(--ground);
+}
+
+.plan-block-edit__toolbar-btn {
+  min-width: 24px;
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.plan-block-edit__comment { border-color: var(--warn); color: var(--warn); }
+
+.plan-block-edit__divider { width: 1px; height: var(--s4); background: var(--hairline); }
+
+.plan-block-edit__hint {
+  margin: var(--s1) 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.plan-block-edit__link-input {
+  width: 160px;
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.plan-panel__conflict {
+  margin: 0 var(--s4) var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-panel);
+  background: var(--warn-quiet);
+}
+
+.plan-panel__conflict-notice { margin: 0 0 var(--s2); color: var(--text); font-size: 12px; }
+
+/* Fix round 1, I4: the read-only preview of what Apply would overwrite. */
+.plan-panel__conflict-current-label {
+  margin: 0 0 var(--s1);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.plan-panel__conflict-current {
+  margin: 0 0 var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.plan-panel__conflict-gone {
+  margin: 0 0 var(--s2);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.plan-panel__conflict-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+}

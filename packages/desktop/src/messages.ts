@@ -148,6 +148,54 @@ export const MESSAGES = {
     language === "ar"
       ? "تغيّر القسم المرتبط بهذه المسودة."
       : "The section this draft was on has changed.",
+  // Task 7b: in-place block editing. The header's own dirty indicator —
+  // shown while the block being edited has a real, unsaved change (an
+  // `input` event fired and the result isn't a no-op against the block's
+  // source) — and the badge shown instead of an immediate reload when
+  // notifyChanged fires for the open document while that edit is still
+  // dirty (plan-panel.ts defers the reload until the edit is saved or
+  // discarded, so it never clobbers text the user is mid-typing).
+  planUnsavedIndicator: (language: "ar" | "en"): string =>
+    language === "ar" ? "غير محفوظ · ⌘S" : "Unsaved · ⌘S",
+  planUpdatedOnDisk: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحدّث على القرص" : "Updated on disk",
+  // The hint under an editing block (D2) — Esc discards the in-progress
+  // edit and exits; ⌘S writes it without exiting.
+  planEditHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "Esc إلغاء · ⌘S لحفظ القسم" : "Esc cancel · ⌘S save block",
+  // The formatting toolbar's own accessible names — B/I/</>/🔗 are the
+  // visible glyphs (same discipline as the existing ×/+ buttons in this
+  // panel); this is what a screen reader says instead.
+  planFormatBold: (language: "ar" | "en"): string => (language === "ar" ? "غامق" : "Bold"),
+  planFormatItalic: (language: "ar" | "en"): string => (language === "ar" ? "مائل" : "Italic"),
+  planFormatCode: (language: "ar" | "en"): string =>
+    language === "ar" ? "كود مضمّن" : "Inline code",
+  planFormatLink: (language: "ar" | "en"): string => (language === "ar" ? "رابط" : "Link"),
+  planLinkUrlPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "الصق رابطًا…" : "Paste a link…",
+  // writeBlock's conflict/missing-block reasons, from inside an active edit
+  // (distinct from planErrorConflict/planErrorMissingBlock, which cover a
+  // failed *read*): the doc has already been reloaded from the failed
+  // write's own `doc`, and the user's text is kept in a textarea rather
+  // than discarded.
+  planEditConflictNotice: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر هذا الملف على القرص — أتريد إعادة تطبيق تعديلك؟"
+      : "Changed on disk — reapply your edit?",
+  planApply: (language: "ar" | "en"): string => (language === "ar" ? "تطبيق" : "Apply"),
+  planDiscard: (language: "ar" | "en"): string => (language === "ar" ? "تجاهل" : "Discard"),
+  // Fix round 1, I4: the label above the conflict notice's read-only
+  // preview of what Apply would actually overwrite.
+  planEditConflictCurrent: (language: "ar" | "en"): string =>
+    language === "ar" ? "حاليًا:" : "Currently:",
+  // Apply's own last-resort failure: the reloaded doc has neither the
+  // original block id nor anything left at its old position (fix round 1,
+  // I4: or something of a different kind entirely), so there is nothing
+  // left to write the edit back onto.
+  planEditConflictGone: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يعد هذا القسم موجودًا — تعديلك محفوظ أدناه، لكن لا يمكن حفظه."
+      : "This section is gone — your edit is kept below, but can't be saved.",
   // S1: relative-time units composed by plan-panel.ts as `${count}${unit}`
   // — t() takes no interpolation args, so the count/unit split stays here.
   planRelativeNow: (language: "ar" | "en"): string => (language === "ar" ? "الآن" : "now"),
