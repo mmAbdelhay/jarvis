@@ -40,7 +40,9 @@ import { createTerminalInput } from "@/lib/terminal-input";
 import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
+import { createPlansStore } from "@/lib/plans-store";
 import { parseTerminalPanes, resolvePane } from "@/lib/workspace-store";
+import { PlanSheet } from "@/plan/PlanSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type ValidationPhase = "checking" | "notFound" | "ok";
@@ -72,6 +74,8 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
   const [connection, setConnection] = useState(client.state());
   const [armed, setArmed] = useState(false);
   const [keyNotice, setKeyNotice] = useState("");
+  const [planVisible, setPlanVisible] = useState(false);
+  const [, setPlanRevision] = useState(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
   const inputRef = useRef<SessionInput | undefined>(undefined);
@@ -85,6 +89,8 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
     }),
     [],
   );
+  const plansStore = useMemo(() => createPlansStore({ client, paneKey }), [client, paneKey]);
+  useEffect(() => plansStore.subscribe(() => setPlanRevision((value) => value + 1)), [plansStore]);
 
   useFocusEffect(
     useCallback(() => {
@@ -252,7 +258,21 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      <Stack.Screen options={{ title: paneKey }} />
+      <Stack.Screen
+        options={{
+          title: paneKey,
+          headerRight: () => (
+            <TouchableOpacity style={styles.planButton} onPress={() => setPlanVisible(true)}>
+              <Text style={styles.planButtonText}>
+                {t(language, "plans.header", {
+                  count: plansStore.state.comments.filter((comment) => comment.sentAt === undefined)
+                    .length,
+                })}
+              </Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -300,6 +320,13 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
           onSent={() => setArmed(inputRef.current?.ctrlArmed() ?? false)}
         />
       </View>
+      <PlanSheet
+        visible={planVisible}
+        store={plansStore}
+        language={language}
+        tabTitle={paneKey}
+        onClose={() => setPlanVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -309,4 +336,6 @@ const styles = StyleSheet.create({
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   composeRow: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
+  planButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: theme.spacing.sm },
+  planButtonText: { color: theme.colors.accent, fontFamily: theme.font.semibold },
 });
