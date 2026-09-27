@@ -209,7 +209,6 @@ export type BridgeDeps = {
   listen: Listen;
   loadCertificate(config: CertificateConfig): Promise<CertificateMaterial>;
   createProxy(registry: SidecarRegistry): SidecarProxy | undefined;
-  webOrigin?: () => string | undefined;
   handle: RequestHandler;
   policies: ChannelPolicies;
   authorizeKey: AuthorizeKey;
