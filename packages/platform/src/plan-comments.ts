@@ -16,10 +16,29 @@ export type PlanCommentStore = {
 
 type FileShape = { v: 1; comments: PlanComment[] };
 
+function isPlanComment(value: unknown): value is PlanComment {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.path === "string" &&
+    typeof record.blockId === "string" &&
+    typeof record.quote === "string" &&
+    typeof record.body === "string" &&
+    typeof record.createdAt === "number" &&
+    (record.sentAt === undefined || typeof record.sentAt === "number")
+  );
+}
+
+// Every entry is checked, not just the outer `{ v, comments }` wrapper — a
+// hand-edited or partially-written file can carry a well-shaped array with
+// a malformed entry (`null`, or one missing `body`) inside it, and every
+// method here reads `comment.path` / `.id` / etc. unconditionally. One bad
+// entry is treated the same as the whole file being corrupt, below.
 function isFileShape(value: unknown): value is FileShape {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return record.v === 1 && Array.isArray(record.comments);
+  return record.v === 1 && Array.isArray(record.comments) && record.comments.every(isPlanComment);
 }
 
 /** Empty or whitespace-only after trimming is refused rather than stored as
@@ -35,10 +54,26 @@ function normalizeBody(body: string): string {
 
 /** Unlike the body, an over-long quote is truncated rather than rejected —
  *  the quote is copied from the plan text by the caller, not typed, so
- *  there is nothing for a user to fix. */
+ *  there is nothing for a user to fix. The cut point backs up one UTF-16
+ *  code unit when it would land inside a surrogate pair (e.g. an emoji),
+ *  so truncation never produces a lone high surrogate. */
 function normalizeQuote(quote: string): string {
   const trimmed = quote.trim();
-  return trimmed.length > MAX_QUOTE ? trimmed.slice(0, MAX_QUOTE) : trimmed;
+  if (trimmed.length <= MAX_QUOTE) return trimmed;
+  let end = MAX_QUOTE;
+  const code = trimmed.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return trimmed.slice(0, end);
+}
+
+/** `update()` drops `sentAt` rather than keeping it, so editing a comment
+ *  that was already sent to the agent re-queues it — the edited body has
+ *  not been sent yet, even if the pre-edit one was. */
+function withoutSentAt(comment: PlanComment): PlanComment {
+  if (comment.sentAt === undefined) return comment;
+  const next = { ...comment };
+  delete next.sentAt;
+  return next;
 }
 
 /**
@@ -72,9 +107,16 @@ export function createPlanCommentStore(
     let text: string;
     try {
       text = await readFile(filePath, "utf8");
-    } catch {
-      // No file yet — every path starts with an empty list.
-      return [];
+    } catch (error) {
+      // Only a genuinely missing file means "every path starts with an
+      // empty list". Anything else (EACCES, EMFILE, EIO, EISDIR, ...) is a
+      // transient or environmental failure, not evidence the store is
+      // empty — treating it as empty would let a later write atomically
+      // replace a file that was merely unreadable a moment ago, silently
+      // losing whatever it held. Such an error is rethrown so the calling
+      // operation fails without writing anything.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
     try {
       const parsed: unknown = JSON.parse(text);
@@ -134,7 +176,7 @@ export function createPlanCommentStore(
         const all = await readAll();
         const existing = all.find((comment) => comment.id === id);
         if (existing === undefined) return undefined;
-        const updated: PlanComment = { ...existing, body: normalized };
+        const updated: PlanComment = { ...withoutSentAt(existing), body: normalized };
         await writeAll(all.map((comment) => (comment.id === id ? updated : comment)));
         return updated;
       });
@@ -155,6 +197,7 @@ export function createPlanCommentStore(
         const wanted = new Set(ids);
         if (wanted.size === 0) return;
         const all = await readAll();
+        if (!all.some((comment) => wanted.has(comment.id))) return;
         const sentAt = now();
         await writeAll(
           all.map((comment) => (wanted.has(comment.id) ? { ...comment, sentAt } : comment)),
