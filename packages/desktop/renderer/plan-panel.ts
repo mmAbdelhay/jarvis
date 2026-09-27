@@ -109,12 +109,16 @@ type ConflictState = {
   reason: "conflict" | "missing-block";
 };
 
-/** Fix round 1, minor: the block a mousedown landed on while a *different*
- *  block was being edited. Recorded on mousedown (before any blur/save that
- *  mousedown triggers) and consumed once the outgoing edit actually
- *  settles, so switching blocks while a save is in flight still opens the
- *  new one automatically — the user needing a second click for that was
- *  the bug (see beginEditingBlock/consumePendingEditTarget). */
+/** Fix round 3, item B: a block clicked while a *different* block's own
+ *  save (always blur-triggered — a real click on another block always
+ *  blurs whatever was focused first) is still in flight. Recorded on that
+ *  CLICK only, never on mousedown — a click already answers "is this a
+ *  genuine click, not a drag-to-select" for free (isRealClick), which a
+ *  mousedown can't yet know. Consumed once the interrupted save actually
+ *  settles (see consumePendingEditTarget, called explicitly from
+ *  finishEditing's own post-await handling — never by exitEditing on its
+ *  own), so switching blocks while a save is in flight still opens the new
+ *  one automatically instead of needing a second click. */
 type PendingEditTarget = { blockId: string; index: number };
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -301,6 +305,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   let editing: EditingState | undefined;
   let conflict: ConflictState | undefined;
   let pendingEditTarget: PendingEditTarget | undefined;
+  // Fix round 3, item A: the exact mtime our own last successful
+  // plansWriteBlock/applyConflict returned for a path. A file watcher
+  // cannot tell "Jarvis just wrote this" apart from "something else did" —
+  // this is the one thing that can: when a reload's own freshly-read mtime
+  // matches, it's an echo of our own write, not a real external change.
+  let lastOwnWrite: { path: string; mtimeMs: number } | undefined;
   // Set while `editing` is dirty and notifyChanged fires for this path — the
   // reload it would normally trigger is deferred until the edit is saved or
   // discarded (see notifyChanged below), and this is the one thing that
@@ -632,6 +642,26 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     container.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
+  /** Fix round 3, item C: the nearest p/li/heading ancestor of `node`
+   *  (stopping at `container` itself if there's none) — a single "line"
+   *  for insertHardBreak's own atEnd purposes. Measuring all the way to
+   *  `container`'s own end was wrong for quote, whose container can hold
+   *  *several* `<p>` paragraphs: a caret at the end of the first of two
+   *  would see the second paragraph's text as "content after the caret"
+   *  and never add the caret-visibility filler, even though there is
+   *  nothing left on that first paragraph's own line. */
+  function enclosingBlockElement(node: Node, container: HTMLElement): Element {
+    let current: Node | null = node;
+    while (current && current !== container) {
+      if (current.nodeType === Node.ELEMENT_NODE) {
+        const tag = (current as Element).tagName.toLowerCase();
+        if (tag === "p" || tag === "li" || /^h[1-6]$/.test(tag)) return current as Element;
+      }
+      current = current.parentNode;
+    }
+    return container;
+  }
+
   /** Inserts `text` at the caret for *rich* mode (paragraph/heading/quote/
    *  list): each embedded newline becomes a `<br>` hard break, never a new
    *  top-level p/div/h* sibling — a literal "\n" text node here would
@@ -645,21 +675,22 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     range.deleteContents();
 
     // Fix round 2, item 5: whether there's any real content left after the
-    // caret within this container — a lone trailing `<br>` with nothing
-    // after it doesn't visually drop a real browser's caret to a new line
-    // (the classic contenteditable "trailing <br> collapses" quirk), so a
+    // caret on this same line — a lone trailing `<br>` with nothing after
+    // it doesn't visually drop a real browser's caret to a new line (the
+    // classic contenteditable "trailing <br> collapses" quirk), so a
     // second, caret-side filler goes in too. It never actually gets saved
     // (see withoutTrailingBreaks, used when finishEditing computes what to
     // write) — it's purely there for the caret to land on a real line, and
     // disappears again the moment real content follows it instead.
+    const enclosing = enclosingBlockElement(range.endContainer, container);
     const tail = document.createRange();
     tail.setStart(range.endContainer, range.endOffset);
-    tail.setEnd(container, container.childNodes.length);
+    tail.setEnd(enclosing, enclosing.childNodes.length);
     // Not `.childElementCount === 0` too: cloneContents() on a range whose
     // start is *inside* an ancestor (here, the caret's own <p>) and whose
-    // end is outside it (the container's own top level) clones that
-    // ancestor as an empty shell to hold "whatever's left of it" — even
-    // when nothing is left, contributing an empty <p></p> to the
+    // end is outside it (the enclosing element's own top level) clones
+    // that ancestor as an empty shell to hold "whatever's left of it" —
+    // even when nothing is left, contributing an empty <p></p> to the
     // fragment. `.textContent` alone already answers "is there any real
     // content after the caret" correctly regardless of that wrapper.
     const atEnd = (tail.cloneContents().textContent ?? "") === "";
@@ -676,13 +707,23 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     container.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  /** The last node in `node`'s subtree in document order — descends via
-   *  `lastChild` all the way down (a void element like `<br>` has none,
-   *  so it stops there and reports itself). */
+  /** The last *meaningful* node in `node`'s subtree in document order —
+   *  descends via `lastChild` (a void element like `<br>` has none, so it
+   *  stops there and reports itself), skipping back over trailing empty
+   *  text nodes at each level (fix round 3, item C: an empty text node
+   *  sitting after a real trailing `<br>` — e.g. `<p>text<br></p>`'s own
+   *  container boundary — would otherwise report itself as "the last
+   *  node", masking that `<br>` from withoutTrailingBreaks entirely). */
   function lastLeaf(node: Node): Node {
-    let current = node;
-    while (current.lastChild) current = current.lastChild;
-    return current;
+    let current: Node = node;
+    for (;;) {
+      let child = current.lastChild;
+      while (child && child.nodeType === Node.TEXT_NODE && (child.textContent ?? "") === "") {
+        child = child.previousSibling;
+      }
+      if (!child) return current;
+      current = child;
+    }
   }
 
   /** A trailing `<br>` (or run of them) with nothing after it is never
@@ -780,6 +821,16 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     input.type = "text";
     input.placeholder = t("planLinkUrlPlaceholder");
     let settled = false;
+    // Fix round 3, item C: set right before Enter/Escape's own
+    // `input.remove()` — removing the focused `input` element fires a real
+    // blur on it (relatedTarget typically unset, since focus hasn't
+    // explicitly moved anywhere yet at that point), which would otherwise
+    // reach the blur listener below and read as "focus left the edit
+    // surface", exiting/committing a second time on top of the keydown
+    // handler's own explicit `container.focus()`. This flag tells that
+    // blur it's just a side effect of an already-handled Enter/Escape, not
+    // a real "leaving".
+    let removingViaKeydown = false;
     const applyUrl = (): void => {
       if (settled) return;
       settled = true;
@@ -803,15 +854,18 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
+        removingViaKeydown = true;
         applyUrl();
         container.focus(); // stay in the block, continue editing
       } else if (event.key === "Escape") {
         event.preventDefault();
+        removingViaKeydown = true;
         cancel();
         container.focus();
       }
     });
     input.addEventListener("blur", (event) => {
+      if (removingViaKeydown) return;
       const related = event.relatedTarget;
       const staysInWrap = related instanceof Node && !!state.wrap?.contains(related);
       applyUrl();
@@ -1043,11 +1097,14 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     renderDocument();
   }
 
-  /** Fix round 1, minor: resolves a mousedown-recorded switch target once
-   *  the block it interrupted has actually finished exiting — see
-   *  PendingEditTarget's own comment for why this exists. Looked up by id,
-   *  falling back to index the same way finishEditing/applyConflict do,
-   *  since the outgoing edit's own save may have changed ids around it. */
+  /** Fix round 3, item B: resolves a click-recorded switch target once the
+   *  save it interrupted has actually settled — see PendingEditTarget's
+   *  own comment for why this exists. Looked up by id, falling back to
+   *  index the same way finishEditing/applyConflict do, since the
+   *  outgoing edit's own save may have changed ids around it. Called
+   *  explicitly by finishEditing's own exit points, never by exitEditing
+   *  itself — exitEditing has callers (the conflict notice's Discard) that
+   *  have nothing to do with a block switch and must not open one. */
   function consumePendingEditTarget(): void {
     const pending = pendingEditTarget;
     pendingEditTarget = undefined;
@@ -1063,7 +1120,9 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
    *  was deferred while this block was dirty (notifyChanged), reloads now —
    *  "reload happens after save/discard" applies to every way an edit
    *  without a fresh write result ends, not only the conflict notice's own
-   *  Discard button. */
+   *  Discard button. Fix round 3, item B: does *not* consume a pending
+   *  switch target on its own — see consumePendingEditTarget's own
+   *  comment for why that's now the caller's job. */
   function exitEditing(): void {
     const path = currentDoc?.path;
     editing = undefined;
@@ -1073,7 +1132,6 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     } else {
       renderDocument();
     }
-    consumePendingEditTarget();
   }
 
   /** Save-or-revert for the block currently in `editing`. `"escape"` always
@@ -1093,11 +1151,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       currentDoc.blocks[state.index];
     if (!block) {
       exitEditing();
+      consumePendingEditTarget();
       return;
     }
     if (reason === "escape") {
       // Fix round 2, item 4: cancelling this block's edit must not later
-      // surprise-open some other block a stray mousedown recorded — the
+      // surprise-open some other block a stray click recorded — the
       // user's actual intent right now is "leave this one alone".
       pendingEditTarget = undefined;
       exitEditing();
@@ -1111,8 +1170,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       : block.source;
     const shouldWrite = state.dirty && !isNoopEdit(next, block.source);
     if (!shouldWrite) {
-      if (reason === "blur") exitEditing();
-      else pendingEditTarget = undefined; // cmd-s with nothing to save: same reasoning as escape
+      if (reason === "blur") {
+        exitEditing();
+        consumePendingEditTarget();
+      } else {
+        pendingEditTarget = undefined; // cmd-s with nothing to save: same reasoning as escape
+      }
       return;
     }
     state.saving = true;
@@ -1128,6 +1191,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       if (disposed) return;
       actionError = t("planActionError");
       exitEditing();
+      consumePendingEditTarget();
       return;
     }
     if (disposed) return;
@@ -1147,17 +1211,27 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
         // (exitEditing) would be redundant and could clobber `conflict`.
         diskChangedWhileDirty = false;
         renderDocument();
+        // Fix round 3, item B: `editing` just became undefined the same
+        // way exitEditing() would have left it, so a block switch that
+        // was waiting on *this* save (not a fresh one on the now-shown
+        // conflict notice, which beginEditingBlock itself refuses while
+        // `conflict` is set) still opens once it's blocked, harmlessly, by
+        // consumePendingEditTarget's own conflict guard.
+        consumePendingEditTarget();
         return;
       }
       actionError = t(planErrorKey(result.reason));
       exitEditing();
+      consumePendingEditTarget();
       return;
     }
     currentDoc = result.value;
+    lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
     diskChangedWhileDirty = false;
     state.saving = false;
     if (reason === "blur") {
       exitEditing();
+      consumePendingEditTarget();
       return;
     }
     // "cmd-s": keep editing the SAME container/state in place rather than
@@ -1167,6 +1241,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     const fresh = currentDoc.blocks[state.index];
     if (!fresh) {
       exitEditing();
+      consumePendingEditTarget();
       return;
     }
     state.blockId = fresh.id;
@@ -1284,6 +1359,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       return;
     }
     currentDoc = result.value;
+    lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
     conflict = undefined;
     renderDocument();
     consumePendingEditTarget();
@@ -1319,20 +1395,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     } else {
       content.append(parseBlockHtml(block.html));
       for (const comment of blockComments) wrapFirstText(content, comment.quote);
-      // Fix round 1, minor: recorded before any blur this mousedown itself
-      // triggers (switching away from a different block being edited) —
-      // see PendingEditTarget's own comment. Fix round 2, item 4: a
-      // mousedown that lands on a real link is never a switch intent (the
-      // user is clicking the link, same reasoning as the click guard
-      // below) — never record one for it.
-      content.addEventListener("mousedown", (event) => {
-        if (event.target instanceof Element && event.target.closest("a")) {
-          pendingEditTarget = undefined;
-          return;
-        }
-        pendingEditTarget =
-          editing && editing.blockId !== block.id ? { blockId: block.id, index } : undefined;
-      });
+      // Fix round 3, item B: recorded on CLICK only, never on mousedown —
+      // a mousedown-based recording couldn't tell a genuine click from a
+      // drag-to-select apart until the click actually arrives, so it had
+      // to be cleared again in three different places once it turned out
+      // not to be one. A real click already carries that answer itself
+      // (isRealClick, below).
       content.addEventListener("click", (event) => {
         hooks.onBlockClick?.(block, content);
         // Fix round 1, I5: a click that's really the tail end of a text
@@ -1342,11 +1410,18 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
         const isRealClick =
           !(selection && !selection.isCollapsed && content.contains(selection.anchorNode)) &&
           !(event.target instanceof Element && event.target.closest("a"));
-        if (!isRealClick) {
-          // Fix round 2, item 4: this mousedown's own pending-switch
-          // intent (if any) turned out not to be a real click either — a
-          // pending target only fires later if a genuine click completed.
-          pendingEditTarget = undefined;
+        if (!isRealClick) return;
+        if (!currentDoc || conflict) return; // mirrors beginEditingBlock's own guard
+        if (editing && editing.blockId !== block.id && editing.saving) {
+          // Fix round 3, item B: A (a different block) is mid-save — a
+          // blur that this same click's own mousedown already triggered,
+          // still in flight. beginEditingBlock would just abort right now
+          // (its own reentrancy guard on A's finishEditing call), so
+          // remember this click instead of losing it; it opens once A's
+          // save settles (finishEditing's own post-await handling calls
+          // consumePendingEditTarget explicitly — exitEditing itself
+          // never does, so nothing else can surprise-open it).
+          pendingEditTarget = { blockId: block.id, index };
           return;
         }
         void beginEditingBlock(block, index);
@@ -1527,6 +1602,28 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     if (pickerVisible) renderDocument();
   }
 
+  /** Fix round 3, item A: replaces round 2's id/index re-anchor logic
+   *  entirely — it kept a stale container in place across a *real*
+   *  external change and risked the next save silently overwriting it.
+   *  This is simpler and echo-aware:
+   *   - our own write's echo (the file watcher noticing Jarvis's own
+   *     save land) → do nothing at all: no re-render, edit mode and focus
+   *     untouched. Detected via `lastOwnWrite`, the one thing a watcher
+   *     notification can't otherwise tell apart from a real external
+   *     change.
+   *   - different path → exits editing, as before.
+   *   - same path, real external change, editing dirty → does *not*
+   *     touch the DOM; only flags `diskChangedWhileDirty` (the header
+   *     badge). `baseMtimeMs` deliberately stays the (now stale) value
+   *     it was based on, so this block's own eventual save discovers the
+   *     change the same way any other conflict is discovered — the
+   *     server's own mtime check, landing in the conflict notice with
+   *     the user's text kept.
+   *   - same path, real external change, editing clean → exits editing
+   *     (nothing of the user's own to lose) and re-renders normally,
+   *     rather than trying to keep a stale container open across content
+   *     that's now genuinely different on disk.
+   */
   async function loadDocument(path: string): Promise<void> {
     const request = ++loadId;
     const samePath = currentDoc?.path === path;
@@ -1547,6 +1644,21 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       renderDocument();
       return;
     }
+
+    if (
+      lastOwnWrite &&
+      lastOwnWrite.path === path &&
+      lastOwnWrite.mtimeMs === result.value.mtimeMs
+    ) {
+      return; // our own write's echo — do nothing at all
+    }
+
+    if (editing && samePath && editing.dirty) {
+      diskChangedWhileDirty = true;
+      updateHeaderDirtyUi();
+      return;
+    }
+
     let nextComments: AnchoredComment[];
     try {
       nextComments = await api.plansComments(path);
@@ -1560,42 +1672,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     loadError = undefined;
     currentDoc = result.value;
     comments = nextComments;
-    // Fix round 2, item 3: round 1's fix here (unconditionally clearing
-    // `editing`) traded one bug for two — typing that happens while THIS
-    // reload's own awaits are in flight got silently dropped the moment it
-    // resolved, and an ordinary watcher echo right after a ⌘S save (this
-    // block's own write landing back through the file watcher, content
-    // already identical) kicked the user straight out of the block they
-    // were still in. Only a genuinely different path exits editing now:
-    //  - dirty: keep editing exactly as it is — its own eventual save is
-    //    what should discover a real concurrent conflict (via
-    //    baseMtimeMs), so this doesn't touch that; just flags the badge.
-    //  - clean: re-anchor to the same logical block (by id, falling back
-    //    to the same index only if it's still the same kind) and refresh
-    //    baseMtimeMs, rather than rebuilding anything — renderEditingBlock
-    //    already reuses `editing.container` once it exists, so the block
-    //    stays open and exactly as it looked before this reload.
-    //  - block genuinely gone: only then does this exit.
-    if (editing) {
-      const state = editing;
-      if (!samePath) {
-        editing = undefined;
-      } else if (state.dirty) {
-        diskChangedWhileDirty = true;
-      } else {
-        const atIndex = currentDoc.blocks[state.index];
-        const target =
-          currentDoc.blocks.find((candidate) => candidate.id === state.blockId) ??
-          (atIndex && atIndex.kind === state.kind ? atIndex : undefined);
-        if (target) {
-          state.blockId = target.id;
-          state.index = currentDoc.blocks.indexOf(target);
-          state.baseMtimeMs = currentDoc.mtimeMs;
-        } else {
-          editing = undefined;
-        }
-      }
-    }
+    if (editing) editing = undefined;
     // I2: a same-path reload (file changed on disk) must not throw away
     // what the user was doing — only a genuinely different document resets
     // the draft, the Source toggle and the tray's "show all" state.
@@ -1707,15 +1784,13 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     notifyChanged(path) {
       void refreshList();
       if (currentDoc?.path !== path) return;
-      // A dirty edit's reload is deferred until it's saved or discarded
-      // (finishEditing/renderConflictNotice's Discard) — an immediate
-      // reload here would rebuild the block from the doc's own html/source
-      // and silently drop whatever the user has typed.
-      if (editing?.dirty) {
-        diskChangedWhileDirty = true;
-        updateHeaderDirtyUi();
-        return;
-      }
+      // Fix round 3, item A: the echo-vs-real-change and dirty-vs-clean
+      // decisions both need the freshly *read* mtime to make correctly
+      // (an echo of our own write is only knowable by comparing against
+      // it) — loadDocument itself now makes them, right after its own
+      // read; forwarding unconditionally is what lets it tell an echo
+      // apart from a real change even while dirty, instead of this
+      // deciding blind before any read happens at all.
       void loadDocument(path);
     },
     dispose() {

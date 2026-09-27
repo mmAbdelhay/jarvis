@@ -948,7 +948,13 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
     expect(writeBlock).toHaveBeenCalledTimes(1);
   });
 
-  it("defers a same-path reload while dirty (showing Updated-on-disk instead), and reloads once discarded", async () => {
+  // Superseded by fix round 3, item A: loadDocument itself now decides
+  // echo-vs-real-change and dirty-vs-clean, which needs the freshly read
+  // mtime — so notifyChanged forwards unconditionally rather than
+  // pre-emptively skipping the read while dirty, and a `plansRead` DOES
+  // happen here (findRoundState: the returned doc is a real, non-echo
+  // change, so the dirty edit is deferred *after* reading it, not before).
+  it("defers acting on a same-path reload while dirty (showing Updated-on-disk instead), and reloads once discarded", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
     const readCallsBefore = vi.mocked(api.plansRead).mock.calls.length;
@@ -956,16 +962,19 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
 
     panel.notifyChanged(doc.path);
     await flush();
-    expect(vi.mocked(api.plansRead).mock.calls.length).toBe(readCallsBefore);
+    expect(vi.mocked(api.plansRead).mock.calls.length).toBe(readCallsBefore + 1);
     expect(panel.element.querySelector<HTMLElement>(".plan-panel__disk-changed")?.hidden).toBe(
       false,
     );
+    // Still editing, untouched -- a real external change while dirty must
+    // not re-render at all.
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
 
     paragraphEl(panel.element).dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
     await flush();
-    expect(vi.mocked(api.plansRead).mock.calls.length).toBe(readCallsBefore + 1);
+    expect(vi.mocked(api.plansRead).mock.calls.length).toBe(readCallsBefore + 2);
   });
 });
 
@@ -1482,13 +1491,14 @@ describe("createPlanPanel: block editing fix round 1", () => {
     ).toBeTruthy();
   });
 
-  // Superseded by fix round 2, item 3: a clean (not dirty) same-path reload
-  // no longer unconditionally exits editing — it re-anchors to the same
-  // block instead (see "createPlanPanel: block editing fix round 2",
-  // item3b), so the block being open for editing does not, on its own,
-  // leave a detached container; only a block that's genuinely gone from
-  // the reloaded doc does.
-  it("minor: a same-path reload while editing (not dirty) re-anchors rather than leaving a detached container", async () => {
+  // Superseded by fix round 3, item A, which replaces round 2's id/index
+  // re-anchor logic entirely: a *real* external change (this fake's own
+  // plansRead, unlike an echo of our own write) while editing is clean now
+  // exits editing and re-renders normally, rather than keeping a stale
+  // container open across content that's genuinely different on disk —
+  // see "createPlanPanel: block editing fix round 3", item A's own tests
+  // for the echo and dirty cases.
+  it("minor: a same-path reload while editing (not dirty) exits cleanly rather than leaving a detached container", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
     click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
@@ -1498,9 +1508,9 @@ describe("createPlanPanel: block editing fix round 1", () => {
     panel.notifyChanged(doc.path);
     await flush();
 
-    // Still open — the container is the *same* live node (reused, per
-    // renderEditingBlock), never a stale reference to something detached.
-    expect(panel.element.querySelector(".plan-block-edit__rich")).toBe(editable);
+    // Exited -- not a detached reference to the old container, a clean
+    // read-mode render (no write, nothing of the user's own to lose).
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
     expect(api.plansRead).toHaveBeenCalledTimes(2);
   });
 
@@ -1872,5 +1882,276 @@ describe("createPlanPanel: block editing fix round 2", () => {
       "# Build itand more",
       doc.mtimeMs,
     );
+  });
+});
+
+describe("createPlanPanel: block editing fix round 3", () => {
+  function paragraphEl(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+  }
+
+  async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
+    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panelElement);
+    editable.querySelector("p")!.textContent = text;
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function selectText(node: Node, start: number, end: number): void {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Item A ------------------------------------------------------------
+
+  it("A1: our own write's echo keeps edit mode and focus, doing nothing at all", async () => {
+    const savedDoc: PlanDoc = { ...doc, mtimeMs: doc.mtimeMs + 1000 };
+    const api = fakeApi({
+      plansRead: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+      plansWriteBlock: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+    editable.focus();
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }),
+    );
+    await flush();
+    // lastOwnWrite is now {path: doc.path, mtimeMs: savedDoc.mtimeMs}.
+
+    panel.notifyChanged(doc.path); // the watcher noticing our own write land
+    await flush();
+
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBe(editable);
+    expect(document.activeElement).toBe(editable);
+  });
+
+  it("A2: a real external change while clean exits editing without writing", async () => {
+    const revisedDoc: PlanDoc = { ...doc, mtimeMs: doc.mtimeMs + 1000 };
+    const plansRead = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value: doc })
+      .mockResolvedValue({ ok: true, value: revisedDoc });
+    const api = fakeApi({ plansRead });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+
+    panel.notifyChanged(doc.path);
+    await flush();
+
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+  });
+
+  it("A3: a real external change while dirty keeps the DOM and text, then the next save conflicts with the typed text kept", async () => {
+    const revisedDoc: PlanDoc = { ...doc, mtimeMs: doc.mtimeMs + 1000 };
+    const plansRead = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value: doc })
+      .mockResolvedValue({ ok: true, value: revisedDoc });
+    const writeBlock = vi.fn(async () => ({
+      ok: false as const,
+      reason: "conflict" as const,
+      doc: revisedDoc,
+    }));
+    const api = fakeApi({ plansRead, plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+
+    panel.notifyChanged(doc.path);
+    await flush();
+
+    // notifyChanged really did forward to a read (echo detection needs
+    // the fresh mtime to compare against) -- this is not the old
+    // pre-round-3 short-circuit that skipped reading entirely while dirty.
+    expect(plansRead).toHaveBeenCalledTimes(2);
+    // DOM and text untouched -- same live node, still the typed text.
+    expect(paragraphEl(panel.element)).toBe(editable);
+    expect(editable.querySelector("p")!.textContent).toBe("Ship the useful feature quickly.");
+    expect(panel.element.querySelector<HTMLElement>(".plan-panel__disk-changed")?.hidden).toBe(
+      false,
+    );
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+
+    // The write still went out with the OLD baseMtimeMs -- that's what
+    // makes the server (fake, here) discover the conflict itself.
+    expect(writeBlock).toHaveBeenCalledWith(
+      doc.path,
+      "paragraph-1",
+      "Ship the useful feature quickly.",
+      doc.mtimeMs,
+    );
+    const textarea = panel.element.querySelector<HTMLTextAreaElement>(
+      ".plan-panel__conflict-textarea",
+    );
+    expect(textarea?.value).toBe("Ship the useful feature quickly.");
+  });
+
+  // Item B ------------------------------------------------------------
+
+  it("B1: switching blocks while a save is in flight opens B once A's save settles (click-recorded)", async () => {
+    let resolveWrite: (value: PlanResult<PlanDoc>) => void;
+    const writeBlock = vi.fn(
+      () =>
+        new Promise<PlanResult<PlanDoc>>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+    const api = fakeApi({ plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentB = panel.element.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+
+    // Real event order: mousedown(B) -> blur(A, relatedTarget=B) -> A's
+    // save starts (state.saving = true) -> mouseup(B) -> click(B).
+    contentB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: contentB }));
+    contentB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    contentB.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // A's save is still in flight -> B did not open on this click.
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeNull();
+
+    resolveWrite!({ ok: true, value: doc });
+    await flush();
+
+    // Once the save settles, B opens automatically -- no second click.
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeTruthy();
+  });
+
+  it("B2: a drag-select on B, with a real microtask checkpoint before the click, does not open B", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentBBeforeSettle = panel.element.querySelector<HTMLElement>(
+      '[data-block-id="heading-1"]',
+    )!;
+
+    contentBBeforeSettle.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: contentBBeforeSettle }));
+    // Real microtask checkpoint: A's own save (default mock, resolves
+    // promptly) fully settles here, well before the click below -- A's own
+    // exit re-renders the whole document, so B's row (never itself
+    // edited) is a fresh element after this, not `contentBBeforeSettle`.
+    await flush();
+
+    const contentB = panel.element.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+    const headingText = contentB.querySelector("h1")!.firstChild!;
+    // A drag-select on B, not a plain click.
+    selectText(headingText, 0, 4);
+    contentB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    contentB.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeNull();
+    expect(api.plansWriteBlock).toHaveBeenCalledTimes(1); // only A's own dirty save
+  });
+
+  // Item C ------------------------------------------------------------
+
+  it("C1: Enter at the end of a quote's first paragraph still gets the caret-visibility filler, even with a second paragraph later in the same container", async () => {
+    const quoteDoc: PlanDoc = {
+      ...doc,
+      blocks: [
+        {
+          id: "quote-1",
+          kind: "quote",
+          start: 0,
+          end: 3,
+          source: "> Hello\n>\n> World",
+          html: "<blockquote><p>Hello</p><p>World</p></blockquote>",
+        },
+      ],
+    };
+    const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: quoteDoc })) });
+    const { panel } = setup(api);
+    await panel.open(quoteDoc.path);
+    click(panel.element.querySelector('[data-block-id="quote-1"]'));
+    const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+    const firstP = editable.querySelectorAll("p")[0]!;
+    const range = document.createRange();
+    range.selectNodeContents(firstP);
+    range.collapse(false); // caret at the end of "Hello" -- "World" follows, but in the SECOND <p>
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    editable.dispatchEvent(event);
+
+    expect(firstP.querySelectorAll("br")).toHaveLength(2);
+  });
+
+  it("C2: a trailing empty text node after a hard break does not hide it from being stripped", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    const p = editable.querySelector("p")!;
+    // A shape a real browser's own editing commands can produce, not
+    // reachable through insertHardBreak itself: two trailing <br>s
+    // followed by an empty text node.
+    p.append(
+      document.createElement("br"),
+      document.createElement("br"),
+      document.createTextNode(""),
+    );
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+
+    // Both breaks (and the empty text node after them) strip away to
+    // nothing meaningful -- still a no-op edit.
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+  });
+
+  it("C3: Enter in the link URL input does not exit editing", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    editable.focus();
+    const text = editable.querySelector("p")!.firstChild!;
+    selectText(text, 9, 23);
+
+    click(panel.element.querySelector(".plan-block-edit__link"));
+    const urlInput = panel.element.querySelector<HTMLInputElement>(".plan-block-edit__link-input")!;
+    urlInput.focus();
+    urlInput.value = "https://example.com";
+    urlInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    // Enter's own applyUrl() removes `urlInput` from the DOM; a real
+    // browser fires a blur on it as a direct side effect of that removal
+    // (jsdom does not reliably reproduce this on its own), dispatched here
+    // explicitly so the test doesn't depend on jsdom's own inconsistent
+    // removal-blur behavior to exercise the fix. `urlInput` is still a
+    // valid event target even though it's already detached — listeners
+    // aren't unregistered by removal.
+    urlInput.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+    expect(editable.querySelector("a")?.getAttribute("href")).toBe("https://example.com");
   });
 });
