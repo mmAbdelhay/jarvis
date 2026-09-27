@@ -48,13 +48,21 @@ function inRange(latitude: number, longitude: number): boolean {
   );
 }
 
+/** The longest name shown to the user (e.g. in "Located by IP: <name>") —
+ *  some providers return oddly long or malformed city/country strings, and
+ *  this keeps the status text from overflowing. */
+const MAX_PLACE_LENGTH = 80;
+
 /** Joins whichever of city/country parsed as a non-empty string — either
  *  can be missing from a real response, and a raw `undefined`/`""` must
- *  never end up in the joined name. */
+ *  never end up in the joined name. Capped at `MAX_PLACE_LENGTH` after
+ *  trimming, so the cut never lands on padding whitespace. */
 function place(...parts: unknown[]): string {
   return parts
     .filter((part): part is string => typeof part === "string" && part.trim() !== "")
-    .join(", ");
+    .join(", ")
+    .trim()
+    .slice(0, MAX_PLACE_LENGTH);
 }
 
 /**

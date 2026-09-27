@@ -1447,6 +1447,29 @@ describe("dispatch table: git, setup and history (deferred M2 table tests)", () 
       expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { project: "" });
     });
 
+    // Bug 7 follow-up: "No project" is a real, storable choice — the UI
+    // sends an explicit `null`, distinct from `""` (which clears the
+    // override back to whatever the importer set).
+    it('accepts an explicit null project ("No project")', async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { project: null });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { project: null });
+    });
+
+    it("rejects a project value that is neither a string nor null", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", "s1", { project: 7 })).toEqual(
+        invalidArgument("en"),
+      );
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
     it("rejects an unknown agent", async () => {
       const deps = fakeDeps();
       const table = createDispatchTable(deps);

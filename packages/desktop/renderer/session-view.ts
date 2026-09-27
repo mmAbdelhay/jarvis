@@ -704,9 +704,15 @@ function buildEditRow(session: Session): HTMLElement {
     // fields only" patch history:edit's own doc expects, so an untouched
     // field's existing override (if any) is left alone rather than
     // re-asserted.
-    const patch: Record<string, string> = {};
+    const patch: Record<string, string | null> = {};
     if (summaryInput.value !== session.summary) patch["summary"] = summaryInput.value;
-    if (projectSelect.value !== (session.project ?? "")) patch["project"] = projectSelect.value;
+    if (projectSelect.value !== (session.project ?? "")) {
+      // The select's "" option reads as "No project" — an explicit choice
+      // to pin this session to no project — never as history:edit's own
+      // "clear the override" empty string, which this form has no control
+      // for and would just let the importer's project silently come back.
+      patch["project"] = projectSelect.value === "" ? null : projectSelect.value;
+    }
     if (agentSelect.value !== session.agentId) patch["agentId"] = agentSelect.value;
     if (modelInput.value !== (session.model ?? "")) patch["model"] = modelInput.value;
     if (stateSelect.value !== session.state) patch["state"] = stateSelect.value;

@@ -357,6 +357,21 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       for (const key of ["summary", "project", "agentId", "model", "state"] as const) {
         if (!(key in raw)) continue;
         const value = raw[key];
+        // `project` alone accepts `null` — the UI's explicit "No project"
+        // choice (see SessionEditPatch's own doc) — every other field is
+        // string-only, "" meaning "clear this override".
+        if (key === "project") {
+          if (value !== null && typeof value !== "string") return invalidArgument(deps.language);
+          if (value !== null && value !== "" && deps.projects[value] === undefined) {
+            return {
+              ok: false,
+              text: MESSAGES.unknownProject(deps.language),
+              language: deps.language,
+            };
+          }
+          edited.project = value;
+          continue;
+        }
         if (typeof value !== "string") return invalidArgument(deps.language);
         if (key === "state") {
           if (value !== "" && !isSessionState(value)) return invalidArgument(deps.language);
@@ -372,17 +387,6 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
             };
           }
           edited.state = value as SessionEditPatch["state"];
-          continue;
-        }
-        if (key === "project") {
-          if (value !== "" && deps.projects[value] === undefined) {
-            return {
-              ok: false,
-              text: MESSAGES.unknownProject(deps.language),
-              language: deps.language,
-            };
-          }
-          edited.project = value;
           continue;
         }
         if (key === "agentId") {

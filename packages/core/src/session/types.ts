@@ -109,7 +109,13 @@ export type Session = {
  */
 export type SessionEditPatch = {
   summary?: string;
-  project?: string;
+  // Unlike the other fields, `project` distinguishes three states rather
+  // than two: omitted (no change), `""` (clear the override, revert to
+  // whatever the importer/SessionManager set), and `null` (an explicit
+  // "no project" override — the UI's "No project" choice sends this, since
+  // an empty string here would otherwise be indistinguishable from
+  // "clear").
+  project?: string | null;
   agentId?: string;
   model?: string;
   state?: SessionState | "";

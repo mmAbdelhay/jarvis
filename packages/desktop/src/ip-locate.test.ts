@@ -50,6 +50,24 @@ describe("parseIpApiCo", () => {
     expect(parseIpApiCo("nope")).toBeNull();
     expect(parseIpApiCo(undefined)).toBeNull();
   });
+
+  it("caps the joined name at 80 characters", () => {
+    const city = "A".repeat(60);
+    const country = "B".repeat(60);
+    const result = parseIpApiCo({ latitude: 31.2, longitude: 29.9, city, country_name: country });
+    expect(result?.name.length).toBe(80);
+    expect(result?.name).toBe(`${city}, ${country}`.slice(0, 80));
+  });
+
+  it("trims before capping so the cut isn't mid-whitespace-padding", () => {
+    const result = parseIpApiCo({
+      latitude: 31.2,
+      longitude: 29.9,
+      city: `  ${"C".repeat(85)}  `,
+    });
+    expect(result?.name.length).toBe(80);
+    expect(result?.name).toBe("C".repeat(80));
+  });
 });
 
 describe("parseIpWhoIs", () => {

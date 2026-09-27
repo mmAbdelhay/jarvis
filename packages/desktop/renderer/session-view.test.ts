@@ -1194,6 +1194,32 @@ describe("session table", () => {
       expect(getHistory).toHaveBeenCalledTimes(2);
     });
 
+    // Bug 7 follow-up: "No project" must pin the session to no project, not
+    // merely clear whatever override already existed — the store treats an
+    // empty-string patch as "clear", which would let the importer's project
+    // come right back. The UI has to send an explicit `null` instead.
+    it("save sends an explicit null project when 'No project' is chosen", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({
+        getHistory: vi.fn(async () => [makeSession({ id: "s1", project: "acme" })]),
+        editSession,
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const projectSelect = editRow()?.querySelector<HTMLSelectElement>(".session-edit-project");
+      projectSelect!.value = "";
+      const save = editRow()?.querySelectorAll("button")[0];
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editSession).toHaveBeenCalledWith("s1", { project: null });
+    });
+
     it("offers configured projects (plus 'No project') set via setKnownProjects", async () => {
       stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1", project: "acme" })]) });
       const { renderSessionTable, setKnownProjects } = await import("./session-view.js");

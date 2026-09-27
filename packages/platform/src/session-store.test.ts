@@ -890,6 +890,32 @@ describe("createSqliteSessionStore", () => {
       expect(row?.summary).toBe("from the transcript again");
     });
 
+    it("pins a session to no project with an explicit null, surviving re-import", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession({ id: "imp", state: "done", endedAt: 5000 }));
+      store.edit("imp", { project: null });
+
+      expect(store.history().find((s) => s.id === "imp")?.project).toBeNull();
+
+      store.upsertImported(
+        agentSession({ id: "imp", project: "acme", summary: "from the transcript again" }),
+        { owned: false },
+      );
+
+      expect(store.history().find((s) => s.id === "imp")?.project).toBeNull();
+    });
+
+    it("clears a null project override with an empty string, reverting to the underlying row", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession());
+      store.edit("s1", { project: null });
+      expect(store.history()[0]?.project).toBeNull();
+
+      store.edit("s1", { project: "" });
+
+      expect(store.history()[0]?.project).toBe(agentSession().project);
+    });
+
     it("records an override for an id with no row yet, without throwing", () => {
       const store = createSqliteSessionStore(":memory:");
       expect(() => store.edit("ghost", { summary: "Renamed" })).not.toThrow();

@@ -107,9 +107,21 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
   // (projectPath, startedAt, branch, the git counts, transcriptPath, …)
   // comes straight from `sessions` because nothing above ever offers to
   // edit them.
+  //
+  // `project` is the one field where NULL isn't the only meaningful
+  // override value: `s.project` is itself nullable ("no configured
+  // project", from the importer), so a plain COALESCE can't tell "no
+  // override" apart from "override to no project" — both would read as
+  // NULL. `edit()` resolves that by storing an explicit "" in
+  // `session_overrides.project` for "override to no project", reserving
+  // NULL there for "no override"; this CASE is the matching read side —
+  // NULL still falls through to `s.project`, but "" is the sentinel that
+  // becomes a real null, not the underlying value.
   const historyStmt = db.prepare(`
     SELECT s.id AS id,
-           COALESCE(o.project, s.project) AS project,
+           CASE WHEN o.project IS NULL THEN s.project
+                WHEN o.project = '' THEN NULL
+                ELSE o.project END AS project,
            s.projectPath AS projectPath,
            COALESCE(o.agentId, s.agentId) AS agentId,
            COALESCE(o.model, s.model) AS model,
@@ -231,10 +243,23 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
         // An empty string clears the override — it is never stored as "".
         return value === "" ? null : value;
       };
+      // `project` alone gets its own resolver: `null` in the patch is the
+      // UI's explicit "No project" choice, stored as "" — the sentinel the
+      // historyStmt CASE above turns back into a real null on read, kept
+      // distinct from the column's own NULL ("no override"). `""` in the
+      // patch still means "clear the override" like every other field.
+      const resolveProject = (
+        value: string | null | undefined,
+        current: string | null,
+      ): string | null => {
+        if (value === undefined) return current;
+        if (value === null) return "";
+        return value === "" ? null : value;
+      };
       upsertOverrideStmt.run(
         id,
         resolve(patch.summary, existing?.summary ?? null),
-        resolve(patch.project, existing?.project ?? null),
+        resolveProject(patch.project, existing?.project ?? null),
         resolve(patch.agentId, existing?.agentId ?? null),
         resolve(patch.model, existing?.model ?? null),
         resolve(patch.state, existing?.state ?? null),
