@@ -280,6 +280,7 @@ function createHarness(overrides: Partial<VoiceControllerDeps> = {}) {
   const clock = createFakeClock();
   const client = createRpcClient({
     transport,
+    lockedAtWelcome: false,
     clock,
     random: () => 0.5,
     client: CLIENT_STRING,
@@ -1445,6 +1446,7 @@ describe("voice-controller: RpcClient busy/cancelled upload outcomes (fix round 
       const clock = createFakeClock();
       const realClient = createRpcClient({
         transport,
+        lockedAtWelcome: false,
         clock,
         random: () => 0.5,
         client: CLIENT_STRING,

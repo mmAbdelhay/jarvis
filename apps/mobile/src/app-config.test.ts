@@ -60,6 +60,16 @@ describe("app.config.ts", () => {
     expect(entry?.[1].enableBackgroundRecording).not.toBe(true);
   });
 
+  // Phase 0 owner login: the refresh token sits behind Face ID
+  // (refresh-store.ts's `requireAuthentication`), which needs
+  // NSFaceIDUsageDescription — written by the expo-secure-store plugin.
+  test("the expo-secure-store entry carries a bilingual faceIDPermission", () => {
+    const text = findPlugin("expo-secure-store")?.[1].faceIDPermission;
+    expect(typeof text).toBe("string");
+    expect(AR_CODE_POINT.test(text as string)).toBe(true);
+    expect(LATIN_LETTER.test(text as string)).toBe(true);
+  });
+
   test("the existing plugins are still present", () => {
     const names = (config.plugins ?? []).map((plugin) =>
       Array.isArray(plugin) ? plugin[0] : plugin,

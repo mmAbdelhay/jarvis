@@ -32,7 +32,18 @@ export type Prefs = {
   // are dropped per-kind rather than resetting the whole object, so one
   // bad value can't wipe every sidecar's remembered zoom.
   sidecarZoom: SidecarZoomPrefs;
+  // Phase 0 owner login: minutes of no touch before the app locks itself
+  // (Settings offers IDLE_LOCK_MINUTES). Anything else falls back to 15.
+  idleLockMinutes: IdleLockMinutes;
 };
+
+export const IDLE_LOCK_MINUTES = [5, 15, 30, 60] as const;
+export type IdleLockMinutes = (typeof IDLE_LOCK_MINUTES)[number];
+export const DEFAULT_IDLE_LOCK_MINUTES: IdleLockMinutes = 15;
+
+function isIdleLockMinutes(value: unknown): value is IdleLockMinutes {
+  return (IDLE_LOCK_MINUTES as readonly unknown[]).includes(value);
+}
 
 // Injected so the app's real `expo-file-system` implementation (prefs-file.ts)
 // and this module's tests never touch the filesystem directly.
@@ -89,6 +100,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     pushRegistered: DEFAULT_PUSH_REGISTERED,
     sidecarDesktopSite: DEFAULT_SIDECAR_DESKTOP_SITE,
     sidecarZoom: { ...DEFAULT_SIDECAR_ZOOM },
+    idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
   };
 
   let text: string | undefined;
@@ -125,6 +137,9 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
       ? raw.sidecarDesktopSite
       : DEFAULT_SIDECAR_DESKTOP_SITE;
   const sidecarZoom = parseSidecarZoom(raw.sidecarZoom);
+  const idleLockMinutes = isIdleLockMinutes(raw.idleLockMinutes)
+    ? raw.idleLockMinutes
+    : DEFAULT_IDLE_LOCK_MINUTES;
 
   return {
     language,
@@ -133,6 +148,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     pushRegistered,
     sidecarDesktopSite,
     sidecarZoom,
+    idleLockMinutes,
   };
 }
 

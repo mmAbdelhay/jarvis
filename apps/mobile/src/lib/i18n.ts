@@ -314,6 +314,10 @@ export const STRINGS = {
     en: "Update the Jarvis app. If it's already up to date, update Jarvis on your computer.",
     ar: "حدّث تطبيق Jarvis. إذا كان محدّثًا بالفعل، فحدّث Jarvis على جهاز الكمبيوتر.",
   },
+  "conn.locked": {
+    en: "Locked. Unlock to continue.",
+    ar: "مقفل. افتح القفل للمتابعة.",
+  },
   "conn.pinMismatch": {
     en: "The computer's certificate doesn't match the one this phone paired with. If you didn't change the computer, someone may be intercepting the connection. Tap \"Pair again\" if this continues.",
     ar: 'شهادة الكمبيوتر لا تطابق الشهادة التي اقترن بها هذا الهاتف. إذا لم تُغيّر جهاز الكمبيوتر، فقد يكون هناك من يتنصت على الاتصال. اضغط "إعادة الاقتران" إذا استمر ذلك.',
@@ -926,6 +930,47 @@ export const STRINGS = {
     ar: "حذف “{name}”؟ لا يمكن التراجع عن هذا.",
   },
   "api.rename.title": { en: "Rename", ar: "إعادة تسمية" },
+  "auth.title": { en: "Unlock Jarvis", ar: "فتح قفل Jarvis" },
+  "auth.passwordHint": {
+    en: "Enter the owner password you set on your computer.",
+    ar: "أدخل كلمة مرور المالك التي عيّنتها على جهاز الكمبيوتر.",
+  },
+  "auth.password": { en: "Password", ar: "كلمة المرور" },
+  "auth.unlock": { en: "Unlock", ar: "فتح القفل" },
+  "auth.useBiometric": { en: "Unlock with biometrics", ar: "الفتح بالبصمة أو الوجه" },
+  "auth.biometricPrompt": {
+    en: "Confirm it's you to unlock Jarvis",
+    ar: "أكّد هويتك لفتح قفل Jarvis",
+  },
+  "auth.wrongPassword": { en: "Wrong password.", ar: "كلمة المرور غير صحيحة." },
+  "auth.rateLimited": {
+    en: "Too many attempts. Wait a moment and try again.",
+    ar: "محاولات كثيرة جدًا. انتظر قليلًا ثم حاول مجددًا.",
+  },
+  "auth.offline": {
+    en: "Can't reach your computer. Check the connection and try again.",
+    ar: "تعذّر الوصول إلى جهاز الكمبيوتر. تحقّق من الاتصال وحاول مجددًا.",
+  },
+  "auth.failed": { en: "Couldn't unlock. Try again.", ar: "تعذّر فتح القفل. حاول مجددًا." },
+  "auth.noBiometric": {
+    en: "Biometric unlock is off because this phone has no screen lock or biometrics set up, so you'll enter your password each time.",
+    ar: "الفتح بالبصمة أو الوجه متوقف لأن هذا الهاتف ليس عليه قفل شاشة أو بصمة مُعدّة، لذا ستُدخل كلمة المرور في كل مرة.",
+  },
+  "auth.reason.idle": { en: "Locked after inactivity.", ar: "تم القفل بعد فترة من عدم النشاط." },
+  "auth.reason.expired": { en: "Your session expired.", ar: "انتهت صلاحية جلستك." },
+  "auth.reason.logout": { en: "You logged out.", ar: "لقد سجّلت الخروج." },
+  "auth.reason.signedOut": {
+    en: "You were signed out from your computer.",
+    ar: "تم تسجيل خروجك من جهاز الكمبيوتر.",
+  },
+  "settings.security": { en: "Security", ar: "الأمان" },
+  "settings.idleLock": { en: "Lock after inactivity", ar: "القفل بعد عدم النشاط" },
+  "settings.idleLock.minutes": { en: "{minutes} min", ar: "{minutes} د" },
+  "settings.logout": { en: "Log out", ar: "تسجيل الخروج" },
+  "settings.logoutConfirm": {
+    en: "Log out of Jarvis on this phone? You'll need your password to unlock it again.",
+    ar: "تسجيل الخروج من Jarvis على هذا الهاتف؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

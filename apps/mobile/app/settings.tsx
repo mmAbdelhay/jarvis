@@ -16,10 +16,11 @@ import { realClock } from "@/lib/clock";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { clearPairing, loadPairing } from "@/lib/pairing-record";
+import { IDLE_LOCK_MINUTES } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { notificationsStatusKey, notificationsSwitchValue } from "@/lib/push-screen";
-import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
+import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import type { SettingsView } from "@/lib/settings-store";
 import { connectionStateKey, createSettingsStore } from "@/lib/settings-store";
@@ -44,6 +45,7 @@ export default function SettingsScreen() {
   const connection = useConnectionStore();
   const voiceController = useVoiceController();
   const push = usePushRegistration();
+  const authSession = useAuthSession();
 
   const store = useMemo(
     () =>
@@ -61,6 +63,8 @@ export default function SettingsScreen() {
         appVersion: APP_VERSION,
         unpair: async () => {
           await clearPairing(expoSecureStore);
+          // The stored refresh token belongs to the pairing it was issued under.
+          await authSession.forget();
         },
         navigateToPair: () => {
           router.replace("/pair");
@@ -71,8 +75,9 @@ export default function SettingsScreen() {
         // one `PushRegistration` `PushProvider` built for the whole app
         // (push-context.tsx), never a second instance built here.
         push,
+        auth: authSession,
       }),
-    [client, connection, router, push],
+    [client, connection, router, push, authSession],
   );
 
   const [view, setView] = useState<SettingsView>(store.get());
@@ -92,6 +97,19 @@ export default function SettingsScreen() {
         style: "destructive",
         onPress: () => {
           void store.unpair();
+        },
+      },
+    ]);
+  }
+
+  function handleLogout(): void {
+    Alert.alert(t(language, "settings.logout"), t(language, "settings.logoutConfirm"), [
+      { text: t(language, "common.cancel"), style: "cancel" },
+      {
+        text: t(language, "common.ok"),
+        style: "destructive",
+        onPress: () => {
+          void store.logout();
         },
       },
     ]);
@@ -269,6 +287,25 @@ export default function SettingsScreen() {
           <Text style={styles.errorText}>{t(language, "settings.reconnectFailed")}</Text>
         )}
       </View>
+
+      <Text style={styles.sectionTitle}>{t(language, "settings.security")}</Text>
+      <Text style={styles.switchHint}>{t(language, "settings.idleLock")}</Text>
+      <View style={styles.row}>
+        {IDLE_LOCK_MINUTES.map((minutes) => (
+          <TouchableOpacity
+            key={minutes}
+            style={[styles.langButton, view.idleLockMinutes === minutes && styles.langButtonActive]}
+            onPress={() => void store.setIdleLockMinutes(minutes).catch(() => {})}
+          >
+            <Text style={styles.langButtonText}>
+              {t(language, "settings.idleLock.minutes", { minutes })}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <TouchableOpacity style={styles.dangerButton} onPress={handleLogout}>
+        <Text style={styles.dangerButtonText}>{t(language, "settings.logout")}</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity style={styles.dangerButton} onPress={handleUnpair}>
         <Text style={styles.dangerButtonText}>{t(language, "settings.unpair")}</Text>

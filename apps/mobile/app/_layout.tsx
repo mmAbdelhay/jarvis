@@ -15,10 +15,11 @@ import { Stack, usePathname, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { AppState, I18nManager, Platform } from "react-native";
+import { AppState, I18nManager, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { appActivityFor } from "@/lib/app-lifecycle";
+import { createAuthSession } from "@/lib/auth-session";
 import { realClock } from "@/lib/clock";
 import { connectFromStoredPairing as connectFromStored } from "@/lib/connect-stored";
 import { createConnectionStore } from "@/lib/connection-store";
@@ -29,8 +30,9 @@ import { nativeTransport } from "@/lib/native-transport";
 import { isClearingPairing } from "@/lib/pairing-guard";
 import { clearPairing } from "@/lib/pairing-record";
 import { filePrefsStore } from "@/lib/prefs-file";
-import { loadPrefs } from "@/lib/prefs";
+import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
+import { createRefreshStore } from "@/lib/refresh-store";
 import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
@@ -38,6 +40,7 @@ import { systemTransport } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createTrustRoutingTransport } from "@/lib/trust-routing-transport";
 import { createUnpairedHandler } from "@/lib/unpaired-handler";
+import { shouldShowUnlock } from "@/lib/unlock-screen";
 import { VoiceProvider } from "@/lib/voice-context";
 
 const CLIENT_STRING = `jarvis-mobile/${Constants.expoConfig?.version ?? "0.0.0"}/${Platform.OS}`;
@@ -88,6 +91,25 @@ export default function RootLayout() {
   }
   const client = clientRef.current;
 
+  // Phase 0 owner login: the app's one auth session over the shared client.
+  // The biometric prompt reads the language when it is shown, so it is
+  // right even though prefs load after this runs.
+  const languageRef = useRef<Language | null>(null);
+  languageRef.current = language;
+  const authSessionRef = useRef<ReturnType<typeof createAuthSession> | undefined>(undefined);
+  if (authSessionRef.current === undefined) {
+    authSessionRef.current = createAuthSession({
+      rpc: client,
+      clock: realClock,
+      refreshStore: createRefreshStore(() =>
+        t(languageRef.current ?? "en", "auth.biometricPrompt"),
+      ),
+      idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
+      log: (line) => console.log(line),
+    });
+  }
+  const authSession = authSessionRef.current;
+
   // The decision — clear the pairing, log without secrets if that fails,
   // navigate to /pair either way — is a plain, tested function
   // (unpaired-handler.ts); this component only wires its two effectful
@@ -101,7 +123,11 @@ export default function RootLayout() {
   );
   if (unpairedHandlerRef.current === undefined) {
     unpairedHandlerRef.current = createUnpairedHandler({
-      clearPairing: () => clearPairing(expoSecureStore),
+      clearPairing: async () => {
+        await clearPairing(expoSecureStore);
+        // The stored refresh token belongs to the pairing it was issued under.
+        await authSession.forget();
+      },
       // The distinct "clearFailed" phase itself is now signalled to
       // /pair via the one-shot clear-failed-signal.ts flag (set by
       // createUnpairedHandler itself, never from a route param — a
@@ -160,16 +186,24 @@ export default function RootLayout() {
   useEffect(() => {
     if (appActivityFor(AppState.currentState) === "suspend") {
       client.setAppActive(false);
+      authSession.setAppActive(false);
     }
     const subscription = AppState.addEventListener("change", (next) => {
       const activity = appActivityFor(next);
-      if (activity === "activate") client.setAppActive(true);
-      else if (activity === "suspend") client.setAppActive(false);
+      if (activity === "activate") {
+        // The idle check first: an app back after the idle window locks
+        // before its subscriptions resume.
+        authSession.setAppActive(true);
+        client.setAppActive(true);
+      } else if (activity === "suspend") {
+        client.setAppActive(false);
+        authSession.setAppActive(false);
+      }
     });
     return () => {
       subscription.remove();
     };
-  }, [client]);
+  }, [client, authSession]);
 
   // Sidecar landscape fix: app.config.ts's own `orientation` is "default"
   // now (not "portrait"), so the sidecar WebView screen can unlock to
@@ -200,6 +234,7 @@ export default function RootLayout() {
       I18nManager.allowRTL(true);
       I18nManager.forceRTL(isRtl(prefs.language));
 
+      authSession.setIdleMs(prefs.idleLockMinutes * 60_000);
       if (!cancelled) {
         setLanguage(prefs.language);
       }
@@ -207,7 +242,36 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authSession]);
+
+  // Phase 0 owner login: whenever the connection is locked (or the phone
+  // locked itself), the unlock screen goes on top of wherever the owner was.
+  const [connectionState, setConnectionState] = useState(connectionStore.get().state);
+  useEffect(() => {
+    setConnectionState(connectionStore.get().state);
+    return connectionStore.subscribe((view) => setConnectionState(view.state));
+  }, [connectionStore]);
+  const [authView, setAuthView] = useState(authSession.get());
+  useEffect(() => {
+    setAuthView(authSession.get());
+    return authSession.subscribe(setAuthView);
+  }, [authSession]);
+  const ready = language !== null && fontsLoaded;
+  // Set between a push and the route actually reaching /unlock, so a
+  // second state change in that window can't stack a second unlock screen.
+  const unlockPushPending = useRef(false);
+  useEffect(() => {
+    if (!ready) return;
+    if (pathname === "/unlock") {
+      unlockPushPending.current = false;
+      return;
+    }
+    if (unlockPushPending.current) return;
+    if (shouldShowUnlock(connectionState, authView, pathname)) {
+      unlockPushPending.current = true;
+      router.push("/unlock");
+    }
+  }, [ready, connectionState, authView, pathname, router]);
 
   // Connects the shared client from whatever pairing is on disk — the same
   // function Settings' reconnect() uses — or routes to /pair when the read
@@ -245,7 +309,10 @@ export default function RootLayout() {
   // fresh object every render, re-rendering every RpcContext consumer
   // (Dashboard, Settings) even when neither value actually changed —
   // both are already stable across renders (refs), so memoise on them.
-  const rpcContextValue = useMemo(() => ({ client, connectionStore }), [client, connectionStore]);
+  const rpcContextValue = useMemo(
+    () => ({ client, connectionStore, authSession }),
+    [client, connectionStore, authSession],
+  );
 
   if (language === null || !fontsLoaded) {
     return null;
@@ -256,104 +323,112 @@ export default function RootLayout() {
       <RpcContext.Provider value={rpcContextValue}>
         <Providers>
           <SafeAreaProvider>
-            <ConnectionBanner
-              store={connectionStore}
-              onRetry={() => {
-                void connectFromStoredPairing();
-              }}
-              onPairAgain={handlePairAgain}
-            />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen
-                name="session/[id]"
-                options={{
-                  headerShown: true,
-                  // Fix round 1 (Important 1): `title`, not `headerTitle` — the
-                  // screen's own `<Stack.Screen options={{ title: row.summary }} />`
-                  // merges into this component's options via
-                  // `navigation.setOptions`, and native-stack prefers a string
-                  // `headerTitle` over `title` after that merge. Using `title`
-                  // here lets the screen's `row.summary` win once the row is
-                  // known, while this stays the header until then.
-                  title: t(language, "sessions.title"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
+            {/* Every touch anywhere restarts the idle-lock window. */}
+            <View style={{ flex: 1 }} onTouchStart={() => authSession.touch()}>
+              <ConnectionBanner
+                store={connectionStore}
+                onRetry={() => {
+                  void connectFromStoredPairing();
                 }}
+                onPairAgain={handlePairAgain}
               />
-              <Stack.Screen
-                name="changes"
-                options={{
-                  headerShown: true,
-                  headerTitle: t(language, "changes.title"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-              <Stack.Screen
-                name="history"
-                options={{
-                  headerShown: true,
-                  headerTitle: t(language, "history.title"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-              <Stack.Screen
-                name="transcript/[id]"
-                options={{
-                  headerShown: true,
-                  title: t(language, "history.transcript"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-              <Stack.Screen
-                name="sidecars/[project]"
-                options={{
-                  headerShown: true,
-                  headerTitle: t(language, "sidecars.title"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-              <Stack.Screen
-                name="sidecar-view"
-                // Slim-header fix: this screen now draws its own single-row
-                // header (back + title + zoom controls + desktop-site
-                // toggle, all in one 44px row) instead of the native
-                // header this used to configure — the native header's
-                // title/right-button layout is what produced the old
-                // two-line header (a long title plus a below-it toggle
-                // pill). `headerShown: false` here hands the whole header
-                // to the screen; see app/sidecar-view.tsx.
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="docker/[project]"
-                options={{
-                  headerShown: true,
-                  // The screen's own `<Stack.Screen options={{ title }} />`
-                  // merges the project name in once known (session/[id].tsx's
-                  // same convention) — this is only the default shown first.
-                  title: t(language, "docker.title"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-              <Stack.Screen
-                name="terminal/[paneKey]"
-                options={{
-                  headerShown: true,
-                  // The screen's own `<Stack.Screen options={{ title }} />`
-                  // sets the pane key once mounted (docker/[project].tsx's
-                  // same convention) — this is only the default shown first.
-                  title: t(language, "workspace.terminal"),
-                  headerStyle: { backgroundColor: theme.colors.background },
-                  headerTintColor: theme.colors.text,
-                }}
-              />
-            </Stack>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="session/[id]"
+                  options={{
+                    headerShown: true,
+                    // Fix round 1 (Important 1): `title`, not `headerTitle` — the
+                    // screen's own `<Stack.Screen options={{ title: row.summary }} />`
+                    // merges into this component's options via
+                    // `navigation.setOptions`, and native-stack prefers a string
+                    // `headerTitle` over `title` after that merge. Using `title`
+                    // here lets the screen's `row.summary` win once the row is
+                    // known, while this stays the header until then.
+                    title: t(language, "sessions.title"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="changes"
+                  options={{
+                    headerShown: true,
+                    headerTitle: t(language, "changes.title"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="history"
+                  options={{
+                    headerShown: true,
+                    headerTitle: t(language, "history.title"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="transcript/[id]"
+                  options={{
+                    headerShown: true,
+                    title: t(language, "history.transcript"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="sidecars/[project]"
+                  options={{
+                    headerShown: true,
+                    headerTitle: t(language, "sidecars.title"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="sidecar-view"
+                  // Slim-header fix: this screen now draws its own single-row
+                  // header (back + title + zoom controls + desktop-site
+                  // toggle, all in one 44px row) instead of the native
+                  // header this used to configure — the native header's
+                  // title/right-button layout is what produced the old
+                  // two-line header (a long title plus a below-it toggle
+                  // pill). `headerShown: false` here hands the whole header
+                  // to the screen; see app/sidecar-view.tsx.
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="docker/[project]"
+                  options={{
+                    headerShown: true,
+                    // The screen's own `<Stack.Screen options={{ title }} />`
+                    // merges the project name in once known (session/[id].tsx's
+                    // same convention) — this is only the default shown first.
+                    title: t(language, "docker.title"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="terminal/[paneKey]"
+                  options={{
+                    headerShown: true,
+                    // The screen's own `<Stack.Screen options={{ title }} />`
+                    // sets the pane key once mounted (docker/[project].tsx's
+                    // same convention) — this is only the default shown first.
+                    title: t(language, "workspace.terminal"),
+                    headerStyle: { backgroundColor: theme.colors.background },
+                    headerTintColor: theme.colors.text,
+                  }}
+                />
+                <Stack.Screen
+                  name="unlock"
+                  // No swipe back past the lock: it closes itself once unlocked.
+                  options={{ headerShown: false, gestureEnabled: false }}
+                />
+              </Stack>
+            </View>
           </SafeAreaProvider>
         </Providers>
       </RpcContext.Provider>

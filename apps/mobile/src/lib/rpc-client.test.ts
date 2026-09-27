@@ -25,6 +25,7 @@ function createClientForTest<C extends Clock = ReturnType<typeof createFakeClock
   const logs: string[] = [];
   const client = createRpcClient({
     transport,
+    lockedAtWelcome: false,
     clock,
     random: () => randomValue,
     client: CLIENT_STRING,
@@ -1324,6 +1325,7 @@ describe("createRpcClient: capabilities and malformed frames (minor findings)", 
     };
     const client = createRpcClient({
       transport,
+      lockedAtWelcome: false,
       clock,
       random: () => 0.5,
       client: CLIENT_STRING,

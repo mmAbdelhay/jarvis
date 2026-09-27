@@ -30,6 +30,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
   });
 
@@ -43,6 +44,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
   });
 
@@ -56,6 +58,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
   });
 
@@ -68,6 +71,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
     const prefs = await loadPrefs(store, "en-US");
     expect(prefs).toEqual<Prefs>({
@@ -77,6 +81,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
   });
 
@@ -89,6 +94,7 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
     });
   });
 
@@ -103,6 +109,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
 
@@ -116,6 +123,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
 
@@ -128,6 +136,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -137,6 +146,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
 
@@ -150,6 +160,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
   });
@@ -184,6 +195,7 @@ describe("loadPrefs", () => {
         pushRegistered: true,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -193,6 +205,7 @@ describe("loadPrefs", () => {
         pushRegistered: true,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
 
@@ -206,6 +219,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
   });
@@ -242,6 +256,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -251,6 +266,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
 
@@ -264,6 +280,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       });
     });
   });
@@ -306,6 +323,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
+        idleLockMinutes: 15,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -315,6 +333,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
+        idleLockMinutes: 15,
       });
     });
 
@@ -327,6 +346,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { database: 110 },
+        idleLockMinutes: 15,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({ database: 110 });
@@ -370,6 +390,7 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { cluster: 200 },
+        idleLockMinutes: 15,
       });
     });
 
@@ -383,6 +404,33 @@ describe("loadPrefs", () => {
       const store = new FakeStore(JSON.stringify({ sidecarZoom: { editor: 49, database: 201 } }));
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({});
+    });
+  });
+
+  describe("idleLockMinutes", () => {
+    it("defaults to 15 when missing", async () => {
+      const prefs = await loadPrefs(new FakeStore(JSON.stringify({})), "en-US");
+      expect(prefs.idleLockMinutes).toBe(15);
+    });
+
+    it("keeps each allowed value", async () => {
+      for (const minutes of [5, 15, 30, 60]) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ idleLockMinutes: minutes })),
+          "en-US",
+        );
+        expect(prefs.idleLockMinutes).toBe(minutes);
+      }
+    });
+
+    it("falls back to 15 for any other value", async () => {
+      for (const bad of [0, 10, 61, "15", null, -5]) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ idleLockMinutes: bad })),
+          "en-US",
+        );
+        expect(prefs.idleLockMinutes).toBe(15);
+      }
     });
   });
 });

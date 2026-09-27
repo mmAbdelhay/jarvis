@@ -23,6 +23,7 @@ function createEnv() {
   const logs: string[] = [];
   const client = createRpcClient({
     transport,
+    lockedAtWelcome: false,
     clock,
     random: () => 0.5,
     client: "jarvis-mobile-test",

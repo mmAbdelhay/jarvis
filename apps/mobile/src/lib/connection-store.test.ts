@@ -41,6 +41,8 @@ function createFakeClient(initial: { state?: ClientState; subscriptions?: unknow
     subscriptions: () => subscriptions as never,
     lastFrameAt: () => lastFrameAt,
     setAppActive: () => {},
+    unlock: () => {},
+    lock: () => {},
   };
 
   return {

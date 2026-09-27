@@ -68,6 +68,8 @@ function createFakeClient(initial: { state?: ClientState } = {}) {
     subscriptions: () => [],
     lastFrameAt: () => lastFrameAt,
     setAppActive: () => {},
+    unlock: () => {},
+    lock: () => {},
   };
 
   return {
@@ -190,8 +192,10 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
   unpairCalls: number[];
   connectFromStoredCalls: number[];
   logs: string[];
+  authCalls: string[];
 } {
   const fake = createFakeClient();
+  const authCalls: string[] = [];
   const clock = createFakeClock();
   const connection = createConnectionStore({
     client: fake.client,
@@ -229,6 +233,14 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
     },
     push,
     log: (line) => logs.push(line),
+    auth: {
+      logout: async () => {
+        authCalls.push("logout");
+      },
+      setIdleMs: (ms: number) => {
+        authCalls.push(`idle ${ms}`);
+      },
+    },
     ...overrides,
   };
 
@@ -243,6 +255,7 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
     unpairCalls,
     connectFromStoredCalls,
     logs,
+    authCalls,
   };
 }
 
@@ -298,6 +311,7 @@ describe("createSettingsStore: setLanguage", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       }),
     ]);
   });
@@ -319,6 +333,7 @@ describe("createSettingsStore: setLanguage", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       }),
       JSON.stringify({
         language: "en",
@@ -327,6 +342,7 @@ describe("createSettingsStore: setLanguage", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       }),
     ]);
     expect(store.get().speakReplies).toBe(false);
@@ -352,6 +368,7 @@ describe("createSettingsStore: setSpeakReplies (M8 Task 7, rule 17)", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
       }),
     ]);
   });
@@ -1088,5 +1105,36 @@ describe("connectionStateKey (I-B: rendering view.connection)", () => {
     expect(connectionStateKey({ state: "open", stale: false, pinMismatch: true })).toBe(
       "conn.pinMismatch",
     );
+  });
+});
+
+describe("createSettingsStore: owner login (Phase 0)", () => {
+  it("loads the idle-lock minutes from prefs (default 15)", async () => {
+    const { deps } = baseDeps();
+    const store = createSettingsStore(deps);
+    await flush();
+    expect(store.get().idleLockMinutes).toBe(15);
+  });
+
+  it("setIdleLockMinutes persists the pref, keeps the rest, and retimes the session", async () => {
+    const { deps, prefs, authCalls } = baseDeps();
+    const store = createSettingsStore(deps);
+    await flush();
+    await store.setIdleLockMinutes(30);
+    const saved = JSON.parse(prefs.written[prefs.written.length - 1] as string);
+    expect(saved).toMatchObject({ idleLockMinutes: 30, speakReplies: true });
+    expect(authCalls).toEqual([`idle ${30 * 60_000}`]);
+    expect(store.get().idleLockMinutes).toBe(30);
+  });
+
+  it("logout forwards to the auth session", async () => {
+    const { deps, authCalls } = baseDeps();
+    const store = createSettingsStore(deps);
+    await store.logout();
+    expect(authCalls).toEqual(["logout"]);
+  });
+
+  it("maps the locked state to its own key", () => {
+    expect(connectionStateKey({ state: "locked", stale: true })).toBe("conn.locked");
   });
 });

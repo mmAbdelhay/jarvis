@@ -127,6 +127,7 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     // --- 2. createRpcClient + connect: the /rpc socket's first frame is hello, then welcome → open ---
     const client = createRpcClient({
       transport,
+      lockedAtWelcome: false,
       clock,
       random: () => 0.5, // zero jitter (backoff.ts): exact 1000ms reconnect delays
       client: CLIENT_STRING,

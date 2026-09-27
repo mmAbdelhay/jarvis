@@ -79,6 +79,7 @@ describe("background/foreground over the real client and a live session stream",
       const token = "T".repeat(43);
       const client = createRpcClient({
         transport,
+        lockedAtWelcome: false,
         clock,
         random: () => 0.5,
         client: "background-test",

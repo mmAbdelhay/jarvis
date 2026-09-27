@@ -36,6 +36,8 @@ function createFakeClient() {
     subscriptions: () => [],
     lastFrameAt: () => undefined,
     setAppActive: () => {},
+    unlock: () => {},
+    lock: () => {},
   } satisfies RpcClient;
   return { client, connectCalls };
 }
