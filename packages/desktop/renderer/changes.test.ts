@@ -199,6 +199,22 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       kind: "failed" as const,
       detail: "not stubbed in this test",
     })),
+    plansList: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
+    plansRead: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+    plansWriteBlock: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+    plansComments: vi.fn(async () => []),
+    plansAddComment: vi.fn(async () => ({
+      id: "c1",
+      path: "/plan.md",
+      blockId: "b1",
+      quote: "",
+      body: "not stubbed in this test",
+      createdAt: 0,
+    })),
+    plansUpdateComment: vi.fn(async () => undefined),
+    plansDeleteComment: vi.fn(async () => false),
+    plansSend: vi.fn(async () => ({ ok: false as const, reason: "no-comments" as const })),
+    onPlansChanged: vi.fn(),
   };
   const jarvis: RendererApi = { ...defaults, ...overrides };
   window.jarvis = jarvis;

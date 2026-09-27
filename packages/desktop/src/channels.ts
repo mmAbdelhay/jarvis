@@ -37,6 +37,12 @@ export type PushChannels = IpcChannels & {
   // classifies this channel "desktop-only", so it never reaches
   // remotePushPolicies() for a phone to subscribe to in the first place.
   "remote:update": RemoteStatus;
+  // Task 5 (plan panel): a plan file main.ts is watching changed on disk.
+  // The payload is the file's own path, never its contents — the same
+  // "push says look again" contract turn:new and workspace:update already
+  // follow — so the renderer (and, via REMOTE_PUSH_POLICY, a paired phone)
+  // re-reads with plansRead/plansComments on receipt.
+  "plans:changed": string;
 };
 
 /**
@@ -223,6 +229,17 @@ export const INVOKE_CHANNELS = {
   // keyPath and turns remote.sidecarProxy on, through the same serialized
   // writeConfig queue Settings' own save uses. See tailscale-cert.ts.
   tailscaleCert: "remote:tailscaleCert",
+  // Task 5 (plan panel): main's own read/write/comment surface for a plan
+  // file — reachable from a paired phone exactly like every other
+  // remote-legal channel (remote-policy.ts).
+  plansList: "plans:list",
+  plansRead: "plans:read",
+  plansWriteBlock: "plans:writeBlock",
+  plansComments: "plans:comments",
+  plansAddComment: "plans:addComment",
+  plansUpdateComment: "plans:updateComment",
+  plansDeleteComment: "plans:deleteComment",
+  plansSend: "plans:send",
 } as const satisfies Record<InvokeKey, string>;
 
 /** Method → channel, for every push. */
@@ -246,6 +263,7 @@ export const PUSH_CHANNELS = {
   onDockerLog: "docker:log",
   onRemoteStatus: "remote:update",
   onTabRename: "workspace:tabRename",
+  onPlansChanged: "plans:changed",
 } as const satisfies Record<PushKey, string>;
 
 /**
