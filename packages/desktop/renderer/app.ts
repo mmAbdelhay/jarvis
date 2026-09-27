@@ -452,6 +452,7 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
   $("cpu-bar").style.width = `${metrics.cpuPercent}%`;
   renderTemperature(metrics.cpuTemperatureC);
+  const cpuCrit = metrics.cpuPercent >= 95;
 
   const memPercent =
     metrics.memoryTotalBytes > 0
@@ -461,6 +462,7 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("mem-detail").textContent =
     `${formatBytes(metrics.memoryUsedBytes)} / ${formatBytes(metrics.memoryTotalBytes)}`;
   $("mem-bar").style.width = `${memPercent}%`;
+  const memCrit = memPercent >= 95;
 
   // A disk at 98% used to be stated in exactly the same colour as a disk at
   // 12%, which makes the number decorative: nobody reads a strip of
@@ -486,14 +488,25 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("net-down").textContent = `↓${metrics.networkDownMbps.toFixed(1)}`;
   $("net-up").textContent = `↑${metrics.networkUpMbps.toFixed(1)}`;
 
-  // The topbar itself carries no numbers any more (board 0 removed
-  // CPU/RAM/DISK/network from the ambient strip — the SYSTEM card above is
-  // the only place they render) — but a machine in real trouble still needs
-  // a signal from every route, so a small dot takes their place, on only
-  // while something is genuinely critical and named in its own tooltip.
+  // The compact topbar readout users asked back after board 0 removed it —
+  // same values as the Dashboard's SYSTEM card above, just glanceable from
+  // every route. `metric--danger` names the same >=95% threshold as the
+  // danger dot below, per number rather than one dot for the whole machine.
+  $("header-cpu").textContent = `${metrics.cpuPercent}%`;
+  $("header-cpu").classList.toggle("metric--danger", cpuCrit);
+  $("header-mem").textContent = `${memPercent}%`;
+  $("header-mem").classList.toggle("metric--danger", memCrit);
+  $("header-disk").textContent = `${diskPercent}%`;
+  $("header-disk").classList.toggle("metric--danger", diskCrit);
+  $("header-net").textContent =
+    `↓${metrics.networkDownMbps.toFixed(1)} ↑${metrics.networkUpMbps.toFixed(1)} Mbps`;
+
+  // A machine in real trouble still needs a signal from every route, so a
+  // small dot takes the readout's place once it collapses (see the
+  // @container rule in styles.css), on only while something is genuinely
+  // critical and named in its own tooltip.
   const dangerDot = document.getElementById("topbar-danger-dot");
   if (dangerDot !== null) {
-    const cpuCrit = metrics.cpuPercent >= 95;
     dangerDot.hidden = !(cpuCrit || diskCrit);
     if (!dangerDot.hidden) {
       dangerDot.title = MESSAGES.topbarDangerTitle(cpuCrit, diskCrit, PRIMARY_LANGUAGE);

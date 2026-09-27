@@ -67,6 +67,10 @@ async function loadApp(
     <div id="temp-note" hidden></div>
     <span id="net-down"></span>
     <span id="net-up"></span>
+    <span id="header-cpu"></span>
+    <span id="header-mem"></span>
+    <span id="header-disk"></span>
+    <span id="header-net"></span>
     <span id="topbar-danger-dot" hidden></span>
     <div id="conversation"></div>
     <section id="presence" class="presence presence--idle"></section>
@@ -938,10 +942,12 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 6; i += 1) await Promise.resolve();
 }
 
-// board 0 removed CPU/RAM/DISK/network from the topbar entirely — the
-// Dashboard SYSTEM card (#disk-value, #disk-bar, #net-down, #net-up) is now
-// the only place they render, and the topbar carries only a danger dot, lit
-// when the machine is genuinely in trouble. See app.ts's renderMetrics.
+// board 0 removed CPU/RAM/DISK/network from the topbar entirely, leaving
+// only a danger dot; bug 6 brought a compact #header-cpu/-mem/-disk/-net
+// readout back (still fed from the same values as the Dashboard's SYSTEM
+// card, #disk-value/#disk-bar/#net-down/#net-up), and the danger dot stays
+// alongside it for when the readout itself has collapsed (narrow window).
+// See app.ts's renderMetrics.
 describe("the Dashboard SYSTEM card and the topbar's danger dot", () => {
   const metrics = (over: Partial<SystemMetrics> = {}): SystemMetrics => ({
     cpuPercent: 10,
@@ -1023,6 +1029,37 @@ describe("the Dashboard SYSTEM card and the topbar's danger dot", () => {
 
     expect(document.getElementById("net-down")?.textContent).toBe("↓0.3");
     expect(document.getElementById("net-up")?.textContent).toBe("↑1.2");
+  });
+
+  it("fills the topbar's compact CPU/RAM/DISK/network readout from the same metrics", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(
+      metrics({
+        cpuPercent: 42,
+        memoryUsedBytes: 5,
+        memoryTotalBytes: 10,
+        diskUsedBytes: 3,
+        diskTotalBytes: 10,
+        networkDownMbps: 0.3,
+        networkUpMbps: 1.2,
+      }),
+    );
+
+    expect(document.getElementById("header-cpu")?.textContent).toBe("42%");
+    expect(document.getElementById("header-mem")?.textContent).toBe("50%");
+    expect(document.getElementById("header-disk")?.textContent).toBe("30%");
+    expect(document.getElementById("header-net")?.textContent).toBe("↓0.3 ↑1.2 Mbps");
+  });
+
+  it("marks only the header metric that is at or above 95% with the danger class", async () => {
+    const { onMetrics } = await loadApp();
+
+    onMetrics?.(metrics({ cpuPercent: 96 }));
+
+    expect(document.getElementById("header-cpu")?.className).toContain("metric--danger");
+    expect(document.getElementById("header-mem")?.className).not.toContain("metric--danger");
+    expect(document.getElementById("header-disk")?.className).not.toContain("metric--danger");
   });
 });
 
