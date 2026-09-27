@@ -10,7 +10,8 @@
 // Rules:
 // - The access token lives in memory only. It is never written anywhere.
 // - The refresh token rotates on every refresh; the laptop treats a
-//   replayed old one as theft and revokes the whole login. So the stored
+//   replayed old one as theft and revokes the whole login (except a retry
+//   right after a lost reply: keep the token held, never guess). So the stored
 //   copy is always the newest: it is written before the new access token
 //   is used, and if that write fails the stale stored copy is deleted.
 // - Refreshes are serialized: one `auth:refresh` in flight at a time.
@@ -43,6 +44,14 @@ export type DeviceAuth = {
   /** Face ID / fingerprint, falling back to the device passcode. True
    *  only when the owner passed it. */
   authenticate(): Promise<boolean>;
+};
+
+/** A non-secret "a refresh token is stored" flag (prefs.json): lets the
+ *  unlock screen skip the device-owner prompt when there is nothing to
+ *  read, without touching the keychain. */
+export type RefreshStoredFlag = {
+  read(): Promise<boolean>;
+  write(stored: boolean): Promise<void>;
 };
 
 export type AuthLockCause = "idle" | AuthLockReason;
@@ -81,6 +90,7 @@ export type AuthSessionDeps = {
   /** Plain secure storage (no per-read prompt): rotation writes never
    *  prompt. The device-owner check gates reads instead. */
   refreshStore: SecureStore;
+  refreshStoredFlag: RefreshStoredFlag;
   deviceAuth: DeviceAuth;
   idleMs: number;
   log(line: string): void;
@@ -160,6 +170,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   // login, unpair): a login/refresh reply that lands afterwards must not
   // unlock again.
   let epoch = 0;
+  // The flag's last known value: written only when it changes.
+  let storedFlag: boolean | undefined;
 
   function setView(patch: Partial<AuthView>): void {
     view = { ...view, ...patch };
@@ -217,7 +229,32 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     cancelIdleTimer();
   }
 
+  async function setStoredFlag(stored: boolean): Promise<void> {
+    if (storedFlag === stored) return;
+    storedFlag = stored;
+    try {
+      await deps.refreshStoredFlag.write(stored);
+    } catch {
+      deps.log("auth: writing the stored-token flag failed");
+    }
+  }
+
+  /** True when a refresh token may be stored. An unreadable flag answers
+   *  true: the keychain read then decides. */
+  async function mayHaveStored(): Promise<boolean> {
+    if (storedFlag !== undefined) return storedFlag;
+    try {
+      storedFlag = await deps.refreshStoredFlag.read();
+      return storedFlag;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Clears the flag first: a flag that says "none" over a leftover token
+   *  only costs a password entry, never a prompt over nothing. */
   async function deleteStored(): Promise<void> {
+    await setStoredFlag(false);
     try {
       await deps.refreshStore.delete(REFRESH_TOKEN_KEY);
     } catch {
@@ -255,6 +292,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     }
     try {
       await deps.refreshStore.set(REFRESH_TOKEN_KEY, token);
+      await setStoredFlag(true);
       if (view.biometricUnavailable) setView({ biometricUnavailable: false });
     } catch {
       // A stale stored copy must never be replayed later: delete it.
@@ -398,6 +436,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     if (view.autoPrompt) setView({ autoPrompt: false });
     if (refreshing !== undefined) return refreshing;
     if (!(await hasPasscode())) return "no-stored-token";
+    // Nothing stored (first launch after pairing, after a logout): no prompt.
+    if (!(await mayHaveStored())) return "no-stored-token";
     let passed = false;
     try {
       passed = await deps.deviceAuth.authenticate();
@@ -414,7 +454,10 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     } catch {
       return "failed";
     }
-    if (stored === undefined) return "no-stored-token";
+    if (stored === undefined) {
+      await setStoredFlag(false);
+      return "no-stored-token";
+    }
     if (refreshing !== undefined) return refreshing;
     touch();
     return refreshWith(stored);

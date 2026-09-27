@@ -30,7 +30,7 @@ import { nativeTransport } from "@/lib/native-transport";
 import { isClearingPairing } from "@/lib/pairing-guard";
 import { clearPairing } from "@/lib/pairing-record";
 import { filePrefsStore } from "@/lib/prefs-file";
-import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
+import { createRefreshStoredFlag, DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshStore } from "@/lib/refresh-store";
@@ -103,6 +103,12 @@ export default function RootLayout() {
       rpc: client,
       clock: realClock,
       refreshStore,
+      // Load-change-save like every prefs writer; the locale only feeds
+      // loadPrefs's language fallback.
+      refreshStoredFlag: createRefreshStoredFlag(
+        filePrefsStore,
+        Intl.DateTimeFormat().resolvedOptions().locale,
+      ),
       deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
       idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
       log: (line) => console.log(line),

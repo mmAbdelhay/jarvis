@@ -312,6 +312,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       }),
     ]);
   });
@@ -334,6 +335,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       }),
       JSON.stringify({
         language: "en",
@@ -343,6 +345,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       }),
     ]);
     expect(store.get().speakReplies).toBe(false);
@@ -369,6 +372,7 @@ describe("createSettingsStore: setSpeakReplies (M8 Task 7, rule 17)", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       }),
     ]);
   });

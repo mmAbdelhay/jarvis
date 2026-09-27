@@ -148,6 +148,24 @@ function createDeviceAuthDouble(options: { passcode?: boolean }) {
   return { auth, state };
 }
 
+/** The non-secret "a refresh token is stored" pref (prefs.ts). */
+function createStoredFlagDouble() {
+  const state = { stored: false, writes: [] as boolean[], reads: 0 };
+  return {
+    state,
+    flag: {
+      read: async () => {
+        state.reads += 1;
+        return state.stored;
+      },
+      write: async (stored: boolean) => {
+        state.writes.push(stored);
+        state.stored = stored;
+      },
+    },
+  };
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
@@ -157,16 +175,23 @@ function setup(options: { passcode?: boolean } = {}) {
   const double = createRpcDouble(clock);
   const store = createStoreDouble(double.events);
   const device = createDeviceAuthDouble(options);
+  const flag = createStoredFlagDouble();
   const logs: string[] = [];
   const session = createAuthSession({
     rpc: double.rpc,
     clock,
     refreshStore: store.store,
+    refreshStoredFlag: flag.flag,
     deviceAuth: device.auth,
     idleMs: IDLE,
     log: (line) => logs.push(line),
   });
-  return { clock, double, store, session, logs, device };
+  /** A refresh token already on the phone from an earlier launch. */
+  function seed(value: string): void {
+    store.values.set(REFRESH_TOKEN_KEY, value);
+    flag.state.stored = true;
+  }
+  return { clock, double, store, session, logs, device, flag, seed };
 }
 
 function tokenArg(call: Call | undefined, field: string): string | undefined {
@@ -257,8 +282,8 @@ describe("auth-session: scheduled refresh", () => {
   });
 
   it("serializes refreshes: two unlocks at once send one auth:refresh", async () => {
-    const { double, store, session } = setup();
-    store.values.set(REFRESH_TOKEN_KEY, token());
+    const { double, session, seed } = setup();
+    seed(token());
     const [a, b] = await Promise.all([
       session.unlockWithStoredRefresh(),
       session.unlockWithStoredRefresh(),
@@ -270,9 +295,9 @@ describe("auth-session: scheduled refresh", () => {
 
 describe("auth-session: stored refresh (biometric) unlock", () => {
   it("unlocks with the stored token and stores the rotated one", async () => {
-    const { double, store, session } = setup();
+    const { double, store, session, seed } = setup();
     const stored = token();
-    store.values.set(REFRESH_TOKEN_KEY, stored);
+    seed(stored);
     expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
     expect(tokenArg(double.calls[0], "refreshToken")).toBe(stored);
     expect(store.values.get(REFRESH_TOKEN_KEY)).not.toBe(stored);
@@ -286,8 +311,8 @@ describe("auth-session: stored refresh (biometric) unlock", () => {
   });
 
   it("a failed device-owner check never reads the stored token", async () => {
-    const { store, session, device, double } = setup();
-    store.values.set(REFRESH_TOKEN_KEY, token());
+    const { store, session, device, double, seed } = setup();
+    seed(token());
     device.state.pass = false;
     expect(await session.unlockWithStoredRefresh()).toBe("cancelled");
     expect(device.state.prompts).toBe(1);
@@ -296,8 +321,8 @@ describe("auth-session: stored refresh (biometric) unlock", () => {
   });
 
   it("with no passcode, neither prompts nor reads: the password is needed", async () => {
-    const { store, session, device } = setup({ passcode: false });
-    store.values.set(REFRESH_TOKEN_KEY, token());
+    const { store, session, device, seed } = setup({ passcode: false });
+    seed(token());
     expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
     expect(device.state.prompts).toBe(0);
     expect(store.reads()).toBe(0);
@@ -305,8 +330,8 @@ describe("auth-session: stored refresh (biometric) unlock", () => {
   });
 
   it("a refused (reused/invalid) token is deleted and the password is required", async () => {
-    const { double, store, session } = setup();
-    store.values.set(REFRESH_TOKEN_KEY, token());
+    const { double, store, session, seed } = setup();
+    seed(token());
     double.reply("auth:refresh", {
       ok: false,
       error: { kind: "remote", code: "forbidden", text: "x", language: "en" },
@@ -530,5 +555,109 @@ describe("auth-session: fix round 1", () => {
     (clock as unknown as { now: () => number }).now = () => IDLE * 3;
     session.setAppActive(true);
     expect(session.get()).toMatchObject({ lockCause: "idle", autoPrompt: true });
+  });
+});
+
+describe("auth-session: a lost refresh reply", () => {
+  it("retries with the refresh token it still holds, and keeps the stored copy", async () => {
+    const { clock, double, store, session } = setup();
+    await session.unlockWithPassword("pw");
+    const held = store.values.get(REFRESH_TOKEN_KEY);
+    // The laptop rotated, but the reply never arrived.
+    double.reply("auth:refresh", { ok: false, error: { kind: "timeout" } });
+    session.touch();
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(store.values.get(REFRESH_TOKEN_KEY)).toBe(held);
+
+    // After the reconnect the access token has expired: refresh again.
+    double.push(AUTH_STATE_CHANNEL, { locked: true, reason: "expired" });
+    double.setState("locked");
+    await flush();
+    const refreshes = double.calls.filter((c) => c.channel === "auth:refresh");
+    expect(refreshes).toHaveLength(2);
+    expect(tokenArg(refreshes[0], "refreshToken")).toBe(held);
+    expect(tokenArg(refreshes[1], "refreshToken")).toBe(held);
+    expect(double.rpc.state()).toBe("open");
+  });
+});
+
+describe("auth-session: the refresh-token-stored flag", () => {
+  it("never raises the device-owner prompt when no refresh token is stored", async () => {
+    const { double, session, device, store } = setup();
+    expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(device.state.prompts).toBe(0);
+    expect(store.reads()).toBe(0);
+    expect(double.calls).toEqual([]);
+  });
+
+  it("is set once a refresh token is stored, after the write", async () => {
+    const { session, flag, store } = setup();
+    await session.unlockWithPassword("pw");
+    expect(flag.state.stored).toBe(true);
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(true);
+  });
+
+  it("is written only when it changes, not on every rotation", async () => {
+    const { clock, session, flag } = setup();
+    await session.unlockWithPassword("pw");
+    session.touch();
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(flag.state.writes).toEqual([true]);
+  });
+
+  it("stays clear when storing the token fails", async () => {
+    const { session, flag, store } = setup();
+    store.failNextSet();
+    await session.unlockWithPassword("pw");
+    expect(flag.state.stored).toBe(false);
+  });
+
+  it("stays clear with no passcode on the phone", async () => {
+    const { session, flag } = setup({ passcode: false });
+    await session.unlockWithPassword("pw");
+    expect(flag.state.stored).toBe(false);
+  });
+
+  it("is cleared by logout, and the next unlock does not prompt", async () => {
+    const { session, flag, device } = setup();
+    await session.unlockWithPassword("pw");
+    await session.logout();
+    expect(flag.state.stored).toBe(false);
+    session.setAppActive(true);
+    expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(device.state.prompts).toBe(0);
+  });
+
+  it("is cleared by forget (unpair) and by a signed-out push", async () => {
+    const first = setup();
+    await first.session.unlockWithPassword("pw");
+    await first.session.forget();
+    expect(first.flag.state.stored).toBe(false);
+
+    const second = setup();
+    await second.session.unlockWithPassword("pw");
+    second.double.push(AUTH_STATE_CHANNEL, { locked: true, reason: "signed-out" });
+    await flush();
+    expect(second.flag.state.stored).toBe(false);
+  });
+
+  it("is cleared by a refused refresh", async () => {
+    const { double, session, flag, seed } = setup();
+    seed(token());
+    double.reply("auth:refresh", {
+      ok: false,
+      error: { kind: "remote", code: "forbidden", text: "x", language: "en" },
+    });
+    expect(await session.unlockWithStoredRefresh()).toBe("password-required");
+    expect(flag.state.stored).toBe(false);
+  });
+
+  it("is cleared when it said stored but the keychain had nothing", async () => {
+    const { session, flag } = setup();
+    flag.state.stored = true;
+    expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(flag.state.stored).toBe(false);
   });
 });

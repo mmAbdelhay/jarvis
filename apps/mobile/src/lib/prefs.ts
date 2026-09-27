@@ -35,6 +35,11 @@ export type Prefs = {
   // Phase 0 owner login: minutes of no touch before the app locks itself
   // (Settings offers IDLE_LOCK_MINUTES). Anything else falls back to 15.
   idleLockMinutes: IdleLockMinutes;
+  // Phase 0 owner login: whether a refresh token sits in the keychain, so
+  // the unlock screen never raises the device-owner prompt over nothing.
+  // Not a secret (the token itself is only in refresh-store.ts). Defaults
+  // false: a missing value costs one password entry, never a prompt.
+  refreshTokenStored: boolean;
 };
 
 export const IDLE_LOCK_MINUTES = [5, 15, 30, 60] as const;
@@ -101,6 +106,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     sidecarDesktopSite: DEFAULT_SIDECAR_DESKTOP_SITE,
     sidecarZoom: { ...DEFAULT_SIDECAR_ZOOM },
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
+    refreshTokenStored: false,
   };
 
   let text: string | undefined;
@@ -140,6 +146,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
   const idleLockMinutes = isIdleLockMinutes(raw.idleLockMinutes)
     ? raw.idleLockMinutes
     : DEFAULT_IDLE_LOCK_MINUTES;
+  const refreshTokenStored = raw.refreshTokenStored === true;
 
   return {
     language,
@@ -149,9 +156,27 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     sidecarDesktopSite,
     sidecarZoom,
     idleLockMinutes,
+    refreshTokenStored,
   };
 }
 
 export async function savePrefs(store: PrefsStore, prefs: Prefs): Promise<void> {
   await store.write(JSON.stringify(prefs));
+}
+
+/** auth-session.ts's RefreshStoredFlag over prefs.json (load, change one
+ *  key, save — the same pattern as every other prefs writer). */
+export function createRefreshStoredFlag(
+  store: PrefsStore,
+  localeTag: string,
+): { read(): Promise<boolean>; write(stored: boolean): Promise<void> } {
+  return {
+    async read() {
+      return (await loadPrefs(store, localeTag)).refreshTokenStored;
+    },
+    async write(stored) {
+      const current = await loadPrefs(store, localeTag);
+      await savePrefs(store, { ...current, refreshTokenStored: stored });
+    },
+  };
 }

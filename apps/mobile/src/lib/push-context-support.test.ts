@@ -58,6 +58,7 @@ describe("createPrefsFacade", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     } satisfies Prefs);
 
     const facade = createPrefsFacade(store, "en-US", {
@@ -75,6 +76,7 @@ describe("createPrefsFacade", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
     expect(facade.get()).toEqual<PushPrefs>({ notifications: true, pushRegistered: false });
   });

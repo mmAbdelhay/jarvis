@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { languageFromLocale } from "./i18n";
-import { type Prefs, type PrefsStore, loadPrefs, savePrefs } from "./prefs";
+import {
+  type Prefs,
+  type PrefsStore,
+  createRefreshStoredFlag,
+  loadPrefs,
+  savePrefs,
+} from "./prefs";
 
 class FakeStore implements PrefsStore {
   private text: string | undefined;
@@ -31,6 +37,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
   });
 
@@ -45,6 +52,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
   });
 
@@ -59,6 +67,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
   });
 
@@ -72,6 +81,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
     const prefs = await loadPrefs(store, "en-US");
     expect(prefs).toEqual<Prefs>({
@@ -82,6 +92,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
   });
 
@@ -95,6 +106,7 @@ describe("loadPrefs", () => {
       sidecarDesktopSite: true,
       sidecarZoom: {},
       idleLockMinutes: 15,
+      refreshTokenStored: false,
     });
   });
 
@@ -110,6 +122,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -124,6 +137,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -137,6 +151,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -147,6 +162,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -161,6 +177,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
   });
@@ -196,6 +213,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -206,6 +224,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -220,6 +239,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
   });
@@ -257,6 +277,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: false,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -267,6 +288,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: false,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -281,6 +303,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: false,
         sidecarZoom: {},
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
   });
@@ -324,6 +347,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -334,6 +358,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -347,6 +372,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: { database: 110 },
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({ database: 110 });
@@ -391,6 +417,7 @@ describe("loadPrefs", () => {
         sidecarDesktopSite: true,
         sidecarZoom: { cluster: 200 },
         idleLockMinutes: 15,
+        refreshTokenStored: false,
       });
     });
 
@@ -431,6 +458,37 @@ describe("loadPrefs", () => {
         );
         expect(prefs.idleLockMinutes).toBe(15);
       }
+    });
+  });
+
+  describe("refreshTokenStored", () => {
+    it("is true only for a stored true", async () => {
+      for (const [value, expected] of [
+        [true, true],
+        [false, false],
+        ["true", false],
+        [1, false],
+      ] as const) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ refreshTokenStored: value })),
+          "en-US",
+        );
+        expect(prefs.refreshTokenStored).toBe(expected);
+      }
+    });
+
+    it("the flag adapter changes only its own key", async () => {
+      const store = new FakeStore(JSON.stringify({ language: "ar", idleLockMinutes: 30 }));
+      const flag = createRefreshStoredFlag(store, "en-US");
+      expect(await flag.read()).toBe(false);
+      await flag.write(true);
+      expect(await flag.read()).toBe(true);
+      const prefs = await loadPrefs(store, "en-US");
+      expect(prefs).toMatchObject({
+        language: "ar",
+        idleLockMinutes: 30,
+        refreshTokenStored: true,
+      });
     });
   });
 });
