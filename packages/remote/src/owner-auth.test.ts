@@ -46,7 +46,19 @@ function makeHarness(
   const verifyPassword = vi.fn(options.verify ?? (async (password) => password === PASSWORD));
   const owner = {
     verifyPassword,
-    listPasskeys: () => Array.from({ length: options.passkeys ?? 0 }, () => ({})),
+    listPasskeys: () =>
+      Array.from({ length: options.passkeys ?? 0 }, (_, index) => ({
+        credentialId: `cred${index}`,
+        publicKey: "key",
+        alg: -7 as const,
+        signCount: 0,
+        label: "Key",
+        createdAt: 0,
+      })),
+    addPasskey: vi.fn(async () => {}),
+    deletePasskey: vi.fn(async () => true),
+    updateSignCount: vi.fn(async () => true),
+    ownerHandle: vi.fn(async () => "handle"),
   };
   const events: AuditEvent[] = [];
   const log = vi.fn<(line: string) => void>();
@@ -66,6 +78,8 @@ function makeHarness(
         };
   const auth = createOwnerAuth({
     owner,
+    random: countingRandom(),
+    now: clock.now,
     sessions: store,
     notifyDesktop,
     audit: { record: (event) => events.push(event) },
@@ -77,7 +91,7 @@ function makeHarness(
 }
 
 function ctx(session?: AuthContext["session"]): AuthContext {
-  return { device: DEVICE, source: SOURCE, session };
+  return { connectionId: "c1", device: DEVICE, source: SOURCE, session };
 }
 
 function gatedVerify(): { verify: (password: string) => Promise<boolean>; gates: Gate[] } {

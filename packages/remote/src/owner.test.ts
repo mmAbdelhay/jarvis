@@ -238,6 +238,10 @@ describe("createOwnerStore: owner.json validation", () => {
       }),
     ],
     [
+      "a malformed owner handle",
+      JSON.stringify({ version: 1, passkeys: [], credentialsVersion: 0, ownerHandle: "short" }),
+    ],
+    [
       "a duplicate passkey",
       JSON.stringify({ version: 1, passkeys: [passkey(), passkey()], credentialsVersion: 0 }),
     ],
@@ -312,5 +316,34 @@ describe("createOwnerStore: passkeys", () => {
     const { store: reloaded } = makeStore({ fs });
     await reloaded.load();
     expect(reloaded.listPasskeys()[0]?.signCount).toBe(7);
+  });
+});
+
+describe("createOwnerStore: owner handle", () => {
+  it("makes a 32-byte handle once, persists it and keeps it across a reload", async () => {
+    const { fs, store } = makeStore();
+    await store.load();
+    const handle = await store.ownerHandle();
+    expect(Buffer.from(handle, "base64url")).toHaveLength(32);
+    expect(await store.ownerHandle()).toBe(handle);
+
+    const { store: reloaded } = makeStore({ fs });
+    await reloaded.load();
+    expect(await reloaded.ownerHandle()).toBe(handle);
+  });
+
+  it("keeps nothing when the first write fails", async () => {
+    const { fs, store } = makeStore();
+    await store.load();
+    const rename = fs.rename;
+    fs.rename = async () => {
+      throw new Error("disk full");
+    };
+    await expect(store.ownerHandle()).rejects.toThrow("owner.json write failed");
+    fs.rename = rename;
+    const handle = await store.ownerHandle();
+    const { store: reloaded } = makeStore({ fs });
+    await reloaded.load();
+    expect(await reloaded.ownerHandle()).toBe(handle);
   });
 });

@@ -19,6 +19,7 @@ import type { SidecarProxy } from "./proxy.js";
 import { ACCESS_TTL_MS } from "./sessions.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
 import { FakeSocket } from "./socket-double.js";
+import { softAuthenticator } from "./webauthn-double.js";
 
 const DIR = "/remote";
 // createBridge builds both paths with `join(deps.dir, …)` (bridge.ts), which
@@ -2271,5 +2272,109 @@ describe("createBridge: owner login (Phase 0)", () => {
     await bridge.apply(ON_127());
     expect(h.listenCalls).toEqual([]);
     expect(bridge.status().problem).toBe("sessions-unreadable");
+  });
+});
+
+describe("createBridge: passkeys (Phase 0)", () => {
+  const NAME = "laptop.tailnet.ts.net";
+  const ORIGIN = `https://${NAME}:8443`;
+
+  /** Sends one request and waits for its answer, then forgets every frame sent so far. */
+  async function ask(
+    conn: { handlers: SessionHandlers | undefined; socket: FakeSocket },
+    id: number,
+    ch: string,
+    args: unknown[] = [],
+  ): Promise<Record<string, unknown>> {
+    conn.handlers?.onText(reqFrame(id, ch, args));
+    for (let i = 0; i < 200; i++) {
+      const answer = conn.socket.sent.find((frame) => frame.id === id);
+      if (answer !== undefined) {
+        conn.socket.sent = [];
+        return answer;
+      }
+      await flush();
+    }
+    throw new Error(`${ch} never answered`);
+  }
+
+  async function setup(options: { cert?: CertificateMaterial; webOrigin?: string } = {}) {
+    const h = makeHarness({ cert: options.cert ?? certWith("configured", [NAME]) });
+    if (options.webOrigin !== undefined) {
+      const origin = options.webOrigin;
+      h.deps.webOrigin = () => origin;
+    }
+    const [one, two] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone", "Laptop"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(ON_127());
+    const connect = (device: { deviceId: string; token: string } | undefined, source: string) => {
+      const socket = new FakeSocket();
+      const handlers = h.listenCalls[0]?.onSocket("rpc", socket, source);
+      handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+      socket.sent = [];
+      return { socket, handlers, id: device?.deviceId ?? "" };
+    };
+    return { h, bridge, a: connect(one, "10.0.0.5:1"), b: connect(two, "10.0.0.6:1") };
+  }
+
+  it("answers unsupported without a web origin, or with a self-signed certificate", async () => {
+    for (const options of [{}, { cert: certWith("self-signed", []), webOrigin: ORIGIN }]) {
+      const { a } = await setup(options);
+      await login(a.handlers, a.socket);
+      expect(await ask(a, 1, "auth:passkeyBegin")).toMatchObject({ code: "unsupported" });
+      expect(
+        await ask(a, 2, "auth:passkeyRegisterBegin", [{ password: OWNER_TEST_PASSWORD }]),
+      ).toMatchObject({ code: "unsupported" });
+    }
+  });
+
+  it("registers over one connection, refreshes desktop Settings, logs in with it over another, and a deleted passkey stops working", async () => {
+    const { h, bridge, a, b } = await setup({ webOrigin: ORIGIN });
+    const authenticator = softAuthenticator({ rpId: NAME, origin: ORIGIN });
+    await login(a.handlers, a.socket);
+    const versionBefore = bridge.status().ownerVersion;
+
+    const begin = await ask(a, 1, "auth:passkeyRegisterBegin", [{ password: OWNER_TEST_PASSWORD }]);
+    const { challenge } = begin.v as { challenge: string };
+    expect(
+      await ask(a, 2, "auth:passkeyRegisterFinish", [
+        { ...authenticator.register(challenge), label: "Phone" },
+      ]),
+    ).toEqual({ t: "res", id: 2, v: null });
+
+    expect(bridge.ownerStatus().passkeys).toEqual([
+      { id: authenticator.credentialId, label: "Phone", createdAt: h.clock.now() },
+    ]);
+    expect(bridge.status().ownerVersion).toBe((versionBefore ?? 0) + 1);
+    expect(h.onStatus.mock.calls.at(-1)?.[0].ownerVersion).toBe((versionBefore ?? 0) + 1);
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain(
+      `passkey-added credentialPrefix="${authenticator.credentialId.slice(0, 8)}"`,
+    );
+
+    // A second, locked connection unlocks with the passkey alone.
+    const loginBegin = await ask(b, 1, "auth:passkeyBegin");
+    const options = loginBegin.v as { challenge: string; allowCredentials: string[] };
+    expect(options.allowCredentials).toEqual([authenticator.credentialId]);
+    const finish = await ask(b, 2, "auth:passkeyFinish", [authenticator.assert(options.challenge)]);
+    expect(finish).toMatchObject({ t: "res", id: 2, v: { accessToken: expect.any(String) } });
+    expect(await ask(b, 3, "projects:list")).toEqual({ t: "res", id: 3, v: null });
+
+    // Deleting it locks every connection, and it can no longer log in.
+    expect(await bridge.deletePasskey(authenticator.credentialId)).toBe(true);
+    await flush();
+    expect(b.socket.sent).toContainEqual({
+      t: "psh",
+      ch: "auth:state",
+      p: { locked: true, reason: "signed-out" },
+      seq: 1,
+    });
+    b.socket.sent = [];
+    const retry = await ask(b, 4, "auth:passkeyBegin");
+    expect(
+      await ask(b, 5, "auth:passkeyFinish", [
+        authenticator.assert((retry.v as { challenge: string }).challenge),
+      ]),
+    ).toMatchObject({ t: "err", id: 5, code: "forbidden" });
   });
 });

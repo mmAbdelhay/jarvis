@@ -183,6 +183,12 @@ export type RemoteStatus = {
    * `RemoteStatus` consumers. `status()` (below) always sets it regardless.
    */
   idle?: RemoteIdleStatus;
+  /**
+   * Phase 0: bumped whenever the owner account changes from the remote
+   * side (a passkey registered from a phone or browser), so desktop
+   * Settings re-reads `ownerStatus()` without being reopened.
+   */
+  ownerVersion?: number;
 };
 
 /** The non-`undefined` half of `RemoteStatus.listening` — the shape this module's own `listening` variable holds. */
@@ -224,6 +230,13 @@ export type BridgeDeps = {
   /** Phase 0: a desktop OS notification — a global login lockout, or a
    *  refresh token presented again. Optional; defaults to a no-op. */
   notifyDesktop?(kind: DesktopNoticeKind): void;
+  /**
+   * Phase 0: the web listener's origin (`https://<name>:<port>`), the
+   * passkey ceremonies' expected origin. The web listener arrives in
+   * Phase 1; until it answers, passkeys are `unsupported`. Optional;
+   * defaults to always `undefined`.
+   */
+  webOrigin?(): string | undefined;
 };
 
 export type Bridge = {
@@ -408,9 +421,22 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   }
 
   const notifyDesktop = (kind: DesktopNoticeKind): void => deps.notifyDesktop?.(kind);
+  // Bumped on every remote owner-account change; carried in RemoteStatus.
+  let ownerVersion = 0;
   const ownerAuth = createOwnerAuth({
     owner,
     sessions,
+    random: deps.random,
+    now: deps.now,
+    // The relying party is the configured certificate's DNS name — never a
+    // self-signed one's, which no browser would accept for WebAuthn.
+    rpId: () =>
+      listening?.certificate.source === "configured" ? listening.certificate.hostname : undefined,
+    webOrigin: () => deps.webOrigin?.(),
+    onPasskeyAdded() {
+      ownerVersion += 1;
+      emit();
+    },
     audit: auditLog,
     log: deps.log,
     lockFamily(familyId, reason) {
@@ -882,6 +908,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       problem,
       sidecarProxy: sidecarProxyStatus(),
       idle: idleStatusValue(),
+      ownerVersion,
     };
   }
 

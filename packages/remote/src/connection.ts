@@ -253,7 +253,12 @@ function keyedTargetId(channel: string, key: string): string {
   return `${channel}\u{0}${key}`;
 }
 
+/** Process-local connection ids (passkey challenges are keyed to them); never sent anywhere. */
+let connectionCount = 0;
+
 export function createConnection(socket: SocketLike, deps: ConnectionDeps): Connection {
+  connectionCount += 1;
+  const connectionId = `c${connectionCount}`;
   let state: ConnState = { phase: "awaiting-hello" };
   const subscribed = new Set<string>();
   const keyedSubscribed = new Set<string>();
@@ -689,24 +694,26 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
       isUnlocked() && state.phase === "open" && state.auth.unlocked
         ? { until: state.auth.until, familyId: state.auth.familyId }
         : undefined;
-    deps.ownerAuth.handle(channel, args, { device, source: deps.source, session }).then(
-      (outcome) => {
-        if (state.phase !== "open") return;
-        if (outcome.kind === "error") {
-          sendErr(id, outcome.code);
-          return;
-        }
-        const { effect } = outcome;
-        if (effect !== undefined && "unlock" in effect) unlock(effect.unlock);
-        if (effect !== undefined && "lock" in effect) lock(effect.lock);
-        deliverOutcome(id, { kind: "value", value: outcome.value });
-      },
-      (error: unknown) => {
-        deps.log(`connection: ownerAuth(${channel}) rejected: ${describeError(error)}`);
-        if (state.phase !== "open") return;
-        sendErr(id, "internal");
-      },
-    );
+    deps.ownerAuth
+      .handle(channel, args, { connectionId, device, source: deps.source, session })
+      .then(
+        (outcome) => {
+          if (state.phase !== "open") return;
+          if (outcome.kind === "error") {
+            sendErr(id, outcome.code);
+            return;
+          }
+          const { effect } = outcome;
+          if (effect !== undefined && "unlock" in effect) unlock(effect.unlock);
+          if (effect !== undefined && "lock" in effect) lock(effect.lock);
+          deliverOutcome(id, { kind: "value", value: outcome.value });
+        },
+        (error: unknown) => {
+          deps.log(`connection: ownerAuth(${channel}) rejected: ${describeError(error)}`);
+          if (state.phase !== "open") return;
+          sendErr(id, "internal");
+        },
+      );
   }
 
   function handleReq(message: ReqMessage, device: AuthenticatedDevice): void {
@@ -1116,6 +1123,11 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     auditedInputKeys.clear();
     outbox?.dispose();
     state = { phase: "closed", device };
+    try {
+      deps.ownerAuth.connectionClosed(connectionId);
+    } catch (error) {
+      deps.log(`connection: connectionClosed threw: ${describeError(error)}`);
+    }
     // Rule 9: onClosed fires once, only for a connection that was ever
     // authenticated — whatever it was that closed the socket.
     if (device !== undefined) deps.onClosed(connection, code);

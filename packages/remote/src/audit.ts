@@ -87,11 +87,15 @@ export type AuditEvent =
   | { kind: "owner-password-changed" }
   | { kind: "passkey-deleted"; credentialTail: string }
   | { kind: "signed-out-everywhere" }
-  // Phase 0: remote owner logins over auth:login, and a rotated refresh
+  // Phase 0: remote owner logins over auth:login (or auth:passkeyFinish,
+  // `method: "passkey"`), and a rotated refresh
   // token presented again (its whole family is revoked). The device id and
   // source only — never the password or any token.
-  | { kind: "login-succeeded"; deviceId: string; source: string }
-  | { kind: "login-failed"; deviceId: string; source: string }
+  | { kind: "login-succeeded"; deviceId: string; source: string; method?: "passkey" }
+  | { kind: "login-failed"; deviceId: string; source: string; method?: "passkey" }
+  // A passkey registered over auth:passkeyRegisterFinish: the device that
+  // added it and the credential id's first eight characters — never a key.
+  | { kind: "passkey-added"; deviceId: string; source: string; credentialPrefix: string }
   | { kind: "refresh-reuse"; deviceId: string; source: string }
   // Phase 0: a login lockout starting — one device's (`device`) after
   // repeated failures, or every login bridge-wide (`global`), tripped by

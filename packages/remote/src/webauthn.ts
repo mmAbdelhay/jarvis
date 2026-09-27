@@ -130,6 +130,15 @@ function parseClientData(encoded: string): { bytes: Buffer; data: ClientData } {
   };
 }
 
+/** The `challenge` a client data JSON carries, or `undefined` when it does not parse. */
+export function clientDataChallenge(clientDataJSON: string): string | undefined {
+  try {
+    return parseClientData(clientDataJSON).data.challenge;
+  } catch {
+    return undefined;
+  }
+}
+
 function validateClient(data: ClientData, type: string, challenge: string, origin: string): void {
   if (data.type !== type) throw new Error("Unexpected ceremony type");
   if (data.challenge !== challenge) throw new Error("Challenge mismatch");

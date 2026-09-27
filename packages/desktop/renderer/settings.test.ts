@@ -3023,6 +3023,60 @@ describe("Settings: owner account (Phase 0)", () => {
     expect(calls.find((entry) => entry.call === "deletePasskey")?.args).toEqual(["cred-2"]);
   });
 
+  it("a remote:update push with a new ownerVersion redraws the passkey list without wiping an open password form", async () => {
+    harness();
+    let passkeys: unknown[] = [];
+    jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword: true, passkeys });
+    // initRemoteStatus also draws the topbar pill and the confirm dialog.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<button id="remote-pill" hidden><span id="remote-pill-text"></span></button>
+       <div id="remote-confirm" hidden>
+         <div id="remote-confirm-title"></div>
+         <div id="remote-confirm-body"></div>
+         <div id="remote-confirm-from"></div>
+         <button id="remote-confirm-approve"></button>
+         <button id="remote-confirm-deny"></button>
+       </div>`,
+    );
+    initSettings();
+    await openSettings();
+    const { initRemoteStatus } = await import("./remote-status.js");
+    type Pushed = Parameters<
+      Parameters<Parameters<typeof initRemoteStatus>[0]["onRemoteStatus"]>[0]
+    >[0];
+    let push: ((status: Pushed) => void) | undefined;
+    initRemoteStatus({
+      remoteStatus: () => new Promise(() => {}),
+      onRemoteStatus: (cb) => {
+        push = cb;
+      },
+      decideRemotePairing: () => Promise.resolve(),
+    });
+    const status = (ownerVersion: number): Pushed => ({
+      enabled: true,
+      listening: undefined,
+      pairing: { kind: "closed" },
+      devices: [],
+      problem: undefined,
+      sidecarProxy: "off",
+      ownerVersion,
+    });
+    push?.(status(101));
+    await flush();
+    button("settings-remote-owner-change")?.click();
+    (input("settings-remote-owner-current") as HTMLInputElement).value = "typed so far";
+
+    passkeys = [{ id: "cred-new", label: "Phone passkey", createdAt: 0 }];
+    push?.(status(102));
+    await flush();
+
+    const rows = document.querySelectorAll("#settings-remote-owner-passkeys .settings-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("Phone passkey");
+    expect(input("settings-remote-owner-current")?.value).toBe("typed so far");
+  });
+
   it("Sign out everywhere calls signOutEverywhere", async () => {
     const { calls } = harness();
     withOwner({ hasPassword: true });

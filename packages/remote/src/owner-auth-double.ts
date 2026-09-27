@@ -13,6 +13,7 @@ export function unlockedOwnerAuth(): OwnerAuth {
   return {
     sessionAtHello: () => ({ until: Number.POSITIVE_INFINITY, familyId: TEST_FAMILY_ID }),
     handle: async () => ({ kind: "error", code: "unsupported" }),
+    connectionClosed: () => {},
   };
 }
 
@@ -23,5 +24,6 @@ export function scriptedOwnerAuth(
   return {
     sessionAtHello: () => undefined,
     handle: async (channel, args, context) => answer(channel, args, context.session),
+    connectionClosed: () => {},
   };
 }

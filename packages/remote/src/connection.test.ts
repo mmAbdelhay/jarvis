@@ -1475,6 +1475,35 @@ describe("createConnection: owner login (Phase 0)", () => {
     harness.socket.sent = [];
   }
 
+  it("hands ownerAuth a per-connection id and reports that id once the socket closes", async () => {
+    const contexts: string[] = [];
+    const closed: string[] = [];
+    const recording = (): OwnerAuth => ({
+      sessionAtHello: () => undefined,
+      handle: async (_channel, _args, context) => {
+        contexts.push(context.connectionId);
+        return { kind: "value", value: null };
+      },
+      connectionClosed: (connectionId) => {
+        closed.push(connectionId);
+      },
+    });
+    const one = makeHarness({ ownerAuth: recording() });
+    const two = makeHarness({ ownerAuth: recording() });
+    openConnection(one);
+    openConnection(two);
+    one.connection.onText(reqFrame(1, "auth:passkeyBegin"));
+    one.connection.onText(reqFrame(2, "auth:passkeyBegin"));
+    two.connection.onText(reqFrame(1, "auth:passkeyBegin"));
+    await flush();
+    const [first, again, other] = contexts;
+    expect(first).toBe(again);
+    expect(other).not.toBe(first);
+
+    one.connection.onSocketClosed(1000);
+    expect(closed).toEqual([first]);
+  });
+
   it("a locked req gets err locked and never reaches handle", () => {
     const handle = vi.fn<RequestHandler>();
     const harness = lockedHarness({ handle });

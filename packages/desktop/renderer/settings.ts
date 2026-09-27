@@ -60,6 +60,9 @@ let ownerFormOpen = false;
 let ownerBusy = false;
 /** The owner block's last outcome line — never carries a password. */
 let ownerMessage: { text: string; warning: boolean } | undefined;
+/** `RemoteStatus.ownerVersion` as last pushed: a change means the owner
+ *  account changed remotely (a passkey registered from a phone). */
+let lastOwnerVersion: number | undefined;
 
 // The pairing QR: rendered at a small internal resolution and scaled up to
 // its fixed 176px CSS box (styles.css, image-rendering: pixelated) rather
@@ -128,6 +131,10 @@ export function initSettings(): void {
     remoteStatusCache = status;
     renderRemotePairArea();
     renderPairedDevices();
+    if (status.ownerVersion !== undefined && status.ownerVersion !== lastOwnerVersion) {
+      lastOwnerVersion = status.ownerVersion;
+      void refreshOwnerPasskeys();
+    }
   });
 }
 
@@ -1420,6 +1427,14 @@ function ownerButton(id: string, text: string, className = "settings-add"): HTML
   return button;
 }
 
+/** A remote owner-account change: re-reads the status and redraws only the
+ *  passkey list, so a password being typed in the same block survives. */
+async function refreshOwnerPasskeys(): Promise<void> {
+  await refreshOwnerStatus();
+  const list = document.getElementById("settings-remote-owner-passkeys");
+  if (list !== null) fillPasskeyList(list);
+}
+
 /** Re-reads the owner status and redraws the block and the Enable gate. */
 async function afterOwnerChange(): Promise<void> {
   await refreshOwnerStatus();
@@ -1563,15 +1578,7 @@ function renderOwnerAccount(): void {
     const list = document.createElement("div");
     list.id = "settings-remote-owner-passkeys";
     list.className = "settings-rows";
-    const passkeys = ownerStatusCache?.passkeys ?? [];
-    if (passkeys.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "settings-note";
-      empty.textContent = MESSAGES.remoteOwnerNoPasskeys(language);
-      list.append(empty);
-    } else {
-      list.append(...passkeys.map((passkey) => passkeyRow(passkey)));
-    }
+    fillPasskeyList(list);
 
     const signOut = ownerButton(
       "settings-remote-owner-signout",
@@ -1603,6 +1610,18 @@ function renderOwnerAccount(): void {
   }
 
   container.replaceChildren(...children);
+}
+
+function fillPasskeyList(list: HTMLElement): void {
+  const passkeys = ownerStatusCache?.passkeys ?? [];
+  if (passkeys.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "settings-note";
+    empty.textContent = MESSAGES.remoteOwnerNoPasskeys(PRIMARY_LANGUAGE);
+    list.replaceChildren(empty);
+  } else {
+    list.replaceChildren(...passkeys.map((passkey) => passkeyRow(passkey)));
+  }
 }
 
 function passkeyRow(passkey: OwnerStatus["passkeys"][number]): HTMLElement {

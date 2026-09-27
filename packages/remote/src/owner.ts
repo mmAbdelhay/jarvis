@@ -40,6 +40,9 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const MAX_CREDENTIAL_ID_CHARS = 1_364;
 const MAX_PUBLIC_KEY_CHARS = 4_096;
 const MAX_SIGN_COUNT = 0xffff_ffff;
+/** The WebAuthn user handle: random bytes, base64url in owner.json. */
+export const OWNER_HANDLE_BYTES = 32;
+const OWNER_HANDLE = /^[A-Za-z0-9_-]{43}$/;
 
 /** A stored WebAuthn credential (Task 7 verifies against it). */
 export type PasskeyRecord = {
@@ -72,6 +75,12 @@ export type OwnerStore = {
    *  existed. */
   deletePasskey(credentialId: string): Promise<boolean>;
   updateSignCount(credentialId: string, signCount: number): Promise<boolean>;
+  /**
+   * The owner's WebAuthn user handle (base64url): made once from random
+   * bytes and kept in owner.json, so every passkey names the same user.
+   * Rejects when a first write fails (nothing is kept then).
+   */
+  ownerHandle(): Promise<string>;
   /** Increments on every password change and every passkey delete. */
   credentialsVersion(): number;
   /** Resolves once every write queued so far has landed. */
@@ -84,6 +93,7 @@ type OwnerState = {
   password: PasswordRecord | undefined;
   passkeys: PasskeyRecord[];
   credentialsVersion: number;
+  ownerHandle: string | undefined;
 };
 
 function invalidOwnerFile(): Error {
@@ -170,6 +180,14 @@ function parseOwnerFile(text: string): OwnerState {
     password = { salt, hash, N: N as number, r: r as number, p: p as number };
   }
 
+  let ownerHandle: string | undefined;
+  if (obj.ownerHandle !== undefined) {
+    if (typeof obj.ownerHandle !== "string" || !OWNER_HANDLE.test(obj.ownerHandle)) {
+      throw invalidOwnerFile();
+    }
+    ownerHandle = obj.ownerHandle;
+  }
+
   const seen = new Set<string>();
   const passkeys: PasskeyRecord[] = [];
   for (const entry of obj.passkeys) {
@@ -178,7 +196,7 @@ function parseOwnerFile(text: string): OwnerState {
     seen.add(parsed.credentialId);
     passkeys.push(parsed);
   }
-  return { password, passkeys, credentialsVersion: obj.credentialsVersion };
+  return { password, passkeys, credentialsVersion: obj.credentialsVersion, ownerHandle };
 }
 
 function serializeOwnerFile(state: OwnerState): string {
@@ -189,6 +207,7 @@ function serializeOwnerFile(state: OwnerState): string {
   }
   file.passkeys = state.passkeys.map((record) => ({ ...record }));
   file.credentialsVersion = state.credentialsVersion;
+  if (state.ownerHandle !== undefined) file.ownerHandle = state.ownerHandle;
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
@@ -223,7 +242,12 @@ export function createOwnerStore(deps: {
 }): OwnerStore {
   const { fs, path, random, enforceFileModes, hashParams = OWNER_HASH_PARAMS } = deps;
   const dir = dirname(path);
-  const state: OwnerState = { password: undefined, passkeys: [], credentialsVersion: 0 };
+  const state: OwnerState = {
+    password: undefined,
+    passkeys: [],
+    credentialsVersion: 0,
+    ownerHandle: undefined,
+  };
   let writeChain: Promise<void> = Promise.resolve();
 
   function persist(): Promise<void> {
@@ -260,6 +284,7 @@ export function createOwnerStore(deps: {
       state.password = loaded.password;
       state.passkeys = loaded.passkeys;
       state.credentialsVersion = loaded.credentialsVersion;
+      state.ownerHandle = loaded.ownerHandle;
       await tightenFileMode(fs, path, enforceFileModes);
     },
 
@@ -334,6 +359,19 @@ export function createOwnerStore(deps: {
       record.signCount = signCount;
       await persist();
       return true;
+    },
+
+    async ownerHandle() {
+      if (state.ownerHandle !== undefined) return state.ownerHandle;
+      const handle = random(OWNER_HANDLE_BYTES).toString("base64url");
+      state.ownerHandle = handle;
+      try {
+        await persist();
+      } catch (error) {
+        if (state.ownerHandle === handle) state.ownerHandle = undefined;
+        throw error;
+      }
+      return handle;
     },
 
     credentialsVersion() {

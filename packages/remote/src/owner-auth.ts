@@ -7,12 +7,20 @@
 // password-check limit and the invalidation generation below are
 // bridge-wide.
 //
-// Never logged or audited: a password or any token. Audit lines carry the
-// device id and source only.
+// Passkeys (WebAuthn): the relying party is the configured certificate's
+// DNS name and the expected origin the web listener's `https://<name>:<port>`;
+// while either is unknown every passkey ceremony answers `unsupported`.
+// Challenges are single use, keyed to the connection, and dropped with it.
+//
+// Never logged or audited: a password, any token, or any key. Audit lines
+// carry the device id and source only (plus a credential id's prefix for
+// an added passkey).
 
 import { AUTH_CHANNELS } from "@jarvis/wire";
 import type { AuditEvent } from "./audit.js";
 import type { AuthenticatedDevice } from "./connection.js";
+import { sanitizeDeviceName } from "./devices.js";
+import type { Clock, RandomBytes } from "./io.js";
 import type { OwnerStore } from "./owner.js";
 import type {
   AuthArgs,
@@ -23,16 +31,26 @@ import type {
   RemoteErrorCode,
 } from "./protocol.js";
 import type { SessionStore } from "./sessions.js";
+import {
+  clientDataChallenge,
+  createChallengeStore,
+  verifyAssertion,
+  verifyRegistration,
+} from "./webauthn.js";
 
 /** scrypt at N=2^17 costs ~128 MiB per check: at most this many run at once, bridge-wide. */
 export const MAX_CONCURRENT_PASSWORD_CHECKS = 2;
 /** Checks waiting for a slot; one more is refused `rate-limited` without being queued. */
 export const MAX_QUEUED_PASSWORD_CHECKS = 8;
+/** How long a browser may take over one passkey ceremony (the challenge lives as long). */
+export const PASSKEY_TIMEOUT_MS = 120_000;
 
 /** An unlocked connection's login: it stays unlocked until `until` (epoch ms). */
 export type AuthSession = { until: number; familyId: string };
 
 export type AuthContext = {
+  /** Process-local and unique per connection: what passkey challenges are keyed to. */
+  connectionId: string;
   device: AuthenticatedDevice;
   source: string;
   /** `undefined` while the connection is locked. */
@@ -81,6 +99,8 @@ export type OwnerAuth = {
     args: AuthArgs[C],
     context: AuthContext,
   ): Promise<AuthOutcome>;
+  /** The connection is gone: its passkey challenges go with it. */
+  connectionClosed(connectionId: string): void;
 };
 
 export type BridgeOwnerAuth = OwnerAuth & {
@@ -94,7 +114,17 @@ export type BridgeOwnerAuth = OwnerAuth & {
 };
 
 export type OwnerAuthDeps = {
-  owner: Pick<OwnerStore, "verifyPassword"> & { listPasskeys(): readonly unknown[] };
+  owner: Pick<
+    OwnerStore,
+    | "verifyPassword"
+    | "listPasskeys"
+    | "addPasskey"
+    | "deletePasskey"
+    | "updateSignCount"
+    | "ownerHandle"
+  >;
+  random: RandomBytes;
+  now: Clock;
   sessions: Pick<SessionStore, "issue" | "refresh" | "verifyAccess" | "revokeFamily">;
   audit: { record(event: AuditEvent): void };
   log(line: string): void;
@@ -103,6 +133,12 @@ export type OwnerAuthDeps = {
   limits?: LoginLimits;
   /** A desktop OS notification (refresh-token reuse). Defaults to a no-op. */
   notifyDesktop?(kind: DesktopNoticeKind): void;
+  /** The WebAuthn relying party id: the configured certificate's DNS name. */
+  rpId?(): string | undefined;
+  /** The web listener's origin, `https://<name>:<port>` (Phase 1). */
+  webOrigin?(): string | undefined;
+  /** A passkey was just registered remotely (desktop Settings refreshes). */
+  onPasskeyAdded?(): void;
 };
 
 const AUTH_CHANNEL_SET: ReadonlySet<string> = new Set(AUTH_CHANNELS);
@@ -115,11 +151,25 @@ const FORBIDDEN: AuthOutcome = { kind: "error", code: "forbidden" };
 const RATE_LIMITED: AuthOutcome = { kind: "error", code: "rate-limited" };
 const INTERNAL: AuthOutcome = { kind: "error", code: "internal" };
 const UNSUPPORTED: AuthOutcome = { kind: "error", code: "unsupported" };
+const LOCKED: AuthOutcome = { kind: "error", code: "locked" };
+const BAD_REQUEST: AuthOutcome = { kind: "error", code: "bad-request" };
+
+type RelyingParty = { rpId: string; origin: string };
+
+const PUBLIC_KEY_PARAMS = [
+  { type: "public-key", alg: -7 },
+  { type: "public-key", alg: -257 },
+] as const;
 
 export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
   const { owner, sessions, audit, log, lockFamily } = deps;
   const limits = deps.limits ?? NO_LOGIN_LIMITS;
   const notifyDesktop = deps.notifyDesktop ?? (() => {});
+  const challenges = createChallengeStore({ random: deps.random, now: deps.now });
+  // The token family each connection's pending registration was begun
+  // under: a finish from any other login (after a lock and a new login,
+  // say) is refused, so a password re-entry never outlives its session.
+  const registering = new Map<string, string>();
 
   // Bumped by every invalidation; a login/refresh compares it across its
   // awaits.
@@ -160,6 +210,21 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
 
   function hasPasskeys(): boolean {
     return owner.listPasskeys().length > 0;
+  }
+
+  /** `undefined` until both the certificate name and the web origin are known and agree. */
+  function relyingParty(): RelyingParty | undefined {
+    const rpId = deps.rpId?.();
+    const webOrigin = deps.webOrigin?.();
+    if (rpId === undefined || webOrigin === undefined) return undefined;
+    let url: URL;
+    try {
+      url = new URL(webOrigin);
+    } catch {
+      return undefined;
+    }
+    if (url.protocol !== "https:" || url.hostname !== rpId.toLowerCase()) return undefined;
+    return { rpId, origin: url.origin };
   }
 
   /** `undefined` when both the running and the waiting slots are full. */
@@ -214,10 +279,17 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     return RATE_LIMITED;
   }
 
-  async function login(password: string, context: AuthContext): Promise<AuthOutcome> {
+  /**
+   * The owner password through the bridge-wide limits and scrypt queue:
+   * `undefined` when it is right, otherwise the outcome to answer. A wrong
+   * one counts toward the lockout and is audited `login-failed`.
+   */
+  async function checkPassword(
+    password: string,
+    context: AuthContext,
+  ): Promise<AuthOutcome | undefined> {
     const { device, source } = context;
     if (!limits.allow(device.id, source)) return refuseLockedOut(device.id, source);
-    const startedAt = generation;
     // A lockout that started while this attempt waited for a slot refuses
     // it before scrypt runs.
     const checked = withPasswordSlot(async () =>
@@ -242,6 +314,24 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       record({ kind: "login-failed", deviceId: device.id, source });
       return FORBIDDEN;
     }
+    return undefined;
+  }
+
+  /** A failed passkey login: counted toward the lockout like a wrong password. */
+  function passkeyFailed(context: AuthContext): AuthOutcome {
+    const { device, source } = context;
+    limits.failed(device.id, source);
+    record({ kind: "login-failed", deviceId: device.id, source, method: "passkey" });
+    return FORBIDDEN;
+  }
+
+  /** Issues a token family for a login verified since `startedAt` and unlocks with it. */
+  async function openSession(
+    context: AuthContext,
+    startedAt: number,
+    method?: "passkey",
+  ): Promise<AuthOutcome> {
+    const { device, source } = context;
     let issued: Awaited<ReturnType<typeof sessions.issue>>;
     try {
       issued = await sessions.issue(device.id);
@@ -255,12 +345,183 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     }
     if (!stillLive(device.id, issued.access, issued.familyId)) return FORBIDDEN;
     limits.succeeded(device.id, source);
-    record({ kind: "login-succeeded", deviceId: device.id, source });
+    record({
+      kind: "login-succeeded",
+      deviceId: device.id,
+      source,
+      ...(method !== undefined ? { method } : {}),
+    });
     return {
       kind: "value",
       value: tokensOf(issued),
       effect: { unlock: { until: issued.accessExpiresAt, familyId: issued.familyId } },
     };
+  }
+
+  async function login(password: string, context: AuthContext): Promise<AuthOutcome> {
+    const startedAt = generation;
+    const refused = await checkPassword(password, context);
+    if (refused !== undefined) return refused;
+    return openSession(context, startedAt);
+  }
+
+  function passkeyBegin(context: AuthContext): AuthOutcome {
+    const party = relyingParty();
+    if (party === undefined) return UNSUPPORTED;
+    const challenge = challenges.issue(context.connectionId, "login");
+    return {
+      kind: "value",
+      value: {
+        challenge,
+        rpId: party.rpId,
+        allowCredentials: owner.listPasskeys().map((passkey) => passkey.credentialId),
+        userVerification: "required",
+        timeout: PASSKEY_TIMEOUT_MS,
+      },
+    };
+  }
+
+  async function passkeyFinish(
+    args: AuthArgs["auth:passkeyFinish"],
+    context: AuthContext,
+  ): Promise<AuthOutcome> {
+    const { device, source, connectionId } = context;
+    // A lockout refuses passkey logins as well as password ones.
+    if (!limits.allow(device.id, source)) return refuseLockedOut(device.id, source);
+    const party = relyingParty();
+    if (party === undefined) return UNSUPPORTED;
+    const startedAt = generation;
+    const challenge = clientDataChallenge(args.clientDataJSON);
+    if (challenge === undefined || !challenges.consume(connectionId, "login", challenge)) {
+      return passkeyFailed(context);
+    }
+    // Credential ids are public (they are in every passkeyBegin answer):
+    // a plain lookup is fine.
+    const passkey = owner.listPasskeys().find((entry) => entry.credentialId === args.credentialId);
+    if (passkey === undefined) return passkeyFailed(context);
+    const verified = verifyAssertion({
+      clientDataJSON: args.clientDataJSON,
+      authenticatorData: args.authenticatorData,
+      signature: args.signature,
+      expectedChallenge: challenge,
+      expectedOrigin: party.origin,
+      rpId: party.rpId,
+      publicKey: passkey.publicKey,
+      alg: passkey.alg,
+      storedSignCount: passkey.signCount,
+    });
+    if (!verified.ok) return passkeyFailed(context);
+    // The new count is in memory the moment this is called (no await
+    // between the lookup above and here), so a concurrent assertion of the
+    // same credential is checked against it; only the write lands later.
+    try {
+      await owner.updateSignCount(passkey.credentialId, verified.signCount);
+    } catch {
+      log("owner-auth: persisting a passkey sign count failed");
+    }
+    return openSession(context, startedAt, "passkey");
+  }
+
+  async function passkeyRegisterBegin(
+    password: string,
+    context: AuthContext,
+  ): Promise<AuthOutcome> {
+    const { session, connectionId } = context;
+    if (session === undefined) return LOCKED;
+    const party = relyingParty();
+    if (party === undefined) return UNSUPPORTED;
+    const startedAt = generation;
+    const refused = await checkPassword(password, context);
+    if (refused !== undefined) return refused;
+    if (generation !== startedAt) return FORBIDDEN;
+    let handle: string;
+    try {
+      handle = await owner.ownerHandle();
+    } catch {
+      log("owner-auth: storing the owner handle failed");
+      return INTERNAL;
+    }
+    const challenge = challenges.issue(connectionId, "register");
+    registering.set(connectionId, session.familyId);
+    return {
+      kind: "value",
+      value: {
+        challenge,
+        rpId: party.rpId,
+        user: { id: handle, name: "owner", displayName: "Jarvis owner" },
+        excludeCredentials: owner.listPasskeys().map((passkey) => passkey.credentialId),
+        pubKeyCredParams: PUBLIC_KEY_PARAMS.map((param) => ({ ...param })),
+        authenticatorSelection: { userVerification: "required", residentKey: "preferred" },
+        attestation: "none",
+        timeout: PASSKEY_TIMEOUT_MS,
+      },
+    };
+  }
+
+  async function passkeyRegisterFinish(
+    args: AuthArgs["auth:passkeyRegisterFinish"],
+    context: AuthContext,
+  ): Promise<AuthOutcome> {
+    const { session, connectionId, device, source } = context;
+    if (session === undefined) return LOCKED;
+    const challenge = clientDataChallenge(args.clientDataJSON);
+    if (challenge === undefined || !challenges.consume(connectionId, "register", challenge)) {
+      return FORBIDDEN;
+    }
+    const beganUnder = registering.get(connectionId);
+    registering.delete(connectionId);
+    if (beganUnder !== session.familyId) return FORBIDDEN;
+    const party = relyingParty();
+    if (party === undefined) return UNSUPPORTED;
+    const verified = verifyRegistration({
+      clientDataJSON: args.clientDataJSON,
+      attestationObject: args.attestationObject,
+      expectedChallenge: challenge,
+      expectedOrigin: party.origin,
+      rpId: party.rpId,
+    });
+    if (!verified.ok || verified.credentialId !== args.credentialId) return FORBIDDEN;
+    const label = sanitizeDeviceName(args.label);
+    if (label === "") return BAD_REQUEST;
+    if (owner.listPasskeys().some((entry) => entry.credentialId === verified.credentialId)) {
+      return BAD_REQUEST;
+    }
+    const startedAt = generation;
+    try {
+      await owner.addPasskey({
+        credentialId: verified.credentialId,
+        publicKey: verified.publicKey,
+        alg: verified.alg,
+        signCount: verified.signCount,
+        label,
+        createdAt: deps.now(),
+      });
+    } catch {
+      log("owner-auth: storing a passkey failed");
+      return INTERNAL;
+    }
+    // An invalidation (password change, sign out everywhere) that landed
+    // while the passkey was written wins: the passkey is taken back out.
+    if (generation !== startedAt) {
+      try {
+        await owner.deletePasskey(verified.credentialId);
+      } catch {
+        log("owner-auth: removing a stale passkey failed");
+      }
+      return FORBIDDEN;
+    }
+    record({
+      kind: "passkey-added",
+      deviceId: device.id,
+      source,
+      credentialPrefix: verified.credentialId.slice(0, 8),
+    });
+    try {
+      deps.onPasskeyAdded?.();
+    } catch {
+      log("owner-auth: onPasskeyAdded failed");
+    }
+    return { kind: "value", value: null };
   }
 
   async function refreshNow(token: string, context: AuthContext): Promise<AuthOutcome> {
@@ -356,16 +617,17 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
         return resume((args as AuthArgs["auth:resume"]).accessToken, context);
       case "auth:logout":
         return logout(context);
-      case "auth:passkeyFinish":
-        // A lockout refuses passkey logins as well as password ones.
-        if (!limits.allow(context.device.id, context.source)) {
-          return refuseLockedOut(context.device.id, context.source);
-        }
-        return UNSUPPORTED;
       case "auth:passkeyBegin":
+        return passkeyBegin(context);
+      case "auth:passkeyFinish":
+        return passkeyFinish(args as AuthArgs["auth:passkeyFinish"], context);
       case "auth:passkeyRegisterBegin":
+        return passkeyRegisterBegin(
+          (args as AuthArgs["auth:passkeyRegisterBegin"]).password,
+          context,
+        );
       case "auth:passkeyRegisterFinish":
-        return UNSUPPORTED;
+        return passkeyRegisterFinish(args as AuthArgs["auth:passkeyRegisterFinish"], context);
     }
   }
 
@@ -379,6 +641,11 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
         log(`owner-auth: ${channel} failed`);
         return INTERNAL;
       }
+    },
+
+    connectionClosed(connectionId) {
+      challenges.drop(connectionId);
+      registering.delete(connectionId);
     },
 
     invalidate() {

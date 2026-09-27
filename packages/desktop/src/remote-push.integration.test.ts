@@ -56,6 +56,7 @@ import {
 const UNLOCKED_OWNER_AUTH: OwnerAuth = {
   sessionAtHello: () => ({ until: Number.POSITIVE_INFINITY, familyId: "f".repeat(32) }),
   handle: async () => ({ kind: "error", code: "unsupported" }),
+  connectionClosed: () => {},
 };
 
 const D1: AuthenticatedDevice = { id: "d".repeat(32), name: "Phone" };

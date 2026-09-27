@@ -1,111 +1,22 @@
-import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
+import { createHash, randomBytes, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { fakeClock } from "./clock-double.js";
 import { createChallengeStore, verifyAssertion, verifyRegistration } from "./webauthn.js";
-
-type CborValue = number | string | Buffer | CborValue[] | Map<CborValue, CborValue>;
-
-function cbor(value: CborValue): Buffer {
-  const head = (major: number, length: number): Buffer => {
-    if (length < 24) return Buffer.from([(major << 5) | length]);
-    if (length < 256) return Buffer.from([(major << 5) | 24, length]);
-    if (length < 65_536) {
-      const result = Buffer.alloc(3);
-      result[0] = (major << 5) | 25;
-      result.writeUInt16BE(length, 1);
-      return result;
-    }
-    const result = Buffer.alloc(5);
-    result[0] = (major << 5) | 26;
-    result.writeUInt32BE(length, 1);
-    return result;
-  };
-  if (typeof value === "number") {
-    return value >= 0 ? head(0, value) : head(1, -1 - value);
-  }
-  if (typeof value === "string") {
-    const bytes = Buffer.from(value);
-    return Buffer.concat([head(3, bytes.length), bytes]);
-  }
-  if (Buffer.isBuffer(value)) return Buffer.concat([head(2, value.length), value]);
-  if (Array.isArray(value)) return Buffer.concat([head(4, value.length), ...value.map(cbor)]);
-  const entries = [...value.entries()];
-  return Buffer.concat([
-    head(5, entries.length),
-    ...entries.flatMap(([key, item]) => [cbor(key), cbor(item)]),
-  ]);
-}
-
-function clientData(type: string, challenge: string, origin = "https://jarvis.test:8443"): Buffer {
-  return Buffer.from(JSON.stringify({ type, challenge, origin }));
-}
-
-function counter(value: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32BE(value);
-  return bytes;
-}
-
-function coseKey(publicKey: KeyObject, alg: -7 | -257): Buffer {
-  const jwk = publicKey.export({ format: "jwk" });
-  if (alg === -7) {
-    return cbor(
-      new Map<CborValue, CborValue>([
-        [1, 2],
-        [3, -7],
-        [-1, 1],
-        [-2, Buffer.from(jwk.x!, "base64url")],
-        [-3, Buffer.from(jwk.y!, "base64url")],
-      ]),
-    );
-  }
-  return cbor(
-    new Map<CborValue, CborValue>([
-      [1, 3],
-      [3, -257],
-      [-1, Buffer.from(jwk.n!, "base64url")],
-      [-2, Buffer.from(jwk.e!, "base64url")],
-    ]),
-  );
-}
-
-function authData(rpId: string, flags: number, signCount: number): Buffer {
-  return Buffer.concat([
-    createHash("sha256").update(rpId).digest(),
-    Buffer.from([flags]),
-    counter(signCount),
-  ]);
-}
+import { attestationObject, authData, clientData, coseKey, keyPair } from "./webauthn-double.js";
 
 function registrationFixture(
   alg: -7 | -257,
   overrides: { rpId?: string; flags?: number; fmt?: string } = {},
 ) {
-  const pair =
-    alg === -7
-      ? generateKeyPairSync("ec", { namedCurve: "prime256v1" })
-      : generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pair = keyPair(alg);
   const credentialId = randomBytes(32);
   const cose = coseKey(pair.publicKey, alg);
-  const base = authData(overrides.rpId ?? "jarvis.test", overrides.flags ?? 0xc5, 3);
-  const credentialLength = Buffer.alloc(2);
-  credentialLength.writeUInt16BE(credentialId.length);
-  const attested = Buffer.concat([base, Buffer.alloc(16), credentialLength, credentialId, cose]);
-  const attestation = cbor(
-    new Map<CborValue, CborValue>([
-      ["fmt", overrides.fmt ?? "none"],
-      ["attStmt", new Map()],
-      ["authData", attested],
-    ]),
-  );
+  const attestation = attestationObject({ credentialId, cose, ...overrides });
   return { pair, credentialId, cose, attestation };
 }
 
 function assertionFixture(alg: -7 | -257, signCount: number, flags = 0x05) {
-  const pair =
-    alg === -7
-      ? generateKeyPairSync("ec", { namedCurve: "prime256v1" })
-      : generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pair = keyPair(alg);
   const cose = coseKey(pair.publicKey, alg);
   const challenge = randomBytes(32).toString("base64url");
   const client = clientData("webauthn.get", challenge);

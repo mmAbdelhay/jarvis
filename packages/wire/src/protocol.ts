@@ -176,14 +176,25 @@ export type AuthArgs = {
 /** Issued by login, passkeyFinish and refresh. `accessExpiresAt` is epoch milliseconds. */
 export type AuthTokens = { accessToken: string; refreshToken: string; accessExpiresAt: number };
 export type AuthStatus = { locked: boolean; hasPasskeys: boolean; accessExpiresAt?: number };
-/** WebAuthn get() options; every binary value is base64url. */
-export type PasskeyLoginOptions = { challenge: string; rpId: string; allowCredentials?: string[] };
-/** WebAuthn create() options; every binary value is base64url. */
+/** WebAuthn get() options; every binary value is base64url. `timeout` is milliseconds. */
+export type PasskeyLoginOptions = {
+  challenge: string;
+  rpId: string;
+  allowCredentials?: string[];
+  userVerification?: "required";
+  timeout?: number;
+};
+/** WebAuthn create() options; every binary value is base64url. `timeout` is milliseconds. */
 export type PasskeyRegisterOptions = {
   challenge: string;
   rpId: string;
   user: { id: string; name: string; displayName: string };
   excludeCredentials?: string[];
+  /** ES256 (-7) then RS256 (-257). */
+  pubKeyCredParams?: Array<{ type: "public-key"; alg: -7 | -257 }>;
+  authenticatorSelection?: { userVerification: "required"; residentKey: "preferred" };
+  attestation?: "none";
+  timeout?: number;
 };
 
 export type AuthResults = {

@@ -45,6 +45,7 @@ import { handleUtterance } from "./voice-turn.js";
 const UNLOCKED_OWNER_AUTH: OwnerAuth = {
   sessionAtHello: () => ({ until: Number.POSITIVE_INFINITY, familyId: "f".repeat(32) }),
   handle: async () => ({ kind: "error", code: "unsupported" }),
+  connectionClosed: () => {},
 };
 
 const DEVICE: AuthenticatedDevice = { id: "d".repeat(32), name: "Phone" };
