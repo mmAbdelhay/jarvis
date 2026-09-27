@@ -1081,12 +1081,18 @@ export const MESSAGES = {
     return text[problem][language];
   },
   // Phase 0: the desktop OS notification for a remote-login security event
-  // (remote-access.ts → main.ts's Electron Notification). Never a device
-  // name, an address, a password or a token.
+  // (remote-access.ts → main.ts's Electron Notification). Only a
+  // device-lockout notice names a device (its paired name); never an
+  // address, a password or a token.
   remoteSecurityNotice: (
     kind: DesktopNoticeKind,
     language: "ar" | "en",
+    deviceName?: string,
   ): { title: string; body: string } => {
+    const device =
+      deviceName !== undefined && deviceName !== ""
+        ? { ar: `«${deviceName}»`, en: `"${deviceName}"` }
+        : { ar: "جهاز مقترن", en: "a paired device" };
     const text: Record<DesktopNoticeKind, Record<"ar" | "en", { title: string; body: string }>> = {
       "locked-out-global": {
         ar: {
@@ -1096,6 +1102,16 @@ export const MESSAGES = {
         en: {
           title: "Remote sign-in paused",
           body: "Too many failed sign-in attempts in the last hour, so every sign-in is refused for 15 minutes.",
+        },
+      },
+      "locked-out-device": {
+        ar: {
+          title: "تم إيقاف تسجيل الدخول من جهاز",
+          body: `أُدخلت كلمة مرور خاطئة عدة مرات من ${device.ar}، فرُفضت محاولات الدخول منه مؤقتًا.`,
+        },
+        en: {
+          title: "Remote sign-in paused for a device",
+          body: `A wrong password was entered several times from ${device.en}, so sign-ins from it are refused for a while.`,
         },
       },
       "refresh-reuse": {

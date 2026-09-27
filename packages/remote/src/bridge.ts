@@ -227,9 +227,10 @@ export type BridgeDeps = {
    * from `stop()` (rule 7).
    */
   onIdleDisabled?(): void;
-  /** Phase 0: a desktop OS notification — a global login lockout, or a
-   *  refresh token presented again. Optional; defaults to a no-op. */
-  notifyDesktop?(kind: DesktopNoticeKind): void;
+  /** Phase 0: a desktop OS notification — a login lockout (global, or one
+   *  device's, with that device's name), or a refresh token presented
+   *  again. Optional; defaults to a no-op. */
+  notifyDesktop?(kind: DesktopNoticeKind, deviceName?: string): void;
   /**
    * Phase 0: the web listener's origin (`https://<name>:<port>`), the
    * passkey ceremonies' expected origin. The web listener arrives in
@@ -420,7 +421,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     auditLog.record({ kind: "error", detail: describeError(error) });
   }
 
-  const notifyDesktop = (kind: DesktopNoticeKind): void => deps.notifyDesktop?.(kind);
+  const notifyDesktop = (...notice: [kind: DesktopNoticeKind, deviceName?: string]): void =>
+    deps.notifyDesktop?.(...notice);
   // Bumped on every remote owner-account change; carried in RemoteStatus.
   let ownerVersion = 0;
   const ownerAuth = createOwnerAuth({
@@ -444,7 +446,13 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       hub.lockFamily(familyId, reason);
     },
     // In memory only: a restart forgets every failure count and lockout.
-    limits: createLoginLimits({ now: deps.now, audit: auditLog, notifyDesktop, log: deps.log }),
+    limits: createLoginLimits({
+      now: deps.now,
+      audit: auditLog,
+      notifyDesktop,
+      deviceName: (deviceId) => devices.list().find((device) => device.id === deviceId)?.name,
+      log: deps.log,
+    }),
     notifyDesktop,
   });
 

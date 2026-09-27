@@ -282,8 +282,8 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           onStatus,
           onDeviceDisconnected: deps.onDeviceDisconnected,
           onIdleDisabled: deps.onIdleDisabled,
-          notifyDesktop: (kind) => {
-            const { title, body } = MESSAGES.remoteSecurityNotice(kind, deps.language);
+          notifyDesktop: (kind, deviceName) => {
+            const { title, body } = MESSAGES.remoteSecurityNotice(kind, deps.language, deviceName);
             deps.showNotification(title, body);
           },
         })

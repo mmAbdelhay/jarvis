@@ -97,18 +97,25 @@ export type AuditEvent =
   // added it and the credential id's first eight characters — never a key.
   | { kind: "passkey-added"; deviceId: string; source: string; credentialPrefix: string }
   | { kind: "refresh-reuse"; deviceId: string; source: string }
+  // The rotated refresh token presented again while its successor was
+  // never used (a lost auth:refresh reply): within the grace window it is
+  // re-rotated (`refresh-retry`); past it the family is revoked without a
+  // desktop alarm (`refresh-stale`).
+  | { kind: "refresh-retry"; deviceId: string; source: string }
+  | { kind: "refresh-stale"; deviceId: string; source: string }
   // Phase 0: a login lockout starting — one device's (`device`) after
   // repeated failures, or every login bridge-wide (`global`), tripped by
   // this device's failure. Recorded once per lockout start.
   | { kind: "locked-out"; deviceId: string; source: string; scope: "device" | "global" }
-  // Phase 0: login attempts a lockout refused, coalesced to at most one
-  // line per (device, scope) per 60 s window with the window's count
+  // Phase 0: login attempts a lockout refused (or, `capacity`, the full
+  // password-check queue refused), coalesced to at most one line per
+  // (device, scope) per 60 s window with the window's count
   // (login-limits.ts), so a flood cannot rotate older lines away.
   | {
       kind: "login-refused";
       deviceId: string;
       source: string;
-      scope: "device" | "global";
+      scope: "device" | "global" | "capacity";
       count: number;
     }
   // Phase 0: every remote owner session was revoked at once (Sign out

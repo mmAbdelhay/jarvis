@@ -12,7 +12,7 @@ import {
   MAX_CONCURRENT_PASSWORD_CHECKS,
   MAX_QUEUED_PASSWORD_CHECKS,
 } from "./owner-auth.js";
-import { ACCESS_TTL_MS, createSessionStore } from "./sessions.js";
+import { ACCESS_TTL_MS, createSessionStore, REFRESH_RETRY_GRACE_MS } from "./sessions.js";
 
 const PASSWORD = "correct horse battery";
 const DEVICE = { id: "d".repeat(32), name: "Phone" };
@@ -263,7 +263,14 @@ describe("createOwnerAuth", () => {
     const good = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
     if (good.kind !== "value") throw new Error("expected login");
     const tokens = good.value as { accessToken: string; refreshToken: string };
-    await h.auth.handle("auth:refresh", { refreshToken: tokens.refreshToken }, ctx());
+    const rotated = await h.auth.handle(
+      "auth:refresh",
+      { refreshToken: tokens.refreshToken },
+      ctx(),
+    );
+    if (rotated.kind !== "value") throw new Error("expected refresh");
+    const successor = (rotated.value as { refreshToken: string }).refreshToken;
+    await h.auth.handle("auth:refresh", { refreshToken: successor }, ctx());
     await h.auth.handle("auth:refresh", { refreshToken: tokens.refreshToken }, ctx());
 
     const wrong = "wrong password number";
@@ -329,6 +336,19 @@ describe("createOwnerAuth", () => {
     expect(gates).toHaveLength(total - 1);
   });
 
+  it("a login refused because the check queue is full is reported to the limits as capacity", async () => {
+    const { verify } = gatedVerify();
+    const refused = vi.fn();
+    const limits: LoginLimits = { allow: () => true, failed: vi.fn(), succeeded: vi.fn(), refused };
+    const h = makeHarness({ verify, limits });
+    const total = MAX_CONCURRENT_PASSWORD_CHECKS + MAX_QUEUED_PASSWORD_CHECKS + 1;
+    const outcomes = Array.from({ length: total }, () =>
+      h.auth.handle("auth:login", { password: PASSWORD }, ctx()),
+    );
+    expect(await outcomes[total - 1]).toEqual({ kind: "error", code: "rate-limited" });
+    expect(refused).toHaveBeenCalledExactlyOnceWith(DEVICE.id, SOURCE, "capacity");
+  });
+
   it("a login whose password check straddles an invalidation is refused and its family revoked", async () => {
     const { verify, gates } = gatedVerify();
     const h = makeHarness({ verify });
@@ -354,7 +374,10 @@ describe("createOwnerAuth", () => {
     );
     if (refreshed.kind !== "value") throw new Error("expected refresh");
     expect(refreshed.effect).toMatchObject({ unlock: { until: expect.any(Number) } });
-    expect((refreshed.value as { refreshToken: string }).refreshToken).not.toBe(first.refreshToken);
+    const second = (refreshed.value as { refreshToken: string }).refreshToken;
+    expect(second).not.toBe(first.refreshToken);
+    // The successor is used, so the first token is reuse, not a retry.
+    await h.auth.handle("auth:refresh", { refreshToken: second }, ctx());
 
     const replayed = await h.auth.handle(
       "auth:refresh",
@@ -399,16 +422,82 @@ describe("createOwnerAuth", () => {
     expect(JSON.parse(file)).toEqual({ version: 1, sessions: [] });
   });
 
-  it("two concurrent refreshes with the same token never both succeed", async () => {
+  it("two concurrent refreshes with the same token leave only one live pair", async () => {
     const h = makeHarness();
     const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
     if (login.kind !== "value") throw new Error("expected login");
     const { refreshToken } = login.value as { refreshToken: string };
-    const results = await Promise.all([
+    const [first, second] = await Promise.all([
       h.auth.handle("auth:refresh", { refreshToken }, ctx()),
       h.auth.handle("auth:refresh", { refreshToken }, ctx()),
     ]);
-    expect(results.filter((result) => result.kind === "value")).toHaveLength(1);
+    if (first?.kind !== "value" || second?.kind !== "value") throw new Error("expected refreshes");
+    const firstTokens = first.value as { accessToken: string; refreshToken: string };
+    // The second is a retry: the first pair was superseded.
+    expect(h.sessions.verifyAccess(DEVICE.id, firstTokens.accessToken)).toBeUndefined();
+    expect(
+      await h.auth.handle("auth:refresh", { refreshToken: firstTokens.refreshToken }, ctx()),
+    ).toEqual({ kind: "error", code: "forbidden" });
+    expect(h.events).toContainEqual({ kind: "refresh-reuse", deviceId: DEVICE.id, source: SOURCE });
+  });
+
+  it("a retry after a lost refresh reply re-rotates without an alarm and audits refresh-retry", async () => {
+    const h = makeHarness();
+    const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (login.kind !== "value") throw new Error("expected login");
+    const { refreshToken } = login.value as { refreshToken: string };
+    // The laptop rotates; the reply never reaches the phone.
+    const lost = await h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    if (lost.kind !== "value") throw new Error("expected refresh");
+    h.clock.advance(REFRESH_RETRY_GRACE_MS);
+
+    const retried = await h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    if (retried.kind !== "value") throw new Error("expected a retry to succeed");
+    expect(retried.effect).toMatchObject({ unlock: { until: expect.any(Number) } });
+    expect(h.events).toContainEqual({ kind: "refresh-retry", deviceId: DEVICE.id, source: SOURCE });
+    expect(h.events.some((event) => event.kind === "refresh-reuse")).toBe(false);
+    expect(h.notifyDesktop).not.toHaveBeenCalled();
+    expect(h.lockFamily).not.toHaveBeenCalled();
+  });
+
+  it("a retry after a failed rotation write lands in the grace path", async () => {
+    const h = makeHarness();
+    const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (login.kind !== "value") throw new Error("expected login");
+    const { refreshToken } = login.value as { refreshToken: string };
+    const writeFile = h.fs.writeFile.bind(h.fs);
+    h.fs.writeFile = async () => {
+      throw new Error("disk full");
+    };
+    expect(await h.auth.handle("auth:refresh", { refreshToken }, ctx())).toEqual({
+      kind: "error",
+      code: "internal",
+    });
+    h.fs.writeFile = writeFile;
+
+    const retried = await h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    expect(retried.kind).toBe("value");
+    expect(h.events).toContainEqual({ kind: "refresh-retry", deviceId: DEVICE.id, source: SOURCE });
+    expect(h.notifyDesktop).not.toHaveBeenCalled();
+  });
+
+  it("a retry past the grace window is refused quietly: family revoked, refresh-stale, no alarm", async () => {
+    const h = makeHarness();
+    const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (login.kind !== "value") throw new Error("expected login");
+    const { refreshToken } = login.value as { refreshToken: string };
+    await h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    h.clock.advance(REFRESH_RETRY_GRACE_MS + 1);
+
+    expect(await h.auth.handle("auth:refresh", { refreshToken }, ctx())).toEqual({
+      kind: "error",
+      code: "forbidden",
+    });
+    const familyId = (login.effect as { unlock: { familyId: string } }).unlock.familyId;
+    expect(h.lockFamily).toHaveBeenCalledWith(familyId, "signed-out");
+    expect(h.events).toContainEqual({ kind: "refresh-stale", deviceId: DEVICE.id, source: SOURCE });
+    expect(h.events.some((event) => event.kind === "refresh-reuse")).toBe(false);
+    expect(h.notifyDesktop).not.toHaveBeenCalled();
   });
 
   it("an unknown refresh token is forbidden", async () => {

@@ -629,7 +629,7 @@ describe("the remote access panel", () => {
   });
 
   it("remoteSecurityNotice has a bilingual, distinct title and body for each notice kind", () => {
-    for (const kind of ["locked-out-global", "refresh-reuse"] as const) {
+    for (const kind of ["locked-out-global", "locked-out-device", "refresh-reuse"] as const) {
       const en = MESSAGES.remoteSecurityNotice(kind, "en");
       const ar = MESSAGES.remoteSecurityNotice(kind, "ar");
       expect(en.title.trim()).not.toBe("");
@@ -639,6 +639,19 @@ describe("the remote access panel", () => {
     }
     expect(MESSAGES.remoteSecurityNotice("locked-out-global", "en")).not.toEqual(
       MESSAGES.remoteSecurityNotice("refresh-reuse", "en"),
+    );
+  });
+
+  it("remoteSecurityNotice names the locked-out device, or falls back to a generic one", () => {
+    for (const language of ["en", "ar"] as const) {
+      const named = MESSAGES.remoteSecurityNotice("locked-out-device", language, "Pixel 8");
+      expect(named.body).toContain("Pixel 8");
+      const unnamed = MESSAGES.remoteSecurityNotice("locked-out-device", language);
+      expect(unnamed.body).not.toContain("{name}");
+      expect(unnamed.body).not.toContain("undefined");
+    }
+    expect(MESSAGES.remoteSecurityNotice("locked-out-device", "en").title).not.toEqual(
+      MESSAGES.remoteSecurityNotice("locked-out-global", "en").title,
     );
   });
 

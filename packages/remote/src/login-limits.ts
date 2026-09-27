@@ -3,7 +3,9 @@
 //
 // - Per device: after 5 failed attempts the device is locked out for 60 s;
 //   every further failure (once that lockout has passed) locks it out
-//   again for twice as long, capped at 1 hour. A success resets it.
+//   again for twice as long, capped at 1 hour. A success resets it. The
+//   desktop is notified (naming the device) at most once per device per
+//   15 minutes, so escalations cannot spam it.
 // - Global: 20 failures across all devices within a rolling hour refuse
 //   every login for 15 minutes and notify the desktop.
 //
@@ -32,17 +34,20 @@ export const GLOBAL_LOCKOUT_MS = 15 * 60_000;
 export const REFUSED_AUDIT_WINDOW_MS = 60_000;
 export const DEVICE_FAILURE_MEMORY_MS = 60 * 60_000;
 export const MAX_TRACKED_LOGIN_DEVICES = 1024;
+export const DEVICE_LOCKOUT_NOTICE_INTERVAL_MS = 15 * 60_000;
 
 export type LoginLimitsDeps = {
   now: Clock;
   audit: { record(event: AuditEvent): void };
-  notifyDesktop(kind: DesktopNoticeKind): void;
+  notifyDesktop(kind: DesktopNoticeKind, deviceName?: string): void;
+  /** The paired device's name for the device-lockout notice. */
+  deviceName?(deviceId: string): string | undefined;
   log?(line: string): void;
 };
 
 type DeviceEntry = { failures: number; blockedUntil: number; lastFailureAt: number };
 
-type RefusalScope = "device" | "global";
+type RefusalScope = "device" | "global" | "capacity";
 type PendingRefusals = {
   deviceId: string;
   source: string;
@@ -66,6 +71,8 @@ export function createLoginLimits(deps: LoginLimitsDeps): LoginLimitsWithStats {
   // than GLOBAL_FAILURE_LIMIT.
   const failureStamps: number[] = [];
   let globalBlockedUntil = 0;
+  // When each device's lockout last reached the desktop.
+  const deviceNoticeAt = new Map<string, number>();
 
   function record(event: AuditEvent): void {
     try {
@@ -75,12 +82,31 @@ export function createLoginLimits(deps: LoginLimitsDeps): LoginLimitsWithStats {
     }
   }
 
-  function notify(kind: DesktopNoticeKind): void {
+  function notify(...notice: [kind: DesktopNoticeKind, deviceName?: string]): void {
     try {
-      deps.notifyDesktop(kind);
+      deps.notifyDesktop(...notice);
     } catch {
       log("login-limits: notifyDesktop failed");
     }
+  }
+
+  /** The desktop hears a device's lockout at most once per interval. */
+  function notifyDeviceLockout(deviceId: string): void {
+    const at = now();
+    const last = deviceNoticeAt.get(deviceId);
+    if (last !== undefined && at - last < DEVICE_LOCKOUT_NOTICE_INTERVAL_MS) return;
+    for (const [id, noticeAt] of deviceNoticeAt) {
+      if (at - noticeAt >= DEVICE_LOCKOUT_NOTICE_INTERVAL_MS) deviceNoticeAt.delete(id);
+    }
+    deviceNoticeAt.set(deviceId, at);
+    let name: string | undefined;
+    try {
+      name = deps.deviceName?.(deviceId);
+    } catch {
+      log("login-limits: deviceName failed");
+    }
+    if (name === undefined) notify("locked-out-device");
+    else notify("locked-out-device", name);
   }
 
   /** Writes every coalesced refusal count whose window or lockout is over. */
@@ -122,6 +148,7 @@ export function createLoginLimits(deps: LoginLimitsDeps): LoginLimitsWithStats {
     const lockout = Math.min(DEVICE_LOCKOUT_MAX_MS, DEVICE_LOCKOUT_BASE_MS * 2 ** over);
     entry.blockedUntil = now() + lockout;
     record({ kind: "locked-out", deviceId, source, scope: "device" });
+    notifyDeviceLockout(deviceId);
   }
 
   function failGlobally(deviceId: string, source: string): void {
@@ -139,6 +166,7 @@ export function createLoginLimits(deps: LoginLimitsDeps): LoginLimitsWithStats {
   }
 
   function lockoutEnd(deviceId: string, scope: RefusalScope): number {
+    if (scope === "capacity") return Number.POSITIVE_INFINITY;
     return scope === "global" ? globalBlockedUntil : (devices.get(deviceId)?.blockedUntil ?? now());
   }
 
@@ -162,10 +190,11 @@ export function createLoginLimits(deps: LoginLimitsDeps): LoginLimitsWithStats {
       devices.delete(deviceId);
     },
 
-    refused(deviceId, source) {
+    refused(deviceId, source, reason) {
       flushDueRefusals();
       const at = now();
-      const scope: RefusalScope = at < globalBlockedUntil ? "global" : "device";
+      const scope: RefusalScope =
+        reason === "capacity" ? "capacity" : at < globalBlockedUntil ? "global" : "device";
       const key = `${scope}\u{0}${deviceId}`;
       const pending = pendingRefusals.get(key);
       if (pending !== undefined) {

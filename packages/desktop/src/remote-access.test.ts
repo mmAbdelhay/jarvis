@@ -306,11 +306,15 @@ describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
     const notifyDesktop = createBridge.mock.calls[0]?.[0].notifyDesktop;
     notifyDesktop?.("locked-out-global");
     notifyDesktop?.("refresh-reuse");
+    notifyDesktop?.("locked-out-device", "Pixel 8");
     const global = MESSAGES.remoteSecurityNotice("locked-out-global", "ar");
     const reuse = MESSAGES.remoteSecurityNotice("refresh-reuse", "ar");
+    const device = MESSAGES.remoteSecurityNotice("locked-out-device", "ar", "Pixel 8");
+    expect(device.body).toContain("Pixel 8");
     expect(showNotification.mock.calls).toEqual([
       [global.title, global.body],
       [reuse.title, reuse.body],
+      [device.title, device.body],
     ]);
   });
 });

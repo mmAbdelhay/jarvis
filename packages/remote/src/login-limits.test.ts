@@ -5,6 +5,7 @@ import { fakeClock } from "./clock-double.js";
 import {
   createLoginLimits,
   DEVICE_FAILURES_BEFORE_LOCKOUT,
+  DEVICE_LOCKOUT_NOTICE_INTERVAL_MS,
   DEVICE_LOCKOUT_BASE_MS,
   DEVICE_LOCKOUT_MAX_MS,
   GLOBAL_FAILURE_LIMIT,
@@ -24,11 +25,12 @@ function deviceId(n: number): string {
 function makeLimits() {
   const clock = fakeClock(1_000_000);
   const events: AuditEvent[] = [];
-  const notifyDesktop = vi.fn<(kind: DesktopNoticeKind) => void>();
+  const notifyDesktop = vi.fn<(kind: DesktopNoticeKind, deviceName?: string) => void>();
   const limits = createLoginLimits({
     now: clock.now,
     audit: { record: (event) => events.push(event) },
     notifyDesktop,
+    deviceName: (id) => (id === deviceId(1) ? "Owner's phone" : undefined),
   });
   return { clock, events, notifyDesktop, limits };
 }
@@ -78,6 +80,60 @@ describe("createLoginLimits: per device", () => {
     limits.succeeded(id, SOURCE);
     failTimes(limits, id, DEVICE_FAILURES_BEFORE_LOCKOUT - 1);
     expect(limits.allow(id, SOURCE)).toBe(true);
+  });
+});
+
+describe("createLoginLimits: device lockout notice", () => {
+  it("a device's first lockout notifies the desktop with its name", () => {
+    const { limits, notifyDesktop } = makeLimits();
+    failTimes(limits, deviceId(1), DEVICE_FAILURES_BEFORE_LOCKOUT - 1);
+    expect(notifyDesktop).not.toHaveBeenCalled();
+    limits.failed(deviceId(1), SOURCE);
+    expect(notifyDesktop).toHaveBeenCalledExactlyOnceWith("locked-out-device", "Owner's phone");
+  });
+
+  it("notifies at most once per device per 15 minutes, across escalations", () => {
+    const { limits, notifyDesktop, clock } = makeLimits();
+    const id = deviceId(1);
+    failTimes(limits, id, DEVICE_FAILURES_BEFORE_LOCKOUT);
+    // Escalations while the notice interval runs: 60 s, 120 s, 240 s, 480 s.
+    for (const lockout of [60_000, 120_000, 240_000]) {
+      clock.advance(lockout);
+      limits.failed(id, SOURCE);
+    }
+    expect(notifyDesktop).toHaveBeenCalledTimes(1);
+    // 60+120+240 s have passed; the next lockout at the 15-minute mark notifies.
+    clock.advance(DEVICE_LOCKOUT_NOTICE_INTERVAL_MS - 420_000 - 1);
+    limits.failed(id, SOURCE);
+    expect(notifyDesktop).toHaveBeenCalledTimes(1);
+    clock.advance(1);
+    limits.failed(id, SOURCE);
+    expect(notifyDesktop).toHaveBeenCalledTimes(2);
+  });
+
+  it("each device has its own throttle; an unknown name is left out", () => {
+    const { limits, notifyDesktop } = makeLimits();
+    failTimes(limits, deviceId(1), DEVICE_FAILURES_BEFORE_LOCKOUT);
+    failTimes(limits, deviceId(2), DEVICE_FAILURES_BEFORE_LOCKOUT);
+    expect(notifyDesktop.mock.calls).toEqual([
+      ["locked-out-device", "Owner's phone"],
+      ["locked-out-device"],
+    ]);
+  });
+});
+
+describe("createLoginLimits: capacity refusals", () => {
+  it("a refusal for a full check queue is coalesced as login-refused scope=capacity and blocks nothing", () => {
+    const { limits, events, clock } = makeLimits();
+    const id = deviceId(1);
+    for (let i = 0; i < 50; i++) limits.refused(id, SOURCE, "capacity");
+    expect(limits.allow(id, SOURCE)).toBe(true);
+    expect(events).toEqual([]);
+    clock.advance(REFUSED_AUDIT_WINDOW_MS);
+    limits.allow(id, SOURCE);
+    expect(events).toEqual([
+      { kind: "login-refused", deviceId: id, source: SOURCE, scope: "capacity", count: 50 },
+    ]);
   });
 });
 

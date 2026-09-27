@@ -8,6 +8,7 @@ import type { AuditPolicy, AuthorizeKey, RequestHandler, RequestOutcome } from "
 import { createDeviceStore } from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import { MAX_PENDING } from "./hub.js";
+import type { DesktopNoticeKind } from "./owner-auth.js";
 import {
   OWNER_TEST_HASH_PARAMS,
   OWNER_TEST_PASSWORD,
@@ -142,7 +143,7 @@ function makeHarness(
     ownerPassword?: boolean;
   } = {},
 ) {
-  const notifyDesktop = vi.fn<(kind: "locked-out-global" | "refresh-reuse") => void>();
+  const notifyDesktop = vi.fn<(kind: DesktopNoticeKind, deviceName?: string) => void>();
   const fs = opts.fs ?? memoryFs();
   if ((opts.ownerPassword ?? true) && !fs.files.has(OWNER_PATH)) {
     fs.files.set(OWNER_PATH, { data: ownerFileWithPassword(), mode: 0o600 });
@@ -2234,6 +2235,7 @@ describe("createBridge: owner login (Phase 0)", () => {
     expect(await login(a.handlers, a.socket)).toMatchObject({ t: "err", code: "rate-limited" });
     const lines = (await auditLines(h.fs)).join("\n");
     expect(lines).toContain(`locked-out deviceId="${a.id}" scope="device" source="10.0.0.5:1"`);
+    expect(h.notifyDesktop).toHaveBeenCalledExactlyOnceWith("locked-out-device", "Phone");
     expect(lines).not.toContain(wrong);
     expect(lines).not.toContain(OWNER_TEST_PASSWORD);
   });
@@ -2242,10 +2244,14 @@ describe("createBridge: owner login (Phase 0)", () => {
     const { h, a } = await twoDevices();
     const answer = await login(a.handlers, a.socket);
     const { refreshToken } = answer.v as { refreshToken: string };
-    for (const id of [13, 14]) {
-      a.handlers?.onText(reqFrame(id, "auth:refresh", [{ refreshToken }]));
-      for (let i = 0; i < 10; i++) await flush();
-    }
+    a.handlers?.onText(reqFrame(13, "auth:refresh", [{ refreshToken }]));
+    for (let i = 0; i < 10; i++) await flush();
+    const rotated = a.socket.sent.find((frame) => frame.id === 13)?.v as { refreshToken: string };
+    // The successor is used, so the first token is no longer a retry.
+    a.handlers?.onText(reqFrame(14, "auth:refresh", [{ refreshToken: rotated.refreshToken }]));
+    for (let i = 0; i < 10; i++) await flush();
+    a.handlers?.onText(reqFrame(15, "auth:refresh", [{ refreshToken }]));
+    for (let i = 0; i < 10; i++) await flush();
     expect(h.notifyDesktop).toHaveBeenCalledExactlyOnceWith("refresh-reuse");
     const lines = (await auditLines(h.fs)).join("\n");
     expect(lines).toContain(`refresh-reuse deviceId="${a.id}"`);

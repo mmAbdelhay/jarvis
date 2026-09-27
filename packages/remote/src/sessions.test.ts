@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fakeClock } from "./clock-double.js";
 import { memoryFs } from "./fs-double.js";
 import type { RandomBytes } from "./io.js";
-import { createSessionStore } from "./sessions.js";
+import { createSessionStore, REFRESH_RETRY_GRACE_MS } from "./sessions.js";
 
 const PATH = "/remote/sessions.json";
 const DAY = 24 * 60 * 60 * 1_000;
@@ -54,19 +54,124 @@ describe("createSessionStore", () => {
     expect(JSON.parse(text).sessions).toHaveLength(2);
   });
 
-  it("detects reuse of a rotated token and revokes its whole family", async () => {
+  it("detects reuse of a token whose successor was already used and revokes its whole family", async () => {
     const { store } = makeStore();
     const issued = await store.issue("device-a");
     const rotated = await store.refresh("device-a", issued.refresh);
     if (rotated.kind !== "ok") throw new Error("expected rotation");
+    const next = await store.refresh("device-a", rotated.refresh);
+    if (next.kind !== "ok") throw new Error("expected rotation");
 
     expect(await store.refresh("device-a", issued.refresh)).toEqual({
       kind: "reuse",
       familyId: issued.familyId,
     });
-    expect(await store.refresh("device-a", rotated.refresh)).toEqual({ kind: "invalid" });
+    expect(await store.refresh("device-a", next.refresh)).toEqual({ kind: "invalid" });
     expect(store.verifyAccess("device-a", issued.access)).toBeUndefined();
-    expect(store.verifyAccess("device-a", rotated.access)).toBeUndefined();
+    expect(store.verifyAccess("device-a", next.access)).toBeUndefined();
+  });
+
+  it("treats an older ancestor (two rotations back) as reuse", async () => {
+    const { store } = makeStore();
+    const issued = await store.issue("device-a");
+    const first = await store.refresh("device-a", issued.refresh);
+    if (first.kind !== "ok") throw new Error("expected rotation");
+    const second = await store.refresh("device-a", first.refresh);
+    if (second.kind !== "ok") throw new Error("expected rotation");
+    // `second.refresh` is unused, but `issued` is not its immediate predecessor.
+    expect(await store.refresh("device-a", issued.refresh)).toEqual({
+      kind: "reuse",
+      familyId: issued.familyId,
+    });
+  });
+
+  it("a retry with the predecessor of an unused successor within the grace window re-rotates", async () => {
+    const { clock, store } = makeStore();
+    const issued = await store.issue("device-a");
+    const lost = await store.refresh("device-a", issued.refresh);
+    if (lost.kind !== "ok") throw new Error("expected rotation");
+
+    clock.advance(REFRESH_RETRY_GRACE_MS);
+    const retried = await store.refresh("device-a", issued.refresh);
+    expect(retried).toMatchObject({ kind: "retry", familyId: issued.familyId });
+    if (retried.kind !== "retry") throw new Error("expected a retry");
+    expect(retried.refresh).not.toBe(lost.refresh);
+    expect(store.verifyAccess("device-a", retried.access)).toBeDefined();
+    // The unused successor (and its access token) is dead.
+    expect(store.verifyAccess("device-a", lost.access)).toBeUndefined();
+
+    // The new pair carries on normally.
+    expect((await store.refresh("device-a", retried.refresh)).kind).toBe("ok");
+  });
+
+  it("presenting a successor superseded by a retry is reuse", async () => {
+    const { store } = makeStore();
+    const issued = await store.issue("device-a");
+    const lost = await store.refresh("device-a", issued.refresh);
+    if (lost.kind !== "ok") throw new Error("expected rotation");
+    const retried = await store.refresh("device-a", issued.refresh);
+    if (retried.kind !== "retry") throw new Error("expected a retry");
+
+    expect(await store.refresh("device-a", lost.refresh)).toEqual({
+      kind: "reuse",
+      familyId: issued.familyId,
+    });
+    expect(store.verifyAccess("device-a", retried.access)).toBeUndefined();
+  });
+
+  it("a superseded successor survives reload and its idle expiry never purges the family", async () => {
+    const { fs, clock, store } = makeStore();
+    const issued = await store.issue("device-a");
+    const lost = await store.refresh("device-a", issued.refresh);
+    if (lost.kind !== "ok") throw new Error("expected rotation");
+    const retried = await store.refresh("device-a", issued.refresh);
+    if (retried.kind !== "retry") throw new Error("expected a retry");
+
+    clock.advance(6 * DAY);
+    const kept = await store.refresh("device-a", retried.refresh);
+    if (kept.kind !== "ok") throw new Error("expected rotation");
+    clock.advance(6 * DAY);
+    const reloaded = createSessionStore({
+      fs,
+      path: PATH,
+      random: countingRandom(),
+      now: clock.now,
+      enforceFileModes: true,
+    });
+    await reloaded.load();
+    expect(await reloaded.refresh("device-a", lost.refresh)).toEqual({
+      kind: "reuse",
+      familyId: issued.familyId,
+    });
+  });
+
+  it("the predecessor of an unused successor past the grace window revokes the family as stale", async () => {
+    const { clock, store } = makeStore();
+    const issued = await store.issue("device-a");
+    const lost = await store.refresh("device-a", issued.refresh);
+    if (lost.kind !== "ok") throw new Error("expected rotation");
+
+    clock.advance(REFRESH_RETRY_GRACE_MS + 1);
+    expect(await store.refresh("device-a", issued.refresh)).toEqual({
+      kind: "stale",
+      familyId: issued.familyId,
+    });
+    expect(await store.refresh("device-a", lost.refresh)).toEqual({ kind: "invalid" });
+    expect(store.verifyAccess("device-a", lost.access)).toBeUndefined();
+  });
+
+  it("a retry after the rotation failed to persist lands in the grace path", async () => {
+    const { fs, store } = makeStore();
+    const issued = await store.issue("device-a");
+    const writeFile = fs.writeFile.bind(fs);
+    fs.writeFile = async () => {
+      throw new Error("disk full");
+    };
+    await expect(store.refresh("device-a", issued.refresh)).rejects.toThrow("disk full");
+    fs.writeFile = writeFile;
+
+    const retried = await store.refresh("device-a", issued.refresh);
+    expect(retried).toMatchObject({ kind: "retry", familyId: issued.familyId });
   });
 
   it("expires a refresh token after 7 days idle plus 1ms", async () => {

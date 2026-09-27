@@ -72,11 +72,13 @@ export type LoginLimits = {
   allow(deviceId: string, source: string): boolean;
   failed(deviceId: string, source: string): void;
   succeeded(deviceId: string, source: string): void;
-  refused(deviceId: string, source: string): void;
+  /** `capacity`: the password-check queue was full (no lockout involved). */
+  refused(deviceId: string, source: string, reason?: "capacity"): void;
 };
 
-/** What the desktop shows an OS notification for (main.ts, bilingual). */
-export type DesktopNoticeKind = "locked-out-global" | "refresh-reuse";
+/** What the desktop shows an OS notification for (main.ts, bilingual).
+ *  `locked-out-device` carries the device's name beside it. */
+export type DesktopNoticeKind = "locked-out-global" | "locked-out-device" | "refresh-reuse";
 
 export const NO_LOGIN_LIMITS: LoginLimits = {
   allow: () => true,
@@ -304,7 +306,11 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     const checked = withPasswordSlot(async () =>
       limits.allow(device.id, source) ? await owner.verifyPassword(password) : undefined,
     );
-    if (checked === undefined) return RATE_LIMITED;
+    if (checked === undefined) {
+      // The queue is full: audited (coalesced) like a lockout refusal.
+      limits.refused(device.id, source, "capacity");
+      return RATE_LIMITED;
+    }
     let ok: boolean | undefined;
     try {
       ok = await checked;
@@ -557,6 +563,14 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       notify("refresh-reuse");
       return FORBIDDEN;
     }
+    // A retry that came too late after a lost reply: the family is gone,
+    // but this is not theft, so no desktop alarm.
+    if (result.kind === "stale") {
+      record({ kind: "refresh-stale", deviceId: device.id, source });
+      lockFamily(result.familyId, "signed-out");
+      return FORBIDDEN;
+    }
+    if (result.kind === "retry") record({ kind: "refresh-retry", deviceId: device.id, source });
     if (generation !== startedAt) {
       await discardFamily(result.familyId);
       return FORBIDDEN;

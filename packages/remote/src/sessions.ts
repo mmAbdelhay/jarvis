@@ -6,6 +6,14 @@ import { ensurePrivateDir, isMissing, tightenFileMode, writeFileAtomic } from ".
 export const ACCESS_TTL_MS = 15 * 60 * 1_000;
 export const REFRESH_IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const REFRESH_ABSOLUTE_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/**
+ * How long after a rotation the rotated token may be presented again while
+ * its successor is still unused: a lost `auth:refresh` reply (a network
+ * handoff, iOS suspending the app) makes the phone retry with the token it
+ * still holds. Within the window that retry re-rotates; past it the family
+ * is revoked quietly (`stale`), never as theft.
+ */
+export const REFRESH_RETRY_GRACE_MS = 10 * 60 * 1_000;
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const FAMILY_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -17,9 +25,14 @@ type RefreshRecord = {
   createdAt: number;
   lastUsedAt: number;
   rotatedTo?: string;
+  /** An unused successor replaced by a retry of its predecessor: a
+   *  tombstone, so presenting it later is reuse. */
+  superseded?: true;
 };
 
-type AccessRecord = { deviceId: string; familyId: string; expiresAt: number };
+/** `refreshHash`: the refresh token minted alongside, so a superseded
+ *  successor's access token dies with it. */
+type AccessRecord = { deviceId: string; familyId: string; expiresAt: number; refreshHash: string };
 
 export type IssuedSession = {
   access: string;
@@ -28,9 +41,19 @@ export type IssuedSession = {
   familyId: string;
 };
 
+/**
+ * - `ok`: rotated.
+ * - `retry`: the immediate predecessor of a never-used successor, within
+ *   REFRESH_RETRY_GRACE_MS of its rotation: re-rotated (the unused
+ *   successor is superseded).
+ * - `stale`: the same, past the window: the family is revoked (no alarm).
+ * - `reuse`: a used or superseded token otherwise: the family is revoked.
+ */
 export type RefreshResult =
   | ({ kind: "ok" } & IssuedSession)
+  | ({ kind: "retry" } & IssuedSession)
   | { kind: "reuse"; familyId: string }
+  | { kind: "stale"; familyId: string }
   | { kind: "invalid" };
 
 export type SessionStore = {
@@ -69,7 +92,8 @@ function validRecord(value: unknown): value is RefreshRecord {
     typeof record.lastUsedAt === "number" &&
     Number.isFinite(record.lastUsedAt) &&
     (record.rotatedTo === undefined ||
-      (typeof record.rotatedTo === "string" && HASH_PATTERN.test(record.rotatedTo)))
+      (typeof record.rotatedTo === "string" && HASH_PATTERN.test(record.rotatedTo))) &&
+    (record.superseded === undefined || record.superseded === true)
   );
 }
 
@@ -111,7 +135,9 @@ export function createSessionStore(deps: {
 
   function expired(record: RefreshRecord, at: number): boolean {
     return (
-      (record.rotatedTo === undefined && at - record.lastUsedAt > REFRESH_IDLE_TTL_MS) ||
+      (record.rotatedTo === undefined &&
+        record.superseded === undefined &&
+        at - record.lastUsedAt > REFRESH_IDLE_TTL_MS) ||
       at - record.createdAt >= REFRESH_ABSOLUTE_TTL_MS
     );
   }
@@ -155,8 +181,38 @@ export function createSessionStore(deps: {
     const access = mintToken(random);
     const refresh = mintToken(random);
     const accessExpiresAt = now() + ACCESS_TTL_MS;
-    accessRecords.set(hashToken(access), { deviceId, familyId, expiresAt: accessExpiresAt });
+    accessRecords.set(hashToken(access), {
+      deviceId,
+      familyId,
+      expiresAt: accessExpiresAt,
+      refreshHash: hashToken(refresh),
+    });
     return { access, refresh, accessExpiresAt, familyId };
+  }
+
+  /** Rotates `record` to a fresh pair, in memory (the caller persists). */
+  function rotate(record: RefreshRecord): IssuedSession {
+    const pair = mintPair(record.deviceId, record.familyId);
+    const nextHash = hashToken(pair.refresh);
+    const usedAt = now();
+    record.lastUsedAt = usedAt;
+    record.rotatedTo = nextHash;
+    refreshRecords.set(nextHash, {
+      hash: nextHash,
+      deviceId: record.deviceId,
+      familyId: record.familyId,
+      createdAt: record.createdAt,
+      lastUsedAt: usedAt,
+    });
+    return pair;
+  }
+
+  /** Marks a never-used successor dead, keeping it as a reuse tombstone. */
+  function supersede(successor: RefreshRecord): void {
+    successor.superseded = true;
+    for (const [hash, access] of accessRecords) {
+      if (access.refreshHash === successor.hash) accessRecords.delete(hash);
+    }
   }
 
   return {
@@ -205,25 +261,36 @@ export function createSessionStore(deps: {
         await persist();
         return { kind: "invalid" };
       }
-      if (record.rotatedTo !== undefined) {
-        const familyId = record.familyId;
+      const familyId = record.familyId;
+      if (record.superseded !== undefined) {
         revokeFamilyInMemory(familyId);
         await persist();
         return { kind: "reuse", familyId };
       }
+      if (record.rotatedTo !== undefined) {
+        // `lastUsedAt` of a rotated record is when it was rotated.
+        const successor = refreshRecords.get(record.rotatedTo);
+        const successorUnused =
+          successor !== undefined &&
+          successor.rotatedTo === undefined &&
+          successor.superseded === undefined;
+        if (!successorUnused) {
+          revokeFamilyInMemory(familyId);
+          await persist();
+          return { kind: "reuse", familyId };
+        }
+        if (now() - record.lastUsedAt > REFRESH_RETRY_GRACE_MS) {
+          revokeFamilyInMemory(familyId);
+          await persist();
+          return { kind: "stale", familyId };
+        }
+        supersede(successor);
+        const pair = rotate(record);
+        await persist();
+        return { kind: "retry", ...pair };
+      }
 
-      const pair = mintPair(deviceId, record.familyId);
-      const nextHash = hashToken(pair.refresh);
-      const usedAt = now();
-      record.lastUsedAt = usedAt;
-      record.rotatedTo = nextHash;
-      refreshRecords.set(nextHash, {
-        hash: nextHash,
-        deviceId,
-        familyId: record.familyId,
-        createdAt: record.createdAt,
-        lastUsedAt: usedAt,
-      });
+      const pair = rotate(record);
       await persist();
       return { kind: "ok", ...pair };
     },
