@@ -53,6 +53,12 @@ function splitOnNamePlaceholder(template: string): { before: string; after: stri
 export const MESSAGES = {
   planPanelLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "لوحة الخطة" : "Plan panel",
+  // Task 8 fix round 1: the palette's own toggle for it — the file
+  // sidebar's matching action stays a plain English literal in
+  // terminal-pane.ts (that one is out of scope here), but this one is new
+  // and goes through MESSAGES from the start.
+  planPanelToggle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   planEmptyTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد خطة لهذه الجلسة بعد" : "No plan for this session yet",
   planEmptyHint: (language: "ar" | "en"): string =>
@@ -737,6 +743,8 @@ export const MESSAGES = {
   tabMenuRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
   tabMenuReload: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تحميل" : "Reload"),
   tabMenuClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
+  // Task 8: the tab menu's fourth item, opening this tab's own plan panel.
+  tabMenuPlans: (language: "ar" | "en"): string => (language === "ar" ? "الخطط" : "Plans"),
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie

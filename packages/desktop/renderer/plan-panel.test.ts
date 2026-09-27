@@ -154,6 +154,35 @@ describe("createPlanPanel", () => {
     expect(panel.element.textContent).toContain("diagram");
   });
 
+  // Task 8: setWindowOpenHandler denies every target=_blank outright, so a
+  // plan link's default action would otherwise silently do nothing — the
+  // panel must always prevent it and hand the href to the caller instead.
+  it("prevents a block link's default action and hands its href to onLinkClick", async () => {
+    const linkDoc: PlanDoc = {
+      ...doc,
+      blocks: [
+        {
+          ...blocks[1]!,
+          html: '<p>See <a href="https://example.com/x" target="_blank" rel="noopener noreferrer">the docs</a>.</p>',
+        },
+      ],
+    };
+    const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: linkDoc })) });
+    const onLinkClick = vi.fn();
+    const panel = createPlanPanel({ api, t: (key) => key, onLinkClick });
+    document.body.append(panel.element);
+    panel.setPane("pane-1", "/repo");
+    await panel.open(doc.path);
+
+    const anchor = panel.element.querySelector("a[href]");
+    if (!anchor) throw new Error("missing link");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    anchor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onLinkClick).toHaveBeenCalledWith("https://example.com/x");
+  });
+
   it("highlights a quoted comment when its text spans inline markup", async () => {
     const markedUpDoc: PlanDoc = {
       ...doc,
@@ -248,6 +277,23 @@ describe("createPlanPanel", () => {
 
     expect(usedApi.plansRead).toHaveBeenLastCalledWith(doc.path);
     expect(panel.element.querySelectorAll(".plan-block").length).toBeGreaterThan(0);
+  });
+
+  // Task 8 fix round 1: workspace-terminal.ts's auto-open calls open() on a
+  // panel the user may have closed with the picker left showing — the
+  // picker's own draw() queues a `search.focus()` microtask, which would
+  // steal the terminal's focus back on a re-open nobody asked for. Closing
+  // must leave nothing behind for the next open to walk into.
+  it("resets the picker on close, so a later open never shows or re-focuses it", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-action="open-picker"]'));
+    expect(panel.element.querySelector(".plan-panel__picker")).toBeTruthy();
+
+    panel.close();
+    await panel.open(doc.path);
+
+    expect(panel.element.querySelector(".plan-panel__picker")).toBeFalsy();
   });
 
   it("adds a comment for a text selection inside one block", async () => {

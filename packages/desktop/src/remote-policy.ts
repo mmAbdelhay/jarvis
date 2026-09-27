@@ -235,6 +235,12 @@ export const CHANNEL_POLICY = {
   "plans:updateComment": "remote",
   "plans:deleteComment": "remote",
   "plans:send": "remote",
+  // Desktop-only (Task 8, controller ruling): runs Electron's
+  // `shell.openExternal` on the LAPTOP, opening the OS's own browser — the
+  // same class of laptop-screen/laptop-process concern every other
+  // Electron-bound channel in this table already is. A paired phone opens
+  // a plan's links with its own OS, not this one's.
+  "plans:openLink": "desktop-only",
 } as const satisfies Record<InvokeChannel, ChannelAccess>;
 
 type PolicyEntries = typeof CHANNEL_POLICY;

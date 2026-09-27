@@ -30,6 +30,11 @@ export type PushChannels = IpcChannels & {
   // 2): the renderer owns the inline rename input, so main only names which
   // chip should start it.
   "workspace:tabRename": string;
+  // Task 8: main pushes this after the tab menu's own Plans item is
+  // clicked — the renderer owns every tab's plan panel, so main only names
+  // which tab's panel should toggle (the same division of labour
+  // workspace:tabRename already follows for Rename).
+  "workspace:tabPlans": string;
   // remote-access.ts's `onStatus` — always local to this window (ruling 36).
   // A paired phone never receives this: the wire protocol
   // (packages/remote/src/protocol.ts's ServerMessage) has no message that
@@ -240,6 +245,13 @@ export const INVOKE_CHANNELS = {
   plansUpdateComment: "plans:updateComment",
   plansDeleteComment: "plans:deleteComment",
   plansSend: "plans:send",
+  // Task 8 (controller ruling): main's webContents deny every
+  // target=_blank outright (setWindowOpenHandler), so a plan block's own
+  // rendered link has no route to the OS browser without this. Electron-
+  // bound (dispatch.ts's ElectronBoundChannel) and desktop-only
+  // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
+  // and length gate before shell.openExternal ever runs.
+  plansOpenLink: "plans:openLink",
 } as const satisfies Record<InvokeKey, string>;
 
 /** Method → channel, for every push. */
@@ -264,6 +276,7 @@ export const PUSH_CHANNELS = {
   onRemoteStatus: "remote:update",
   onTabRename: "workspace:tabRename",
   onPlansChanged: "plans:changed",
+  onTabPlans: "workspace:tabPlans",
 } as const satisfies Record<PushKey, string>;
 
 /**

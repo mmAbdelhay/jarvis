@@ -2151,6 +2151,14 @@
     border-left: none; border-top: 1px solid var(--border); }
   .terminal-split-divider:hover { background: var(--border); }
 
+  /* Task 8: the grab handle between the tab's panes and its plan panel —
+     the same discipline as .terminal-split-divider above, but always
+     col-resize: the panel only ever docks to the side, never below. */
+  .plan-panel-handle { flex: 0 0 5px; cursor: col-resize; background: var(--ground);
+    border-left: 1px solid var(--border); }
+  .plan-panel-handle:hover { background: var(--border); }
+  .plan-panel-handle[hidden] { display: none; }
+
   /* One terminal as the user sees it: frozen blocks stacked above a live
      xterm. data-state is set by terminal-pane.ts and is the only thing that
      lays this out, so that module measures nothing. */

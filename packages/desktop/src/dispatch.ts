@@ -140,15 +140,17 @@ export type SidecarPublisher = {
       };
 };
 
-/** The five handlers that hold a BrowserWindow, the screen, a native dialog
- *  or a native menu. They can never run for a phone, so they never enter the
- *  table — desktop-only.ts registers them. */
+/** The six handlers that hold a BrowserWindow, the screen, a native dialog,
+ *  a native menu, or (plans:openLink, Task 8) the OS's own browser via
+ *  Electron's `shell`. They can never run for a phone, so they never enter
+ *  the table — desktop-only.ts registers them. */
 export type ElectronBoundChannel =
   | "workspace:bounds"
   | "workspace:devtoolsBounds"
   | "workspace:devtoolsDockMenu"
   | "workspace:tabMenu"
-  | "dialog:pickFiles";
+  | "dialog:pickFiles"
+  | "plans:openLink";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 

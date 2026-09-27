@@ -34,6 +34,8 @@ describe("MESSAGES", () => {
       MESSAGES.tabMenuRename,
       MESSAGES.tabMenuReload,
       MESSAGES.tabMenuClose,
+      MESSAGES.tabMenuPlans,
+      MESSAGES.planPanelToggle,
       MESSAGES.unknownAgent,
       MESSAGES.cannotEditLiveSessionState,
     ];

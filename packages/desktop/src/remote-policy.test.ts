@@ -55,6 +55,8 @@ describe("remote policy", () => {
     "prayer:locateIp",
     // Bug 7: no phone Sessions UI exists yet to edit a record from.
     "history:edit",
+    // Task 8: runs shell.openExternal on the laptop.
+    "plans:openLink",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);
