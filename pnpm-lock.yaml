@@ -191,12 +191,18 @@ importers:
       '@fontsource/manrope':
         specifier: 5.3.0
         version: 5.3.0
+      '@types/markdown-it':
+        specifier: ^14.2.0
+        version: 14.2.0
       electron:
         specifier: github:castlabs/electron-releases#v44.1.0+wvcus
         version: https://codeload.github.com/castlabs/electron-releases/tar.gz/bbb3862120430db6fa3ffa1ce22c3b66fe99e0b8
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
+      markdown-it:
+        specifier: ^15.0.1
+        version: 15.0.1
 
   packages/platform:
     dependencies:
