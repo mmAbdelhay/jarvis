@@ -7,6 +7,7 @@ import { detectLanguage } from "./format.js";
 import { initApi, renderApi } from "./api.js";
 import { attachDockerPane, detachDockerPane } from "./workspace-docker.js";
 import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
+import { syncHostedView } from "./views.js";
 
 // Structurally the same shape the preload bridge and main process pass
 // across IPC (packages/desktop/src/ipc.ts's Bookmark, from @jarvis/platform)
@@ -1650,6 +1651,9 @@ function hideTabMenu(menu: HTMLElement): void {
     }
   }
   menu.hidden = true;
+  // The hosted view (bug 2) was sunk below the menu while it was open —
+  // bring it back now that it's gone.
+  syncHostedView();
 }
 
 /** Opens a chip's context menu in the top layer, positioned off the click
@@ -1658,6 +1662,10 @@ function hideTabMenu(menu: HTMLElement): void {
  *  edge never draws off screen. */
 function openTabMenu(menu: HTMLElement, event: MouseEvent): void {
   menu.hidden = false;
+  // Native hosted views (web/editor/database/cluster/chat tabs) paint above
+  // this DOM popover — sink the hosted view for as long as the menu is up,
+  // same choke point the history overlay uses (views.ts's syncHostedView).
+  syncHostedView();
   if (typeof menu.showPopover !== "function") return;
   menu.showPopover();
   const width = menu.offsetWidth;
@@ -1774,6 +1782,7 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
   menu.addEventListener("toggle", () => {
     if (menu.matches(":popover-open")) return;
     menu.hidden = true;
+    syncHostedView();
   });
   // Without this a click inside the menu bubbles to `element` and activates
   // the tab underneath it on its way out, same reason `close` above stops it.

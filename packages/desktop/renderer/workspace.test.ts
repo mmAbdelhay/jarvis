@@ -19,6 +19,7 @@ import {
   reportWorkspaceBounds,
   setBrowserSnapshot,
 } from "./workspace.js";
+import { showView } from "./views.js";
 
 type Recorded = { call: string; args: unknown[] };
 
@@ -814,6 +815,27 @@ describe("workspace chrome", () => {
       MESSAGES.tabMenuReload(PRIMARY_LANGUAGE),
       MESSAGES.tabMenuClose(PRIMARY_LANGUAGE),
     ]);
+  });
+
+  // Bug 2: the menu is a DOM popover, but hosted tabs (web/editor/database/
+  // cluster/chat) paint above it as a native WebContentsView, so it was
+  // invisible underneath. The hosted view must sink for as long as the menu
+  // is open and come back once it closes.
+  it("sinks the hosted view while the tab's context menu is open, and restores it on close", () => {
+    showView("workspace");
+    renderWorkspace({ tabs: [tab()], activeTabId: "tab-1" });
+    const chip = document.querySelector<HTMLElement>(".workspace-tab");
+    const visibility = (): unknown[] =>
+      calls.filter((call) => call.call === "setWorkspaceVisible").map((call) => call.args[0]);
+
+    chip?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(visibility().at(-1)).toBe(false);
+
+    const items = [
+      ...(chip?.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu-item") ?? []),
+    ];
+    items.find((item) => item.textContent === MESSAGES.tabMenuReload(PRIMARY_LANGUAGE))?.click();
+    expect(visibility().at(-1)).toBe(true);
   });
 
   it("opens the inline rename input from the context menu's Rename item", () => {
