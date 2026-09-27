@@ -50,4 +50,13 @@ describe("bracketedSubmit", () => {
   it("normalises CRLF and lone CR to LF", () => {
     expect(bracketedSubmit("a\r\nb\rc")).toBe("\u001b[200~a\nb\nc\u001b[201~\r");
   });
+
+  it("strips DEL (\\u007f)", () => {
+    expect(bracketedSubmit("a\u007fb")).toBe("\u001b[200~ab\u001b[201~\r");
+  });
+
+  it("keeps tabs, Arabic text, emoji (surrogate pairs), and accented Latin unchanged", () => {
+    const text = "tab\there\nمرحبا 🎉 café";
+    expect(bracketedSubmit(text)).toBe(`\u001b[200~${text}\u001b[201~\r`);
+  });
 });

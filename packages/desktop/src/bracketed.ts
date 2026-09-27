@@ -16,13 +16,13 @@
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 
-// Every C0 control byte except tab (\u0009) and newline (\u000a), plus
-// every C1 control byte (\u0080-\u009f). \u000d (CR) is covered by this
-// range too, but is never actually matched — sanitizeForPaste normalises
-// it to \n first — kept in the range anyway as a defence against a future
-// caller of this regex that skips that normalisation step.
+// Every C0 control byte except tab (\u0009) and newline (\u000a), plus DEL
+// (\u007f) and every C1 control byte (\u0080-\u009f). \u000d (CR) is covered
+// by this range too, but is never actually matched — sanitizeForPaste
+// normalises it to \n first — kept in the range anyway as a defence against
+// a future caller of this regex that skips that normalisation step.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC and every other control byte literally is the point — stripping them is what this pattern is for.
-const CONTROL_BYTES = /[\u0000-\u0008\u000b-\u001f\u0080-\u009f]/g;
+const CONTROL_BYTES = /[\u0000-\u0008\u000b-\u001f\u007f\u0080-\u009f]/g;
 
 /**
  * Strips every control byte that could terminate — or otherwise interfere
