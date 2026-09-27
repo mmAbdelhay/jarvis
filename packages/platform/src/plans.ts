@@ -482,11 +482,18 @@ export function createPlanFiles(deps: {
           `.${basename(real)}.${process.pid}-${randomBytes(6).toString("hex")}.jarvis-tmp`,
         );
         try {
+          // `mode` here is only a starting point: the OS filters file
+          // creation through the process umask (a default 022 turns a
+          // requested 0o664 into 0o644), so it does not reliably reproduce
+          // the original file's mode on its own. The `chmod` right after
+          // is what actually makes the temp file's mode match — umask
+          // applies to creation, never to an explicit `chmod`.
           await fs.writeFile(tempPath, updated, {
             encoding: "utf8",
             flag: "wx",
             mode: statted.info.mode & 0o777,
           });
+          await fs.chmod(tempPath, statted.info.mode & 0o777);
           await fs.rename(tempPath, real);
         } catch (error) {
           await fs.rm(tempPath, { force: true }).catch(() => {});
@@ -548,7 +555,12 @@ export function createPlanFiles(deps: {
         watcher.on("error", () => {
           logOnce(`[plans] watch error on ${dir}`);
           watcher.close();
-          activeWatchers.delete(dir);
+          // Only remove the map entry if it's still *this* watcher: a
+          // rescan could already have detached this one and attached a
+          // fresh watcher for `dir` before this stale error arrives, and
+          // that later watcher's entry must not be deleted out from under
+          // it by an earlier one's error handler.
+          if (activeWatchers.get(dir) === watcher) activeWatchers.delete(dir);
         });
         if (disposed) {
           watcher.close();

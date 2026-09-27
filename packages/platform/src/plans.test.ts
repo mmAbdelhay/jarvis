@@ -452,7 +452,13 @@ describe("writeBlock", () => {
 
   it("preserves the file's mode across a write", async () => {
     const { path, source, mtimeMs, planFiles } = await planWithFile("write-mode");
-    await chmod(path, 0o640);
+    // 0o664 (not 0o640): the group/other write bits it sets fall inside a
+    // default umask of 022, so a `mode` option passed only to the
+    // creating `writeFile` call — filtered through that umask by the OS —
+    // would silently come out as 0o644 here. A mode like 0640, with no
+    // bits the umask would ever mask, could pass through by accident and
+    // hide exactly this bug.
+    await chmod(path, 0o664);
     const blocks = parsePlan(source);
     const heading = blocks.find((b) => b.kind === "heading");
     if (heading === undefined) throw new Error("fixture has no heading block");
@@ -461,7 +467,7 @@ describe("writeBlock", () => {
     expect(result.ok).toBe(true);
 
     const info = await stat(path);
-    expect(info.mode & 0o777).toBe(0o640);
+    expect(info.mode & 0o777).toBe(0o664);
   });
 
   it("serializes concurrent writes to the same file: exactly one succeeds", async () => {
