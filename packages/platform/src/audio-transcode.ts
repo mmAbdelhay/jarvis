@@ -5,7 +5,11 @@ export const TRANSCODE_MAX_SECONDS = 120;
 
 export type AudioDemuxer = "mov" | "webm";
 
-/** Identifies only the two container families accepted for voice uploads. */
+/**
+ * Identifies only the two container families accepted for voice uploads:
+ * any ISO-BMFF `ftyp` file (the brand is checked separately by
+ * {@link isMp4Audio}) or an EBML (WebM/Matroska) file.
+ */
 export function sniffAudioContainer(header: Uint8Array): AudioDemuxer | undefined {
   if (
     header.length >= 8 &&
@@ -33,7 +37,7 @@ export function sniffAudioContainer(header: Uint8Array): AudioDemuxer | undefine
  * MPEG-4 on both iOS and Android, with a 44.1 kHz fallback) can produce, or
  * that a compliant MP4/M4A muxer commonly writes. Anything else — including
  * a brand ffmpeg would happily demux, like `qt  ` (QuickTime) — is refused
- * by {@link isMp4Audio} before a phone-supplied file ever reaches ffmpeg.
+ * by {@link isMp4Audio} before an uploaded file ever reaches ffmpeg.
  */
 export const MP4_AUDIO_BRANDS: readonly string[] = [
   "M4A ",
@@ -53,9 +57,9 @@ export const MP4_AUDIO_BRANDS: readonly string[] = [
  * the box's major brand, read as latin1 like every other 4-byte FourCC in
  * this format — are one of {@link MP4_AUDIO_BRANDS}.
  *
- * Retained for callers that specifically need the historical MP4 brand
- * whitelist. Voice uploads use {@link sniffAudioContainer} because browsers
- * can also produce WebM/Opus.
+ * Voice uploads (desktop voice-upload.ts) apply it to every upload that
+ * {@link sniffAudioContainer} reads as `mov`, before ffmpeg; WebM has its
+ * own sniff and no brand list.
  */
 export function isMp4Audio(header: Uint8Array): boolean {
   if (header.length < 12) return false;

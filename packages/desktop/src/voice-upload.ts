@@ -22,7 +22,7 @@
 //     `failed:transcode` or `failed:utterance` — never `transcoded.detail`
 //     or a caught error's own message/stack.
 import { join } from "node:path";
-import { sniffAudioContainer, type AudioDemuxer } from "@jarvis/platform";
+import { isMp4Audio, sniffAudioContainer, type AudioDemuxer } from "@jarvis/platform";
 import { MAX_VOICE_BYTES, parseVoiceUploadMeta, type VoiceUploadResult } from "@jarvis/wire";
 import { MESSAGES } from "./messages.js";
 import type { BlobHandler } from "./remote-blob.js";
@@ -138,12 +138,16 @@ export function createVoiceUploadHandler(deps: VoiceUploadDeps): BlobHandler {
     }
 
     const meta = args.length === 1 ? parseVoiceUploadMeta(args[0]) : undefined;
+    // The sniffed container picks ffmpeg's demuxer and must match the
+    // declared format; an MP4 must also carry one of the audio brands
+    // (isMp4Audio), so a QuickTime or other ftyp file never reaches ffmpeg.
     const container = sniffAudioContainer(bytes);
     if (
       meta === undefined ||
       bytes.length < 1 ||
       bytes.length > MAX_VOICE_BYTES ||
       container === undefined ||
+      (container === "mov" && !isMp4Audio(bytes)) ||
       (meta.format === "m4a" && container !== "mov") ||
       (meta.format === "webm" && container !== "webm")
     ) {

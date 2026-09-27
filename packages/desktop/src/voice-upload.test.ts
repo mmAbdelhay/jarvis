@@ -34,12 +34,12 @@ function turnId(n: number): string {
   return n.toString(16).padStart(32, "0");
 }
 
-// A real 12-byte ftyp/M4A header followed by filler — isMp4Audio only ever
-// reads bytes 4-11, so the rest can be anything.
-function m4aBytes(length = 64): Uint8Array {
+// A real 12-byte ftyp header followed by filler — sniffAudioContainer and
+// isMp4Audio only ever read bytes 4-11, so the rest can be anything.
+function m4aBytes(length = 64, brand = "M4A "): Uint8Array {
   const bytes = new Uint8Array(length);
   bytes.set(Buffer.from("ftyp", "latin1"), 4);
-  bytes.set(Buffer.from("M4A ", "latin1"), 8);
+  bytes.set(Buffer.from(brand, "latin1"), 8);
   return bytes;
 }
 
@@ -294,11 +294,39 @@ describe("createVoiceUploadHandler", () => {
       expect(h.utteranceCalls).toHaveLength(0);
     });
 
-    // [bite-proof: skipping isMp4Audio would let this reach transcode.]
+    // [bite-proof: skipping sniffAudioContainer would let this reach transcode.]
     it("a RIFF header", async () => {
       const h = harness();
       const handler = typedHandler(h.deps);
       const result = await handler([meta()], riffBytes(), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    // [bite-proof: skipping isMp4Audio on the mov branch would let this reach transcode.]
+    it("an ftyp header with a brand outside the MP4 audio list (QuickTime)", async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta()], m4aBytes(64, "qt  "), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    it('format:"webm" with m4a bytes', async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta({ format: "webm" })], m4aBytes(), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    it('format:"m4a" with webm bytes', async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta({ format: "m4a" })], webmBytes(), DEVICE_1);
       expect(result.kind).toBe("invalid");
       expect(h.makeTempDirCalls()).toBe(0);
       expect(h.transcodes).toHaveLength(0);
