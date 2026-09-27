@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePlan, replaceBlock } from "./blocks.js";
+import { blockId, parsePlan, replaceBlock } from "./blocks.js";
 
 describe("parsePlan — block kinds and line ranges", () => {
   const src = [
@@ -120,6 +120,27 @@ describe("replaceBlock", () => {
     expect(result.endsWith("\n")).toBe(false);
     expect(result).toBe("Paragraph 0.\n\nNew last.");
   });
+
+  it("keeps CRLF endings inside the replaced range when the file is CRLF (textarea edits are LF)", () => {
+    const crlf = "A.\r\n\r\nB.\r\n\r\nC.\r\n";
+    const blocks = parsePlan(crlf);
+    const target = blocks[1];
+    if (target === undefined) throw new Error("expected block 1");
+    const result = replaceBlock(crlf, target, "X.");
+    expect(result).toBe("A.\r\n\r\nX.\r\n\r\nC.\r\n");
+    // No bare \n anywhere — every \n is part of a \r\n pair.
+    expect(/(?<!\r)\n/.test(result)).toBe(false);
+  });
+
+  it("does not add a stray trailing CR when a no-trailing-newline CRLF file's last block is replaced", () => {
+    const crlf = "A.\r\n\r\nB.";
+    const blocks = parsePlan(crlf);
+    const target = blocks[1];
+    if (target === undefined) throw new Error("expected block 1");
+    const result = replaceBlock(crlf, target, "X.");
+    expect(result).toBe("A.\r\n\r\nX.");
+    expect(result.endsWith("\r")).toBe(false);
+  });
 });
 
 describe("parsePlan — HTML safety and links", () => {
@@ -150,6 +171,26 @@ describe("parsePlan — task list checkboxes", () => {
     expect(html).toContain('<input type="checkbox" checked disabled>');
     expect(html).not.toContain("[ ]");
     expect(html).not.toContain("[x]");
+  });
+});
+
+describe("parsePlan — lone CR does not drift line maps", () => {
+  it("treats a lone \\r within a line as content, not a line break markdown-it would insert one for", () => {
+    const blocks = parsePlan("A.\rstill\n\nB.\n");
+    const paragraphA = blocks[0];
+    const paragraphB = blocks[1];
+    expect(paragraphA?.start).toBe(0);
+    expect(paragraphA?.end).toBe(1);
+    expect(paragraphA?.source).toBe("A.\rstill");
+    expect(paragraphB?.start).toBe(2);
+    expect(paragraphB?.end).toBe(3);
+    expect(paragraphB?.source).toBe("B.");
+  });
+});
+
+describe("blockId", () => {
+  it("is pinned to a stable value so the cross-task id format can't drift", () => {
+    expect(blockId("paragraph", "Hello", 0)).toBe("495b36a9-0");
   });
 });
 

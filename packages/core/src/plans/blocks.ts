@@ -194,7 +194,15 @@ export function parsePlan(markdown: string): PlanBlock[] {
   }
 
   const bodyText = lines.slice(bodyStart).join("\n");
-  const tokens = md.parse(bodyText, {});
+  // markdown-it's own normalize step treats a lone `\r` (not part of `\r\n`)
+  // as a line break too, the same as our own `lines` array's `\n`-only split
+  // does not — a stray `\r` inside a line would otherwise shift every
+  // subsequent token's `map` by one line relative to our own line indices.
+  // Blank it out to a space for parsing only; `lines` (and therefore every
+  // block's `source`, and `replaceBlock`'s splicing) keeps the original
+  // bytes untouched.
+  const parseText = bodyText.replace(/\r(?!\n)/g, " ");
+  const tokens = md.parse(parseText, {});
 
   const topLevel: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -232,11 +240,23 @@ export function parsePlan(markdown: string): PlanBlock[] {
   return blocks;
 }
 
+/** True when `markdown`'s own line ending (sampled from its first line break) is `\r\n`. */
+function usesCrlf(markdown: string): boolean {
+  const newlineIndex = markdown.indexOf("\n");
+  return newlineIndex > 0 && markdown[newlineIndex - 1] === "\r";
+}
+
 /**
  * Replaces lines `block.start..block.end` (exclusive) with `newSource`,
  * split on `"\n"`. Every other line is untouched — including a CRLF line's
  * trailing `\r`, and whether the file ends with a trailing newline, since
  * both survive only in lines this function never touches.
+ *
+ * `newSource` itself is always LF (it comes from a textarea). When `markdown`
+ * is a CRLF file, each of its lines is re-terminated with `\r` before
+ * splicing so the result doesn't end up with mixed line endings — a bare
+ * `\n` from the replacement sitting next to `\r\n` from the rest of the
+ * file.
  */
 export function replaceBlock(
   markdown: string,
@@ -244,7 +264,22 @@ export function replaceBlock(
   newSource: string,
 ): string {
   const lines = markdown.split("\n");
-  const newLines = newSource.split("\n");
+  const crlf = usesCrlf(markdown);
+  const hadTrailingNewline = markdown.endsWith("\n");
+  const normalizedNewLines = newSource.replace(/\r\n?/g, "\n").split("\n");
+
+  // The replacement's last line becomes the file's own last line — with no
+  // line break after it — exactly when this block reaches the true end of a
+  // file that itself has no trailing newline. Every other new line is
+  // followed by a `\n` from `join`, so it needs the file's own `\r` first.
+  const replacesFinalLineWithoutTrailingNewline = !hadTrailingNewline && block.end === lines.length;
+  const newLines = crlf
+    ? normalizedNewLines.map((line, i) => {
+        const isLast = i === normalizedNewLines.length - 1;
+        return isLast && replacesFinalLineWithoutTrailingNewline ? line : `${line}\r`;
+      })
+    : normalizedNewLines;
+
   lines.splice(block.start, block.end - block.start, ...newLines);
   return lines.join("\n");
 }
