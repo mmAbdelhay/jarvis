@@ -153,6 +153,13 @@ export const STRINGS = {
     en: "Not available on this device or build",
     ar: "غير متاحة على هذا الجهاز أو هذا الإصدار",
   },
+  // iOS sideloaded builds (AltStore/SideStore/personal-team Xcode): free
+  // signing strips the push entitlement, so the token fetch always fails.
+  // Named explicitly so users don't chase a bug that isn't one.
+  "settings.notifications.sideloaded": {
+    en: "Not available on sideloaded iOS builds — free signing has no push permission. Everything else works.",
+    ar: "غير متاحة في إصدارات iOS المثبّتة جانبيًا — التوقيع المجاني لا يدعم إشعارات الدفع. كل شيء آخر يعمل.",
+  },
   "settings.notifications.pending": {
     en: "Will register when connected",
     ar: "ستُسجَّل عند الاتصال",
@@ -168,6 +175,20 @@ export const STRINGS = {
   "notifications.channelName": {
     en: "Jarvis",
     ar: "جارفيس",
+  },
+  // Free-signing plan, work item 3: sideloaded iOS builds die 7 days after
+  // signing. Banner under 2 days; local notification a day before.
+  "expiry.banner": {
+    en: "This build expires in {days} day(s). Refresh it with AltStore or SideStore.",
+    ar: "تنتهي صلاحية هذا الإصدار خلال {days} يوم/أيام. حدّثه عبر AltStore أو SideStore.",
+  },
+  "expiry.notification.title": {
+    en: "Jarvis expires tomorrow",
+    ar: "تنتهي صلاحية Jarvis غدًا",
+  },
+  "expiry.notification.body": {
+    en: "Sideloaded builds stop opening after 7 days. Refresh with AltStore or SideStore to keep it running.",
+    ar: "الإصدارات المثبّتة جانبيًا تتوقف عن الفتح بعد 7 أيام. حدّثه عبر AltStore أو SideStore ليستمر في العمل.",
   },
   "common.retry": {
     en: "Retry",

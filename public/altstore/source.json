@@ -1,0 +1,15 @@
+{
+  "name": "Jarvis",
+  "identifier": "dev.jarvis.source",
+  "apps": [
+    {
+      "name": "Jarvis",
+      "bundleIdentifier": "dev.jarvis.mobile",
+      "developerName": "Muhammad AbdElHay",
+      "subtitle": "Your machine, in your pocket — companion app for the Jarvis desktop",
+      "localizedDescription": "Your machine, in your pocket — companion app for the Jarvis desktop",
+      "iconURL": "https://raw.githubusercontent.com/mmAbdelhay/jarvis/master/apps/mobile/assets/icon.png",
+      "versions": []
+    }
+  ]
+}

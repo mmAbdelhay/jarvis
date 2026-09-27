@@ -18,7 +18,10 @@ const config: ExpoConfig = {
   name: "Jarvis",
   slug: "jarvis-mobile",
   scheme: "jarvis",
-  version: "0.0.0",
+  // Real version, not 0.0.0: AltStore/SideStore key updates off
+  // CFBundleShortVersionString, and the pair screen shows it so a device
+  // with several sideloaded builds can say which one it runs.
+  version: "0.1.5",
   // "default" (not "portrait"): the app locks portrait itself at the JS
   // level (`expo-screen-orientation`, app/_layout.tsx on mount) everywhere
   // except the sidecar WebView screen, which unlocks on focus so a
@@ -39,6 +42,10 @@ const config: ExpoConfig = {
   // Architecture is the only architecture from SDK 52 on, nothing to opt into.
   ios: {
     bundleIdentifier: "dev.jarvis.mobile",
+    // Without this the app installs on iPad as a scaled-up iPhone app.
+    // The JS-level portrait lock (app/_layout.tsx) still applies; the
+    // sidecar WebView screen still unlocks on focus.
+    supportsTablet: true,
     infoPlist: {
       NSCameraUsageDescription:
         "Jarvis uses the camera to scan the pairing QR code shown by the desktop app. / يستخدم Jarvis الكاميرا لمسح رمز الاقتران المعروض في تطبيق سطح المكتب.",
@@ -102,6 +109,9 @@ const config: ExpoConfig = {
     ],
   ],
   extra: {
+    // Shown on the pair screen next to `version` — bumped per sideload
+    // beta so an installed build is identifiable without a debugger.
+    build: "beta.3",
     router: {
       origin: false,
     },

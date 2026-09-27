@@ -106,6 +106,13 @@ to Applications. Two things are worth knowing before you do:
 same releases page, install it on the phone, and pair from Settings →
 Remote access on the desktop ([how](docs/guide/remote-access.md)).
 
+**iPhone / iPad (optional)** — sideload `jarvis-mobile-<version>.ipa` from
+the releases page with AltStore or SideStore and your own free Apple ID;
+there is no App Store or TestFlight build (that needs Apple's $99/year
+programme). Free signing means a 7-day refresh cycle (the tools automate
+it) and no push notifications — everything else works. Full walkthrough:
+**[iPhone and iPad](docs/guide/ios-install.md)**.
+
 **Linux** — grab the `.AppImage`, make it executable, and run it. There is
 nothing to install and no package manager involved:
 

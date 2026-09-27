@@ -1,10 +1,10 @@
-import { CLOSE, HANDSHAKE_TIMEOUT_MS, PROTOCOL_VERSION, encodeMessage } from "@jarvis/wire";
+import { CLOSE, PROTOCOL_VERSION, encodeMessage } from "@jarvis/wire";
 import type { PairingLink } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { createFakeClock } from "./clock";
 import type { FakeSocket } from "./fake-transport";
 import { createFakeTransport } from "./fake-transport";
-import { needsHost, pair, withHost } from "./pairing";
+import { PAIR_CONNECT_TIMEOUT_MS, needsHost, pair, pairWithFallback, withHost } from "./pairing";
 import type { PairOutcome } from "./pairing";
 import type { Transport, TransportEvent, TransportSocket } from "./transport";
 
@@ -106,7 +106,11 @@ describe("pair", () => {
     const socket = latestSocket(transport);
     socket.emit({ kind: "error", message: "invalid fingerprint" });
     socket.emit({ kind: "close", code: 1006, reason: "fingerprint" });
-    await expect(promise).resolves.toEqual({ ok: false, reason: "fingerprint" });
+    await expect(promise).resolves.toEqual({
+      ok: false,
+      reason: "fingerprint",
+      detail: "invalid fingerprint",
+    });
   });
 
   it("maps a close (any code) before open to unreachable", async () => {
@@ -123,7 +127,11 @@ describe("pair", () => {
     const socket = latestSocket(transport);
     socket.emit({ kind: "error", message: "connection refused" });
     socket.emit({ kind: "close", code: 1006, reason: "" });
-    await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    await expect(promise).resolves.toEqual({
+      ok: false,
+      reason: "unreachable",
+      detail: "connection refused",
+    });
   });
 
   it("maps a malformed paired frame (bad deviceId) to protocol", async () => {
@@ -237,18 +245,22 @@ describe("pair", () => {
   });
 
   it(
-    "maps no `open` within HANDSHAKE_TIMEOUT_MS of the call to unreachable " +
+    "maps no `open` within PAIR_CONNECT_TIMEOUT_MS of the call to unreachable " +
       "[bite-proof: drop the pre-open deadline and this test times out instead of resolving]",
     async () => {
       const { transport, clock, deps } = setup();
       const promise = pair(deps, LINK, DEVICE_NAME);
       // No socket.emit({kind: "open"}) at all — the transport never connects.
-      clock.advance(HANDSHAKE_TIMEOUT_MS - 1);
+      clock.advance(PAIR_CONNECT_TIMEOUT_MS - 1);
       const socket = latestSocket(transport);
       expect(socket.closedWith).toBeUndefined();
 
       clock.advance(1);
-      await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+      await expect(promise).resolves.toEqual({
+        ok: false,
+        reason: "unreachable",
+        detail: `no connection within ${PAIR_CONNECT_TIMEOUT_MS / 1000}s`,
+      });
       expect(socket.closedWith).toBeDefined();
     },
   );
@@ -300,7 +312,7 @@ describe("pair", () => {
       // post-open timer that the synchronous `open` handler already armed
       // — advancing past the 5s mark would then wrongly settle
       // "unreachable" even though pairing had already moved past "open".
-      clock.advance(HANDSHAKE_TIMEOUT_MS);
+      clock.advance(PAIR_CONNECT_TIMEOUT_MS);
       expect(settled).toBe(false);
 
       // The state machine is still coherent afterwards: once `deps.transport.open()`
@@ -450,5 +462,88 @@ describe("withHost", () => {
 
   it("returns undefined for :: (still unspecified, not a dialable host)", () => {
     expect(withHost(LINK, "::")).toBeUndefined();
+  });
+});
+
+describe("pairWithFallback (iOS sideload fix: pinned-IP fallback + detail)", () => {
+  const NAMED_LINK: PairingLink = { ...LINK, name: "laptop.tailfee19e.ts.net" };
+  const PAIRED_REPLY = encodeMessage({
+    t: "paired",
+    v: PROTOCOL_VERSION,
+    deviceId: "d".repeat(32),
+    token: "T".repeat(43),
+  });
+
+  function failUnopened(socket: FakeSocket, message: string): void {
+    socket.emit({ kind: "error", message });
+    socket.emit({ kind: "close", code: 1006, reason: "" });
+  }
+
+  it("a by-name dial that dies unreached retries pinned by IP and stores a record without name", async () => {
+    const { transport, deps } = setup();
+    const promise = pairWithFallback(deps, NAMED_LINK, DEVICE_NAME);
+    failUnopened(latestSocket(transport), "TLS handshake failed");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.sockets).toHaveLength(2);
+    const second = latestSocket(transport);
+    expect(second.url).toBe(`wss://${LINK.host}:${LINK.port}/pair`);
+    expect(second.trust).toEqual({ kind: "pin", fingerprint: LINK.fingerprint });
+
+    second.emit({ kind: "open" });
+    second.emit({ kind: "message", text: PAIRED_REPLY });
+    const outcome = await promise;
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.record.name).toBeUndefined();
+    expect(outcome.record.host).toBe(LINK.host);
+  });
+
+  it("never falls back when the server was reached (denied consumed the secret)", async () => {
+    const { transport, deps } = setup();
+    const promise = pairWithFallback(deps, NAMED_LINK, DEVICE_NAME);
+    const socket = latestSocket(transport);
+    socket.emit({ kind: "open" });
+    socket.emit({ kind: "close", code: CLOSE.pairingDenied, reason: "" });
+
+    const outcome = await promise;
+    expect(outcome).toMatchObject({ ok: false, reason: "denied" });
+    expect(transport.sockets).toHaveLength(1);
+  });
+
+  it("never falls back on a link without a name", async () => {
+    const { transport, deps } = setup();
+    const promise = pairWithFallback(deps, LINK, DEVICE_NAME);
+    failUnopened(latestSocket(transport), "connrefused");
+    const outcome = await promise;
+    expect(outcome).toMatchObject({ ok: false, reason: "unreachable" });
+    expect(transport.sockets).toHaveLength(1);
+  });
+
+  it("both paths dead: reports the by-name failure with its transport detail", async () => {
+    const { transport, deps } = setup();
+    const promise = pairWithFallback(deps, NAMED_LINK, DEVICE_NAME);
+    failUnopened(latestSocket(transport), "The certificate for this server is invalid");
+    await Promise.resolve();
+    await Promise.resolve();
+    failUnopened(latestSocket(transport), "connrefused");
+    const outcome = await promise;
+    expect(outcome).toMatchObject({
+      ok: false,
+      reason: "unreachable",
+      detail: "The certificate for this server is invalid",
+    });
+  });
+
+  it("a fallback fingerprint mismatch always surfaces over the by-name failure", async () => {
+    const { transport, deps } = setup();
+    const promise = pairWithFallback(deps, NAMED_LINK, DEVICE_NAME);
+    failUnopened(latestSocket(transport), "stall");
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = latestSocket(transport);
+    second.emit({ kind: "close", code: 1006, reason: "fingerprint" });
+    const outcome = await promise;
+    expect(outcome).toMatchObject({ ok: false, reason: "fingerprint" });
   });
 });

@@ -52,6 +52,15 @@ export type NotificationsModule = {
   // throwing") guards against an older native build that doesn't export
   // this function at all.
   getLastNotificationResponseAsync?(): Promise<NativeNotificationResponse | null | undefined>;
+  // Free-signing plan, work item 3: local scheduling for the
+  // provisioning-expiry warning. `type: "date"` is expo-notifications'
+  // SchedulableTriggerInputTypes.DATE string literal.
+  scheduleNotificationAsync(request: {
+    identifier: string;
+    content: { title: string; body: string };
+    trigger: { type: "date"; date: Date };
+  }): Promise<string>;
+  cancelScheduledNotificationAsync(identifier: string): Promise<void>;
   setNotificationHandler(handler: {
     handleNotification: () => Promise<{
       shouldShowBanner: boolean;
@@ -198,6 +207,20 @@ export function buildNotificationsAdapter(getModules: () => NativeModules): Noti
 
     platform(): "ios" | "android" {
       return getModules().Platform.OS === "ios" ? "ios" : "android";
+    },
+
+    async scheduleLocal(input): Promise<void> {
+      const { Notifications } = getModules();
+      await Notifications.scheduleNotificationAsync({
+        identifier: input.identifier,
+        content: { title: input.title, body: input.body },
+        trigger: { type: "date", date: input.date },
+      });
+    },
+
+    async cancelScheduledLocal(identifier): Promise<void> {
+      const { Notifications } = getModules();
+      await Notifications.cancelScheduledNotificationAsync(identifier);
     },
   };
 }

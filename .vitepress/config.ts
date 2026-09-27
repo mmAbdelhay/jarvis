@@ -74,6 +74,7 @@ export default defineConfig({
           { text: "Workspace tabs", link: "/docs/guide/workspace-tabs" },
           { text: "The API client", link: "/docs/guide/api-client" },
           { text: "Remote access", link: "/docs/guide/remote-access" },
+          { text: "iPhone and iPad", link: "/docs/guide/ios-install" },
           { text: "Troubleshooting", link: "/docs/guide/troubleshooting" },
         ],
       },

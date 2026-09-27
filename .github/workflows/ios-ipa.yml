@@ -1,0 +1,98 @@
+name: iOS IPA
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: npx tsc -b packages/wire
+
+      - run: npx expo prebuild --platform ios --no-install
+        working-directory: apps/mobile
+
+      - run: pod install
+        working-directory: apps/mobile/ios
+
+      - name: Archive unsigned app
+        working-directory: apps/mobile/ios
+        run: |
+          xcodebuild archive \
+            -workspace Jarvis.xcworkspace \
+            -scheme Jarvis \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/Jarvis.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        working-directory: apps/mobile/ios
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          IPA_NAME="jarvis-mobile-${VERSION}.ipa"
+          mkdir Payload
+          cp -R build/Jarvis.xcarchive/Products/Applications/Jarvis.app Payload/
+          zip -qr "$IPA_NAME" Payload
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
+
+      # A tag push can land before anyone has created the release for it —
+      # fall back to a draft release carrying the IPA rather than failing;
+      # publishing the draft (or the finished release) stays a human step.
+      - name: Upload IPA to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" "apps/mobile/ios/$IPA_NAME" --clobber ||
+            gh release create "$RELEASE_TAG" "apps/mobile/ios/$IPA_NAME" \
+              --draft --verify-tag --title "$RELEASE_TAG" --notes "Draft — assets landing."
+
+      # A manually selected older tag predates this script, so use the current
+      # default-branch copy to build the post-upload preview.
+      - name: Check out source generator
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: source-generator
+          sparse-checkout: scripts/update-altstore-source.mjs
+
+      # Best-effort: the preview is informational (nothing here is pushed),
+      # so a missing script — a tag or default branch that predates it —
+      # must never fail a build whose IPA already uploaded.
+      - name: Refresh AltStore source preview
+        run: |
+          node source-generator/scripts/update-altstore-source.mjs ||
+            node scripts/update-altstore-source.mjs ||
+            echo "source preview skipped (script not present on this ref)"
+          echo '### AltStore source update required' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Regenerate `public/altstore/source.json` from the release assets and merge the change.' >> "$GITHUB_STEP_SUMMARY"

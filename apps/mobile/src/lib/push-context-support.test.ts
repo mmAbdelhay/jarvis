@@ -131,6 +131,8 @@ function createFakeAdapter(): NotificationsAdapter {
     setForegroundHandler: vi.fn(),
     platform: vi.fn(() => "ios" as const),
     setAutoServerRegistrationEnabled: vi.fn(async () => {}),
+    scheduleLocal: vi.fn(async () => {}),
+    cancelScheduledLocal: vi.fn(async () => {}),
   };
 }
 
