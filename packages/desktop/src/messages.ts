@@ -51,6 +51,103 @@ function splitOnNamePlaceholder(template: string): { before: string; after: stri
 }
 
 export const MESSAGES = {
+  planPanelLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "لوحة الخطة" : "Plan panel",
+  planEmptyTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد خطة لهذه الجلسة بعد" : "No plan for this session yet",
+  planEmptyHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ابدأ وضع الخطة في الجلسة لعرضها هنا."
+      : "Start plan mode in the session to see it here.",
+  planSourceSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة · وضع الخطة" : "This session · plan mode",
+  planSourceMode: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة" : "Plan mode",
+  planSourceRepo: (language: "ar" | "en"): string => (language === "ar" ? "المستودع" : "Repo"),
+  planKindSpec: (language: "ar" | "en"): string => (language === "ar" ? "مواصفات" : "spec"),
+  planKindPlan: (language: "ar" | "en"): string => (language === "ar" ? "خطة" : "plan"),
+  planSourceToggle: (language: "ar" | "en"): string => (language === "ar" ? "المصدر" : "Source"),
+  planClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق الخطة" : "Close plan"),
+  planUpdated: (language: "ar" | "en"): string => (language === "ar" ? "حُدِّثت" : "Updated"),
+  planPickerOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر خطة" : "Choose a plan",
+  planPickerSearch: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث عن خطة" : "Search plans",
+  planPickerSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة" : "This session",
+  planPickerRecent: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة · حديثة" : "Plan mode · recent",
+  planPickerRepo: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستودع · docs/superpowers" : "Repo · docs/superpowers",
+  planComment: (language: "ar" | "en"): string => (language === "ar" ? "تعليق" : "Comment"),
+  planCommentPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اكتب تعليقًا…" : "Write a comment…",
+  planAddComment: (language: "ar" | "en"): string =>
+    language === "ar" ? "أضف تعليقًا" : "Add comment",
+  planCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  planEdit: (language: "ar" | "en"): string => (language === "ar" ? "تعديل" : "Edit"),
+  planDelete: (language: "ar" | "en"): string => (language === "ar" ? "حذف" : "Delete"),
+  planSave: (language: "ar" | "en"): string => (language === "ar" ? "حفظ" : "Save"),
+  planCommentNumber: (language: "ar" | "en"): string => (language === "ar" ? "التعليق" : "Comment"),
+  planCommentOnBlock: (language: "ar" | "en"): string =>
+    language === "ar" ? "علّق على هذا القسم" : "Comment on this section",
+  planComments: (language: "ar" | "en"): string => (language === "ar" ? "تعليقات" : "comments"),
+  planQueued: (language: "ar" | "en"): string => (language === "ar" ? "في الانتظار" : "queued"),
+  planSent: (language: "ar" | "en"): string => (language === "ar" ? "أُرسلت" : "sent"),
+  planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
+  planKeepLater: (language: "ar" | "en"): string =>
+    language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  planSendClaude: (language: "ar" | "en"): string =>
+    language === "ar" ? "إرسال إلى Claude" : "Send to Claude",
+  planSectionChanged: (language: "ar" | "en"): string =>
+    language === "ar" ? "تغيّر القسم" : "Section changed",
+  // Fix round 1, I3: loadDocument's PlanResult failure reasons, translated
+  // by reason rather than shown as a swallowed error. Closed table —
+  // plan-panel.ts's planErrorKey() switch is a compile error if a reason
+  // is ever added here without a case there.
+  planErrorForbidden: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا تملك صلاحية الوصول إلى هذا الملف."
+      : "You don't have access to this file.",
+  planErrorNotFound: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم يعد هذا الملف موجودًا." : "This file no longer exists.",
+  planErrorTooLarge: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا الملف كبير جدًا ليُفتح." : "This file is too large to open.",
+  planErrorConflict: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر هذا الملف على القرص. أعد فتحه لرؤية أحدث نسخة."
+      : "This file changed on disk. Reopen it to see the latest version.",
+  planErrorMissingBlock: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يعد هذا القسم موجودًا في الملف."
+      : "This section no longer exists in the file.",
+  planErrorIo: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّرت قراءة هذا الملف." : "Could not read this file.",
+  // Generic fallback for a rejected promise or plansSend's own reasons —
+  // the async click handlers (save/edit/delete/send/refreshList) have no
+  // more specific detail to translate than "that didn't work".
+  planActionError: (language: "ar" | "en"): string =>
+    language === "ar" ? "حدث خطأ ما. حاول مرة أخرى." : "Something went wrong. Try again.",
+  planSendErrorNoComments: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد شيء في الانتظار لإرساله." : "There is nothing queued to send.",
+  planSendErrorForbidden: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "إرسال التعليقات غير مسموح به هنا."
+      : "Sending comments is not allowed here.",
+  planSendErrorNoPane: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر العثور على الجلسة لإرسال التعليقات إليها."
+      : "Could not find the session to send to.",
+  planDraftOrphaned: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر القسم المرتبط بهذه المسودة."
+      : "The section this draft was on has changed.",
+  // S1: relative-time units composed by plan-panel.ts as `${count}${unit}`
+  // — t() takes no interpolation args, so the count/unit split stays here.
+  planRelativeNow: (language: "ar" | "en"): string => (language === "ar" ? "الآن" : "now"),
+  planRelativeMinute: (language: "ar" | "en"): string => (language === "ar" ? "د" : "m"),
+  planRelativeHour: (language: "ar" | "en"): string => (language === "ar" ? "س" : "h"),
+  planRelativeDay: (language: "ar" | "en"): string => (language === "ar" ? "ي" : "d"),
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل اختصار ${combo} — يبدو أن تطبيقًا آخر يستخدمه بالفعل.`
@@ -1346,6 +1443,8 @@ export const MESSAGES = {
       ? "تعذّر تسجيل هذا الجهاز لتلقّي الإشعارات"
       : "This device could not be registered for notifications",
 };
+
+export type MessageKey = keyof typeof MESSAGES;
 
 // NOT the same table as arabicSessionsCount below, even though the two
 // started out identical (that copy-paste is exactly the bug this comment
