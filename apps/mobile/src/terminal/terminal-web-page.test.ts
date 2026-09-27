@@ -55,6 +55,8 @@ describe("findInlineScripts", () => {
     expect(findInlineScripts('<script type="module">x</script>')).toHaveLength(1);
     expect(findInlineScripts('<script src="a.js">x</script>')).toHaveLength(1);
     expect(findInlineScripts("<SCRIPT >x</SCRIPT>")).toHaveLength(1);
+    // A data-src attribute is not a src.
+    expect(findInlineScripts('<script data-src="a.js"></script>')).toHaveLength(1);
   });
 
   it("accepts external scripts only", () => {

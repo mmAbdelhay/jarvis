@@ -41,16 +41,43 @@ export function unlockMessageKey(outcome: UnlockOutcome): MessageKey | undefined
   }
 }
 
-/** Browser build: after the automatic stored sign-in (keep-signed-in)
- *  found nothing usable, raise the passkey sheet on its own — only when
- *  the browser has WebAuthn and the laptop has a passkey to offer. A
- *  browser that refuses a sheet without a tap just leaves the button. */
-export function shouldAutoPasskey(
-  storedOutcome: UnlockOutcome,
-  context: { supported: boolean; hasPasskeys: boolean },
-): boolean {
-  if (!context.supported || !context.hasPasskeys) return false;
+export type PasskeyContext = {
+  /** WebAuthn exists in this browser. */
+  supported: boolean;
+  /** The platform reports a user-verifying platform authenticator
+   *  (Touch ID, Windows Hello, ...). */
+  platformAuthenticator: boolean;
+  /** The laptop has at least one passkey. */
+  hasPasskeys: boolean;
+};
+
+/** Browser build (controller ruling): after the page-load stored sign-in
+ *  found nothing usable, raise the passkey sheet on its own only when the
+ *  platform can verify the owner and the laptop has a passkey. Otherwise
+ *  the passkey button is there, above the password. */
+export function shouldAutoPasskey(storedOutcome: UnlockOutcome, context: PasskeyContext): boolean {
+  if (!context.supported || !context.platformAuthenticator || !context.hasPasskeys) return false;
   return storedOutcome === "no-stored-token" || storedOutcome === "password-required";
+}
+
+/** The browser's one automatic sign-in at page load: the stored token
+ *  (keep-signed-in), then maybe the passkey sheet. Never throws — a failing
+ *  step ends as "failed", so the screen can always leave its busy state. A
+ *  sheet the browser refuses without a tap comes back as "cancelled" and
+ *  leaves the button. */
+export async function runWebAutoSignIn(steps: {
+  storedSignIn(): Promise<UnlockOutcome>;
+  passkeyContext(): Promise<PasskeyContext>;
+  passkeySignIn(): Promise<UnlockOutcome>;
+}): Promise<UnlockOutcome> {
+  try {
+    const stored = await steps.storedSignIn();
+    if (stored === "unlocked") return stored;
+    if (!shouldAutoPasskey(stored, await steps.passkeyContext())) return stored;
+    return await steps.passkeySignIn();
+  } catch {
+    return "failed";
+  }
 }
 
 export function registerMessageKey(outcome: RegisterOutcome): MessageKey | undefined {

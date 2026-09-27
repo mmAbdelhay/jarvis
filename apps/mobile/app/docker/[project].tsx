@@ -12,7 +12,6 @@ import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   RefreshControl,
   ScrollView,
@@ -21,6 +20,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { dialogs } from "@/lib/dialog";
 import { appStateFollowAction } from "@/lib/docker-screen";
 import type { DockerActionKind, DockerRow, DockerState } from "@/lib/docker-store";
 import { createDockerStore, DOCKER_ACTION_BUSY, DOCKER_LOAD_FAILED } from "@/lib/docker-store";
@@ -149,36 +149,33 @@ export default function DockerScreen() {
   }
 
   function confirmStop(row: DockerRow): void {
-    Alert.alert(t(language, "docker.confirmStop", { name: row.name }), undefined, [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => runAction("stop", row.container),
-      },
-    ]);
+    dialogs.confirm({
+      title: t(language, "docker.confirmStop", { name: row.name }),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => runAction("stop", row.container),
+    });
   }
 
   function confirmRestart(row: DockerRow): void {
-    Alert.alert(t(language, "docker.confirmRestart", { name: row.name }), undefined, [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => runAction("restart", row.container),
-      },
-    ]);
+    dialogs.confirm({
+      title: t(language, "docker.confirmRestart", { name: row.name }),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => runAction("restart", row.container),
+    });
   }
 
   function confirmComposeDown(): void {
-    Alert.alert(t(language, "docker.confirmComposeDown", { project: projectName }), undefined, [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => runAction("composeDown"),
-      },
-    ]);
+    dialogs.confirm({
+      title: t(language, "docker.confirmComposeDown", { project: projectName }),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => runAction("composeDown"),
+    });
   }
 
   const rows = state.view?.rows ?? [];

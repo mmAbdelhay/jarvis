@@ -988,9 +988,10 @@ export const STRINGS = {
     ar: "إبقائي مسجّل الدخول على هذا المتصفح",
   },
   "auth.keepSignedInHint": {
-    en: "Off: every visit needs a passkey or the password. On: this browser keeps a sign-in token, which stops working after 7 days without use.",
-    ar: "عند الإيقاف: كل زيارة تحتاج إلى مفتاح مرور أو كلمة المرور. عند التشغيل: يحتفظ هذا المتصفح برمز تسجيل دخول يتوقف عن العمل بعد 7 أيام دون استخدام.",
+    en: "Off: every visit needs a passkey or the password. On: opening Jarvis in this browser signs you in automatically (the sign-in stops working after 7 days without use); after locking for inactivity you still need a passkey or the password.",
+    ar: "عند الإيقاف: كل زيارة تحتاج إلى مفتاح مرور أو كلمة المرور. عند التشغيل: فتح Jarvis في هذا المتصفح يسجّل دخولك تلقائيًا (يتوقف تسجيل الدخول بعد 7 أيام دون استخدام)؛ وبعد القفل بسبب عدم النشاط ستحتاج إلى مفتاح مرور أو كلمة المرور.",
   },
+
   "passkey.offerTitle": {
     en: "Add a passkey for this browser?",
     ar: "إضافة مفتاح مرور لهذا المتصفح؟",
@@ -1010,6 +1011,11 @@ export const STRINGS = {
   "passkey.failed": {
     en: "Couldn't add the passkey. Try again.",
     ar: "تعذّرت إضافة مفتاح المرور. حاول مجددًا.",
+  },
+  "settings.passkeys": { en: "Passkeys", ar: "مفاتيح المرور" },
+  "settings.passkeysHint": {
+    en: "Add a passkey for this browser: sign in with Face ID, Touch ID, Windows Hello or your phone instead of the password. Enter the password to confirm.",
+    ar: "أضف مفتاح مرور لهذا المتصفح: سجّل الدخول بالوجه أو البصمة أو Windows Hello أو هاتفك بدلًا من كلمة المرور. أدخل كلمة المرور للتأكيد.",
   },
   "settings.security": { en: "Security", ar: "الأمان" },
   "settings.idleLock": { en: "Lock after inactivity", ar: "القفل بعد عدم النشاط" },

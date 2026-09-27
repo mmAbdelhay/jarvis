@@ -2,7 +2,6 @@ import Constants from "expo-constants";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
-  Alert,
   Linking,
   Platform,
   ScrollView,
@@ -12,6 +11,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
+import { dialogs } from "@/lib/dialog";
+import { passkeys } from "@/lib/passkey";
 import { connectFromStoredPairing } from "@/lib/connect-stored";
 import { realClock } from "@/lib/clock";
 import { t } from "@/lib/i18n";
@@ -91,29 +93,29 @@ export default function SettingsScreen() {
   );
 
   function handleUnpair(): void {
-    Alert.alert(t(language, "settings.unpair"), t(language, "settings.unpairConfirm"), [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => {
-          void store.unpair();
-        },
+    dialogs.confirm({
+      title: t(language, "settings.unpair"),
+      message: t(language, "settings.unpairConfirm"),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => {
+        void store.unpair();
       },
-    ]);
+    });
   }
 
   function handleLogout(): void {
-    Alert.alert(t(language, "settings.logout"), t(language, "settings.logoutConfirm"), [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => {
-          void store.logout();
-        },
+    dialogs.confirm({
+      title: t(language, "settings.logout"),
+      message: t(language, "settings.logoutConfirm"),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => {
+        void store.logout();
       },
-    ]);
+    });
   }
 
   // M10 Task 6, rule 3: the "error" phase's status line shows the
@@ -316,6 +318,13 @@ export default function SettingsScreen() {
               onValueChange={(on) => void store.setKeepSignedIn(on).catch(() => {})}
             />
           </View>
+          {passkeys.isSupported() && (
+            <>
+              <Text style={styles.sectionTitle}>{t(language, "settings.passkeys")}</Text>
+              <Text style={styles.switchHint}>{t(language, "settings.passkeysHint")}</Text>
+              <PasskeyRegisterForm />
+            </>
+          )}
         </>
       )}
       <TouchableOpacity style={styles.dangerButton} onPress={handleLogout}>

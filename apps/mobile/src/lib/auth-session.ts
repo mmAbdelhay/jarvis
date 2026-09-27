@@ -104,6 +104,13 @@ export type AuthSessionDeps = {
   refreshStore: SecureStore;
   refreshStoredFlag: RefreshStoredFlag;
   deviceAuth: DeviceAuth;
+  /** The browser build (controller ruling, 13b fix round 1): the stored
+   *  refresh token only serves the automatic sign-in at page load. After
+   *  that first attempt — and so after any idle lock, logout or return to
+   *  the tab — unlocking needs a passkey or the password, and a return to
+   *  the foreground never re-arms `autoPrompt`. Native keeps the stored
+   *  token behind the device-owner check at every unlock. */
+  storedUnlockAtLaunchOnly?: boolean;
   idleMs: number;
   log(line: string): void;
 };
@@ -205,6 +212,9 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   // login, unpair): a login/refresh reply that lands afterwards must not
   // unlock again.
   let epoch = 0;
+  // Browser build: the one launch sign-in with the stored token is still
+  // available (see storedUnlockAtLaunchOnly).
+  let launchSignInAvailable = true;
   // The flag's last known value: written only when it changes.
   let storedFlag: boolean | undefined;
 
@@ -298,6 +308,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   }
 
   function lockLocally(cause: AuthLockCause): void {
+    launchSignInAvailable = false;
     dropSession();
     setView({ lockedLocally: true, lockCause: cause, autoPrompt: false });
     deps.rpc.lock();
@@ -356,6 +367,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     if (startedEpoch !== epoch && view.lockCause !== "idle") return false;
     await storeRefreshToken(tokens.refreshToken);
     if (startedEpoch !== epoch) return false;
+    // Signed in: the page-load sign-in (browser) is behind us.
+    launchSignInAvailable = false;
     access = { token: tokens.accessToken, expiresAt: receivedAt + lifetime };
     refreshToken = tokens.refreshToken;
     // Not a touch: a background refresh must not postpone the idle lock
@@ -475,6 +488,10 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
 
   async function unlockWithStoredRefresh(): Promise<UnlockOutcome> {
     if (view.autoPrompt) setView({ autoPrompt: false });
+    if (deps.storedUnlockAtLaunchOnly === true) {
+      if (!launchSignInAvailable) return "no-stored-token";
+      launchSignInAvailable = false;
+    }
     if (refreshing !== undefined) return refreshing;
     if (!(await hasPasscode())) return "no-stored-token";
     // Nothing stored (first launch after pairing, after a logout): no prompt.
@@ -542,6 +559,10 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   async function storagePolicyChanged(): Promise<void> {
     if (!(await hasPasscode())) {
       await deleteStored();
+      // A deleted record may linger on disk: spend the token it held with
+      // one rotation, keeping the new pair in memory only (the gate is off,
+      // so adoptTokens stores nothing).
+      if (refreshToken !== undefined) await refreshWith(refreshToken);
       return;
     }
     // Rotating (single-flight) stores the fresh token through adoptTokens,
@@ -572,8 +593,9 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     // Timers may not have run while suspended: check both deadlines now.
     if (access !== undefined && deps.clock.now() - lastActivityAt >= idleMs) idleLock();
     // A return to the foreground may raise the device-owner check itself
-    // (also after the idle lock just above).
-    if (!view.autoPrompt) setView({ autoPrompt: true });
+    // (also after the idle lock just above) — never in the browser, where
+    // only the page load signs in automatically.
+    if (!view.autoPrompt && deps.storedUnlockAtLaunchOnly !== true) setView({ autoPrompt: true });
     if (access === undefined) return;
     touch();
     armIdleTimer();

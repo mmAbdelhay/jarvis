@@ -10,7 +10,6 @@ import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -23,6 +22,7 @@ import { CollectionTree } from "@/components/api/CollectionTree";
 import { KeyValueRows } from "@/components/api/KeyValueRows";
 import { ResponseView } from "@/components/api/ResponseView";
 import { SecretField } from "@/components/api/SecretField";
+import { dialogs } from "@/lib/dialog";
 import type { ApiAction, ApiCollection, ApiVariable, ApiView } from "@/lib/api-store";
 import {
   API_ACTION_BUSY,
@@ -210,14 +210,13 @@ export default function ApiScreen() {
   }
 
   function confirmDelete(path: string, isFolder: boolean, name: string): void {
-    Alert.alert(t(language, "api.confirmDelete", { name }), undefined, [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => invoke({ kind: "delete", path }),
-      },
-    ]);
+    dialogs.confirm({
+      title: t(language, "api.confirmDelete", { name }),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => invoke({ kind: "delete", path }),
+    });
     void isFolder;
   }
 
@@ -252,14 +251,13 @@ export default function ApiScreen() {
   // the same api:delete channel createApiCollection's counterpart uses —
   // confirmed the same way as a folder/request delete.
   function confirmDeleteCollection(collection: ApiCollection): void {
-    Alert.alert(t(language, "api.confirmDelete", { name: collection.name }), undefined, [
-      { text: t(language, "common.cancel"), style: "cancel" },
-      {
-        text: t(language, "common.ok"),
-        style: "destructive",
-        onPress: () => invoke({ kind: "delete", path: collection.path }),
-      },
-    ]);
+    dialogs.confirm({
+      title: t(language, "api.confirmDelete", { name: collection.name }),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: () => invoke({ kind: "delete", path: collection.path }),
+    });
   }
 
   function startRename(path: string, isFolder: boolean, currentName: string): void {
@@ -356,21 +354,21 @@ export default function ApiScreen() {
       case "cancelled":
         return;
       case "overLimit":
-        Alert.alert(t(language, "api.upload.overLimit"));
+        dialogs.notice(t(language, "api.upload.overLimit"));
         return;
       case "busy":
-        Alert.alert(t(language, "api.upload.busy"));
+        dialogs.notice(t(language, "api.upload.busy"));
         return;
       case "offline":
-        Alert.alert(t(language, "api.upload.offline"));
+        dialogs.notice(t(language, "api.upload.offline"));
         return;
       case "refused":
         // Server-originated text, shown verbatim (global-constraints.md
         // rule 7) — never routed through the i18n table.
-        Alert.alert(result.text);
+        dialogs.notice(result.text);
         return;
       case "failed":
-        Alert.alert(t(language, "api.upload.failed"));
+        dialogs.notice(t(language, "api.upload.failed"));
     }
   }
 
@@ -385,7 +383,7 @@ export default function ApiScreen() {
       whenNotOpen: "reject",
     });
     if (!jsonResult.ok) {
-      Alert.alert(t(language, "api.import.failed"));
+      dialogs.notice(t(language, "api.import.failed"));
       return;
     }
     // Fix round 1 (I7): parsed with the same GitViewResult convention
@@ -394,7 +392,7 @@ export default function ApiScreen() {
     // all falls back to this screen's own translated message.
     const parsed = parseGitViewResult(jsonResult.value, (v) => (v === undefined ? undefined : v));
     if (!parsed.ok) {
-      Alert.alert(
+      dialogs.notice(
         parsed.text === MALFORMED_REPLY_NOTICE ? t(language, "api.import.failed") : parsed.text,
       );
       return;
@@ -1014,14 +1012,13 @@ export default function ApiScreen() {
             <TouchableOpacity
               style={styles.smallButton}
               onPress={() =>
-                Alert.alert(t(language, "api.history.clear"), undefined, [
-                  { text: t(language, "common.cancel"), style: "cancel" },
-                  {
-                    text: t(language, "common.ok"),
-                    style: "destructive",
-                    onPress: () => invoke({ kind: "clearHistory" }),
-                  },
-                ])
+                dialogs.confirm({
+                  title: t(language, "api.history.clear"),
+                  cancelText: t(language, "common.cancel"),
+                  confirmText: t(language, "common.ok"),
+                  destructive: true,
+                  onConfirm: () => invoke({ kind: "clearHistory" }),
+                })
               }
             >
               <Text style={styles.buttonText}>{t(language, "api.history.clear")}</Text>
@@ -1049,14 +1046,13 @@ export default function ApiScreen() {
           <TouchableOpacity
             style={styles.smallButton}
             onPress={() =>
-              Alert.alert(t(language, "api.cookies.clear"), undefined, [
-                { text: t(language, "common.cancel"), style: "cancel" },
-                {
-                  text: t(language, "common.ok"),
-                  style: "destructive",
-                  onPress: () => invoke({ kind: "clearCookies" }),
-                },
-              ])
+              dialogs.confirm({
+                title: t(language, "api.cookies.clear"),
+                cancelText: t(language, "common.cancel"),
+                confirmText: t(language, "common.ok"),
+                destructive: true,
+                onConfirm: () => invoke({ kind: "clearCookies" }),
+              })
             }
           >
             <Text style={styles.buttonText}>{t(language, "api.cookies.clear")}</Text>

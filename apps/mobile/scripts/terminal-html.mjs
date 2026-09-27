@@ -333,7 +333,7 @@ export function findInlineScripts(html) {
   const offenders = [];
   for (const match of html.matchAll(SCRIPT_ELEMENT_PATTERN)) {
     const [element, attributes, body] = match;
-    if (!/\bsrc\s*=/i.test(attributes) || body.trim() !== "") offenders.push(element);
+    if (!/(?:^|\s)src\s*=/i.test(attributes) || body.trim() !== "") offenders.push(element);
   }
   return offenders;
 }

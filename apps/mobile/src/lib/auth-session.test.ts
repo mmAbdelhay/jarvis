@@ -171,7 +171,9 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
-function setup(options: { passcode?: boolean; deviceAuth?: DeviceAuth } = {}) {
+function setup(
+  options: { passcode?: boolean; deviceAuth?: DeviceAuth; storedUnlockAtLaunchOnly?: boolean } = {},
+) {
   const clock = createFakeClock();
   const double = createRpcDouble(clock);
   const store = createStoreDouble(double.events);
@@ -184,6 +186,7 @@ function setup(options: { passcode?: boolean; deviceAuth?: DeviceAuth } = {}) {
     refreshStore: store.store,
     refreshStoredFlag: flag.flag,
     deviceAuth: options.deviceAuth ?? device.auth,
+    storedUnlockAtLaunchOnly: options.storedUnlockAtLaunchOnly,
     idleMs: IDLE,
     log: (line) => logs.push(line),
   });
@@ -666,7 +669,10 @@ describe("auth-session: the refresh-token-stored flag", () => {
 /** The browser build's device-owner gate over a mutable "Keep me signed in". */
 function browserSetup(keep: boolean) {
   const setting = { keep };
-  const ctx = setup({ deviceAuth: createWebDeviceAuth(async () => setting.keep) });
+  const ctx = setup({
+    deviceAuth: createWebDeviceAuth(async () => setting.keep),
+    storedUnlockAtLaunchOnly: true,
+  });
   /** A page reload: memory is gone, IndexedDB and prefs stay. */
   function reload() {
     const clock = createFakeClock();
@@ -677,6 +683,7 @@ function browserSetup(keep: boolean) {
       refreshStore: ctx.store.store,
       refreshStoredFlag: ctx.flag.flag,
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
+      storedUnlockAtLaunchOnly: true,
       idleMs: IDLE,
       log: () => {},
     });
@@ -750,14 +757,26 @@ describe("auth-session: storagePolicyChanged (the setting flipped while unlocked
     expect(browser.double.rpc.state()).toBe("open");
   });
 
-  it("turned off: deletes the stored token and clears the flag, without a request", async () => {
+  it("turned off: deletes the stored token and rotates once, keeping the new pair in memory only", async () => {
     const browser = browserSetup(true);
     await browser.session.unlockWithPassword("pw");
+    const deleted = browser.store.values.get(REFRESH_TOKEN_KEY);
     browser.setting.keep = false;
     await browser.session.storagePolicyChanged();
     expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
     expect(browser.flag.state.stored).toBe(false);
-    expect(browser.double.calls.map((call) => call.channel)).toEqual(["auth:login"]);
+    // The deleted copy was spent on the laptop by this rotation.
+    expect(browser.double.calls.map((call) => call.channel)).toEqual([
+      "auth:login",
+      "auth:refresh",
+    ]);
+    expect(tokenArg(browser.double.calls[1], "refreshToken")).toBe(deleted);
+    expect(browser.store.writes).toHaveLength(1);
+    expect(browser.double.rpc.state()).toBe("open");
+    // The next scheduled refresh uses the new in-memory token.
+    browser.clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(tokenArg(browser.double.calls[2], "refreshToken")).not.toBe(deleted);
   });
 
   it("a write racing the switch to off is taken back out", async () => {
@@ -875,5 +894,53 @@ describe("auth-session: passkey unlock", () => {
     });
     expect(outcome).toBe("failed");
     expect(asked).toBe(false);
+  });
+});
+
+describe("auth-session: browser, the stored token only signs in at page load", () => {
+  it("an idle lock needs a passkey or the password even with keep-signed-in on", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(true);
+    browser.clock.advance(IDLE);
+    await flush();
+    expect(browser.session.get().lockCause).toBe("idle");
+    const before = browser.double.calls.length;
+    expect(await browser.session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(browser.double.calls).toHaveLength(before);
+    expect(browser.session.get().autoPrompt).toBe(false);
+  });
+
+  it("returning to the tab after the idle window locks and never re-arms the automatic sign-in", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    browser.session.setAppActive(false);
+    browser.clock.advance(IDLE + 1);
+    browser.session.setAppActive(true);
+    expect(browser.session.get().lockCause).toBe("idle");
+    expect(browser.session.get().autoPrompt).toBe(false);
+    expect(await browser.session.unlockWithStoredRefresh()).toBe("no-stored-token");
+  });
+
+  it("after a reload the stored token signs in once, and only that once", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    const { double, session } = browser.reload();
+    expect(session.get().autoPrompt).toBe(true);
+    expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
+    session.setAppActive(true);
+    expect(session.get().autoPrompt).toBe(false);
+    session.dispose();
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:refresh"]);
+  });
+
+  it("the native app keeps using the stored token after an idle lock", async () => {
+    const { session, clock, double } = setup();
+    await session.unlockWithPassword("pw");
+    clock.advance(IDLE);
+    await flush();
+    const before = double.calls.length;
+    expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
+    expect(double.calls.slice(before).map((call) => call.channel)).toEqual(["auth:refresh"]);
   });
 });

@@ -36,6 +36,16 @@ export const passkeys: Passkeys = {
       typeof navigator.credentials?.get === "function"
     );
   },
+  async hasPlatformAuthenticator() {
+    if (!passkeys.isSupported()) return false;
+    try {
+      return (
+        (await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) === true
+      );
+    } catch {
+      return false;
+    }
+  },
   async getAssertion(options) {
     let credential: Credential | null;
     try {

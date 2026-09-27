@@ -1,9 +1,12 @@
 // The browser build's unlock screen (Task 13). The root layout pushes it
 // whenever the connection is locked, exactly as on native. Differences:
-// - No OS prompt. At page load (`autoPrompt`) it first tries the stored
-//   refresh token, which exists only with "Keep me signed in on this
-//   browser" on, and goes straight to `auth:refresh`. If that finds nothing
-//   and the laptop has passkeys, it raises the passkey sheet on its own.
+// - No OS prompt. Once per page load it first tries the stored refresh
+//   token, which exists only with "Keep me signed in on this browser" on,
+//   and goes straight to `auth:refresh`. If that finds nothing, the laptop
+//   has passkeys and the platform reports a user-verifying authenticator,
+//   it raises the passkey sheet on its own (a browser that refuses a sheet
+//   without a tap just leaves the button). After an idle lock, or on a
+//   return to the tab, the owner uses a passkey or the password.
 // - Passkey first (button), password as the fallback.
 // - The "Keep me signed in" switch lives here too (default off).
 // - Right after pairing (passkey-offer-signal.ts), the first password
@@ -30,25 +33,20 @@ import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { passkeys } from "@/lib/passkey";
 import { setPasskeyOfferSignal, takePasskeyOfferSignal } from "@/lib/passkey-offer-signal";
-import { passkeyLabel, registerPasskey } from "@/lib/passkey-registration";
 import { loadPrefs, setKeepSignedIn } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { connectionStateKey } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
-import {
-  lockCauseKey,
-  registerMessageKey,
-  shouldAutoPasskey,
-  unlockMessageKey,
-} from "@/lib/unlock-screen";
-import { deviceNameFromUserAgent } from "@/lib/web-pairing";
+import { lockCauseKey, runWebAutoSignIn, unlockMessageKey } from "@/lib/unlock-screen";
+import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
 
 const LOCALE = Intl.DateTimeFormat().resolvedOptions().locale;
-const DEFAULT_LABEL =
-  typeof navigator === "undefined" ? "Web browser" : deviceNameFromUserAgent(navigator.userAgent);
 
 type Phase = "unlock" | "offer";
+
+/** The automatic sign-in runs once per page load, not once per mount. */
+let pageLoadSignInDone = false;
 
 export default function UnlockScreen() {
   const insets = useSafeAreaInsets();
@@ -68,7 +66,6 @@ export default function UnlockScreen() {
   // Set before a password sign-in that should be followed by the offer, so
   // the close-on-open effect below never races it.
   const [holdOpen, setHoldOpen] = useState(false);
-  const [label, setLabel] = useState(DEFAULT_LABEL);
   const passkeySupported = useRef(passkeys.isSupported()).current;
 
   useEffect(() => connection.subscribe(setConnectionView), [connection]);
@@ -100,65 +97,74 @@ export default function UnlockScreen() {
 
   const finish = useCallback((outcome: UnlockOutcome) => {
     setMessage(unlockMessageKey(outcome));
-    setWorking(false);
   }, []);
 
-  const tryPasskey = useCallback(async () => {
-    setWorking(true);
-    setMessage(undefined);
-    finish(await auth.unlockWithPasskey(passkeys.getAssertion));
-  }, [auth, finish]);
-
-  const hasPasskeys = useCallback(async (): Promise<boolean> => {
-    const status = await client.call("auth:status", [{}]);
-    return status.ok && (status.value as { hasPasskeys?: unknown } | null)?.hasPasskeys === true;
-  }, [client]);
-
-  // At page load (and on a return to the tab): the stored sign-in first,
-  // then — when that found nothing — the passkey sheet on its own.
-  useEffect(() => {
-    if (!locked || authView.busy || !authView.autoPrompt) return;
-    void (async () => {
+  /** Runs one attempt with the busy state always reset (finally), so an
+   *  exception can never leave the screen stuck. */
+  const attempt = useCallback(
+    async (run: () => Promise<UnlockOutcome>) => {
       setWorking(true);
       setMessage(undefined);
-      const outcome = await auth.unlockWithStoredRefresh();
-      if (outcome === "unlocked") {
-        finish(outcome);
-        return;
+      try {
+        finish(await run());
+      } catch {
+        finish("failed");
+      } finally {
+        setWorking(false);
       }
-      const context = { supported: passkeySupported, hasPasskeys: await hasPasskeys() };
-      if (shouldAutoPasskey(outcome, context)) {
-        await tryPasskey();
-        return;
-      }
-      finish(outcome);
-    })();
-  }, [
-    locked,
-    authView.busy,
-    authView.autoPrompt,
-    auth,
-    finish,
-    hasPasskeys,
-    tryPasskey,
-    passkeySupported,
-  ]);
+    },
+    [finish],
+  );
+
+  const passkeySignIn = useCallback(() => auth.unlockWithPasskey(passkeys.getAssertion), [auth]);
+
+  const passkeyContext = useCallback(async () => {
+    const status = await client.call("auth:status", [{}]);
+    return {
+      supported: passkeySupported,
+      platformAuthenticator: await passkeys.hasPlatformAuthenticator(),
+      hasPasskeys:
+        status.ok && (status.value as { hasPasskeys?: unknown } | null)?.hasPasskeys === true,
+    };
+  }, [client, passkeySupported]);
+
+  // Once per page load (controller ruling): the stored sign-in (keep me
+  // signed in), then — when that found nothing and the platform can verify
+  // the owner — the passkey sheet. Never on a return to the tab or after an
+  // idle lock: auth-session re-arms `autoPrompt` only at launch in the
+  // browser, and the module flag guards a remount.
+  useEffect(() => {
+    if (!locked || authView.busy || !authView.autoPrompt || pageLoadSignInDone) return;
+    pageLoadSignInDone = true;
+    void attempt(() =>
+      runWebAutoSignIn({
+        storedSignIn: () => auth.unlockWithStoredRefresh(),
+        passkeyContext,
+        passkeySignIn,
+      }),
+    );
+  }, [locked, authView.busy, authView.autoPrompt, auth, attempt, passkeyContext, passkeySignIn]);
 
   async function submitPassword(): Promise<void> {
     if (password === "" || working) return;
     const offer = passkeySupported && takePasskeyOfferSignal();
     setHoldOpen(offer);
-    setWorking(true);
-    setMessage(undefined);
-    const outcome = await auth.unlockWithPassword(password);
+    const typed = password;
     // Never keep the password around longer than the attempt.
     setPassword("");
-    if (offer) {
-      if (outcome === "unlocked") setPhase("offer");
-      else setPasskeyOfferSignal(); // not signed in yet: offer after the next try
-      setHoldOpen(false);
-    }
-    finish(outcome);
+    await attempt(async () => {
+      let outcome: UnlockOutcome = "failed";
+      try {
+        outcome = await auth.unlockWithPassword(typed);
+        return outcome;
+      } finally {
+        if (offer) {
+          if (outcome === "unlocked") setPhase("offer");
+          else setPasskeyOfferSignal(); // not signed in yet: offer after the next try
+          setHoldOpen(false);
+        }
+      }
+    });
   }
 
   async function changeKeepSignedIn(on: boolean): Promise<void> {
@@ -171,29 +177,9 @@ export default function UnlockScreen() {
     }
   }
 
-  async function addPasskey(): Promise<void> {
-    if (password === "" || working) return;
-    setWorking(true);
-    setMessage(undefined);
-    const outcome = await registerPasskey({
-      rpc: client,
-      password,
-      label: passkeyLabel(label, DEFAULT_LABEL),
-      create: passkeys.create,
-    });
-    setPassword("");
-    setWorking(false);
-    if (outcome === "registered") {
-      leave();
-      return;
-    }
-    setMessage(registerMessageKey(outcome));
-  }
-
   const causeKey = lockCauseKey(authView.lockCause);
 
   if (phase === "offer") {
-    const canAdd = !working && password !== "";
     return (
       <ScrollView
         style={styles.container}
@@ -201,44 +187,10 @@ export default function UnlockScreen() {
       >
         <Text style={styles.title}>{t(language, "passkey.offerTitle")}</Text>
         <Text style={styles.hint}>{t(language, "passkey.offerHint")}</Text>
-        <TextInput
-          style={styles.input}
-          value={label}
-          onChangeText={setLabel}
-          placeholder={t(language, "passkey.label")}
-          placeholderTextColor={theme.colors.textMuted}
-          accessibilityLabel={t(language, "passkey.label")}
-          autoCorrect={false}
-          editable={!working}
-        />
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder={t(language, "auth.password")}
-          placeholderTextColor={theme.colors.textMuted}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="current-password"
-          editable={!working}
-          onSubmitEditing={() => void addPasskey()}
-        />
-        <TouchableOpacity
-          style={[styles.button, !canAdd && styles.buttonDisabled]}
-          disabled={!canAdd}
-          onPress={() => void addPasskey()}
-        >
-          {working ? (
-            <ActivityIndicator color={theme.colors.primaryText} />
-          ) : (
-            <Text style={styles.buttonText}>{t(language, "passkey.add")}</Text>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondary} disabled={working} onPress={leave}>
+        <PasskeyRegisterForm onRegistered={leave} />
+        <TouchableOpacity style={styles.secondary} onPress={leave}>
           <Text style={styles.secondaryText}>{t(language, "passkey.skip")}</Text>
         </TouchableOpacity>
-        {message !== undefined && <Text style={styles.error}>{t(language, message)}</Text>}
       </ScrollView>
     );
   }
@@ -260,7 +212,7 @@ export default function UnlockScreen() {
         <TouchableOpacity
           style={[styles.button, (!locked || working) && styles.buttonDisabled]}
           disabled={!locked || working}
-          onPress={() => void tryPasskey()}
+          onPress={() => void attempt(passkeySignIn)}
         >
           <Text style={styles.buttonText}>{t(language, "auth.usePasskey")}</Text>
         </TouchableOpacity>

@@ -7,12 +7,16 @@ import type { CreatePasskey } from "./passkey-registration";
 export type Passkeys = {
   /** WebAuthn exists in this runtime. */
   isSupported(): boolean;
+  /** A user-verifying platform authenticator (Touch ID, Windows Hello,
+   *  ...) is available: only then does the sheet open on its own. */
+  hasPlatformAuthenticator(): Promise<boolean>;
   getAssertion: GetPasskeyAssertion;
   create: CreatePasskey;
 };
 
 export const passkeys: Passkeys = {
   isSupported: () => false,
+  hasPlatformAuthenticator: async () => false,
   getAssertion: async () => undefined,
   create: async () => "cancelled",
 };

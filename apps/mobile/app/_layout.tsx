@@ -113,6 +113,9 @@ export default function RootLayout() {
         Intl.DateTimeFormat().resolvedOptions().locale,
       ),
       deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
+      // Browser: the stored token only signs in at page load; an idle lock
+      // needs a passkey or the password.
+      storedUnlockAtLaunchOnly: PLATFORM === "web",
       idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
       log: (line) => console.log(line),
     });
