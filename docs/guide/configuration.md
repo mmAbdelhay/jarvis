@@ -239,11 +239,33 @@ Link-local addresses (`fe80::…`, `169.254.x.x`) are not offered.
 account at the OS level, restart Jarvis, and its `100.x.y.z` address appears
 in the list. Jarvis needs nothing else from it: no account, API key or auth key.
 
-**While it is on, a paired device can run commands on this machine as you.**
-There is no lower-privilege version of this feature.
+**While it is on, a paired device that has signed in with the owner password
+can run commands on this machine as you.** There is no lower-privilege
+version of this feature.
 
 See [Remote access](remote-access.md) for the phone side of pairing: the
-confirm step, what the phone can see, and what happens on revocation.
+confirm step, owner login, what the phone can see, and what happens on
+revocation.
+
+### Owner login files
+
+Owner login adds no `jarvis.yaml` keys. The owner password is set in
+**Settings → Remote access → Owner account**, and the bridge stays off until
+one exists. Two files hold its state, in `~/.config/jarvis/remote/` beside
+the pairing and audit files. Both are written atomically with mode 0600, and
+the mode is tightened again on every load:
+
+| File | What it holds |
+|---|---|
+| `owner.json` | The owner password's scrypt hash, its salt and its scrypt parameters. Each passkey's credential id, public key, signature counter, label and date added. A random owner handle used for passkeys, and a counter that goes up on every password change and passkey delete. Never the password itself. |
+| `sessions.json` | One record per refresh token: the device it belongs to, its sign-in family, and when it was created and last used. Each record stores only a SHA-256 hash of the token, never the token itself. Retired tokens are kept until their family's 30 days are up, so that reuse of one can be detected. Access tokens are never written. |
+
+A missing file is not an error: no `owner.json` means no password yet, and
+no `sessions.json` means no one is signed in. An `owner.json` that cannot be
+read or parsed keeps the bridge off, and Settings says so ("The owner account
+file could not be read"), rather than treating it as missing. A `sessions.json` that cannot be read keeps the bridge off the same way.
+One that reads but does not parse is treated as empty, which only means every
+device signs in again.
 
 ## Notes that are easy to get wrong
 

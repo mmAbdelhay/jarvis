@@ -273,8 +273,13 @@ unless you explicitly configure that. When it does listen, it speaks TLS 1.3
 to a certificate the phone pins, or, with a named certificate, trusts by
 name on first pairing, and pairing itself needs a second step on this
 machine: a confirmation dialog naming the requesting device, which you
-approve or deny. Once paired, that phone can run commands on this machine
-as you, exactly like an agent session — see "Agents run as you" above — so
+approve or deny. Pairing alone opens nothing: every connection starts
+locked until the device signs in with an owner password, which is set only
+on this machine and without which the bridge does not start. Sign-ins are
+short-lived tokens with brute-force limits, and changing the password or
+clicking **Sign out everywhere** ends them all (see [Remote
+access](docs/guide/remote-access.md#owner-login)). Once paired and signed in,
+that phone can run commands on this machine as you, exactly like an agent session — see "Agents run as you" above — so
 treat a paired phone the way you would treat a second person with your
 terminal. With the laptop's self-signed default certificate, or a
 configured certificate with no DNS name, the phone pins that exact

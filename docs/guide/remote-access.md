@@ -3,8 +3,9 @@
 The mobile remote bridge lets a paired phone reach this laptop over a local
 connection — see the root README's "What it exposes" for what the bridge is,
 when it listens, and what a paired phone can do on this machine. This page
-covers the phone side: pairing, what the phone app can see, what happens when
-a pairing ends, and the three ways a pairing can be reached.
+covers the phone side: pairing, the owner login every paired device signs in
+with, what the phone app can see, what happens when a pairing ends, and the
+three ways a pairing can be reached.
 
 ## Three paths to a pairing
 
@@ -134,6 +135,119 @@ bound is on *new* requests only: neither the 24-hour expiry nor an eviction
 connection already open on the affected handle; only revoking the device or
 restarting the bridge does that.
 
+## Owner login
+
+Reaching this machine takes two things, checked separately:
+
+1. **Pairing** says *which device* is talking. The laptop issues a device
+   token when you approve the pairing dialog, and every connection starts
+   by presenting it.
+2. **Owner login** says *that you are the one holding it*. A paired device
+   that connects is **locked** until it signs in with the owner password
+   (or, once the browser client ships, a passkey). A lost or copied phone
+   with a valid pairing still cannot see or run anything.
+
+**Setting the password.** The owner password is set and changed only on the
+laptop, in **Settings → Remote access → Owner account** — never from a phone
+or a browser. It must be at least 12 characters. Changing it asks for the
+current one first. It is stored as a scrypt hash (N=2^17, r=8, p=1, with a
+random salt) in `~/.config/jarvis/remote/owner.json` (see
+[configuration](configuration.md#owner-login-files)); the password itself
+is never written anywhere or logged.
+
+**The bridge will not start without one.** With no owner password, the bridge
+stays off even when `remote.enabled` is `true`, and Settings says "Remote
+access stays off until you set an owner password below." This covers
+upgrading, too: if the bridge was on before this version, it stays off after
+the upgrade — your paired phones cannot connect — until you set a password.
+Setting the first password starts the bridge straight away. `jarvis.yaml`
+needs no change, and existing pairings keep working.
+
+**What a locked connection can do.** A locked connection stays open, but
+answers only the sign-in channels: status, password login, passkey login,
+token refresh, resume and logout. Everything else — every screen, every
+subscription, every upload, and opening a sidecar tab — is refused with
+`locked` until sign-in succeeds. Adding a passkey is refused too; that
+requires a signed-in connection.
+
+**Tokens.** A successful sign-in returns two tokens:
+
+- an **access token** that lasts 15 minutes. The phone keeps it in memory
+  only, never on disk.
+- a **refresh token** that gets a new access token without the password. It
+  expires after 7 days unused, and 30 days after the sign-in that started it,
+  whatever happens. Each refresh replaces it with a new one and retires the
+  old one. If a retired refresh token is ever presented again, the laptop
+  assumes it was copied. It ends that sign-in and every token descended from
+  it, and it shows a desktop notification: "An old sign-in session was
+  reused".
+
+The laptop keeps only SHA-256 hashes of refresh tokens, in `sessions.json`.
+Access tokens are held in memory only, so restarting Jarvis or the bridge
+means every device refreshes or signs in again.
+
+**Guessing limits.** Wrong passwords are limited per device and across the
+whole bridge:
+
+- **Per device.** After 5 wrong passwords, that device cannot try again for
+  1 minute. Each further wrong password doubles the wait, up to 1 hour. A
+  successful sign-in resets the count.
+- **Across all devices.** 20 wrong passwords within one hour pause every
+  sign-in, from every device, for 15 minutes. The laptop shows a desktop
+  notification: "Remote sign-in paused".
+
+These counts are kept in memory, so restarting Jarvis resets them. While a
+lockout lasts, even the right password is refused, and the reply does not
+say whether it was right. The audit log records each sign-in
+(`login-succeeded`, `login-failed`), each lockout as it starts (`locked-out`,
+with `scope=device` or `scope=global`), and attempts refused during a
+lockout. Those refusals are collected into one `login-refused` line with a
+`count` per device per minute, so a device retrying in a loop cannot flood
+the log.
+
+**What signs devices out.** Each of these ends signed-in sessions:
+
+| Trigger | Ends |
+|---|---|
+| Changing the owner password | every session, on every device |
+| Deleting a passkey in Settings | every session, on every device |
+| **Sign out everywhere** in Settings | every session, on every device |
+| Revoking a device in Settings | that device's sessions, and its pairing |
+| Logging out on the device | that one sign-in |
+
+Signed-in connections are locked on the spot, not at their next request, and
+the device is told why. Sidecar tabs (Editor, Database, Cluster) follow the
+sign-in. When a device's connection locks, its sidecar handles are revoked
+and its live sidecar connections are cut mid-stream, the same way revocation
+cuts them. A device that is not signed in cannot open a new one.
+
+**On the phone.** After pairing, the phone shows an unlock screen. Enter the
+owner password once. The phone then stores the refresh token in the
+keychain/keystore, where reading it needs the phone's own Face ID,
+fingerprint or passcode, so later unlocks go through that OS prompt. The
+password field is always there as a fallback. A phone with no biometrics or
+passcode set up keeps nothing, and asks for the password every time. The app
+also locks itself after 15 minutes with no touches. You can choose 5, 15, 30
+or 60 minutes in the app's **Settings → Security**, which also has **Log
+out**. Logging out ends this phone's sign-in on the laptop and deletes the
+stored token. The pairing stays. A phone coming back from the background
+after its idle time is already locked.
+
+**Passkeys** are for the browser client, which is not released yet. A
+passkey is added from a browser that is already signed in, and adding one
+asks for the owner password again. The laptop's **Settings → Remote access →
+Owner account** lists passkeys and deletes them. The phone app always uses
+the password and the phone's own unlock. Until the browser client ships, the
+passkey channels answer `unsupported`, and the list stays empty.
+
+**Protocol version 2.** Owner login changes the wire protocol, so the phone
+app and the laptop must both be updated. An older app talking to an updated
+laptop, or an updated app talking to an older laptop, is refused at connect.
+The updated app says "Update the Jarvis app. If it's already up to date,
+update Jarvis on your computer." Existing pairings carry over once both sides
+are updated. A pairing code made before the upgrade (its link says `v=1`) is
+refused, so click **New code** for a fresh one (`v=2`).
+
 ## The phone app
 
 A companion phone app (`apps/mobile` in the repository) pairs with
@@ -171,7 +285,7 @@ silently replace an existing pairing.
 
 **Idle auto-disable.** Idle counts only while no paired phone is connected and no pairing code is open; an attempt to connect that fails does not reset it. Set `remote.idleDisableMinutes` in Settings (or in `jarvis.yaml`) to the whole number of minutes, or `0` to leave it off. While the timer is armed, Settings shows "Will turn off automatically at `<time>`"; after it fires, the bridge shows "Turned off automatically at `<time>` after N min idle" and the Dashboard listening indicator disappears. The bridge closes its listener first, then main writes `remote.enabled: false` to `jarvis.yaml` through the Settings write queue, so the file agrees with the already-closed listener. A failed write is logged to the desktop console and the file still reads `enabled: true` until the next save; the bridge stays off either way. Turning the switch on and saving applies `enabled: true` again.
 
-**Audit log.** `~/.config/jarvis/remote/audit.log` is mode 0600 and rotates once to `audit.log.1` when the current file would exceed 5 MiB. It records pairings, connections, authentication failures, revocations, mutating remote calls, the first input key for each session or pane per connection, refused probes up to the per-connection cap, queued push kinds and idle shut-offs. Read a line as an ISO timestamp, an event name, and sorted `key=value` fields; the fields identify a device and channel or a bounded outcome, never the payload. The audit log never contains a token, a pairing secret, what you typed, what an agent printed or a file's contents — only which device did what kind of thing, and when.
+**Audit log.** `~/.config/jarvis/remote/audit.log` is mode 0600 and rotates once to `audit.log.1` when the current file would exceed 5 MiB. It records pairings, connections, authentication failures, owner sign-ins and lockouts (see "Owner login" above), password and passkey changes, revocations, mutating remote calls, the first input key for each session or pane per connection, refused probes up to the per-connection cap, queued push kinds and idle shut-offs. Read a line as an ISO timestamp, an event name, and sorted `key=value` fields; the fields identify a device and channel or a bounded outcome, never the payload. The audit log never contains a token, a pairing secret, what you typed, what an agent printed or a file's contents — only which device did what kind of thing, and when.
 
 **Dashboard and Sessions.** Once paired, the Dashboard shows the laptop's projects, live system metrics (CPU, memory, disk, network, uptime and temperature when available), and sessions. The Sessions table includes finished sessions too.
 

@@ -8,7 +8,23 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
-Nothing yet.
+- Owner login for remote access: pairing now identifies a device, and
+  every connection stays locked until it signs in with an owner password
+  set in Settings → Remote access → Owner account (at least 12
+  characters). The bridge does not start without one, so a bridge that
+  was on before upgrading stays off until the password is set. Sign-ins
+  use 15-minute access tokens and rotating refresh tokens (7 days idle,
+  30 days at most); a reused refresh token ends that sign-in and raises a
+  desktop notification. Wrong passwords lock a device out from 1 minute
+  up to 1 hour, and 20 in an hour pause all sign-ins for 15 minutes.
+  Changing the password, deleting a passkey, Sign out everywhere or
+  revoking a device ends sessions and cuts sidecar tabs. The phone app
+  unlocks with Face ID, fingerprint or passcode after the first password
+  sign-in, and locks itself after 15 minutes idle (adjustable).
+- **Breaking:** the remote wire protocol is now version 2. Update the
+  phone app and Jarvis on the laptop together; either one alone refuses
+  to connect ("Update the Jarvis app"). Pairing codes made before the
+  upgrade are refused, so make a new one.
 
 ## [0.1.4] — 2026-09-20
 
