@@ -113,7 +113,7 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
         onClose: () => deps.closeTab(tabId),
       },
     );
-    deps.buildMenu(template).popup({ window: deps.window, x, y });
+    deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
   });
   // A native picker, for a multipart file field and for importing a
   // collection. Cancelling returns [] — it is not a failure.

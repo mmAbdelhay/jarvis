@@ -76,6 +76,17 @@ describe("desktop-only registrations", () => {
       expect(popup).toHaveBeenCalledWith({ window: deps.window, x: 42, y: 24 });
     });
 
+    it("rounds fractional coordinates — Menu.popup requires integers, but clientX/Y are fractional under zoom", () => {
+      const popup = vi.fn();
+      const buildMenu = vi.fn(() => ({ popup }));
+      const deps = fakeDesktopDeps();
+      const listener = tabMenuListener({ ...deps, buildMenu });
+
+      listener({}, "tab-1", 42.6, 24.2);
+
+      expect(popup).toHaveBeenCalledWith({ window: deps.window, x: 43, y: 24 });
+    });
+
     it("runs Reload and Close in main directly, for this tab's id", () => {
       const reloadTab = vi.fn();
       const closeTab = vi.fn();
