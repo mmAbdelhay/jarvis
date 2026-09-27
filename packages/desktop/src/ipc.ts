@@ -14,6 +14,7 @@ import {
   type ProviderStatus,
   type Session,
   type SessionChanges,
+  type SessionEditPatch,
   type SessionOutput,
   type StreamSnapshot,
   type SystemMetrics,
@@ -378,6 +379,14 @@ export type RendererApi = {
   // renderer. Main-process only — the outbound request itself is made
   // there (ip-locate.ts) — and desktop-only by policy.
   locateByIp(): Promise<IpLocateResult>;
+  // Bug 7 ("edit any session record"): patch keys are optional and an
+  // empty string clears that field's own override — see
+  // SessionEditPatch's own doc (core/session/types.ts). Rejects (ok:
+  // false) an unknown project/agent, a bad state value, or a state edit
+  // for a session SessionManager currently owns. Stored-only: the Session
+  // view offers no edit control for an "external" row, and this never
+  // resolves for one either — there is no stored row to edit.
+  editSession(id: string, patch: SessionEditPatch): Promise<GitViewResult<null>>;
   // The live session list, pullable (M7 ruling 10): the same Session[] the
   // "sessions:update" push carries. The renderer does not call this — it
   // already gets sessions:update — this exists so a phone can render the

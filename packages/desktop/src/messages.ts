@@ -464,6 +464,18 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر استئناف هذه الجلسة." : "This session cannot be resumed.",
   unknownProject: (language: "ar" | "en"): string =>
     language === "ar" ? "لا أعرف مشروعًا بهذا الاسم." : "I don't know a project by that name.",
+  // Bug 7 ("edit any session record"): the agent select on the edit form
+  // only ever offers a registry id, but the IPC handler validates again
+  // rather than trusting the renderer.
+  unknownAgent: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا أعرف وكيلًا بهذا المعرّف." : "I don't know an agent by that id.",
+  // Bug 7: SessionManager owns state for a session it is currently running
+  // — the pty observes it directly — so an edit cannot override state
+  // while the row is live; project/agentId/model/summary can still change.
+  cannotEditLiveSessionState: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يمكن تغيير حالة جلسة قيد التشغيل."
+      : "Can't change the state of a session that is still running.",
   // The personal browser's name in the project selector. Its *key* is the
   // reserved "__personal__" (see personal.ts) — never shown; this is what
   // the user reads, beside project names they chose themselves.

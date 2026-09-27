@@ -24,7 +24,7 @@ function closeOpenStores(): void {
 
 // The version this build migrates to. Pinned here rather than repeated as a
 // literal in each migration test, so a bump changes one line.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const STORE_SOURCE_PATH = fileURLToPath(new URL("./session-store.ts", import.meta.url));
 
@@ -822,6 +822,162 @@ describe("createSqliteSessionStore", () => {
       store.upsertImported(agentSession({ id: "counted", branch: "feat/x" }), { owned: false });
 
       expect(store.history()[0]).toMatchObject({ insertions: 9, deletions: 2, changedFiles: 3 });
+    });
+  });
+
+  describe("edit — session overrides (bug 7)", () => {
+    it("overrides only the edited fields, leaving the rest of the row alone", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession());
+
+      store.edit("s1", { summary: "Renamed", state: "done" });
+
+      expect(store.history()[0]).toMatchObject({
+        summary: "Renamed",
+        state: "done",
+        project: "acme",
+        agentId: "claude-acme",
+        model: "sonnet",
+      });
+    });
+
+    it("clears an override with an empty string, reverting to the underlying row", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession());
+      store.edit("s1", { summary: "Renamed" });
+      expect(store.history()[0]?.summary).toBe("Renamed");
+
+      store.edit("s1", { summary: "" });
+
+      expect(store.history()[0]?.summary).toBe(agentSession().summary);
+    });
+
+    it("leaves a field's override untouched when a later edit omits that key", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession());
+
+      store.edit("s1", { summary: "Renamed" });
+      store.edit("s1", { model: "opus" });
+
+      expect(store.history()[0]).toMatchObject({ summary: "Renamed", model: "opus" });
+    });
+
+    // The whole reason overrides live in a separate table: upsert/
+    // upsertImported must never have a reason to consult them, and an edit
+    // must survive whichever of the two writes next.
+    it("survives upsert re-running (a session progressing) after the edit", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession());
+      store.edit("s1", { summary: "Renamed" });
+
+      store.upsert(agentSession({ state: "running", lastActivityAt: 2000 }));
+
+      expect(store.history()[0]).toMatchObject({ summary: "Renamed", state: "running" });
+    });
+
+    it("survives the transcript importer re-importing the session", () => {
+      const store = createSqliteSessionStore(":memory:");
+      store.upsert(agentSession({ id: "imp", state: "done", endedAt: 5000 }));
+      store.edit("imp", { project: "renamed-project" });
+
+      store.upsertImported(
+        agentSession({ id: "imp", project: "acme", summary: "from the transcript again" }),
+        { owned: false },
+      );
+
+      const row = store.history().find((s) => s.id === "imp");
+      expect(row?.project).toBe("renamed-project");
+      expect(row?.summary).toBe("from the transcript again");
+    });
+
+    it("records an override for an id with no row yet, without throwing", () => {
+      const store = createSqliteSessionStore(":memory:");
+      expect(() => store.edit("ghost", { summary: "Renamed" })).not.toThrow();
+      expect(store.history()).toEqual([]);
+    });
+
+    it("is idempotent to open twice with no migration needed a second time", () => {
+      const dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-overrides-"));
+      try {
+        const dbPath = join(dir, "sessions.db");
+        const first = createSqliteSessionStore(dbPath);
+        first.upsert(agentSession());
+        first.edit("s1", { summary: "Renamed" });
+
+        const reopened = createSqliteSessionStore(dbPath);
+        expect(reopened.history()[0]?.summary).toBe("Renamed");
+
+        const db = new DatabaseSync(dbPath);
+        const version = db.prepare("PRAGMA user_version").get();
+        db.close();
+        expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
+      } finally {
+        closeOpenStores();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("session_overrides migration (v4 -> v5)", () => {
+    let dir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "jarvis-session-store-v5-"));
+      dbPath = join(dir, "sessions.db");
+    });
+
+    afterEach(() => {
+      closeOpenStores();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("adds session_overrides to a v4 database without touching its existing rows", () => {
+      // Seed a v4-shaped db by hand: createSchemaV1 plus every column the
+      // v1->v2/v2->v3/v3->v4 steps add, same technique the v2->v3 block
+      // above uses for its own "pre-existing" seed.
+      const seed = new DatabaseSync(dbPath);
+      seed.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          project TEXT,
+          projectPath TEXT NOT NULL,
+          agentId TEXT NOT NULL,
+          model TEXT,
+          state TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          startedAt INTEGER NOT NULL,
+          lastActivityAt INTEGER NOT NULL,
+          endedAt INTEGER,
+          exitCode INTEGER,
+          branch TEXT NOT NULL DEFAULT '',
+          insertions INTEGER NOT NULL DEFAULT 0,
+          deletions INTEGER NOT NULL DEFAULT 0,
+          changed_files INTEGER NOT NULL DEFAULT 0,
+          transcriptPath TEXT
+        )
+      `);
+      seed
+        .prepare(
+          `INSERT INTO sessions (id, project, projectPath, agentId, model, state, summary, startedAt, lastActivityAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run("pre-existing", "acme", "/p/acme", "claude-acme", "sonnet", "done", "hi", 1, 2);
+      seed.exec("PRAGMA user_version = 4");
+      seed.close();
+
+      const store = createSqliteSessionStore(dbPath);
+      expect(store.history()).toHaveLength(1);
+      expect(store.history()[0]).toMatchObject({ id: "pre-existing", summary: "hi" });
+
+      // The new table exists and edit() writes into it.
+      store.edit("pre-existing", { summary: "Renamed" });
+      expect(store.history()[0]?.summary).toBe("Renamed");
+
+      const db = new DatabaseSync(dbPath);
+      const version = db.prepare("PRAGMA user_version").get();
+      db.close();
+      expect(version).toMatchObject({ user_version: SCHEMA_VERSION });
     });
   });
 });

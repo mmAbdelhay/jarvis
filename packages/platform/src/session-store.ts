@@ -1,18 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Session, SessionState, SessionStore } from "@jarvis/core";
+import {
+  isSessionState,
+  type Session,
+  type SessionEditPatch,
+  type SessionStore,
+} from "@jarvis/core";
 
 // Bumped whenever the table shape changes. Each bump adds a migration
 // branch below instead of dropping and recreating the table, so an
 // existing db always opens without losing rows.
-const SCHEMA_VERSION = 4;
-
-const SESSION_STATES: readonly SessionState[] = ["starting", "running", "waiting", "done", "dead"];
-
-function isSessionState(value: string): value is SessionState {
-  return (SESSION_STATES as readonly string[]).includes(value);
-}
+const SCHEMA_VERSION = 5;
 
 /**
  * Sqlite-backed `SessionStore` — this is `platform`'s one and only OS-facing
@@ -100,18 +99,56 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       transcriptPath = excluded.transcriptPath
   `);
 
+  // Bug 7: every overridden field falls back to the underlying row's own
+  // value via COALESCE — a NULL override column means "no override", never
+  // "override to NULL" (see `edit()`'s own doc: an empty-string patch value
+  // clears by writing NULL here, not by writing ""). Only the five fields
+  // a user can actually edit are joined this way; every other column
+  // (projectPath, startedAt, branch, the git counts, transcriptPath, …)
+  // comes straight from `sessions` because nothing above ever offers to
+  // edit them.
   const historyStmt = db.prepare(`
-    SELECT id, project, projectPath, agentId, model, state, summary,
-           startedAt, lastActivityAt, endedAt, exitCode,
-           branch, insertions, deletions, changed_files, transcriptPath
-    FROM sessions
-    ORDER BY lastActivityAt DESC
+    SELECT s.id AS id,
+           COALESCE(o.project, s.project) AS project,
+           s.projectPath AS projectPath,
+           COALESCE(o.agentId, s.agentId) AS agentId,
+           COALESCE(o.model, s.model) AS model,
+           COALESCE(o.state, s.state) AS state,
+           COALESCE(o.summary, s.summary) AS summary,
+           s.startedAt AS startedAt,
+           s.lastActivityAt AS lastActivityAt,
+           s.endedAt AS endedAt,
+           s.exitCode AS exitCode,
+           s.branch AS branch,
+           s.insertions AS insertions,
+           s.deletions AS deletions,
+           s.changed_files AS changed_files,
+           s.transcriptPath AS transcriptPath
+    FROM sessions s
+    LEFT JOIN session_overrides o ON o.id = s.id
+    ORDER BY s.lastActivityAt DESC
   `);
 
   const updateGitStmt = db.prepare(`
     UPDATE sessions
     SET branch = ?, insertions = ?, deletions = ?, changed_files = ?
     WHERE id = ?
+  `);
+
+  const selectOverrideStmt = db.prepare(`
+    SELECT summary, project, agentId, model, state FROM session_overrides WHERE id = ?
+  `);
+
+  const upsertOverrideStmt = db.prepare(`
+    INSERT INTO session_overrides (id, summary, project, agentId, model, state, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      summary = excluded.summary,
+      project = excluded.project,
+      agentId = excluded.agentId,
+      model = excluded.model,
+      state = excluded.state,
+      updatedAt = excluded.updatedAt
   `);
 
   return {
@@ -173,6 +210,36 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       // exactly the "do nothing, don't throw" behaviour a race between the
       // tracker and a row's removal needs — see the interface doc comment.
       updateGitStmt.run(git.branch, git.insertions, git.deletions, git.changedFiles, sessionId);
+    },
+    edit(id: string, patch: SessionEditPatch): void {
+      // Merge in JS rather than a single SQL upsert: a key `patch` omits
+      // must keep whatever this id's row already holds (or NULL, for a
+      // first edit), which needs the existing row read back first — a
+      // plain INSERT ... ON CONFLICT can only replace a column, not leave
+      // it "whatever it already was" without also naming that value.
+      const existing = selectOverrideStmt.get(id) as
+        | {
+            summary: string | null;
+            project: string | null;
+            agentId: string | null;
+            model: string | null;
+            state: string | null;
+          }
+        | undefined;
+      const resolve = (value: string | undefined, current: string | null): string | null => {
+        if (value === undefined) return current;
+        // An empty string clears the override — it is never stored as "".
+        return value === "" ? null : value;
+      };
+      upsertOverrideStmt.run(
+        id,
+        resolve(patch.summary, existing?.summary ?? null),
+        resolve(patch.project, existing?.project ?? null),
+        resolve(patch.agentId, existing?.agentId ?? null),
+        resolve(patch.model, existing?.model ?? null),
+        resolve(patch.state, existing?.state ?? null),
+        Date.now(),
+      );
     },
     close(): void {
       // node:sqlite throws on a second close; a store closed twice (a signal
@@ -364,6 +431,29 @@ function migrate(db: DatabaseSync): void {
         "ALTER TABLE sessions ADD COLUMN transcriptPath TEXT",
         "transcriptPath",
       );
+    }
+
+    if (version < 5) {
+      // Phase 5 (bug 7 — "edit any session record"): a user's edit lives in
+      // its own table rather than a column on `sessions`, so `upsert()` and
+      // `upsertImported()` never have to know overrides exist at all — a
+      // session progressing or a transcript rescan simply overwrites
+      // `sessions` the way it always has, and `history()`'s own JOIN is the
+      // only place the two are reconciled. A NULL column is "no override
+      // for this field" — never "override to NULL" — which is what lets
+      // `edit()` clear a field by writing NULL back rather than needing a
+      // second sentinel.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_overrides (
+          id TEXT PRIMARY KEY,
+          summary TEXT,
+          project TEXT,
+          agentId TEXT,
+          model TEXT,
+          state TEXT,
+          updatedAt INTEGER NOT NULL
+        )
+      `);
     }
 
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

@@ -2099,6 +2099,11 @@ app.whenReady().then(async () => {
         resize: (id, cols, rows) => sessions.resize(id, cols, rows),
         snapshot: (id) => sessions.snapshot(id),
         list: () => mergedSessions(),
+        // Bug 7: SessionManager's own map, never the merged view above — an
+        // "external" row from process-scan.ts is never something
+        // SessionManager owns, and history:edit's live check is about
+        // exactly that ownership.
+        get: (id) => sessions.get(id),
       },
       refreshSessions,
       sessionTranscript,
@@ -2119,6 +2124,9 @@ app.whenReady().then(async () => {
       chat,
       docker,
       projects: config.projects,
+      // Bug 7: a live accessor, not a snapshot — registry.replace() (a
+      // Settings save) can swap the registry after this table is built.
+      agents: { ids: () => registry.list().map((agent) => agent.id) },
       dockerConfig: config.docker,
       language: PRIMARY_LANGUAGE,
       api,

@@ -261,7 +261,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     const sessionTranscript = vi.fn(async (_sessionId: unknown) => [
       { role: "user" as const, text: "hi", tools: [] },
     ]);
-    const sessionStore = { history: vi.fn(() => [{ id: "s1" }]) };
+    const sessionStore = { history: vi.fn(() => [{ id: "s1" }]), edit: vi.fn() };
 
     const dispatchDeps = fakeDeps({
       api,

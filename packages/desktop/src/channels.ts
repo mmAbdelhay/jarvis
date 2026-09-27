@@ -81,6 +81,11 @@ export const INVOKE_CHANNELS = {
   // (remote-policy.ts) — an outbound request a paired phone must never be
   // able to trigger through the laptop.
   locateByIp: "prayer:locateIp",
+  // Bug 7: edits a stored session's summary/project/agentId/model/state on
+  // top of what the transcript importer or SessionManager last wrote —
+  // see SessionStore.edit's own doc (core/session/types.ts) for why this
+  // never touches the row those two maintain.
+  editSession: "history:edit",
   listSessions: "sessions:list",
   // A phone or the desktop's own Refresh button asking for a fresh look at
   // the machine, not just Jarvis's own state: re-imports any new

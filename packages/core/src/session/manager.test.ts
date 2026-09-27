@@ -45,6 +45,11 @@ class FakeStore implements SessionStore {
     if (existing === undefined) return;
     this.rows.set(sessionId, { ...existing, ...git });
   }
+  // SessionManager never calls this either (bug 7's edit path is
+  // dispatch.ts's alone) — same rationale as upsertImported above.
+  edit(): void {
+    // Not exercised by SessionManager's own tests.
+  }
 }
 
 const agent: AgentConfig = { id: "claude-main", command: "claude-main", model: "opus" };

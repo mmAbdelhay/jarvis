@@ -35,6 +35,11 @@ export const CHANNEL_POLICY = {
   // has its own device location and must never be able to trigger a
   // laptop-side network request like this one.
   "prayer:locateIp": "desktop-only",
+  // Desktop-only (bug 7): edits a session's own recorded fields — the same
+  // class of persistent, laptop-controlled state settings:save and
+  // api:saveSettings are already desktop-only for. Revisit alongside those
+  // when a phone Settings/Sessions UI ships.
+  "history:edit": "desktop-only",
   // Remote (M7): the same read-only Session[] as the sessions:update push,
   // pullable so a phone can render the session table before the first push.
   "sessions:list": "remote",

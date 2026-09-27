@@ -42,6 +42,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onVoiceHotkeys: vi.fn(),
     getHistory: vi.fn(async () => []),
     locateByIp: vi.fn(async () => ({ error: "not stubbed in this test" })),
+    editSession: vi.fn(async () => notStubbed),
     listSessions: vi.fn(async () => []),
     refreshSessions: vi.fn(async () => ({ jarvis: 0, external: 0, importedTranscripts: 0 })),
     gitChanges: vi.fn(async () => notStubbed),
