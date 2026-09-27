@@ -2,38 +2,40 @@ import { describe, expect, it } from "vitest";
 import { buildWindowsService } from "./service-win32.js";
 
 describe("buildWindowsService", () => {
-  it("builds a quoted cmd wrapper and exact schtasks argv", () => {
+  it("builds exact registry argv with the quoted executable value", () => {
     const service = buildWindowsService({
-      localAppData: "C:\\Users\\Jarvis User\\AppData\\Local",
       execPath: "C:\\Program Files\\Jarvis\\Jarvis.exe",
-      daemonScript: "C:\\Program Files\\Jarvis\\resources\\dist\\daemon-main.js",
     });
 
-    expect(service.filePath).toBe("C:\\Users\\Jarvis User\\AppData\\Local\\Jarvis\\jarvisd.cmd");
-    expect(service.contents).toBe(`@echo off\r
-set "ELECTRON_RUN_AS_NODE=1"\r
-"C:\\Program Files\\Jarvis\\Jarvis.exe" "C:\\Program Files\\Jarvis\\resources\\dist\\daemon-main.js" run\r
-`);
     expect(service.commands).toEqual({
       install: [
-        "schtasks",
+        "reg",
         [
-          "/Create",
-          "/F",
-          "/SC",
-          "ONLOGON",
-          "/TN",
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          "/v",
           "JarvisDaemon",
-          "/RL",
-          "LIMITED",
-          "/TR",
-          `"${service.filePath}"`,
+          "/t",
+          "REG_SZ",
+          "/d",
+          '"C:\\Program Files\\Jarvis\\Jarvis.exe" --jarvis-daemon',
+          "/f",
         ],
       ],
-      start: ["schtasks", ["/Run", "/TN", "JarvisDaemon"]],
-      stop: ["schtasks", ["/End", "/TN", "JarvisDaemon"]],
-      uninstall: ["schtasks", ["/Delete", "/F", "/TN", "JarvisDaemon"]],
-      status: ["schtasks", ["/Query", "/TN", "JarvisDaemon"]],
+      uninstall: [
+        "reg",
+        [
+          "delete",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          "/v",
+          "JarvisDaemon",
+          "/f",
+        ],
+      ],
+      status: [
+        "reg",
+        ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "JarvisDaemon"],
+      ],
     });
   });
 });

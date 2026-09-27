@@ -16,16 +16,12 @@ function setup(
 ) {
   const operations: Operation[] = [];
   const invocations: Invocation[] = [];
+  const detachedInvocations: Invocation[] = [];
   const fs: ServiceFileSystem = {
-    mkdir: async (path, mkdirOptions) => {
-      operations.push(["mkdir", path, mkdirOptions]);
-    },
-    writeFile: async (path, contents, writeOptions) => {
-      operations.push(["writeFile", path, contents, writeOptions]);
-    },
-    rm: async (path, rmOptions) => {
-      operations.push(["rm", path, rmOptions]);
-    },
+    mkdir: async (path, mkdirOptions) => void operations.push(["mkdir", path, mkdirOptions]),
+    writeFile: async (path, contents, writeOptions) =>
+      void operations.push(["writeFile", path, contents, writeOptions]),
+    rm: async (path, rmOptions) => void operations.push(["rm", path, rmOptions]),
     exists: async () => options.installed ?? true,
   };
   const results = [...(options.results ?? [])];
@@ -33,165 +29,175 @@ function setup(
     platform,
     home: "/Users/Jarvis User",
     uid: 502,
-    localAppData: "C:\\Users\\Jarvis User\\AppData\\Local",
     execPath:
       platform === "win32"
         ? "C:\\Program Files\\Jarvis\\Jarvis.exe"
         : "/Applications/Jarvis App/Jarvis",
-    daemonScript:
-      platform === "win32"
-        ? "C:\\Program Files\\Jarvis\\daemon-main.js"
-        : "/Applications/Jarvis App/daemon-main.js",
-    env: { ELECTRON_RUN_AS_NODE: "ignored" },
+    daemonScript: "/Applications/Jarvis App/daemon-main.js",
     fs,
     run: async (command, args) => {
       invocations.push([command, args]);
       return results.shift() ?? { code: 0, stdout: "", stderr: "" };
     },
+    spawnDetached: async (command, args) => void detachedInvocations.push([command, args]),
   });
-  return { manager, operations, invocations };
+  return { manager, operations, invocations, detachedInvocations };
 }
 
+const darwinPrint: Invocation = ["launchctl", ["print", "gui/502/dev.jarvis.daemon"]];
+const darwinBootstrap: Invocation = [
+  "launchctl",
+  ["bootstrap", "gui/502", "/Users/Jarvis User/Library/LaunchAgents/dev.jarvis.daemon.plist"],
+];
+const darwinBootout: Invocation = ["launchctl", ["bootout", "gui/502/dev.jarvis.daemon"]];
+const darwinKickstart: Invocation = ["launchctl", ["kickstart", "-k", "gui/502/dev.jarvis.daemon"]];
+
 describe("createServiceManager", () => {
-  it("installs and uninstalls the macOS launch agent", async () => {
-    const { manager, operations, invocations } = setup("darwin");
-
+  it("replaces a loaded macOS launch agent during install", async () => {
+    const { manager, invocations } = setup("darwin");
     await manager.install();
-    await manager.uninstall();
-
-    expect(
-      operations.map(([operation, path, , writeOptions]) => [operation, path, writeOptions]),
-    ).toEqual([
-      ["mkdir", "/Users/Jarvis User/Library/LaunchAgents", undefined],
-      ["mkdir", "/Users/Jarvis User/.config/jarvis/logs", undefined],
-      [
-        "writeFile",
-        "/Users/Jarvis User/Library/LaunchAgents/dev.jarvis.daemon.plist",
-        { mode: 0o644 },
-      ],
-      ["rm", "/Users/Jarvis User/Library/LaunchAgents/dev.jarvis.daemon.plist", undefined],
-    ]);
-    expect(invocations).toEqual([
-      [
-        "launchctl",
-        ["bootstrap", "gui/502", "/Users/Jarvis User/Library/LaunchAgents/dev.jarvis.daemon.plist"],
-      ],
-      ["launchctl", ["bootout", "gui/502/dev.jarvis.daemon"]],
-    ]);
+    expect(invocations).toEqual([darwinPrint, darwinBootout, darwinBootstrap]);
   });
 
-  it("installs and uninstalls the Linux user service", async () => {
-    const { manager, operations, invocations } = setup("linux");
-
+  it("bootstraps an unloaded macOS launch agent during install", async () => {
+    const { manager, invocations } = setup("darwin", {
+      results: [{ code: 113, stdout: "", stderr: "not loaded" }],
+    });
     await manager.install();
-    await manager.uninstall();
-
-    expect(
-      operations.map(([operation, path, , writeOptions]) => [operation, path, writeOptions]),
-    ).toEqual([
-      ["mkdir", "/Users/Jarvis User/.config/systemd/user", undefined],
-      ["writeFile", "/Users/Jarvis User/.config/systemd/user/jarvisd.service", { mode: 0o644 }],
-      ["rm", "/Users/Jarvis User/.config/systemd/user/jarvisd.service", undefined],
-    ]);
-    expect(invocations).toEqual([
-      ["systemctl", ["--user", "daemon-reload"]],
-      ["systemctl", ["--user", "enable", "--now", "jarvisd.service"]],
-      ["systemctl", ["--user", "disable", "--now", "jarvisd.service"]],
-      ["systemctl", ["--user", "daemon-reload"]],
-    ]);
+    expect(invocations).toEqual([darwinPrint, darwinBootstrap]);
   });
 
-  it("installs and uninstalls the Windows scheduled task", async () => {
-    const { manager, operations, invocations } = setup("win32");
-
-    await manager.install();
-    await manager.uninstall();
-
-    expect(operations.map(([operation, path]) => [operation, path])).toEqual([
-      ["mkdir", "C:\\Users\\Jarvis User\\AppData\\Local\\Jarvis"],
-      ["writeFile", "C:\\Users\\Jarvis User\\AppData\\Local\\Jarvis\\jarvisd.cmd"],
-      ["rm", "C:\\Users\\Jarvis User\\AppData\\Local\\Jarvis\\jarvisd.cmd"],
-    ]);
-    expect(invocations).toEqual([
-      [
-        "schtasks",
-        [
-          "/Create",
-          "/F",
-          "/SC",
-          "ONLOGON",
-          "/TN",
-          "JarvisDaemon",
-          "/RL",
-          "LIMITED",
-          "/TR",
-          '"C:\\Users\\Jarvis User\\AppData\\Local\\Jarvis\\jarvisd.cmd"',
-        ],
+  it("continues macOS install when bootout of a loaded job fails", async () => {
+    const { manager, invocations } = setup("darwin", {
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "already exiting" },
+        { code: 0, stdout: "", stderr: "" },
       ],
-      ["schtasks", ["/Delete", "/F", "/TN", "JarvisDaemon"]],
-    ]);
+    });
+    await expect(manager.install()).resolves.toBeUndefined();
+    expect(invocations).toEqual([darwinPrint, darwinBootout, darwinBootstrap]);
   });
 
-  it.each([
-    [
-      "darwin",
-      [["launchctl", ["kickstart", "-k", "gui/502/dev.jarvis.daemon"]]],
-      [["launchctl", ["bootout", "gui/502/dev.jarvis.daemon"]]],
-      [["launchctl", ["kickstart", "-k", "gui/502/dev.jarvis.daemon"]]],
-    ],
-    [
-      "linux",
-      [["systemctl", ["--user", "enable", "--now", "jarvisd.service"]]],
-      [["systemctl", ["--user", "disable", "--now", "jarvisd.service"]]],
-      [["systemctl", ["--user", "restart", "jarvisd.service"]]],
-    ],
-    [
-      "win32",
-      [["schtasks", ["/Run", "/TN", "JarvisDaemon"]]],
-      [["schtasks", ["/End", "/TN", "JarvisDaemon"]]],
-      [
-        ["schtasks", ["/End", "/TN", "JarvisDaemon"]],
-        ["schtasks", ["/Run", "/TN", "JarvisDaemon"]],
+  it("uses load-aware macOS lifecycle commands and tolerates stop failure", async () => {
+    const context = setup("darwin", {
+      results: [
+        { code: 113, stdout: "", stderr: "not loaded" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "not loaded" },
+        { code: 113, stdout: "", stderr: "not loaded" },
       ],
-    ],
-  ] as const)("uses exact %s lifecycle argv", async (platform, start, stop, restart) => {
-    const context = setup(platform);
+    });
     await context.manager.start();
-    expect(context.invocations).toEqual(start);
+    expect(context.invocations).toEqual([darwinPrint, darwinBootstrap]);
     context.invocations.length = 0;
-    await context.manager.stop();
-    expect(context.invocations).toEqual(stop);
+    await expect(context.manager.stop()).resolves.toBeUndefined();
+    expect(context.invocations).toEqual([darwinBootout]);
     context.invocations.length = 0;
     await context.manager.restart();
-    expect(context.invocations).toEqual(restart);
+    expect(context.invocations).toEqual([darwinPrint, darwinBootstrap]);
   });
 
-  it.each(["darwin", "linux", "win32"] as const)(
-    "reports %s as not installed without running a command",
-    async (platform) => {
-      const { manager, invocations } = setup(platform, { installed: false });
-      await expect(manager.status()).resolves.toBe("not-installed");
-      expect(invocations).toEqual([]);
-    },
-  );
+  it("kickstarts a loaded macOS launch agent on start and restart", async () => {
+    const context = setup("darwin");
+    await context.manager.start();
+    expect(context.invocations).toEqual([darwinPrint, darwinKickstart]);
+    context.invocations.length = 0;
+    await context.manager.restart();
+    expect(context.invocations).toEqual([darwinPrint, darwinKickstart]);
+  });
 
   it.each([
-    ["darwin", { code: 0, stdout: "", stderr: "" }, "running"],
-    ["darwin", { code: 113, stdout: "", stderr: "" }, "stopped"],
-    ["linux", { code: 0, stdout: "active\n", stderr: "" }, "running"],
-    ["linux", { code: 3, stdout: "inactive\n", stderr: "" }, "stopped"],
-    ["linux", { code: 1, stdout: "failed\n", stderr: "" }, "unknown"],
-    ["win32", { code: 0, stdout: "Status: Running", stderr: "" }, "running"],
-    ["win32", { code: 0, stdout: "Status: Ready", stderr: "" }, "stopped"],
-    ["win32", { code: 1, stdout: "", stderr: "ERROR" }, "unknown"],
-  ] as const)("parses %s status results", async (platform, result, expected) => {
-    const { manager } = setup(platform, { results: [result] });
+    [{ code: 0, stdout: "state = running\n", stderr: "" }, true, "running"],
+    [{ code: 0, stdout: "state = waiting\n", stderr: "" }, true, "stopped"],
+    [{ code: 0, stdout: "service state = running later\n", stderr: "" }, true, "stopped"],
+    [{ code: 113, stdout: "", stderr: "" }, true, "stopped"],
+    [{ code: 113, stdout: "", stderr: "" }, false, "not-installed"],
+  ] as const)("parses macOS loaded state", async (result, installed, expected) => {
+    const { manager } = setup("darwin", { installed, results: [result] });
     await expect(manager.status()).resolves.toBe(expected);
   });
 
-  it.each(["darwin", "linux", "win32"] as const)(
-    "tolerates an already removed %s service during uninstall",
-    async (platform) => {
+  it("uses enable --now for a first Linux install", async () => {
+    const { manager, invocations } = setup("linux", {
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 3, stdout: "inactive", stderr: "" },
+      ],
+    });
+    await manager.install();
+    expect(invocations).toEqual([
+      ["systemctl", ["--user", "daemon-reload"]],
+      ["systemctl", ["--user", "is-active", "jarvisd.service"]],
+      ["systemctl", ["--user", "enable", "--now", "jarvisd.service"]],
+    ]);
+  });
+
+  it("enables and restarts an already-running Linux service during install", async () => {
+    const { manager, invocations } = setup("linux");
+    await manager.install();
+    expect(invocations).toEqual([
+      ["systemctl", ["--user", "daemon-reload"]],
+      ["systemctl", ["--user", "is-active", "jarvisd.service"]],
+      ["systemctl", ["--user", "enable", "jarvisd.service"]],
+      ["systemctl", ["--user", "restart", "jarvisd.service"]],
+    ]);
+  });
+
+  it("manages Windows autostart through the registry without files", async () => {
+    const { manager, operations, invocations } = setup("win32");
+    await manager.install();
+    await manager.uninstall();
+    expect(operations).toEqual([]);
+    expect(invocations).toEqual([
+      [
+        "reg",
+        [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          "/v",
+          "JarvisDaemon",
+          "/t",
+          "REG_SZ",
+          "/d",
+          '"C:\\Program Files\\Jarvis\\Jarvis.exe" --jarvis-daemon',
+          "/f",
+        ],
+      ],
+      [
+        "reg",
+        [
+          "delete",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          "/v",
+          "JarvisDaemon",
+          "/f",
+        ],
+      ],
+    ]);
+  });
+
+  it("starts Windows detached and directs stop/restart to the control socket", async () => {
+    const { manager, invocations, detachedInvocations } = setup("win32");
+    await expect(manager.start()).resolves.toBeUndefined();
+    await expect(manager.stop()).resolves.toEqual({ ok: false, reason: "use-control-socket" });
+    await expect(manager.restart()).resolves.toEqual({ ok: false, reason: "use-control-socket" });
+    expect(detachedInvocations).toEqual([
+      ["C:\\Program Files\\Jarvis\\Jarvis.exe", ["--jarvis-daemon"]],
+    ]);
+    expect(invocations).toEqual([]);
+  });
+
+  it.each([
+    [{ code: 0, stdout: "value", stderr: "" }, "stopped"],
+    [{ code: 1, stdout: "", stderr: "missing" }, "not-installed"],
+  ] as const)("maps Windows registry query status", async (result, expected) => {
+    const { manager } = setup("win32", { results: [result] });
+    await expect(manager.status()).resolves.toBe(expected);
+  });
+
+  it("tolerates missing services during uninstall", async () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
       const { manager } = setup(platform, {
         results: [
           { code: 1, stdout: "", stderr: "not found" },
@@ -199,6 +205,6 @@ describe("createServiceManager", () => {
         ],
       });
       await expect(manager.uninstall()).resolves.toBeUndefined();
-    },
-  );
+    }
+  });
 });

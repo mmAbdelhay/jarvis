@@ -5,7 +5,7 @@ describe("buildLinuxService", () => {
   it("builds a quoted user unit and exact systemctl argv", () => {
     const service = buildLinuxService({
       home: "/home/Jarvis User",
-      execPath: "/opt/Jarvis App/bin/jarvis\\preview",
+      execPath: "/opt/Jarvis %App/bin/jarvis\\preview$",
       daemonScript: '/home/Jarvis User/a "quoted" daemon.js',
     });
 
@@ -15,7 +15,7 @@ describe("buildLinuxService", () => {
 Description=Jarvis background daemon
 
 [Service]
-ExecStart="/opt/Jarvis App/bin/jarvis\\\\preview" "/home/Jarvis User/a \\"quoted\\" daemon.js" run
+ExecStart="/opt/Jarvis %%App/bin/jarvis\\\\preview$$" "/home/Jarvis User/a \\"quoted\\" daemon.js" "run"
 Environment=ELECTRON_RUN_AS_NODE=1
 Restart=on-failure
 RestartSec=5
@@ -25,6 +25,7 @@ WantedBy=default.target
 `);
     expect(service.commands).toEqual({
       reload: ["systemctl", ["--user", "daemon-reload"]],
+      enable: ["systemctl", ["--user", "enable", "jarvisd.service"]],
       start: ["systemctl", ["--user", "enable", "--now", "jarvisd.service"]],
       stop: ["systemctl", ["--user", "disable", "--now", "jarvisd.service"]],
       restart: ["systemctl", ["--user", "restart", "jarvisd.service"]],

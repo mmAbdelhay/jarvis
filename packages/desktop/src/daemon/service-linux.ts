@@ -6,6 +6,7 @@ export interface LinuxServiceDefinition {
   contents: string;
   commands: {
     reload: Command;
+    enable: Command;
     start: Command;
     stop: Command;
     restart: Command;
@@ -14,7 +15,11 @@ export interface LinuxServiceDefinition {
 }
 
 function systemdQuote(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  return `"${value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("$", () => "$$")}"`;
 }
 
 export function buildLinuxService(options: {
@@ -27,7 +32,7 @@ export function buildLinuxService(options: {
 Description=Jarvis background daemon
 
 [Service]
-ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} run
+ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} ${systemdQuote("run")}
 Environment=ELECTRON_RUN_AS_NODE=1
 Restart=on-failure
 RestartSec=5
@@ -41,6 +46,7 @@ WantedBy=default.target
     contents,
     commands: {
       reload: ["systemctl", ["--user", "daemon-reload"]],
+      enable: ["systemctl", ["--user", "enable", "jarvisd.service"]],
       start: ["systemctl", ["--user", "enable", "--now", "jarvisd.service"]],
       stop: ["systemctl", ["--user", "disable", "--now", "jarvisd.service"]],
       restart: ["systemctl", ["--user", "restart", "jarvisd.service"]],
