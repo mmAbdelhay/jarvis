@@ -87,6 +87,318 @@
   --measure: 1180px;
 }
 
+/* Plan review stays a self-contained side panel so Task 7 can add block
+   editing without coupling it to the workspace renderer. */
+.plan-panel {
+  position: relative;
+  width: 420px;
+  min-width: 300px;
+  max-width: 60%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+  border-inline-start: 1px solid var(--border);
+  box-shadow: 0 0 var(--s4) var(--ground);
+}
+
+.plan-panel[hidden] { display: none; }
+
+.plan-panel__header {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s4);
+  border-block-end: 1px solid var(--hairline);
+  background: var(--surface-raised);
+}
+
+.plan-panel__header-main,
+.plan-panel__header-sub,
+.plan-panel__tray-actions,
+.plan-panel__comment-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.plan-panel__header-sub {
+  justify-content: space-between;
+  margin-block-start: var(--s2);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.plan-panel__file,
+.plan-panel__source-toggle,
+.plan-panel__close,
+.plan-panel__primary,
+.plan-panel__secondary,
+.plan-panel__danger,
+.plan-panel__show-all,
+.plan-panel__picker-item,
+.plan-panel__selection-comment,
+.plan-panel__pin,
+.plan-panel__add-pin {
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plan-panel__file {
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--s1) var(--s2);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-panel__source-badge {
+  margin-inline-end: auto;
+  padding: var(--s1) var(--s2);
+  border-radius: var(--r-control);
+  background: var(--accent-quiet);
+  color: var(--accent-text);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.plan-panel__source-toggle,
+.plan-panel__close { padding: var(--s1) var(--s2); }
+
+.plan-panel__path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-panel__updated { white-space: nowrap; }
+
+.plan-panel__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding-block: var(--s3);
+}
+
+.plan-panel__block-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding-inline-end: var(--s4);
+}
+
+.plan-panel__gutter {
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s1);
+  padding-block-start: var(--s1);
+}
+
+.plan-panel__pin,
+.plan-panel__add-pin {
+  width: var(--s5);
+  height: var(--s5);
+  padding: 0;
+  border-radius: var(--s4);
+  font-size: 11px;
+}
+
+.plan-panel__pin--queued {
+  border-color: var(--warn);
+  background: var(--warn-quiet);
+  color: var(--warn);
+}
+
+.plan-panel__pin--sent {
+  border-color: var(--accent-quiet);
+  background: var(--accent-quiet);
+  color: var(--accent-text);
+}
+
+.plan-panel__add-pin {
+  visibility: hidden;
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.plan-panel__block-row:hover .plan-panel__add-pin,
+.plan-panel__add-pin:focus { visibility: visible; }
+
+.plan-panel .plan-block {
+  min-width: 0;
+  padding-block: var(--s1) var(--s3);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.plan-panel .plan-block > :first-child { margin-block-start: 0; }
+.plan-panel .plan-block > :last-child { margin-block-end: 0; }
+
+.plan-panel .plan-quote {
+  background: var(--warn-quiet);
+  color: var(--text);
+}
+
+.plan-panel__image-alt {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.plan-panel__source {
+  margin: 0;
+  padding: var(--s4);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.plan-panel__picker {
+  position: absolute;
+  z-index: 4;
+  inset-block-start: 52px;
+  inset-inline: var(--s3);
+  max-height: 70%;
+  overflow: auto;
+  padding: var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-panel);
+  background: var(--surface-raised);
+  box-shadow: 0 var(--s2) var(--s5) var(--ground);
+}
+
+.plan-panel__picker-search,
+.plan-panel__comment-input {
+  width: 100%;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+}
+
+.plan-panel__picker-heading {
+  margin: var(--s3) var(--s2) var(--s1);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.plan-panel__picker-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-block: var(--s1);
+  padding: var(--s2);
+  text-align: start;
+}
+
+.plan-panel__picker-item[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-quiet);
+}
+
+.plan-panel__picker-meta { color: var(--text-muted); font-size: 10px; }
+
+.plan-panel__empty {
+  margin: auto;
+  max-width: 280px;
+  padding: var(--s5);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.plan-panel__empty-title { color: var(--text); font-size: 16px; }
+.plan-panel__empty-hint { color: var(--text-muted); font-size: 12px; }
+
+.plan-panel__selection-comment {
+  position: absolute;
+  z-index: 5;
+  inset-inline-end: var(--s4);
+  inset-block-start: 96px;
+  padding: var(--s2) var(--s3);
+  border-color: var(--accent);
+  background: var(--accent-quiet);
+  color: var(--accent-text);
+}
+
+.plan-panel__comment-box {
+  grid-column: 2;
+  margin-block-end: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface-raised);
+}
+
+.plan-panel__comment-quote {
+  margin: 0 0 var(--s2);
+  padding-inline-start: var(--s2);
+  border-inline-start: 2px solid var(--warn);
+  color: var(--text-muted);
+}
+
+.plan-panel__comment-actions { justify-content: flex-end; margin-block-start: var(--s2); }
+
+.plan-panel__primary,
+.plan-panel__secondary,
+.plan-panel__danger,
+.plan-panel__show-all {
+  padding: var(--s2) var(--s3);
+}
+
+.plan-panel__primary { border-color: var(--accent); background: var(--accent); color: var(--ground); }
+.plan-panel__danger { border-color: var(--bad); color: var(--bad); }
+.plan-panel__primary:disabled { border-color: var(--border); background: var(--surface-sunken); color: var(--text-faint); cursor: default; }
+
+.plan-panel__comment-popover {
+  position: absolute;
+  z-index: 3;
+  inset-inline-start: 36px;
+  width: min(280px, calc(100% - 48px));
+  padding: var(--s3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-panel);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 var(--s2) var(--s5) var(--ground);
+}
+
+.plan-panel__tray {
+  flex: 0 0 auto;
+  max-height: 42%;
+  overflow: auto;
+  padding: var(--s3);
+  border-block-start: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.plan-panel__tray--collapsed { cursor: pointer; }
+.plan-panel__tray-summary { color: var(--text-secondary); font-size: 12px; }
+.plan-panel__tray-list { margin-block: var(--s2); }
+
+.plan-panel__tray-item {
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2);
+  border-block-end: 1px solid var(--hairline-soft);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.plan-panel__orphaned { flex-direction: column; color: var(--text-muted); }
+.plan-panel__orphan-label { color: var(--warn); font-size: 10px; text-transform: uppercase; }
+.plan-panel__tray-actions { justify-content: flex-end; }
+
   * { box-sizing: border-box; }
 
   html, body {
@@ -4587,4 +4899,3 @@
 .settings-add--primary:hover { background: var(--accent-text); border-color: var(--accent-text); }
 .settings-add--danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .settings-add--danger:hover { border-color: var(--bad); }
-

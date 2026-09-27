@@ -51,6 +51,56 @@ function splitOnNamePlaceholder(template: string): { before: string; after: stri
 }
 
 export const MESSAGES = {
+  planPanelLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "لوحة الخطة" : "Plan panel",
+  planEmptyTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد خطة لهذه الجلسة بعد" : "No plan for this session yet",
+  planEmptyHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ابدأ وضع الخطة في الجلسة لعرضها هنا."
+      : "Start plan mode in the session to see it here.",
+  planSourceSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة · وضع الخطة" : "This session · plan mode",
+  planSourceMode: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة" : "Plan mode",
+  planSourceRepo: (language: "ar" | "en"): string => (language === "ar" ? "المستودع" : "Repo"),
+  planKindSpec: (language: "ar" | "en"): string => (language === "ar" ? "مواصفات" : "spec"),
+  planKindPlan: (language: "ar" | "en"): string => (language === "ar" ? "خطة" : "plan"),
+  planSourceToggle: (language: "ar" | "en"): string => (language === "ar" ? "المصدر" : "Source"),
+  planClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق الخطة" : "Close plan"),
+  planUpdated: (language: "ar" | "en"): string => (language === "ar" ? "حُدِّثت" : "Updated"),
+  planPickerOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر خطة" : "Choose a plan",
+  planPickerSearch: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث عن خطة" : "Search plans",
+  planPickerSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة" : "This session",
+  planPickerRecent: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة · حديثة" : "Plan mode · recent",
+  planPickerRepo: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستودع · docs/superpowers" : "Repo · docs/superpowers",
+  planComment: (language: "ar" | "en"): string => (language === "ar" ? "تعليق" : "Comment"),
+  planCommentPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اكتب تعليقًا…" : "Write a comment…",
+  planAddComment: (language: "ar" | "en"): string =>
+    language === "ar" ? "أضف تعليقًا" : "Add comment",
+  planCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  planEdit: (language: "ar" | "en"): string => (language === "ar" ? "تعديل" : "Edit"),
+  planDelete: (language: "ar" | "en"): string => (language === "ar" ? "حذف" : "Delete"),
+  planSave: (language: "ar" | "en"): string => (language === "ar" ? "حفظ" : "Save"),
+  planCommentNumber: (language: "ar" | "en"): string => (language === "ar" ? "التعليق" : "Comment"),
+  planCommentOnBlock: (language: "ar" | "en"): string =>
+    language === "ar" ? "علّق على هذا القسم" : "Comment on this section",
+  planComments: (language: "ar" | "en"): string => (language === "ar" ? "تعليقات" : "comments"),
+  planQueued: (language: "ar" | "en"): string => (language === "ar" ? "في الانتظار" : "queued"),
+  planSent: (language: "ar" | "en"): string => (language === "ar" ? "أُرسلت" : "sent"),
+  planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
+  planKeepLater: (language: "ar" | "en"): string =>
+    language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  planSendClaude: (language: "ar" | "en"): string =>
+    language === "ar" ? "إرسال إلى Claude" : "Send to Claude",
+  planSectionChanged: (language: "ar" | "en"): string =>
+    language === "ar" ? "تغيّر القسم" : "Section changed",
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل اختصار ${combo} — يبدو أن تطبيقًا آخر يستخدمه بالفعل.`
@@ -1346,6 +1396,8 @@ export const MESSAGES = {
       ? "تعذّر تسجيل هذا الجهاز لتلقّي الإشعارات"
       : "This device could not be registered for notifications",
 };
+
+export type MessageKey = keyof typeof MESSAGES;
 
 // NOT the same table as arabicSessionsCount below, even though the two
 // started out identical (that copy-paste is exactly the bug this comment
