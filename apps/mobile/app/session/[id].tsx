@@ -1,4 +1,5 @@
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
@@ -103,6 +104,33 @@ function SessionBody({ id }: { id: string }) {
         store.blur();
       };
     }, [store, client]),
+  );
+
+  // Bug 10: app/_layout.tsx locks PORTRAIT_UP globally; unlocks the moment
+  // this screen gains focus so the OS can rotate to landscape for a wider
+  // terminal, re-locks to PORTRAIT_UP the moment it loses focus or unmounts
+  // (`useFocusEffect`'s cleanup runs for both) — same pattern as
+  // sidecar-view.tsx's own landscape fix. Wrapped in try/catch: the web
+  // target and some simulators reject these calls outright.
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          await ScreenOrientation.unlockAsync();
+        } catch {
+          // Simulator/web: no native orientation lock to unlock. Nothing to do.
+        }
+      })();
+      return () => {
+        void (async () => {
+          try {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+          } catch {
+            // Simulator/web: no native orientation lock to set. Nothing to do.
+          }
+        })();
+      };
+    }, []),
   );
 
   useFocusEffect(

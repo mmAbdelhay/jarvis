@@ -183,3 +183,56 @@ describe("session route input boundary", () => {
     expect(screenSource).toContain("input.setEnded(endedRef.current);");
   });
 });
+
+// Bug 10: app/_layout.tsx locks PORTRAIT_UP globally; the session and
+// terminal screens unlock on focus and re-lock on blur/unmount, the exact
+// pattern sidecar-view.tsx already proved out (sidecar-screen.test.ts
+// ~150-177) — same source-scan style, since app/ isn't under vitest's
+// test.include and these screens can't be imported and rendered directly.
+describe("app/session/[id].tsx and app/terminal/[paneKey].tsx source scan: landscape orientation", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sessionScreenSource = readFileSync(resolve(here, "../../app/session/[id].tsx"), "utf8");
+  const terminalScreenSource = readFileSync(
+    resolve(here, "../../app/terminal/[paneKey].tsx"),
+    "utf8",
+  );
+
+  for (const [name, source] of [
+    ["session/[id].tsx", sessionScreenSource],
+    ["terminal/[paneKey].tsx", terminalScreenSource],
+  ] as const) {
+    describe(name, () => {
+      it(
+        "unlocks orientation inside a useFocusEffect " +
+          "[bite-proof: unlock outside focus tracking and every other screen could rotate too]",
+        () => {
+          expect(source).toMatch(/useFocusEffect\(/);
+          expect(source).toMatch(/ScreenOrientation\.unlockAsync\(\)/);
+        },
+      );
+
+      it(
+        "re-locks to PORTRAIT_UP in that same effect's cleanup (covers both blur and unmount) " +
+          "[bite-proof: useFocusEffect's cleanup fires for both]",
+        () => {
+          expect(source).toMatch(
+            /ScreenOrientation\.lockAsync\(ScreenOrientation\.OrientationLock\.PORTRAIT_UP\)/,
+          );
+        },
+      );
+
+      it("imports expo-screen-orientation, the package pinned in package.json", () => {
+        expect(source).toMatch(
+          /import \* as ScreenOrientation from ["']expo-screen-orientation["']/,
+        );
+      });
+
+      it("tolerates a rejected native call the same way sidecar-view.tsx does (try/catch, no rethrow)", () => {
+        expect(source).toMatch(/try\s*\{\s*await ScreenOrientation\.unlockAsync\(\);\s*\}\s*catch/);
+        expect(source).toMatch(
+          /try\s*\{\s*await ScreenOrientation\.lockAsync\(ScreenOrientation\.OrientationLock\.PORTRAIT_UP\);\s*\}\s*catch/,
+        );
+      });
+    });
+  }
+});
