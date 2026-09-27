@@ -63,6 +63,15 @@ export type AuthLockCause = "idle" | AuthLockReason;
 /** Runs `task` while holding the one cross-tab refresh lock (refresh-lock.web.ts). */
 export type RefreshLock = <T>(task: () => Promise<T>) => Promise<T>;
 
+/** What one tab tells the others (web-auth-channel.ts). Never a token. */
+export type AuthBroadcast = { t: "storage-off" } | { t: "logout" };
+
+/** The browser's tab-to-tab signal: posts reach every other tab, never this one. */
+export type AuthChannel = {
+  post(message: AuthBroadcast): void;
+  subscribe(handler: (message: AuthBroadcast) => void): () => void;
+};
+
 export type UnlockOutcome =
   | "unlocked"
   /** Nothing stored (or biometrics changed): use the password. */
@@ -122,6 +131,11 @@ export type AuthSessionDeps = {
    *  each rotation holds this lock and prefers the stored token over the
    *  one in memory. Native has one process and passes none. */
   refreshLock?: RefreshLock;
+  /** The browser build (follow-up N2): switching "Keep me signed in" off,
+   *  or logging out, locks every other tab too. Once the stored token is
+   *  gone the tabs can no longer tell whose in-memory copy is current, so
+   *  each signs in again rather than present a spent one. */
+  authChannel?: AuthChannel;
   idleMs: number;
   log(line: string): void;
 };
@@ -391,24 +405,47 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     return true;
   }
 
+  async function readStored(): Promise<string | undefined> {
+    try {
+      return await deps.refreshStore.get(REFRESH_TOKEN_KEY);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Under the cross-tab lock with the stored token allowed: the stored
    *  copy when there is one (another tab may have rotated it), else `token`. */
   async function newestToken(token: string): Promise<string> {
     if (!(await hasPasscode())) return token;
-    try {
-      return (await deps.refreshStore.get(REFRESH_TOKEN_KEY)) ?? token;
-    } catch {
-      return token;
-    }
+    return (await readStored()) ?? token;
   }
 
-  /** The one `auth:refresh` path (serialized, across tabs too). */
-  function refreshWith(token: string): Promise<UnlockOutcome> {
+  /**
+   * The one `auth:refresh` path (serialized, across tabs too).
+   * `"spend-stored"` (keep-signed-in just switched off): inside the lock,
+   * take the stored token out, then rotate with it (else `token`), so the
+   * newest token any tab stored is the one spent.
+   */
+  function refreshWith(
+    token: string,
+    mode: "rotate" | "spend-stored" = "rotate",
+  ): Promise<UnlockOutcome> {
     if (refreshing !== undefined) return refreshing;
     const lock = deps.refreshLock;
+    // Captured before the lock wait (follow-up N1): an idle lock or a
+    // logout while this tab waits for another tab's rotation cancels this
+    // one outright — no store read, no request, no unlock.
+    const startedEpoch = epoch;
     const run = async (): Promise<UnlockOutcome> => {
-      const startedEpoch = epoch;
-      const presented = lock === undefined ? token : await newestToken(token);
+      if (startedEpoch !== epoch) return "failed";
+      let presented = token;
+      if (mode === "spend-stored") {
+        const stored = await readStored();
+        await deleteStored();
+        presented = stored ?? token;
+      } else if (lock !== undefined) {
+        presented = await newestToken(token);
+      }
       if (startedEpoch !== epoch) return "failed";
       const result = await deps.rpc.call("auth:refresh", [{ refreshToken: presented }]);
       if (result.ok) {
@@ -493,6 +530,14 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     // Nothing left to unlock with: no automatic device-owner prompt.
     setView({ lockedLocally: true, lockCause: reason, autoPrompt: false });
     void deleteStored();
+  });
+
+  // Another tab switched keep-signed-in off or logged out (follow-up N2).
+  // A tab holding no tokens has nothing to drop.
+  const unsubscribeChannel = deps.authChannel?.subscribe((message) => {
+    if (disposed || (access === undefined && refreshToken === undefined)) return;
+    deps.log(`auth: another tab sent ${message.t}`);
+    lockLocally(message.t === "logout" ? "logout" : "signed-out");
   });
 
   async function unlockWithPassword(password: string): Promise<UnlockOutcome> {
@@ -583,14 +628,18 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
 
   async function storagePolicyChanged(): Promise<void> {
     if (!(await hasPasscode())) {
-      await deleteStored();
       // A deleted record may linger on disk: spend the token it held with
       // one rotation, keeping the new pair in memory only (the gate is off,
       // so adoptTokens stores nothing). A rotation already in flight may
       // have stored its token before the switch: wait for it, then rotate
-      // once more so that one is spent too (final review D2).
+      // once more so that one is spent too (final review D2). The rotation
+      // itself takes the stored copy out under the cross-tab lock.
       if (refreshing !== undefined) await refreshing;
-      if (refreshToken !== undefined) await rotateForPolicy(refreshToken);
+      if (refreshToken !== undefined) await rotateForPolicy(refreshToken, "spend-stored");
+      // Whatever the rotation did (none, skipped, offline): nothing stays.
+      await deleteStored();
+      // Follow-up N2: the other tabs' in-memory tokens may now be spent.
+      deps.authChannel?.post({ t: "storage-off" });
       return;
     }
     // Rotating (single-flight) stores the fresh token through adoptTokens,
@@ -599,8 +648,11 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   }
 
   /** A refused rotation leaves nothing to unlock with (final review D1). */
-  async function rotateForPolicy(token: string): Promise<void> {
-    const outcome = await refreshWith(token);
+  async function rotateForPolicy(
+    token: string,
+    mode: "rotate" | "spend-stored" = "rotate",
+  ): Promise<void> {
+    const outcome = await refreshWith(token, mode);
     if (outcome === "password-required") lockLocally("signed-out");
   }
 
@@ -608,6 +660,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
    *  never leave the phone unlocked or the stored token behind. */
   async function logout(): Promise<void> {
     lockLocally("logout");
+    // Every tab of this browser signs out, whichever login it holds.
+    deps.authChannel?.post({ t: "logout" });
     await deleteStored();
     await deps.rpc.call("auth:logout", [{}]);
   }
@@ -649,6 +703,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     dropSession();
     unsubscribeState();
     unsubscribePush();
+    unsubscribeChannel?.();
     listeners.clear();
   }
 

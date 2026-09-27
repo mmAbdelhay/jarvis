@@ -1,7 +1,7 @@
 import { AUTH_STATE_CHANNEL } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
-import type { DeviceAuth, RefreshLock } from "./auth-session";
+import type { AuthBroadcast, AuthChannel, DeviceAuth, RefreshLock } from "./auth-session";
 import { createFakeClock } from "./clock";
 import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
@@ -956,7 +956,40 @@ function createLockDouble() {
     tail = run.catch(() => undefined);
     return run;
   };
-  return { lock, requests: () => requests };
+  /** Another tab takes the lock and keeps it until the returned release runs. */
+  function hold(): () => void {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    tail = tail.then(() => held);
+    return release;
+  }
+  return { lock, hold, requests: () => requests };
+}
+
+/** BroadcastChannel between tabs: a post reaches every other tab. */
+function createChannelBus() {
+  const posted: AuthBroadcast[] = [];
+  const tabs = new Set<{ handlers: Set<(message: AuthBroadcast) => void> }>();
+  function channel(): AuthChannel {
+    const tab = { handlers: new Set<(message: AuthBroadcast) => void>() };
+    tabs.add(tab);
+    return {
+      post(message) {
+        posted.push(message);
+        for (const other of tabs) {
+          if (other === tab) continue;
+          for (const handler of [...other.handlers]) handler(message);
+        }
+      },
+      subscribe(handler) {
+        tab.handlers.add(handler);
+        return () => tab.handlers.delete(handler);
+      },
+    };
+  }
+  return { channel, posted };
 }
 
 /** The laptop's one refresh family: only its newest token rotates; any
@@ -1013,6 +1046,7 @@ function browserTabs() {
   const flag = createStoredFlagDouble();
   const locks = createLockDouble();
   const family = createFamilyDouble();
+  const bus = createChannelBus();
   const setting = { keep: true };
   function open() {
     const clock = createFakeClock();
@@ -1032,12 +1066,13 @@ function browserTabs() {
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
       storedUnlockAtLaunchOnly: true,
       refreshLock: locks.lock,
+      authChannel: bus.channel(),
       idleMs: IDLE,
       log: () => {},
     });
     return { clock, double, session };
   }
-  return { store, flag, locks, family, setting, open };
+  return { store, flag, locks, family, bus, setting, open };
 }
 
 describe("auth-session: browser tabs sharing one stored token (final review I2)", () => {
@@ -1137,5 +1172,113 @@ describe("auth-session: storagePolicyChanged edge cases (final review D1, D2)", 
     expect(tokenArg(browser.double.calls[2], "refreshToken")).toBe(rotated);
     expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
     expect(browser.double.rpc.state()).toBe("open");
+  });
+});
+
+describe("auth-session: a session dropped while waiting for the cross-tab lock (follow-up N1)", () => {
+  it("an idle lock during the wait cancels the rotation: no request, no unlock, no store write", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const writes = tabs.store.writes.length;
+    const release = tabs.locks.hold();
+    a.clock.advance(ACCESS_TTL * 0.8); // the scheduled rotation queues behind the held lock
+    await flush();
+    a.clock.advance(IDLE - ACCESS_TTL * 0.8); // then the idle lock fires
+    await flush();
+    expect(a.session.get().lockCause).toBe("idle");
+
+    release();
+    await flush();
+
+    expect(a.double.calls.map((call) => call.channel)).toEqual(["auth:login"]);
+    expect(a.double.rpc.state()).toBe("locked");
+    expect(a.session.get()).toMatchObject({ lockedLocally: true, lockCause: "idle" });
+    expect(tabs.store.writes).toHaveLength(writes);
+  });
+
+  it("a logout during the wait cancels the rotation and writes nothing back", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const writes = tabs.store.writes.length;
+    const release = tabs.locks.hold();
+    a.clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    await a.session.logout();
+
+    release();
+    await flush();
+
+    expect(a.double.calls.map((call) => call.channel)).toEqual(["auth:login", "auth:logout"]);
+    expect(a.double.rpc.state()).toBe("locked");
+    expect(tabs.store.writes).toHaveLength(writes);
+    expect(tabs.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+  });
+});
+
+describe("auth-session: other tabs follow keep-signed-in off and logout (follow-up N2)", () => {
+  it("switching keep-signed-in off spends the newest stored token and locks the other tabs, so none presents a spent one", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const b = tabs.open();
+    expect(await b.session.unlockWithStoredRefresh()).toBe("unlocked"); // B holds the newest token
+    const newest = tabs.store.values.get(REFRESH_TOKEN_KEY);
+
+    tabs.setting.keep = false;
+    await a.session.storagePolicyChanged();
+
+    expect(tokenArg(a.double.calls.at(-1), "refreshToken")).toBe(newest);
+    expect(tabs.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    expect(a.double.rpc.state()).toBe("open");
+    expect(b.session.get()).toMatchObject({ lockedLocally: true, lockCause: "signed-out" });
+    expect(b.double.rpc.state()).toBe("locked");
+    const bCalls = b.double.calls.length;
+    b.clock.advance(ACCESS_TTL);
+    await flush();
+    expect(b.double.calls).toHaveLength(bCalls);
+    expect(tabs.family.state.reuse).toBe(0);
+    // The signal is the bare kind: never a token.
+    expect(tabs.bus.posted).toEqual([{ t: "storage-off" }]);
+  });
+
+  it("logging out in one tab locks the others", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const b = tabs.open();
+    await b.session.unlockWithStoredRefresh();
+
+    await a.session.logout();
+
+    expect(b.session.get()).toMatchObject({ lockedLocally: true, lockCause: "logout" });
+    expect(b.double.rpc.state()).toBe("locked");
+    expect(tabs.bus.posted).toEqual([{ t: "logout" }]);
+  });
+
+  it("a tab holding no tokens ignores the signal", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const b = tabs.open(); // never signed in
+
+    await a.session.logout();
+
+    expect(b.session.get()).toMatchObject({ lockedLocally: false, autoPrompt: true });
+  });
+
+  it("a disposed tab ignores the signal", async () => {
+    const tabs = browserTabs();
+    const a = tabs.open();
+    await a.session.unlockWithPassword("pw");
+    const b = tabs.open();
+    await b.session.unlockWithStoredRefresh();
+    b.session.dispose();
+    const events = b.double.events.length;
+
+    await a.session.logout();
+
+    expect(b.double.events).toHaveLength(events);
   });
 });

@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { APP_FONTS } from "@/lib/app-fonts";
 import { appActivityFor } from "@/lib/app-lifecycle";
+import { authChannel } from "@/lib/auth-channel";
 import { createAuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
@@ -101,6 +102,8 @@ export default function RootLayout() {
       storedUnlockAtLaunchOnly: PLATFORM === "web",
       // Browser: tabs share the stored token, so rotations take turns.
       refreshLock,
+      // Browser: keep-signed-in off and logout lock every other tab too.
+      authChannel,
       idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
       log: (line) => console.log(line),
     });
