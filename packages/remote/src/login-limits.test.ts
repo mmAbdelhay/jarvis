@@ -10,6 +10,8 @@ import {
   GLOBAL_FAILURE_LIMIT,
   GLOBAL_FAILURE_WINDOW_MS,
   GLOBAL_LOCKOUT_MS,
+  MAX_TRACKED_LOGIN_DEVICES,
+  REFUSED_AUDIT_WINDOW_MS,
 } from "./login-limits.js";
 import type { DesktopNoticeKind } from "./owner-auth.js";
 
@@ -132,6 +134,95 @@ describe("createLoginLimits: global", () => {
       for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i++) limits.failed(deviceId(i % 3), SOURCE);
     }).not.toThrow();
     expect(limits.allow(deviceId(7), SOURCE)).toBe(false);
+  });
+});
+
+describe("createLoginLimits: refused attempts are audited, coalesced", () => {
+  function refusedLines(events: AuditEvent[]) {
+    return events.filter((event) => event.kind === "login-refused");
+  }
+
+  it("50 refusals within 60 s give exactly one line with count 50, written after the window", () => {
+    const { limits, events, clock } = makeLimits();
+    const id = deviceId(1);
+    // 7 failures: a 240 s lockout, so the 60 s window closes first.
+    failTimes(limits, id, DEVICE_FAILURES_BEFORE_LOCKOUT + 2);
+    for (let i = 0; i < 50; i++) {
+      expect(limits.allow(id, SOURCE)).toBe(false);
+      limits.refused(id, SOURCE);
+      clock.advance(1_000);
+    }
+    clock.advance(REFUSED_AUDIT_WINDOW_MS - 50_000 - 1);
+    limits.allow(id, SOURCE);
+    expect(refusedLines(events)).toEqual([]);
+
+    clock.advance(1);
+    limits.allow(id, SOURCE);
+    expect(refusedLines(events)).toEqual([
+      { kind: "login-refused", deviceId: id, source: SOURCE, scope: "device", count: 50 },
+    ]);
+
+    // The next window starts afresh.
+    limits.refused(id, "100.64.0.9");
+    clock.advance(REFUSED_AUDIT_WINDOW_MS);
+    limits.allow(id, SOURCE);
+    expect(refusedLines(events)).toHaveLength(2);
+    expect(refusedLines(events)[1]).toEqual({
+      kind: "login-refused",
+      deviceId: id,
+      source: "100.64.0.9",
+      scope: "device",
+      count: 1,
+    });
+    // The locked-out line at lockout start is still there, once per lockout.
+    expect(events.filter((event) => event.kind === "locked-out")).toHaveLength(3);
+  });
+
+  it("a pending count is written when the lockout ends before its window does", () => {
+    const { limits, events, clock } = makeLimits();
+    const id = deviceId(1);
+    failTimes(limits, id, DEVICE_FAILURES_BEFORE_LOCKOUT);
+    clock.advance(DEVICE_LOCKOUT_BASE_MS - 10_000);
+    limits.refused(id, SOURCE);
+    limits.refused(id, SOURCE);
+    clock.advance(10_000);
+    expect(limits.allow(id, SOURCE)).toBe(true);
+    expect(refusedLines(events)).toEqual([
+      { kind: "login-refused", deviceId: id, source: SOURCE, scope: "device", count: 2 },
+    ]);
+  });
+
+  it("refusals during a global lockout are audited with scope global", () => {
+    const { limits, events, clock } = makeLimits();
+    for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i++) limits.failed(deviceId(100 + i), SOURCE);
+    limits.refused(deviceId(1), SOURCE);
+    clock.advance(REFUSED_AUDIT_WINDOW_MS);
+    limits.allow(deviceId(1), SOURCE);
+    expect(refusedLines(events)).toEqual([
+      { kind: "login-refused", deviceId: deviceId(1), source: SOURCE, scope: "global", count: 1 },
+    ]);
+  });
+});
+
+describe("createLoginLimits: device map bounds", () => {
+  it("forgets a device whose lockout is over and whose last failure is over an hour old", () => {
+    const { limits, clock } = makeLimits();
+    failTimes(limits, deviceId(1), DEVICE_FAILURES_BEFORE_LOCKOUT - 1);
+    clock.advance(60 * 60_000);
+    limits.failed(deviceId(2), SOURCE);
+    expect(limits.trackedDeviceIds()).toEqual([deviceId(2)]);
+    // Its old failures no longer count toward a lockout.
+    limits.failed(deviceId(1), SOURCE);
+    expect(limits.allow(deviceId(1), SOURCE)).toBe(true);
+  });
+
+  it(`never tracks more than ${MAX_TRACKED_LOGIN_DEVICES} devices, evicting the least recently failed`, () => {
+    const { limits } = makeLimits();
+    for (let i = 0; i <= MAX_TRACKED_LOGIN_DEVICES; i++) limits.failed(deviceId(i), SOURCE);
+    const tracked = limits.trackedDeviceIds();
+    expect(tracked).toHaveLength(MAX_TRACKED_LOGIN_DEVICES);
+    expect(tracked).not.toContain(deviceId(0));
+    expect(tracked).toContain(deviceId(MAX_TRACKED_LOGIN_DEVICES));
   });
 });
 

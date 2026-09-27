@@ -97,6 +97,16 @@ export type AuditEvent =
   // repeated failures, or every login bridge-wide (`global`), tripped by
   // this device's failure. Recorded once per lockout start.
   | { kind: "locked-out"; deviceId: string; source: string; scope: "device" | "global" }
+  // Phase 0: login attempts a lockout refused, coalesced to at most one
+  // line per (device, scope) per 60 s window with the window's count
+  // (login-limits.ts), so a flood cannot rotate older lines away.
+  | {
+      kind: "login-refused";
+      deviceId: string;
+      source: string;
+      scope: "device" | "global";
+      count: number;
+    }
   // Phase 0: every remote owner session was revoked at once (Sign out
   // everywhere, a password change, a passkey delete).
   | {

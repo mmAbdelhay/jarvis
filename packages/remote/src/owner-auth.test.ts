@@ -155,6 +155,7 @@ describe("createOwnerAuth", () => {
       allow: vi.fn(() => false),
       failed: vi.fn(),
       succeeded: vi.fn(),
+      refused: vi.fn(),
     };
     const h = makeHarness({ limits });
     expect(await h.auth.handle("auth:login", { password: PASSWORD }, ctx())).toEqual({
@@ -167,7 +168,12 @@ describe("createOwnerAuth", () => {
 
   it("a lockout that starts while a password check runs refuses it rate-limited, uncounted", async () => {
     let allowed = true;
-    const limits: LoginLimits = { allow: () => allowed, failed: vi.fn(), succeeded: vi.fn() };
+    const limits: LoginLimits = {
+      allow: () => allowed,
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
     const { verify, gates } = gatedVerify();
     const h = makeHarness({ limits, verify });
     const pending = h.auth.handle("auth:login", { password: PASSWORD }, ctx());
@@ -179,8 +185,50 @@ describe("createOwnerAuth", () => {
     expect(h.events).toEqual([]);
   });
 
+  it("a queued password check re-asks the limits when it gets its slot, and never runs scrypt once locked out", async () => {
+    let allowed = true;
+    const limits: LoginLimits = {
+      allow: () => allowed,
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
+    const { verify, gates } = gatedVerify();
+    const h = makeHarness({ limits, verify });
+    const running = Array.from({ length: MAX_CONCURRENT_PASSWORD_CHECKS }, () =>
+      h.auth.handle("auth:login", { password: PASSWORD }, ctx()),
+    );
+    const queued = h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    await flush();
+    expect(h.verifyPassword).toHaveBeenCalledTimes(MAX_CONCURRENT_PASSWORD_CHECKS);
+    allowed = false;
+    gates[0]?.release();
+    expect(await queued).toEqual({ kind: "error", code: "rate-limited" });
+    expect(h.verifyPassword).toHaveBeenCalledTimes(MAX_CONCURRENT_PASSWORD_CHECKS);
+    expect(limits.refused).toHaveBeenCalledWith(DEVICE.id, SOURCE);
+    for (const gate of gates) gate.release();
+    await Promise.all(running);
+  });
+
+  it("a locked-out attempt is reported to the limits as refused", async () => {
+    const limits: LoginLimits = {
+      allow: () => false,
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
+    const h = makeHarness({ limits });
+    await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    expect(limits.refused).toHaveBeenCalledExactlyOnceWith(DEVICE.id, SOURCE);
+  });
+
   it("a locked-out device's passkey finish is refused rate-limited", async () => {
-    const limits: LoginLimits = { allow: () => false, failed: vi.fn(), succeeded: vi.fn() };
+    const limits: LoginLimits = {
+      allow: () => false,
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
     const h = makeHarness({ limits });
     expect(await h.auth.handle("auth:passkeyFinish", {} as never, ctx())).toEqual({
       kind: "error",
@@ -229,7 +277,12 @@ describe("createOwnerAuth", () => {
   });
 
   it("reports each verified attempt to the login-limits seam", async () => {
-    const limits: LoginLimits = { allow: () => true, failed: vi.fn(), succeeded: vi.fn() };
+    const limits: LoginLimits = {
+      allow: () => true,
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
     const h = makeHarness({ limits });
     await h.auth.handle("auth:login", { password: "nope nope nope" }, ctx());
     await h.auth.handle("auth:login", { password: PASSWORD }, ctx());

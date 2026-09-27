@@ -47,12 +47,14 @@ export type AuthOutcome =
 
 /**
  * Brute-force policy seam (Task 5 fills it). `allow` is asked before a
- * password is checked; `failed`/`succeeded` hear every checked attempt.
+ * password is checked; `failed`/`succeeded` hear every checked attempt, and
+ * `refused` every attempt a lockout turned away (audited, coalesced).
  */
 export type LoginLimits = {
   allow(deviceId: string, source: string): boolean;
   failed(deviceId: string, source: string): void;
   succeeded(deviceId: string, source: string): void;
+  refused(deviceId: string, source: string): void;
 };
 
 /** What the desktop shows an OS notification for (main.ts, bilingual). */
@@ -62,6 +64,7 @@ export const NO_LOGIN_LIMITS: LoginLimits = {
   allow: () => true,
   failed: () => {},
   succeeded: () => {},
+  refused: () => {},
 };
 
 /** What a connection needs from the owner-login module. */
@@ -205,13 +208,23 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     }
   }
 
+  /** An attempt a lockout turns away: reported to the limits (which audit it) and refused. */
+  function refuseLockedOut(deviceId: string, source: string): AuthOutcome {
+    limits.refused(deviceId, source);
+    return RATE_LIMITED;
+  }
+
   async function login(password: string, context: AuthContext): Promise<AuthOutcome> {
     const { device, source } = context;
-    if (!limits.allow(device.id, source)) return RATE_LIMITED;
+    if (!limits.allow(device.id, source)) return refuseLockedOut(device.id, source);
     const startedAt = generation;
-    const checked = withPasswordSlot(() => owner.verifyPassword(password));
+    // A lockout that started while this attempt waited for a slot refuses
+    // it before scrypt runs.
+    const checked = withPasswordSlot(async () =>
+      limits.allow(device.id, source) ? await owner.verifyPassword(password) : undefined,
+    );
     if (checked === undefined) return RATE_LIMITED;
-    let ok: boolean;
+    let ok: boolean | undefined;
     try {
       ok = await checked;
     } catch {
@@ -221,7 +234,9 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     // A lockout that started while this check ran (parallel attempts from
     // the same device, or the global trip) refuses it without saying
     // whether the password was right.
-    if (!limits.allow(device.id, source)) return RATE_LIMITED;
+    if (ok === undefined || !limits.allow(device.id, source)) {
+      return refuseLockedOut(device.id, source);
+    }
     if (!ok) {
       limits.failed(device.id, source);
       record({ kind: "login-failed", deviceId: device.id, source });
@@ -343,7 +358,9 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
         return logout(context);
       case "auth:passkeyFinish":
         // A lockout refuses passkey logins as well as password ones.
-        if (!limits.allow(context.device.id, context.source)) return RATE_LIMITED;
+        if (!limits.allow(context.device.id, context.source)) {
+          return refuseLockedOut(context.device.id, context.source);
+        }
         return UNSUPPORTED;
       case "auth:passkeyBegin":
       case "auth:passkeyRegisterBegin":
