@@ -804,6 +804,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
 
   function closePanel(): void {
     setOpen(false);
+    pickerVisible = false; // Task 8 fix round 1: never leaves the picker for a later open to re-focus.
   }
 
   // Cheap minor: toggle() must not depend on `this` — it is handed out of

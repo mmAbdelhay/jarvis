@@ -2218,6 +2218,9 @@ app.whenReady().then(async () => {
       // Task 8: the tab menu's own Plans item — the renderer owns every
       // tab's plan panel, so main only names which tab to toggle.
       startTabPlans: (tabId) => broadcast.local("workspace:tabPlans", tabId),
+      // Task 8 fix round 1: only a terminal tab has a plan panel at all.
+      isTerminalTab: (tabId) =>
+        workspace.state().tabs.some((tab) => tab.id === tabId && tab.kind === "terminal"),
       shell: electronShell,
       language: PRIMARY_LANGUAGE,
     });

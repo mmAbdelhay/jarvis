@@ -119,6 +119,38 @@ describe("desktop-only registrations", () => {
       expect(closeTab).toHaveBeenCalledWith("tab-1");
       expect(startTabPlans).toHaveBeenCalledWith("tab-1");
     });
+
+    // Task 8 fix round 1: a non-terminal tab (web, editor, api, …) has no
+    // plan panel of its own — the item is left off its menu rather than
+    // offered as an action that does nothing.
+    it("omits Plans for a tab isTerminalTab says is not a terminal", () => {
+      let template: MenuItemConstructorOptions[] = [];
+      const buildMenu = vi.fn((built: MenuItemConstructorOptions[]) => {
+        template = built;
+        return { popup: vi.fn() };
+      });
+      const isTerminalTab = vi.fn(() => false);
+      const listener = tabMenuListener({ ...fakeDesktopDeps(), buildMenu, isTerminalTab });
+
+      listener({}, "tab-1", 42, 24);
+
+      expect(isTerminalTab).toHaveBeenCalledWith("tab-1");
+      expect(template.map((item) => item.label)).not.toContain("Plans");
+    });
+
+    it("keeps Plans for a tab isTerminalTab says is a terminal", () => {
+      let template: MenuItemConstructorOptions[] = [];
+      const buildMenu = vi.fn((built: MenuItemConstructorOptions[]) => {
+        template = built;
+        return { popup: vi.fn() };
+      });
+      const isTerminalTab = vi.fn(() => true);
+      const listener = tabMenuListener({ ...fakeDesktopDeps(), buildMenu, isTerminalTab });
+
+      listener({}, "tab-1", 42, 24);
+
+      expect(template.map((item) => item.label)).toContain("Plans");
+    });
   });
 
   // Task 8 (controller ruling): main's webContents deny every
@@ -135,12 +167,33 @@ describe("desktop-only registrations", () => {
     }
 
     it("opens an allowed URL in the OS browser", () => {
-      const openExternal = vi.fn();
+      const openExternal = vi.fn(async () => {});
       const listener = openLinkListener({ ...fakeDesktopDeps(), shell: { openExternal } });
 
       listener({}, "https://example.com/docs");
 
       expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+    });
+
+    // Task 8 fix round 1: a rejected openExternal (e.g. no handler
+    // registered for the scheme on this OS) must not become an unhandled
+    // promise rejection — logged, same as every other main-process failure.
+    it("catches and logs a rejected openExternal, never throwing", async () => {
+      const logged: unknown[] = [];
+      const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        logged.push(args);
+      });
+      const openExternal = vi.fn(async () => {
+        throw new Error("no handler registered");
+      });
+      const listener = openLinkListener({ ...fakeDesktopDeps(), shell: { openExternal } });
+
+      expect(() => listener({}, "https://example.com/docs")).not.toThrow();
+      await Promise.resolve().then(() => Promise.resolve());
+
+      expect(logged.length).toBe(1);
+      expect(String(logged[0])).toContain("no handler registered");
+      spy.mockRestore();
     });
 
     it.each([
@@ -151,7 +204,7 @@ describe("desktop-only registrations", () => {
       ["an unparsable string", "not a url"],
       ["a url over 2048 characters", `https://example.com/${"a".repeat(2048)}`],
     ])("never opens %s", (_name, arg) => {
-      const openExternal = vi.fn();
+      const openExternal = vi.fn(async () => {});
       const listener = openLinkListener({ ...fakeDesktopDeps(), shell: { openExternal } });
 
       listener({}, arg);
@@ -191,7 +244,8 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     closeTab: vi.fn(),
     startTabRename: vi.fn(),
     startTabPlans: vi.fn(),
-    shell: { openExternal: vi.fn() },
+    isTerminalTab: vi.fn(() => true),
+    shell: { openExternal: vi.fn(async () => {}) },
     language: "en" as const,
   };
 }

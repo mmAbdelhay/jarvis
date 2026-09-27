@@ -7,7 +7,7 @@ import type { BrowserWindow, Dialog, MenuItemConstructorOptions, Screen, Shell }
 import type { BrowserHost, DevToolsDock } from "./browser-host.js";
 import type { ElectronBoundChannel } from "./dispatch.js";
 import type { ReportedRect } from "./ipc.js";
-import { MESSAGES } from "./messages.js";
+import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
 import { toDeviceIndependent } from "./view-bounds.js";
@@ -73,6 +73,12 @@ export type DesktopOnlyDeps = {
   closeTab: (tabId: string) => void;
   startTabRename: (tabId: string) => void; // broadcast.local("workspace:tabRename", tabId)
   startTabPlans: (tabId: string) => void; // broadcast.local("workspace:tabPlans", tabId)
+  // Task 8 fix round 1: whether `tabId` names a terminal tab — a non-
+  // terminal tab (web, editor, database, api, cluster, docker, chat) has
+  // no plan panel of its own, so its menu leaves the item off entirely
+  // (tab-menu.ts's own `showPlans`) rather than offering an action that
+  // does nothing.
+  isTerminalTab: (tabId: string) => boolean;
   // plans:openLink's own way out of this process — Pick, not the whole
   // Electron `shell`, the same discipline `dialog` above follows.
   shell: Pick<Shell, "openExternal">;
@@ -145,6 +151,7 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
         onClose: () => deps.closeTab(tabId),
         onPlans: () => deps.startTabPlans(tabId),
       },
+      { showPlans: deps.isTerminalTab(tabId) },
     );
     deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
   });
@@ -155,7 +162,9 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // renderer's own await.
   deps.handle("plans:openLink", (_event, url) => {
     if (typeof url !== "string" || !isAllowedPlanLinkUrl(url)) return;
-    void deps.shell.openExternal(url);
+    deps.shell.openExternal(url).catch((error: unknown) => {
+      console.error(`plans:openLink: shell.openExternal failed: ${errorMessage(error)}`);
+    });
   });
   // A native picker, for a multipart file field and for importing a
   // collection. Cancelling returns [] — it is not a failure.

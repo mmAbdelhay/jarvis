@@ -38,7 +38,20 @@ const $ = (id: string): HTMLElement => {
  *  (undefined until the first successful plansList answers) — what a
  *  `plans:changed` push compares its own path against to decide whether a
  *  closed panel should auto-open; `sessionPlanTimer` is the pending,
- *  per-tab debounce for the plansList call that keeps it fresh. */
+ *  per-tab debounce for the plansList call that keeps it fresh.
+ *
+ *  Fix round 1: `sessionPlanRequestId` guards a debounced lookup's own
+ *  async answer — bumped every time one actually fires, so a stale
+ *  response (clearTimeout only cancels a timer that has not fired yet,
+ *  never an in-flight promise) is discarded rather than overwriting a
+ *  newer one. `focusedPaneKey`/`focusedCwd` are the focused pane's own key
+ *  and last-known cwd, kept here (not only in ensurePane's own closure) so
+ *  a `plans:changed` push can schedule a *fresh* lookup of its own — a
+ *  foreground process like `claude` never re-emits OSC 7, so the cached
+ *  `sessionPlanPath` can be stale exactly when a plan just changed.
+ *  `dismissedPlanPath` is the session plan path the user last closed the
+ *  panel on purpose for (controller ruling): auto-open is suppressed for
+ *  that exact path until a *different* session plan resolves. */
 type Pane = {
   element: HTMLElement;
   tree: SplitTree;
@@ -46,6 +59,10 @@ type Pane = {
   planPanel: PlanPanel;
   sessionPlanPath: string | undefined;
   sessionPlanTimer: ReturnType<typeof setTimeout> | undefined;
+  sessionPlanRequestId: number;
+  focusedPaneKey: string | undefined;
+  focusedCwd: string | undefined;
+  dismissedPlanPath: string | undefined;
 };
 
 /** Which shell each pane is drawing. A WeakMap rather than a lookup table
@@ -117,32 +134,122 @@ function savePlanPanelWidth(tabId: string, width: number): void {
 /**
  * Debounced per tab (SESSION_PLAN_DEBOUNCE_MS): asks main which plan (if
  * any) `tabId`'s own session transcript currently names, and records the
- * answer on the tab's own Pane so the next `plans:changed` push can compare
- * against it. `paneKey`/`cwd` are the focused pane's own — the same pair
- * `planPanel.setPane` is handed at every call site below, since "this tab's
- * session plan" follows whichever pane is focused exactly as the panel
- * itself does.
+ * answer on the tab's own Pane. `paneKey`/`cwd` are the focused pane's own
+ * — the same pair `planPanel.setPane` is handed at every cwd/focus call
+ * site, since "this tab's session plan" follows whichever pane is focused
+ * exactly as the panel itself does. `openIfPath`, when given, is the
+ * `plans:changed` path this refresh exists to answer for (fix round 1) —
+ * once the lookup resolves, `maybeAutoOpenPlan` decides whether it now
+ * matches and the panel is still closed and not dismissed for it.
+ *
+ * `clearTimeout` only cancels a timer that has not fired yet, never an
+ * in-flight `plansList` promise — a second call arriving while the first
+ * request is already awaiting main's answer replaces the timer (fine, it
+ * had not fired) but cannot stop that answer arriving late. `pane.
+ * sessionPlanRequestId`, bumped only when a timer actually fires, is what
+ * lets the `.then` below tell "my own answer" from "an older one that
+ * arrived after a newer request already resolved" and discard the latter.
  *
  * Looks `tabId` up in `panes` at call time rather than closing over the
  * `Pane` object: every call site fires from inside a pane's own hooks,
  * which can only run once `ensurePane` has already returned and set the
  * entry — so a miss here only ever means the tab has since closed.
  */
-function scheduleSessionPlanRefresh(tabId: string, paneKey: string, cwd: string): void {
+function scheduleSessionPlanRefresh(
+  tabId: string,
+  paneKey: string,
+  cwd: string,
+  openIfPath?: string,
+): void {
   const pane = panes.get(tabId);
   if (pane === undefined) return;
   if (pane.sessionPlanTimer !== undefined) clearTimeout(pane.sessionPlanTimer);
   pane.sessionPlanTimer = setTimeout(() => {
     pane.sessionPlanTimer = undefined;
+    const requestId = ++pane.sessionPlanRequestId;
     void window.jarvis
       .plansList(paneKey, cwd)
       .then((list) => {
-        pane.sessionPlanPath = list.session?.path;
+        if (pane.sessionPlanRequestId !== requestId) return; // superseded — discard
+        const resolved = list.session?.path;
+        pane.sessionPlanPath = resolved;
+        // A *different* session plan than the one the user dismissed
+        // re-arms auto-open for it (controller ruling); the dismissal
+        // itself only ever suppresses the exact path it was recorded for.
+        if (pane.dismissedPlanPath !== undefined && pane.dismissedPlanPath !== resolved) {
+          pane.dismissedPlanPath = undefined;
+        }
+        if (openIfPath !== undefined) maybeAutoOpenPlan(tabId, openIfPath);
       })
       .catch(() => {
         // A failed lookup leaves the tab's last known session plan alone.
       });
   }, SESSION_PLAN_DEBOUNCE_MS);
+}
+
+/**
+ * Whether `tabId`'s panel should auto-open for `path` right now: closed,
+ * its own session plan resolves to exactly this path, and the user has
+ * not already dismissed this same path (controller ruling). The one place
+ * that rule is written down — both the immediate check in onPlansChanged
+ * and every debounced lookup's own resolution route through this.
+ */
+function maybeAutoOpenPlan(tabId: string, path: string): void {
+  const pane = panes.get(tabId);
+  if (pane === undefined) return;
+  if (pane.planPanel.isOpen()) return;
+  if (pane.sessionPlanPath !== path) return;
+  if (pane.dismissedPlanPath === path) return;
+  openPlanPanelWithoutStealingFocus(pane, path);
+}
+
+/**
+ * Auto-open must never move the terminal's own focus (spec rule 4).
+ * plan-panel.ts's open() does not touch focus itself, but a picker or a
+ * comment draft left over from before the panel was closed both queue a
+ * `queueMicrotask(() => …focus())` of their own (renderPicker/commentBox)
+ * — closePanel() now resets the picker (fix round 1), but a draft is not
+ * this caller's to reset. Saving and restoring document.activeElement
+ * around open() is the defensive net for either: one extra macrotask after
+ * open() resolves, so every microtask a render queued has already run
+ * before this decides whether anything needs restoring.
+ */
+function openPlanPanelWithoutStealingFocus(pane: Pane, path: string): void {
+  const previousFocus = document.activeElement;
+  void pane.planPanel
+    .open(path)
+    .then(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    .then(() => {
+      if (
+        previousFocus instanceof HTMLElement &&
+        previousFocus.isConnected &&
+        document.activeElement !== previousFocus
+      ) {
+        previousFocus.focus();
+      }
+    });
+}
+
+/** Records the focused pane's own key and cwd on the tab (fix round 1) —
+ *  what a `plans:changed` push uses to schedule its own fresh session-plan
+ *  lookup. A newly focused pane with no known cwd yet (`cwd` undefined)
+ *  leaves nothing honest to compare a future push against, so it clears
+ *  the cached session plan and cancels any lookup still in flight for the
+ *  pane that just lost focus — the same "nothing honest to show" rule the
+ *  sidebar's own clear() already follows for this exact case. */
+function setFocusedPane(tabId: string, paneKey: string, cwd: string | undefined): void {
+  const pane = panes.get(tabId);
+  if (pane === undefined) return;
+  pane.focusedPaneKey = paneKey;
+  pane.focusedCwd = cwd;
+  if (cwd === undefined) {
+    pane.sessionPlanPath = undefined;
+    if (pane.sessionPlanTimer !== undefined) {
+      clearTimeout(pane.sessionPlanTimer);
+      pane.sessionPlanTimer = undefined;
+    }
+    pane.sessionPlanRequestId += 1; // invalidates any in-flight lookup for the old pane
+  }
 }
 
 /**
@@ -183,6 +290,33 @@ function wirePlanPanelHandle(
     window.addEventListener("mouseup", onUp);
   });
 }
+
+// Minor (fix round 1): a width that was legal against yesterday's window
+// is not necessarily legal against today's — nothing re-checks the 60%
+// ceiling without this. Registered once at module init, re-registered on
+// every module reset the same way workspace-terminal.test.ts's own
+// vi.resetModules() needs the focus listener below to be (jsdom's
+// `window` outlives every test; a plain addEventListener would leave one
+// stale, closed-over listener behind per test otherwise).
+type PlanPanelResizeHost = typeof window & {
+  __reassertPlanPanelWidthOnResize__?: () => void;
+};
+const planPanelResizeHost = window as PlanPanelResizeHost;
+if (planPanelResizeHost.__reassertPlanPanelWidthOnResize__ !== undefined) {
+  window.removeEventListener("resize", planPanelResizeHost.__reassertPlanPanelWidthOnResize__);
+}
+const handlePlanPanelWindowResize = (): void => {
+  for (const pane of panes.values()) {
+    const current = pane.planPanel.element.getBoundingClientRect().width;
+    if (current <= 0) continue; // no real layout (every jsdom test that never stubs it)
+    const clamped = Math.round(clampPlanPanelWidth(current, pane.element.clientWidth));
+    if (clamped === Math.round(current)) continue;
+    pane.planPanel.element.style.width = `${clamped}px`;
+    for (const leaf of pane.tree.panes()) leaf.refit();
+  }
+};
+planPanelResizeHost.__reassertPlanPanelWidthOnResize__ = handlePlanPanelWindowResize;
+window.addEventListener("resize", handlePlanPanelWindowResize);
 
 let wired = false;
 
@@ -256,17 +390,22 @@ export function initWorkspaceTerminals(): void {
 
   // Task 8: a plan file changed on disk. Every open tab's panel gets the
   // chance to refresh itself (notifyChanged is a no-op unless that panel's
-  // own open doc — or list — actually needs it); a tab whose panel is
-  // still closed additionally auto-opens it, but only when the changed
-  // path is the one its own session names — never any other tab's plan,
-  // and never a closed panel for an unrelated file. Opening never moves
-  // focus: plan-panel.ts's open() touches no element's focus of its own,
-  // and its onToggle hook (wired in ensurePane) only refits the terminal.
+  // own open doc — or list — actually needs it). A tab whose panel is
+  // still closed is checked twice: once against whatever session plan is
+  // already cached (the common case — a recent cwd/focus event already
+  // resolved it), and once via a fresh, debounced plansList of its own
+  // (fix round 1) — a foreground process like `claude` never re-emits
+  // OSC 7 while it works, so the cached value can be stale exactly when a
+  // plan just changed, which is the scenario this feature exists for.
+  // maybeAutoOpenPlan is the one place that decides whether a path
+  // actually counts as "this tab's own" and is not one the user already
+  // dismissed; opening never moves focus (openPlanPanelWithoutStealingFocus).
   window.jarvis.onPlansChanged((path) => {
-    for (const pane of panes.values()) {
+    for (const [tabId, pane] of panes) {
       pane.planPanel.notifyChanged(path);
-      if (!pane.planPanel.isOpen() && pane.sessionPlanPath === path) {
-        void pane.planPanel.open(path);
+      maybeAutoOpenPlan(tabId, path);
+      if (pane.focusedPaneKey !== undefined && pane.focusedCwd !== undefined) {
+        scheduleSessionPlanRefresh(tabId, pane.focusedPaneKey, pane.focusedCwd, path);
       }
     }
   });
@@ -527,6 +666,7 @@ function ensurePane(
           if (focusedKey() === paneKey) {
             explorer.setRoot(paneKey, path);
             planPanel?.setPane(paneKey, path);
+            setFocusedPane(tabId, paneKey, path);
             scheduleSessionPlanRefresh(tabId, paneKey, path);
           }
         },
@@ -553,6 +693,7 @@ function ensurePane(
         if (path === undefined) explorer.clear();
         else explorer.setRoot(paneKey, path);
         planPanel?.setPane(paneKey, path);
+        setFocusedPane(tabId, paneKey, path);
         if (path !== undefined) scheduleSessionPlanRefresh(tabId, paneKey, path);
       },
     },
@@ -586,6 +727,17 @@ function ensurePane(
     onToggle: (open) => {
       planHandle.hidden = !open;
       for (const leaf of built.panes()) leaf.refit();
+      // Controller ruling (fix round 1): every close reaching this hook is
+      // the user's own — auto-open only ever calls open(), never
+      // close()/toggle() — so record the session plan it was showing (if
+      // any) as dismissed. scheduleSessionPlanRefresh's own resolution
+      // clears this again once a *different* session plan resolves.
+      if (!open) {
+        const pane = panes.get(tabId);
+        if (pane !== undefined && pane.sessionPlanPath !== undefined) {
+          pane.dismissedPlanPath = pane.sessionPlanPath;
+        }
+      }
     },
     // Controller ruling: main's webContents deny every target=_blank
     // outright, so a plan block's own rendered link has no route to the OS
@@ -613,6 +765,10 @@ function ensurePane(
     planPanel: builtPanel,
     sessionPlanPath: undefined,
     sessionPlanTimer: undefined,
+    sessionPlanRequestId: 0,
+    focusedPaneKey: undefined,
+    focusedCwd: undefined,
+    dismissedPlanPath: undefined,
   };
   panes.set(tabId, pane);
   return pane;

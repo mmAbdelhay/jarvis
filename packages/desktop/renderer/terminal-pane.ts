@@ -19,6 +19,7 @@
 
 import type { Workflow } from "@jarvis/platform";
 import type { TerminalChips } from "../src/ipc.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
@@ -751,7 +752,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     if (togglePlan !== undefined) {
       actions.push({
         id: "toggle-plan",
-        label: "Toggle plan panel",
+        label: MESSAGES.planPanelToggle(PRIMARY_LANGUAGE),
         run: () => attempt(() => togglePlan()),
       });
     }
