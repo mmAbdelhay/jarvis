@@ -197,7 +197,10 @@
   .topbar button,
   .topbar select,
   .topbar input,
-  .topbar .pill {
+  .topbar .pill,
+  .topbar .prayer-chip,
+  .topbar .topbar-metrics,
+  .topbar .topbar-danger-dot {
     -webkit-app-region: no-drag;
   }
 

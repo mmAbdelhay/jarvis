@@ -30,9 +30,9 @@ describe("the topbar as a drag region", () => {
     expect(body).toMatch(/-webkit-app-region:\s*drag/);
   });
 
-  it("its buttons, selects, inputs and pills opt back out of the drag region", () => {
+  it("its buttons, selects, inputs, pills and hover-tooltip chips opt back out of the drag region", () => {
     const body = ruleBody(
-      /\.topbar (?:button|select|input|\.pill)(?:,\s*\n?\s*\.topbar (?:button|select|input|\.pill))*\s*\{([^}]*)\}/,
+      /\.topbar (?:button|select|input|\.pill|\.prayer-chip|\.topbar-metrics|\.topbar-danger-dot)(?:,\s*\n?\s*\.topbar (?:button|select|input|\.pill|\.prayer-chip|\.topbar-metrics|\.topbar-danger-dot))*\s*\{([^}]*)\}/,
     );
     expect(body).toMatch(/-webkit-app-region:\s*no-drag/);
   });

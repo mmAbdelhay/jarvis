@@ -1,13 +1,13 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 
-// Mirrors styles.css's --ground / --text and .topbar's 40px height. This
+// Mirrors styles.css's --ground / --text and the redesigned .topbar's 48px height. This
 // runs in the main process, before any renderer or CSS exists, so the
 // values are a literal copy rather than something read from the stylesheet
 // — if the topbar's background, text colour or height tokens change, these
 // need updating too.
 const TOPBAR_BACKGROUND = "#0b0d12";
 const TOPBAR_TEXT = "#f4f5f7";
-const TOPBAR_HEIGHT_PX = 40;
+const TOPBAR_HEIGHT_PX = 48;
 
 /**
  * The window's title-bar chrome for `platform`.
