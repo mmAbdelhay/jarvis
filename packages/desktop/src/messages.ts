@@ -21,7 +21,7 @@
 // detected utterance — an Arabic sentence still gets an Arabic reply, and
 // Arabic session/project text still renders RTL via detectLanguage().
 import type { PrerequisiteId } from "@jarvis/platform";
-import type { BindKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
+import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
 import type { PushKind } from "@jarvis/wire";
 
 export const PRIMARY_LANGUAGE = "en";
@@ -1080,6 +1080,37 @@ export const MESSAGES = {
     };
     return text[problem][language];
   },
+  // Phase 0: the desktop OS notification for a remote-login security event
+  // (remote-access.ts → main.ts's Electron Notification). Never a device
+  // name, an address, a password or a token.
+  remoteSecurityNotice: (
+    kind: DesktopNoticeKind,
+    language: "ar" | "en",
+  ): { title: string; body: string } => {
+    const text: Record<DesktopNoticeKind, Record<"ar" | "en", { title: string; body: string }>> = {
+      "locked-out-global": {
+        ar: {
+          title: "تم إيقاف تسجيل الدخول عن بُعد مؤقتًا",
+          body: "فشلت محاولات دخول كثيرة خلال الساعة الأخيرة، فرُفضت كل محاولات الدخول لمدة 15 دقيقة.",
+        },
+        en: {
+          title: "Remote sign-in paused",
+          body: "Too many failed sign-in attempts in the last hour, so every sign-in is refused for 15 minutes.",
+        },
+      },
+      "refresh-reuse": {
+        ar: {
+          title: "أُعيد استخدام جلسة دخول قديمة",
+          body: "استُخدمت جلسة دخول سبق تجديدها، فأُلغيت تلك الجلسة. سجّل الدخول من جديد على جهازك.",
+        },
+        en: {
+          title: "An old sign-in session was reused",
+          body: "A sign-in session that had already been renewed was presented again, so that session was ended. Sign in again on your device.",
+        },
+      },
+    };
+    return text[kind][language];
+  },
   // Phase 0, owner login: Settings → Remote access → Owner account. The
   // password itself never appears in any of these strings.
   remoteOwnerTitle: (language: "ar" | "en"): string =>
@@ -1285,14 +1316,20 @@ export const MESSAGES = {
   remoteRevokeFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر إلغاء هذا الجهاز." : "Could not revoke that device.",
   // M11 Task 4: a remote editor:open/database:open/cluster:open whose
-  // sidecar publish was refused (dispatch.ts). Three of the five reasons
-  // collapse into one generic sentence — not-listening, unknown-device and
-  // bad-target are never something the user on the phone can act on, only
+  // sidecar publish was refused (dispatch.ts). Four of the six reasons
+  // collapse into one generic sentence — not-listening, unknown-device,
+  // locked (Phase 0: the phone is answered `locked` anyway) and bad-target are never something the user on the phone can act on, only
   // something dispatch.ts's own console log (`sidecar publish refused:
   // <reason>`) is for — so the specific value never has to be translated
-  // five ways for what is really only two user-facing meanings.
+  // six ways for what is really only two user-facing meanings.
   sidecarProxyUnavailable: (
-    reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target",
+    reason:
+      | "off"
+      | "needs-certificate"
+      | "not-listening"
+      | "unknown-device"
+      | "locked"
+      | "bad-target",
     language: "ar" | "en",
   ): string => {
     if (reason === "off") {

@@ -337,6 +337,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
       onDeviceDisconnected: vi.fn(),
       onDeviceRevoked: vi.fn(),
       onIdleDisabled: vi.fn(),
+      showNotification: vi.fn(),
       fetch: fetchLike,
     });
 

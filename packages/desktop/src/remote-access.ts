@@ -138,6 +138,7 @@ export type RemoteAccessDeps = {
     | "onStatus"
     | "onDeviceDisconnected"
     | "onIdleDisabled"
+    | "notifyDesktop"
   >;
   // Backs remoteKeyAuthorizer's pane/session/docker-follower checks — real
   // ShellManager/SessionManager/DockerFollowers methods in main.ts.
@@ -162,6 +163,10 @@ export type RemoteAccessDeps = {
   // which packages/remote leaves optional for its own callers) because the
   // desktop always has a disk to write this to.
   onIdleDisabled(): void;
+  // Phase 0: shows a desktop OS notification (main.ts: Electron
+  // `Notification`). This file picks the bilingual text for the bridge's
+  // notice kind; main.ts only displays it.
+  showNotification(title: string, body: string): void;
   // M10 Task 4: the Expo push sender's own outbound HTTP client — injected
   // exactly like `io`, so a test drives the whole send lifecycle with a
   // fake `fetch` and never a real socket.
@@ -277,6 +282,10 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           onStatus,
           onDeviceDisconnected: deps.onDeviceDisconnected,
           onIdleDisabled: deps.onIdleDisabled,
+          notifyDesktop: (kind) => {
+            const { title, body } = MESSAGES.remoteSecurityNotice(kind, deps.language);
+            deps.showNotification(title, body);
+          },
         })
         .then((created) => {
           bridge = created;

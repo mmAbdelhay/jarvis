@@ -89,7 +89,13 @@ export function invalidArgument(language: "ar" | "en"): GitViewResult<never> {
  *  (the reason is developer detail; the phone only ever gets one of two
  *  bilingual sentences, MESSAGES.sidecarProxyUnavailable's own text). */
 function sidecarPublishRefused(
-  reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target",
+  reason:
+    | "off"
+    | "needs-certificate"
+    | "not-listening"
+    | "unknown-device"
+    | "locked"
+    | "bad-target",
   language: "ar" | "en",
 ): GitViewResult<never> {
   console.error(`sidecar publish refused: ${reason}`);
@@ -138,7 +144,13 @@ export type SidecarPublisher = {
     | { ok: true; url: string }
     | {
         ok: false;
-        reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target";
+        reason:
+          | "off"
+          | "needs-certificate"
+          | "not-listening"
+          | "unknown-device"
+          | "locked"
+          | "bad-target";
       };
 };
 

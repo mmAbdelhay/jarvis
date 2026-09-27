@@ -1571,6 +1571,24 @@ describe("createConnection: owner login (Phase 0)", () => {
     ]);
   });
 
+  it("an unlock past its expiry admits nothing even before the expiry timer fires", async () => {
+    let wall = 0;
+    const handle = vi.fn<RequestHandler>(async () => ({ kind: "value", value: 1 }));
+    // `now` moves on its own while the clock's timers stay put.
+    const harness = lockedHarness({ handle, now: () => wall });
+    await login(harness);
+    expect(harness.connection.isUnlocked()).toBe(true);
+    wall = LIFETIME;
+    harness.connection.onText(reqFrame(10, "projects:list"));
+    expect(handle).not.toHaveBeenCalled();
+    expect(harness.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "expired" }, seq: 1 },
+      { t: "err", id: 10, code: "locked", text: "err:locked", language: "en" },
+    ]);
+    expect(harness.connection.isUnlocked()).toBe(false);
+    expect(harness.onLock).toHaveBeenCalledTimes(1);
+  });
+
   it("a refresh before expiry moves the expiry forward", async () => {
     const harness = lockedHarness();
     await login(harness);

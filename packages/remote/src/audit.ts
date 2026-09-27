@@ -92,7 +92,17 @@ export type AuditEvent =
   // source only — never the password or any token.
   | { kind: "login-succeeded"; deviceId: string; source: string }
   | { kind: "login-failed"; deviceId: string; source: string }
-  | { kind: "refresh-reuse"; deviceId: string; source: string };
+  | { kind: "refresh-reuse"; deviceId: string; source: string }
+  // Phase 0: a login lockout starting — one device's (`device`) after
+  // repeated failures, or every login bridge-wide (`global`), tripped by
+  // this device's failure. Recorded once per lockout start.
+  | { kind: "locked-out"; deviceId: string; source: string; scope: "device" | "global" }
+  // Phase 0: every remote owner session was revoked at once (Sign out
+  // everywhere, a password change, a passkey delete).
+  | {
+      kind: "signed-out-all";
+      reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere";
+    };
 
 export type AuditLog = { record(event: AuditEvent): void; flushed(): Promise<void> };
 

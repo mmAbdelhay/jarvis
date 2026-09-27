@@ -55,6 +55,9 @@ export type LoginLimits = {
   succeeded(deviceId: string, source: string): void;
 };
 
+/** What the desktop shows an OS notification for (main.ts, bilingual). */
+export type DesktopNoticeKind = "locked-out-global" | "refresh-reuse";
+
 export const NO_LOGIN_LIMITS: LoginLimits = {
   allow: () => true,
   failed: () => {},
@@ -95,6 +98,8 @@ export type OwnerAuthDeps = {
   /** Locks every open connection unlocked by `familyId` (after logout or refresh-token reuse). */
   lockFamily(familyId: string, reason: AuthLockReason): void;
   limits?: LoginLimits;
+  /** A desktop OS notification (refresh-token reuse). Defaults to a no-op. */
+  notifyDesktop?(kind: DesktopNoticeKind): void;
 };
 
 const AUTH_CHANNEL_SET: ReadonlySet<string> = new Set(AUTH_CHANNELS);
@@ -111,6 +116,7 @@ const UNSUPPORTED: AuthOutcome = { kind: "error", code: "unsupported" };
 export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
   const { owner, sessions, audit, log, lockFamily } = deps;
   const limits = deps.limits ?? NO_LOGIN_LIMITS;
+  const notifyDesktop = deps.notifyDesktop ?? (() => {});
 
   // Bumped by every invalidation; a login/refresh compares it across its
   // awaits.
@@ -130,6 +136,23 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     } catch {
       log("owner-auth: audit record failed");
     }
+  }
+
+  function notify(kind: DesktopNoticeKind): void {
+    try {
+      notifyDesktop(kind);
+    } catch {
+      log("owner-auth: notifyDesktop failed");
+    }
+  }
+
+  /**
+   * Whether a family just issued or rotated is still live right before the
+   * connection unlocks with it: a logout, reuse revoke or device revoke
+   * that landed while this request awaited must win.
+   */
+  function stillLive(deviceId: string, access: string, familyId: string): boolean {
+    return sessions.verifyAccess(deviceId, access)?.familyId === familyId;
   }
 
   function hasPasskeys(): boolean {
@@ -195,6 +218,10 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       log("owner-auth: password check failed");
       return INTERNAL;
     }
+    // A lockout that started while this check ran (parallel attempts from
+    // the same device, or the global trip) refuses it without saying
+    // whether the password was right.
+    if (!limits.allow(device.id, source)) return RATE_LIMITED;
     if (!ok) {
       limits.failed(device.id, source);
       record({ kind: "login-failed", deviceId: device.id, source });
@@ -211,6 +238,7 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
       await discardFamily(issued.familyId);
       return FORBIDDEN;
     }
+    if (!stillLive(device.id, issued.access, issued.familyId)) return FORBIDDEN;
     limits.succeeded(device.id, source);
     record({ kind: "login-succeeded", deviceId: device.id, source });
     return {
@@ -234,12 +262,14 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     if (result.kind === "reuse") {
       record({ kind: "refresh-reuse", deviceId: device.id, source });
       lockFamily(result.familyId, "signed-out");
+      notify("refresh-reuse");
       return FORBIDDEN;
     }
     if (generation !== startedAt) {
       await discardFamily(result.familyId);
       return FORBIDDEN;
     }
+    if (!stillLive(device.id, result.access, result.familyId)) return FORBIDDEN;
     return {
       kind: "value",
       value: tokensOf(result),
@@ -311,8 +341,11 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
         return resume((args as AuthArgs["auth:resume"]).accessToken, context);
       case "auth:logout":
         return logout(context);
-      case "auth:passkeyBegin":
       case "auth:passkeyFinish":
+        // A lockout refuses passkey logins as well as password ones.
+        if (!limits.allow(context.device.id, context.source)) return RATE_LIMITED;
+        return UNSUPPORTED;
+      case "auth:passkeyBegin":
       case "auth:passkeyRegisterBegin":
       case "auth:passkeyRegisterFinish":
         return UNSUPPORTED;

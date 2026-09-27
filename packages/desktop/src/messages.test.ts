@@ -628,6 +628,20 @@ describe("the remote access panel", () => {
     expect(parts.before + parts.after).not.toContain("{name}");
   });
 
+  it("remoteSecurityNotice has a bilingual, distinct title and body for each notice kind", () => {
+    for (const kind of ["locked-out-global", "refresh-reuse"] as const) {
+      const en = MESSAGES.remoteSecurityNotice(kind, "en");
+      const ar = MESSAGES.remoteSecurityNotice(kind, "ar");
+      expect(en.title.trim()).not.toBe("");
+      expect(en.body.trim()).not.toBe("");
+      expect(ar.title).toMatch(/[؀-ۿ]/);
+      expect(ar.body).toMatch(/[؀-ۿ]/);
+    }
+    expect(MESSAGES.remoteSecurityNotice("locked-out-global", "en")).not.toEqual(
+      MESSAGES.remoteSecurityNotice("refresh-reuse", "en"),
+    );
+  });
+
   it("covers all eight RemoteProblem values, bilingually and distinctly", () => {
     const problems = [
       "bad-address",

@@ -141,6 +141,7 @@ function makeHarness(
     ownerPassword?: boolean;
   } = {},
 ) {
+  const notifyDesktop = vi.fn<(kind: "locked-out-global" | "refresh-reuse") => void>();
   const fs = opts.fs ?? memoryFs();
   if ((opts.ownerPassword ?? true) && !fs.files.has(OWNER_PATH)) {
     fs.files.set(OWNER_PATH, { data: ownerFileWithPassword(), mode: 0o600 });
@@ -202,9 +203,11 @@ function makeHarness(
     log,
     onStatus,
     onDeviceDisconnected,
+    notifyDesktop,
   };
 
   return {
+    notifyDesktop,
     fs,
     clock,
     random,
@@ -232,6 +235,20 @@ async function seedDevices(
   const minted: { deviceId: string; token: string }[] = [];
   for (const name of names) minted.push(await store.add(name));
   return minted;
+}
+
+/** Opens an /rpc connection for `device` on the current listener and logs it in. */
+async function connectLoggedIn(
+  h: ReturnType<typeof makeHarness>,
+  device: { deviceId: string; token: string } | undefined,
+  source = "10.0.0.5:1",
+): Promise<{ socket: FakeSocket; handlers: SessionHandlers | undefined }> {
+  const socket = new FakeSocket();
+  const handlers = h.listenCalls.at(-1)?.onSocket("rpc", socket, source);
+  handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+  socket.sent = [];
+  expect(await login(handlers, socket)).toMatchObject({ t: "res" });
+  return { socket, handlers };
 }
 
 async function auditLines(fs: ReturnType<typeof memoryFs>): Promise<string[]> {
@@ -1375,6 +1392,7 @@ describe("createBridge: publishSidecar (rule 6)", () => {
     const [device] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
     const bridge = await createBridge(h.deps);
     await bridge.apply({ ...ON_127(), sidecarProxy: true });
+    await connectLoggedIn(h, device);
 
     const result = bridge.publishSidecar(device?.deviceId ?? "", TARGET);
     expect(result).toMatchObject({ url: expect.stringMatching(URL_PATTERN) });
@@ -1399,6 +1417,8 @@ describe("createBridge: sidecar handles cleared on revoke and listener restart (
     const [device, other] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone", "Tablet"]);
     const bridge = await createBridge(h.deps);
     await bridge.apply({ ...ON_127(), sidecarProxy: true });
+    await connectLoggedIn(h, device);
+    await connectLoggedIn(h, other, "10.0.0.6:1");
 
     const published1 = bridge.publishSidecar(device?.deviceId ?? "", TARGET);
     const published2 = bridge.publishSidecar(other?.deviceId ?? "", TARGET);
@@ -1427,6 +1447,7 @@ describe("createBridge: sidecar handles cleared on revoke and listener restart (
     const [device] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
     const bridge = await createBridge(h.deps);
     await bridge.apply({ ...ON_127(7717), sidecarProxy: true });
+    await connectLoggedIn(h, device);
 
     const published = bridge.publishSidecar(device?.deviceId ?? "", TARGET);
     expect(published).toMatchObject({ url: expect.any(String) });
@@ -1485,6 +1506,7 @@ describe("createBridge: stop() clears the sidecar registry directly (M4)", () =>
     const [device] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
     const bridge = await createBridge(h.deps);
     await bridge.apply({ ...ON_127(), sidecarProxy: true });
+    await connectLoggedIn(h, device);
 
     const published = bridge.publishSidecar(device?.deviceId ?? "", {
       kind: "editor",
@@ -1981,7 +2003,9 @@ describe("createBridge: owner password gate (Phase 0)", () => {
 
     await bridge.signOutEverywhere();
 
-    expect((await auditLines(h.fs)).join("\n")).toContain("signed-out-everywhere");
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain("signed-out-everywhere");
+    expect(lines).toContain('signed-out-all reason="signed-out-everywhere"');
   });
 
   it("an unreadable owner.json is sticky owner-unreadable: never listens, never overwritten", async () => {
@@ -2148,6 +2172,83 @@ describe("createBridge: owner login (Phase 0)", () => {
       seq: 1,
     });
     expect(closeDevice).toHaveBeenCalledWith(a.id);
+  });
+
+  it("publishSidecar refuses locked for a device with no logged-in connection", async () => {
+    const { bridge, a } = await twoDevices();
+    expect(bridge.publishSidecar(a.id, TARGET)).toEqual({ unavailable: "locked" });
+    await login(a.handlers, a.socket);
+    expect(bridge.publishSidecar(a.id, TARGET)).toHaveProperty("url");
+    a.handlers?.onText(reqFrame(10, "auth:logout"));
+    for (let i = 0; i < 5; i++) await flush();
+    expect(bridge.publishSidecar(a.id, TARGET)).toEqual({ unavailable: "locked" });
+  });
+
+  it("a refresh straddling Sign out everywhere ends locked with its family revoked", async () => {
+    const { h, bridge, a } = await twoDevices();
+    const answer = await login(a.handlers, a.socket);
+    const { refreshToken } = answer.v as { refreshToken: string };
+    const rename = h.fs.rename.bind(h.fs);
+    let held = false;
+    let release: () => void = () => {};
+    h.fs.rename = async (from, to) => {
+      if (!held && to === SESSIONS_PATH) {
+        held = true;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return rename(from, to);
+    };
+    a.handlers?.onText(reqFrame(11, "auth:refresh", [{ refreshToken }]));
+    for (let i = 0; i < 10; i++) await flush();
+    expect(held).toBe(true);
+
+    await bridge.signOutEverywhere();
+    release();
+    for (let i = 0; i < 20; i++) await flush();
+
+    expect(a.socket.sent).toContainEqual({
+      t: "err",
+      id: 11,
+      code: "forbidden",
+      text: "err:forbidden",
+      language: "en",
+    });
+    a.socket.sent = [];
+    a.handlers?.onText(reqFrame(12, "projects:list"));
+    expect(a.socket.sent).toEqual([lockedErr(12)]);
+    expect(JSON.parse(h.fs.files.get(SESSIONS_PATH)?.data ?? "{}")).toEqual({
+      version: 1,
+      sessions: [],
+    });
+  });
+
+  it("5 wrong passwords lock the device out: the 6th attempt is rate-limited and locked-out is audited", async () => {
+    const { h, a } = await twoDevices();
+    const wrong = "definitely not the owner password";
+    for (let i = 0; i < 5; i++) {
+      expect(await login(a.handlers, a.socket, wrong)).toMatchObject({ code: "forbidden" });
+    }
+    expect(await login(a.handlers, a.socket)).toMatchObject({ t: "err", code: "rate-limited" });
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain(`locked-out deviceId="${a.id}" scope="device" source="10.0.0.5:1"`);
+    expect(lines).not.toContain(wrong);
+    expect(lines).not.toContain(OWNER_TEST_PASSWORD);
+  });
+
+  it("a replayed refresh token notifies the desktop and audits refresh-reuse", async () => {
+    const { h, a } = await twoDevices();
+    const answer = await login(a.handlers, a.socket);
+    const { refreshToken } = answer.v as { refreshToken: string };
+    for (const id of [13, 14]) {
+      a.handlers?.onText(reqFrame(id, "auth:refresh", [{ refreshToken }]));
+      for (let i = 0; i < 10; i++) await flush();
+    }
+    expect(h.notifyDesktop).toHaveBeenCalledExactlyOnceWith("refresh-reuse");
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain(`refresh-reuse deviceId="${a.id}"`);
+    expect(lines).not.toContain(refreshToken);
   });
 
   it("revoke deletes the device's refresh tokens", async () => {

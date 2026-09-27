@@ -198,6 +198,8 @@ export type Connection = {
    * given) without closing its socket. True when it actually locked.
    */
   lock(reason: AuthLockReason, onlyFamily?: string): boolean;
+  /** Open, logged in and not past its access expiry (checked against now). */
+  isUnlocked(): boolean;
 };
 
 type ReqMessage = Extract<ClientMessage, { t: "req" }>;
@@ -453,8 +455,16 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     lock("expired");
   }
 
+  /**
+   * Checked against `now()`, not only the expiry timer: a timer can fire
+   * late, and an unlock past its `until` must never admit anything. An
+   * expired session found here locks the connection at once.
+   */
   function isUnlocked(): boolean {
-    return state.phase === "open" && state.auth.unlocked;
+    if (state.phase !== "open" || !state.auth.unlocked) return false;
+    if (deps.now() < state.auth.until) return true;
+    lock("expired");
+    return false;
   }
 
   function unlock(session: AuthSession): void {
@@ -676,7 +686,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
       return;
     }
     const session: AuthSession | undefined =
-      state.phase === "open" && state.auth.unlocked
+      isUnlocked() && state.phase === "open" && state.auth.unlocked
         ? { until: state.auth.until, familyId: state.auth.familyId }
         : undefined;
     deps.ownerAuth.handle(channel, args, { device, source: deps.source, session }).then(
@@ -1112,7 +1122,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
   }
 
   function push(channel: string, payload: unknown, key: string | undefined): void {
-    if (state.phase !== "open" || !state.auth.unlocked) return;
+    if (!isUnlocked() || state.phase !== "open") return;
     const policy = deps.policies.get(channel);
     if (policy === undefined) return;
     if (isKeyedPolicy(policy)) {
@@ -1156,6 +1166,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
         : keyedSubscribed.has(keyedTargetId(channel, key)),
     close,
     lock,
+    isUnlocked,
   };
 
   return connection;

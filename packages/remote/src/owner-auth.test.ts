@@ -3,7 +3,9 @@ import type { AuditEvent } from "./audit.js";
 import { fakeClock } from "./clock-double.js";
 import { memoryFs } from "./fs-double.js";
 import type { RandomBytes } from "./io.js";
-import type { AuthContext, LoginLimits } from "./owner-auth.js";
+import { formatAuditLine } from "./audit.js";
+import { createLoginLimits, DEVICE_FAILURES_BEFORE_LOCKOUT } from "./login-limits.js";
+import type { AuthContext, DesktopNoticeKind, LoginLimits } from "./owner-auth.js";
 import {
   createOwnerAuth,
   isAuthChannel,
@@ -28,6 +30,8 @@ function makeHarness(
     verify?: (password: string) => Promise<boolean>;
     limits?: LoginLimits;
     passkeys?: number;
+    /** Each auth:refresh waits for a gate after the store has rotated. */
+    holdRefresh?: Gate[];
   } = {},
 ) {
   const clock = fakeClock(10_000);
@@ -47,15 +51,29 @@ function makeHarness(
   const events: AuditEvent[] = [];
   const log = vi.fn<(line: string) => void>();
   const lockFamily = vi.fn<(familyId: string, reason: string) => void>();
+  const notifyDesktop = vi.fn<(kind: DesktopNoticeKind) => void>();
+  const held = options.holdRefresh;
+  const store =
+    held === undefined
+      ? sessions
+      : {
+          ...sessions,
+          refresh: async (deviceId: string, token: string) => {
+            const result = await sessions.refresh(deviceId, token);
+            await new Promise<void>((resolve) => held.push({ release: resolve }));
+            return result;
+          },
+        };
   const auth = createOwnerAuth({
     owner,
-    sessions,
+    sessions: store,
+    notifyDesktop,
     audit: { record: (event) => events.push(event) },
     log,
     lockFamily,
     ...(options.limits !== undefined ? { limits: options.limits } : {}),
   });
-  return { clock, fs, sessions, auth, events, log, lockFamily, verifyPassword };
+  return { clock, fs, sessions, auth, events, log, lockFamily, notifyDesktop, verifyPassword };
 }
 
 function ctx(session?: AuthContext["session"]): AuthContext {
@@ -147,6 +165,69 @@ describe("createOwnerAuth", () => {
     expect(limits.allow).toHaveBeenCalledWith(DEVICE.id, SOURCE);
   });
 
+  it("a lockout that starts while a password check runs refuses it rate-limited, uncounted", async () => {
+    let allowed = true;
+    const limits: LoginLimits = { allow: () => allowed, failed: vi.fn(), succeeded: vi.fn() };
+    const { verify, gates } = gatedVerify();
+    const h = makeHarness({ limits, verify });
+    const pending = h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    await flush();
+    allowed = false;
+    gates[0]?.release();
+    expect(await pending).toEqual({ kind: "error", code: "rate-limited" });
+    expect(limits.succeeded).not.toHaveBeenCalled();
+    expect(h.events).toEqual([]);
+  });
+
+  it("a locked-out device's passkey finish is refused rate-limited", async () => {
+    const limits: LoginLimits = { allow: () => false, failed: vi.fn(), succeeded: vi.fn() };
+    const h = makeHarness({ limits });
+    expect(await h.auth.handle("auth:passkeyFinish", {} as never, ctx())).toEqual({
+      kind: "error",
+      code: "rate-limited",
+    });
+  });
+
+  it("with the real limits: 5 wrong passwords block the 6th, and no audit line or log carries a password or token", async () => {
+    const clock = fakeClock(10_000);
+    const events: AuditEvent[] = [];
+    const notifyDesktop = vi.fn();
+    const limits = createLoginLimits({
+      now: clock.now,
+      audit: { record: (event) => events.push(event) },
+      notifyDesktop,
+    });
+    const h = makeHarness({ limits });
+    const good = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (good.kind !== "value") throw new Error("expected login");
+    const tokens = good.value as { accessToken: string; refreshToken: string };
+    await h.auth.handle("auth:refresh", { refreshToken: tokens.refreshToken }, ctx());
+    await h.auth.handle("auth:refresh", { refreshToken: tokens.refreshToken }, ctx());
+
+    const wrong = "wrong password number";
+    for (let i = 0; i < DEVICE_FAILURES_BEFORE_LOCKOUT; i++) {
+      expect(await h.auth.handle("auth:login", { password: wrong }, ctx())).toEqual({
+        kind: "error",
+        code: "forbidden",
+      });
+    }
+    expect(await h.auth.handle("auth:login", { password: PASSWORD }, ctx())).toEqual({
+      kind: "error",
+      code: "rate-limited",
+    });
+    expect(h.verifyPassword).toHaveBeenCalledTimes(1 + DEVICE_FAILURES_BEFORE_LOCKOUT);
+
+    const lines = [...h.events, ...events].map((event) => formatAuditLine(0, event)).join("");
+    expect(lines).toContain(" login-failed ");
+    expect(lines).toContain(" locked-out ");
+    expect(lines).toContain(" refresh-reuse ");
+    const logged = JSON.stringify(h.log.mock.calls);
+    for (const secret of [PASSWORD, wrong, tokens.accessToken, tokens.refreshToken]) {
+      expect(lines).not.toContain(secret);
+      expect(logged).not.toContain(secret);
+    }
+  });
+
   it("reports each verified attempt to the login-limits seam", async () => {
     const limits: LoginLimits = { allow: () => true, failed: vi.fn(), succeeded: vi.fn() };
     const h = makeHarness({ limits });
@@ -217,6 +298,38 @@ describe("createOwnerAuth", () => {
     const familyId = (login.effect as { unlock: { familyId: string } }).unlock.familyId;
     expect(h.lockFamily).toHaveBeenCalledWith(familyId, "signed-out");
     expect(h.events).toContainEqual({ kind: "refresh-reuse", deviceId: DEVICE.id, source: SOURCE });
+    expect(h.notifyDesktop).toHaveBeenCalledExactlyOnceWith("refresh-reuse");
+  });
+
+  it("a refresh racing a logout of its family is forbidden instead of unlocking with it", async () => {
+    const holdRefresh: Gate[] = [];
+    const h = makeHarness({ holdRefresh });
+    const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (login.kind !== "value" || login.effect === undefined || !("unlock" in login.effect)) {
+      throw new Error("expected login");
+    }
+    const { refreshToken } = login.value as { refreshToken: string };
+    const pending = h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    await flush();
+    expect(holdRefresh).toHaveLength(1);
+    await h.auth.handle("auth:logout", {}, ctx(login.effect.unlock));
+    holdRefresh[0]?.release();
+    expect(await pending).toEqual({ kind: "error", code: "forbidden" });
+  });
+
+  it("a refresh straddling an invalidation is forbidden and its family revoked", async () => {
+    const holdRefresh: Gate[] = [];
+    const h = makeHarness({ holdRefresh });
+    const login = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    if (login.kind !== "value") throw new Error("expected login");
+    const { refreshToken } = login.value as { refreshToken: string };
+    const pending = h.auth.handle("auth:refresh", { refreshToken }, ctx());
+    await flush();
+    h.auth.invalidate();
+    holdRefresh[0]?.release();
+    expect(await pending).toEqual({ kind: "error", code: "forbidden" });
+    const file = await h.fs.readFile("/remote/sessions.json");
+    expect(JSON.parse(file)).toEqual({ version: 1, sessions: [] });
   });
 
   it("two concurrent refreshes with the same token never both succeed", async () => {

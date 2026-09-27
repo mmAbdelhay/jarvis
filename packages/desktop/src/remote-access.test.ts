@@ -3,6 +3,7 @@ import { VOICE_UPLOAD_CHANNEL, type PushRegistration } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
 import { createBroadcaster } from "./broadcast.js";
 import { createDispatchTable, type DispatchTable } from "./dispatch.js";
+import { MESSAGES } from "./messages.js";
 import { fakeDeps } from "./dispatch.test.js";
 import {
   createRemoteAccess,
@@ -247,6 +248,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
     onDeviceDisconnected: vi.fn(),
     onDeviceRevoked: vi.fn(),
     onIdleDisabled: vi.fn(),
+    showNotification: vi.fn(),
     fetch: vi.fn(async () => ({ status: 200, json: async () => ({ data: [] }) })),
     ...overrides,
   };
@@ -295,6 +297,23 @@ const REMOTE_CONFIG = {
   push: { enabled: false, includeProjectNames: false },
   idleDisableMinutes: 0,
 };
+
+describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
+  it("shows the bridge's security notices as bilingual OS notifications in the configured language", async () => {
+    const showNotification = vi.fn<(title: string, body: string) => void>();
+    const { remoteAccess, createBridge } = harness({ showNotification, language: "ar" });
+    await remoteAccess.start(REMOTE_CONFIG);
+    const notifyDesktop = createBridge.mock.calls[0]?.[0].notifyDesktop;
+    notifyDesktop?.("locked-out-global");
+    notifyDesktop?.("refresh-reuse");
+    const global = MESSAGES.remoteSecurityNotice("locked-out-global", "ar");
+    const reuse = MESSAGES.remoteSecurityNotice("refresh-reuse", "ar");
+    expect(showNotification.mock.calls).toEqual([
+      [global.title, global.body],
+      [reuse.title, reuse.body],
+    ]);
+  });
+});
 
 describe("createRemoteAccess: bridge creation", () => {
   it("start() creates the bridge once, then applies the config", async () => {

@@ -32,7 +32,8 @@ import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
 import type { OwnerHashParams } from "./owner.js";
 import { createOwnerStore } from "./owner.js";
-import { createOwnerAuth } from "./owner-auth.js";
+import { createLoginLimits } from "./login-limits.js";
+import { createOwnerAuth, type DesktopNoticeKind } from "./owner-auth.js";
 import { createSessionStore } from "./sessions.js";
 import { describeError } from "./io.js";
 import type { Clock, RandomBytes, RemoteFs, SessionHandlers, SocketLike, Timers } from "./io.js";
@@ -220,6 +221,9 @@ export type BridgeDeps = {
    * from `stop()` (rule 7).
    */
   onIdleDisabled?(): void;
+  /** Phase 0: a desktop OS notification — a global login lockout, or a
+   *  refresh token presented again. Optional; defaults to a no-op. */
+  notifyDesktop?(kind: DesktopNoticeKind): void;
 };
 
 export type Bridge = {
@@ -233,7 +237,9 @@ export type Bridge = {
     target: SidecarTarget,
   ):
     | { url: string }
-    | { unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" };
+    | {
+        unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "locked";
+      };
   push(channel: string, payload: unknown): void;
   hasSubscriber(channel: string): boolean;
   /** Stores this device's Expo push registration beside its record. Answers
@@ -401,6 +407,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     auditLog.record({ kind: "error", detail: describeError(error) });
   }
 
+  const notifyDesktop = (kind: DesktopNoticeKind): void => deps.notifyDesktop?.(kind);
   const ownerAuth = createOwnerAuth({
     owner,
     sessions,
@@ -409,6 +416,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     lockFamily(familyId, reason) {
       hub.lockFamily(familyId, reason);
     },
+    // In memory only: a restart forgets every failure count and lockout.
+    limits: createLoginLimits({ now: deps.now, audit: auditLog, notifyDesktop, log: deps.log }),
+    notifyDesktop,
   });
 
   // Owner-account changes (set/change password, passkey delete) run one at
@@ -1086,7 +1096,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     target: SidecarTarget,
   ):
     | { url: string }
-    | { unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" } {
+    | {
+        unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "locked";
+      } {
     const sidecarProxyEnabled = config?.sidecarProxy ?? false;
     if (!sidecarProxyEnabled) return { unavailable: "off" };
     if (listening === undefined) return { unavailable: "not-listening" };
@@ -1102,6 +1114,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (!devices.list().some((device) => device.id === deviceId)) {
       return { unavailable: "unknown-device" };
     }
+    // A handle is only ever minted for a logged-in device: a request that
+    // was admitted before its connection locked must not leave one behind.
+    if (!hub.hasUnlockedConnection(deviceId)) return { unavailable: "locked" };
 
     const { handle, key } = sidecarRegistry.publish(deviceId, target);
     auditLog.record({
@@ -1132,9 +1147,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
    * write lands later.
    */
   function invalidateOwnerSessions(
-    _reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere",
+    reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere",
   ): void {
     ownerAuth.invalidate();
+    auditLog.record({ kind: "signed-out-all", reason });
     sessions.revokeAll().catch((error: unknown) => {
       deps.log(`bridge: sessions.revokeAll failed: ${describeError(error)}`);
     });

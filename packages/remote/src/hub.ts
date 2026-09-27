@@ -67,6 +67,8 @@ export type Hub = {
   lockDevice(deviceId: string, reason: AuthLockReason): number;
   /** Locks every open connection unlocked by `familyId` (logout, refresh-token reuse). */
   lockFamily(familyId: string, reason: AuthLockReason): number;
+  /** Whether any of this device's open connections is logged in right now. */
+  hasUnlockedConnection(deviceId: string): boolean;
   connectedDeviceIds(): ReadonlySet<string>;
 };
 
@@ -329,6 +331,10 @@ export function createHub(deps: HubDeps): Hub {
 
     lockFamily(familyId, reason) {
       return lockEach(open, (connection) => connection.lock(reason, familyId));
+    },
+
+    hasUnlockedConnection(deviceId) {
+      return [...(byDevice.get(deviceId) ?? [])].some((connection) => connection.isUnlocked());
     },
 
     connectedDeviceIds() {

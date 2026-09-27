@@ -33,12 +33,23 @@ export {
   MAX_QUEUED_PASSWORD_CHECKS,
   NO_LOGIN_LIMITS,
 } from "./owner-auth.js";
+export {
+  createLoginLimits,
+  DEVICE_FAILURES_BEFORE_LOCKOUT,
+  DEVICE_LOCKOUT_BASE_MS,
+  DEVICE_LOCKOUT_MAX_MS,
+  GLOBAL_FAILURE_LIMIT,
+  GLOBAL_FAILURE_WINDOW_MS,
+  GLOBAL_LOCKOUT_MS,
+} from "./login-limits.js";
+export type { LoginLimitsDeps } from "./login-limits.js";
 export type {
   AuthContext,
   AuthEffect,
   AuthOutcome,
   AuthSession,
   BridgeOwnerAuth,
+  DesktopNoticeKind,
   LoginLimits,
   OwnerAuth,
   OwnerAuthDeps,

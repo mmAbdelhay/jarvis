@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   BrowserWindow,
   Menu,
+  Notification,
   app,
   components,
   dialog,
@@ -1570,6 +1571,10 @@ app.whenReady().then(async () => {
       // global fetch — the same one api-executor.ts already relies on
       // existing — never `@jarvis/platform`'s apiFetch or undici directly.
       fetch: (url, init) => fetch(url, init),
+      // Phase 0: a global login lockout or a reused refresh token.
+      showNotification: (title, body) => {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      },
     });
 
     // M10 Task 4: built right after remoteAccess and before wiring.start(),
