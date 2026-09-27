@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnchoredComment, PlanBlock, PlanComment } from "@jarvis/core";
 import type { PlanDoc, PlanList, PlanResult } from "@jarvis/platform";
 import { createPlanPanel, type PlanPanelApi } from "./plan-panel.js";
@@ -2425,12 +2425,184 @@ describe("createPlanPanel: block editing fix round 4", () => {
   it("B4: mousedown on B and mouseup elsewhere does not open B", async () => {
     const { panel } = setup();
     await panel.open(doc.path);
-    liveHeading(panel.element).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    // Fix round 5: a pointer that stays put still confirms (layout shift),
+    // so "mouseup elsewhere" here means the pointer really moved there.
+    liveHeading(panel.element).dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
     panel.element
       .querySelector('[data-block-id="paragraph-1"]')!
-      .dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      .dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 10, clientY: 60 }));
     await flush();
 
     expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+  });
+});
+
+describe("createPlanPanel: block editing fix round 5", () => {
+  type CaretDoc = Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null };
+
+  function paragraphEl(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+  }
+
+  function headingEditor(panelElement: HTMLElement): Element | null {
+    return panelElement.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich');
+  }
+
+  function liveHeading(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+  }
+
+  function mouse(type: string, target: EventTarget, x: number, y: number): void {
+    target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+  }
+
+  function selectText(node: Node, start: number, end: number): void {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
+    vi.restoreAllMocks();
+  });
+
+  // Item 1: caret at the click point ------------------------------------
+
+  it("1a: click-to-edit places the caret at the pointer via caretRangeFromPoint", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    const caretRangeFromPoint = vi.fn((_x: number, _y: number) => {
+      const text = paragraphEl(panel.element)?.querySelector("p")?.firstChild;
+      if (!text) return null;
+      const range = document.createRange();
+      range.setStart(text, 9);
+      range.collapse(true);
+      return range;
+    });
+    (document as CaretDoc).caretRangeFromPoint = caretRangeFromPoint;
+
+    const content = panel.element.querySelector('[data-block-id="paragraph-1"]')!;
+    window.getSelection()?.removeAllRanges();
+    mouse("mousedown", content, 120, 40);
+    mouse("mouseup", content, 120, 40);
+    await flush();
+
+    const editable = paragraphEl(panel.element);
+    const selection = window.getSelection()!;
+    expect(caretRangeFromPoint).toHaveBeenCalledWith(120, 40);
+    expect(selection.isCollapsed).toBe(true);
+    expect(selection.anchorNode).toBe(editable.querySelector("p")!.firstChild);
+    expect(selection.anchorOffset).toBe(9);
+  });
+
+  it("1b: when the pointer resolves to nothing, the caret goes to the END of the block", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    (document as CaretDoc).caretRangeFromPoint = vi.fn(() => null);
+
+    const content = panel.element.querySelector('[data-block-id="paragraph-1"]')!;
+    window.getSelection()?.removeAllRanges();
+    mouse("mousedown", content, 5, 5);
+    mouse("mouseup", content, 5, 5);
+    await flush();
+
+    const text = paragraphEl(panel.element).querySelector("p")!.firstChild!;
+    const selection = window.getSelection()!;
+    expect(selection.isCollapsed).toBe(true);
+    expect(selection.anchorNode).toBe(text);
+    expect(selection.anchorOffset).toBe(text.textContent!.length);
+  });
+
+  it("1c: a caret range outside the edited block also falls back to the end", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    (document as CaretDoc).caretRangeFromPoint = vi.fn(() => {
+      const outside = panel.element.querySelector('[data-block-id="heading-1"] h1')!.firstChild!;
+      const range = document.createRange();
+      range.setStart(outside, 2);
+      range.collapse(true);
+      return range;
+    });
+
+    const content = panel.element.querySelector('[data-block-id="paragraph-1"]')!;
+    window.getSelection()?.removeAllRanges();
+    mouse("mousedown", content, 5, 5);
+    mouse("mouseup", content, 5, 5);
+    await flush();
+
+    const text = paragraphEl(panel.element).querySelector("p")!.firstChild!;
+    expect(window.getSelection()!.anchorNode).toBe(text);
+    expect(window.getSelection()!.anchorOffset).toBe(text.textContent!.length);
+  });
+
+  // Item 2: layout shift under a stationary pointer --------------------
+
+  async function startSwitchWithShift(panelElement: HTMLElement) {
+    // A is open and dirty; its save resolves immediately (default mock).
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    const editableA = paragraphEl(panelElement);
+    editableA.querySelector("p")!.textContent = "Ship the useful feature quickly.";
+    editableA.dispatchEvent(new Event("input", { bubbles: true }));
+    const staleB = liveHeading(panelElement);
+    window.getSelection()?.removeAllRanges();
+    mouse("mousedown", staleB, 200, 100);
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: staleB }));
+    await flush(); // A saves and exits: every row is rebuilt and shifts up
+    expect(liveHeading(panelElement)).not.toBe(staleB);
+    return panelElement.querySelector<HTMLElement>(".plan-panel__body")!;
+  }
+
+  it("2a: mouseup at the same point lands on the panel body after the shift, and B still opens", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    const body = await startSwitchWithShift(panel.element);
+
+    mouse("mouseup", body, 200, 100);
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeTruthy();
+  });
+
+  it("2b: a pointer that moved 5px or more before mouseup on another target does not open B", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    const body = await startSwitchWithShift(panel.element);
+
+    mouse("mouseup", body, 205, 100);
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeNull();
+  });
+
+  it("2c: a stationary mouseup more than 800ms after mousedown on another target does not open B", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const body = await startSwitchWithShift(panel.element);
+
+    now += 801;
+    mouse("mouseup", body, 200, 100);
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeNull();
+  });
+
+  it("2d: a drag-select still never opens B, even at the same point", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    const body = await startSwitchWithShift(panel.element);
+
+    selectText(liveHeading(panel.element).querySelector("h1")!.firstChild!, 0, 4);
+    mouse("mouseup", body, 200, 100);
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeNull();
   });
 });

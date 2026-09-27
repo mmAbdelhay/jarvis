@@ -90,6 +90,10 @@ type EditingState = {
    *  so focusing the toolbar's own link-URL input doesn't read as leaving
    *  the edit. */
   wrap: HTMLElement | undefined;
+  /** Fix round 5, item 1: the pointer position of the mouse gesture that
+   *  opened this edit, if any. Consumed on the first render to put the
+   *  caret where the user clicked instead of at offset 0. */
+  caretPoint: CaretPoint | undefined;
   /** Set only by a real `input` event in `container` — a click that opens
    *  the block and a blur that immediately follows it must never write. */
   dirty: boolean;
@@ -127,7 +131,54 @@ type ConflictState = {
  *  post-await handling — never by exitEditing on its own), so switching
  *  blocks while a save is in flight still opens the new one automatically
  *  instead of needing a second click. */
-type PendingEditTarget = { blockId: string; index: number };
+type PendingEditTarget = { blockId: string; index: number; point?: CaretPoint };
+
+type CaretPoint = { x: number; y: number };
+
+/** Both hit-test APIs, feature-detected: Chromium ships
+ *  caretRangeFromPoint, the standard caretPositionFromPoint is the
+ *  fallback, and jsdom has neither. */
+type CaretHitTestDocument = Document & {
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+};
+
+function caretRangeAt(point: CaretPoint): Range | undefined {
+  const hitTest = document as CaretHitTestDocument;
+  if (typeof hitTest.caretRangeFromPoint === "function") {
+    return hitTest.caretRangeFromPoint(point.x, point.y) ?? undefined;
+  }
+  if (typeof hitTest.caretPositionFromPoint === "function") {
+    const position = hitTest.caretPositionFromPoint(point.x, point.y);
+    if (!position) return undefined;
+    const range = document.createRange();
+    range.setStart(position.offsetNode, position.offset);
+    range.collapse(true);
+    return range;
+  }
+  return undefined;
+}
+
+/** Fix round 5, item 1: a collapsed caret at the pointer when that lands
+ *  inside `container`, otherwise at the end of its last text. */
+function placeCaret(container: HTMLElement, point: CaretPoint): void {
+  const selection = window.getSelection();
+  if (!selection) return;
+  let range = caretRangeAt(point);
+  if (!range || !container.contains(range.startContainer)) {
+    range = document.createRange();
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let lastText: Node | null = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) lastText = node;
+    if (lastText) range.setStart(lastText, lastText.textContent?.length ?? 0);
+    else range.selectNodeContents(container);
+    range.collapse(lastText !== null);
+  } else {
+    range.collapse(true);
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -318,7 +369,9 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   // resolves to the same block id — re-queried by data-block-id, since the
   // rows may have been rebuilt in between — with a collapsed selection
   // turns it into an edit.
-  let switchCandidate: string | undefined;
+  // Fix round 5, item 2: plus where and when that mousedown happened, so a
+  // stationary pointer still confirms after a layout shift moved B away.
+  let switchCandidate: { blockId: string; x: number; y: number; at: number } | undefined;
   // Fix round 3, item A: the exact mtime our own last successful
   // plansWriteBlock/applyConflict returned for a path. A file watcher
   // cannot tell "Jarvis just wrote this" apart from "something else did" —
@@ -1083,7 +1136,15 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     }
     wrap.append(state.container);
     wrap.append(el("p", "plan-block-edit__hint", t("planEditHint")));
-    if (firstRender) queueMicrotask(() => state.container?.focus());
+    if (firstRender) {
+      queueMicrotask(() => {
+        if (editing !== state || !state.container) return;
+        state.container.focus();
+        const point = state.caretPoint;
+        state.caretPoint = undefined;
+        if (point) placeCaret(state.container, point);
+      });
+    }
     return wrap;
   }
 
@@ -1091,7 +1152,11 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
    *  finishEditing("blur") first (same commit a real blur would trigger) so
    *  switching blocks never leaves two edits live at once; a conflict notice
    *  already owns the panel's one write path until it's resolved. */
-  async function beginEditingBlock(block: PlanBlock, index: number): Promise<void> {
+  async function beginEditingBlock(
+    block: PlanBlock,
+    index: number,
+    caretPoint?: CaretPoint,
+  ): Promise<void> {
     if (!currentDoc || conflict) return;
     if (editing?.blockId === block.id) return; // already editing; let the click place the caret
     if (editing) await finishEditing("blur");
@@ -1107,6 +1172,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       inputCount: 0,
       baseMtimeMs: currentDoc.mtimeMs,
       saving: false,
+      caretPoint,
     };
     renderDocument();
   }
@@ -1127,7 +1193,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       currentDoc.blocks.find((candidate) => candidate.id === pending.blockId) ??
       currentDoc.blocks[pending.index];
     if (!target) return;
-    void beginEditingBlock(target, currentDoc.blocks.indexOf(target));
+    void beginEditingBlock(target, currentDoc.blocks.indexOf(target), pending.point);
   }
 
   /** Clears `editing` and either re-renders in place or, if a disk change
@@ -1788,7 +1854,20 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     if (event.target instanceof Element && event.target.closest("a")) return;
     const id = blockIdAt(event.target);
     if (!id || id === editing?.blockId) return;
-    switchCandidate = id;
+    switchCandidate = { blockId: id, x: event.clientX, y: event.clientY, at: performance.now() };
+  }
+
+  /** Fix round 5, item 2: A's exit removes its toolbar/hint/outline and
+   *  the rows below move, so a mouseup at the very same pointer position
+   *  can land on something else (e.g. `.plan-panel__body`). A pointer that
+   *  stayed put (< 5px) and released quickly (< 800ms) still counts. */
+  function confirmsCandidate(
+    candidate: NonNullable<typeof switchCandidate>,
+    event: MouseEvent,
+  ): boolean {
+    if (blockIdAt(event.target) === candidate.blockId) return true;
+    const moved = Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y);
+    return moved < 5 && performance.now() - candidate.at < 800;
   }
 
   /** Fix round 4, item B: confirms the candidate when this mouseup lands on
@@ -1799,18 +1878,19 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   function onBlockMouseUp(event: MouseEvent): void {
     const candidate = switchCandidate;
     switchCandidate = undefined;
-    if (!candidate || event.button !== 0 || blockIdAt(event.target) !== candidate) return;
+    if (!candidate || event.button !== 0 || !confirmsCandidate(candidate, event)) return;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
-    if (!currentDoc || conflict || editing?.blockId === candidate) return;
-    const index = currentDoc.blocks.findIndex((candidateBlock) => candidateBlock.id === candidate);
+    if (!currentDoc || conflict || editing?.blockId === candidate.blockId) return;
+    const index = currentDoc.blocks.findIndex((block) => block.id === candidate.blockId);
     const block = currentDoc.blocks[index];
     if (!block) return;
+    const point = { x: event.clientX, y: event.clientY };
     if (editing?.saving) {
-      pendingEditTarget = { blockId: block.id, index };
+      pendingEditTarget = { blockId: block.id, index, point };
       return;
     }
-    void beginEditingBlock(block, index);
+    void beginEditingBlock(block, index, point);
   }
   document.addEventListener("mousedown", onBlockMouseDown);
   document.addEventListener("mouseup", onBlockMouseUp);
