@@ -133,6 +133,60 @@ describe("createChallengeStore", () => {
     clock.advance(120_001);
     expect(store.consume("connection-a", "login", challenge)).toBe(false);
   });
+
+  it("invalidates the previous challenge when the same purpose is re-issued", () => {
+    let value = 0;
+    const store = createChallengeStore({
+      random: (size) => Buffer.alloc(size, value++),
+      now: () => 100,
+    });
+    const previous = store.issue("connection-a", "register");
+    const latest = store.issue("connection-a", "register");
+
+    expect(store.consume("connection-a", "register", previous)).toBe(false);
+    expect(store.consume("connection-a", "register", latest)).toBe(true);
+  });
+
+  it("drops registration and login challenges for a connection", () => {
+    let value = 0;
+    const store = createChallengeStore({
+      random: (size) => Buffer.alloc(size, value++),
+      now: () => 100,
+    });
+    const registration = store.issue("connection-a", "register");
+    const login = store.issue("connection-a", "login");
+
+    store.drop("connection-a");
+
+    expect(store.consume("connection-a", "register", registration)).toBe(false);
+    expect(store.consume("connection-a", "login", login)).toBe(false);
+  });
+
+  it("sweeps expired challenges whenever a challenge is issued", () => {
+    const clock = fakeClock();
+    const store = createChallengeStore({ random: randomBytes, now: clock.now });
+    store.issue("expired-a", "register");
+    store.issue("expired-b", "login");
+    clock.advance(120_001);
+
+    store.issue("current", "login");
+
+    expect(store.size()).toBe(1);
+  });
+
+  it("keeps the store bounded after 10000 connections expire", () => {
+    const clock = fakeClock();
+    const store = createChallengeStore({ random: randomBytes, now: clock.now });
+    for (let index = 0; index < 10_000; index++) {
+      store.issue(`connection-${index}`, "login");
+    }
+    expect(store.size()).toBe(10_000);
+    clock.advance(120_001);
+
+    store.issue("current", "login");
+
+    expect(store.size()).toBe(1);
+  });
 });
 
 describe("verifyRegistration", () => {

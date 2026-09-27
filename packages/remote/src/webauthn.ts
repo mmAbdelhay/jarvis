@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash, createPublicKey, timingSafeEqual, verify } from "node:crypto";
 
 export type WebAuthnAlgorithm = -7 | -257;
 export type ChallengePurpose = "register" | "login";
@@ -188,26 +188,51 @@ function failure(error: unknown): { ok: false; reason: string } {
 export function createChallengeStore(dependencies: { random: RandomBytes; now: Clock }): {
   issue(connId: string, purpose: ChallengePurpose): string;
   consume(connId: string, purpose: ChallengePurpose, challenge: string): boolean;
+  drop(connId: string): void;
+  size(): number;
 } {
-  const issued = new Map<string, number>();
-  const key = (connId: string, purpose: ChallengePurpose, challenge: string) =>
-    JSON.stringify([connId, purpose, challenge]);
+  const issued = new Map<string, { challenge: Buffer; createdAt: number }>();
+  const key = (connId: string, purpose: ChallengePurpose) => JSON.stringify([connId, purpose]);
+  const isFresh = (createdAt: number, now: number) => {
+    const age = now - createdAt;
+    return age >= 0 && age <= CHALLENGE_LIFETIME_MS;
+  };
   return {
     issue(connId, purpose) {
+      const now = dependencies.now();
+      for (const [challengeKey, entry] of issued) {
+        if (!isFresh(entry.createdAt, now)) issued.delete(challengeKey);
+      }
       const challengeBytes = dependencies.random(CHALLENGE_BYTES);
       if (!Buffer.isBuffer(challengeBytes) || challengeBytes.length !== CHALLENGE_BYTES)
         throw new Error("Random source returned the wrong byte count");
       const challenge = challengeBytes.toString("base64url");
-      issued.set(key(connId, purpose, challenge), dependencies.now());
+      issued.set(key(connId, purpose), { challenge: Buffer.from(challengeBytes), createdAt: now });
       return challenge;
     },
     consume(connId, purpose, challenge) {
-      const challengeKey = key(connId, purpose, challenge);
-      const createdAt = issued.get(challengeKey);
-      if (createdAt === undefined) return false;
-      issued.delete(challengeKey);
-      const age = dependencies.now() - createdAt;
-      return age >= 0 && age <= CHALLENGE_LIFETIME_MS;
+      const challengeKey = key(connId, purpose);
+      const entry = issued.get(challengeKey);
+      if (entry === undefined) return false;
+      if (!isFresh(entry.createdAt, dependencies.now())) {
+        issued.delete(challengeKey);
+        return false;
+      }
+      if (!/^[A-Za-z0-9_-]*$/.test(challenge)) return false;
+      const challengeBytes = Buffer.from(challenge, "base64url");
+      if (challengeBytes.toString("base64url") !== challenge) return false;
+      const matches =
+        challengeBytes.length === entry.challenge.length &&
+        timingSafeEqual(challengeBytes, entry.challenge);
+      if (matches) issued.delete(challengeKey);
+      return matches;
+    },
+    drop(connId) {
+      issued.delete(key(connId, "register"));
+      issued.delete(key(connId, "login"));
+    },
+    size() {
+      return issued.size;
     },
   };
 }
