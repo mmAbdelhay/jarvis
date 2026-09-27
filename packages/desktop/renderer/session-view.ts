@@ -583,6 +583,13 @@ function buildSessionTableRow(session: Session): HTMLElement {
   const actions = document.createElement("td");
   actions.className = "session-cell-actions";
   if (!external) {
+    // A flex row of its own (not display:flex on the <td> itself — see the
+    // state cell's own comment above on why that breaks a row's shared
+    // height and border) so Resume and the edit button sit on one line
+    // rather than wrapping under each other when the column is squeezed.
+    const rowActions = document.createElement("span");
+    rowActions.className = "session-row-actions";
+
     const resume = document.createElement("button");
     resume.type = "button";
     resume.className = "session-table-resume";
@@ -593,18 +600,18 @@ function buildSessionTableRow(session: Session): HTMLElement {
       event.stopPropagation();
       void resumeInTerminal(session.id);
     });
-    actions.append(resume);
+    rowActions.append(resume);
 
     // Stored rows only (bug 7) — an external row has no sessionStore row
     // to edit at all, only a live process-scan chip above.
     const edit = document.createElement("button");
     edit.type = "button";
-    // Shares Resume's own styling (styles-tokens.test.ts requires a real
-    // background rule, not a browser-default button) — "session-table-edit"
-    // is its own hook for selecting just this button.
-    edit.className = "session-table-resume session-table-edit";
+    // Its own class and its own rule — a compact square icon button the
+    // same height as Resume, not Resume's class reused.
+    edit.className = "session-table-edit";
     edit.textContent = "✎";
-    edit.title = "Edit";
+    edit.title = "Edit session";
+    edit.setAttribute("aria-label", "Edit session");
     edit.addEventListener("click", (event) => {
       // Same reason as resume's own stopPropagation: opening the edit form
       // must not also open the session's terminal.
@@ -612,12 +619,33 @@ function buildSessionTableRow(session: Session): HTMLElement {
       editingId = editingId === session.id ? undefined : session.id;
       drawRows();
     });
-    actions.append(edit);
+    rowActions.append(edit);
+
+    actions.append(rowActions);
   }
 
   row.append(main, agent, state, when, actions);
   row.addEventListener("click", () => void openSession(session));
   return row;
+}
+
+/** A labelled field in the edit panel's grid: a small muted uppercase
+ *  caption above the control (the Settings look, stacked rather than beside
+ *  it), with a real `<label for>` rather than an aria-label — one input, one
+ *  id, one association. */
+function editField(
+  labelText: string,
+  id: string,
+  control: HTMLInputElement | HTMLSelectElement,
+): HTMLElement {
+  const field = document.createElement("div");
+  field.className = "session-edit-field";
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = labelText;
+  control.id = id;
+  field.append(label, control);
+  return field;
 }
 
 /**
@@ -627,6 +655,13 @@ function buildSessionTableRow(session: Session): HTMLElement {
  * state, with Save/Cancel and a status line for whatever history:edit
  * rejects (an unknown project/agent, a bad state, or a state edit while
  * SessionManager still owns the row).
+ *
+ * It renders as a panel inset under the row — a CSS grid of labelled
+ * fields plus a right-aligned actions line — rather than the bare,
+ * browser-default controls the form shipped with originally (the user's
+ * own words: "the ui design is so wrong"). See styles.css's
+ * .session-edit-panel block, which reuses the Settings fields' dark
+ * control look rather than inventing a new one.
  */
 function buildEditRow(session: Session): HTMLElement {
   const tr = document.createElement("tr");
@@ -642,7 +677,6 @@ function buildEditRow(session: Session): HTMLElement {
   summaryInput.type = "text";
   summaryInput.className = "session-edit-summary";
   summaryInput.value = session.summary;
-  summaryInput.setAttribute("aria-label", "Summary");
 
   const projectSelect = document.createElement("select");
   projectSelect.className = "session-edit-project";
@@ -677,21 +711,25 @@ function buildEditRow(session: Session): HTMLElement {
   modelInput.type = "text";
   modelInput.className = "session-edit-model";
   modelInput.value = session.model ?? "";
-  modelInput.setAttribute("aria-label", "Model");
 
   const stateSelect = document.createElement("select");
   stateSelect.className = "session-edit-state";
   stateSelect.append(...SESSION_STATES.map((s) => option(s, s)));
   stateSelect.value = session.state;
 
+  // Own classes, own rules (not Resume's reused) — Cancel is the
+  // ghost/secondary action, Save the accent/primary one. Appended to the
+  // actions line in this order (Save, then Cancel) so existing callers
+  // that address them by DOM position keep working; styles.css reorders
+  // them visually with `order` so Cancel reads to Save's left.
   const save = document.createElement("button");
   save.type = "button";
-  save.className = "session-table-resume";
+  save.className = "session-edit-save";
   save.textContent = "Save";
 
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "session-table-resume";
+  cancel.className = "session-edit-cancel";
   cancel.textContent = "Cancel";
 
   const status = document.createElement("span");
@@ -737,21 +775,47 @@ function buildEditRow(session: Session): HTMLElement {
     await renderSessionTable();
   }
 
-  cancel.addEventListener("click", () => {
+  function closeForm(): void {
     editingId = undefined;
     drawRows();
+  }
+
+  cancel.addEventListener("click", closeForm);
+
+  const panel = document.createElement("div");
+  panel.className = "session-edit-panel";
+  // Enter in a text input saves, Escape cancels — from anywhere in the
+  // panel, including a <select>, which never fires its own Enter.
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.target as HTMLElement).tagName === "INPUT") {
+      event.preventDefault();
+      void saveEdit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeForm();
+    }
   });
 
-  td.append(
-    summaryInput,
-    projectSelect,
-    agentSelect,
-    modelInput,
-    stateSelect,
-    save,
-    cancel,
-    status,
+  const grid = document.createElement("div");
+  grid.className = "session-edit-grid";
+  grid.append(
+    editField("Title", `session-edit-summary-${session.id}`, summaryInput),
+    editField("Project", `session-edit-project-${session.id}`, projectSelect),
+    editField("Agent", `session-edit-agent-${session.id}`, agentSelect),
+    editField("Model", `session-edit-model-${session.id}`, modelInput),
+    editField("State", `session-edit-state-${session.id}`, stateSelect),
   );
+
+  // status, then save, then cancel — the order existing callers address
+  // Save/Cancel by (querySelectorAll("button")[0] is Save, [1] is Cancel).
+  // styles.css's `order` reorders Cancel before Save visually without
+  // touching this document order.
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "session-edit-actions";
+  actionsRow.append(status, save, cancel);
+
+  panel.append(grid, actionsRow);
+  td.append(panel);
   tr.append(td);
   return tr;
 }
