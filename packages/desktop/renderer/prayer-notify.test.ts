@@ -130,14 +130,43 @@ describe("duePrayerNotifications", () => {
       enabled: true,
       notify: { before: false, beforeMinutes: 10, atTime: true },
     };
-    // Exactly at the boundary: due.
+    // Exactly at the boundary (5 minutes, matching the chip's own NOW
+    // window): due.
     expect(
-      duePrayerNotifications(now, state({ sincePrevious: 60_000 }), config, new Map()),
-    ).toEqual([{ kind: "at", name: "Asr", time: now.getTime() - 60_000 }]);
+      duePrayerNotifications(now, state({ sincePrevious: 5 * 60_000 }), config, new Map()),
+    ).toEqual([{ kind: "at", name: "Asr", time: now.getTime() - 5 * 60_000 }]);
     // Just outside the boundary: not due.
     expect(
-      duePrayerNotifications(now, state({ sincePrevious: 60_000 + 1000 }), config, new Map()),
+      duePrayerNotifications(now, state({ sincePrevious: 5 * 60_000 + 1000 }), config, new Map()),
     ).toEqual([]);
+  });
+
+  // Bug 3: Chromium throttles timers in a hidden/minimized/occluded window to
+  // ~1 per minute, so the 1s tick can land 60s+ after the prayer instant and
+  // miss a too-short window entirely.
+  it("fires 'at' when the tick lands 90s after the prayer, and never repeats for the same instant", () => {
+    const fired = new Map<string, number>();
+    const first = duePrayerNotifications(now, state({ sincePrevious: 90_000 }), enabled, fired);
+    expect(first).toEqual([{ kind: "at", name: "Asr", time: now.getTime() - 90_000 }]);
+
+    // The next (throttled) tick, 30s later, same prayer instant: no repeat.
+    const second = duePrayerNotifications(
+      new Date(now.getTime() + 30_000),
+      state({ sincePrevious: 120_000 }),
+      enabled,
+      fired,
+    );
+    expect(second).toEqual([]);
+  });
+
+  it("does not fire 'at' once six minutes have passed — well outside the window", () => {
+    const result = duePrayerNotifications(
+      now,
+      state({ sincePrevious: 6 * 60_000 }),
+      enabled,
+      new Map(),
+    );
+    expect(result).toEqual([]);
   });
 
   it("never fires 'at time' retroactively for an event hours in the past on the first tick after launch", () => {

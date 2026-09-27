@@ -39,10 +39,13 @@ export type DuePrayerNotification = {
   time: number;
 };
 
-// Shorter than the header chip's own 5-minute "now" window (prayer.ts) —
-// "Maghrib now" arriving several minutes late would read as a stale
-// notification, not a timely one.
-const AT_WINDOW_MS = 60_000;
+// Same as the header chip's own 5-minute "now" window (prayer.ts). A minute
+// was too tight: Chromium throttles timers in a hidden/minimized/occluded
+// window to about one tick per minute, so the 1s tick that should catch a
+// prayer instant can itself land 60s+ late and miss a 60s window entirely.
+// The dedupe key above still guarantees exactly one "at" notification per
+// instant regardless of how wide this window is.
+const AT_WINDOW_MS = 5 * 60_000;
 // Dedupe keys are pruned once they are this old so `fired` cannot grow
 // unbounded over an app that stays open for weeks.
 const PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
