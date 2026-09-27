@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -303,6 +304,20 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         ))}
       </View>
+      {Platform.OS === "web" && (
+        <>
+          <Text style={styles.cardLine}>{t(language, "auth.keepSignedIn")}</Text>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchHint}>{t(language, "auth.keepSignedInHint")}</Text>
+            <Switch
+              value={view.keepSignedIn}
+              accessibilityLabel={t(language, "auth.keepSignedIn")}
+              // Bound to the store's view: a failed write leaves it as it was.
+              onValueChange={(on) => void store.setKeepSignedIn(on).catch(() => {})}
+            />
+          </View>
+        </>
+      )}
       <TouchableOpacity style={styles.dangerButton} onPress={handleLogout}>
         <Text style={styles.dangerButtonText}>{t(language, "settings.logout")}</Text>
       </TouchableOpacity>

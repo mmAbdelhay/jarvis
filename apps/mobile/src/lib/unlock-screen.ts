@@ -3,6 +3,7 @@
 
 import type { AuthLockCause, AuthView, UnlockOutcome } from "./auth-session";
 import type { MessageKey } from "./i18n";
+import type { RegisterOutcome } from "./passkey-registration";
 import type { ClientState } from "./rpc-client";
 
 /** Paths the unlock redirect never fires from: itself, pairing (no owner
@@ -33,6 +34,44 @@ export function unlockMessageKey(outcome: UnlockOutcome): MessageKey | undefined
       return "auth.offline";
     case "failed":
       return "auth.failed";
+    case "passkey-unsupported":
+      return "auth.passkeyUnsupported";
+    case "passkey-refused":
+      return "auth.passkeyRefused";
+  }
+}
+
+/** Browser build: after the automatic stored sign-in (keep-signed-in)
+ *  found nothing usable, raise the passkey sheet on its own — only when
+ *  the browser has WebAuthn and the laptop has a passkey to offer. A
+ *  browser that refuses a sheet without a tap just leaves the button. */
+export function shouldAutoPasskey(
+  storedOutcome: UnlockOutcome,
+  context: { supported: boolean; hasPasskeys: boolean },
+): boolean {
+  if (!context.supported || !context.hasPasskeys) return false;
+  return storedOutcome === "no-stored-token" || storedOutcome === "password-required";
+}
+
+export function registerMessageKey(outcome: RegisterOutcome): MessageKey | undefined {
+  switch (outcome) {
+    case "registered":
+      return "passkey.added";
+    case "cancelled":
+      return undefined;
+    case "exists":
+      return "passkey.exists";
+    case "wrong-password":
+      return "auth.wrongPassword";
+    case "rate-limited":
+      return "auth.rateLimited";
+    case "offline":
+      return "auth.offline";
+    case "unsupported":
+      return "auth.passkeyUnsupported";
+    case "locked":
+    case "failed":
+      return "passkey.failed";
   }
 }
 

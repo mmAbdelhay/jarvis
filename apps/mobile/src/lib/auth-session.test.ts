@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
 import type { DeviceAuth } from "./auth-session";
 import { createFakeClock } from "./clock";
+import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
 
@@ -170,7 +171,7 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
-function setup(options: { passcode?: boolean } = {}) {
+function setup(options: { passcode?: boolean; deviceAuth?: DeviceAuth } = {}) {
   const clock = createFakeClock();
   const double = createRpcDouble(clock);
   const store = createStoreDouble(double.events);
@@ -182,7 +183,7 @@ function setup(options: { passcode?: boolean } = {}) {
     clock,
     refreshStore: store.store,
     refreshStoredFlag: flag.flag,
-    deviceAuth: device.auth,
+    deviceAuth: options.deviceAuth ?? device.auth,
     idleMs: IDLE,
     log: (line) => logs.push(line),
   });
@@ -659,5 +660,220 @@ describe("auth-session: the refresh-token-stored flag", () => {
     flag.state.stored = true;
     expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
     expect(flag.state.stored).toBe(false);
+  });
+});
+
+/** The browser build's device-owner gate over a mutable "Keep me signed in". */
+function browserSetup(keep: boolean) {
+  const setting = { keep };
+  const ctx = setup({ deviceAuth: createWebDeviceAuth(async () => setting.keep) });
+  /** A page reload: memory is gone, IndexedDB and prefs stay. */
+  function reload() {
+    const clock = createFakeClock();
+    const double = createRpcDouble(clock);
+    const session = createAuthSession({
+      rpc: double.rpc,
+      clock,
+      refreshStore: ctx.store.store,
+      refreshStoredFlag: ctx.flag.flag,
+      deviceAuth: createWebDeviceAuth(async () => setting.keep),
+      idleMs: IDLE,
+      log: () => {},
+    });
+    return { double, session };
+  }
+  return { ...ctx, setting, reload };
+}
+
+describe("auth-session: browser, keep me signed in off (the default)", () => {
+  it("never writes a refresh token: login, scheduled refresh, idle lock", async () => {
+    const { store, session, clock, flag, double } = browserSetup(false);
+    expect(await session.unlockWithPassword("pw")).toBe("unlocked");
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:login", "auth:refresh"]);
+    clock.advance(IDLE);
+    await flush();
+    expect(store.writes).toEqual([]);
+    expect(store.values.size).toBe(0);
+    expect(flag.state.stored).toBe(false);
+  });
+
+  it("after a reload the stored-refresh unlock finds nothing and sends nothing", async () => {
+    const browser = browserSetup(false);
+    await browser.session.unlockWithPassword("pw");
+    const { double, session } = browser.reload();
+    expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(double.calls).toEqual([]);
+  });
+});
+
+describe("auth-session: browser, keep me signed in on", () => {
+  it("stores the refresh token, and after a reload refreshes with it straight away (no prompt)", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    const stored = browser.store.values.get(REFRESH_TOKEN_KEY);
+    expect(stored).toBeDefined();
+    expect(browser.flag.state.stored).toBe(true);
+    const { double, session } = browser.reload();
+    expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:refresh"]);
+    expect(tokenArg(double.calls[0], "refreshToken")).toBe(stored);
+  });
+
+  it("the access token is never stored", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    const login = browser.double.calls[0];
+    expect(login?.channel).toBe("auth:login");
+    const written = browser.store.writes.map((write) => write.value);
+    expect(written).toHaveLength(1);
+    // The one write is the refresh token the login answered with, never
+    // the access token (tokens are distinct counters in the double).
+    expect(written[0]).toBe(browser.store.values.get(REFRESH_TOKEN_KEY));
+  });
+});
+
+describe("auth-session: storagePolicyChanged (the setting flipped while unlocked)", () => {
+  it("turned on: rotates once so the new refresh token is stored through the normal path", async () => {
+    const browser = browserSetup(false);
+    await browser.session.unlockWithPassword("pw");
+    expect(browser.store.writes).toEqual([]);
+    browser.setting.keep = true;
+    await browser.session.storagePolicyChanged();
+    expect(browser.double.calls.map((call) => call.channel)).toEqual([
+      "auth:login",
+      "auth:refresh",
+    ]);
+    expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(true);
+    expect(browser.flag.state.stored).toBe(true);
+    expect(browser.double.rpc.state()).toBe("open");
+  });
+
+  it("turned off: deletes the stored token and clears the flag, without a request", async () => {
+    const browser = browserSetup(true);
+    await browser.session.unlockWithPassword("pw");
+    browser.setting.keep = false;
+    await browser.session.storagePolicyChanged();
+    expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    expect(browser.flag.state.stored).toBe(false);
+    expect(browser.double.calls.map((call) => call.channel)).toEqual(["auth:login"]);
+  });
+
+  it("a write racing the switch to off is taken back out", async () => {
+    const browser = browserSetup(true);
+    const originalSet = browser.store.store.set;
+    browser.store.store.set = async (key, value) => {
+      browser.setting.keep = false;
+      await originalSet(key, value);
+    };
+    await browser.session.unlockWithPassword("pw");
+    expect(browser.store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    expect(browser.flag.state.stored).toBe(false);
+  });
+
+  it("turned on while locked: nothing to store, no request", async () => {
+    const browser = browserSetup(false);
+    browser.setting.keep = true;
+    await browser.session.storagePolicyChanged();
+    expect(browser.double.calls).toEqual([]);
+    expect(browser.store.writes).toEqual([]);
+  });
+});
+
+describe("auth-session: passkey unlock", () => {
+  const OPTIONS = { challenge: "AQID", rpId: "laptop.tail.ts.net", userVerification: "required" };
+  const ASSERTION = {
+    credentialId: "-w",
+    clientDataJSON: "AQ",
+    authenticatorData: "Ag",
+    signature: "Aw",
+  };
+
+  it("begins, asks the browser with the server's options, finishes and unlocks", async () => {
+    const { double, session, store } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: OPTIONS });
+    double.reply("auth:passkeyFinish", double.tokensFor());
+    const asked: unknown[] = [];
+    const outcome = await session.unlockWithPasskey(async (options) => {
+      asked.push(options);
+      return ASSERTION;
+    });
+    expect(outcome).toBe("unlocked");
+    expect(asked).toEqual([OPTIONS]);
+    expect(double.calls.map((call) => call.channel)).toEqual([
+      "auth:passkeyBegin",
+      "auth:passkeyFinish",
+    ]);
+    expect(double.calls[1]?.args).toEqual([ASSERTION]);
+    expect(double.rpc.state()).toBe("open");
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(true);
+  });
+
+  it("a dismissed browser sheet is cancelled and sends no finish", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: OPTIONS });
+    expect(await session.unlockWithPasskey(async () => undefined)).toBe("cancelled");
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:passkeyBegin"]);
+  });
+
+  it("a browser error is a failure and sends no finish", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: OPTIONS });
+    const outcome = await session.unlockWithPasskey(async () => {
+      throw new Error("SecurityError");
+    });
+    expect(outcome).toBe("failed");
+    expect(double.calls).toHaveLength(1);
+  });
+
+  it("an unsupported laptop (no web origin) answers passkey-unsupported", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", {
+      ok: false,
+      error: { kind: "remote", code: "unsupported", text: "x", language: "en" },
+    });
+    let asked = false;
+    const outcome = await session.unlockWithPasskey(async () => {
+      asked = true;
+      return ASSERTION;
+    });
+    expect(outcome).toBe("passkey-unsupported");
+    expect(asked).toBe(false);
+  });
+
+  it("a refused assertion answers passkey-refused and stays locked", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: OPTIONS });
+    double.reply("auth:passkeyFinish", {
+      ok: false,
+      error: { kind: "remote", code: "forbidden", text: "x", language: "en" },
+    });
+    expect(await session.unlockWithPasskey(async () => ASSERTION)).toBe("passkey-refused");
+    expect(double.rpc.state()).toBe("locked");
+  });
+
+  it("maps rate-limited and offline like the password path", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: OPTIONS });
+    double.reply("auth:passkeyFinish", {
+      ok: false,
+      error: { kind: "remote", code: "rate-limited", text: "x", language: "en" },
+    });
+    expect(await session.unlockWithPasskey(async () => ASSERTION)).toBe("rate-limited");
+    double.reply("auth:passkeyBegin", { ok: false, error: { kind: "offline" } });
+    expect(await session.unlockWithPasskey(async () => ASSERTION)).toBe("offline");
+  });
+
+  it("a malformed begin answer never reaches the browser", async () => {
+    const { double, session } = setup();
+    double.reply("auth:passkeyBegin", { ok: true, value: { challenge: 5 } });
+    let asked = false;
+    const outcome = await session.unlockWithPasskey(async () => {
+      asked = true;
+      return ASSERTION;
+    });
+    expect(outcome).toBe("failed");
+    expect(asked).toBe(false);
   });
 });

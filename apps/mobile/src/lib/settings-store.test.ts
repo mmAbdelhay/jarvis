@@ -240,6 +240,9 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
       setIdleMs: (ms: number) => {
         authCalls.push(`idle ${ms}`);
       },
+      storagePolicyChanged: async () => {
+        authCalls.push("policy");
+      },
     },
     ...overrides,
   };
@@ -313,6 +316,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarZoom: {},
         idleLockMinutes: 15,
         refreshTokenStored: false,
+        keepSignedIn: false,
       }),
     ]);
   });
@@ -336,6 +340,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarZoom: {},
         idleLockMinutes: 15,
         refreshTokenStored: false,
+        keepSignedIn: false,
       }),
       JSON.stringify({
         language: "en",
@@ -346,6 +351,7 @@ describe("createSettingsStore: setLanguage", () => {
         sidecarZoom: {},
         idleLockMinutes: 15,
         refreshTokenStored: false,
+        keepSignedIn: false,
       }),
     ]);
     expect(store.get().speakReplies).toBe(false);
@@ -373,6 +379,7 @@ describe("createSettingsStore: setSpeakReplies (M8 Task 7, rule 17)", () => {
         sidecarZoom: {},
         idleLockMinutes: 15,
         refreshTokenStored: false,
+        keepSignedIn: false,
       }),
     ]);
   });
@@ -1129,6 +1136,24 @@ describe("createSettingsStore: owner login (Phase 0)", () => {
     expect(saved).toMatchObject({ idleLockMinutes: 30, speakReplies: true });
     expect(authCalls).toEqual([`idle ${30 * 60_000}`]);
     expect(store.get().idleLockMinutes).toBe(30);
+  });
+
+  it("loads keep-signed-in from prefs (default off)", async () => {
+    const { deps } = baseDeps();
+    const store = createSettingsStore(deps);
+    await flush();
+    expect(store.get().keepSignedIn).toBe(false);
+  });
+
+  it("setKeepSignedIn persists the pref, keeps the rest, then tells the auth session", async () => {
+    const { deps, prefs, authCalls } = baseDeps();
+    const store = createSettingsStore(deps);
+    await flush();
+    await store.setKeepSignedIn(true);
+    const saved = JSON.parse(prefs.written[prefs.written.length - 1] as string);
+    expect(saved).toMatchObject({ keepSignedIn: true, speakReplies: true });
+    expect(authCalls).toEqual(["policy"]);
+    expect(store.get().keepSignedIn).toBe(true);
   });
 
   it("logout forwards to the auth session", async () => {

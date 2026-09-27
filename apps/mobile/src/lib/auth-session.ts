@@ -20,7 +20,7 @@
 // - Log lines are fixed text: never a token or a password.
 
 import { AUTH_STATE_CHANNEL, AUTH_TOKEN_PATTERN } from "@jarvis/wire";
-import type { AuthLockReason, AuthTokens } from "@jarvis/wire";
+import type { AuthArgs, AuthLockReason, AuthTokens, PasskeyLoginOptions } from "@jarvis/wire";
 import type { Clock } from "./clock";
 import type { RpcClient, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
@@ -67,7 +67,19 @@ export type UnlockOutcome =
   | "wrong-password"
   | "rate-limited"
   | "offline"
-  | "failed";
+  | "failed"
+  /** The laptop has no web origin / certificate name for passkeys. */
+  | "passkey-unsupported"
+  /** The laptop refused the passkey assertion. */
+  | "passkey-refused";
+
+/** What `auth:passkeyFinish` takes: the browser's assertion, base64url. */
+export type PasskeyAssertion = AuthArgs["auth:passkeyFinish"];
+/** Runs the browser's passkey sheet for these options; `undefined` when
+ *  the owner dismissed it. */
+export type GetPasskeyAssertion = (
+  options: PasskeyLoginOptions,
+) => Promise<PasskeyAssertion | undefined>;
 
 export type AuthView = {
   /** Locked by this phone (idle, logout, a refused refresh) even if the
@@ -101,6 +113,11 @@ export type AuthSession = {
   subscribe(listener: (view: AuthView) => void): () => void;
   unlockWithPassword(password: string): Promise<UnlockOutcome>;
   unlockWithStoredRefresh(): Promise<UnlockOutcome>;
+  unlockWithPasskey(getAssertion: GetPasskeyAssertion): Promise<UnlockOutcome>;
+  /** The device-owner gate's answer may have changed (the browser's "Keep
+   *  me signed in"): off deletes the stored token; on, while unlocked,
+   *  rotates once so the new token is stored through the normal path. */
+  storagePolicyChanged(): Promise<void>;
   /** `auth:logout` (revokes this login on the laptop), deletes the stored
    *  refresh token and locks. */
   logout(): Promise<void>;
@@ -137,6 +154,24 @@ function failureOutcome(result: RpcResult & { ok: false }): UnlockOutcome {
   if (error.kind === "offline" || error.kind === "timeout") return "offline";
   if (error.kind === "remote" && error.code === "rate-limited") return "rate-limited";
   return "failed";
+}
+
+function isRemoteCode(result: RpcResult, code: string): boolean {
+  return !result.ok && result.error.kind === "remote" && result.error.code === code;
+}
+
+function parseLoginOptions(value: unknown): PasskeyLoginOptions | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.challenge !== "string" || typeof raw.rpId !== "string") return undefined;
+  if (
+    raw.allowCredentials !== undefined &&
+    (!Array.isArray(raw.allowCredentials) ||
+      !raw.allowCredentials.every((id) => typeof id === "string"))
+  ) {
+    return undefined;
+  }
+  return value as PasskeyLoginOptions;
 }
 
 function isForbidden(result: RpcResult): boolean {
@@ -292,6 +327,12 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     }
     try {
       await deps.refreshStore.set(REFRESH_TOKEN_KEY, token);
+      // The gate may have closed while writing (the browser's "Keep me
+      // signed in" switched off): take the token back out.
+      if (!(await hasPasscode())) {
+        await deleteStored();
+        return;
+      }
       await setStoredFlag(true);
       if (view.biometricUnavailable) setView({ biometricUnavailable: false });
     } catch {
@@ -463,6 +504,51 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     return refreshWith(stored);
   }
 
+  async function unlockWithPasskey(getAssertion: GetPasskeyAssertion): Promise<UnlockOutcome> {
+    const startedEpoch = epoch;
+    const begin = await deps.rpc.call("auth:passkeyBegin", [{}]);
+    if (!begin.ok) {
+      if (isRemoteCode(begin, "unsupported")) return "passkey-unsupported";
+      return failureOutcome(begin);
+    }
+    const options = parseLoginOptions(begin.value);
+    if (options === undefined) {
+      deps.log("auth: malformed passkey options");
+      return "failed";
+    }
+    let assertion: PasskeyAssertion | undefined;
+    try {
+      assertion = await getAssertion(options);
+    } catch {
+      deps.log("auth: the passkey sheet failed");
+      return "failed";
+    }
+    if (assertion === undefined) return "cancelled";
+    const finish = await deps.rpc.call("auth:passkeyFinish", [assertion]);
+    if (!finish.ok) {
+      if (isForbidden(finish)) return "passkey-refused";
+      if (isRemoteCode(finish, "unsupported")) return "passkey-unsupported";
+      return failureOutcome(finish);
+    }
+    const tokens = parseTokens(finish.value);
+    if (tokens === undefined) {
+      deps.log("auth: malformed passkey reply");
+      return "failed";
+    }
+    touch();
+    return (await adoptTokens(tokens, startedEpoch)) ? "unlocked" : "failed";
+  }
+
+  async function storagePolicyChanged(): Promise<void> {
+    if (!(await hasPasscode())) {
+      await deleteStored();
+      return;
+    }
+    // Rotating (single-flight) stores the fresh token through adoptTokens,
+    // so no write here can ever race a rotation with an older token.
+    if (refreshToken !== undefined) await refreshWith(refreshToken);
+  }
+
   /** Local effects first, so an offline (or hanging) `auth:logout` can
    *  never leave the phone unlocked or the stored token behind. */
   async function logout(): Promise<void> {
@@ -520,6 +606,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     },
     unlockWithPassword,
     unlockWithStoredRefresh,
+    unlockWithPasskey,
+    storagePolicyChanged,
     logout,
     forget,
     touch,

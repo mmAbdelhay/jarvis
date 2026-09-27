@@ -1,15 +1,22 @@
-// The browser build's terminal surface (Task 13): the same generated,
-// CSP-hashed xterm page as native, loaded as a sandboxed `srcdoc` iframe
-// (`allow-scripts` only — an opaque origin: no same-origin access to this
-// app, no storage, no navigation, no popups, no forms). It speaks the same
+// The browser build's terminal surface (Task 13): the same xterm page as
+// native, but as a static file — /terminal.html with an external, hashed
+// script (scripts/emit-terminal-web.mjs writes both at export time), so
+// neither it nor the app needs an inline <script> in any CSP. It loads in
+// a sandboxed iframe (`allow-scripts` only — an opaque origin: no
+// same-origin access to this app, no storage, no navigation, no popups,
+// no forms). The page's URL is relative to wherever the app itself was
+// served; nothing here reads the host or port. It speaks the same
 // terminal-protocol.ts messages as the native WebView:
 //
 // - page → app: `parseFrameMessage` drops every `message` event whose
 //   `source` is not this iframe's own `contentWindow`, then parses the
 //   rest field by field — nothing unparsed is ever forwarded.
 // - app → page: `postMessage(text, "*")`. The `"*"` target is unavoidable:
-//   a sandboxed srcdoc frame has an opaque origin that cannot be named.
-//   The recipient is pinned by the `contentWindow` reference itself.
+//   without `allow-same-origin` the frame's origin is opaque ("null"),
+//   and a postMessage target origin can never match an opaque origin —
+//   naming the server's origin would drop every message. The recipient is
+//   pinned by the `contentWindow` reference itself, and the page accepts
+//   messages only from its parent.
 //
 // Attach/replay behaviour mirrors TerminalWebView.tsx: writes before the
 // page's first `ready` are buffered (bounded by ATTACH_BUFFER_MAX_CHARS,
@@ -24,7 +31,6 @@ import type { NativeMessage } from "@/lib/terminal-protocol";
 import { encodeNativeMessage, parseFrameMessage } from "@/lib/terminal-protocol";
 import { createTerminalReadyGate } from "@/lib/terminal-ready";
 import { createWriteBatcher } from "@/lib/write-batcher";
-import { TERMINAL_HTML } from "@/terminal/terminal-html.generated";
 import type { TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
 
 export type { TerminalModes, TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
@@ -45,7 +51,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     const droppedMessageCountRef = useRef(0);
 
     const postToPage = useCallback((message: NativeMessage) => {
-      // Opaque-origin sandboxed frame: "*" is the only possible target.
+      // Opaque-origin sandboxed frame: "*" is the only target that can match
+      // (see the file header); the contentWindow reference pins the recipient.
       iframeRef.current?.contentWindow?.postMessage(encodeNativeMessage(message), "*");
     }, []);
 
@@ -173,7 +180,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
         <iframe
           ref={iframeRef}
           title="terminal"
-          srcDoc={TERMINAL_HTML}
+          src={TERMINAL_PAGE_URL}
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
           style={IFRAME_STYLE}
@@ -182,6 +189,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     );
   },
 );
+
+/** Written into the export by scripts/emit-terminal-web.mjs. */
+const TERMINAL_PAGE_URL = "/terminal.html";
 
 const IFRAME_STYLE = { border: "none", width: "100%", height: "100%", display: "block" } as const;
 

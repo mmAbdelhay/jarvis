@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AuthView } from "./auth-session";
-import { lockCauseKey, shouldShowUnlock, unlockMessageKey } from "./unlock-screen";
+import {
+  lockCauseKey,
+  registerMessageKey,
+  shouldAutoPasskey,
+  shouldShowUnlock,
+  unlockMessageKey,
+} from "./unlock-screen";
 
 const UNLOCKED: AuthView = {
   lockedLocally: false,
@@ -37,6 +43,31 @@ describe("unlock-screen", () => {
     expect(unlockMessageKey("rate-limited")).toBe("auth.rateLimited");
     expect(unlockMessageKey("offline")).toBe("auth.offline");
     expect(unlockMessageKey("failed")).toBe("auth.failed");
+    expect(unlockMessageKey("passkey-unsupported")).toBe("auth.passkeyUnsupported");
+    expect(unlockMessageKey("passkey-refused")).toBe("auth.passkeyRefused");
+  });
+
+  it("the browser tries a passkey on its own only after the stored sign-in found nothing", () => {
+    const ready = { supported: true, hasPasskeys: true };
+    expect(shouldAutoPasskey("no-stored-token", ready)).toBe(true);
+    expect(shouldAutoPasskey("password-required", ready)).toBe(true);
+    expect(shouldAutoPasskey("unlocked", ready)).toBe(false);
+    // A laptop that can't be reached isn't asked twice.
+    expect(shouldAutoPasskey("offline", ready)).toBe(false);
+    expect(shouldAutoPasskey("no-stored-token", { ...ready, supported: false })).toBe(false);
+    expect(shouldAutoPasskey("no-stored-token", { ...ready, hasPasskeys: false })).toBe(false);
+  });
+
+  it("maps each passkey registration outcome to its message", () => {
+    expect(registerMessageKey("registered")).toBe("passkey.added");
+    expect(registerMessageKey("cancelled")).toBeUndefined();
+    expect(registerMessageKey("exists")).toBe("passkey.exists");
+    expect(registerMessageKey("wrong-password")).toBe("auth.wrongPassword");
+    expect(registerMessageKey("rate-limited")).toBe("auth.rateLimited");
+    expect(registerMessageKey("offline")).toBe("auth.offline");
+    expect(registerMessageKey("unsupported")).toBe("auth.passkeyUnsupported");
+    expect(registerMessageKey("locked")).toBe("passkey.failed");
+    expect(registerMessageKey("failed")).toBe("passkey.failed");
   });
 
   it("maps each lock cause to its message", () => {

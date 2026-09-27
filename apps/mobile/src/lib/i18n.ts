@@ -974,6 +974,43 @@ export const STRINGS = {
     en: "You were signed out from your computer.",
     ar: "تم تسجيل خروجك من جهاز الكمبيوتر.",
   },
+  "auth.usePasskey": { en: "Sign in with a passkey", ar: "تسجيل الدخول بمفتاح مرور" },
+  "auth.passkeyUnsupported": {
+    en: "Passkeys need your computer's Tailscale web address with a real certificate. Use the password.",
+    ar: "مفاتيح المرور تحتاج إلى عنوان الويب لجهاز الكمبيوتر عبر Tailscale بشهادة حقيقية. استخدم كلمة المرور.",
+  },
+  "auth.passkeyRefused": {
+    en: "That passkey wasn't accepted. Try again or use the password.",
+    ar: "لم يُقبل مفتاح المرور هذا. حاول مجددًا أو استخدم كلمة المرور.",
+  },
+  "auth.keepSignedIn": {
+    en: "Keep me signed in on this browser",
+    ar: "إبقائي مسجّل الدخول على هذا المتصفح",
+  },
+  "auth.keepSignedInHint": {
+    en: "Off: every visit needs a passkey or the password. On: this browser keeps a sign-in token, which stops working after 7 days without use.",
+    ar: "عند الإيقاف: كل زيارة تحتاج إلى مفتاح مرور أو كلمة المرور. عند التشغيل: يحتفظ هذا المتصفح برمز تسجيل دخول يتوقف عن العمل بعد 7 أيام دون استخدام.",
+  },
+  "passkey.offerTitle": {
+    en: "Add a passkey for this browser?",
+    ar: "إضافة مفتاح مرور لهذا المتصفح؟",
+  },
+  "passkey.offerHint": {
+    en: "Next time, sign in with Face ID, Touch ID, Windows Hello or your phone instead of the password. Enter the password once more to confirm.",
+    ar: "في المرة القادمة، سجّل الدخول بالوجه أو البصمة أو Windows Hello أو هاتفك بدلًا من كلمة المرور. أدخل كلمة المرور مرة أخرى للتأكيد.",
+  },
+  "passkey.label": { en: "Passkey name", ar: "اسم مفتاح المرور" },
+  "passkey.add": { en: "Add passkey", ar: "إضافة مفتاح المرور" },
+  "passkey.skip": { en: "Not now", ar: "ليس الآن" },
+  "passkey.added": { en: "Passkey added.", ar: "تمت إضافة مفتاح المرور." },
+  "passkey.exists": {
+    en: "This device already has a Jarvis passkey.",
+    ar: "هذا الجهاز لديه مفتاح مرور لـ Jarvis بالفعل.",
+  },
+  "passkey.failed": {
+    en: "Couldn't add the passkey. Try again.",
+    ar: "تعذّرت إضافة مفتاح المرور. حاول مجددًا.",
+  },
   "settings.security": { en: "Security", ar: "الأمان" },
   "settings.idleLock": { en: "Lock after inactivity", ar: "القفل بعد عدم النشاط" },
   "settings.idleLock.minutes": { en: "{minutes} min", ar: "{minutes} د" },

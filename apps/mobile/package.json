@@ -11,7 +11,7 @@
     "android": "expo run:android",
     "prebuild": "expo prebuild",
     "build:terminal-html": "node scripts/build-terminal-html.mjs",
-    "export:web": "expo export --platform web --output-dir dist-web",
+    "export:web": "expo export --platform web --output-dir dist-web && node scripts/emit-terminal-web.mjs dist-web",
     "eas-build-post-install": "cd ../.. && npx tsc -b packages/wire"
   },
   "dependencies": {

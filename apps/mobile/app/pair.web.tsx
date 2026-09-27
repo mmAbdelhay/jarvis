@@ -44,6 +44,7 @@ import {
   intakeStep,
   phaseAfterCheck,
 } from "@/lib/pair-flow";
+import { setPasskeyOfferSignal } from "@/lib/passkey-offer-signal";
 import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
 import {
   clearPairing,
@@ -269,6 +270,9 @@ export default function PairWebScreen() {
         return;
       }
       safeSetPhase({ kind: "success" });
+      // Next: the owner password on the unlock screen, which then offers
+      // adding a passkey for this browser.
+      setPasskeyOfferSignal();
       router.replace("/dashboard");
     },
     [router, safeSetPhase],

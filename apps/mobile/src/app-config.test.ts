@@ -140,12 +140,12 @@ describe("app.config.ts: web target (Task 12)", () => {
     expect(config.web).toMatchObject({ output: "single", bundler: "metro" });
   });
 
-  test("export:web writes to dist-web, and react-dom/react-native-web are exact pins", () => {
+  test("export:web writes to dist-web then emits the static terminal page, and react-dom/react-native-web are exact pins", () => {
     const packageJson = JSON.parse(
       readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
     ) as { dependencies?: Record<string, string>; scripts?: Record<string, string> };
     expect(packageJson.scripts?.["export:web"]).toBe(
-      "expo export --platform web --output-dir dist-web",
+      "expo export --platform web --output-dir dist-web && node scripts/emit-terminal-web.mjs dist-web",
     );
     expect(packageJson.dependencies?.["react-dom"]).toBe("19.2.3");
     expect(packageJson.dependencies?.["react-native-web"]).toBe("0.21.3");

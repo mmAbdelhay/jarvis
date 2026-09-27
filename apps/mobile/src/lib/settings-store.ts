@@ -32,7 +32,12 @@ import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
 import type { AuthSession } from "./auth-session";
 import type { IdleLockMinutes, PrefsStore } from "./prefs";
-import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs, savePrefs } from "./prefs";
+import {
+  DEFAULT_IDLE_LOCK_MINUTES,
+  loadPrefs,
+  savePrefs,
+  setKeepSignedIn as saveKeepSignedIn,
+} from "./prefs";
 import { PUSH_REGISTER_TIMEOUT_MS } from "./push-registration";
 import type { PushRegistration, PushView } from "./push-registration";
 import type { RpcClient } from "./rpc-client";
@@ -57,6 +62,9 @@ export type SettingsView = {
   speakReplies: boolean;
   // Phase 0 owner login: the idle-lock window; 15 until prefs load.
   idleLockMinutes: IdleLockMinutes;
+  // Task 13 (browser build only): "Keep me signed in on this browser";
+  // off until prefs load, as loadPrefs's own default.
+  keepSignedIn: boolean;
   laptop?: SettingsLaptop;
   fingerprintTail?: string;
   // M10 Task 5, rule 10: mirrors `deps.push.get()` — the push controller
@@ -115,6 +123,7 @@ export type SettingsStore = {
   setSpeakReplies(on: boolean): Promise<void>;
   setNotifications(on: boolean): Promise<void>;
   setIdleLockMinutes(minutes: IdleLockMinutes): Promise<void>;
+  setKeepSignedIn(on: boolean): Promise<void>;
   logout(): Promise<void>;
   unpair(): Promise<void>;
   reconnect(): void;
@@ -152,7 +161,7 @@ export type SettingsStoreDeps = {
   // push-registration.ts, not here.
   push: Pick<PushRegistration, "get" | "subscribe" | "setEnabled">;
   // Phase 0 owner login: the app's one auth session (built in _layout.tsx).
-  auth: Pick<AuthSession, "logout" | "setIdleMs">;
+  auth: Pick<AuthSession, "logout" | "setIdleMs" | "storagePolicyChanged">;
 };
 
 const TICK_MS = 1_000;
@@ -165,6 +174,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     restartRequired: false,
     speakReplies: true,
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
+    keepSignedIn: false,
     notifications: deps.push.get(),
     connection: deps.connection.get(),
     appVersion: deps.appVersion,
@@ -261,6 +271,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       language: prefs.language,
       speakReplies: prefs.speakReplies,
       idleLockMinutes: prefs.idleLockMinutes,
+      keepSignedIn: prefs.keepSignedIn,
     });
   }
 
@@ -325,6 +336,12 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     await savePrefs(deps.prefs, { ...current, idleLockMinutes: minutes });
     deps.auth.setIdleMs(minutes * 60_000);
     setView({ idleLockMinutes: minutes });
+  }
+
+  async function setKeepSignedIn(on: boolean): Promise<void> {
+    await saveKeepSignedIn(deps.prefs, deps.localeTag, on);
+    setView({ keepSignedIn: on });
+    await deps.auth.storagePolicyChanged();
   }
 
   async function logout(): Promise<void> {
@@ -470,6 +487,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     setSpeakReplies,
     setNotifications,
     setIdleLockMinutes,
+    setKeepSignedIn,
     logout,
     unpair,
     reconnect,

@@ -40,6 +40,12 @@ export type Prefs = {
   // Not a secret (the token itself is only in refresh-store.ts). Defaults
   // false: a missing value costs one password entry, never a prompt.
   refreshTokenStored: boolean;
+  // Task 13, the browser build only: "Keep me signed in on this browser".
+  // Off (the default, and for any value but a stored `true`) means no
+  // refresh token is ever written to this browser's storage, so every
+  // page load needs a passkey or the password (web-device-auth.ts).
+  // The native app ignores it.
+  keepSignedIn: boolean;
 };
 
 export const IDLE_LOCK_MINUTES = [5, 15, 30, 60] as const;
@@ -107,6 +113,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     sidecarZoom: { ...DEFAULT_SIDECAR_ZOOM },
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
     refreshTokenStored: false,
+    keepSignedIn: false,
   };
 
   let text: string | undefined;
@@ -147,6 +154,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     ? raw.idleLockMinutes
     : DEFAULT_IDLE_LOCK_MINUTES;
   const refreshTokenStored = raw.refreshTokenStored === true;
+  const keepSignedIn = raw.keepSignedIn === true;
 
   return {
     language,
@@ -157,6 +165,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     sidecarZoom,
     idleLockMinutes,
     refreshTokenStored,
+    keepSignedIn,
   };
 }
 
@@ -179,4 +188,15 @@ export function createRefreshStoredFlag(
       await savePrefs(store, { ...current, refreshTokenStored: stored });
     },
   };
+}
+
+/** Saves the browser's "Keep me signed in" choice (load, change one key,
+ *  save). The caller then tells the auth session (`storagePolicyChanged`). */
+export async function setKeepSignedIn(
+  store: PrefsStore,
+  localeTag: string,
+  keepSignedIn: boolean,
+): Promise<void> {
+  const current = await loadPrefs(store, localeTag);
+  await savePrefs(store, { ...current, keepSignedIn });
 }
