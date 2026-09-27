@@ -908,7 +908,8 @@ function parseRemoteWeb(rawWeb: unknown, bridgePort: number): RemoteConfig["web"
   if (enabled !== undefined && typeof enabled !== "boolean") {
     throw new Error("Config `remote.web.enabled` must be true or false");
   }
-  const port = web["port"];
+  // `~` or a bare `port:` in YAML is null: absent, like `tls.certPath`.
+  const port = web["port"] ?? undefined;
   if (
     port !== undefined &&
     (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535)

@@ -1534,6 +1534,19 @@ describe("remote", () => {
       expect(web({ web: {} })).toEqual({ enabled: false });
     });
 
+    // Final review D4: YAML's `port: ~` and a bare `port:` are both null,
+    // and mean "use the default" the way `tls.certPath: ~` does.
+    it("a null port (YAML ~ or empty) is absent: the default port", () => {
+      for (const text of ["port: ~", "port:"]) {
+        const remote = parse(`port: 9000\nweb:\n  enabled: true\n  ${text}\n`) as Record<
+          string,
+          unknown
+        >;
+        expect(web(remote)).toEqual({ enabled: true });
+        expect(effectiveWebPort(parseConfig({ ...base, remote }).remote)).toBe(9001);
+      }
+    });
+
     it("keeps an explicit port and the flag as written", () => {
       expect(web({ web: { enabled: true, port: 443 } })).toEqual({ enabled: true, port: 443 });
     });
