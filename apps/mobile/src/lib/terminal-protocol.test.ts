@@ -43,6 +43,22 @@ describe("parsePageMessage", () => {
     ).toEqual({ t: "ready", cols: 80, rows: 24 });
   });
 
+  it("parses a valid wheel message to exactly its fields", () => {
+    expect(parsePageMessage(JSON.stringify({ t: "wheel", direction: "up" }))).toEqual({
+      t: "wheel",
+      direction: "up",
+    });
+    expect(parsePageMessage(JSON.stringify({ t: "wheel", direction: "down" }))).toEqual({
+      t: "wheel",
+      direction: "down",
+    });
+  });
+
+  it('rejects a wheel message with a direction other than "up"/"down"', () => {
+    expect(parsePageMessage(JSON.stringify({ t: "wheel", direction: "sideways" }))).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "wheel" }))).toBeUndefined();
+  });
+
   it('rejects an unknown message type ({t: "input", data: "x"})', () => {
     expect(parsePageMessage(JSON.stringify({ t: "input", data: "x" }))).toBeUndefined();
   });
@@ -83,5 +99,12 @@ describe("encodeNativeMessage", () => {
   it("round-trips a fit message through JSON.parse", () => {
     const encoded = encodeNativeMessage({ t: "fit" });
     expect(JSON.parse(encoded)).toEqual({ t: "fit" });
+  });
+
+  // Bug 8: tells the page the pty's real size, so it resizes to match
+  // instead of fitting to the WebView's own dimensions.
+  it("round-trips a size message through JSON.parse", () => {
+    const encoded = encodeNativeMessage({ t: "size", cols: 80, rows: 24 });
+    expect(JSON.parse(encoded)).toEqual({ t: "size", cols: 80, rows: 24 });
   });
 });

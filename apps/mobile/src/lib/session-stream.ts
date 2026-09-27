@@ -44,6 +44,12 @@ export type SessionStreamView = {
   // the view is the store's one public stat surface.
   ignoredCount: number;
   error?: RpcError;
+  // Bug 8: the pty's real size, once a snapshot has reported one — a
+  // screen uses this to tell its terminal to render at that exact size
+  // instead of guessing from its own screen dimensions. Undefined until
+  // the first snapshot answer carrying a size lands (no resize has ever
+  // been recorded for this session/pane yet).
+  size?: { cols: number; rows: number };
 };
 
 export type SessionStream = {
@@ -216,7 +222,13 @@ export function createAttachStream(deps: AttachStreamDeps): SessionStream {
     writeStep(step, undefined, suppressMarker);
     rendered = step.rendered;
     drainBuffer();
-    setView({ phase: "live" });
+    setView({
+      phase: "live",
+      size:
+        snapshot.cols !== undefined && snapshot.rows !== undefined
+          ? { cols: snapshot.cols, rows: snapshot.rows }
+          : undefined,
+    });
   }
 
   function attemptSnapshot(generation: number, retryIndex: number, suppressMarker: boolean): void {

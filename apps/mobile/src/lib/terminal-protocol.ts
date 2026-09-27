@@ -8,9 +8,23 @@
 export type PageMessage =
   | { t: "ready"; cols: number; rows: number }
   | { t: "resize"; cols: number; rows: number }
-  | { t: "modes"; applicationCursor: boolean };
+  | { t: "modes"; applicationCursor: boolean }
+  // Bug 9: a touch-drag scroll gesture in the alternate screen buffer,
+  // while some program has mouse tracking on — carries only a synthesized
+  // direction, never anything read from the terminal's own content. The
+  // native side turns this into a `terminal:input`/`session:input` SGR
+  // mouse-wheel escape sequence.
+  | { t: "wheel"; direction: "up" | "down" };
 
-export type NativeMessage = { t: "write"; data: string } | { t: "reset" } | { t: "fit" };
+export type NativeMessage =
+  | { t: "write"; data: string }
+  | { t: "reset" }
+  | { t: "fit" }
+  // Bug 8: the pty's real size, once known — the page resizes its
+  // terminal to exactly this rather than fitting to the WebView's own
+  // dimensions, so a phone attaching to a pane the desktop already sized
+  // renders it correctly instead of garbling wrapped lines.
+  | { t: "size"; cols: number; rows: number };
 
 const MAX_TEXT_LENGTH = 256;
 
@@ -42,6 +56,11 @@ export function parsePageMessage(text: unknown): PageMessage | undefined {
     case "modes":
       if (typeof obj.applicationCursor === "boolean") {
         return { t: "modes", applicationCursor: obj.applicationCursor };
+      }
+      return undefined;
+    case "wheel":
+      if (obj.direction === "up" || obj.direction === "down") {
+        return { t: "wheel", direction: obj.direction };
       }
       return undefined;
     default:

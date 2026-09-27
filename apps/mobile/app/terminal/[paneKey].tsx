@@ -34,6 +34,7 @@ import {
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import type { KeyName } from "@/lib/terminal-keys";
+import { sgrWheelSequence } from "@/lib/terminal-keys";
 import { createTerminalInput } from "@/lib/terminal-input";
 import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
@@ -249,6 +250,10 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
         onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
         onModes={(modes) => inputRef.current?.setModes(modes)}
         onNeedsReplay={() => streamRef.current?.restart(sink)}
+        fixedSize={streamView.size}
+        onWheel={(direction) => {
+          void inputRef.current?.sendText(sgrWheelSequence(direction));
+        }}
       />
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
       <KeyBar

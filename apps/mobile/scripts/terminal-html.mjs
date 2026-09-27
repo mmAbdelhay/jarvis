@@ -121,14 +121,71 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "textarea.readOnly=true;" +
     'textarea.setAttribute("inputmode","none");' +
     "}" +
+    // Bug 8: a fixed size from native (the pty's real cols/rows) picks the
+    // largest font size in [6,14]px whose `cols` columns fit the WebView's
+    // current width, measured with a scratch canvas rather than xterm's own
+    // (fontSize-dependent) internals — clamped to 6px rather than shrunk
+    // further, with native horizontal panning left on for whatever still
+    // overflows at that floor.
+    'var fitCanvas=document.createElement("canvas");' +
+    'var fitCtx=fitCanvas.getContext("2d");' +
+    "function charWidthAt(size){" +
+    'fitCtx.font=size+"px "+fontFamily;' +
+    'return fitCtx.measureText("M").width;' +
+    "}" +
+    "function applyFixedSize(cols,rows){" +
+    'var container=document.getElementById("t");' +
+    "var width=container.clientWidth;" +
+    "var chosen=6;" +
+    "for(var size=14;size>=6;size--){" +
+    "if(charWidthAt(size)*cols<=width){chosen=size;break;}" +
+    "}" +
+    "term.options.fontSize=chosen;" +
+    "term.resize(cols,rows);" +
+    "var overflowing=charWidthAt(chosen)*cols>width;" +
+    'container.style.overflowX=overflowing?"auto":"hidden";' +
+    'container.style.touchAction=overflowing?"pan-x":"none";' +
+    "}" +
+    // Bug 9: `term` is passed straight through as `PageDeps.term` — real
+    // xterm 6 already shapes `.write`/`.reset`/`.cols`/`.rows`/`.modes`/
+    // `.buffer.active.type`/`.scrollLines` exactly like `PageTerminal`, so
+    // no adapter object is needed here.
     "var controller=createPageController({" +
     "term:term," +
     "fit:function(){fitAddon.fit();}," +
-    "post:function(s){window.ReactNativeWebView.postMessage(s);}" +
+    "post:function(s){window.ReactNativeWebView.postMessage(s);}," +
+    "applyFixedSize:applyFixedSize," +
+    'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;}' +
     "});" +
     'window.addEventListener("message",function(e){controller.receive(e.data);});' +
     'document.addEventListener("message",function(e){controller.receive(e.data);});' +
     'window.addEventListener("resize",function(){controller.layoutChanged();});' +
+    // Bug 9: touch scrolling — xterm 6's own viewport is wheel-only, so
+    // every touch gesture on the terminal element is turned into
+    // scrollLines()/wheel calls by the controller itself. `{passive:true}`
+    // throughout: CSS `touch-action` (STYLE, and applyFixedSize's
+    // "pan-x" override) is what stops the WebView's own default handling,
+    // not preventDefault() here.
+    "var touchY=0;" +
+    'document.getElementById("t").addEventListener("touchstart",function(e){' +
+    "var t0=e.touches[0];" +
+    "if(!t0)return;" +
+    "touchY=t0.clientY;" +
+    "controller.touchStart();" +
+    "},{passive:true});" +
+    'document.getElementById("t").addEventListener("touchmove",function(e){' +
+    "var t0=e.touches[0];" +
+    "if(!t0)return;" +
+    "var dy=t0.clientY-touchY;" +
+    "touchY=t0.clientY;" +
+    "controller.touchMove(dy);" +
+    "},{passive:true});" +
+    'document.getElementById("t").addEventListener("touchend",function(){' +
+    "controller.touchEnd();" +
+    "},{passive:true});" +
+    'document.getElementById("t").addEventListener("touchcancel",function(){' +
+    "controller.touchEnd();" +
+    "},{passive:true});" +
     "controller.start();" +
     "})();"
   );
@@ -145,9 +202,16 @@ const CSP =
   "base-uri 'none'; " +
   "form-action 'none'";
 
+// Bug 9: touch-action:none on the terminal element so the WebView never
+// natively scrolls it — every touch gesture reaches the page's own
+// touchstart/touchmove handlers instead, which turn a vertical drag into
+// term.scrollLines() (or, in the alternate screen buffer with mouse
+// tracking on, an SGR wheel sequence). applyFixedSize() (bug 8) is the only
+// thing that ever relaxes this, to "pan-x" for whatever a size that cannot
+// shrink to the WebView's width still overflows by.
 const STYLE =
   "html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}" +
-  "#t{width:100%;height:100%;}";
+  "#t{width:100%;height:100%;touch-action:none;}";
 
 export function buildTerminalHtml(inputs) {
   const { xtermJs, fitJs, unicode11Js, xtermCss, pageJs, theme, fontFamily, scrollback, fontSize } =
