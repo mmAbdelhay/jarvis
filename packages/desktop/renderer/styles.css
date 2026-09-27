@@ -186,6 +186,33 @@
     border-bottom: 1px solid var(--border);
     container: topbar / inline-size;
     overflow: hidden;
+    /* Bug 1: Linux/Windows hide the native frame in favour of Electron's own
+       titleBarOverlay (window-chrome.ts), so the bar itself is now the only
+       thing left to drag the window by. */
+    -webkit-app-region: drag;
+  }
+
+  /* Without this none of the topbar's own controls could be clicked at all
+     — a drag region swallows every pointer event under it. */
+  .topbar button,
+  .topbar select,
+  .topbar input,
+  .topbar .pill {
+    -webkit-app-region: no-drag;
+  }
+
+  /* The titlebar overlay's min/max/close buttons paint over the window's
+     own top-right corner (top-left in RTL) on Linux/Windows only — macOS
+     keeps its WM-drawn traffic lights and never sets the platform-* class
+     (see app.ts). `titlebar-area-width`/`-x` are the rectangle Chromium
+     leaves clear of those buttons; the gap between that and the full width
+     is exactly how much room to reserve. Falls back to 0 (100vw - 100vw)
+     wherever the env() vars are unset, e.g. darwin or an older Chromium. */
+  body.platform-linux .topbar,
+  body.platform-win32 .topbar {
+    padding-inline-end: calc(
+      20px + (100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+    );
   }
 
   .topbar > * {

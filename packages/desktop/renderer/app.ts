@@ -301,6 +301,10 @@ window.jarvis.onProviders((statuses) => {
 });
 window.jarvis.onSessionOutput((output) => appendSessionOutput(output));
 
+// Bug 1: styles.css only reserves room for the titlebar overlay's own
+// min/max/close buttons (window-chrome.ts) on the platforms that draw one.
+document.body.classList.add(`platform-${hostPlatform()}`);
+
 startClock();
 labelShortcuts();
 

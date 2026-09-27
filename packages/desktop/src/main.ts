@@ -30,6 +30,7 @@ import {
 } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
+import { windowChrome } from "./window-chrome.js";
 import { createBroadcaster, rendererSink } from "./broadcast.js";
 import { preloadChannelArgs } from "./channels.js";
 import { dbGateLoginAnswer } from "./dbgate-login.js";
@@ -680,6 +681,10 @@ app.whenReady().then(async () => {
       // the bundle at package time and from the dock while developing, which
       // is what setDockIcon below is for.
       icon: iconPath("icon.png"),
+      // Bug 1: Linux (GNOME/Wayland especially) and some Windows configs
+      // leave the WM drawing no min/max/close decorations at all. See
+      // window-chrome.ts — darwin gets {} back and is unaffected.
+      ...windowChrome(process.platform),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
         // argv rather than an IPC call, because the renderer needs both
