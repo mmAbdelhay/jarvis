@@ -112,7 +112,13 @@ export const REMOTE_PUSH_POLICY: {
   "voice:speaking": { kind: "reliable" },
   "voice:notice": { kind: "reliable" },
   "workspace:update": { kind: "reliable" },
-  // Keyed, unlike the five reliable channels above: a phone that only cares
+  // Task 5: unkeyed, like the five above it — plans-store.ts (mobile)
+  // subscribes to the bare channel, never a per-path key, since it wants
+  // every plan's own change notice regardless of which one it currently
+  // has open (it re-derives what to do with each payload itself: reload
+  // the open doc if the path matches, refresh the list either way).
+  "plans:changed": { kind: "reliable" },
+  // Keyed, unlike the six reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },
 

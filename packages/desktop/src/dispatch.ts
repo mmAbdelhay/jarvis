@@ -16,14 +16,19 @@
 // process.platform (platform-convention.test.ts). Whatever needs either is
 // built in main.ts and handed in through DispatchDeps.
 import {
+  anchorComments,
+  formatFeedback,
   isSessionState,
   type HandleOptions,
+  type PlanComment,
   type Session,
   type SessionEditPatch,
   type StreamSnapshot,
   type Turn,
 } from "@jarvis/core";
-import type { DockerConfig } from "@jarvis/platform";
+import type { DockerConfig, PlanCommentStore, PlanFiles } from "@jarvis/platform";
+import { isWithin } from "@jarvis/platform";
+import { bracketedSubmit } from "./bracketed.js";
 import {
   isFileId,
   isSubscriptionKey,
@@ -217,10 +222,16 @@ export type DispatchDeps = {
   terminal: TerminalHandlers;
   // terminal:attach's backlog read; not part of TerminalHandlers because it
   // reads the shell manager directly rather than going through terminal.ts.
+  // `write` backs plans:send (Task 5): the same ShellManager.write path
+  // terminal:input uses. plans:send finds a pane (and whether it has
+  // exited) through `panes()`, already declared below — never a separate
+  // `has`, which does not distinguish a live pane from an exited one still
+  // holding its retained log (ruling 12).
   shells: {
     log(paneKey: string): string;
     snapshot(paneKey: string): StreamSnapshot;
     panes(): readonly TerminalPaneInfo[];
+    write(paneKey: string, data: string): void;
   };
   followers: DockerFollowers;
   editor: EditorHandlers;
@@ -281,6 +292,30 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
+  // instance for the whole app — Tasks 3 and 4's own factories, built once
+  // in main.ts and handed in here, the same "exactly one instance" rule
+  // bookmarks' store and the api store already follow.
+  plans: {
+    files: PlanFiles;
+    comments: PlanCommentStore;
+    // plans:list's own `cwd` argument: true only for a path that is both
+    // absolute and, right now, an existing directory — the check that
+    // decides whether to trust the caller's cwd or fall back to the
+    // pane's own recorded start directory (deps.terminal.paneStartDir).
+    // Injected, like `readFile` above, so this file does no I/O of its
+    // own and stays testable without a real filesystem.
+    isDirectory(path: string): Promise<boolean>;
+    // Every configured project's own directory (config.projects' values,
+    // read live so a Settings save is picked up on the next call) — the
+    // other half of plans:list's own `cwd` containment check
+    // (resolvePlansCwd): a candidate must be, or live under, either the
+    // calling pane's own start directory or one of these, or it is
+    // refused. Without this a remote caller could hand plans:list any
+    // existing absolute directory on the host and have it probed for
+    // `docs/superpowers/{specs,plans}` — this is what stops that.
+    projectRoots(): readonly string[];
+  };
 };
 
 /** A terminal/session pty resize dimension: a plain positive integer, no
@@ -295,6 +330,53 @@ function isDimension(value: unknown): value is number {
  *  as RECENT_TURNS_PER_DEVICE elsewhere: a phone reconnecting after a long
  *  gap gets a bounded catch-up, not the whole session's history. */
 export const TURNS_LIST_MAX = 50;
+
+/** Cap on any `path`/`blockId`/comment-id string argument a plans:* channel
+ *  accepts, checked at the handler boundary before any of it is used — the
+ *  defence-in-depth re-check remote-policy.ts's own plans entries call for,
+ *  same discipline as every other remote-reachable argument in this file.
+ *  Comfortably above any real path or markdown block id; a caller sending
+ *  more is refused, never truncated. */
+const MAX_PLAN_ARG_CHARS = 4096;
+
+/** Cap on `source` in plans:writeBlock, checked here in addition to (never
+ *  instead of) `PlanFiles.writeBlock`'s own MAX_PLAN_BYTES check —
+ *  @jarvis/platform's plans.ts enforces the same 1 MiB bound on the file
+ *  this becomes, so a source this large is refused before it is even
+ *  handed to the write queue. */
+const MAX_PLAN_SOURCE_BYTES = 1024 * 1024;
+
+/**
+ * plans:list's own `cwd` argument: used only when it is a string, at most
+ * MAX_PLAN_ARG_CHARS long, equal to or inside either the calling pane's
+ * own recorded start directory or one of the app's configured project
+ * roots, and — per `isDirectory` — names a directory that exists right
+ * now. The containment check runs before `isDirectory`'s own `stat`, so a
+ * candidate outside both never reaches the filesystem at all: a remote
+ * caller cannot use this argument to probe for the existence of an
+ * arbitrary directory elsewhere on the host.
+ *
+ * Anything that fails any of those falls back to `paneKey`'s own recorded
+ * start directory, and a `paneKey` this process never started falls back
+ * to `undefined`, the same "list what the agent-only directories hold"
+ * default `PlanFiles.list` already gives an unrooted caller.
+ */
+async function resolvePlansCwd(
+  candidate: unknown,
+  paneKey: string,
+  terminal: Pick<TerminalHandlers, "paneStartDir">,
+  isDirectory: (path: string) => Promise<boolean>,
+  projectRoots: readonly string[],
+): Promise<string | undefined> {
+  const startDir = terminal.paneStartDir(paneKey);
+  if (typeof candidate === "string" && candidate.length <= MAX_PLAN_ARG_CHARS) {
+    const withinKnownRoot =
+      (startDir !== undefined && isWithin(candidate, startDir)) ||
+      projectRoots.some((root) => isWithin(candidate, root));
+    if (withinKnownRoot && (await isDirectory(candidate))) return candidate;
+  }
+  return startDir;
+}
 
 export function createDispatchTable(deps: DispatchDeps): DispatchTable {
   const {
@@ -1047,6 +1129,210 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         return { ok: false as const, kind: "failed" as const, detail: write.detail };
       }
       return result;
+    },
+
+    // Task 5 (plan panel): main's own read/write/comment surface for a
+    // plan file, remote-legal end to end (remote-policy.ts). Every `path`/
+    // `blockId`/comment-id argument is capped at MAX_PLAN_ARG_CHARS and
+    // every `path` is re-checked with `PlanFiles.isAllowed` here, in
+    // addition to (never instead of) the checks `read`/`writeBlock`
+    // already do internally — defence for a remote caller, the same
+    // posture every other path-bearing channel in this file takes.
+    "plans:list": async ([paneKeyArg, cwdArg]) => {
+      const paneKey =
+        typeof paneKeyArg === "string" && paneKeyArg.length <= MAX_PLAN_ARG_CHARS ? paneKeyArg : "";
+      const cwd = await resolvePlansCwd(
+        cwdArg,
+        paneKey,
+        deps.terminal,
+        deps.plans.isDirectory,
+        deps.plans.projectRoots(),
+      );
+      return deps.plans.files.list(cwd);
+    },
+
+    "plans:read": async ([pathArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+      return deps.plans.files.read(pathArg);
+    },
+
+    "plans:writeBlock": async ([pathArg, blockIdArg, sourceArg, baseMtimeArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (typeof blockIdArg !== "string" || blockIdArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (typeof sourceArg !== "string") return { ok: false, reason: "forbidden" };
+      if (Buffer.byteLength(sourceArg, "utf8") > MAX_PLAN_SOURCE_BYTES) {
+        return { ok: false, reason: "too-large" };
+      }
+      if (typeof baseMtimeArg !== "number" || !Number.isFinite(baseMtimeArg)) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+      return deps.plans.files.writeBlock(pathArg, blockIdArg, sourceArg, baseMtimeArg);
+    },
+
+    // Computed fresh every call, never cached: `anchorComments` needs the
+    // plan's *current* blocks. Two different kinds of "can't read this
+    // path" are handled differently, deliberately:
+    //  - Not `isAllowed` at all (outside the allowed plan directories, or
+    //    simply not a path this process ever accepted) — the security
+    //    boundary every other path-bearing channel enforces. Nothing
+    //    stored under that path is shown, ever: `[]`, the same as if
+    //    nothing had ever been commented there.
+    //  - `isAllowed` but `read` still fails for some other reason (the
+    //    file was deleted, is temporarily too large, an IO error) —
+    //    `blocks` is just [] in that case, which `anchorComments` already
+    //    turns into every stored comment coming back `orphaned` rather
+    //    than dropped. This is graceful degradation for an allowed path
+    //    whose file merely is not there right now, not a security gate,
+    //    so it never empties the result the way the first case does.
+    // A store read that throws (a corrupt-beyond-repair file, an IO
+    // error) is mapped to "no stored comments" rather than left to reject
+    // this call — plans:comments has no failure shape of its own to
+    // report it through, and an empty result is exactly what a caller
+    // already treats "nothing on file" as.
+    "plans:comments": async ([pathArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) return [];
+      if (!(await deps.plans.files.isAllowed(pathArg))) return [];
+      let stored: PlanComment[];
+      try {
+        stored = await deps.plans.comments.list(pathArg);
+      } catch (error) {
+        console.error(`plans:comments: comment store read failed: ${errorMessage(error)}`);
+        stored = [];
+      }
+      const read = await deps.plans.files.read(pathArg);
+      const blocks = read.ok ? read.value.blocks : [];
+      return anchorComments(stored, blocks);
+    },
+
+    // No failure shape of its own (`Promise<PlanComment>`) — an invalid
+    // argument or a store validation failure (an empty or 4000+ character
+    // body) is a thrown/rejected promise, exactly the way every ordinary
+    // JS/Electron IPC failure already reaches a caller; nothing here
+    // catches it into some invented "ok: false" shape the type does not
+    // have room for.
+    "plans:addComment": async ([pathArg, blockIdArg, quoteArg, bodyArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        throw new Error("plans:addComment: invalid path");
+      }
+      if (typeof blockIdArg !== "string" || blockIdArg.length > MAX_PLAN_ARG_CHARS) {
+        throw new Error("plans:addComment: invalid blockId");
+      }
+      if (typeof quoteArg !== "string" || typeof bodyArg !== "string") {
+        throw new Error("plans:addComment: invalid comment text");
+      }
+      // Re-checked here the same as every other path-bearing channel
+      // (defence for a remote caller): a comment is never filed against a
+      // path outside the allowed plan directories, even though nothing
+      // downstream of `comments.add` would itself read that path from
+      // disk. Same rejection style as the type/length checks above — this
+      // channel has no failure shape of its own to return one through.
+      if (!(await deps.plans.files.isAllowed(pathArg))) {
+        throw new Error("plans:addComment: path not allowed");
+      }
+      return deps.plans.comments.add({
+        path: pathArg,
+        blockId: blockIdArg,
+        quote: quoteArg,
+        body: bodyArg,
+      });
+    },
+
+    // `undefined` already means "no such comment" in this return type, so
+    // a store throw (an invalid body) is caught and mapped onto that same
+    // value rather than rejecting — unlike addComment, there is a value
+    // here that already means "nothing happened".
+    "plans:updateComment": async ([idArg, bodyArg]) => {
+      if (typeof idArg !== "string" || idArg.length > MAX_PLAN_ARG_CHARS) return undefined;
+      if (typeof bodyArg !== "string") return undefined;
+      try {
+        return await deps.plans.comments.update(idArg, bodyArg);
+      } catch (error) {
+        console.error(`plans:updateComment failed: ${errorMessage(error)}`);
+        return undefined;
+      }
+    },
+
+    // `false` already means "no such comment" here, the same reasoning
+    // updateComment's `undefined` follows.
+    "plans:deleteComment": async ([idArg]) => {
+      if (typeof idArg !== "string" || idArg.length > MAX_PLAN_ARG_CHARS) return false;
+      try {
+        return await deps.plans.comments.remove(idArg);
+      } catch (error) {
+        console.error(`plans:deleteComment failed: ${errorMessage(error)}`);
+        return false;
+      }
+    },
+
+    // Loads the named comments still on `path` (an id for another file, or
+    // one already deleted, is dropped silently — "unknown ids ignored");
+    // none left is "no-comments" before anything else is even attempted.
+    // `path` is re-checked with isAllowed the same as read/writeBlock; the
+    // pane is checked only once there is something worth writing to it,
+    // so an unknown pane with no selected comments still answers
+    // "no-comments", not "no-pane" — the more specific reason of the two.
+    "plans:send": async ([paneKeyArg, pathArg, idsArg]) => {
+      if (typeof paneKeyArg !== "string" || paneKeyArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "no-pane" };
+      }
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!Array.isArray(idsArg)) return { ok: false, reason: "no-comments" };
+      const ids = idsArg.filter(
+        (id): id is string => typeof id === "string" && id.length <= MAX_PLAN_ARG_CHARS,
+      );
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+
+      let stored: PlanComment[];
+      try {
+        stored = await deps.plans.comments.list(pathArg);
+      } catch (error) {
+        console.error(`plans:send: comment store read failed: ${errorMessage(error)}`);
+        stored = [];
+      }
+      const wanted = new Set(ids);
+      const selected = stored.filter((comment) => wanted.has(comment.id));
+      if (selected.length === 0) return { ok: false, reason: "no-comments" };
+
+      // Not just "does this process know the pane" — ShellManager keeps a
+      // pane's retained log around after its shell exits (ruling 12), so
+      // an exited pane is still "known" and a write to it would silently
+      // no-op, leaving `markSent` called for a comment nothing actually
+      // delivered. `panes()` carries the live/exited distinction `has`
+      // alone does not.
+      const pane = deps.shells.panes().find((candidate) => candidate.paneKey === paneKeyArg);
+      if (pane === undefined || pane.exited) return { ok: false, reason: "no-pane" };
+
+      const read = await deps.plans.files.read(pathArg);
+      const blocks = read.ok ? read.value.blocks : [];
+      const anchored = anchorComments(selected, blocks);
+      // Never throws here: `selected` (and so `anchored`) is already
+      // proven non-empty above, and formatFeedback only ever throws on an
+      // empty comment list.
+      const feedback = formatFeedback(pathArg, anchored);
+
+      // The same path terminal:input writes through — ShellManager.write —
+      // so a plan comment lands in the pane exactly as if the user had
+      // pasted it themselves.
+      deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+      try {
+        await deps.plans.comments.markSent(selected.map((comment) => comment.id));
+      } catch (error) {
+        // The message is already in the pane; a store failure here is
+        // logged, never surfaced as a send failure the caller would
+        // reasonably read as "nothing was sent".
+        console.error(`plans:send: markSent failed: ${errorMessage(error)}`);
+      }
+      return { ok: true, sent: selected.length };
     },
   } satisfies Record<TableChannel, Handler>;
 }

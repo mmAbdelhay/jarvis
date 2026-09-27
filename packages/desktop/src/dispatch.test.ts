@@ -90,11 +90,13 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       workflows: vi.fn(async () => []),
       terminalAi: vi.fn(async () => ""),
       chips: vi.fn(async () => undefined),
+      paneStartDir: vi.fn(() => undefined),
     },
     shells: {
       log: vi.fn(() => "backlog"),
       snapshot: vi.fn(() => ({ text: "backlog", end: 7 })),
       panes: vi.fn(() => []),
+      write: vi.fn(),
     },
     followers: {
       follow: vi.fn(() => "following" as const),
@@ -209,6 +211,31 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    plans: {
+      files: {
+        list: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
+        read: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+        writeBlock: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+        isAllowed: vi.fn(async () => true),
+        watch: vi.fn(() => () => {}),
+      },
+      comments: {
+        list: vi.fn(async () => []),
+        add: vi.fn(async () => ({
+          id: "c1",
+          path: "/plan.md",
+          blockId: "b1",
+          quote: "",
+          body: "note",
+          createdAt: 0,
+        })),
+        update: vi.fn(async () => undefined),
+        remove: vi.fn(async () => false),
+        markSent: vi.fn(async () => undefined),
+      },
+      isDirectory: vi.fn(async () => false),
+      projectRoots: vi.fn(() => []),
+    },
     ...overrides,
   } as DispatchDeps;
 }
@@ -568,6 +595,7 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "tab-10:split-a", exited: false },
           { paneKey: "tab-1ish", exited: false },
         ]),
+        write: vi.fn(),
       },
     });
     const table = createDispatchTable(deps);
@@ -601,6 +629,7 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "terminal-tab", exited: false },
           { paneKey: "closed-tab", exited: true },
         ]),
+        write: vi.fn(),
       },
     });
     const table = createDispatchTable(deps);

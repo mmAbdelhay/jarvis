@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   BrowserWindow,
@@ -103,6 +103,8 @@ import {
   parseZshHistory,
   createKubeContextLister,
   createMetricsReader,
+  createPlanCommentStore,
+  createPlanFiles,
   createPtySpawner,
   createRealCodeServerSpawner,
   createRealDockerClient,
@@ -1253,6 +1255,19 @@ app.whenReady().then(async () => {
       projects: config.projects,
     });
 
+    // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
+    // instance for the whole app — dispatch.ts's own `plans` dep group
+    // requires exactly one of each. `agents` is a live accessor, not a
+    // snapshot, the same reason dispatch.ts's own `agents.ids()` is one
+    // (registry.replace() on a Settings save can swap the registry after
+    // this is built). The comment store's file sits beside bookmarks.json,
+    // under the same ~/.config/jarvis/ tree every other small JSON store
+    // in this app already uses.
+    const planFiles = createPlanFiles({ agents: () => registry.list(), home: homedir() });
+    const planComments = createPlanCommentStore(
+      join(homedir(), ".config/jarvis/plan-comments.json"),
+    );
+
     const indexUrl = pathToFileURL(
       fileURLToPath(new URL("../../renderer/index.html", import.meta.url)),
     ).href;
@@ -1270,6 +1285,18 @@ app.whenReady().then(async () => {
     const broadcast = createBroadcaster({
       toRenderer: rendererSink(window),
     });
+
+    // Task 5: started once, here — `cwds()` is read fresh on every
+    // reconcile (plans.ts's own watch()), so an opened or closed terminal
+    // tab changes which `docs/superpowers/{specs,plans}` directories are
+    // watched without this ever being re-armed. The push reaches the
+    // remote bridge too: REMOTE_PUSH_POLICY (remote-push-policy.ts)
+    // classifies "plans:changed" as an ordinary reliable channel, and
+    // broadcast.send already fans out to every sink remote-access.ts adds.
+    const stopPlanWatch = planFiles.watch(
+      (path) => broadcast.send("plans:changed", path),
+      () => terminal.paneStartDirs(),
+    );
 
     // Sessions the process scan (process-scan.ts) found running outside
     // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
@@ -1854,6 +1881,9 @@ app.whenReady().then(async () => {
       });
       // Each followed container log is a live `docker logs -f` child.
       safely("docker logs", () => followers.closeAll());
+      // Task 5: the plan directories' fs.watch handles and their rescan
+      // interval — same reasoning as "session importer" above.
+      safely("plan watcher", () => stopPlanWatch());
     };
 
     // DbGate is spawned with BASIC_AUTH=1 (dbgate.ts) and answers with
@@ -2143,6 +2173,27 @@ app.whenReady().then(async () => {
       notifier,
       tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
       writeConfig,
+      plans: {
+        files: planFiles,
+        comments: planComments,
+        // plans:list's own `cwd` argument: true only for an existing,
+        // statable directory. Absolute is checked first and cheaply,
+        // before ever touching the filesystem for a relative path (or any
+        // other string) that could never be trusted as a cwd regardless of
+        // what stat() says about it.
+        isDirectory: async (path) => {
+          if (!isAbsolute(path)) return false;
+          try {
+            return (await stat(path)).isDirectory();
+          } catch {
+            return false;
+          }
+        },
+        // Live, not a snapshot — config.projects is mutated in place on a
+        // Settings save (writeConfig above), so a project added or removed
+        // is reflected on the very next plans:list call.
+        projectRoots: () => Object.values(config.projects),
+      },
     });
     for (const [channel, handler] of Object.entries(dispatch)) {
       ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(args, DESKTOP_ORIGIN));
