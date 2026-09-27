@@ -59,6 +59,12 @@ const config: ExpoConfig = {
     permissions: ["CAMERA", "RECORD_AUDIO"],
     ...(HAS_GOOGLE_SERVICES ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
   },
+  // Browser client (Task 12): a single-page app (one index.html, client-side
+  // routing) bundled by Metro, served by the bridge under `script-src 'self'`.
+  web: {
+    output: "single",
+    bundler: "metro",
+  },
   // `modules/pinned-socket` (Task 3) needs no entry here: Expo autolinks
   // everything under `modules/*`.
   plugins: [
