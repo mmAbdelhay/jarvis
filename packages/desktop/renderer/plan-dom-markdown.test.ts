@@ -6,9 +6,8 @@ import { blockToMarkdown, isNoopEdit, type BlockKind } from "./plan-dom-markdown
 // Task 1's own parse options: no raw HTML passthrough, bare URLs/emails
 // autolinked, smart quotes/dashes off. Every rendered-HTML fixture below is
 // this real renderer's actual output, not a hand-modelled approximation —
-// see the task-7a fix report for why that distinction mattered (plain-text
-// `[ ]`/`[x]` task markers instead of checkbox inputs, a trailing `\n`
-// inside every `<code>`, `<p>`-wrapping only on loose list items, etc).
+// see the task-7a fix report for why that distinction mattered (a trailing
+// `\n` inside every `<code>`, `<p>`-wrapping only on loose list items, etc).
 const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
 
 // Renders `source` the way plan-panel would build a block's editable DOM:
@@ -16,6 +15,24 @@ const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
 function render(source: string): HTMLElement {
   const el = document.createElement("div");
   el.innerHTML = md.render(source);
+  return el;
+}
+
+// Task 1 post-processes a `- [ ] text` / `- [x] text` item into an `<li>`
+// whose first child is a manufactured `<input type="checkbox" disabled>`
+// (or `checked disabled`) rather than leaving the brackets as literal text
+// (see plan-dom-markdown.ts's module comment). Plain markdown-it (used by
+// `render` above) doesn't do that GFM extension on its own, so this mirrors
+// Task 1's substitution directly on the rendered HTML — a plain string
+// replace of the exact prefix Task 1 replaces — rather than reimplementing
+// its token-level post-processing here.
+function renderTaskList(source: string): HTMLElement {
+  const html = md
+    .render(source)
+    .replace(/<li>\[ \] /g, '<li><input type="checkbox" disabled> ')
+    .replace(/<li>\[x\] /g, '<li><input type="checkbox" checked disabled> ');
+  const el = document.createElement("div");
+  el.innerHTML = html;
   return el;
 }
 
@@ -72,7 +89,7 @@ describe("blockToMarkdown: round-trip against real markdown-it output", () => {
 
   it("task list", () => {
     const source = "- [ ] Todo\n- [x] Done";
-    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
+    expect(blockToMarkdown(renderTaskList(source), original("list", source))).toBe(source);
   });
 
   it("fenced code with a language", () => {
@@ -165,6 +182,30 @@ describe("blockToMarkdown: escaping and entities", () => {
     expect(blockToMarkdown(render(literalSource), original("paragraph", literalSource))).toBe(
       literalSource,
     );
+  });
+});
+
+describe("blockToMarkdown: task list checkboxes (Task 1's DOM shape)", () => {
+  it("round-trips an unchecked item", () => {
+    const source = "- [ ] Todo";
+    expect(blockToMarkdown(renderTaskList(source), original("list", source))).toBe(source);
+  });
+
+  it("round-trips a checked item", () => {
+    const source = "- [x] Done";
+    expect(blockToMarkdown(renderTaskList(source), original("list", source))).toBe(source);
+  });
+
+  it("round-trips a nested task item", () => {
+    const source = "- Parent\n  - [ ] Nested task";
+    expect(blockToMarkdown(renderTaskList(source), original("list", source))).toBe(source);
+  });
+
+  it("still round-trips literal bracket text that isn't a checkbox", () => {
+    // No <input> here — plain markdown-it text starting with "[note]" that
+    // Task 1's substitution never touches (it only matches "[ ] "/"[x] ").
+    const source = "- [note] Something";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
   });
 });
 

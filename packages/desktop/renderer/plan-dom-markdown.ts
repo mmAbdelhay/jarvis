@@ -11,9 +11,12 @@
 // The DOM this reads is real markdown-it output (`{ html: false, linkify:
 // true, typographer: false }` — Task 1's own parse options), not a
 // hand-modelled approximation, so every rule below is calibrated against
-// what that renderer actually emits (plain-text `[ ] `/`[x] ` task markers
-// rather than checkbox inputs, a trailing `\n` inside every `<code>`, `<p>`
-// wrapping only on loose list items, and so on).
+// what that renderer actually emits: a trailing `\n` inside every `<code>`,
+// `<p>` wrapping only on loose list items, and — for task list items —
+// Task 1's own post-processing, which replaces a `[ ] `/`[x] ` item prefix
+// with a manufactured `<input type="checkbox" disabled>`/`<input
+// type="checkbox" checked disabled>` as the `<li>`'s first child, rather
+// than leaving the brackets as literal text.
 
 export type BlockKind =
   | "heading"
@@ -164,6 +167,32 @@ function isListElement(el: Element): boolean {
   return tag === "ul" || tag === "ol";
 }
 
+function isCheckboxElement(node: ChildNode): node is Element {
+  return (
+    node.nodeType === Node.ELEMENT_NODE &&
+    (node as Element).tagName.toLowerCase() === "input" &&
+    (node as Element).getAttribute("type") === "checkbox"
+  );
+}
+
+/**
+ * Task 1 turns a source `- [ ] text` / `- [x] text` item into an `<li>`
+ * whose first child is a manufactured `<input type="checkbox" disabled>` (or
+ * `checked disabled`), not literal bracket text. If the item's content
+ * starts with one, this pulls it off and turns it back into the `[ ] `/
+ * `[x] ` prefix the marker line needs; a plain item (no checkbox) is
+ * returned unchanged, so literal `[ ] `/`[x] ` bracket text elsewhere still
+ * round-trips as ordinary text.
+ */
+function extractTaskPrefix(nodes: ChildNode[]): { prefix: string; contentNodes: ChildNode[] } {
+  const [first, ...rest] = nodes;
+  if (first && isCheckboxElement(first)) {
+    const checked = first.hasAttribute("checked");
+    return { prefix: `[${checked ? "x" : " "}] `, contentNodes: rest };
+  }
+  return { prefix: "", contentNodes: nodes };
+}
+
 function orderedStart(list: HTMLElement): number {
   // `HTMLOListElement.start` reflects a default of 1 when the attribute is
   // absent, which is indistinguishable from an explicit `start="1"` — but
@@ -185,16 +214,17 @@ function renderListItem(
   // `<li>`, alongside (not inside) that `<p>`.
   const paragraph = li.querySelector(":scope > p");
   const nestedLists = Array.from(li.children).filter(isListElement) as HTMLElement[];
-  const contentNodes = paragraph
+  const rawContentNodes = paragraph
     ? Array.from(paragraph.childNodes)
     : Array.from(li.childNodes).filter((node) => {
         if (node.nodeType !== Node.ELEMENT_NODE) return true;
         return !isListElement(node as Element);
       });
 
+  const { prefix, contentNodes } = extractTaskPrefix(rawContentNodes);
   const inline = childNodesToMarkdown(contentNodes, source).trim();
   const indentStr = " ".repeat(indent);
-  const firstLine = `${indentStr}${marker} ${inline}`;
+  const firstLine = `${indentStr}${marker} ${prefix}${inline}`;
 
   // A nested list's content must indent past this item's own marker plus
   // its trailing space (`"10. "` is 4 columns wide) for markdown-it to
