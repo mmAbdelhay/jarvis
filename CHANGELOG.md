@@ -25,6 +25,25 @@ version and the downloads. This file is the index.
   phone app and Jarvis on the laptop together; either one alone refuses
   to connect ("Update the Jarvis app"). Pairing codes made before the
   upgrade are refused, so make a new one.
+- Browser client: the phone app now also runs in a web browser, served
+  by Jarvis itself from a second listener. It is off by default
+  (`remote.web.enabled`) and has its own port (`remote.web.port`, the
+  bridge's port plus one by default), and it needs a Tailscale certificate
+  with a DNS name and the owner password. Open or pair it from Settings →
+  Remote access → Browser access (address, Open in browser, QR code) or by
+  opening a `https://<name>:<port>/pair#…` link. A browser signs in with
+  the owner password or a passkey, and can optionally stay signed in. It
+  has no push notifications and no QR scanning, and Editor, Database and
+  Cluster open in a new tab. Settings labels each paired device Browser or
+  App.
+- Voice uploads accept WebM/Opus as well as MP4/AAC, so browsers that
+  cannot record MP4 can send voice. The laptop checks the recording's
+  actual container against the format it was sent as.
+- The bridge now checks `Origin` on `/rpc` and `/pair` connections. It
+  accepts no `Origin`, the phone app's `jarvis-app://native` (which the
+  updated app sends), or the browser client's own address while browser
+  access is on. Anything else, including the bridge's own address where
+  sidecar pages run, is closed without a reply.
 
 ## [0.1.4] — 2026-09-20
 

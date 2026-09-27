@@ -241,7 +241,7 @@ and read by a fresh reviewer before the next begins.
 ## What it exposes
 
 Jarvis is built for one person on one machine, and most of it touches no
-network at all. Five things are worth knowing before you run it somewhere
+network at all. Six things are worth knowing before you run it somewhere
 shared.
 
 **The Database tab is reachable from your network while it is open.**
@@ -319,6 +319,22 @@ stream) is destroyed the moment that device is revoked. See [Remote
 access](docs/guide/remote-access.md) for the three ways a pairing can be
 reached and the `tailscale cert` walkthrough, and [Security](SECURITY.md)
 for what is in scope.
+
+**Browser access is a second listener, off by default, on its own port.**
+With `remote.web.enabled` on, a configured certificate with a DNS name and
+an owner password, the laptop also serves the phone app as a web app, so a
+browser on another paired device can use Jarvis. It listens only while the
+bridge does, on the same address with the same certificate and TLS 1.3, on
+`remote.web.port` (the bridge's port plus one by default). It serves only
+the app's own static files: `GET` and `HEAD` with the exact expected `Host`,
+under a strict Content-Security-Policy, and every other request gets a
+closed connection with no reply. It has its own port because a browser
+treats each port as a separate origin. The sidecar pages run on the
+bridge's origin, so they cannot read the web app's storage, and the bridge
+accepts `/rpc` and `/pair` connections only from the web app's origin, from
+the phone app (`Origin: jarvis-app://native`), or with no `Origin` at all.
+A browser pairs and signs in like a phone, and can also use a passkey. See
+[the browser client](docs/guide/remote-access.md#the-browser-client).
 
 ## Licence
 

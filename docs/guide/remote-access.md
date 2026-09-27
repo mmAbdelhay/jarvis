@@ -5,7 +5,9 @@ connection — see the root README's "What it exposes" for what the bridge is,
 when it listens, and what a paired phone can do on this machine. This page
 covers the phone side: pairing, the owner login every paired device signs in
 with, what the phone app can see, what happens when a pairing ends, and the
-three ways a pairing can be reached.
+three ways a pairing can be reached. The same app also runs in a browser on
+another computer or phone; see [The browser client](#the-browser-client) at
+the end.
 
 ## Three paths to a pairing
 
@@ -144,7 +146,7 @@ Reaching this machine takes two things, checked separately:
    by presenting it.
 2. **Owner login** says *that you are the one holding it*. A paired device
    that connects is **locked** until it signs in with the owner password
-   (or, once the browser client ships, a passkey). A lost or copied phone
+   (or, in a browser, a passkey). A lost or copied phone
    with a valid pairing still cannot see or run anything.
 
 **Setting the password.** The owner password is set and changed only on the
@@ -245,12 +247,15 @@ out**. Logging out ends this phone's sign-in on the laptop and deletes the
 stored token. The pairing stays. A phone coming back from the background
 after its idle time is already locked.
 
-**Passkeys** are for the browser client, which is not released yet. A
-passkey is added from a browser that is already signed in, and adding one
-asks for the owner password again. The laptop's **Settings → Remote access →
-Owner account** lists passkeys and deletes them. The phone app always uses
-the password and the phone's own unlock. Until the browser client ships, the
-passkey channels answer `unsupported`, and the list stays empty.
+**Passkeys** are for the browser client (see [The browser
+client](#the-browser-client) below). A passkey is added from a browser that
+is already signed in, and adding one asks for the owner password again. The
+laptop's **Settings → Remote access → Owner account** lists passkeys and
+deletes them. The phone app always uses the password and the phone's own
+unlock. A passkey belongs to the certificate's DNS name and is checked
+against the browser listener's address, so while browser access is off
+(`remote.web.enabled` is `false`, or its listener is not running) the
+passkey channels answer `unsupported` and only the password works.
 
 **Protocol version 2.** Owner login changes the wire protocol, so the phone
 app and the laptop must both be updated. An older app talking to an updated
@@ -421,3 +426,173 @@ there too — the phone's confirmation dialog says so.
 the device locale) and is not part of the pairing record. Changing it in
 Settings asks you to restart the app — real right-to-left layout is applied
 process-wide at startup, so it cannot take effect until the app restarts.
+
+## The browser client
+
+The phone app also runs in a web browser, on another computer or on a phone
+without the app installed. It is the same app, built for the web and shipped
+inside Jarvis. The laptop serves it from a second listener beside the
+bridge, so there is nothing else to install or host.
+
+**What it needs.** All three of these:
+
+1. **Tailscale with a real certificate** — path 1 above. A browser can only
+   trust a certificate through its own trust store, so a self-signed,
+   pinned certificate cannot work. The certificate needs a DNS name, as in
+   the [`tailscale cert` walkthrough](#the-tailscale-cert-walkthrough) or
+   [Sidecars over Tailscale, from Settings](#sidecars-over-tailscale-from-settings).
+   The device running the browser needs Tailscale with MagicDNS too, to
+   resolve that name, and `remote.bindAddress` must be an address it can
+   reach, normally the Tailscale one.
+2. **An owner password.** The bridge does not start without one anyway.
+3. **Browser access turned on**: the **Browser access** switch in
+   **Settings → Remote access**, which is `remote.web.enabled` in
+   `jarvis.yaml` (see [configuration](configuration.md)). It is off by
+   default.
+
+The browser listener runs only while the bridge itself is listening (a
+device is paired, or a pairing window is open). It binds the same address
+with the same certificate and TLS 1.3, on its own port: `remote.web.port`,
+or the bridge's port plus one (7718 by default). Settings shows a state line
+under the switch: **On**, **Off** (browser access or the bridge is off), or
+why the listener cannot run — the two ports are the same, the port could not
+be opened ("Another program may be using it"), there is no real certificate,
+there is no owner password, or "The browser version is not included in this
+build".
+
+**Opening it and pairing.** When the listener is on, Settings shows its
+address (`https://<name>:<port>/`), an **Open in browser** button and a QR
+code. A browser pairs the same way a phone does, with a pairing window open:
+
+- While a pairing window is open, the address, the button and the QR carry
+  the pairing link: `https://<name>:<port>/pair#<the pairing code>`. Scan
+  the QR with a phone's camera, or open the address on the other computer.
+  **Open in browser** opens it in this laptop's own default browser.
+- Or open `https://<name>:<port>/pair` and paste the pairing link text
+  (either the `https://…/pair#…` form or the `jarvis://pair?…` one).
+
+The pairing code travels after the `#`, so the browser never sends it to
+the laptop as part of the page request, and the page removes it from the
+address bar and the history once read. The page then shows the same
+confirmation step as the phone, with a device name taken from the browser
+(for example "Chrome · macOS"), which you can edit. Approving the laptop's
+dialog finishes it. The device is listed in Settings with a **Browser**
+label; phones are labelled **App**. A pairing link without a certificate
+name is refused in a browser: "Browser access needs Tailscale with a real
+certificate."
+
+**Signing in.** After pairing, the browser shows the unlock screen, which
+signs in with the owner password or a passkey. Right after the first
+password sign-in it offers "Add a passkey for this browser", which asks for
+the password again. **Settings → Passkeys**, shown only in a browser, adds
+one later. A passkey signs in with Face ID, Touch ID, Windows Hello or
+a phone instead of the password. When this browser can verify you itself and
+at least one passkey exists, opening Jarvis raises the passkey prompt on
+its own, once per page load. The password is always there as a fallback.
+
+**Keep me signed in on this browser** is a switch on the unlock screen and
+in Settings, and it is off by default:
+
+- **Off**: nothing that can sign in is stored. Every visit needs a passkey
+  or the password.
+- **On**: the refresh token is stored in this browser, so opening Jarvis
+  signs you in without asking. The token stops working after 7 days
+  without use, and 30 days after the password or passkey sign-in, the same
+  as on the phone. It is used only for that sign-in when the page opens:
+  after the idle lock, or after you log out, you need a passkey or the
+  password again, even with the switch on. A browser has no Face ID prompt
+  standing in front of the stored token the way the phone does, so the idle
+  lock would mean nothing otherwise.
+
+Turning the switch off deletes the stored token at once. The pairing record
+and the device token are always kept in the browser's IndexedDB, encrypted
+with AES-GCM under a key the page cannot export. That keeps the raw values
+out of the database, but it does not protect against someone who can use
+this browser profile. That person still needs the owner password or a
+passkey, unless keep-signed-in is on. The access token is kept in memory
+only, as on the phone, and the idle lock (**Settings → Security**) works
+the same way.
+
+**What works, and what does not.** The Dashboard, Sessions, terminals,
+Workspace, Changes, Docker, History, the API client and voice all work
+through the same `/rpc` connection the phone uses. The differences:
+
+- **No notifications.** A browser cannot register for push, so Settings
+  reports notifications as unavailable.
+- **No QR scanning.** Pairing takes the link, as above, not the camera.
+- **Editor, Database and Cluster open in a new tab** on the bridge's own
+  address (`https://<name>:<bridge port>/s/<handle>/…`), through the same
+  sidecar proxy, with the same `remote.sidecarProxy` requirement. The app
+  shows "Opened in a new tab." with an **Open again** button.
+- **Voice** records with the browser's own recorder. It uses MP4 audio
+  where the browser supports it and WebM/Opus otherwise; the laptop accepts
+  either, checks the file's actual contents against the format it was sent
+  as, and refuses a mismatch. The 120-second and 4 MiB limits are the same.
+  Replies are spoken with the browser's own voices, or shown as text when
+  it has none for the language.
+- **The terminal** is the same terminal page the phone uses. It runs in a
+  sandboxed frame (`/terminal.html`) that can only exchange messages with
+  the app.
+- **Log out** and **Unpair** in Settings ask with the browser's own
+  confirmation dialog.
+
+**Revocation and signing out** behave as on the phone. Revoking the browser
+from the laptop's Settings closes its connection. The browser then forgets
+its records and returns to the pairing screen. Every trigger in the
+"What signs devices out" table above applies to a browser too. **Log out**
+ends this browser's sign-in and deletes its stored token, and keeps the
+pairing. **Unpair** removes only what this browser stores; the laptop keeps
+the device listed until you revoke it there. A browser that is connected
+counts as a connected device for idle auto-disable.
+
+**Why a separate port.** The sidecar tabs are third-party pages (code-server,
+DbGate, Headlamp) served on the bridge's own origin, `https://<name>:<bridge
+port>`. A browser treats a different port as a different origin, so serving
+the app from its own port keeps those pages away from the app: they cannot
+read its storage, and their origin is not one the bridge accepts on `/rpc`
+or `/pair`. The browser listener serves only the app's own files. It cannot
+reach sessions or the sidecars itself; the app talks to the laptop over the
+bridge's `/rpc`, the same as the phone.
+
+**Security rules on the browser listener.** Every response the listener
+does not want to give is a closed connection with no bytes at all, the same
+"no banner to an unauthenticated peer" rule the bridge follows:
+
+- **Host** must be exactly `<name>:<port>` (just `<name>` on port 443). A
+  missing, repeated, IP-address or otherwise different Host is refused.
+- **Methods**: only `GET` and `HEAD`. Any request carrying an `Upgrade`
+  header, an `Expect` header, or a malformed or traversal path (`..`, a
+  backslash or NUL, whether literal or percent-encoded) is refused. An
+  unknown path that looks like a file is refused. Any other unknown path
+  gets the app's `index.html`, because the app does its own routing.
+- **Headers**: every response carries `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer` and this Content-Security-Policy:
+
+  ```
+  default-src 'self'; script-src 'self';
+  connect-src wss://<name>:<bridge port>;
+  img-src 'self' data: blob:; media-src 'self' blob:;
+  style-src 'self' 'unsafe-inline'; frame-src 'self';
+  frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  ```
+
+  No inline script is allowed; the build fails if an exported page has
+  one. The page can connect only to the bridge. `/terminal.html` alone
+  says `frame-ancestors 'self'`, so the app can frame its own terminal page.
+  Nothing else can be framed at all.
+
+**Origin rules on the bridge.** The bridge checks the `Origin` header of
+every `/rpc` and `/pair` WebSocket upgrade and destroys the connection,
+unanswered, unless the header is:
+
+- absent,
+- exactly `jarvis-app://native`, which the phone app sends, or
+- exactly the browser listener's origin, `https://<name>:<port>`, and only
+  while that listener is running.
+
+The comparison is exact: no case folding and no trailing slash. A web page
+cannot forge a non-`https` Origin, and the bridge's own origin is never
+accepted, because the sidecar pages run there. Once browser access is
+turned off, no browser can open a new connection to the bridge. Sidecar
+requests under `/s/` are not subject to this check; they have their own
+single-use key and cookie.

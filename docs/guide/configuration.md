@@ -163,6 +163,9 @@ remote:                         # optional; absent means the bridge does not exi
     enabled: false              # the one part involving a third party
     includeProjectNames: false  # project names in a notification's text
   idleDisableMinutes: 0         # 0 = never; otherwise turn off after this long idle
+  web:
+    enabled: false              # the app in a browser, on a second port; needs a real certificate
+    # port: 7718                # leave it out for remote.port + 1
 ```
 
 **prayer**: The “Use my location” button asks CoreLocation on macOS. On Linux
@@ -221,6 +224,8 @@ default.
 | `tls.certPath`, `tls.keyPath` | absent | Both or neither, and file paths only — there is no Settings-panel equivalent. Neither means a self-signed certificate, made once and pinned when you pair. A real one comes from `tailscale cert <machine>.<tailnet>.ts.net`; see [Remote access](remote-access.md) for the full walkthrough, including renewal. `~/` is expanded. The pairing link's name, and the sidecar proxy's gate, come from the first DNS name on that certificate that is a plain hostname — not a wildcard; a certificate whose only names are wildcards is treated the same as one with no DNS name at all. |
 | `push.enabled` | `false` | Turns laptop push delivery on when the phone has also enabled notifications and registered a token. A notification carries only a generic bilingual title and body plus `{kind, sessionId?}` in its data — never agent output, a file, a command, a path or a transcript. Pushes keep flowing while `remote.enabled` is false as long as `push.enabled` is true and a registered token exists. See [Remote access](remote-access.md) for what each kind says and when nothing is sent at all. |
 | `push.includeProjectNames` | `false` | Adds the project name to eligible notification text and data. It is controlled by the **include project names** checkbox in Settings. |
+| `web.enabled` | `false` | Serves the app to a browser from a second listener beside the bridge — the **Browser access** switch in Settings. It runs only while the bridge is listening, and only with a configured certificate that has a DNS name and an owner password; Settings says which is missing. See [the browser client](remote-access.md#the-browser-client) for pairing a browser, signing in and the security rules. |
+| `web.port` | `port` + 1 | A whole number from 1 to 65535, the browser listener's own port (7718 with the default bridge port). It is a separate port so the app has a different origin from the sidecar pages on the bridge's port. While `web.enabled` is `true` it must differ from `port`, and it must be set explicitly when `port` is `0` or `65535`, which have no usable "+1"; either mistake refuses the config with a message naming it. While `web.enabled` is `false` only its shape is checked. To use the default, leave the key out; `~` is refused. There is no Settings field for it; edit `jarvis.yaml`. |
 | `idleDisableMinutes` | `0` | A whole number from 0 to 10080 (one week). The Settings idle field turns the bridge off after this many minutes with no connected paired phone and no open pairing code; when it fires, the bridge closes the listener and main only writes `remote.enabled: false` to `jarvis.yaml`. `0` never auto-disables. |
 
 **Settings lists your addresses for you.** "Reachable on" offers two radios:
@@ -245,7 +250,7 @@ version of this feature.
 
 See [Remote access](remote-access.md) for the phone side of pairing: the
 confirm step, owner login, what the phone can see, and what happens on
-revocation.
+revocation, and for the browser client.
 
 ### Owner login files
 
