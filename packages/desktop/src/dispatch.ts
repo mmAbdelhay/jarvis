@@ -35,8 +35,10 @@ import {
 import {
   bindChoices,
   type InterfaceMap,
+  type OwnerStatus,
   type PairingResult,
   type RemoteStatus,
+  type SetOwnerPasswordResult,
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
@@ -104,6 +106,11 @@ export type RemoteControls = {
   cancelPairing(): void;
   decidePairing(requestId: string, approve: boolean): boolean;
   revoke(deviceId: string): Promise<boolean>;
+  /** Phase 0: the owner account, desktop-only. */
+  ownerStatus(): OwnerStatus;
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  deletePasskey(credentialId: string): Promise<boolean>;
+  signOutEverywhere(): Promise<void>;
   /** M10 Task 4: stores this device's Expo push registration — always the
    *  authenticated origin's own `deviceId`, never one carried in `args`. */
   registerPush(deviceId: string, registration: PushRegistration): Promise<PushRegisterResult>;
@@ -956,6 +963,41 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         };
       }
       return { ok: true, value: undefined };
+    },
+    // Phase 0, owner login: desktop-only (remote-policy.ts), and each
+    // mutating one refuses a remote origin again here, belt and braces —
+    // the owner account is never changed from a paired device.
+    "remote:ownerStatus": () => deps.remote.ownerStatus(),
+    "remote:setOwnerPassword": ([current, next], origin) => {
+      const refused: SetOwnerPasswordResult = { ok: false, code: "unavailable" };
+      if (origin.kind === "remote") return refused;
+      // `undefined` may arrive as `null` across IPC; either means "none".
+      const currentValue = current === null || current === undefined ? undefined : current;
+      if (
+        (currentValue !== undefined && typeof currentValue !== "string") ||
+        typeof next !== "string"
+      ) {
+        return refused;
+      }
+      return deps.remote.setOwnerPassword(currentValue, next);
+    },
+    "remote:deletePasskey": async ([credentialId], origin) => {
+      if (origin.kind === "remote" || typeof credentialId !== "string") {
+        return invalidArgument(deps.language);
+      }
+      const ok = await deps.remote.deletePasskey(credentialId);
+      if (!ok) {
+        return {
+          ok: false,
+          text: MESSAGES.remoteOwnerPasskeyDeleteFailed(deps.language),
+          language: deps.language,
+        };
+      }
+      return { ok: true, value: undefined };
+    },
+    "remote:signOutEverywhere": async (_args, origin) => {
+      if (origin.kind === "remote") return;
+      await deps.remote.signOutEverywhere();
     },
     // M10 Task 4: a phone's own Expo push registration. Remote only
     // (remote-policy.ts) — a desktop origin is refused outright, belt and

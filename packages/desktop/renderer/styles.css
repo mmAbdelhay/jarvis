@@ -2694,6 +2694,21 @@
        this their spin buttons render in the light UA style. */
     color-scheme: dark;
   }
+  /* Phase 0's owner-account password fields: the same look as a text
+     field (kept as its own rule so the text/number rule above stays the
+     exact shape settings-number-input-css.test.ts pins). */
+  .settings-field input[type="password"] {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    flex-grow: 1;
+    max-width: 480px;
+    color-scheme: dark;
+  }
   /* The first switch in Settings. Built from a real checkbox so it keeps
      the keyboard and the accessibility tree it was born with — the input
      itself is what focus, space and a screen reader address, and the track

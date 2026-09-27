@@ -15,13 +15,17 @@ export type {
   Listen,
   ListenOptions,
   Listener,
+  OwnerPasswordError,
+  OwnerStatus,
   PairingResult,
   RemoteDeviceStatus,
   RemoteIdleStatus,
   RemotePairingStatus,
   RemoteProblem,
   RemoteStatus,
+  SetOwnerPasswordResult,
 } from "./bridge.js";
+export type { OwnerHashParams, PasskeyRecord } from "./owner.js";
 // `createConnection` itself was previously reachable only transitively
 // (bridge.ts -> hub.ts -> connection.ts, already inside this file's own
 // reachability graph below) but never re-exported directly — every other

@@ -79,7 +79,14 @@ export type AuditEvent =
   // the title, the body or the project name (notify.ts's own audit() call
   // never hands this file any of those; only a device id and the push's
   // generic kind word).
-  | { kind: "push-queued"; deviceId: string; pushKind: string };
+  | { kind: "push-queued"; deviceId: string; pushKind: string }
+  // Phase 0: owner-account changes made from desktop Settings. Never the
+  // password, a hash or a key — a passkey is named by its credential id's
+  // last four characters only.
+  | { kind: "owner-password-set" }
+  | { kind: "owner-password-changed" }
+  | { kind: "passkey-deleted"; credentialTail: string }
+  | { kind: "signed-out-everywhere" };
 
 export type AuditLog = { record(event: AuditEvent): void; flushed(): Promise<void> };
 

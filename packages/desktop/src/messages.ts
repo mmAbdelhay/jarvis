@@ -1039,7 +1039,7 @@ export const MESSAGES = {
     return platform === "ios" ? "Notifications on (iPhone)" : "Notifications on (Android)";
   },
   remoteRevoke: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء الإقران" : "Revoke"),
-  // The five RemoteProblem values the bridge's own gate can land on
+  // The seven RemoteProblem values the bridge's own gate can land on
   // (bridge.ts). Closed table for the same reason remoteErrorText is: a
   // problem added to the protocol without a translation here is a compile
   // error, not a silent English-only gap.
@@ -1065,9 +1065,110 @@ export const MESSAGES = {
         ar: "تعذّر حفظ التغيير على الأجهزة المقترنة.",
         en: "Could not save that change to the paired devices.",
       },
+      "no-owner-password": {
+        ar: "الوصول عن بُعد متوقف حتى تعيّن كلمة مرور المالك أدناه.",
+        en: "Remote access stays off until you set an owner password below.",
+      },
+      "owner-unreadable": {
+        ar: "تعذّرت قراءة ملف حساب المالك، فبقي الوصول عن بُعد متوقفًا.",
+        en: "The owner account file could not be read, so remote access stays off.",
+      },
     };
     return text[problem][language];
   },
+  // Phase 0, owner login: Settings → Remote access → Owner account. The
+  // password itself never appears in any of these strings.
+  remoteOwnerTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "حساب المالك" : "Owner account",
+  remoteOwnerNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بعد الإقران، يجب على كل هاتف أو متصفح تسجيل الدخول بهذه الكلمة أو بمفتاح مرور. لا يمكن تعيينها أو تغييرها إلا من هنا."
+      : "After pairing, every phone or browser must sign in with this password or a passkey. It can only be set or changed here.",
+  remoteOwnerHasPassword: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة مرور المالك معيّنة." : "An owner password is set.",
+  remoteOwnerNoPassword: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد كلمة مرور للمالك بعد. عيّن واحدة لتشغيل الوصول عن بُعد."
+      : "No owner password yet. Set one to turn on remote access.",
+  remoteOwnerCurrentLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة المرور الحالية" : "Current password",
+  remoteOwnerNewLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة المرور الجديدة" : "New password",
+  remoteOwnerConfirmLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "تأكيد كلمة المرور" : "Confirm password",
+  remoteOwnerLengthNote: (language: "ar" | "en"): string =>
+    language === "ar" ? "12 حرفًا على الأقل." : "At least 12 characters.",
+  remoteOwnerSetButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعيين كلمة المرور" : "Set password",
+  remoteOwnerChangeButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "تغيير كلمة المرور" : "Change password",
+  remoteOwnerCancelButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  remoteOwnerSaved: (language: "ar" | "en"): string =>
+    language === "ar" ? "حُفظت كلمة المرور." : "Password saved.",
+  remoteOwnerError: (
+    code:
+      | "mismatch"
+      | "too-short"
+      | "too-long"
+      | "current-required"
+      | "current-wrong"
+      | "unavailable"
+      | "write-failed",
+    language: "ar" | "en",
+  ): string => {
+    const text = {
+      mismatch: { ar: "كلمتا المرور غير متطابقتين.", en: "The passwords do not match." },
+      "too-short": {
+        ar: "يجب أن تتكون كلمة المرور من 12 حرفًا على الأقل.",
+        en: "The password must be at least 12 characters.",
+      },
+      "too-long": { ar: "كلمة المرور طويلة جدًا.", en: "The password is too long." },
+      "current-required": {
+        ar: "أدخل كلمة المرور الحالية أولًا.",
+        en: "Enter the current password first.",
+      },
+      "current-wrong": {
+        ar: "كلمة المرور الحالية غير صحيحة.",
+        en: "The current password is not correct.",
+      },
+      unavailable: {
+        ar: "تعذّر الوصول إلى حساب المالك الآن.",
+        en: "The owner account is not available right now.",
+      },
+      "write-failed": {
+        ar: "تعذّر حفظ كلمة المرور.",
+        en: "Could not save the password.",
+      },
+    };
+    return text[code][language];
+  },
+  remoteOwnerPasskeysTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفاتيح المرور" : "Passkeys",
+  remoteOwnerNoPasskeys: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد مفاتيح مرور. يمكن لمتصفح مسجَّل الدخول إضافة واحد."
+      : "No passkeys. A signed-in browser can add one.",
+  remoteOwnerPasskeyAdded: (at: number, language: "ar" | "en"): string => {
+    const formatted = new Date(at).toLocaleString(language === "ar" ? "ar" : "en");
+    return language === "ar" ? `أضيف في ${formatted}` : `added ${formatted}`;
+  },
+  remoteOwnerPasskeyDelete: (language: "ar" | "en"): string =>
+    language === "ar" ? "حذف" : "Delete",
+  remoteOwnerPasskeyDeleteFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر حذف مفتاح المرور هذا." : "Could not delete that passkey.",
+  remoteOwnerSignOutEverywhere: (language: "ar" | "en"): string =>
+    language === "ar" ? "تسجيل الخروج من كل مكان" : "Sign out everywhere",
+  remoteOwnerSignOutNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يجب على كل هاتف ومتصفح تسجيل الدخول من جديد."
+      : "Every phone and browser will have to sign in again.",
+  remoteOwnerSignedOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "سُجِّل الخروج من كل مكان." : "Signed out everywhere.",
+  remoteOwnerEnableBlocked: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "عيّن كلمة مرور المالك أولًا — يبقى الوصول عن بُعد متوقفًا حتى توجد واحدة."
+      : "Set an owner password first — remote access stays off until one exists.",
   // The topbar's listening indicator (#remote-pill). "pairing open" mirrors
   // Settings' own pair-area note — the same fact, said briefly. Always
   // carries a short state word (never bare host:port), so `ar` and `en`

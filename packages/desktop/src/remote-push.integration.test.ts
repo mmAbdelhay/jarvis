@@ -207,6 +207,10 @@ function createFakePushBridge(): {
       problem: undefined,
       sidecarProxy: "off",
     }),
+    ownerStatus: () => ({ hasPassword: true, passkeys: [] }),
+    setOwnerPassword: async () => ({ ok: true as const }),
+    deletePasskey: async () => true,
+    signOutEverywhere: async () => {},
     stop: async () => {},
   };
 

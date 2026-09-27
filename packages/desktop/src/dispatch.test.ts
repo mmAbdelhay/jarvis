@@ -193,6 +193,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       cancelPairing: vi.fn(),
       decidePairing: vi.fn(() => true),
       revoke: vi.fn(async () => true),
+      ownerStatus: vi.fn(() => ({ hasPassword: false, passkeys: [] })),
+      setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
+      deletePasskey: vi.fn(async () => true),
+      signOutEverywhere: vi.fn(async () => {}),
       registerPush: vi.fn(async () => ({ registered: true as const, laptopEnabled: false })),
       unregisterPush: vi.fn(async () => undefined),
     },
@@ -1266,6 +1270,78 @@ describe("dispatch table: remote controls", () => {
     const table = createDispatchTable(deps);
     expect(await call(table, "remote:revoke", "d1")).toEqual({ ok: true, value: undefined });
     expect(deps.remote.revoke).toHaveBeenCalledWith("d1");
+  });
+});
+
+describe("dispatch table: owner account (Phase 0)", () => {
+  it("remote:ownerStatus reads the controls' owner status", async () => {
+    const deps = fakeDeps();
+    expect(await call(createDispatchTable(deps), "remote:ownerStatus")).toEqual({
+      hasPassword: false,
+      passkeys: [],
+    });
+  });
+
+  it("remote:setOwnerPassword forwards (current, next), treating a null current as none", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:setOwnerPassword", null, "a long new password")).toEqual({
+      ok: true,
+    });
+    expect(deps.remote.setOwnerPassword).toHaveBeenLastCalledWith(undefined, "a long new password");
+    await call(table, "remote:setOwnerPassword", "old password!", "a long new password");
+    expect(deps.remote.setOwnerPassword).toHaveBeenLastCalledWith(
+      "old password!",
+      "a long new password",
+    );
+  });
+
+  it("remote:setOwnerPassword refuses non-string arguments and a remote origin without forwarding", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:setOwnerPassword", undefined, 7)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(await call(table, "remote:setOwnerPassword", 7, "a long new password")).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(
+      await callAs(table, REMOTE_ORIGIN, "remote:setOwnerPassword", undefined, "a long password"),
+    ).toEqual({ ok: false, code: "unavailable" });
+    expect(deps.remote.setOwnerPassword).not.toHaveBeenCalled();
+  });
+
+  it("remote:deletePasskey forwards a string id, reports a failure bilingually, and refuses a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:deletePasskey", "cred")).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(deps.remote.deletePasskey).toHaveBeenCalledWith("cred");
+    expect(await call(table, "remote:deletePasskey", 7)).toEqual(invalidArgument("en"));
+    expect(await callAs(table, REMOTE_ORIGIN, "remote:deletePasskey", "cred")).toEqual(
+      invalidArgument("en"),
+    );
+    expect(deps.remote.deletePasskey).toHaveBeenCalledTimes(1);
+
+    vi.mocked(deps.remote.deletePasskey).mockResolvedValueOnce(false);
+    expect(await call(table, "remote:deletePasskey", "cred")).toEqual({
+      ok: false,
+      text: MESSAGES.remoteOwnerPasskeyDeleteFailed("en"),
+      language: "en",
+    });
+  });
+
+  it("remote:signOutEverywhere forwards from the desktop and does nothing from a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    await callAs(table, REMOTE_ORIGIN, "remote:signOutEverywhere");
+    expect(deps.remote.signOutEverywhere).not.toHaveBeenCalled();
+    await call(table, "remote:signOutEverywhere");
+    expect(deps.remote.signOutEverywhere).toHaveBeenCalledTimes(1);
   });
 });
 

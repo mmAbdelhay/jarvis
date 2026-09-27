@@ -19,6 +19,7 @@ import type { Bridge, RemoteStatus } from "./bridge.js";
 import { createBridge } from "./bridge.js";
 import { loadCertificate } from "./certificate.js";
 import { nodeFs, nodeTimers } from "./node-io.js";
+import { ownerFileWithPassword } from "./owner-double.js";
 import { OUTBOX_TICK_MS } from "./outbox.js";
 import { STREAM_MAX_BYTES, utf8Bytes } from "./policy.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
@@ -132,6 +133,8 @@ describe("bridge.integration", () => {
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "jarvis-remote-"));
     const random = (size: number) => randomBytes(size);
+    // Phase 0: the bridge never listens without an owner password.
+    await nodeFs.writeFile(join(dir, "owner.json"), ownerFileWithPassword(), 0o600);
 
     bridge = await createBridge({
       dir,

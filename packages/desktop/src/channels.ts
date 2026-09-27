@@ -214,6 +214,12 @@ export const INVOKE_CHANNELS = {
   cancelRemotePairing: "remote:cancelPair",
   decideRemotePairing: "remote:decidePair",
   revokeRemoteDevice: "remote:revoke",
+  // Phase 0, owner login: the owner account is created and managed only
+  // from the laptop — all four are desktop-only (remote-policy.ts).
+  ownerStatus: "remote:ownerStatus",
+  setOwnerPassword: "remote:setOwnerPassword",
+  deletePasskey: "remote:deletePasskey",
+  signOutEverywhere: "remote:signOutEverywhere",
   // M10 Task 4: a phone's own Expo push registration — acts only on the
   // authenticated device, never a device id in the arguments.
   registerPush: "remote:registerPush",

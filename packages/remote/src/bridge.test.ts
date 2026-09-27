@@ -8,6 +8,11 @@ import type { AuditPolicy, AuthorizeKey, RequestHandler, RequestOutcome } from "
 import { createDeviceStore } from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import { MAX_PENDING } from "./hub.js";
+import {
+  OWNER_TEST_HASH_PARAMS,
+  OWNER_TEST_PASSWORD,
+  ownerFileWithPassword,
+} from "./owner-double.js";
 import type { RandomBytes } from "./io.js";
 import { CLOSE, parsePairingUri, PROTOCOL_VERSION } from "./protocol.js";
 import type { SidecarProxy } from "./proxy.js";
@@ -22,6 +27,7 @@ const DIR = "/remote";
 // Windows and the bridge treats devices.json as unreadable.
 const DEVICES_PATH = join(DIR, "devices.json");
 const AUDIT_PATH = join(DIR, "audit.log");
+const OWNER_PATH = join(DIR, "owner.json");
 const CERT = {
   cert: "CERT",
   key: "KEY",
@@ -105,9 +111,15 @@ function makeHarness(
     authorizeKey?: AuthorizeKey;
     createProxy?: (registry: SidecarRegistry) => SidecarProxy | undefined;
     auditPolicy?: (channel: string) => AuditPolicy;
+    /** Phase 0: every harness starts with an owner password already set
+     *  (the bridge never listens without one) unless this is false. */
+    ownerPassword?: boolean;
   } = {},
 ) {
   const fs = opts.fs ?? memoryFs();
+  if ((opts.ownerPassword ?? true) && !fs.files.has(OWNER_PATH)) {
+    fs.files.set(OWNER_PATH, { data: ownerFileWithPassword(), mode: 0o600 });
+  }
   const clock = fakeClock(0);
   const random = countingRandom();
   const {
@@ -161,6 +173,7 @@ function makeHarness(
     errorText: (code) => ({ text: `err:${code}`, language: "en" }),
     auditPolicy: opts.auditPolicy ?? (() => "never"),
     enforceFileModes: true,
+    ownerHashParams: OWNER_TEST_HASH_PARAMS,
     log,
     onStatus,
     onDeviceDisconnected,
@@ -1769,5 +1782,192 @@ describe("createBridge: idle auto-disable (M12 Task 1)", () => {
 
     await bridge.apply({ ...ON_127(), idleDisableMinutes: 10 });
     expect(h.clock.pending()).toBe(1);
+  });
+});
+
+describe("createBridge: owner password gate (Phase 0)", () => {
+  const NEW_PASSWORD = "a brand new owner password";
+
+  it("[bite-proof: no owner password] enabled with a paired device never listens without an owner password", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+
+    await bridge.apply(ON_127());
+
+    expect(h.listenCalls).toEqual([]);
+    expect(bridge.status().listening).toBeUndefined();
+    expect(bridge.status().problem).toBe("no-owner-password");
+  });
+
+  it("openPairing without an owner password is unavailable and never listens", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(ON_127());
+
+    expect(await bridge.openPairing()).toBe("unavailable");
+    expect(h.listenCalls).toEqual([]);
+  });
+
+  it("disabled without an owner password reports no problem", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({ ...ON_127(), enabled: false });
+
+    expect(bridge.status().problem).toBeUndefined();
+  });
+
+  it("upgrade path: enabled in config with no password stays off with the problem shown, keeps enabled, and comes up once a password is set", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+
+    await bridge.apply(ON_127());
+
+    const before = bridge.status();
+    expect(before.enabled).toBe(true);
+    expect(before.problem).toBe("no-owner-password");
+    expect(before.listening).toBeUndefined();
+    expect(h.onStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ problem: "no-owner-password" }),
+    );
+    expect(h.fs.files.has(OWNER_PATH)).toBe(false);
+
+    expect(await bridge.setOwnerPassword(undefined, NEW_PASSWORD)).toEqual({ ok: true });
+
+    expect(h.listenCalls).toHaveLength(1);
+    expect(bridge.status().problem).toBeUndefined();
+    expect(bridge.status().listening).toBeDefined();
+    expect(h.fs.files.get(OWNER_PATH)?.mode).toBe(0o600);
+  });
+
+  it("rejects an 11-character password and writes nothing", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    const bridge = await createBridge(h.deps);
+
+    expect(await bridge.setOwnerPassword(undefined, "a".repeat(11))).toEqual({
+      ok: false,
+      code: "too-short",
+    });
+    expect(bridge.ownerStatus().hasPassword).toBe(false);
+    expect(h.fs.files.has(OWNER_PATH)).toBe(false);
+  });
+
+  it("a change needs the current password: missing is current-required, wrong is current-wrong, right changes it", async () => {
+    const h = makeHarness();
+    const bridge = await createBridge(h.deps);
+
+    expect(await bridge.setOwnerPassword(undefined, NEW_PASSWORD)).toEqual({
+      ok: false,
+      code: "current-required",
+    });
+    expect(await bridge.setOwnerPassword("", NEW_PASSWORD)).toEqual({
+      ok: false,
+      code: "current-required",
+    });
+    expect(await bridge.setOwnerPassword("not the password", NEW_PASSWORD)).toEqual({
+      ok: false,
+      code: "current-wrong",
+    });
+    expect(await bridge.setOwnerPassword(OWNER_TEST_PASSWORD, NEW_PASSWORD)).toEqual({ ok: true });
+    expect(await bridge.setOwnerPassword(OWNER_TEST_PASSWORD, "yet another password")).toEqual({
+      ok: false,
+      code: "current-wrong",
+    });
+
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain("owner-password-changed");
+    expect(lines).not.toContain("owner-password-set");
+  });
+
+  it("a first password is audited as owner-password-set", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    const bridge = await createBridge(h.deps);
+
+    await bridge.setOwnerPassword(undefined, NEW_PASSWORD);
+
+    expect((await auditLines(h.fs)).join("\n")).toContain("owner-password-set");
+  });
+
+  it("[bite-proof: password leak] no password ever reaches the audit log, the log double, or any file as plaintext", async () => {
+    const h = makeHarness();
+    const bridge = await createBridge(h.deps);
+    const wrong = "a wrong guess at the password";
+
+    await bridge.setOwnerPassword(wrong, NEW_PASSWORD);
+    await bridge.setOwnerPassword(OWNER_TEST_PASSWORD, NEW_PASSWORD);
+    await bridge.setOwnerPassword(NEW_PASSWORD, "short");
+    h.fs.rename = async () => {
+      throw new Error(`rename failed: ${NEW_PASSWORD}`);
+    };
+    expect(await bridge.setOwnerPassword(NEW_PASSWORD, "the password that fails")).toEqual({
+      ok: false,
+      code: "write-failed",
+    });
+    await flush();
+
+    const logged = h.log.mock.calls.map((call) => String(call[0])).join("\n");
+    const files = [...h.fs.files.values()].map((entry) => entry.data).join("\n");
+    for (const secret of [OWNER_TEST_PASSWORD, NEW_PASSWORD, wrong, "the password that fails"]) {
+      expect(logged).not.toContain(secret);
+      expect(files).not.toContain(secret);
+    }
+  });
+
+  it("ownerStatus lists passkeys by id, label and createdAt only; deletePasskey removes one and audits only its tail", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    const owner = JSON.parse(ownerFileWithPassword());
+    owner.passkeys = [
+      {
+        credentialId: "Y3JlZGVudGlhbC1vbmU",
+        publicKey: "cHVibGljLWtleQ",
+        alg: -7,
+        signCount: 3,
+        label: "Laptop",
+        createdAt: 42,
+      },
+    ];
+    h.fs.files.set(OWNER_PATH, { data: JSON.stringify(owner), mode: 0o600 });
+    const bridge = await createBridge(h.deps);
+
+    expect(bridge.ownerStatus()).toEqual({
+      hasPassword: true,
+      passkeys: [{ id: "Y3JlZGVudGlhbC1vbmU", label: "Laptop", createdAt: 42 }],
+    });
+
+    expect(await bridge.deletePasskey("unknown")).toBe(false);
+    expect(await bridge.deletePasskey("Y3JlZGVudGlhbC1vbmU")).toBe(true);
+    expect(bridge.ownerStatus().passkeys).toEqual([]);
+
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain(`passkey-deleted credentialTail="vbmU"`);
+    expect(lines).not.toContain("Y3JlZGVudGlhbC1vbmU");
+    expect(lines).not.toContain("cHVibGljLWtleQ");
+  });
+
+  it("signOutEverywhere is audited", async () => {
+    const h = makeHarness();
+    const bridge = await createBridge(h.deps);
+
+    await bridge.signOutEverywhere();
+
+    expect((await auditLines(h.fs)).join("\n")).toContain("signed-out-everywhere");
+  });
+
+  it("an unreadable owner.json is sticky owner-unreadable: never listens, never overwritten", async () => {
+    const h = makeHarness({ ownerPassword: false });
+    h.fs.files.set(OWNER_PATH, { data: "{", mode: 0o600 });
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+
+    await bridge.apply(ON_127());
+
+    expect(h.listenCalls).toEqual([]);
+    expect(bridge.status().problem).toBe("owner-unreadable");
+    expect(await bridge.setOwnerPassword(undefined, NEW_PASSWORD)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(h.fs.files.get(OWNER_PATH)?.data).toBe("{");
   });
 });

@@ -22,7 +22,7 @@ import {
 } from "@jarvis/core";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
-import type { BindChoice, RemoteStatus } from "@jarvis/remote";
+import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
 import {
   checkPrerequisites,
@@ -801,6 +801,14 @@ export type RendererApi = {
    *  before a token is ever minted. */
   decideRemotePairing(requestId: string, approve: boolean): Promise<void>;
   revokeRemoteDevice(deviceId: string): Promise<GitViewResult<undefined>>;
+  /** Phase 0: whether an owner password exists, and the stored passkeys
+   *  (id, label, createdAt only). Desktop-only by policy. */
+  ownerStatus(): Promise<OwnerStatus>;
+  /** Sets the first owner password, or changes it (`current` then
+   *  required). The password is never echoed back in any result. */
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  deletePasskey(credentialId: string): Promise<GitViewResult<undefined>>;
+  signOutEverywhere(): Promise<void>;
   /** Pushed on every bridge state change (remote-access.ts's `onStatus`),
    *  local to this window only. */
   onRemoteStatus(cb: (status: RemoteStatus) => void): void;

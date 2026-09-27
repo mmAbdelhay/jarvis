@@ -823,6 +823,9 @@
            nothing here makes this machine listen. -->
       <section class="settings-section" id="settings-section-remote">
         <div id="settings-remote-title" class="lbl"></div>
+        <!-- Phase 0: the owner account block (password, passkeys, sign out
+             everywhere) — built entirely by settings.ts (renderOwnerAccount). -->
+        <div id="settings-remote-owner" class="settings-remote-owner"></div>
         <div class="settings-field">
           <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
           <label id="settings-remote-enabled-label" for="settings-remote-enabled"></label>
@@ -832,6 +835,7 @@
           </span>
           <span id="settings-remote-state"></span>
         </div>
+        <div id="settings-remote-enable-blocked" class="settings-note settings-note--warning" hidden></div>
         <div class="settings-field">
           <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
           <label id="settings-remote-idle-label" for="settings-remote-idle"></label>

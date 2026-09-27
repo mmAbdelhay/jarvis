@@ -206,6 +206,14 @@ export const CHANNEL_POLICY = {
   "remote:cancelPair": "desktop-only",
   "remote:decidePair": "desktop-only",
   "remote:revoke": "desktop-only",
+  // Desktop-only, all four (Phase 0): the owner account can never be
+  // created, reset or changed remotely — a paired device changing the
+  // password that is meant to prove the person behind it would defeat the
+  // whole second layer.
+  "remote:ownerStatus": "desktop-only",
+  "remote:setOwnerPassword": "desktop-only",
+  "remote:deletePasskey": "desktop-only",
+  "remote:signOutEverywhere": "desktop-only",
   // Remote (M10 Task 4): a phone registers and clears only its own Expo
   // push token — dispatch.ts's handlers act on `origin.deviceId` alone,
   // never a device id carried in the arguments, so this being remote-legal

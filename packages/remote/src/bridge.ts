@@ -6,8 +6,8 @@
 // pull `@peculiar/x509` into `@jarvis/remote`'s main entry).
 //
 // The gate (rule 3): a listener is "wanted" only while the bridge is
-// enabled, not stopped, its devices file is readable, its configured
-// address is a real IP literal, and — the "off by default" rule — either a
+// enabled, not stopped, its devices and owner files are readable, an owner
+// password exists (Phase 0), its configured address is a real IP literal, and — the "off by default" rule — either a
 // device is already paired, a pairing window (or its confirmation, or a
 // pair socket already in flight) is open. Every public method that can
 // change any of those inputs awaits `reconcile()`, the only place the gate
@@ -30,6 +30,8 @@ import type {
 import type { DevicePush, DeviceStore } from "./devices.js";
 import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
+import type { OwnerHashParams } from "./owner.js";
+import { createOwnerStore } from "./owner.js";
 import { describeError } from "./io.js";
 import type { Clock, RandomBytes, RemoteFs, SessionHandlers, SocketLike, Timers } from "./io.js";
 import type { ChannelPolicies } from "./policy.js";
@@ -94,7 +96,33 @@ export type RemoteProblem =
   | "listen-failed"
   | "certificate-failed"
   | "devices-unreadable"
-  | "devices-write-failed";
+  | "devices-write-failed"
+  /** Enabled in config, but no owner password exists yet (Phase 0): the
+   *  bridge never listens without one. Config is left as it is, so setting
+   *  a password is all it takes to come up. */
+  | "no-owner-password"
+  /** owner.json exists but could not be read or parsed — sticky, like
+   *  devices-unreadable. */
+  | "owner-unreadable";
+
+/** What desktop Settings shows of the owner account — never a hash, a
+ *  salt or a passkey's public key. */
+export type OwnerStatus = {
+  hasPassword: boolean;
+  passkeys: { id: string; label: string; createdAt: number }[];
+};
+
+/** `mismatch` (the confirm field) never reaches here — it is the
+ *  renderer's own check. */
+export type OwnerPasswordError =
+  | "too-short"
+  | "too-long"
+  | "current-required"
+  | "current-wrong"
+  | "unavailable"
+  | "write-failed";
+
+export type SetOwnerPasswordResult = { ok: true } | { ok: false; code: OwnerPasswordError };
 
 export type RemoteDeviceStatus = {
   id: string;
@@ -174,6 +202,8 @@ export type BridgeDeps = {
    *  names a channel, it only asks. */
   auditPolicy(channel: string): AuditPolicy;
   enforceFileModes: boolean;
+  /** Test-only: a lower scrypt cost for owner.json. Production omits it. */
+  ownerHashParams?: OwnerHashParams;
   log(line: string): void;
   onStatus(status: RemoteStatus): void;
   onDeviceDisconnected(deviceId: string): void;
@@ -223,6 +253,16 @@ export type Bridge = {
    *  listener is actually up (M10 rule 6). */
   watchingDevices(channel: string, key?: string): ReadonlySet<string>;
   status(): RemoteStatus;
+  /** Phase 0: the owner account, for desktop Settings only. */
+  ownerStatus(): OwnerStatus;
+  /** Sets the first owner password (`current` ignored) or changes it
+   *  (`current` required and verified). The password is never logged,
+   *  audited, echoed in an error or returned. */
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  /** False for an unknown id or a failed write (the passkey is gone from
+   *  memory either way once it existed). */
+  deletePasskey(credentialId: string): Promise<boolean>;
+  signOutEverywhere(): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -238,6 +278,7 @@ function isStickyProblem(problem: RemoteProblem | undefined): boolean {
   return (
     problem === "devices-unreadable" ||
     problem === "devices-write-failed" ||
+    problem === "owner-unreadable" ||
     problem === "listen-failed" ||
     problem === "certificate-failed"
   );
@@ -296,6 +337,15 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     log: deps.log,
   });
 
+  const owner = createOwnerStore({
+    fs: deps.fs,
+    path: join(deps.dir, "owner.json"),
+    random: deps.random,
+    now: deps.now,
+    enforceFileModes: deps.enforceFileModes,
+    ...(deps.ownerHashParams !== undefined ? { hashParams: deps.ownerHashParams } : {}),
+  });
+
   // Rule 5: one registry for this bridge's whole lifetime, emptied (never
   // recreated) on every device revoke, listener teardown/restart and stop —
   // see the `sidecarRegistry.clear()`/`revokeDevice()` calls below.
@@ -316,6 +366,20 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     deps.log(`bridge: devices.load failed: ${describeError(error)}`);
     auditLog.record({ kind: "error", detail: describeError(error) });
   }
+
+  let ownerReadable = true;
+  try {
+    await owner.load();
+  } catch (error) {
+    ownerReadable = false;
+    problem ??= "owner-unreadable";
+    deps.log(`bridge: owner.load failed: ${describeError(error)}`);
+    auditLog.record({ kind: "error", detail: describeError(error) });
+  }
+  // Owner-account changes (set/change password, passkey delete) run one at
+  // a time: a change verifies the current password and then replaces it,
+  // and two of those interleaving could both pass the check.
+  let ownerQueue: Promise<unknown> = Promise.resolve();
 
   // No default: "the bind address comes only from config" — until the first
   // `apply()`, there is no config at all, so nothing here ever holds a
@@ -472,8 +536,14 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // listen/certificate failure from below) are left exactly as their own
     // caller set them — this baseline must never clobber one of those.
     if (!isStickyProblem(problem)) {
-      problem =
-        (config?.enabled ?? false) && !stopped && host === undefined ? "bad-address" : undefined;
+      const active = (config?.enabled ?? false) && !stopped;
+      problem = !active
+        ? undefined
+        : !owner.hasPassword()
+          ? "no-owner-password"
+          : host === undefined
+            ? "bad-address"
+            : undefined;
     }
 
     const wanted =
@@ -482,6 +552,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       config.enabled &&
       !idleDisabled &&
       devicesReadable &&
+      ownerReadable &&
+      owner.hasPassword() &&
       host !== undefined &&
       (devices.count() > 0 || pairing.status().kind !== "closed" || pairSessions > 0);
 
@@ -996,6 +1068,88 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     return listening !== undefined && hub.hasSubscriber(channel);
   }
 
+  /**
+   * The one place every owner-credential invalidation (spec rule 8)
+   * converges: a password change, a passkey delete, "Sign out everywhere".
+   * Phase 0 Tasks 3-4 fill this in — revoke every refresh token and lock
+   * every open connection. Until then it only marks the spot; nothing here
+   * yet holds a session to invalidate.
+   */
+  function invalidateOwnerSessions(
+    _reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere",
+  ): void {}
+
+  function ownerStatus(): OwnerStatus {
+    return {
+      hasPassword: owner.hasPassword(),
+      passkeys: owner.listPasskeys().map((record) => ({
+        id: record.credentialId,
+        label: record.label,
+        createdAt: record.createdAt,
+      })),
+    };
+  }
+
+  function queueOwnerChange<T>(change: () => Promise<T>): Promise<T> {
+    const task = ownerQueue.then(change, change);
+    ownerQueue = task.catch(() => undefined);
+    return task;
+  }
+
+  function setOwnerPassword(
+    current: string | undefined,
+    next: string,
+  ): Promise<SetOwnerPasswordResult> {
+    return queueOwnerChange(async (): Promise<SetOwnerPasswordResult> => {
+      if (stopped || !ownerReadable) return { ok: false, code: "unavailable" };
+      const hadPassword = owner.hasPassword();
+      if (hadPassword) {
+        if (current === undefined || current === "") {
+          return { ok: false, code: "current-required" };
+        }
+        if (!(await owner.verifyPassword(current))) return { ok: false, code: "current-wrong" };
+      }
+      let result: Awaited<ReturnType<typeof owner.setPassword>>;
+      try {
+        result = await owner.setPassword(next);
+      } catch {
+        // Fixed text only: nothing thrown from a call that held the
+        // password is ever interpolated into a log line.
+        deps.log("bridge: owner.setPassword failed");
+        return { ok: false, code: "write-failed" };
+      }
+      if (result !== "ok") return { ok: false, code: result };
+      auditLog.record({ kind: hadPassword ? "owner-password-changed" : "owner-password-set" });
+      if (hadPassword) invalidateOwnerSessions("password-changed");
+      // A first password is what lets an already-enabled bridge listen.
+      await reconcile();
+      return { ok: true };
+    });
+  }
+
+  function deletePasskey(credentialId: string): Promise<boolean> {
+    return queueOwnerChange(async () => {
+      if (!owner.listPasskeys().some((record) => record.credentialId === credentialId)) {
+        return false;
+      }
+      let ok = true;
+      try {
+        await owner.deletePasskey(credentialId);
+      } catch (error) {
+        deps.log(`bridge: owner.deletePasskey failed: ${describeError(error)}`);
+        ok = false;
+      }
+      auditLog.record({ kind: "passkey-deleted", credentialTail: credentialId.slice(-4) });
+      invalidateOwnerSessions("passkey-deleted");
+      return ok;
+    });
+  }
+
+  async function signOutEverywhere(): Promise<void> {
+    auditLog.record({ kind: "signed-out-everywhere" });
+    invalidateOwnerSessions("signed-out-everywhere");
+  }
+
   async function stop(): Promise<void> {
     stopped = true;
     // Rule 7: the timer is cleared before the listener closes — never left
@@ -1026,6 +1180,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // this is the fix for that carry-over.
     await auditLog.flushed();
     await devices.flushed();
+    await owner.flushed();
   }
 
   return {
@@ -1043,6 +1198,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     recordPushQueued,
     watchingDevices,
     status,
+    ownerStatus,
+    setOwnerPassword,
+    deletePasskey,
+    signOutEverywhere,
     stop,
   };
 }

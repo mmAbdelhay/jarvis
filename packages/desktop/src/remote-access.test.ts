@@ -196,6 +196,10 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     push,
     hasSubscriber: vi.fn(() => false),
     status: vi.fn(() => CLOSED_STATUS),
+    ownerStatus: vi.fn(() => ({ hasPassword: true, passkeys: [] })),
+    setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
+    deletePasskey: vi.fn(async () => true),
+    signOutEverywhere: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
   };
   return { bridge, push };
@@ -266,6 +270,13 @@ describe("createRemoteAccess: before start", () => {
     expect(await remoteAccess.revoke("d1")).toBe(false);
     expect(remoteAccess.decidePairing("r1", true)).toBe(false);
     remoteAccess.cancelPairing();
+    expect(remoteAccess.ownerStatus()).toEqual({ hasPassword: false, passkeys: [] });
+    expect(await remoteAccess.setOwnerPassword(undefined, "a long new password")).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(await remoteAccess.deletePasskey("cred")).toBe(false);
+    await remoteAccess.signOutEverywhere();
     expect(createBridge).not.toHaveBeenCalled();
   });
 
@@ -599,6 +610,23 @@ describe("createRemoteAccess: revoke", () => {
 
     expect(ok).toBe(false);
     expect(onDeviceRevoked).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRemoteAccess: owner account", () => {
+  it("passes ownerStatus/setOwnerPassword/deletePasskey/signOutEverywhere straight to the bridge", async () => {
+    const { remoteAccess, bridge } = harness();
+    await remoteAccess.start(REMOTE_CONFIG);
+
+    expect(remoteAccess.ownerStatus()).toEqual({ hasPassword: true, passkeys: [] });
+    expect(await remoteAccess.setOwnerPassword("old password!", "a long new password")).toEqual({
+      ok: true,
+    });
+    expect(bridge.setOwnerPassword).toHaveBeenCalledWith("old password!", "a long new password");
+    expect(await remoteAccess.deletePasskey("cred")).toBe(true);
+    expect(bridge.deletePasskey).toHaveBeenCalledWith("cred");
+    await remoteAccess.signOutEverywhere();
+    expect(bridge.signOutEverywhere).toHaveBeenCalledTimes(1);
   });
 });
 

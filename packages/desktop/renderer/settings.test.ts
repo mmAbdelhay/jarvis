@@ -142,9 +142,11 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-whisper-binary" />
     <input id="settings-whisper-model" />
     <div id="settings-remote-title"></div>
+    <div id="settings-remote-owner"></div>
     <label id="settings-remote-enabled-label"></label>
     <input id="settings-remote-enabled" type="checkbox" />
     <span id="settings-remote-state"></span>
+    <div id="settings-remote-enable-blocked" hidden></div>
     <label id="settings-remote-idle-label"></label>
     <input id="settings-remote-idle" />
     <div id="settings-remote-idle-note"></div>
@@ -231,6 +233,22 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     cancelRemotePairing: () => Promise.resolve(),
     decideRemotePairing: () => Promise.resolve(),
     revokeRemoteDevice: () => Promise.resolve({ ok: true, value: undefined }),
+    // Phase 0: every harness starts with an owner password already set, so
+    // the Enable switch behaves as it did before the gate existed; the
+    // owner-account tests override this.
+    ownerStatus: () => Promise.resolve({ hasPassword: true, passkeys: [] }),
+    setOwnerPassword: (...args: unknown[]) => {
+      calls.push({ call: "setOwnerPassword", args });
+      return Promise.resolve({ ok: true });
+    },
+    deletePasskey: (...args: unknown[]) => {
+      calls.push({ call: "deletePasskey", args });
+      return Promise.resolve({ ok: true, value: undefined });
+    },
+    signOutEverywhere: () => {
+      calls.push({ call: "signOutEverywhere", args: [] });
+      return Promise.resolve();
+    },
     onRemoteStatus: () => {},
     tailscaleCert: () => {
       calls.push({ call: "tailscaleCert", args: [] });
@@ -2857,5 +2875,185 @@ describe("remote access section", () => {
     change(cwd);
 
     expect((await save(calls)).remote.port).toBe(8443);
+  });
+});
+
+describe("Settings: owner account (Phase 0)", () => {
+  const jarvis = () => (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement | null;
+  const button = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
+  const PASSWORD = "a long owner password";
+
+  function withOwner(status: { hasPassword: boolean; passkeys?: unknown[] }): void {
+    jarvis()["ownerStatus"] = () =>
+      Promise.resolve({ hasPassword: status.hasPassword, passkeys: status.passkeys ?? [] });
+  }
+
+  it("without a password: the Enable switch is disabled with an explanation, and the set form has only new + confirm password fields", async () => {
+    harness();
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    expect(input("settings-remote-enabled")?.disabled).toBe(true);
+    const blocked = document.getElementById("settings-remote-enable-blocked");
+    expect(blocked?.hidden).toBe(false);
+    expect(blocked?.textContent).toBe(MESSAGES.remoteOwnerEnableBlocked(PRIMARY_LANGUAGE));
+
+    expect(input("settings-remote-owner-current")).toBeNull();
+    for (const id of ["settings-remote-owner-new", "settings-remote-owner-confirm"]) {
+      expect(input(id)?.type).toBe("password");
+      expect(input(id)?.autocomplete).toBe("new-password");
+    }
+    expect(button("settings-remote-owner-submit")?.textContent).toBe(
+      MESSAGES.remoteOwnerSetButton(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("settings-remote-owner-passkeys")).toBeNull();
+  });
+
+  it("a mismatched confirm never calls setOwnerPassword, says so, and clears both fields", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = `${PASSWORD}x`;
+    button("settings-remote-owner-submit")?.click();
+
+    expect(calls.some((entry) => entry.call === "setOwnerPassword")).toBe(false);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerError("mismatch", PRIMARY_LANGUAGE),
+    );
+    expect(input("settings-remote-owner-new")?.value).toBe("");
+    expect(input("settings-remote-owner-confirm")?.value).toBe("");
+  });
+
+  it("setting the first password calls setOwnerPassword(undefined, pw), clears the fields, and unlocks the Enable switch", async () => {
+    const { calls } = harness();
+    let hasPassword = false;
+    jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword, passkeys: [] });
+    jarvis()["setOwnerPassword"] = (...args: unknown[]) => {
+      calls.push({ call: "setOwnerPassword", args });
+      hasPassword = true;
+      return Promise.resolve({ ok: true });
+    };
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = PASSWORD;
+    button("settings-remote-owner-submit")?.click();
+    expect(input("settings-remote-owner-new")?.value ?? "").toBe("");
+    await flush();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "setOwnerPassword")?.args).toEqual([
+      undefined,
+      PASSWORD,
+    ]);
+    expect(input("settings-remote-enabled")?.disabled).toBe(false);
+    expect(document.getElementById("settings-remote-enable-blocked")?.hidden).toBe(true);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerSaved(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("settings-remote-owner")?.textContent).not.toContain(PASSWORD);
+  });
+
+  it("shows the bridge's error code as bilingual text", async () => {
+    harness();
+    withOwner({ hasPassword: false });
+    jarvis()["setOwnerPassword"] = () => Promise.resolve({ ok: false, code: "too-short" });
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = "short";
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = "short";
+    button("settings-remote-owner-submit")?.click();
+    await flush();
+    await flush();
+
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerError("too-short", PRIMARY_LANGUAGE),
+    );
+    expect(input("settings-remote-enabled")?.disabled).toBe(true);
+  });
+
+  it("with a password: Change password opens a form with the current field, and submit sends (current, next)", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: true });
+    initSettings();
+    await openSettings();
+
+    expect(input("settings-remote-owner-new")).toBeNull();
+    button("settings-remote-owner-change")?.click();
+    expect(input("settings-remote-owner-current")?.type).toBe("password");
+
+    (input("settings-remote-owner-current") as HTMLInputElement).value = "the old password";
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = PASSWORD;
+    button("settings-remote-owner-submit")?.click();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "setOwnerPassword")?.args).toEqual([
+      "the old password",
+      PASSWORD,
+    ]);
+  });
+
+  it("lists passkeys as rows (label never parsed as markup) and Delete calls deletePasskey with its id", async () => {
+    const { calls } = harness();
+    withOwner({
+      hasPassword: true,
+      passkeys: [
+        { id: "cred-1", label: "<b>Chrome</b>", createdAt: 0 },
+        { id: "cred-2", label: "Safari", createdAt: 1000 },
+      ],
+    });
+    initSettings();
+    await openSettings();
+
+    const rows = document.querySelectorAll("#settings-remote-owner-passkeys .settings-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.querySelector("b")).toBeNull();
+    expect(rows[0]?.textContent).toContain("<b>Chrome</b>");
+
+    button("settings-remote-owner-passkey-delete-cred-2")?.click();
+    await flush();
+    expect(calls.find((entry) => entry.call === "deletePasskey")?.args).toEqual(["cred-2"]);
+  });
+
+  it("Sign out everywhere calls signOutEverywhere", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: true });
+    initSettings();
+    await openSettings();
+
+    button("settings-remote-owner-signout")?.click();
+    await flush();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "signOutEverywhere")).toBe(true);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerSignedOut(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("upgrade case: enabled in config with no password leaves the switch able to turn off, then locks it", async () => {
+    const config = sample();
+    config.remote.enabled = true;
+    harness(config);
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    const toggle = input("settings-remote-enabled") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
+    expect(document.getElementById("settings-remote-enable-blocked")?.hidden).toBe(false);
+
+    toggle.checked = false;
+    change(toggle);
+    expect(toggle.disabled).toBe(true);
   });
 });

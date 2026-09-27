@@ -30,10 +30,12 @@ import {
   type BridgeDeps,
   type ExpoPushMessage,
   type FetchLike,
+  type OwnerStatus,
   type PairingResult,
   type PushSender,
   type RemoteStatus,
   type RequestHandler,
+  type SetOwnerPasswordResult,
 } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration } from "@jarvis/wire";
 import type { Broadcaster } from "./broadcast.js";
@@ -48,6 +50,8 @@ import {
   type StreamOwners,
 } from "./remote-push-policy.js";
 import { auditPolicyFor, CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
+
+const CLOSED_OWNER_STATUS: OwnerStatus = { hasPassword: false, passkeys: [] };
 
 const CLOSED_STATUS: RemoteStatus = {
   enabled: false,
@@ -415,6 +419,19 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
     },
     hasSubscriber(channel: string): boolean {
       return bridge?.hasSubscriber(channel) ?? false;
+    },
+    // Phase 0: plain pass-throughs to the bridge's owner store, with the
+    // same closed defaults as every other control before the bridge exists.
+    ownerStatus: () => bridge?.ownerStatus() ?? CLOSED_OWNER_STATUS,
+    async setOwnerPassword(current, next): Promise<SetOwnerPasswordResult> {
+      if (bridge === undefined) return { ok: false, code: "unavailable" };
+      return bridge.setOwnerPassword(current, next);
+    },
+    async deletePasskey(credentialId: string): Promise<boolean> {
+      return bridge === undefined ? false : bridge.deletePasskey(credentialId);
+    },
+    async signOutEverywhere(): Promise<void> {
+      await bridge?.signOutEverywhere();
     },
     publishSidecar,
     pushSettings: () => currentPush,
