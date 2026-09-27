@@ -32,7 +32,7 @@ const $ = (id: string): HTMLElement => {
 
 // "+" has no typed input to go on, unlike Enter on the address bar. An
 // empty string is not a URL — normalizeInput would reject it and
-// BrowserHost.open would silently no-op — so a new tab needs a real
+// TabHost.open would silently no-op — so a new tab needs a real
 // default to open, with the address bar left selected so typing over it
 // is the very next thing the user can do.
 // Exported so the Dashboard's project cards (app.ts's buildProjectRow) can

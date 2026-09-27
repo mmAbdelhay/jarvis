@@ -31,7 +31,8 @@ import {
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
-import { createDispatchTable, type DispatchDeps, type DispatchTable } from "../dispatch.js";
+import { createDispatchTable, type DispatchTable } from "../dispatch.js";
+import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
 import { createBlobTable } from "../remote-blob.js";
 import { createFileUploadHandler, createFileUploadStore } from "../file-upload.js";
@@ -171,7 +172,6 @@ import {
   PROVIDER_HEALTH_INTERVAL_MS,
   showEditorTab,
 } from "../ipc.js";
-import type { BrowserHost } from "../browser-host.js";
 import { createSidecarReaper } from "../sidecar-reaper.js";
 import { locateByIp } from "../ip-locate.js";
 import {
@@ -278,12 +278,6 @@ const VOICE_SAMPLE = {
   ar: "مساء الخير يا سيدي، كيف أقدر أساعدك اليوم؟",
 };
 
-/** What the core needs from the workspace's tab host. BrowserHost today;
- *  Task 18 moves its pure half (TabHost) in here and leaves only the
- *  WebContentsView reconciler in main.ts. */
-export type CoreWorkspace = DispatchDeps["workspace"] &
-  Pick<BrowserHost, "openTerminal" | "openForResult" | "onChange" | "sweepIdle" | "destroy">;
-
 /** Handed to CoreDeps.attachHost at the point main.ts always built its
  *  window: config loaded, orchestrator built, no sidecar wired yet. */
 export type HostContext = {
@@ -292,15 +286,22 @@ export type HostContext = {
   config: JarvisConfig;
   /** The favicon cache bookmarks read and hosted pages fill. */
   favicons: FaviconStore;
-  /** Where a suspended hosted-app tab is rebuilt. Answers undefined until
-   *  createCore has wired the handlers behind it — the host only ever calls
-   *  it from a click, long after startup. */
-  resumeHostedApp(tab: WorkspaceTab): Promise<string | undefined>;
+  /** The Workspace's tab state, owned by the core. A host with a window
+   *  follows it with a ViewReconciler; a headless one ignores it. */
+  tabs: TabHost;
 };
 
-/** The host's side of the seam: the window and its tabs. */
+/** The host's side of the seam: the window and the pages in it. */
 export type CoreHost = {
-  workspace: CoreWorkspace;
+  /** The hosted pages, if this host has any. */
+  views: {
+    /** Asks the core to suspend pages that sat hidden too long. Run on the
+     *  sweep tick, before the sidecar reapers read which tabs still need
+     *  their sidecar. */
+    sweepIdle(): void;
+    /** Destroys every page: each is a live Chromium process. */
+    destroy(): void;
+  };
   /** Where every push reaches this host's own renderer. */
   toRenderer: PushSink;
   /** notify.ts holds back a phone push the user is already looking at. */
@@ -665,20 +666,21 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   // that manager can say where it went.
   //
   // Assigned rather than passed, because every one of those handlers is
-  // built from `workspace` and so cannot exist before it. The host only
+  // built from `workspace` and so cannot exist before it. TabHost only
   // ever calls this from a click, long after startup has finished.
   let resumeHostedApp: ((tab: WorkspaceTab) => Promise<string | undefined>) | undefined;
 
-  // The window and its Workspace tabs, built by the host here — where
-  // main.ts always built them: after the orchestrator, before any sidecar.
-  const host = deps.attachHost({
-    firstRun,
-    config,
-    favicons,
-    resumeHostedApp: (tab) =>
+  // The Workspace's tabs — the core's own state, which the phone reads and
+  // opens terminals in as much as the desktop does (core/tab-host.ts).
+  const workspace = new TabHost({
+    resumeUrl: (tab) =>
       resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
   });
-  const workspace = host.workspace;
+
+  // The window and the pages that follow those tabs, built by the host here
+  // — where main.ts always built them: after the orchestrator, before any
+  // sidecar.
+  const host = deps.attachHost({ firstRun, config, favicons, tabs: workspace });
 
   // Asked once, at startup: every sidecar below is a binary resolved on
   // PATH — `code-server`, `dbgate-serve`, `docker`, and the exec
@@ -1030,7 +1032,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     editor: {
       open: (projectPath, folderPath) => codeServer.open(projectPath, folderPath),
       // Reuses an already-open tab at the same (project, detail) rather
-      // than opening a new one every click — BrowserHost's MAX_TABS cap
+      // than opening a new one every click — TabHost's MAX_TABS cap
       // would otherwise silently evict a user's other hosted tabs (a
       // DbGate tab with an unsaved query, say) as a side effect of
       // browsing the file tree. Reuse means navigating that tab to the
@@ -1559,7 +1561,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   wiring.start();
 
   // Where a suspended hosted-app tab should be rebuilt — see the
-  // declaration of resumeHostedApp above the BrowserHost. Every branch goes
+  // declaration of resumeHostedApp above the TabHost. Every branch goes
   // through the same handler the tab's own button uses, so "reuse if
   // running, start if not" is decided in exactly one place.
   resumeHostedApp = async (tab) => {
@@ -1646,7 +1648,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   // sidecar starts its own grace period from here rather than a minute
   // later.
   const sweepTimer = setInterval(() => {
-    workspace.sweepIdle();
+    host.views.sweepIdle();
     editorReaper.sweep(neededEditorKeys());
     databaseReaper.sweep(neededProjects("database"));
     clusterReaper.sweep(neededProjects("cluster"));
@@ -1717,7 +1719,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     safely("idle sweeps", () => clearInterval(sweepTimer));
     // Each hosted view is a live Chromium process; they do not go away
     // with the window on their own.
-    safely("hosted views", () => workspace.destroy());
+    safely("hosted views", () => host.views.destroy());
     // Each open editor is a live code-server child process, same reasoning.
     safely("code-server", () => codeServer.stopAll());
     // And each open Database tab is a live dbgate-serve child process.

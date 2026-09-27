@@ -13,8 +13,8 @@ import { describe, expect, it } from "vitest";
 //
 // "Loads" is the rule, so the walk follows value imports only: an
 // `import type {…}` clause is erased from the compiled output and carries
-// nothing to runtime (dispatch.ts type-imports BrowserHost, whose own file
-// only type-imports electron's Session). The same reasoning as
+// nothing to runtime (browser-host.ts, home of the hosted-view types, only
+// type-imports electron's Session). The same reasoning as
 // packages/remote's index.ts reachability test.
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
@@ -176,6 +176,14 @@ describe("the core never loads electron", () => {
 
   it("walks the core's composition root", () => {
     expect(entryFiles()).toContain(resolve(SRC, "core/compose.ts"));
+  });
+
+  // Task 18: the Workspace's tab state is the core's; only its pages are
+  // Electron's. TabHost must be walked, and the view factory the Electron
+  // host follows it with must be the kind of file the walk would flag.
+  it("walks the core's tab state, and would catch the Electron view factory", () => {
+    expect(entryFiles()).toContain(resolve(SRC, "core/tab-host.ts"));
+    expect(electronImports([resolve(SRC, "electron-view.ts")], readSource)).not.toEqual([]);
   });
 
   it("finds no electron import under src/core/, src/daemon/ or daemon-*.ts, directly or transitively", () => {

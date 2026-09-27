@@ -22,8 +22,8 @@ import { dbGateLoginAnswer } from "./dbgate-login.js";
 import { DESKTOP_ORIGIN } from "./dispatch.js";
 import { registerDesktopOnly } from "./desktop-only.js";
 import { webExportDir } from "./web-export.js";
-import { BrowserHost } from "./browser-host.js";
 import { createElectronViewFactory } from "./electron-view.js";
+import { ViewReconciler } from "./view-reconciler.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
 import { isAllowedNavigation } from "./navigation.js";
 import { decidePermission } from "./permissions.js";
@@ -55,15 +55,16 @@ function setDockIcon(): void {
 }
 
 /**
- * The desktop host: the window and its Workspace tabs, built at the point
- * in createCore where main.ts always built them.
+ * The desktop host: the window and the Workspace's pages, built at the
+ * point in createCore where main.ts always built them.
  *
  * Everything here is Electron — the BrowserWindow, its permission and
- * navigation guards, the WebContentsView-backed BrowserHost, and the
- * per-project session partitions favicons are fetched through. The core
- * reaches it only through the CoreHost it returns.
+ * navigation guards, the ViewReconciler that keeps one WebContentsView per
+ * page tab in the core's TabHost, and the per-project session partitions
+ * favicons are fetched through. The core reaches it only through the
+ * CoreHost it returns.
  */
-function createDesktopHost({ firstRun, config, favicons, resumeHostedApp }: HostContext) {
+function createDesktopHost({ firstRun, config, favicons, tabs }: HostContext) {
   const window = new BrowserWindow({
     // Jarvis is the surface you work from, not a panel beside something
     // else: it opens at the full working area — maximized, NOT macOS
@@ -114,19 +115,21 @@ function createDesktopHost({ firstRun, config, favicons, resumeHostedApp }: Host
     callback(decidePermission(permission, requesting.id === window.webContents.id));
   });
 
-  // The Workspace's hosted browser tabs. Each is a native WebContentsView
-  // over this window, so the host — not CSS — decides where they sit and
-  // whether they are visible at all.
-  const workspace = new BrowserHost(
+  // The Workspace's hosted pages. Each is a native WebContentsView over
+  // this window, so the host — not CSS — decides where they sit and whether
+  // they are visible at all. Which pages exist is the core's tab state; the
+  // reconciler follows it.
+  const views = new ViewReconciler(
     createElectronViewFactory(window, {
       allowPopups: () => config.browser.allowPopups,
     }),
+    tabs,
     {
       cacheFavicon,
       suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
-      resumeUrl: resumeHostedApp,
     },
   );
+  views.follow(tabs);
 
   /** The size cap, the image-type check and the miss-on-failure rule all
    *  live in favicon-fetch.ts, where they are testable without Electron.
@@ -157,7 +160,7 @@ function createDesktopHost({ firstRun, config, favicons, resumeHostedApp }: Host
     if (fetching.has(key)) return;
     fetching.add(key);
     // The partition is what makes a project's logins its own, mirroring
-    // browser-host.ts's own partition name — encodeURIComponent because
+    // view-reconciler.ts's own partition name — encodeURIComponent because
     // a project name is user-supplied config and a partition name with a
     // slash or a space in it is not addressable.
     const from = session.fromPartition(`persist:project-${encodeURIComponent(project)}`);
@@ -176,7 +179,7 @@ function createDesktopHost({ firstRun, config, favicons, resumeHostedApp }: Host
 
   return {
     window,
-    workspace,
+    views,
     toRenderer: rendererSink(window),
     isFocused: () => window.isFocused(),
     isAwake: () => window.isVisible() && !window.isMinimized(),
@@ -258,7 +261,7 @@ app.whenReady().then(async () => {
           devDir: fileURLToPath(new URL("../../web", import.meta.url)),
         }),
     });
-    const { window, workspace } = core.host;
+    const { window, views } = core.host;
     const { dispatch, broadcast } = core;
     const releaseChildren = core.stop;
 
@@ -306,18 +309,18 @@ app.whenReady().then(async () => {
       screen,
       dialog,
       buildMenu: (template) => Menu.buildFromTemplate(template),
-      workspace,
+      views,
       chooseDock: (dock) => broadcast.local("workspace:devtoolsDockChosen", dock),
-      // Bug 2: the tab menu's Reload and Close run the same dispatch table
-      // entries workspace:reload/workspace:close already do (terminal
-      // close, follower unfollow, desktopSizedPanes cleanup for close) —
-      // called directly rather than duplicated here.
-      reloadTab: (tabId) => void dispatch["workspace:reload"]([tabId], DESKTOP_ORIGIN),
+      // Bug 2: the tab menu's Reload is workspace:reload's own view call,
+      // and Close runs the dispatch table's workspace:close (terminal
+      // close, follower unfollow, desktopSizedPanes cleanup) — called
+      // directly rather than duplicated here.
+      reloadTab: (tabId) => views.reload(tabId),
       closeTab: (tabId) => void dispatch["workspace:close"]([tabId], DESKTOP_ORIGIN),
       startTabRename: (tabId) => broadcast.local("workspace:tabRename", tabId),
       language: PRIMARY_LANGUAGE,
     });
-    workspace.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));
+    views.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));
 
     // The bridge's lifecycle, started where it always was: after every
     // request handler is registered. See core.startRemote.

@@ -59,14 +59,6 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       rename: vi.fn(),
       move: vi.fn(),
       navigate: vi.fn(),
-      back: vi.fn(),
-      forward: vi.fn(),
-      reload: vi.fn(),
-      setDevTools: vi.fn(),
-      setDevToolsDock: vi.fn(),
-      setVisible: vi.fn(),
-      hideAll: vi.fn(),
-      requestPictureInPicture: vi.fn(),
       openDocker: vi.fn(),
       openApi: vi.fn(),
     },
@@ -649,14 +641,6 @@ describe("dispatch table: workspace and docker", () => {
     expect(order).toEqual(["terminal", "unfollow", "workspace"]);
     await call(table, "workspace:close", 5);
     expect(order).toHaveLength(3);
-  });
-
-  it("workspace:devtools requires a string tab and a boolean flag", async () => {
-    const deps = fakeDeps();
-    const table = createDispatchTable(deps);
-    await call(table, "workspace:devtools", "t1", "yes");
-    await call(table, "workspace:devtools", "t1", true);
-    expect(deps.workspace.setDevTools).toHaveBeenCalledTimes(1);
   });
 
   it("cluster:open reads background only as the literal true", async () => {

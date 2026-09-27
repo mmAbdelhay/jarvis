@@ -42,7 +42,7 @@ import {
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
-import { isDevToolsDock, type BrowserHost } from "./browser-host.js";
+import type { TabHost } from "./core/tab-host.js";
 import type { JarvisConfig } from "./config.js";
 import {
   DESKTOP_OWNER,
@@ -155,14 +155,23 @@ export type SidecarPublisher = {
       };
 };
 
-/** The five handlers that hold a BrowserWindow, the screen, a native dialog
- *  or a native menu. They can never run for a phone, so they never enter the
- *  table — desktop-only.ts registers them. */
+/** The handlers that hold a BrowserWindow, the screen, a native dialog, a
+ *  native menu or a hosted page's WebContentsView (view-reconciler.ts).
+ *  They can never run for a phone, nor in a headless core, so they never
+ *  enter the table — desktop-only.ts registers them in the Electron host. */
 export type ElectronBoundChannel =
   | "workspace:bounds"
   | "workspace:devtoolsBounds"
   | "workspace:devtoolsDockMenu"
   | "workspace:tabMenu"
+  | "workspace:back"
+  | "workspace:forward"
+  | "workspace:reload"
+  | "workspace:devtools"
+  | "workspace:devtoolsDock"
+  | "workspace:visible"
+  | "workspace:hideAll"
+  | "workspace:pip"
   | "dialog:pickFiles";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
@@ -214,22 +223,17 @@ export type DispatchDeps = {
   sessionResume: ReturnType<typeof createResumeInTerminalHandler>;
   voice: { setTarget(sessionId: string | undefined): void };
   git: Pick<GitHandlers, "changes" | "fileDiff" | "setStaged" | "commit">;
+  /** The core's tab state (core/tab-host.ts). What only a hosted page's
+   *  view can do — back, reload, DevTools, visibility — is not here: those
+   *  channels are Electron-bound (desktop-only.ts). */
   workspace: Pick<
-    BrowserHost,
+    TabHost,
     | "open"
     | "close"
     | "activate"
     | "rename"
     | "move"
     | "navigate"
-    | "back"
-    | "forward"
-    | "reload"
-    | "setDevTools"
-    | "setDevToolsDock"
-    | "setVisible"
-    | "hideAll"
-    | "requestPictureInPicture"
     | "openDocker"
     | "openApi"
     | "state"
@@ -545,27 +549,6 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "workspace:navigate": ([id, input]) => {
       if (typeof id === "string" && typeof input === "string") workspace.navigate(id, input);
     },
-    "workspace:back": ([id]) => {
-      if (typeof id === "string") workspace.back(id);
-    },
-    "workspace:forward": ([id]) => {
-      if (typeof id === "string") workspace.forward(id);
-    },
-    "workspace:reload": ([id]) => {
-      if (typeof id === "string") workspace.reload(id);
-    },
-    "workspace:devtools": ([tabId, open]) => {
-      if (typeof tabId !== "string" || typeof open !== "boolean") return;
-      workspace.setDevTools(tabId, open);
-    },
-    "workspace:devtoolsDock": ([dock]) => {
-      if (isDevToolsDock(dock)) workspace.setDevToolsDock(dock);
-    },
-    "workspace:visible": ([visible]) => workspace.setVisible(visible === true),
-    "workspace:hideAll": () => workspace.hideAll(),
-    "workspace:pip": ([tabId]) => {
-      if (typeof tabId === "string") workspace.requestPictureInPicture(tabId);
-    },
     "workspace:snapshot": () => workspace.state(),
     "terminal:panes": (args) => {
       if (args.length !== 1) return [];
@@ -722,7 +705,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       if (typeof tabId !== "string") return;
       deps.followers.unfollow(tabId, origin.kind === "remote" ? origin.deviceId : DESKTOP_OWNER);
     },
-    // Opening the tab is main's job (only it holds the BrowserHost); deciding
+    // Opening the tab is the core's job (its TabHost holds the tabs); deciding
     // whether one already exists is the renderer's, exactly as it is for the
     // Editor and Database buttons.
     "api:open": ([project]) => {

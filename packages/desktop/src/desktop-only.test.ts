@@ -38,6 +38,64 @@ describe("desktop-only registrations", () => {
     });
   });
 
+  // The page controls moved here from the dispatch table when the tab state
+  // moved into the core (Task 18): they act on a view, which only the
+  // Electron host has.
+  describe("hosted-page controls", () => {
+    function listenerFor(deps: DesktopOnlyDeps, channel: string) {
+      const handle = vi.fn();
+      registerDesktopOnly({ ...deps, handle });
+      return handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => unknown;
+    }
+
+    it("routes back, forward, reload and picture-in-picture by tab id, dropping a non-string id", () => {
+      const deps = fakeDesktopDeps();
+      for (const [channel, method] of [
+        ["workspace:back", "back"],
+        ["workspace:forward", "forward"],
+        ["workspace:reload", "reload"],
+        ["workspace:pip", "requestPictureInPicture"],
+      ] as const) {
+        const listener = listenerFor(deps, channel);
+        listener({}, 7);
+        listener({}, "tab-1");
+        expect(deps.views[method], channel).toHaveBeenCalledTimes(1);
+        expect(deps.views[method], channel).toHaveBeenCalledWith("tab-1");
+      }
+    });
+
+    it("workspace:devtools requires a string tab and a boolean flag", () => {
+      const deps = fakeDesktopDeps();
+      const listener = listenerFor(deps, "workspace:devtools");
+      listener({}, "t1", "yes");
+      listener({}, "t1", true);
+      expect(deps.views.setDevTools).toHaveBeenCalledTimes(1);
+      expect(deps.views.setDevTools).toHaveBeenCalledWith("t1", true);
+    });
+
+    it("workspace:devtoolsDock takes only a real dock side", () => {
+      const deps = fakeDesktopDeps();
+      const listener = listenerFor(deps, "workspace:devtoolsDock");
+      listener({}, "sideways");
+      listener({}, "left");
+      expect(deps.views.setDevToolsDock).toHaveBeenCalledTimes(1);
+      expect(deps.views.setDevToolsDock).toHaveBeenCalledWith("left");
+    });
+
+    it("workspace:visible reads only the literal true, and hideAll hides", () => {
+      const deps = fakeDesktopDeps();
+      listenerFor(deps, "workspace:visible")({}, "true");
+      listenerFor(deps, "workspace:visible")({}, true);
+      listenerFor(deps, "workspace:hideAll")({});
+      expect(deps.views.setVisible).toHaveBeenNthCalledWith(1, false);
+      expect(deps.views.setVisible).toHaveBeenNthCalledWith(2, true);
+      expect(deps.views.hideAll).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // Bug 2: workspace:tabMenu pops the chip's native Rename/Reload/Close
   // menu — see tab-menu.test.ts for the template itself; this covers the
   // handler's own argument validation and wiring.
@@ -124,7 +182,18 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     screen: { getDisplayMatching: () => ({ scaleFactor: 2 }) },
     dialog: { showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: [] })) },
     buildMenu: () => ({ popup: vi.fn() }),
-    workspace: { setBounds: vi.fn(), setDevToolsBounds: vi.fn() },
+    views: {
+      setBounds: vi.fn(),
+      setDevToolsBounds: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      reload: vi.fn(),
+      setDevTools: vi.fn(),
+      setDevToolsDock: vi.fn(),
+      setVisible: vi.fn(),
+      hideAll: vi.fn(),
+      requestPictureInPicture: vi.fn(),
+    },
     chooseDock: vi.fn(),
     reloadTab: vi.fn(),
     closeTab: vi.fn(),

@@ -1855,7 +1855,7 @@ export type TerminalChips = {
 
 export type TerminalHandlerDeps = {
   shells: ShellManager;
-  /** Opens the tab itself and returns its id — BrowserHost.openTerminal,
+  /** Opens the tab itself and returns its id — TabHost.openTerminal,
    *  injected so these handlers stay testable without a window. `label`
    *  replaces the project's name in the tab's title, for a terminal whose
    *  shell is rooted somewhere other than its project. */
@@ -2038,9 +2038,9 @@ function withOpenFilePayload(baseUrl: string, filePath: string): string {
 /**
  * The id of `project`'s existing Editor tab already rooted at `detail`, if
  * one is open. What lets clicking around the file sidebar reuse a tab
- * instead of opening a new one on every click: `BrowserHost` caps hosted
+ * instead of opening a new one on every click: `TabHost` caps hosted
  * views at `MAX_TABS` and evicts the least-recently-active one once full
- * (see browser-host.ts's `#evictIfFull`), so with no reuse, browsing a file
+ * (see core/tab-host.ts's `#evictIfFull`), so with no reuse, browsing a file
  * tree would silently close a user's *other* open tabs — a DbGate tab with
  * an unsaved query, say — as a side effect of clicking around. Reusing a
  * tab still costs something: the `payload` query is only honoured by the
@@ -2068,7 +2068,7 @@ export function findEditorTab(
   )?.id;
 }
 
-/** The little of a `BrowserHost` that showing an editor tab needs. Named
+/** The little of a `TabHost` that showing an editor tab needs. Named
  *  as its own type so the composition below can be tested without one. */
 export type EditorTabHost = {
   tabs: () => readonly Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[];
