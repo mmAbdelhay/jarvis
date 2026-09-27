@@ -5,7 +5,7 @@
 // handleUtterance, shared with the desktop recorder.
 //
 // Global constraints this file exists to uphold:
-//   - a phone's bytes are written to one file, audio.m4a, inside a fresh
+//   - a phone's bytes are written to one file, audio.m4a or audio.webm, inside a fresh
 //     temp directory the caller creates and removes; no phone-supplied
 //     string ever becomes part of a path or an argv element (meta's
 //     targetSessionId is the only phone string that reaches handleUtterance
@@ -22,7 +22,7 @@
 //     `failed:transcode` or `failed:utterance` — never `transcoded.detail`
 //     or a caught error's own message/stack.
 import { join } from "node:path";
-import { isMp4Audio } from "@jarvis/platform";
+import { sniffAudioContainer, type AudioDemuxer } from "@jarvis/platform";
 import { MAX_VOICE_BYTES, parseVoiceUploadMeta, type VoiceUploadResult } from "@jarvis/wire";
 import { MESSAGES } from "./messages.js";
 import type { BlobHandler } from "./remote-blob.js";
@@ -38,7 +38,11 @@ export type VoiceUploadDeps = {
   makeTempDir(): Promise<string>;
   writeFileExclusive(path: string, bytes: Uint8Array): Promise<void>;
   removeDir(path: string): Promise<void>;
-  transcode(input: string, output: string): Promise<{ ok: true } | { ok: false; detail: string }>;
+  transcode(
+    input: string,
+    output: string,
+    demuxer: AudioDemuxer,
+  ): Promise<{ ok: true } | { ok: false; detail: string }>;
   utterance(request: UtteranceRequest): Promise<HandledUtterance>;
   language: "ar" | "en";
   log(line: string): void;
@@ -134,11 +138,14 @@ export function createVoiceUploadHandler(deps: VoiceUploadDeps): BlobHandler {
     }
 
     const meta = args.length === 1 ? parseVoiceUploadMeta(args[0]) : undefined;
+    const container = sniffAudioContainer(bytes);
     if (
       meta === undefined ||
       bytes.length < 1 ||
       bytes.length > MAX_VOICE_BYTES ||
-      !isMp4Audio(bytes)
+      container === undefined ||
+      (meta.format === "m4a" && container !== "mov") ||
+      (meta.format === "webm" && container !== "webm")
     ) {
       const result: VoiceUploadResult = {
         kind: "invalid",
@@ -198,7 +205,7 @@ export function createVoiceUploadHandler(deps: VoiceUploadDeps): BlobHandler {
     }
 
     try {
-      const inputPath = join(dir, "audio.m4a");
+      const inputPath = join(dir, container === "webm" ? "audio.webm" : "audio.m4a");
       const outputPath = join(dir, "audio.wav");
       let outcomeResult: VoiceUploadResult;
       let logKind: string;
@@ -209,7 +216,7 @@ export function createVoiceUploadHandler(deps: VoiceUploadDeps): BlobHandler {
       try {
         await deps.writeFileExclusive(inputPath, bytes);
         site = "transcode";
-        const transcoded = await deps.transcode(inputPath, outputPath);
+        const transcoded = await deps.transcode(inputPath, outputPath, container);
         if (!transcoded.ok) {
           outcomeResult = { kind: "failed", text: MESSAGES.voiceTurnFailed(language), language };
           logKind = "failed:transcode";

@@ -43,6 +43,12 @@ function m4aBytes(length = 64): Uint8Array {
   return bytes;
 }
 
+function webmBytes(length = 64): Uint8Array {
+  const bytes = new Uint8Array(length);
+  bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+  return bytes;
+}
+
 function riffBytes(length = 32): Uint8Array {
   const bytes = new Uint8Array(length);
   bytes.set(Buffer.from("RIFF", "latin1"), 0);
@@ -87,7 +93,7 @@ function harness(overrides: Partial<VoiceUploadDeps> = {}) {
   let dirCounter = 0;
   let makeTempDirCalls = 0;
   const writes: { path: string; bytes: Uint8Array }[] = [];
-  const transcodes: { input: string; output: string }[] = [];
+  const transcodes: { input: string; output: string; demuxer: "mov" | "webm" }[] = [];
   const utteranceCalls: UtteranceRequest[] = [];
   const removeDirs: string[] = [];
   const logs: string[] = [];
@@ -105,8 +111,8 @@ function harness(overrides: Partial<VoiceUploadDeps> = {}) {
     removeDir: vi.fn(async (path: string) => {
       removeDirs.push(path);
     }),
-    transcode: vi.fn(async (input: string, output: string) => {
-      transcodes.push({ input, output });
+    transcode: vi.fn(async (input: string, output: string, demuxer: "mov" | "webm") => {
+      transcodes.push({ input, output, demuxer });
       return { ok: true as const };
     }),
     utterance: vi.fn(async (request: UtteranceRequest) => {
@@ -160,13 +166,34 @@ describe("createVoiceUploadHandler", () => {
       expect(h.writes[0]?.path).toBe(voiceFile(0, "audio.m4a"));
       expect(h.writes[0]?.bytes).toBe(bytes);
       expect(h.transcodes).toEqual([
-        { input: voiceFile(0, "audio.m4a"), output: voiceFile(0, "audio.wav") },
+        {
+          input: voiceFile(0, "audio.m4a"),
+          output: voiceFile(0, "audio.wav"),
+          demuxer: "mov",
+        },
       ]);
       expect(h.utteranceCalls).toEqual([
         {
           wavPath: voiceFile(0, "audio.wav"),
           targetSessionId: "s1",
           origin: { kind: "remote", replyTo: turnId(1) },
+        },
+      ]);
+    });
+
+    it("writes WebM bytes with a .webm extension and transcodes with the webm demuxer", async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+
+      const result = await handler([meta({ format: "webm" })], webmBytes(), DEVICE_1);
+
+      expect(result.kind).toBe("heard");
+      expect(h.writes[0]?.path).toBe(voiceFile(0, "audio.webm"));
+      expect(h.transcodes).toEqual([
+        {
+          input: voiceFile(0, "audio.webm"),
+          output: voiceFile(0, "audio.wav"),
+          demuxer: "webm",
         },
       ]);
     });

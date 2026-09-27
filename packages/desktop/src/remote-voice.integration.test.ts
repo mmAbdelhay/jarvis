@@ -470,7 +470,7 @@ describe.skipIf(!ffmpegOnPath)(
       const bytes = new Uint8Array(await readFile(fixture));
 
       const realTranscode: VoiceUploadDeps["transcode"] = async (input, output) => {
-        const { command, args } = transcodeToWhisperWavCommand(input, output);
+        const { command, args } = transcodeToWhisperWavCommand(input, output, "mov");
         const result = await runCommandWithLimits(command, args, {
           timeoutMs: TRANSCODE_TIMEOUT_MS,
           maxOutputBytes: 65_536,

@@ -2236,8 +2236,9 @@ app.whenReady().then(async () => {
     async function transcodeVoiceUpload(
       input: string,
       output: string,
+      demuxer: "mov" | "webm",
     ): Promise<{ ok: true } | { ok: false; detail: string }> {
-      const { command, args } = transcodeToWhisperWavCommand(input, output);
+      const { command, args } = transcodeToWhisperWavCommand(input, output, demuxer);
       const result = await runCommandWithLimits(command, args, {
         timeoutMs: TRANSCODE_TIMEOUT_MS,
         maxOutputBytes: 65_536,
