@@ -2,6 +2,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import { describe, expect, it, vi } from "vitest";
 import {
   ELECTRON_BOUND_CHANNELS,
+  isAllowedPlanLinkUrl,
   registerDesktopOnly,
   type DesktopOnlyDeps,
 } from "./desktop-only.js";
@@ -87,10 +88,11 @@ describe("desktop-only registrations", () => {
       expect(popup).toHaveBeenCalledWith({ window: deps.window, x: 43, y: 24 });
     });
 
-    it("runs Reload and Close in main directly, for this tab's id", () => {
+    it("runs Reload and Close in main directly, for this tab's id, and Plans back to the renderer", () => {
       const reloadTab = vi.fn();
       const closeTab = vi.fn();
       const startTabRename = vi.fn();
+      const startTabPlans = vi.fn();
       let template: MenuItemConstructorOptions[] = [];
       const buildMenu = vi.fn((built: MenuItemConstructorOptions[]) => {
         template = built;
@@ -102,18 +104,77 @@ describe("desktop-only registrations", () => {
         reloadTab,
         closeTab,
         startTabRename,
+        startTabPlans,
       });
 
       listener({}, "tab-1", 42, 24);
-      const [rename, reload, close] = template;
+      const [rename, reload, close, plans] = template;
       (rename?.click as (() => void) | undefined)?.();
       (reload?.click as (() => void) | undefined)?.();
       (close?.click as (() => void) | undefined)?.();
+      (plans?.click as (() => void) | undefined)?.();
 
       expect(startTabRename).toHaveBeenCalledWith("tab-1");
       expect(reloadTab).toHaveBeenCalledWith("tab-1");
       expect(closeTab).toHaveBeenCalledWith("tab-1");
+      expect(startTabPlans).toHaveBeenCalledWith("tab-1");
     });
+  });
+
+  // Task 8 (controller ruling): main's webContents deny every
+  // target=_blank outright, so this channel is a plan link's only route to
+  // the OS browser — and the one place that route is gated.
+  describe("plans:openLink", () => {
+    function openLinkListener(deps: ReturnType<typeof fakeDesktopDeps>) {
+      const handle = vi.fn();
+      registerDesktopOnly({ ...deps, handle });
+      return handle.mock.calls.find(([c]) => c === "plans:openLink")![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => unknown;
+    }
+
+    it("opens an allowed URL in the OS browser", () => {
+      const openExternal = vi.fn();
+      const listener = openLinkListener({ ...fakeDesktopDeps(), shell: { openExternal } });
+
+      listener({}, "https://example.com/docs");
+
+      expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+    });
+
+    it.each([
+      ["a non-string url", 42],
+      ["a javascript: url", "javascript:alert(1)"],
+      ["a data: url", "data:text/html,hi"],
+      ["a bare path", "/etc/hosts"],
+      ["an unparsable string", "not a url"],
+      ["a url over 2048 characters", `https://example.com/${"a".repeat(2048)}`],
+    ])("never opens %s", (_name, arg) => {
+      const openExternal = vi.fn();
+      const listener = openLinkListener({ ...fakeDesktopDeps(), shell: { openExternal } });
+
+      listener({}, arg);
+
+      expect(openExternal).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("isAllowedPlanLinkUrl", () => {
+  it("accepts http, https and mailto", () => {
+    expect(isAllowedPlanLinkUrl("http://example.com")).toBe(true);
+    expect(isAllowedPlanLinkUrl("https://example.com/x?y=1")).toBe(true);
+    expect(isAllowedPlanLinkUrl("mailto:a@example.com")).toBe(true);
+  });
+
+  it("rejects any other scheme, an unparsable string, and an over-length url", () => {
+    expect(isAllowedPlanLinkUrl("javascript:alert(1)")).toBe(false);
+    expect(isAllowedPlanLinkUrl("data:text/html,hi")).toBe(false);
+    expect(isAllowedPlanLinkUrl("ftp://example.com")).toBe(false);
+    expect(isAllowedPlanLinkUrl("/etc/hosts")).toBe(false);
+    expect(isAllowedPlanLinkUrl("not a url")).toBe(false);
+    expect(isAllowedPlanLinkUrl(`https://example.com/${"a".repeat(2048)}`)).toBe(false);
   });
 });
 
@@ -129,6 +190,8 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     reloadTab: vi.fn(),
     closeTab: vi.fn(),
     startTabRename: vi.fn(),
+    startTabPlans: vi.fn(),
+    shell: { openExternal: vi.fn() },
     language: "en" as const,
   };
 }

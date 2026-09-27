@@ -516,11 +516,15 @@ export type RendererApi = {
   /** A tab's DevTools closed without the renderer asking: the user closed
    *  their undocked window. */
   onDevToolsClosed(cb: (tabId: string) => void): void;
-  /** Pops a chip's native Rename/Reload/Close menu at (x, y) — the click's
-   *  own clientX/clientY. Reload and Close run in main directly; Rename
-   *  arrives back on onTabRename so the renderer's own inline input opens. */
+  /** Pops a chip's native Rename/Reload/Close/Plans menu at (x, y) — the
+   *  click's own clientX/clientY. Reload and Close run in main directly;
+   *  Rename arrives back on onTabRename so the renderer's own inline input
+   *  opens, and Plans arrives back on onTabPlans (Task 8) so the renderer
+   *  toggles that tab's own plan panel — main knows only which tab, never
+   *  whether the panel is open. */
   tabMenu(tabId: string, x: number, y: number): Promise<void>;
   onTabRename(cb: (tabId: string) => void): void;
+  onTabPlans(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;
@@ -887,6 +891,14 @@ export type RendererApi = {
    *  plansRead/plansComments on receipt, the same "push says look again"
    *  contract turn:new and workspace:update already follow. */
   onPlansChanged(cb: (path: string) => void): void;
+  /** Task 8 (controller ruling): opens a plan block's own rendered link in
+   *  the OS browser, via Electron's `shell.openExternal` — main's
+   *  webContents deny every `target=_blank` outright, so a plan link has no
+   *  other route out of the window. Desktop-only, and refused for anything
+   *  but an `http:`/`https:`/`mailto:` URL under 2048 characters
+   *  (desktop-only.ts's own validator, never trusted from the renderer
+   *  alone since the renderer only renders what plansRead handed it). */
+  plansOpenLink(url: string): Promise<void>;
 };
 
 export type WiringDeps = {

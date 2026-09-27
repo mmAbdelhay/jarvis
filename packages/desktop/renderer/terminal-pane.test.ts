@@ -2121,6 +2121,63 @@ describe("the file sidebar's palette action", () => {
   });
 });
 
+// Task 8: the plan panel has no chord of its own either — the palette is
+// its only way out, the same rule the file sidebar's own action follows.
+describe("the plan panel's palette action", () => {
+  function paneWithPlan(togglePlan?: () => void) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    return createPane(host, {
+      sendInput: vi.fn(),
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: true,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+      togglePlan,
+    });
+  }
+
+  const palette = (p: { element: HTMLElement }) =>
+    p.element.querySelector<HTMLElement>(".terminal-palette");
+
+  function run(p: { element: HTMLElement }, label: string): void {
+    const input = palette(p)?.querySelector("input");
+    if (input === null || input === undefined) throw new Error("no palette input");
+    input.value = label;
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+  }
+
+  it("offers the plan panel toggle and runs it", () => {
+    const togglePlan = vi.fn();
+    const p = paneWithPlan(togglePlan);
+    p.write(`${A}$ ${B}`);
+
+    p.openPalette();
+    expect(palette(p)?.textContent).toContain("Toggle plan panel");
+    run(p, "Toggle plan panel");
+
+    expect(togglePlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers nothing when the pane has no plan panel", () => {
+    const p = paneWithPlan();
+    p.write(`${A}$ ${B}`);
+
+    p.openPalette();
+
+    expect(palette(p)?.textContent).not.toContain("Toggle plan panel");
+  });
+});
+
 describe("a terminal pane over a ConPTY", () => {
   const settings = {
     blocks: true,

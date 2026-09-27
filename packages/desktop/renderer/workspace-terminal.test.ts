@@ -42,12 +42,47 @@ function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
 let calls: Recorded[];
 let dataListener: ((tabId: string, chunk: string) => void) | undefined;
 let exitListener: ((tabId: string, code: number) => void) | undefined;
+let tabPlansListener: ((tabId: string) => void) | undefined;
+let plansChangedListener: ((path: string) => void) | undefined;
+/** What plansList answers with, for every test in this file — most never
+ *  read it (a pane that never reports a cwd never asks), and the Task 8
+ *  describe block below overwrites it per test to control which path (if
+ *  any) counts as "this tab's session plan". */
+let sessionPlanEntry: { path: string } | undefined;
+
+/** This jsdom setup has no real `window.localStorage` (an experimental Node
+ *  global that needs a `--localstorage-file` flag this project's vitest
+ *  config never passes — an environment gap, not something the app can see:
+ *  a real Electron renderer always has one). A fresh in-memory stand-in per
+ *  test is what loadPlanPanelWidth/savePlanPanelWidth's own try/catch is
+ *  for in production; here it is what lets Task 8's width-persistence
+ *  tests observe anything at all. */
+function fakeLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => store.clear(),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  } as Storage;
+}
 
 function harness(buffered = ""): void {
   document.body.innerHTML = `<div id="workspace-terminal" hidden></div>`;
   calls = [];
   dataListener = undefined;
   exitListener = undefined;
+  tabPlansListener = undefined;
+  plansChangedListener = undefined;
+  sessionPlanEntry = undefined;
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: fakeLocalStorage(),
+  });
   FakeTerminal.instances = [];
   (window as unknown as { jarvis: Record<string, unknown> }).jarvis = {
     onTerminalData: (cb: (tabId: string, chunk: string) => void) => {
@@ -55,6 +90,34 @@ function harness(buffered = ""): void {
     },
     onTerminalExit: (cb: (tabId: string, code: number) => void) => {
       exitListener = cb;
+    },
+    onTabPlans: (cb: (tabId: string) => void) => {
+      tabPlansListener = cb;
+    },
+    onPlansChanged: (cb: (path: string) => void) => {
+      plansChangedListener = cb;
+    },
+    plansList: (paneKey: string, cwd?: string) => {
+      calls.push({ call: "plansList", args: [paneKey, cwd] });
+      return Promise.resolve({
+        session: sessionPlanEntry,
+        planMode: [],
+        repo: [],
+      });
+    },
+    plansRead: (path: string) => {
+      calls.push({ call: "plansRead", args: [path] });
+      return Promise.resolve({ ok: false as const, reason: "not-found" as const });
+    },
+    plansWriteBlock: () => Promise.resolve({ ok: false as const, reason: "not-found" as const }),
+    plansComments: () => Promise.resolve([]),
+    plansAddComment: () => Promise.reject(new Error("plansAddComment not stubbed")),
+    plansUpdateComment: () => Promise.resolve(undefined),
+    plansDeleteComment: () => Promise.resolve(false),
+    plansSend: () => Promise.resolve({ ok: false as const, reason: "no-comments" as const }),
+    plansOpenLink: (url: string) => {
+      calls.push({ call: "plansOpenLink", args: [url] });
+      return Promise.resolve();
     },
     attachTerminal: (tabId: string) => {
       calls.push({ call: "attachTerminal", args: [tabId] });
@@ -1378,5 +1441,310 @@ describe("dismissing the terminal tab's file sidebar", () => {
     dataListener?.("tab-1", CWD("/proj"));
     await settle();
     expect(sidebar()?.hidden).toBe(false);
+  });
+});
+
+// Task 8: the plan panel mounted in each terminal tab — DOM order, the
+// palette and tab-menu toggles, the drag handle's width clamp and
+// persistence, and auto-open on a plans:changed push.
+describe("the terminal tab's plan panel", () => {
+  beforeEach(() => harness());
+
+  /** OSC 7, exactly as the zsh wrapper prints it in precmd. */
+  const CWD = (path: string) => `]7;file://${path}`;
+  const settle = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 0));
+  /** Real time, not fake timers (this file's established pattern) — long
+   *  enough to clear scheduleSessionPlanRefresh's 300ms per-tab debounce. */
+  const advance = (ms: number): Promise<unknown> =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function tabWithPanel(): Promise<typeof import("./workspace-terminal.js")> {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    const module = await load();
+    await settle();
+    return module;
+  }
+
+  const tabPane = () => document.querySelector<HTMLElement>(".workspace-terminal-pane");
+  const handle = () => document.querySelector<HTMLElement>(".plan-panel-handle");
+  const panel = () => document.querySelector<HTMLElement>(".plan-panel");
+
+  function runAction(label: string): void {
+    const palette = document.querySelector<HTMLElement>(".terminal-palette");
+    const input = palette?.querySelector("input");
+    if (input === null || input === undefined) throw new Error("no palette input");
+    input.value = label;
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+  }
+
+  it("builds the tab's file sidebar, its panes, a drag handle and the plan panel in that order", async () => {
+    const { renderWorkspaceTerminals } = await tabWithPanel();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    const classNames = Array.from(tabPane()?.children ?? []).map((el) => el.className);
+    expect(classNames).toEqual([
+      "terminal-explorer",
+      "terminal-split",
+      "plan-panel-handle",
+      "plan-panel",
+    ]);
+  });
+
+  it("starts closed, with the handle hidden alongside it", async () => {
+    const { renderWorkspaceTerminals } = await tabWithPanel();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    expect(panel()?.hidden).toBe(true);
+    expect(handle()?.hidden).toBe(true);
+  });
+
+  it("toggles open and closed from the command palette, showing the handle with it", async () => {
+    const { renderWorkspaceTerminals } = await tabWithPanel();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle plan panel");
+    await settle();
+    expect(panel()?.hidden).toBe(false);
+    expect(handle()?.hidden).toBe(false);
+
+    FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+    runAction("Toggle plan panel");
+    await settle();
+    expect(panel()?.hidden).toBe(true);
+    expect(handle()?.hidden).toBe(true);
+  });
+
+  it("toggles from the tab menu's Plans push, by tab id", async () => {
+    const { renderWorkspaceTerminals } = await tabWithPanel();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    tabPlansListener?.("tab-1");
+    await settle();
+    expect(panel()?.hidden).toBe(false);
+
+    tabPlansListener?.("tab-1");
+    await settle();
+    expect(panel()?.hidden).toBe(true);
+  });
+
+  it("ignores the Plans push for a tab id with no pane", async () => {
+    await tabWithPanel();
+
+    expect(() => tabPlansListener?.("unknown-tab")).not.toThrow();
+  });
+
+  it("disposes the panel and drops it from the DOM when the tab closes", async () => {
+    const { renderWorkspaceTerminals } = await tabWithPanel();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    renderWorkspaceTerminals([], undefined, "acme");
+
+    expect(document.querySelector(".plan-panel")).toBeNull();
+  });
+
+  describe("width clamp and persistence", () => {
+    it("clamps a width between 300px and 60% of the container, dropping the upper bound at zero", async () => {
+      const { clampPlanPanelWidth } = await load();
+
+      expect(clampPlanPanelWidth(100, 1000)).toBe(300);
+      expect(clampPlanPanelWidth(900, 1000)).toBe(600);
+      expect(clampPlanPanelWidth(450, 1000)).toBe(450);
+      expect(clampPlanPanelWidth(9000, 0)).toBe(9000);
+    });
+
+    it("resizes on drag, clamped to the container, and persists the final width on mouseup", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+      runAction("Toggle plan panel");
+      await settle();
+
+      tabPane()!.getBoundingClientRect = () =>
+        ({
+          x: 0,
+          y: 0,
+          width: 1000,
+          height: 600,
+          left: 0,
+          right: 1000,
+          top: 0,
+          bottom: 600,
+        }) as DOMRect;
+
+      handle()!.dispatchEvent(new MouseEvent("mousedown", { clientX: 700, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 600, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+      expect(panel()?.style.width).toBe("400px");
+      expect(window.localStorage.getItem("jarvis.planPanelWidth.tab-1")).toBe("400");
+    });
+
+    it("clamps a drag past 60% of the container to the 60% ceiling", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+      runAction("Toggle plan panel");
+      await settle();
+
+      tabPane()!.getBoundingClientRect = () =>
+        ({
+          x: 0,
+          y: 0,
+          width: 1000,
+          height: 600,
+          left: 0,
+          right: 1000,
+          top: 0,
+          bottom: 600,
+        }) as DOMRect;
+
+      handle()!.dispatchEvent(new MouseEvent("mousedown", { clientX: 900, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 100, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+      expect(panel()?.style.width).toBe("600px");
+    });
+
+    // jsdom's `clientWidth` is always 0 (no layout engine), so a saved
+    // width above 300 applies verbatim here — the 60% ceiling only ever
+    // bites against a real, positive container width (proven above via
+    // clampPlanPanelWidth directly, and via the drag test's own
+    // getBoundingClientRect stub).
+    it("applies a previously saved width on the next tab open, clamped at the 300px floor", async () => {
+      window.localStorage.setItem("jarvis.planPanelWidth.tab-1", "50");
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      expect(panel()?.style.width).toBe("300px");
+    });
+  });
+
+  describe("auto-open on plans:changed", () => {
+    it("opens a closed panel for the pushed path that matches this tab's own session plan, without moving focus", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      const focusedBefore = FakeTerminal.instances[0]?.focused;
+
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320); // clears the 300ms per-tab debounce
+
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+
+      expect(panel()?.hidden).toBe(false);
+      expect(FakeTerminal.instances[0]?.focused).toBe(focusedBefore);
+    });
+
+    it("does not open for a path that is not this tab's own session plan", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320);
+
+      plansChangedListener?.("/plans/unrelated.md");
+      await settle();
+
+      expect(panel()?.hidden).toBe(true);
+    });
+
+    it("does not auto-open before the debounced session-plan lookup has answered", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle(); // the cwd event lands, but the 300ms debounce has not fired yet
+
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+
+      expect(panel()?.hidden).toBe(true);
+    });
+
+    // Spec rule 3 is literally "open the panel for that tab if closed" — no
+    // memory of a manual dismissal, so a plan that keeps changing keeps
+    // surfacing itself even after the user has closed the panel once.
+    it("re-opens on a later matching push even after the user closed it manually", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320);
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+      expect(panel()?.hidden).toBe(false);
+
+      FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+      runAction("Toggle plan panel");
+      await settle();
+      expect(panel()?.hidden).toBe(true);
+
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+
+      expect(panel()?.hidden).toBe(false);
+    });
+
+    // The other side of the same rule: a panel already open for the
+    // matching path stays open through a repeat push — notifyChanged
+    // refreshes it, never open()/close() again.
+    it("leaves an already-open panel open on a repeat push for the same path", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320);
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+      expect(panel()?.hidden).toBe(false);
+
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+
+      expect(panel()?.hidden).toBe(false);
+    });
+
+    it("debounces the session-plan lookup to one plansList call per tab across rapid cwd changes", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      calls = calls.filter((c) => c.call === "plansList"); // drop anything unrelated so length is exact
+
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      dataListener?.("tab-1", CWD("/proj/src"));
+      await settle();
+      await advance(320);
+
+      const plansListCalls = calls.filter((c) => c.call === "plansList");
+      expect(plansListCalls).toHaveLength(1);
+      expect(plansListCalls[0]?.args).toEqual(["tab-1", "/proj/src"]);
+    });
   });
 });

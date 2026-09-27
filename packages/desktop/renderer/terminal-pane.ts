@@ -133,6 +133,12 @@ export type PaneHooks = {
    *  only way to see a file a command just created or removed without
    *  leaving the directory and coming back. */
   refreshExplorer?: (() => void) | undefined;
+  /** Task 8: shows or hides the tab's plan panel. Offered as a palette
+   *  action, the same way `toggleExplorer` is (id `"toggle-plan"`) — the
+   *  panel belongs to the tab, not to this pane, so every pane's action
+   *  toggles the same one. Absent means the tab has no plan panel, and the
+   *  action is left out entirely rather than doing nothing. */
+  togglePlan?: (() => void) | undefined;
 };
 
 export type { BlockView };
@@ -739,6 +745,14 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         id: "refresh-explorer",
         label: "Refresh file sidebar",
         run: () => attempt(() => refreshExplorer()),
+      });
+    }
+    const togglePlan = hooks.togglePlan;
+    if (togglePlan !== undefined) {
+      actions.push({
+        id: "toggle-plan",
+        label: "Toggle plan panel",
+        run: () => attempt(() => togglePlan()),
       });
     }
     if (hooks.workflows !== undefined && editor !== undefined) {

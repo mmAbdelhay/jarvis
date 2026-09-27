@@ -1,9 +1,11 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
+import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
 import { hostPlatform } from "./keys.js";
+import { createPlanPanel, type PlanPanel } from "./plan-panel.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
@@ -29,8 +31,22 @@ const $ = (id: string): HTMLElement => {
 };
 
 /** The outer element belongs to the Workspace — one per tab, shown and
- *  hidden as tabs change — and the tree is what draws inside it. */
-type Pane = { element: HTMLElement; tree: SplitTree; explorer: TerminalExplorer };
+ *  hidden as tabs change — and the tree is what draws inside it.
+ *
+ *  Task 8: `planPanel` is one per tab too, the split tree's right sibling.
+ *  `sessionPlanPath` is this tab's most recently resolved "session" plan
+ *  (undefined until the first successful plansList answers) — what a
+ *  `plans:changed` push compares its own path against to decide whether a
+ *  closed panel should auto-open; `sessionPlanTimer` is the pending,
+ *  per-tab debounce for the plansList call that keeps it fresh. */
+type Pane = {
+  element: HTMLElement;
+  tree: SplitTree;
+  explorer: TerminalExplorer;
+  planPanel: PlanPanel;
+  sessionPlanPath: string | undefined;
+  sessionPlanTimer: ReturnType<typeof setTimeout> | undefined;
+};
 
 /** Which shell each pane is drawing. A WeakMap rather than a lookup table
  *  the tree would have to keep in step: a pane that has been closed is
@@ -44,6 +60,130 @@ const paneKeys = new WeakMap<TerminalPane, string>();
 const HISTORY_LIMIT = 200;
 
 const panes = new Map<string, Pane>();
+
+// ------------------------------------------------------------- Plan panel
+
+/** Adapts plan-panel.ts's `t: (key: MessageKey) => string` to this app's
+ *  own bilingual MESSAGES table — every key the panel ever calls this with
+ *  (messages.ts's own "plan*" group) takes just a language, so the cast is
+ *  sound for every call this module makes, even though MessageKey itself
+ *  spans MESSAGES entries of other arities too. */
+function planPanelT(key: MessageKey): string {
+  return (MESSAGES[key] as (language: "ar" | "en") => string)(PRIMARY_LANGUAGE);
+}
+
+/** How long a cwd/focus change waits, per tab, before re-asking main which
+ *  plan (if any) this tab's own session currently names — the debounce
+ *  spec rule 3 asks for, so a burst of prompts from a fast-running script
+ *  costs one plansList call rather than one per prompt. */
+const SESSION_PLAN_DEBOUNCE_MS = 300;
+
+/** Clamps a plan panel's width to 300px…60% of `containerWidth` (spec
+ *  rule 2). `containerWidth <= 0` — no real layout yet, which is every
+ *  jsdom test and the first paint before the tab's own box has a size —
+ *  drops the upper bound rather than clamping against a width that is not
+ *  really zero. */
+export function clampPlanPanelWidth(width: number, containerWidth: number): number {
+  const max = containerWidth > 0 ? containerWidth * 0.6 : Number.POSITIVE_INFINITY;
+  return Math.min(max, Math.max(300, width));
+}
+
+function planPanelWidthKey(tabId: string): string {
+  return `jarvis.planPanelWidth.${tabId}`;
+}
+
+/** The width this tab's panel was last dragged to, or undefined for a tab
+ *  never resized (or unreadable storage — a private window, cleared site
+ *  data) — the panel then keeps styles.css's own 420px default. */
+function loadPlanPanelWidth(tabId: string): number | undefined {
+  try {
+    const raw = window.localStorage.getItem(planPanelWidthKey(tabId));
+    if (raw === null) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function savePlanPanelWidth(tabId: string, width: number): void {
+  try {
+    window.localStorage.setItem(planPanelWidthKey(tabId), String(width));
+  } catch {
+    // Not remembering is not worth interrupting anyone over.
+  }
+}
+
+/**
+ * Debounced per tab (SESSION_PLAN_DEBOUNCE_MS): asks main which plan (if
+ * any) `tabId`'s own session transcript currently names, and records the
+ * answer on the tab's own Pane so the next `plans:changed` push can compare
+ * against it. `paneKey`/`cwd` are the focused pane's own — the same pair
+ * `planPanel.setPane` is handed at every call site below, since "this tab's
+ * session plan" follows whichever pane is focused exactly as the panel
+ * itself does.
+ *
+ * Looks `tabId` up in `panes` at call time rather than closing over the
+ * `Pane` object: every call site fires from inside a pane's own hooks,
+ * which can only run once `ensurePane` has already returned and set the
+ * entry — so a miss here only ever means the tab has since closed.
+ */
+function scheduleSessionPlanRefresh(tabId: string, paneKey: string, cwd: string): void {
+  const pane = panes.get(tabId);
+  if (pane === undefined) return;
+  if (pane.sessionPlanTimer !== undefined) clearTimeout(pane.sessionPlanTimer);
+  pane.sessionPlanTimer = setTimeout(() => {
+    pane.sessionPlanTimer = undefined;
+    void window.jarvis
+      .plansList(paneKey, cwd)
+      .then((list) => {
+        pane.sessionPlanPath = list.session?.path;
+      })
+      .catch(() => {
+        // A failed lookup leaves the tab's last known session plan alone.
+      });
+  }, SESSION_PLAN_DEBOUNCE_MS);
+}
+
+/**
+ * Drags the split between the tab's panes and its plan panel — the same
+ * pattern workspace.ts's own wireDevToolsHandle follows: the pointer is
+ * tracked on the window, not the handle, so a fast drag that leaves the 5px
+ * strip does not silently stop resizing. Persists the final width on
+ * mouseup only, the same "drag freely, remember once" discipline
+ * saveDevToolsLayout follows.
+ */
+function wirePlanPanelHandle(
+  handle: HTMLElement,
+  panelElement: HTMLElement,
+  container: HTMLElement,
+  tabId: string,
+  tree: SplitTree,
+): void {
+  handle.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    let width = clampPlanPanelWidth(
+      panelElement.getBoundingClientRect().width,
+      container.getBoundingClientRect().width,
+    );
+
+    const onMove = (move: MouseEvent): void => {
+      const box = container.getBoundingClientRect();
+      if (box.width === 0) return;
+      width = clampPlanPanelWidth(box.right - move.clientX, box.width);
+      panelElement.style.width = `${Math.round(width)}px`;
+      for (const leaf of tree.panes()) leaf.refit();
+    };
+    const onUp = (): void => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      savePlanPanelWidth(tabId, Math.round(width));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
 let wired = false;
 
 // M9 Task 7 / M7 ruling 11 (shared pty size, last writer wins): which
@@ -103,6 +243,33 @@ export function initWorkspaceTerminals(): void {
     // has no business inside a block.
     paneFor(paneKey)?.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
   });
+
+  // Task 8: the tab menu's own Plans item (bug 2's native menu, desktop-
+  // only.ts) — main only names which tab; the renderer owns whether that
+  // tab's panel is open, the same division of labour onTabRename already
+  // follows for Rename's own inline input.
+  window.jarvis.onTabPlans((tabId) => {
+    const pane = panes.get(tabId);
+    if (pane === undefined) return;
+    pane.planPanel.toggle();
+  });
+
+  // Task 8: a plan file changed on disk. Every open tab's panel gets the
+  // chance to refresh itself (notifyChanged is a no-op unless that panel's
+  // own open doc — or list — actually needs it); a tab whose panel is
+  // still closed additionally auto-opens it, but only when the changed
+  // path is the one its own session names — never any other tab's plan,
+  // and never a closed panel for an unrelated file. Opening never moves
+  // focus: plan-panel.ts's open() touches no element's focus of its own,
+  // and its onToggle hook (wired in ensurePane) only refits the terminal.
+  window.jarvis.onPlansChanged((path) => {
+    for (const pane of panes.values()) {
+      pane.planPanel.notifyChanged(path);
+      if (!pane.planPanel.isOpen() && pane.sessionPlanPath === path) {
+        void pane.planPanel.open(path);
+      }
+    }
+  });
 }
 
 /**
@@ -142,6 +309,13 @@ export function renderWorkspaceTerminals(
     // close handler reaps the tab's shells and its splits' with them.
     pane.tree.dispose();
     pane.explorer.dispose();
+    // Task 8: closing a tab disposes its plan panel too, and drops any
+    // pending session-plan refresh rather than letting it fire into a
+    // Pane object that is no longer in `panes` (scheduleSessionPlanRefresh
+    // already no-ops in that case, but there is no reason to leave the
+    // timer running for a tab that is gone).
+    pane.planPanel.dispose();
+    if (pane.sessionPlanTimer !== undefined) clearTimeout(pane.sessionPlanTimer);
     pane.element.remove();
     panes.delete(tabId);
   }
@@ -287,6 +461,14 @@ function ensurePane(
     closeTab: () => void window.jarvis.closeTab(tabId),
   };
 
+  // The tab's plan panel, right sibling of the split tree — declared here
+  // (assigned once the tree exists, mirroring `tree` above) so the pane
+  // callbacks built below can close over it even though it is built after
+  // them. Every callback that reaches it only ever runs later, on a
+  // cwd/focus event or a click — long after this function has returned and
+  // `planPanel` holds its real value.
+  let planPanel: PlanPanel | undefined;
+
   // The tab's file sidebar, on the left — one for the whole tab, however
   // many panes it is split into, following whichever of them has the
   // focus. Appended before the tree so it sits left of the panes.
@@ -336,12 +518,17 @@ function ensurePane(
         paneHost,
         splitKeys,
         paneSettings(isLoginTerminal),
-        // Only the focused pane's directory drives the sidebar: a
-        // background pane running `cd` must never re-root the tree under
+        // Only the focused pane's directory drives the sidebar (and the
+        // plan panel, which follows it the same way — Task 8 rule 1): a
+        // background pane running `cd` must never re-root either under
         // someone reading it in another pane.
         (path) => {
           lastCwd.set(paneKey, path);
-          if (focusedKey() === paneKey) explorer.setRoot(paneKey, path);
+          if (focusedKey() === paneKey) {
+            explorer.setRoot(paneKey, path);
+            planPanel?.setPane(paneKey, path);
+            scheduleSessionPlanRefresh(tabId, paneKey, path);
+          }
         },
         // The sidebar's only way out: no chord, one palette action.
         () => explorer.toggle(),
@@ -349,6 +536,9 @@ function ensurePane(
         // deleted or renamed: nothing watches the filesystem, and a root
         // that has not changed is not re-listed.
         () => explorer.refresh(),
+        // The plan panel's own only way out besides the tab menu's Plans
+        // item (Task 8) — no chord of its own, same rule as the sidebar.
+        () => planPanel?.toggle(),
       ),
     tabId,
     {
@@ -362,6 +552,8 @@ function ensurePane(
         // back to the tab's own.
         if (path === undefined) explorer.clear();
         else explorer.setRoot(paneKey, path);
+        planPanel?.setPane(paneKey, path);
+        if (path !== undefined) scheduleSessionPlanRefresh(tabId, paneKey, path);
       },
     },
   );
@@ -373,7 +565,55 @@ function ensurePane(
     return tree === undefined ? undefined : paneKeys.get(tree.focused());
   }
 
-  const pane: Pane = { element, tree: built, explorer };
+  // The plan panel and its drag handle: appended last, after the tree, so
+  // DOM order inside `.workspace-terminal-pane` is explorer | splits |
+  // handle | panel (spec rule 1) — the handle always immediately precedes
+  // the panel it resizes.
+  const planHandle = document.createElement("div");
+  planHandle.className = "plan-panel-handle";
+  // The panel itself starts closed (plan-panel.ts's own root.hidden), so
+  // the handle starts hidden with it; onToggle below keeps the two in step
+  // from here on.
+  planHandle.hidden = true;
+
+  const builtPanel = createPlanPanel({
+    api: window.jarvis,
+    t: planPanelT,
+    // xterm refit after every open/close (spec rule 5): both go through
+    // setOpen, so this is the one place that needs to. Never touches focus
+    // — plan-panel.ts's open()/close() do not move it either, which is
+    // what keeps an auto-open from stealing the terminal's keys.
+    onToggle: (open) => {
+      planHandle.hidden = !open;
+      for (const leaf of built.panes()) leaf.refit();
+    },
+    // Controller ruling: main's webContents deny every target=_blank
+    // outright, so a plan block's own rendered link has no route to the OS
+    // browser without this — see desktop-only.ts's own scheme/length gate
+    // before shell.openExternal ever runs.
+    onLinkClick: (href) => void window.jarvis.plansOpenLink(href),
+  });
+  planPanel = builtPanel;
+  element.append(planHandle, builtPanel.element);
+  wirePlanPanelHandle(planHandle, builtPanel.element, element, tabId, built);
+
+  // A width this tab was resized to before wins over styles.css's own
+  // 420px default (spec rule 2); clamped against this pane's own box,
+  // which already has its real size by the time ensurePane runs (its host
+  // was un-hidden just before this call — see renderWorkspaceTerminals).
+  const savedWidth = loadPlanPanelWidth(tabId);
+  if (savedWidth !== undefined) {
+    builtPanel.element.style.width = `${clampPlanPanelWidth(savedWidth, element.clientWidth)}px`;
+  }
+
+  const pane: Pane = {
+    element,
+    tree: built,
+    explorer,
+    planPanel: builtPanel,
+    sessionPlanPath: undefined,
+    sessionPlanTimer: undefined,
+  };
   panes.set(tabId, pane);
   return pane;
 }
@@ -394,6 +634,7 @@ function makePane(
   onCwd: (path: string) => void,
   toggleExplorer: () => void,
   refreshExplorer: () => void,
+  togglePlan: () => void,
 ): TerminalPane {
   // A split pane's shell has to exist before the pane can attach to it, so
   // the attach below waits on this. The tab's own pane has had a shell
@@ -527,6 +768,9 @@ function makePane(
     // "Refresh file sidebar" in the same palette, and the sidebar's only
     // refresh trigger besides a `cd` and expanding a folder.
     refreshExplorer,
+    // "Toggle plan panel" (Task 8), the same "belongs to the tab" rule
+    // toggleExplorer follows.
+    togglePlan,
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;

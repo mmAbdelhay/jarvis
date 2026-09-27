@@ -215,6 +215,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     plansDeleteComment: vi.fn(async () => false),
     plansSend: vi.fn(async () => ({ ok: false as const, reason: "no-comments" as const })),
     onPlansChanged: vi.fn(),
+    onTabPlans: vi.fn(),
+    plansOpenLink: vi.fn(async () => {}),
   };
   const jarvis: RendererApi = { ...defaults, ...overrides };
   window.jarvis = jarvis;

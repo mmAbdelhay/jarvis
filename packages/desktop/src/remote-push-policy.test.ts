@@ -15,6 +15,7 @@ const DESKTOP_ONLY = new Set([
   "workspace:devtoolsDockChosen",
   "workspace:devtoolsClosed",
   "workspace:tabRename",
+  "workspace:tabPlans",
   "remote:update",
 ]);
 

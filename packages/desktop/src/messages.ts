@@ -737,6 +737,8 @@ export const MESSAGES = {
   tabMenuRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
   tabMenuReload: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تحميل" : "Reload"),
   tabMenuClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
+  // Task 8: the tab menu's fourth item, opening this tab's own plan panel.
+  tabMenuPlans: (language: "ar" | "en"): string => (language === "ar" ? "الخطط" : "Plans"),
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie

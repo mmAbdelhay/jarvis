@@ -30,6 +30,13 @@ export type PlanPanelHooks = {
   onToggle?: (open: boolean) => void;
   /** Task 7 can attach editing here without changing read-mode rendering. */
   onBlockClick?: (block: PlanBlock, element: HTMLElement) => void;
+  /** Task 8: a block's own rendered markdown `<a href>` was clicked. The
+   *  panel always calls `preventDefault` first — main's own
+   *  `setWindowOpenHandler` denies every `target=_blank` outright (every
+   *  link markdown-it emits carries one), so the anchor's default action
+   *  would otherwise silently do nothing. Absent leaves a link inert,
+   *  same as today. */
+  onLinkClick?: (href: string) => void;
 };
 
 export type PlanPanel = {
@@ -763,6 +770,22 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     root.append(action);
   }
   document.addEventListener("mouseup", selectionChanged);
+
+  // Task 8: one delegated listener for every link a block's own markdown
+  // renders, rather than one per `<a>` — blocks are rebuilt wholesale on
+  // every renderDocument(), so a per-anchor listener would have to be
+  // rewired on every render for no benefit a single root-level one does
+  // not already give. Scoped to `.plan-block` so the panel's own chrome
+  // (never anchors) is untouched even if that ever changes.
+  root.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const anchor = event.target.closest("a[href]");
+    if (anchor === null || anchor.closest(".plan-block") === null) return;
+    const href = anchor.getAttribute("href");
+    if (href === null) return;
+    event.preventDefault();
+    hooks.onLinkClick?.(href);
+  });
 
   async function openPanel(path?: string): Promise<void> {
     setOpen(true);

@@ -27,6 +27,7 @@ import {
   ipcMain,
   screen,
   session,
+  shell as electronShell,
 } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
@@ -2214,6 +2215,10 @@ app.whenReady().then(async () => {
       reloadTab: (tabId) => void dispatch["workspace:reload"]([tabId], DESKTOP_ORIGIN),
       closeTab: (tabId) => void dispatch["workspace:close"]([tabId], DESKTOP_ORIGIN),
       startTabRename: (tabId) => broadcast.local("workspace:tabRename", tabId),
+      // Task 8: the tab menu's own Plans item — the renderer owns every
+      // tab's plan panel, so main only names which tab to toggle.
+      startTabPlans: (tabId) => broadcast.local("workspace:tabPlans", tabId),
+      shell: electronShell,
       language: PRIMARY_LANGUAGE,
     });
     workspace.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));
