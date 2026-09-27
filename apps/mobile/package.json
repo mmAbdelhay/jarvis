@@ -15,8 +15,6 @@
     "eas-build-post-install": "cd ../.. && npx tsc -b packages/wire"
   },
   "dependencies": {
-    "@expo-google-fonts/jetbrains-mono": "0.4.1",
-    "@expo-google-fonts/manrope": "0.4.2",
     "@expo/metro-runtime": "57.0.15",
     "@jarvis/wire": "workspace:*",
     "expo": "57.0.23",
