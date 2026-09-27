@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
-import type { BindChoice } from "@jarvis/remote";
+import type { BindChoice, RemoteStatus } from "@jarvis/remote";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 
@@ -88,6 +88,7 @@ function sample(): JarvisConfig {
       sidecarProxy: false,
       tls: {},
       push: { enabled: false, includeProjectNames: false },
+      web: { enabled: false },
       idleDisableMinutes: 0,
     },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
@@ -171,6 +172,16 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <label id="settings-remote-push-projects-label"></label>
     <input id="settings-remote-push-projects" type="checkbox" />
     <div id="settings-remote-push-projects-note"></div>
+    <label id="settings-remote-web-label"></label>
+    <input id="settings-remote-web" type="checkbox" />
+    <div id="settings-remote-web-note"></div>
+    <div id="settings-remote-web-state"></div>
+    <div id="settings-remote-web-access" hidden>
+      <div id="settings-remote-web-url"></div>
+      <button id="settings-remote-web-open"></button>
+      <canvas id="settings-remote-web-qr"></canvas>
+      <div id="settings-remote-web-qr-note"></div>
+    </div>
     <div id="settings-remote-problem" hidden></div>
     <div id="settings-remote-pair-title"></div>
     <button id="settings-remote-new-code"></button>
@@ -250,6 +261,10 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
       return Promise.resolve();
     },
     onRemoteStatus: () => {},
+    openWebClient: () => {
+      calls.push({ call: "openWebClient", args: [] });
+      return Promise.resolve(true);
+    },
     tailscaleCert: () => {
       calls.push({ call: "tailscaleCert", args: [] });
       return Promise.resolve({
@@ -1906,7 +1921,7 @@ describe("remote access section", () => {
       | "devices-write-failed";
     pairing?:
       | { kind: "closed" }
-      | { kind: "open"; uri: string; expiresAt: number }
+      | { kind: "open"; uri: string; expiresAt: number; webUri?: string }
       | {
           kind: "confirming";
           requestId: string;
@@ -1920,6 +1935,7 @@ describe("remote access section", () => {
       pairedAt: number;
       lastSeenAt: number | undefined;
       connected: boolean;
+      client?: "web";
       push?: "ios" | "android";
     }[];
     listening?: {
@@ -1932,6 +1948,7 @@ describe("remote access section", () => {
     idle?:
       | { kind: "armed"; disableAt: number }
       | { kind: "disabled"; at: number; afterMinutes: number };
+    web?: RemoteStatus["web"];
   }) {
     return {
       enabled: patch.enabled ?? true,
@@ -1941,6 +1958,7 @@ describe("remote access section", () => {
       problem: patch.problem,
       sidecarProxy: patch.sidecarProxy ?? ("off" as const),
       idle: patch.idle,
+      ...(patch.web !== undefined ? { web: patch.web } : {}),
     };
   }
 
@@ -2258,6 +2276,95 @@ describe("remote access section", () => {
     expect(document.querySelector("#settings-remote-devices .settings-row")?.textContent).toContain(
       "T",
     );
+  });
+
+  describe("browser access (Phase 1)", () => {
+    const ORIGIN = "https://laptop.tail1234.ts.net:7718";
+    const WEB_ON = { kind: "on" as const, port: 7718, origin: ORIGIN };
+
+    it("the switch shows the draft, and a change is what Save carries", async () => {
+      const calls = await open();
+      const toggle = document.getElementById("settings-remote-web") as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      expect(text("settings-remote-web-label")).toBe(MESSAGES.remoteWebLabel(PRIMARY_LANGUAGE));
+
+      toggle.checked = true;
+      change(toggle);
+
+      expect((await save(calls)).remote.web.enabled).toBe(true);
+    });
+
+    it("the state line comes from the bridge's status, and nothing else shows while it is not on", async () => {
+      await openWithStatus(statusOf({ web: { kind: "needs-certificate" } }));
+      expect(text("settings-remote-web-state")).toBe(
+        MESSAGES.remoteWebState("needs-certificate", PRIMARY_LANGUAGE),
+      );
+      expect((document.getElementById("settings-remote-web-access") as HTMLElement).hidden).toBe(
+        true,
+      );
+      expect(text("settings-remote-web-url")).toBe("");
+    });
+
+    it("while on, shows the root URL, draws it as a QR, and Open asks main to open it", async () => {
+      vi.mocked(encodeQr).mockClear();
+      const calls = await openWithStatus(statusOf({ web: WEB_ON }));
+
+      expect(text("settings-remote-web-state")).toBe(
+        MESSAGES.remoteWebState("on", PRIMARY_LANGUAGE),
+      );
+      expect((document.getElementById("settings-remote-web-access") as HTMLElement).hidden).toBe(
+        false,
+      );
+      expect(text("settings-remote-web-url")).toBe(`${ORIGIN}/`);
+      expect(encodeQr).toHaveBeenCalledWith(`${ORIGIN}/`);
+      expect(text("settings-remote-web-qr-note")).toBe(
+        MESSAGES.remoteWebQrNote(false, PRIMARY_LANGUAGE),
+      );
+
+      (document.getElementById("settings-remote-web-open") as HTMLButtonElement).click();
+      expect(calls.filter((entry) => entry.call === "openWebClient")).toHaveLength(1);
+    });
+
+    it("while a pairing window is open, the link and QR are the browser pairing link", async () => {
+      vi.mocked(encodeQr).mockClear();
+      const webUri = `${ORIGIN}/pair#v=2&host=100.64.0.1`;
+      await openWithStatus(
+        statusOf({
+          web: WEB_ON,
+          pairing: {
+            kind: "open",
+            uri: "jarvis://pair?v=2",
+            expiresAt: Date.now() + 60_000,
+            webUri,
+          },
+        }),
+      );
+
+      expect(text("settings-remote-web-url")).toBe(webUri);
+      expect(encodeQr).toHaveBeenCalledWith(webUri);
+      expect(text("settings-remote-web-qr-note")).toBe(
+        MESSAGES.remoteWebQrNote(true, PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("labels each paired device as a browser or the app", async () => {
+      const device = { pairedAt: 1, lastSeenAt: undefined, connected: false };
+      await openWithStatus(
+        statusOf({
+          devices: [
+            { id: "a", name: "Chrome", client: "web", ...device },
+            { id: "b", name: "Pixel", ...device },
+          ],
+        }),
+      );
+      const rows = [...document.querySelectorAll("#settings-remote-devices .settings-row")];
+      expect(rows[0]?.textContent).toContain(
+        MESSAGES.remoteWebDeviceClient("web", PRIMARY_LANGUAGE),
+      );
+      expect(rows[1]?.textContent).toContain(
+        MESSAGES.remoteWebDeviceClient("app", PRIMARY_LANGUAGE),
+      );
+    });
   });
 
   it("shows a problem note, hidden when there is none", async () => {
@@ -2799,9 +2906,9 @@ describe("remote access section", () => {
       await settle();
 
       const row = document.querySelector("#settings-remote-devices .settings-row");
-      // name, state, revoke, failure — the same count as before this task,
-      // not the 5 a push-registered device's row has.
-      expect(row?.children).toHaveLength(4);
+      // name, state, client (Phase 1), revoke, failure — not the 6 a
+      // push-registered device's row has.
+      expect(row?.children).toHaveLength(5);
     });
   });
 

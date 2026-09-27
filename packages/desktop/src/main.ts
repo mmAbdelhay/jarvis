@@ -28,6 +28,7 @@ import {
   ipcMain,
   screen,
   session,
+  shell as electronShell,
 } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
@@ -49,13 +50,16 @@ import {
 import { registerDesktopOnly } from "./desktop-only.js";
 import { createBridge } from "@jarvis/remote";
 import {
+  buildWebManifest,
   createSidecarProxy,
   listenTls,
+  listenWeb,
   loadCertificate,
   nodeFs,
   nodeTimers,
 } from "@jarvis/remote/listen";
 import { createRemoteAccess, type RemoteAccess } from "./remote-access.js";
+import { createWebManifestLoader, nodeWebExportFs, webExportDir } from "./web-export.js";
 import { disableRemoteOnDisk } from "./remote-idle.js";
 import { obtainCertificate, type TailscaleCertDeps } from "./tailscale-cert.js";
 import { createNotifier } from "./notify.js";
@@ -1529,6 +1533,21 @@ app.whenReady().then(async () => {
           }),
         createProxy: (registry) =>
           createSidecarProxy({ registry, log: (line) => console.error(line) }),
+        // Phase 1: the browser client's own listener, behind the bridge's
+        // web gate. The export is read once, lazily (web-export.ts).
+        listenWeb,
+        loadWebManifest: createWebManifestLoader({
+          dir: () =>
+            webExportDir({
+              packaged: app.isPackaged,
+              resourcesPath: process.resourcesPath,
+              // From dist/src/main.js: the repo root, then the mobile app's
+              // web export (apps/mobile `export:web`).
+              devDir: fileURLToPath(new URL("../../../../apps/mobile/dist-web", import.meta.url)),
+            }),
+          fs: nodeWebExportFs,
+          build: buildWebManifest,
+        }),
         enforceFileModes: remoteEnforceFileModes,
         log: (line) => console.error(line),
       },
@@ -2148,6 +2167,8 @@ app.whenReady().then(async () => {
       notifier,
       tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
       writeConfig,
+      // Phase 1: remote:openWebClient's system browser (dispatch.ts).
+      openExternal: (url) => electronShell.openExternal(url),
     });
     for (const [channel, handler] of Object.entries(dispatch)) {
       ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(args, DESKTOP_ORIGIN));

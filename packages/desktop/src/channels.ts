@@ -229,6 +229,9 @@ export const INVOKE_CHANNELS = {
   // keyPath and turns remote.sidecarProxy on, through the same serialized
   // writeConfig queue Settings' own save uses. See tailscale-cert.ts.
   tailscaleCert: "remote:tailscaleCert",
+  // Desktop-only (Phase 1): opens the browser client in the system
+  // browser. Takes no URL — main builds it from the bridge's own status.
+  openWebClient: "remote:openWebClient",
 } as const satisfies Record<InvokeKey, string>;
 
 /** Method → channel, for every push. */

@@ -899,6 +899,27 @@
           </span>
         </div>
         <div id="settings-remote-push-projects-note" class="settings-note"></div>
+        <!-- Phase 1: browser access. The switch is the draft (saved with the
+             rest); the state line, link and QR below it come from the
+             bridge's own status (settings.ts renderRemoteWeb). While a
+             pairing window is open the link and QR carry the pairing
+             secret, so they are cleared the moment it closes. -->
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-web-label" for="settings-remote-web"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-web" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-web-note" class="settings-note"></div>
+        <div id="settings-remote-web-state" class="settings-note"></div>
+        <div id="settings-remote-web-access" hidden>
+          <div id="settings-remote-web-url" class="mono settings-remote-pair-code" dir="ltr"></div>
+          <button id="settings-remote-web-open" class="settings-add" type="button"></button>
+          <canvas id="settings-remote-web-qr" class="settings-remote-pair-qr" aria-hidden="true"></canvas>
+          <div id="settings-remote-web-qr-note" class="settings-note"></div>
+        </div>
         <div id="settings-remote-problem" class="settings-note settings-note--warning" hidden></div>
         <div class="settings-section-head">
           <div id="settings-remote-pair-title" class="lbl"></div>

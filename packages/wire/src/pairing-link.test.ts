@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPairingUri, parsePairingUri } from "./pairing-link.js";
+import { formatPairingUri, parsePairingUri, webPairingUrl } from "./pairing-link.js";
 import { HOSTNAME_PATTERN, type PairingLink } from "./protocol.js";
 
 const TOKEN = "A".repeat(43);
@@ -97,5 +97,33 @@ describe("pairing URI name (rule 2)", () => {
   ])("refuses a name of %s", (_label, name) => {
     const uri = `${formatPairingUri(link)}&name=${name}`;
     expect(parsePairingUri(uri)).toBeUndefined();
+  });
+});
+
+describe("webPairingUrl", () => {
+  const link: PairingLink = {
+    host: "100.64.0.1",
+    port: 7717,
+    secret: TOKEN,
+    fingerprint: FINGERPRINT,
+    name: "mac.tail1234.ts.net",
+  };
+
+  it("puts the jarvis:// query in the fragment of the web origin's /pair", () => {
+    const query = formatPairingUri(link).slice("jarvis://pair?".length);
+    expect(webPairingUrl(link, 7718)).toBe(`https://mac.tail1234.ts.net:7718/pair#${query}`);
+  });
+
+  it("leaves port 443 out, as a browser's own origin does", () => {
+    expect(webPairingUrl(link, 443)).toMatch(/^https:\/\/mac\.tail1234\.ts\.net\/pair#v=/);
+  });
+
+  it("refuses a link with no certificate name", () => {
+    const { name: _name, ...unnamed } = link;
+    expect(webPairingUrl(unnamed, 7718)).toBeUndefined();
+  });
+
+  it.each([0, 65536, 1.5, Number.NaN])("refuses web port %s", (port) => {
+    expect(webPairingUrl(link, port)).toBeUndefined();
   });
 });

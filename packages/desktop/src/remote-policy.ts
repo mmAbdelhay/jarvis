@@ -225,6 +225,9 @@ export const CHANNEL_POLICY = {
   // exactly the class of persistent, laptop-controlled-tool config change
   // settings:save and settings:testAgent are already desktop-only for.
   "remote:tailscaleCert": "desktop-only",
+  // Desktop-only (Phase 1): opens a browser on the laptop itself; a phone
+  // has no business launching programs here.
+  "remote:openWebClient": "desktop-only",
 } as const satisfies Record<InvokeChannel, ChannelAccess>;
 
 type PolicyEntries = typeof CHANNEL_POLICY;

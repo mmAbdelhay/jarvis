@@ -52,6 +52,7 @@ const CONFIG: JarvisConfig = {
     sidecarProxy: true,
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
+    web: { enabled: false },
     idleDisableMinutes: 30,
   },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",

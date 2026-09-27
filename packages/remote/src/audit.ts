@@ -11,6 +11,9 @@ import type { SidecarKind } from "./sidecar-registry.js";
 export type AuditEvent =
   | { kind: "listening"; host: string; port: number; fingerprintTail: string }
   | { kind: "stopped" }
+  /** Phase 1: the browser listener came up on `port` (a bind failure is an
+   *  `error` line instead). */
+  | { kind: "web-listening"; port: number }
   | { kind: "pairing-opened"; expiresAt: number }
   | { kind: "pairing-closed"; reason: "expired" | "cancelled" }
   | { kind: "pairing-requested"; source: string; deviceName: string }

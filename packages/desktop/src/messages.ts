@@ -23,6 +23,7 @@
 import type { PrerequisiteId } from "@jarvis/platform";
 import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
 import type { PushKind } from "@jarvis/wire";
+import type { RemoteWebState } from "./remote-web.js";
 
 export const PRIMARY_LANGUAGE = "en";
 
@@ -1039,6 +1040,57 @@ export const MESSAGES = {
     return platform === "ios" ? "Notifications on (iPhone)" : "Notifications on (Android)";
   },
   remoteRevoke: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء الإقران" : "Revoke"),
+  // Phase 1: browser access — its switch, what it does, and its state line,
+  // which (like remoteCertificateReal) comes from the bridge's own status,
+  // never the draft. A closed table: a web state added without a
+  // translation here is a compile error.
+  remoteWebLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "الوصول من المتصفح" : "browser access",
+  remoteWebNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يفتح منفذًا ثانيًا ليعمل Jarvis في متصفح على جهاز مقترن. يحتاج إلى شهادة Tailscale وكلمة مرور المالك."
+      : "Opens a second port so Jarvis runs in a browser on a paired device. Needs a Tailscale certificate and the owner password.",
+  remoteWebState: (state: RemoteWebState, language: "ar" | "en"): string => {
+    const ar: Record<RemoteWebState, string> = {
+      off: "متوقف",
+      "port-conflict": "متوقف: منفذ المتصفح هو نفسه منفذ الوصول عن بُعد.",
+      "listen-failed": "متوقف: تعذّر فتح منفذ المتصفح. قد يكون برنامج آخر يستخدمه.",
+      "needs-certificate": "يحتاج إلى شهادة حقيقية (Tailscale) قبل أن يعمل.",
+      "needs-owner-password": "يحتاج إلى كلمة مرور المالك قبل أن يعمل.",
+      "not-built": "نسخة المتصفح غير مضمّنة في هذا الإصدار.",
+      on: "مفعّل",
+    };
+    const en: Record<RemoteWebState, string> = {
+      off: "Off",
+      "port-conflict": "Off: the browser port is the same as the remote access port.",
+      "listen-failed":
+        "Off: the browser port could not be opened. Another program may be using it.",
+      "needs-certificate": "Needs a real (Tailscale) certificate before it can run.",
+      "needs-owner-password": "Needs the owner password before it can run.",
+      "not-built": "The browser version is not included in this build.",
+      on: "On",
+    };
+    return (language === "ar" ? ar : en)[state];
+  },
+  remoteWebOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح في المتصفح" : "Open in browser",
+  // Under the QR: while a pairing window is open it carries the pairing
+  // link, otherwise just the address.
+  remoteWebQrNote: (pairing: boolean, language: "ar" | "en"): string => {
+    if (language === "ar") {
+      return pairing
+        ? "امسح الرمز بكاميرا الهاتف لإقران متصفحه."
+        : "امسح الرمز لفتح Jarvis في متصفح جهاز مقترن.";
+    }
+    return pairing
+      ? "Scan with a phone's camera to pair its browser."
+      : "Scan to open Jarvis in a paired device's browser.";
+  },
+  // Paired devices: which client paired (RemoteDeviceStatus.client).
+  remoteWebDeviceClient: (client: "web" | "app", language: "ar" | "en"): string => {
+    if (language === "ar") return client === "web" ? "متصفح" : "تطبيق";
+    return client === "web" ? "Browser" : "App";
+  },
   // The seven RemoteProblem values the bridge's own gate can land on
   // (bridge.ts). Closed table for the same reason remoteErrorText is: a
   // problem added to the protocol without a translation here is a compile

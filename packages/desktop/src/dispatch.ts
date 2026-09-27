@@ -68,6 +68,7 @@ import {
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
+import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 
@@ -300,6 +301,10 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // Phase 1: Electron's shell.openExternal — the system browser, never a
+  // window inside Jarvis. Only remote:openWebClient calls it, with a URL
+  // built from the bridge's own status.
+  openExternal(url: string): Promise<void>;
 };
 
 /** A terminal/session pty resize dimension: a plain positive integer, no
@@ -1010,6 +1015,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "remote:signOutEverywhere": async (_args, origin) => {
       if (origin.kind === "remote") return;
       await deps.remote.signOutEverywhere();
+    },
+    // Phase 1: desktop-only (remote-policy.ts), refused here again. Any
+    // argument is ignored: the URL comes only from the bridge's status, and
+    // remoteWebUrl only ever builds an https URL from the web origin.
+    "remote:openWebClient": async (_args, origin) => {
+      if (origin.kind === "remote") return false;
+      const url = remoteWebUrl(deps.remote.status());
+      if (url === undefined || !url.startsWith("https://")) return false;
+      await deps.openExternal(url);
+      return true;
     },
     // M10 Task 4: a phone's own Expo push registration. Remote only
     // (remote-policy.ts) — a desktop origin is refused outright, belt and

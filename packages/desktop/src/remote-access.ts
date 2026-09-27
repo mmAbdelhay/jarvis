@@ -39,7 +39,7 @@ import {
 } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration } from "@jarvis/wire";
 import type { Broadcaster } from "./broadcast.js";
-import type { RemoteConfig } from "./config.js";
+import { effectiveWebPort, type RemoteConfig } from "./config.js";
 import type { DispatchTable, Handler, RemoteControls, SidecarPublisher } from "./dispatch.js";
 import { MESSAGES } from "./messages.js";
 import type { PushTarget } from "./notify.js";
@@ -211,8 +211,9 @@ function toBridgeConfig(config: RemoteConfig): BridgeConfig {
     port: config.port,
     sidecarProxy: config.sidecarProxy,
     idleDisableMinutes: config.idleDisableMinutes,
-    // Phase 1: off until Task 9 parses `remote.web` from jarvis.yaml.
-    web: { enabled: false, port: config.port + 1 },
+    // Phase 1: config.ts has already refused an enabled web section whose
+    // effective port is out of range or equal to the bridge's own.
+    web: { enabled: config.web.enabled, port: effectiveWebPort(config) },
     tls: {
       ...(config.tls.certPath !== undefined ? { certPath: config.tls.certPath } : {}),
       ...(config.tls.keyPath !== undefined ? { keyPath: config.tls.keyPath } : {}),

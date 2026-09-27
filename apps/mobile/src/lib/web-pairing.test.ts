@@ -1,4 +1,4 @@
-import { formatPairingUri, type PairingLink } from "@jarvis/wire";
+import { formatPairingUri, type PairingLink, webPairingUrl } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { deviceNameFromUserAgent, pairingLinkFromHash, pairingLinkFromText } from "./web-pairing";
 
@@ -92,5 +92,23 @@ describe("deviceNameFromUserAgent", () => {
   it("falls back to a generic name for an unknown or empty agent", () => {
     expect(deviceNameFromUserAgent("")).toBe("Web browser");
     expect(deviceNameFromUserAgent("curl/8.0")).toBe("Web browser");
+  });
+});
+
+describe("webPairingUrl round trip (desktop QR → browser)", () => {
+  it("the desktop's web pairing URL parses back to the same link, by hash and by paste", () => {
+    const url = webPairingUrl(LINK, 7718);
+    if (url === undefined) throw new Error("expected a web pairing URL");
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe("https://laptop.tail1234.ts.net:7718");
+    expect(parsed.pathname).toBe("/pair");
+    expect(pairingLinkFromHash(parsed.hash)).toEqual(LINK);
+    expect(pairingLinkFromText(url)).toEqual(LINK);
+  });
+
+  it("round-trips on port 443 too", () => {
+    const url = webPairingUrl(LINK, 443);
+    if (url === undefined) throw new Error("expected a web pairing URL");
+    expect(pairingLinkFromText(url)).toEqual(LINK);
   });
 });

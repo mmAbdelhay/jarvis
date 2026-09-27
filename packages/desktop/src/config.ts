@@ -179,6 +179,9 @@ export type RemoteConfig = {
   tls: { certPath?: string; keyPath?: string };
   /** The one part of the feature that involves a third party. */
   push: { enabled: boolean; includeProjectNames: boolean };
+  /** Phase 1: the browser client's own listener, off by default. `port`
+   *  absent means the bridge port + 1 — see `effectiveWebPort`. */
+  web: { enabled: boolean; port?: number };
   /** 0 = never; otherwise the bridge turns itself off after this long idle. */
   idleDisableMinutes: number;
 };
@@ -760,8 +763,16 @@ export const DEFAULT_REMOTE: RemoteConfig = {
   sidecarProxy: false,
   tls: {},
   push: { enabled: false, includeProjectNames: false },
+  web: { enabled: false },
   idleDisableMinutes: 0,
 };
+
+/** The port the browser listener binds: `remote.web.port`, or the bridge
+ *  port + 1 when that is absent. parseRemoteWeb has already checked it is
+ *  1-65535 and not the bridge port whenever `web.enabled` is true. */
+export function effectiveWebPort(remote: Pick<RemoteConfig, "port" | "web">): number {
+  return remote.web.port ?? remote.port + 1;
+}
 
 const BIND_ADDRESS_ERROR =
   "Config `remote.bindAddress` must be an IP address such as 127.0.0.1, not a hostname";
@@ -774,6 +785,7 @@ function parseRemote(rawRemote: unknown): RemoteConfig {
     ...DEFAULT_REMOTE,
     tls: {},
     push: { ...DEFAULT_REMOTE.push },
+    web: { ...DEFAULT_REMOTE.web },
   });
   if (rawRemote === undefined || rawRemote === null) return defaults();
   if (typeof rawRemote !== "object" || Array.isArray(rawRemote)) {
@@ -820,13 +832,15 @@ function parseRemote(rawRemote: unknown): RemoteConfig {
     );
   }
 
+  const bridgePort = typeof port === "number" ? port : DEFAULT_REMOTE.port;
   return {
     enabled: flag("enabled"),
     bindAddress: typeof bindAddress === "string" ? bindAddress : DEFAULT_REMOTE.bindAddress,
-    port: typeof port === "number" ? port : DEFAULT_REMOTE.port,
+    port: bridgePort,
     sidecarProxy: flag("sidecarProxy"),
     tls: parseRemoteTls(remote["tls"]),
     push: parseRemotePush(remote["push"]),
+    web: parseRemoteWeb(remote["web"], bridgePort),
     idleDisableMinutes: typeof idle === "number" ? idle : DEFAULT_REMOTE.idleDisableMinutes,
   };
 }
@@ -874,6 +888,46 @@ function parseRemotePush(rawPush: unknown): RemoteConfig["push"] {
     return value;
   };
   return { enabled: flag("enabled"), includeProjectNames: flag("includeProjectNames") };
+}
+
+/**
+ * Phase 1's `remote.web`. The port's own shape is checked whether or not
+ * the toggle is on, like every other key; the rules that depend on the
+ * bridge port (the derived port must be a real port, and must not be the
+ * bridge's own) only refuse the file while the toggle is on, so a
+ * disabled section can never stop Jarvis from loading. Bridge port 0 (the
+ * OS picks) has no "+1", so an enabled web section then needs its own port.
+ */
+function parseRemoteWeb(rawWeb: unknown, bridgePort: number): RemoteConfig["web"] {
+  if (rawWeb === undefined || rawWeb === null) return { ...DEFAULT_REMOTE.web };
+  if (typeof rawWeb !== "object" || Array.isArray(rawWeb)) {
+    throw new Error("Config `remote.web` must be an object");
+  }
+  const web = rawWeb as Record<string, unknown>;
+  const enabled = web["enabled"];
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("Config `remote.web.enabled` must be true or false");
+  }
+  const port = web["port"];
+  if (
+    port !== undefined &&
+    (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535)
+  ) {
+    throw new Error("Config `remote.web.port` must be a whole number from 1 to 65535");
+  }
+  const parsed: RemoteConfig["web"] = {
+    enabled: enabled ?? DEFAULT_REMOTE.web.enabled,
+    ...(typeof port === "number" ? { port } : {}),
+  };
+  if (parsed.enabled) {
+    if (parsed.port === undefined && (bridgePort === 0 || bridgePort === 65535)) {
+      throw new Error("Config `remote.web.port` must be set when `remote.port` is 0 or 65535");
+    }
+    if (effectiveWebPort({ port: bridgePort, web: parsed }) === bridgePort) {
+      throw new Error("Config `remote.web.port` must differ from `remote.port`");
+    }
+  }
+  return parsed;
 }
 
 function parseWhisper(rawWhisper: unknown): { binaryPath: string; modelPath: string } {

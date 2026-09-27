@@ -15,6 +15,7 @@ import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, OwnerStatus, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
 import { isMeshAddress, primaryBindChoices } from "./remote-bind.js";
 import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remote-status.js";
+import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-web.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 import { syncPrayerSettings } from "./prayer.js";
 
@@ -1343,6 +1344,10 @@ function renderRemote(): void {
   $("settings-remote-idle-note").textContent = MESSAGES.remoteIdleNote(language);
   $("settings-remote-push-projects-label").textContent = MESSAGES.remotePushProjectsLabel(language);
   $("settings-remote-push-projects-note").textContent = MESSAGES.remotePushProjectsNote(language);
+  $("settings-remote-web-label").textContent = MESSAGES.remoteWebLabel(language);
+  $("settings-remote-web-note").textContent = MESSAGES.remoteWebNote(language);
+  ($("settings-remote-web-open") as HTMLButtonElement).textContent =
+    MESSAGES.remoteWebOpen(language);
   $("settings-remote-pair-title").textContent = MESSAGES.remotePairTitle(language);
   $("settings-remote-devices-title").textContent = MESSAGES.remoteDevicesTitle(language);
   $("settings-remote-warning").textContent = MESSAGES.remoteWarning(language);
@@ -1361,6 +1366,7 @@ function renderRemote(): void {
   ($("settings-remote-idle") as HTMLInputElement).value = String(remote.idleDisableMinutes);
   ($("settings-remote-push-projects") as HTMLInputElement).checked =
     remote.push.includeProjectNames;
+  ($("settings-remote-web") as HTMLInputElement).checked = remote.web.enabled;
 
   $("settings-remote-new-code").textContent = MESSAGES.remoteNewCode(language);
 
@@ -1747,6 +1753,39 @@ function renderRemotePairArea(): void {
 
   renderRemoteCertificateNote(status);
   renderRemoteIdleState(status);
+  renderRemoteWeb(status);
+}
+
+/** Phase 1: browser access's state line, and — only while the web
+ *  listener is on — its address as text, the Open button and a QR.
+ *  Rendered from `status` only (remote-web.ts), never from the draft: the
+ *  switch says what Save will ask for, this says what is running. While a
+ *  pairing window is open the address is the browser pairing link, which
+ *  carries the pairing secret — same handling as the pairing QR above:
+ *  drawn only here, never saved or logged, cleared when the window closes. */
+function renderRemoteWeb(status: RemoteStatus): void {
+  const language = PRIMARY_LANGUAGE;
+  $("settings-remote-web-state").textContent = MESSAGES.remoteWebState(
+    remoteWebState(status),
+    language,
+  );
+
+  const access = $("settings-remote-web-access");
+  const urlEl = $("settings-remote-web-url");
+  const qr = $("settings-remote-web-qr") as HTMLCanvasElement;
+  const qrNote = $("settings-remote-web-qr-note");
+  const url = remoteWebUrl(status);
+  if (url === undefined) {
+    access.hidden = true;
+    urlEl.textContent = "";
+    qr.getContext("2d")?.clearRect(0, 0, qr.width, qr.height);
+    qrNote.textContent = "";
+    return;
+  }
+  access.hidden = false;
+  urlEl.textContent = url;
+  qrToCanvas(qr, encodeQr(url), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+  qrNote.textContent = MESSAGES.remoteWebQrNote(status.pairing.kind === "open", language);
 }
 
 /** Task 4 rule 4: the bridge's own idle-timer status (RemoteStatus.idle,
@@ -2229,6 +2268,12 @@ function deviceRow(device: RemoteDeviceStatus): HTMLElement {
       : MESSAGES.remoteDeviceNeverSeen(language);
   row.append(state);
 
+  // Phase 1: which client paired — the browser build or the app.
+  const client = document.createElement("span");
+  client.className = "settings-note";
+  client.textContent = MESSAGES.remoteWebDeviceClient(remoteDeviceClient(device), language);
+  row.append(client);
+
   // Ruling h: a third note, only when this device has actually registered
   // for push — never an empty node for one that hasn't (platform-only,
   // mirroring RemoteDeviceStatus.push; the token itself never reaches here).
@@ -2570,6 +2615,19 @@ function wireStaticFields(): void {
     if (draft === undefined) return;
     draft.remote.push.enabled = ($("settings-remote-push") as HTMLInputElement).checked;
     clearSaveStatus();
+  });
+  $("settings-remote-web").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.web.enabled = ($("settings-remote-web") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
+  // Opens the system browser, never a window inside Jarvis: main builds
+  // the URL from the bridge's own status (dispatch.ts remote:openWebClient),
+  // so nothing the renderer holds can pick what gets opened.
+  $("settings-remote-web-open").addEventListener("click", () => {
+    void window.jarvis.openWebClient().catch((error: unknown) => {
+      console.error(`settings: openWebClient failed: ${String(error)}`);
+    });
   });
   $("settings-remote-idle").addEventListener("change", () => {
     if (draft === undefined) return;

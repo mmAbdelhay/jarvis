@@ -55,6 +55,7 @@ const draft: JarvisConfig = {
     sidecarProxy: false,
     tls: {},
     push: { enabled: false, includeProjectNames: false },
+    web: { enabled: false },
     idleDisableMinutes: 0,
   },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
@@ -94,6 +95,7 @@ const fullDraft: JarvisConfig = {
     sidecarProxy: true,
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
+    web: { enabled: false },
     idleDisableMinutes: 30,
   },
 };
@@ -656,8 +658,18 @@ describe("remote round-trip", () => {
       port: 8443,
       sidecarProxy: false,
       push: { enabled: false, includeProjectNames: false },
+      web: { enabled: false },
       idleDisableMinutes: 0,
     });
+  });
+
+  it("writes remote.web (Phase 1) and parses it back unchanged", () => {
+    const web = { enabled: true, port: 8443 };
+    const raw = toRawConfig({ ...draft, remote: { ...draft.remote, web } }) as {
+      remote: Record<string, unknown>;
+    };
+    expect(raw.remote["web"]).toEqual(web);
+    expect(parseConfig(raw).remote.web).toEqual(web);
   });
 
   // `tls: {}` is the self-signed default spelled as noise.

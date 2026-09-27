@@ -747,6 +747,42 @@ describe("the remote access panel", () => {
     expect(MESSAGES.remoteIdleDisabled(Date.UTC(2026, 0, 1, 12), minutes, "ar")).toContain(phrase);
   });
 
+  it("has a bilingual line for every browser-access state, and the rest of remoteWeb*", () => {
+    const states = [
+      "off",
+      "port-conflict",
+      "listen-failed",
+      "needs-certificate",
+      "needs-owner-password",
+      "not-built",
+      "on",
+    ] as const;
+    const english = new Set<string>();
+    for (const state of states) {
+      const en = MESSAGES.remoteWebState(state, "en");
+      expect(MESSAGES.remoteWebState(state, "ar")).not.toBe(en);
+      english.add(en);
+    }
+    expect(english.size).toBe(states.length);
+    for (const message of [
+      MESSAGES.remoteWebLabel,
+      MESSAGES.remoteWebNote,
+      MESSAGES.remoteWebOpen,
+    ]) {
+      expect(message("ar")).not.toBe(message("en"));
+    }
+    for (const pairing of [true, false]) {
+      expect(MESSAGES.remoteWebQrNote(pairing, "ar")).not.toBe(
+        MESSAGES.remoteWebQrNote(pairing, "en"),
+      );
+    }
+    expect(MESSAGES.remoteWebDeviceClient("web", "en")).toBe("Browser");
+    expect(MESSAGES.remoteWebDeviceClient("app", "en")).toBe("App");
+    expect(MESSAGES.remoteWebDeviceClient("web", "ar")).not.toBe(
+      MESSAGES.remoteWebDeviceClient("app", "ar"),
+    );
+  });
+
   it("names the platform in remoteDevicePush, bilingually (ruling h)", () => {
     expect(MESSAGES.remoteDevicePush("ios", "en")).toBe("Notifications on (iPhone)");
     expect(MESSAGES.remoteDevicePush("android", "en")).toContain("Android");

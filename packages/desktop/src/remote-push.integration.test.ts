@@ -238,6 +238,7 @@ function remoteConfig(push: { enabled: boolean; includeProjectNames: boolean }):
     sidecarProxy: false,
     tls: {},
     push,
+    web: { enabled: false },
     idleDisableMinutes: 0,
   };
 }

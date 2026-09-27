@@ -1455,6 +1455,7 @@ const sampleConfig: JarvisConfig = {
     sidecarProxy: false,
     tls: {},
     push: { enabled: false, includeProjectNames: false },
+    web: { enabled: false },
     idleDisableMinutes: 0,
   },
   sessionsDbPath: "/tmp/sessions.db",

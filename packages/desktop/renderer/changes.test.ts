@@ -198,6 +198,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     registerPush: vi.fn(async () => ({ registered: true as const, laptopEnabled: false })),
     unregisterPush: vi.fn(async () => {}),
     reportCommandFinished: vi.fn(async () => {}),
+    openWebClient: vi.fn(async () => false),
     tailscaleCert: vi.fn(async () => ({
       ok: false as const,
       kind: "failed" as const,

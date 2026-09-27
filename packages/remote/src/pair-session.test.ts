@@ -99,8 +99,13 @@ function makeHarness(overrides: { random?: RandomBytes } = {}) {
   };
 }
 
-function pairFrame(secret: string, deviceName: string, v: number = PROTOCOL_VERSION): string {
-  return JSON.stringify({ t: "pair", v, secret, deviceName, client: "test/1.0" });
+function pairFrame(
+  secret: string,
+  deviceName: string,
+  v: number = PROTOCOL_VERSION,
+  client = "test/1.0",
+): string {
+  return JSON.stringify({ t: "pair", v, secret, deviceName, client });
 }
 
 describe("createPairSession", () => {
@@ -142,6 +147,24 @@ describe("createPairSession", () => {
     expect(lines.some((l) => l.includes(secret))).toBe(false);
     expect(onSettled).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["web", "web"],
+    ["jarvis-mobile/1.0.0/ios", undefined],
+  ])(
+    "a pair frame with client %j stores a device whose summary client is %j",
+    async (client, expected) => {
+      const { pairing, session, devices } = makeHarness();
+      const { secret } = pairing.open();
+      session.onText(pairFrame(secret, "Chrome", PROTOCOL_VERSION, client));
+      const status = pairing.status();
+      if (status.kind !== "confirming") throw new Error("unreachable");
+      pairing.decide(status.requestId, true);
+      await flush();
+
+      expect(devices.list()[0]?.client).toBe(expected);
+    },
+  );
 
   it("denying closes 4403, sends nothing, adds no device", async () => {
     const { pairing, socket, session, devices } = makeHarness();

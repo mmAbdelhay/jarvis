@@ -827,6 +827,11 @@ export type RendererApi = {
    *  click calls this exact same channel — `tailscale cert` renews an
    *  existing name in place. */
   tailscaleCert(): Promise<TailscaleCertResult>;
+  /** Phase 1: opens the browser client in the system browser (never inside
+   *  Jarvis) — the pairing link while a pairing window is open, otherwise
+   *  the root. Takes no URL: main reads it from the bridge's own status.
+   *  False when browser access is not on. Desktop-only by policy. */
+  openWebClient(): Promise<boolean>;
   /** A slow terminal block's own duration and exit status, for main's
    *  notifier to weigh a push against — desktop-only, and never the
    *  command that ran. */

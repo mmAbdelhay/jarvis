@@ -16,7 +16,7 @@
 // each other opening or closing the listener.
 
 import { join } from "node:path";
-import { isHostname } from "@jarvis/wire";
+import { isHostname, type PairingLink, webPairingUrl } from "@jarvis/wire";
 import { canonicalAddress } from "./address.js";
 import { createAuditLog } from "./audit.js";
 import type { CertificateConfig, CertificateMaterial } from "./certificate.js";
@@ -174,13 +174,23 @@ export type RemoteDeviceStatus = {
   pairedAt: number;
   lastSeenAt: number | undefined;
   connected: boolean;
+  /** Phase 1: present only for a device paired from the browser build,
+   *  mirroring DeviceSummary.client; absent means the app. */
+  client?: "web";
   /** Platform only, mirroring DeviceSummary.push — never the token (M10). */
   push?: "ios" | "android";
 };
 
 export type RemotePairingStatus =
   | { kind: "closed" }
-  | { kind: "open"; uri: string; expiresAt: number }
+  | {
+      kind: "open";
+      uri: string;
+      expiresAt: number;
+      /** Phase 1: the same pairing data as a browser link
+       *  (`webPairingUrl`), present only while the web listener is on. */
+      webUri?: string;
+    }
   | {
       kind: "confirming";
       requestId: string;
@@ -908,6 +918,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       });
       webListener = started;
       webListening = { port: started.port, origin: webOriginFor(hostname, started.port) };
+      auditLog.record({ kind: "web-listening", port: started.port });
     } catch (error) {
       webOutcome = "listen-failed";
       deps.log(`bridge: web listen failed: ${describeError(error)}`);
@@ -1047,21 +1058,30 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (pairingStatus.kind === "confirming") {
       remotePairing = pairingStatus;
     } else if (pairingStatus.kind === "open" && listening !== undefined) {
+      const link: PairingLink = {
+        host: listening.host,
+        port: listening.port,
+        secret: pairingStatus.secret,
+        fingerprint: listening.fingerprint,
+        // Ruling 1/rule 7: `name` rides along only when the served
+        // certificate is a configured one carrying a DNS SAN — the same
+        // condition that makes the sidecar gate anything but "off".
+        ...(listening.certificate.hostname !== undefined
+          ? { name: listening.certificate.hostname }
+          : {}),
+      };
+      // Phase 1: the browser link carries the web listener's certificate
+      // name, which is the one the web origin is built from.
+      const webName = webHostname();
+      const webUri =
+        webListening !== undefined && webName !== undefined
+          ? webPairingUrl({ ...link, name: webName }, webListening.port)
+          : undefined;
       remotePairing = {
         kind: "open",
-        uri: formatPairingUri({
-          host: listening.host,
-          port: listening.port,
-          secret: pairingStatus.secret,
-          fingerprint: listening.fingerprint,
-          // Ruling 1/rule 7: `name` rides along only when the served
-          // certificate is a configured one carrying a DNS SAN — the same
-          // condition that makes the sidecar gate anything but "off".
-          ...(listening.certificate.hostname !== undefined
-            ? { name: listening.certificate.hostname }
-            : {}),
-        }),
+        uri: formatPairingUri(link),
         expiresAt: pairingStatus.expiresAt,
+        ...(webUri !== undefined ? { webUri } : {}),
       };
     } else {
       // Rule 10: pairing reads as "open" only while a listener is actually
@@ -1078,6 +1098,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       pairedAt: device.pairedAt,
       lastSeenAt: device.lastSeenAt,
       connected: connected.has(device.id),
+      ...(device.client !== undefined ? { client: device.client } : {}),
       ...(device.push !== undefined ? { push: device.push } : {}),
     }));
 

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { GitProvider, Session, WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { RemoteStatus } from "@jarvis/remote";
 import { describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNELS } from "./channels.js";
 import { ELECTRON_BOUND_CHANNELS } from "./desktop-only.js";
@@ -213,6 +214,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    openExternal: vi.fn(async () => {}),
     ...overrides,
   } as DispatchDeps;
 }
@@ -1342,6 +1344,59 @@ describe("dispatch table: owner account (Phase 0)", () => {
     expect(deps.remote.signOutEverywhere).not.toHaveBeenCalled();
     await call(table, "remote:signOutEverywhere");
     expect(deps.remote.signOutEverywhere).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("dispatch table: remote:openWebClient (Phase 1)", () => {
+  const ORIGIN = "https://laptop.tail1234.ts.net:7718";
+  const webOn = (pairing: RemoteStatus["pairing"] = { kind: "closed" }): RemoteStatus => ({
+    enabled: true,
+    listening: undefined,
+    pairing,
+    devices: [],
+    problem: undefined,
+    sidecarProxy: "off",
+    web: { kind: "on", port: 7718, origin: ORIGIN },
+  });
+
+  it("opens the web client's root URL in the system browser", async () => {
+    const deps = fakeDeps();
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "remote:openWebClient")).toBe(true);
+    expect(deps.openExternal).toHaveBeenCalledWith(`${ORIGIN}/`);
+  });
+
+  it("opens the browser pairing link while a pairing window is open", async () => {
+    const deps = fakeDeps();
+    const webUri = `${ORIGIN}/pair#v=2`;
+    vi.mocked(deps.remote.status).mockReturnValue(
+      webOn({ kind: "open", uri: "jarvis://pair?v=2", expiresAt: 1, webUri }),
+    );
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "remote:openWebClient")).toBe(true);
+    expect(deps.openExternal).toHaveBeenCalledWith(webUri);
+  });
+
+  it("opens nothing while web is not on, and nothing for a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:openWebClient")).toBe(false);
+
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    expect(await callAs(table, REMOTE_ORIGIN, "remote:openWebClient")).toBe(false);
+    expect(deps.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("ignores any URL passed as an argument", async () => {
+    const deps = fakeDeps();
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    const table = createDispatchTable(deps);
+
+    await call(table, "remote:openWebClient", "file:///etc/passwd");
+    expect(deps.openExternal).toHaveBeenCalledWith(`${ORIGIN}/`);
   });
 });
 

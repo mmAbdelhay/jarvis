@@ -14,6 +14,7 @@ import {
   DEFAULT_SESSIONS,
   DEFAULT_TERMINAL,
   defaultSessionsDbPath,
+  effectiveWebPort,
   ensureConfigFile,
   loadConfig,
   mergeConfigInPlace,
@@ -1366,6 +1367,7 @@ describe("remote", () => {
     sidecarProxy: false,
     tls: {},
     push: { enabled: false, includeProjectNames: false },
+    web: { enabled: false },
     idleDisableMinutes: 0,
   };
 
@@ -1388,6 +1390,7 @@ describe("remote", () => {
       sidecarProxy: true,
       tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
       push: { enabled: true, includeProjectNames: true },
+      web: { enabled: true, port: 8443 },
       idleDisableMinutes: 30,
     };
     expect(parseConfig({ ...base, remote }).remote).toEqual(remote);
@@ -1475,6 +1478,37 @@ describe("remote", () => {
       { remote: { push: { includeProjectNames: "no" } } },
       "Config `remote.push.includeProjectNames` must be true or false",
     ],
+    [{ remote: { web: true } }, "Config `remote.web` must be an object"],
+    [{ remote: { web: [] } }, "Config `remote.web` must be an object"],
+    [{ remote: { web: { enabled: "yes" } } }, "Config `remote.web.enabled` must be true or false"],
+    [
+      { remote: { web: { port: 0 } } },
+      "Config `remote.web.port` must be a whole number from 1 to 65535",
+    ],
+    [
+      { remote: { web: { port: 65536 } } },
+      "Config `remote.web.port` must be a whole number from 1 to 65535",
+    ],
+    [
+      { remote: { web: { port: "7718" } } },
+      "Config `remote.web.port` must be a whole number from 1 to 65535",
+    ],
+    [
+      { remote: { web: { port: 1.5 } } },
+      "Config `remote.web.port` must be a whole number from 1 to 65535",
+    ],
+    [
+      { remote: { port: 7717, web: { enabled: true, port: 7717 } } },
+      "Config `remote.web.port` must differ from `remote.port`",
+    ],
+    [
+      { remote: { port: 65535, web: { enabled: true } } },
+      "Config `remote.web.port` must be set when `remote.port` is 0 or 65535",
+    ],
+    [
+      { remote: { port: 0, web: { enabled: true } } },
+      "Config `remote.web.port` must be set when `remote.port` is 0 or 65535",
+    ],
     [
       { remote: { idleDisableMinutes: -5 } },
       "Config `remote.idleDisableMinutes` must be a whole number of minutes from 0 to 10080",
@@ -1489,6 +1523,42 @@ describe("remote", () => {
     ],
   ])("rejects %j", (patch, message) => {
     expect(() => parseConfig({ ...base, ...patch })).toThrow(message);
+  });
+
+  describe("web (Phase 1)", () => {
+    const web = (remote: Record<string, unknown>) => parseConfig({ ...base, remote }).remote.web;
+
+    it("is off with no port when absent, null or empty", () => {
+      expect(web({})).toEqual({ enabled: false });
+      expect(web({ web: null })).toEqual({ enabled: false });
+      expect(web({ web: {} })).toEqual({ enabled: false });
+    });
+
+    it("keeps an explicit port and the flag as written", () => {
+      expect(web({ web: { enabled: true, port: 443 } })).toEqual({ enabled: true, port: 443 });
+    });
+
+    it("effective port is the bridge port + 1 unless one is set", () => {
+      expect(effectiveWebPort(parseConfig({ ...base, remote: { port: 9000 } }).remote)).toBe(9001);
+      expect(
+        effectiveWebPort(parseConfig({ ...base, remote: { web: { port: 8443 } } }).remote),
+      ).toBe(8443);
+    });
+
+    it("a disabled web section never refuses the file over its derived port", () => {
+      expect(web({ port: 65535, web: { enabled: false } })).toEqual({ enabled: false });
+      expect(web({ port: 7717, web: { enabled: false, port: 7717 } })).toEqual({
+        enabled: false,
+        port: 7717,
+      });
+    });
+
+    it("bridge port 0 with an explicit web port is fine", () => {
+      expect(web({ port: 0, web: { enabled: true, port: 8443 } })).toEqual({
+        enabled: true,
+        port: 8443,
+      });
+    });
   });
 
   it("accepts idleDisableMinutes at its floor (0) and its ceiling (10080)", () => {

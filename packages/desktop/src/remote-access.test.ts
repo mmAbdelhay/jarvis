@@ -295,6 +295,7 @@ const REMOTE_CONFIG = {
   sidecarProxy: false,
   tls: {},
   push: { enabled: false, includeProjectNames: false },
+  web: { enabled: false },
   idleDisableMinutes: 0,
 };
 
@@ -333,6 +334,24 @@ describe("createRemoteAccess: bridge creation", () => {
       web: { enabled: false, port: 1 },
       tls: {},
     });
+  });
+
+  it("passes remote.web through: the flag, and the explicit port or the bridge port + 1", async () => {
+    const explicit = harness();
+    await explicit.remoteAccess.start({
+      ...REMOTE_CONFIG,
+      port: 7717,
+      web: { enabled: true, port: 8443 },
+    });
+    expect(explicit.bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ web: { enabled: true, port: 8443 } }),
+    );
+
+    const derived = harness();
+    await derived.remoteAccess.start({ ...REMOTE_CONFIG, port: 7717, web: { enabled: true } });
+    expect(derived.bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ web: { enabled: true, port: 7718 } }),
+    );
   });
 
   it("concurrent start calls create the bridge exactly once", async () => {

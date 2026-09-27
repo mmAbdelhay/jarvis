@@ -13,6 +13,7 @@ import { createBridge, IDLE_DISABLE_MAX_MINUTES } from "./bridge.js";
 import type { CertificateMaterial } from "./certificate.js";
 import { fakeClock } from "./clock-double.js";
 import type { AuditPolicy, AuthorizeKey, RequestHandler, RequestOutcome } from "./connection.js";
+import { webPairingUrl } from "@jarvis/wire";
 import { createDeviceStore } from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import { MAX_PENDING } from "./hub.js";
@@ -2545,6 +2546,53 @@ describe("createBridge: web listener (Phase 1)", () => {
     });
     expect(h.listenCalls[0]?.webOrigin()).toBe(`https://${NAME}:7718`);
     expect(h.onStatus.mock.calls.at(-1)?.[0].web).toEqual(bridge.status().web);
+  });
+
+  it('audits a "web-listening" line with the bound port once the web listener is up', async () => {
+    const { h } = await start();
+    const lines = (await auditLines(h.fs)).filter((line) => line.includes("web-listening"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("web-listening port=7718");
+  });
+
+  it("an open pairing window carries the browser's pairing URL while web is on", async () => {
+    const { bridge } = await start();
+    await bridge.openPairing();
+    const pairing = bridge.status().pairing;
+    if (pairing.kind !== "open") throw new Error("expected an open window");
+    const link = parsePairingUri(pairing.uri);
+    if (link === undefined) throw new Error("expected a valid pairing uri");
+    expect(pairing.webUri).toBe(webPairingUrl(link, 7718));
+    expect(pairing.webUri).toMatch(
+      new RegExp(`^https://${NAME.replaceAll(".", "\\.")}:7718/pair#v=`),
+    );
+  });
+
+  it("status().devices labels a browser-paired device client web, and leaves an app's unset", async () => {
+    const h = makeHarness({ cert: CONFIGURED });
+    const store = createDeviceStore({
+      fs: h.fs,
+      path: DEVICES_PATH,
+      random: h.random,
+      now: h.clock.now,
+      enforceFileModes: true,
+    });
+    await store.load();
+    await store.add("Phone");
+    await store.add("Chrome", "web");
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(WEB_ON());
+    const byName = new Map(bridge.status().devices.map((device) => [device.name, device]));
+    expect(byName.get("Chrome")?.client).toBe("web");
+    expect(byName.get("Phone")).not.toHaveProperty("client");
+  });
+
+  it("an open pairing window has no browser URL while web is off", async () => {
+    const { bridge } = await start({}, ON_127());
+    await bridge.openPairing();
+    const pairing = bridge.status().pairing;
+    if (pairing.kind !== "open") throw new Error("expected an open window");
+    expect(pairing.webUri).toBeUndefined();
   });
 
   it("port 443 gives the origin without a port, as a browser sends it", async () => {
