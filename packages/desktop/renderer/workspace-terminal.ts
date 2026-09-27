@@ -173,10 +173,20 @@ function scheduleSessionPlanRefresh(
         if (pane.sessionPlanRequestId !== requestId) return; // superseded — discard
         const resolved = list.session?.path;
         pane.sessionPlanPath = resolved;
-        // A *different* session plan than the one the user dismissed
-        // re-arms auto-open for it (controller ruling); the dismissal
-        // itself only ever suppresses the exact path it was recorded for.
-        if (pane.dismissedPlanPath !== undefined && pane.dismissedPlanPath !== resolved) {
+        // A *different, defined* session plan than the one the user
+        // dismissed re-arms auto-open for it (controller ruling); the
+        // dismissal itself only ever suppresses the exact path it was
+        // recorded for. `resolved === undefined` is not "a different
+        // plan" — it is "no plan for whichever pane is focused right
+        // now" (fix round 2: a sibling split with a real cwd but no
+        // active session resolves exactly this), and must never wipe a
+        // dismissal that still applies once focus returns to the pane
+        // that actually has one.
+        if (
+          resolved !== undefined &&
+          pane.dismissedPlanPath !== undefined &&
+          pane.dismissedPlanPath !== resolved
+        ) {
           pane.dismissedPlanPath = undefined;
         }
         if (openIfPath !== undefined) maybeAutoOpenPlan(tabId, openIfPath);

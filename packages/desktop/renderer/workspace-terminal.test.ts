@@ -1857,6 +1857,88 @@ describe("the terminal tab's plan panel", () => {
       expect(panel()?.hidden).toBe(false);
     });
 
+    // Fix round 1's own missing test: onFocus with an unknown cwd must
+    // clear the *cached* session plan too, not only cancel a pending
+    // lookup — otherwise a stale sessionPlanPath from before the focus
+    // change could still match a later push.
+    it("clears the cached session plan when the newly focused pane has no known cwd", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320); // sessionPlanPath resolves to build.md
+
+      // Split off a new pane and focus it — it has never reported a cwd,
+      // so onFocus sees path === undefined.
+      FakeTerminal.instances[0]?.pressKey({ key: "d", metaKey: true });
+      await settle();
+
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+
+      // Nothing was ever dismissed — the cached value was simply cleared,
+      // so it no longer matches the pushed path.
+      expect(panel()?.hidden).toBe(true);
+    });
+
+    // Fix round 2: workspace-terminal.ts used to clear dismissedPlanPath
+    // whenever a resolution's own path differed from it — including
+    // `resolved === undefined`. Focusing a sibling split with a real cwd
+    // but no active session (a plain shell) resolved "undefined" and wiped
+    // the dismissal; focusing back onto the claude pane then re-opened the
+    // very plan the user had just closed.
+    it("keeps a dismissed plan dismissed after focusing a sibling split with no session of its own", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320);
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+      expect(panel()?.hidden).toBe(false);
+
+      FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+      runAction("Toggle plan panel");
+      await settle();
+      expect(panel()?.hidden).toBe(true);
+
+      // Split off a plain shell pane, focus it, and let it report its own
+      // real cwd — no active claude session there, so its own lookup
+      // resolves session: undefined.
+      FakeTerminal.instances[0]?.pressKey({ key: "d", metaKey: true });
+      await settle();
+      sessionPlanEntry = undefined;
+      dataListener?.("tab-1:p1", CWD("/proj/other"));
+      await settle();
+      await advance(320); // resolves sessionPlanPath to undefined for the sibling
+
+      // Focus back onto the original claude pane — its own last-known cwd
+      // ("/proj") re-resolves through the same debounce.
+      FakeTerminal.instances[1]?.pressKey({ key: "ArrowLeft", metaKey: true, altKey: true });
+      await settle();
+      sessionPlanEntry = { path: "/plans/build.md" };
+      await advance(320);
+
+      // The dismissal must have survived the detour through the sibling.
+      plansChangedListener?.("/plans/build.md");
+      await settle();
+      await advance(320);
+      expect(panel()?.hidden).toBe(true);
+
+      // A genuinely different session plan still re-arms auto-open.
+      sessionPlanEntry = { path: "/plans/second.md" };
+      dataListener?.("tab-1", CWD("/proj/sub"));
+      await settle();
+      await advance(320);
+      plansChangedListener?.("/plans/second.md");
+      await settle();
+      expect(panel()?.hidden).toBe(false);
+    });
+
     // Fix round 1: a foreground process like `claude` never re-emits OSC 7
     // while it works, so the cached session plan can go stale exactly when
     // a plan just changed — the brief's own required fix is a fresh,
