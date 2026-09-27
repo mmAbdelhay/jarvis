@@ -97,6 +97,18 @@ function click(target: Element | null): void {
   target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
 
+/** A plain (non-drag) mouse click on a block, in the order a real browser
+ *  delivers it: mousedown (which collapses any selection) → mouseup →
+ *  click. Block editing opens on the confirmed mousedown/mouseup pair (fix
+ *  round 4, item B), not on `click`, so a bare `click` event is not enough. */
+function clickBlock(target: Element | null): void {
+  if (!target) throw new Error("missing click target");
+  window.getSelection()?.removeAllRanges();
+  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+}
+
 function blockRow(panelElement: HTMLElement, blockId: string): HTMLElement {
   const content = panelElement.querySelector(`[data-block-id="${blockId}"]`);
   const row = content?.closest<HTMLElement>(".plan-panel__block-row");
@@ -618,7 +630,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   }
 
   async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
-    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panelElement);
     editable.querySelector("p")!.textContent = text;
     editable.dispatchEvent(new Event("input", { bubbles: true }));
@@ -627,7 +639,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   it("click enters edit mode: accent-outlined contenteditable, a formatting toolbar, and a hint", async () => {
     const { panel } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     // jsdom doesn't implement the `.contentEditable` IDL property at all
     // (reads back `undefined` regardless of what's set) — the attribute is
@@ -640,7 +652,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   it("a click-then-blur with no typing never writes (gated on a real dirty flag)", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     paragraphEl(panel.element).dispatchEvent(new Event("blur"));
     await flush();
     expect(api.plansWriteBlock).not.toHaveBeenCalled();
@@ -717,7 +729,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   it("Bold wraps the current selection and saves it as **markdown**", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const text = editable.querySelector("p")!.firstChild!;
     const range = document.createRange();
@@ -742,7 +754,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   it("Link wraps the selection, focuses an inline URL input (no window.prompt), and saves [text](url)", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const text = editable.querySelector("p")!.firstChild!;
     const range = document.createRange();
@@ -772,7 +784,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
   it("the toolbar's Comment button opens a draft quoting the selection, without discarding the in-progress edit", async () => {
     const { panel } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const text = editable.querySelector("p")!.firstChild!;
     const range = document.createRange();
@@ -813,7 +825,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
     const { panel } = setup(api);
     await panel.open(codeDoc.path);
 
-    click(panel.element.querySelector('[data-block-id="code-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="code-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__code")!;
     expect(panel.element.querySelector(".plan-block-edit__toolbar")).toBeNull();
     editable.querySelector("code")!.textContent = "const x = 2;";
@@ -847,7 +859,7 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
     const { panel } = setup(api);
     await panel.open(tableDoc.path);
 
-    click(panel.element.querySelector('[data-block-id="table-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="table-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__raw")!;
     expect(editable.textContent).toBe(tableSource);
     editable.textContent = "| A | B |\n| - | - |\n| 3 | 4 |";
@@ -984,7 +996,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   }
 
   async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
-    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panelElement);
     editable.querySelector("p")!.textContent = text;
     editable.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1017,7 +1029,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("C1: Enter in a rich paragraph inserts a hard break, never a sibling block", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const textNode = editable.querySelector("p")!.firstChild!;
     selectText(textNode, 4, 4);
@@ -1042,7 +1054,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("C1: Shift+Enter does the same as Enter in rich mode", async () => {
     const { panel } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const textNode = editable.querySelector("p")!.firstChild!;
     selectText(textNode, 4, 4);
@@ -1075,7 +1087,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
     const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: listDoc })) });
     const { panel } = setup(api);
     await panel.open(listDoc.path);
-    click(panel.element.querySelector('[data-block-id="list-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="list-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
     const li = editable.querySelector("li")!;
     const range = document.createRange();
@@ -1093,7 +1105,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("C1: pasting multi-line text into a rich paragraph inserts hard breaks, never sibling blocks", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const p = editable.querySelector("p")!;
     const range = document.createRange();
@@ -1137,7 +1149,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
     const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: codeDoc })) });
     const { panel } = setup(api);
     await panel.open(codeDoc.path);
-    click(panel.element.querySelector('[data-block-id="code-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="code-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__code")!;
     const codeEl = editable.querySelector("code")!;
     const range = document.createRange();
@@ -1180,7 +1192,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
     const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: codeDoc })) });
     const { panel } = setup(api);
     await panel.open(codeDoc.path);
-    click(panel.element.querySelector('[data-block-id="code-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="code-1"]'));
     expect(
       panel.element
         .querySelector<HTMLElement>(".plan-block-edit__code")
@@ -1205,7 +1217,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
     const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: tableDoc })) });
     const { panel } = setup(api);
     await panel.open(tableDoc.path);
-    click(panel.element.querySelector('[data-block-id="table-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="table-1"]'));
     expect(
       panel.element
         .querySelector<HTMLElement>(".plan-block-edit__raw")
@@ -1218,7 +1230,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("I1: focusing the link URL input does not blur out of edit mode or write anything", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     // Real focus first: the bug is that focusing the URL input blurs the
     // container out from under itself, which only happens if the container
@@ -1240,7 +1252,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("I1: committing the link with an empty URL unwraps the anchor instead of writing [text]()", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const text = editable.querySelector("p")!.firstChild!;
     selectText(text, 9, 23);
@@ -1399,8 +1411,9 @@ describe("createPlanPanel: block editing fix round 1", () => {
     await panel.open(doc.path);
     const content = panel.element.querySelector<HTMLElement>('[data-block-id="paragraph-1"]')!;
     const text = content.querySelector("p")!.firstChild!;
+    content.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     selectText(text, 0, 4);
-
+    content.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     content.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
   });
@@ -1421,6 +1434,8 @@ describe("createPlanPanel: block editing fix round 1", () => {
     const { panel } = setup(api);
     await panel.open(linkedDoc.path);
     const link = panel.element.querySelector("a")!;
+    link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     link.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
   });
@@ -1430,7 +1445,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("I6: selecting text inside an actively-edited rich block anchors the comment draft to the real block id", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const text = editable.querySelector("p")!.firstChild!;
     selectText(text, 9, 23);
@@ -1501,7 +1516,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("minor: a same-path reload while editing (not dirty) exits cleanly rather than leaving a detached container", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = panel.element.querySelector(".plan-block-edit__rich");
     expect(editable).toBeTruthy();
 
@@ -1536,7 +1551,7 @@ describe("createPlanPanel: block editing fix round 1", () => {
   it("minor: Esc while editing does not propagate past the editor", async () => {
     const { panel } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const outerHandler = vi.fn();
     document.addEventListener("keydown", outerHandler);
@@ -1554,7 +1569,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
   }
 
   async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
-    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panelElement);
     editable.querySelector("p")!.textContent = text;
     editable.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1648,7 +1663,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
     await panel.open(doc.path);
     const outside = document.createElement("button");
     document.body.append(outside);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     editable.focus();
     const text = editable.querySelector("p")!.firstChild!;
@@ -1690,7 +1705,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
     const api = fakeApi({ plansRead });
     const { panel } = setup(api);
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
 
     panel.notifyChanged(doc.path); // not dirty yet -> loadDocument starts, awaiting plansRead
@@ -1810,7 +1825,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
   it("item5: Enter at the end of a paragraph inserts a double <br>, and an untouched trailing break is not saved", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const p = editable.querySelector("p")!;
     const range = document.createRange();
@@ -1836,7 +1851,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
   it("item6: Enter in a heading does nothing (single-line)", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="heading-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="heading-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
     const textNode = editable.querySelector("h1")!.firstChild!;
     selectText(textNode, 2, 2);
@@ -1855,7 +1870,7 @@ describe("createPlanPanel: block editing fix round 2", () => {
   it("item6: pasted newlines in a heading become spaces", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="heading-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="heading-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
     const h1 = editable.querySelector("h1")!;
     const range = document.createRange();
@@ -1891,7 +1906,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
   }
 
   async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
-    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panelElement);
     editable.querySelector("p")!.textContent = text;
     editable.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1941,7 +1956,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
     const api = fakeApi({ plansRead });
     const { panel } = setup(api);
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
 
     panel.notifyChanged(doc.path);
     await flush();
@@ -2000,7 +2015,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
 
   // Item B ------------------------------------------------------------
 
-  it("B1: switching blocks while a save is in flight opens B once A's save settles (click-recorded)", async () => {
+  it("B1: switching blocks while a save is in flight opens B once A's save settles (mouseup-confirmed)", async () => {
     let resolveWrite: (value: PlanResult<PlanDoc>) => void;
     const writeBlock = vi.fn(
       () =>
@@ -2086,7 +2101,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
     const api = fakeApi({ plansRead: vi.fn(async () => ({ ok: true as const, value: quoteDoc })) });
     const { panel } = setup(api);
     await panel.open(quoteDoc.path);
-    click(panel.element.querySelector('[data-block-id="quote-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="quote-1"]'));
     const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
     const firstP = editable.querySelectorAll("p")[0]!;
     const range = document.createRange();
@@ -2105,7 +2120,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
   it("C2: a trailing empty text node after a hard break does not hide it from being stripped", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     const p = editable.querySelector("p")!;
     // A shape a real browser's own editing commands can produce, not
@@ -2129,7 +2144,7 @@ describe("createPlanPanel: block editing fix round 3", () => {
   it("C3: Enter in the link URL input does not exit editing", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
-    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
     const editable = paragraphEl(panel.element);
     editable.focus();
     const text = editable.querySelector("p")!.firstChild!;
@@ -2153,5 +2168,223 @@ describe("createPlanPanel: block editing fix round 3", () => {
     expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
     expect(api.plansWriteBlock).not.toHaveBeenCalled();
     expect(editable.querySelector("a")?.getAttribute("href")).toBe("https://example.com");
+  });
+});
+
+describe("createPlanPanel: block editing fix round 4", () => {
+  function paragraphEl(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+  }
+
+  function headingEditor(panelElement: HTMLElement): Element | null {
+    return panelElement.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich');
+  }
+
+  function liveHeading(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+  }
+
+  async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panelElement);
+    editable.querySelector("p")!.textContent = text;
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function selectText(node: Node, start: number, end: number): void {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function pendingWrite() {
+    let resolveWrite: (value: PlanResult<PlanDoc>) => void = () => undefined;
+    const plansWriteBlock = vi.fn(
+      () =>
+        new Promise<PlanResult<PlanDoc>>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+    return { plansWriteBlock, resolve: (value: PlanResult<PlanDoc>) => resolveWrite(value) };
+  }
+
+  // Item A ------------------------------------------------------------
+
+  it("A: typing that starts while a reload's plansComments is pending is kept, flagged, and later conflicts", async () => {
+    const revisedDoc: PlanDoc = { ...doc, mtimeMs: doc.mtimeMs + 1000 };
+    const plansRead = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value: doc })
+      .mockResolvedValue({ ok: true, value: revisedDoc });
+    let resolveComments: (value: AnchoredComment[]) => void = () => undefined;
+    const plansComments = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise<AnchoredComment[]>((resolve) => {
+            resolveComments = resolve;
+          }),
+      )
+      .mockResolvedValue([]);
+    const writeBlock = vi.fn(async () => ({
+      ok: false as const,
+      reason: "conflict" as const,
+      doc: revisedDoc,
+    }));
+    const api = fakeApi({ plansRead, plansComments, plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+
+    // Real external change; the block is clean when loadDocument checks,
+    // so it proceeds to await plansComments.
+    panel.notifyChanged(doc.path);
+    await flush();
+    expect(plansComments).toHaveBeenCalledTimes(2);
+
+    // Typing starts while plansComments is still pending.
+    editable.querySelector("p")!.textContent = "Ship the useful feature quickly.";
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+
+    resolveComments([]);
+    await flush();
+
+    expect(paragraphEl(panel.element)).toBe(editable);
+    expect(editable.querySelector("p")!.textContent).toBe("Ship the useful feature quickly.");
+    expect(panel.element.querySelector<HTMLElement>(".plan-panel__disk-changed")?.hidden).toBe(
+      false,
+    );
+    expect(writeBlock).not.toHaveBeenCalled();
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(writeBlock).toHaveBeenCalledWith(
+      doc.path,
+      "paragraph-1",
+      "Ship the useful feature quickly.",
+      doc.mtimeMs,
+    );
+    expect(
+      panel.element.querySelector<HTMLTextAreaElement>(".plan-panel__conflict-textarea")?.value,
+    ).toBe("Ship the useful feature quickly.");
+  });
+
+  // Item B ------------------------------------------------------------
+
+  it("B1: A's blur-exit rebuilds the rows before mouseup and no click fires; mouseup on the new B element opens B", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const staleB = liveHeading(panel.element);
+
+    staleB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: staleB }));
+    await flush(); // A's save settles and its exit rebuilds every row
+
+    const freshB = liveHeading(panel.element);
+    expect(freshB).not.toBe(staleB);
+    freshB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    // Chromium dispatches no click here: the mousedown target is gone.
+    await flush();
+
+    expect(api.plansWriteBlock).toHaveBeenCalledTimes(1);
+    expect(headingEditor(panel.element)).toBeTruthy();
+  });
+
+  it("B1b: a clean A's synchronous blur-exit rebuild before mouseup still opens B with no click", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editableA = paragraphEl(panel.element);
+    const staleB = liveHeading(panel.element);
+
+    staleB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: staleB }));
+    const freshB = liveHeading(panel.element);
+    expect(freshB).not.toBe(staleB);
+    freshB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await flush();
+
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+    expect(headingEditor(panel.element)).toBeTruthy();
+  });
+
+  it("B1c: mouseup on B while A's save is still in flight opens B once the save settles, with no click", async () => {
+    const write = pendingWrite();
+    const { panel } = setup(fakeApi({ plansWriteBlock: write.plansWriteBlock }));
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentB = liveHeading(panel.element);
+
+    contentB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: contentB }));
+    liveHeading(panel.element).dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(headingEditor(panel.element)).toBeNull();
+
+    write.resolve({ ok: true, value: doc });
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeTruthy();
+  });
+
+  it("B2: a drag-select on the rebuilt B (non-collapsed selection at mouseup) never opens B", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const staleB = liveHeading(panel.element);
+
+    staleB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: staleB }));
+    await flush();
+
+    const freshB = liveHeading(panel.element);
+    selectText(freshB.querySelector("h1")!.firstChild!, 0, 4);
+    freshB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeNull();
+  });
+
+  it("B3: a mousedown back into A clears a pending switch to B", async () => {
+    const write = pendingWrite();
+    const { panel } = setup(fakeApi({ plansWriteBlock: write.plansWriteBlock }));
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentB = liveHeading(panel.element);
+
+    contentB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: contentB }));
+    liveHeading(panel.element).dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // Changed their mind: click back into A while its save is in flight.
+    paragraphEl(panel.element).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    paragraphEl(panel.element).dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    write.resolve({ ok: true, value: doc });
+    await flush();
+
+    expect(headingEditor(panel.element)).toBeNull();
+  });
+
+  it("B4: mousedown on B and mouseup elsewhere does not open B", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    liveHeading(panel.element).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    panel.element
+      .querySelector('[data-block-id="paragraph-1"]')!
+      .dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await flush();
+
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
   });
 });

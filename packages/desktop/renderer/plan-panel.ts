@@ -109,16 +109,17 @@ type ConflictState = {
   reason: "conflict" | "missing-block";
 };
 
-/** Fix round 3, item B: a block clicked while a *different* block's own
- *  save (always blur-triggered — a real click on another block always
- *  blurs whatever was focused first) is still in flight. Recorded on that
- *  CLICK only, never on mousedown — a click already answers "is this a
- *  genuine click, not a drag-to-select" for free (isRealClick), which a
- *  mousedown can't yet know. Consumed once the interrupted save actually
- *  settles (see consumePendingEditTarget, called explicitly from
- *  finishEditing's own post-await handling — never by exitEditing on its
- *  own), so switching blocks while a save is in flight still opens the new
- *  one automatically instead of needing a second click. */
+/** A block the user clicked while a *different* block's own save (always
+ *  blur-triggered — a real click on another block always blurs whatever was
+ *  focused first) is still in flight. Fix round 4, item B: recorded when a
+ *  mousedown/mouseup pair on the same block is confirmed (see
+ *  onBlockMouseUp), never on `click` — Chromium fires no click at all when
+ *  the outgoing block's blur-exit rebuilt the rows between mousedown and
+ *  mouseup. Consumed once the interrupted save actually settles (see
+ *  consumePendingEditTarget, called explicitly from finishEditing's own
+ *  post-await handling — never by exitEditing on its own), so switching
+ *  blocks while a save is in flight still opens the new one automatically
+ *  instead of needing a second click. */
 type PendingEditTarget = { blockId: string; index: number };
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -305,6 +306,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   let editing: EditingState | undefined;
   let conflict: ConflictState | undefined;
   let pendingEditTarget: PendingEditTarget | undefined;
+  // Fix round 4, item B: the block id a primary-button mousedown landed on
+  // (outside any link, not the block being edited). Only a mouseup that
+  // resolves to the same block id — re-queried by data-block-id, since the
+  // rows may have been rebuilt in between — with a collapsed selection
+  // turns it into an edit.
+  let switchCandidate: string | undefined;
   // Fix round 3, item A: the exact mtime our own last successful
   // plansWriteBlock/applyConflict returned for a path. A file watcher
   // cannot tell "Jarvis just wrote this" apart from "something else did" —
@@ -1365,7 +1372,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     consumePendingEditTarget();
   }
 
-  function renderBlock(block: PlanBlock, index: number): HTMLElement {
+  function renderBlock(block: PlanBlock): HTMLElement {
     const row = el("div", "plan-panel__block-row");
     const gutter = el("div", "plan-panel__gutter");
     const blockComments = comments.filter(
@@ -1395,37 +1402,11 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     } else {
       content.append(parseBlockHtml(block.html));
       for (const comment of blockComments) wrapFirstText(content, comment.quote);
-      // Fix round 3, item B: recorded on CLICK only, never on mousedown —
-      // a mousedown-based recording couldn't tell a genuine click from a
-      // drag-to-select apart until the click actually arrives, so it had
-      // to be cleared again in three different places once it turned out
-      // not to be one. A real click already carries that answer itself
-      // (isRealClick, below).
-      content.addEventListener("click", (event) => {
-        hooks.onBlockClick?.(block, content);
-        // Fix round 1, I5: a click that's really the tail end of a text
-        // selection (for the selection-comment button) or that landed on a
-        // real link must not also start editing the block underneath it.
-        const selection = window.getSelection();
-        const isRealClick =
-          !(selection && !selection.isCollapsed && content.contains(selection.anchorNode)) &&
-          !(event.target instanceof Element && event.target.closest("a"));
-        if (!isRealClick) return;
-        if (!currentDoc || conflict) return; // mirrors beginEditingBlock's own guard
-        if (editing && editing.blockId !== block.id && editing.saving) {
-          // Fix round 3, item B: A (a different block) is mid-save — a
-          // blur that this same click's own mousedown already triggered,
-          // still in flight. beginEditingBlock would just abort right now
-          // (its own reentrancy guard on A's finishEditing call), so
-          // remember this click instead of losing it; it opens once A's
-          // save settles (finishEditing's own post-await handling calls
-          // consumePendingEditTarget explicitly — exitEditing itself
-          // never does, so nothing else can surprise-open it).
-          pendingEditTarget = { blockId: block.id, index };
-          return;
-        }
-        void beginEditingBlock(block, index);
-      });
+      // Fix round 4, item B: editing opens from the document-level
+      // mousedown/mouseup pair (onBlockMouseDown/onBlockMouseUp), not from
+      // here — Chromium delivers no click at all when the outgoing block's
+      // blur-exit rebuilt the rows between mousedown and mouseup.
+      content.addEventListener("click", () => hooks.onBlockClick?.(block, content));
     }
     row.append(gutter, content);
     if (draft?.blockId === block.id) {
@@ -1578,9 +1559,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
         el("pre", "plan-panel__source", doc.blocks.map((block) => block.source).join("\n\n")),
       );
     } else {
-      doc.blocks.forEach((block, index) => {
-        body.append(renderBlock(block, index));
-      });
+      for (const block of doc.blocks) body.append(renderBlock(block));
     }
     root.append(body, renderTray());
   }
@@ -1602,6 +1581,24 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     if (pickerVisible) renderDocument();
   }
 
+  /** Whether the open edit on `path` holds the user's own typing (dirty) or
+   *  a save of it (saving) — the state a reload must never re-render over. */
+  function editInProgress(path: string): boolean {
+    return !!editing && currentDoc?.path === path && (editing.dirty || editing.saving);
+  }
+
+  /** loadDocument's "edit in progress on this same path" branch: a real
+   *  external change only flags the header badge — no re-render, edit left
+   *  open. Returns whether it flagged, i.e. whether loadDocument must stop
+   *  here. Fix round 4, item A: called after *every* await in loadDocument,
+   *  since the edit's dirty/saving state can change during any of them. */
+  function flagIfEditInProgress(path: string): boolean {
+    if (!editInProgress(path)) return false;
+    diskChangedWhileDirty = true;
+    updateHeaderDirtyUi();
+    return true;
+  }
+
   /** Fix round 3, item A: replaces round 2's id/index re-anchor logic
    *  entirely — it kept a stale container in place across a *real*
    *  external change and risked the next save silently overwriting it.
@@ -1612,7 +1609,8 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
    *     notification can't otherwise tell apart from a real external
    *     change.
    *   - different path → exits editing, as before.
-   *   - same path, real external change, editing dirty → does *not*
+   *   - same path, real external change, editing dirty or saving (fix
+   *     round 4: re-checked after every await, not only the first) → does *not*
    *     touch the DOM; only flags `diskChangedWhileDirty` (the header
    *     badge). `baseMtimeMs` deliberately stays the (now stale) value
    *     it was based on, so this block's own eventual save discovers the
@@ -1632,12 +1630,16 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       result = await api.plansRead(path);
     } catch {
       if (disposed || request !== loadId) return;
+      // Nothing is known to have changed on disk; just never re-render
+      // (and so rebuild) an edit that holds the user's own typing.
+      if (editInProgress(path)) return;
       actionError = t("planActionError");
       renderDocument();
       return;
     }
     if (disposed || request !== loadId) return;
     if (!result.ok) {
+      if (flagIfEditInProgress(path)) return;
       currentDoc = undefined;
       comments = [];
       loadError = result.reason;
@@ -1653,22 +1655,23 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       return; // our own write's echo — do nothing at all
     }
 
-    if (editing && samePath && editing.dirty) {
-      diskChangedWhileDirty = true;
-      updateHeaderDirtyUi();
-      return;
-    }
+    if (flagIfEditInProgress(path)) return;
 
     let nextComments: AnchoredComment[];
     try {
       nextComments = await api.plansComments(path);
     } catch {
       if (disposed || request !== loadId) return;
+      if (flagIfEditInProgress(path)) return;
       actionError = t("planActionError");
       renderDocument();
       return;
     }
     if (disposed || request !== loadId) return;
+    // Fix round 4, item A: typing (or a save) can start during the
+    // plansComments await above even though the block was clean at the
+    // first check — re-checked after every await, never trusted across one.
+    if (flagIfEditInProgress(path)) return;
     loadError = undefined;
     currentDoc = result.value;
     comments = nextComments;
@@ -1743,6 +1746,52 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   }
   document.addEventListener("mouseup", selectionChanged);
 
+  /** The block row (`.plan-block[data-block-id]` directly under a block
+   *  row) an event target sits in, resolved against the live tree. */
+  function blockIdAt(target: EventTarget | null): string | undefined {
+    if (!(target instanceof Element) || !root.contains(target)) return undefined;
+    const content = target.closest<HTMLElement>(".plan-panel__block-row > [data-block-id]");
+    return content?.dataset.blockId;
+  }
+
+  /** Fix round 4, item B: any mousedown clears a previous candidate and any
+   *  pending switch (a click back into the edited block, or anywhere else,
+   *  supersedes it); a primary-button mousedown on a different block,
+   *  outside a link, becomes the new candidate. */
+  function onBlockMouseDown(event: MouseEvent): void {
+    switchCandidate = undefined;
+    pendingEditTarget = undefined;
+    if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("a")) return;
+    const id = blockIdAt(event.target);
+    if (!id || id === editing?.blockId) return;
+    switchCandidate = id;
+  }
+
+  /** Fix round 4, item B: confirms the candidate when this mouseup lands on
+   *  the same block (by id — the element itself may have been rebuilt
+   *  since mousedown) with a collapsed selection (a drag-select never
+   *  opens a block). Opens it now, or once a different block's in-flight
+   *  save settles. */
+  function onBlockMouseUp(event: MouseEvent): void {
+    const candidate = switchCandidate;
+    switchCandidate = undefined;
+    if (!candidate || event.button !== 0 || blockIdAt(event.target) !== candidate) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    if (!currentDoc || conflict || editing?.blockId === candidate) return;
+    const index = currentDoc.blocks.findIndex((candidateBlock) => candidateBlock.id === candidate);
+    const block = currentDoc.blocks[index];
+    if (!block) return;
+    if (editing?.saving) {
+      pendingEditTarget = { blockId: block.id, index };
+      return;
+    }
+    void beginEditingBlock(block, index);
+  }
+  document.addEventListener("mousedown", onBlockMouseDown);
+  document.addEventListener("mouseup", onBlockMouseUp);
+
   async function openPanel(path?: string): Promise<void> {
     setOpen(true);
     loadError = undefined;
@@ -1799,6 +1848,8 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       closeActivePopover?.();
       closeActivePopover = undefined;
       document.removeEventListener("mouseup", selectionChanged);
+      document.removeEventListener("mousedown", onBlockMouseDown);
+      document.removeEventListener("mouseup", onBlockMouseUp);
       root.remove();
     },
   };
