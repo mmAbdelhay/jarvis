@@ -7,6 +7,13 @@
 // declared here (`BlockKind`, and the `original` parameter's inline type) to
 // keep this module a type-only consumer, per the "renderer imports only
 // types from workspace packages" rule.
+//
+// The DOM this reads is real markdown-it output (`{ html: false, linkify:
+// true, typographer: false }` — Task 1's own parse options), not a
+// hand-modelled approximation, so every rule below is calibrated against
+// what that renderer actually emits (plain-text `[ ] `/`[x] ` task markers
+// rather than checkbox inputs, a trailing `\n` inside every `<code>`, `<p>`
+// wrapping only on loose list items, and so on).
 
 export type BlockKind =
   | "heading"
@@ -21,38 +28,58 @@ export type BlockKind =
 const ESCAPABLE_CHARS = ["*", "_", "`", "["] as const;
 
 /**
- * Escapes markdown-significant characters in plain text, but only the ones
- * that don't already appear anywhere in the block's original source. If the
- * source already used a character (as markdown syntax or literal text), a
- * fresh occurrence typed during editing is left alone rather than risking a
- * double-escape; a character the source never used gets escaped so it can't
- * accidentally form new markdown syntax.
+ * Re-applies markdown escaping to a text node's plain content, but only for
+ * what the original source actually escaped. A character is only escaped in
+ * the output if the source contains that exact character preceded by a
+ * backslash (`\*` in the source means a literal `*` must round-trip back to
+ * `\*`); a lone, never-escaped occurrence of the character is left alone,
+ * since re-escaping it could diverge from what the user actually typed.
+ * `&` follows the same idea for the one HTML entity markdown-it introduces
+ * on its own: it stays a literal `&` unless the source spelled it `&amp;`.
  */
 function escapeIfNeeded(text: string, source: string): string {
   let result = text;
   for (const ch of ESCAPABLE_CHARS) {
-    if (source.includes(ch)) continue;
+    if (!source.includes(`\\${ch}`)) continue;
     result = result.split(ch).join(`\\${ch}`);
+  }
+  if (source.includes("&amp;")) {
+    result = result.split("&").join("&amp;");
   }
   return result;
 }
 
+function codeSpanFence(content: string): string {
+  const runs = content.match(/`+/g) ?? [];
+  const longest = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  return "`".repeat(longest + 1);
+}
+
 function childNodesToMarkdown(nodes: ArrayLike<ChildNode>, source: string): string {
   let out = "";
+  let previousWasBr = false;
   for (let i = 0; i < nodes.length; i += 1) {
-    out += nodeToMarkdown(nodes[i] as ChildNode, source);
+    const node = nodes[i] as ChildNode;
+    if (node.nodeType === Node.TEXT_NODE) {
+      let text = node.textContent ?? "";
+      // markdown-it always emits a literal "\n" right after a <br> in its
+      // HTML output (pretty-printing, not user content) — e.g.
+      // "<br>\nLine two". Left alone, that would round-trip a hard break
+      // as two newlines instead of the one the source actually had.
+      if (previousWasBr && text.startsWith("\n")) {
+        text = text.slice(1);
+      }
+      out += escapeIfNeeded(text, source);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      out += elementToMarkdown(node as HTMLElement, source);
+    }
+    previousWasBr =
+      node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName.toLowerCase() === "br";
   }
   return out;
 }
 
-function nodeToMarkdown(node: ChildNode, source: string): string {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return escapeIfNeeded(node.textContent ?? "", source);
-  }
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return "";
-  }
-  const el = node as HTMLElement;
+function elementToMarkdown(el: HTMLElement, source: string): string {
   switch (el.tagName.toLowerCase()) {
     case "strong":
     case "b":
@@ -60,11 +87,31 @@ function nodeToMarkdown(node: ChildNode, source: string): string {
     case "em":
     case "i":
       return `*${childNodesToMarkdown(el.childNodes, source)}*`;
-    case "code":
-      return `\`${el.textContent ?? ""}\``;
+    case "code": {
+      const content = el.textContent ?? "";
+      const fence = codeSpanFence(content);
+      const pad = content.startsWith("`") || content.endsWith("`") ? " " : "";
+      return `${fence}${pad}${content}${pad}${fence}`;
+    }
     case "a": {
       const href = el.getAttribute("href") ?? "";
+      const bareText = el.textContent ?? "";
+      const hrefBare = href.startsWith("mailto:") ? href.slice("mailto:".length) : href;
+      // linkify (autolinked URLs/emails) never appears as `[text](url)` in
+      // the source; writing it back that way would introduce syntax the
+      // user never typed. Only take this path when the bare text is
+      // actually present verbatim in the source, so a manual link whose
+      // text happens to equal its href still round-trips as a real link.
+      if (bareText.length > 0 && bareText === hrefBare && source.includes(bareText)) {
+        return bareText;
+      }
       return `[${childNodesToMarkdown(el.childNodes, source)}](${href})`;
+    }
+    case "img": {
+      const src = el.getAttribute("src") ?? "";
+      const alt = el.getAttribute("alt") ?? "";
+      const title = el.getAttribute("title");
+      return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
     }
     case "br":
       return "  \n";
@@ -87,17 +134,24 @@ function paragraphToMarkdown(el: HTMLElement, source: string): string {
   return inlineToMarkdown(paragraph, source);
 }
 
-function quoteToMarkdown(el: HTMLElement, source: string): string {
-  const quote = el.querySelector("blockquote") ?? el;
-  const paragraphs = Array.from(quote.querySelectorAll("p"));
-  const content =
-    paragraphs.length > 0
-      ? paragraphs.map((p) => inlineToMarkdown(p, source)).join("\n>\n")
-      : inlineToMarkdown(quote, source);
+function quoteLines(content: string): string {
   return content
     .split("\n")
     .map((line) => (line.length > 0 ? `> ${line}` : ">"))
     .join("\n");
+}
+
+function quoteToMarkdown(el: HTMLElement, source: string): string {
+  const quote = el.querySelector("blockquote") ?? el;
+  const paragraphs = Array.from(quote.querySelectorAll(":scope > p"));
+  if (paragraphs.length === 0) {
+    return quoteLines(inlineToMarkdown(quote, source));
+  }
+  // Each source paragraph becomes its own `> `-prefixed block; markdown-it
+  // separates them with a bare `>` line, which quoteLines only produces
+  // *inside* a block (for a `<br>` line break) — so the separator between
+  // paragraphs is joined in explicitly here, once, rather than per line.
+  return paragraphs.map((p) => quoteLines(inlineToMarkdown(p, source))).join("\n>\n");
 }
 
 function detectBulletMarker(source: string): string {
@@ -110,41 +164,71 @@ function isListElement(el: Element): boolean {
   return tag === "ul" || tag === "ol";
 }
 
-function isCheckbox(el: Element): boolean {
-  return el.tagName.toLowerCase() === "input" && el.getAttribute("type") === "checkbox";
+function orderedStart(list: HTMLElement): number {
+  // `HTMLOListElement.start` reflects a default of 1 when the attribute is
+  // absent, which is indistinguishable from an explicit `start="1"` — but
+  // an explicit `start="0"` is a real, meaningful value that `Number(...)
+  // || 1` would silently turn back into 1. Reading the attribute directly
+  // keeps 0 as 0.
+  return list.hasAttribute("start") ? Number(list.getAttribute("start")) : 1;
+}
+
+function renderListItem(
+  li: HTMLElement,
+  source: string,
+  bullet: string,
+  indent: number,
+  marker: string,
+): string[] {
+  // A loose list wraps each item's text in a `<p>`; a tight one doesn't.
+  // Either way, a nested sublist is always its own direct child of the
+  // `<li>`, alongside (not inside) that `<p>`.
+  const paragraph = li.querySelector(":scope > p");
+  const nestedLists = Array.from(li.children).filter(isListElement) as HTMLElement[];
+  const contentNodes = paragraph
+    ? Array.from(paragraph.childNodes)
+    : Array.from(li.childNodes).filter((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE) return true;
+        return !isListElement(node as Element);
+      });
+
+  const inline = childNodesToMarkdown(contentNodes, source).trim();
+  const indentStr = " ".repeat(indent);
+  const firstLine = `${indentStr}${marker} ${inline}`;
+
+  // A nested list's content must indent past this item's own marker plus
+  // its trailing space (`"10. "` is 4 columns wide) for markdown-it to
+  // parse it back as nested rather than a new sibling block.
+  const childIndent = indent + marker.length + 1;
+  const nestedLines = nestedLists.flatMap((nested) =>
+    renderList(nested, source, bullet, childIndent),
+  );
+
+  return [firstLine, ...nestedLines];
 }
 
 function renderList(list: HTMLElement, source: string, bullet: string, indent: number): string[] {
   const isOrdered = list.tagName.toLowerCase() === "ol";
-  const start = isOrdered ? Number((list as HTMLOListElement).start) || 1 : 0;
+  const start = isOrdered ? orderedStart(list) : 0;
   const items = Array.from(list.children).filter(
     (child) => child.tagName.toLowerCase() === "li",
   ) as HTMLElement[];
 
-  const indentStr = " ".repeat(indent);
+  // Looseness (a blank line between source items) is per-list, not global:
+  // a tight top-level list can contain a loose nested one and vice versa.
+  // markdown-it's own signal for it is exactly this — an item's text
+  // wrapped in a `<p>` rather than sitting directly in the `<li>`.
+  const loose = items.some((li) => li.querySelector(":scope > p") !== null);
+
+  const blocks = items.map((li, index) =>
+    renderListItem(li, source, bullet, indent, isOrdered ? `${start + index}.` : bullet),
+  );
+
   const lines: string[] = [];
-
-  items.forEach((li, index) => {
-    const marker = isOrdered ? `${start + index}.` : bullet;
-    const checkbox = Array.from(li.children).find(isCheckbox) as HTMLInputElement | undefined;
-    const taskPrefix = checkbox ? `[${checkbox.checked ? "x" : " "}] ` : "";
-
-    const nestedLists = Array.from(li.children).filter(isListElement) as HTMLElement[];
-    const contentNodes = Array.from(li.childNodes).filter((node) => {
-      if (node.nodeType !== Node.ELEMENT_NODE) return true;
-      const child = node as Element;
-      return !isListElement(child) && !isCheckbox(child);
-    });
-
-    const inline = childNodesToMarkdown(contentNodes, source).trim();
-    lines.push(`${indentStr}${marker} ${taskPrefix}${inline}`);
-
-    const childIndent = indent + (isOrdered ? 3 : 2);
-    nestedLists.forEach((nested) => {
-      lines.push(...renderList(nested, source, bullet, childIndent));
-    });
+  blocks.forEach((block, index) => {
+    if (index > 0 && loose) lines.push("");
+    lines.push(...block);
   });
-
   return lines;
 }
 
@@ -155,12 +239,28 @@ function listToMarkdown(el: HTMLElement, source: string): string {
 }
 
 function codeToMarkdown(el: HTMLElement, source: string): string {
-  const lines = source.split("\n");
-  const openFence = lines[0] ?? "```";
-  const closeFence = lines.length > 1 ? lines[lines.length - 1] : "```";
-  const body = el.textContent ?? "";
+  const codeEl = el.querySelector("code") ?? el;
+  const rawBody = codeEl.textContent ?? "";
+  // markdown-it always terminates a code block's content with a `\n`
+  // (fenced or indented) that isn't part of the block's last line.
+  const body = rawBody.endsWith("\n") ? rawBody.slice(0, -1) : rawBody;
   const bodyLines = body === "" ? [] : body.split("\n");
-  return [openFence, ...bodyLines, closeFence].join("\n");
+
+  const firstSourceLine = source.split("\n")[0] ?? "";
+  const isFenced = /^(`{3,}|~{3,})/.test(firstSourceLine);
+  if (isFenced) {
+    // The fence lines (with any info string) are never edited as text —
+    // only the body is — so they're carried over from the source verbatim.
+    const sourceLines = source.split("\n");
+    const openFence = sourceLines[0] ?? "```";
+    const closeFence = sourceLines.length > 1 ? sourceLines[sourceLines.length - 1] : openFence;
+    return [openFence, ...bodyLines, closeFence].join("\n");
+  }
+
+  // Task 1 maps an indented code_block to the same "code" kind; it has no
+  // fence to preserve, just the 4-space indent markdown-it stripped off
+  // when it built the DOM.
+  return bodyLines.map((line) => `    ${line}`).join("\n");
 }
 
 function rawToMarkdown(el: HTMLElement): string {

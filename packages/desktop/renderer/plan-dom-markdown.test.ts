@@ -1,15 +1,30 @@
 // @vitest-environment jsdom
+import MarkdownIt from "markdown-it";
 import { describe, expect, it } from "vitest";
 import { blockToMarkdown, isNoopEdit, type BlockKind } from "./plan-dom-markdown.js";
 
-// Builds the block wrapper div a real plan-panel render would produce: a
-// container div holding whatever markdown-it rendered for that block's
-// source. Editable kinds (heading/paragraph/list/quote) hold the rendered
-// tag; code/table/hr/other hold the raw markdown text itself, since those
-// edit as plain text rather than rendered HTML.
-function wrapper(innerHTML: string): HTMLElement {
+// Task 1's own parse options: no raw HTML passthrough, bare URLs/emails
+// autolinked, smart quotes/dashes off. Every rendered-HTML fixture below is
+// this real renderer's actual output, not a hand-modelled approximation —
+// see the task-7a fix report for why that distinction mattered (plain-text
+// `[ ]`/`[x]` task markers instead of checkbox inputs, a trailing `\n`
+// inside every `<code>`, `<p>`-wrapping only on loose list items, etc).
+const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
+
+// Renders `source` the way plan-panel would build a block's editable DOM:
+// a wrapper div holding whatever markdown-it rendered for it.
+function render(source: string): HTMLElement {
   const el = document.createElement("div");
-  el.innerHTML = innerHTML;
+  el.innerHTML = md.render(source);
+  return el;
+}
+
+// table/hr/other blocks don't render through markdown-it at all — per the
+// full Task 7 spec they edit as a raw-markdown textarea, so their wrapper
+// holds the source text itself, not rendered HTML.
+function renderRaw(source: string): HTMLElement {
+  const el = document.createElement("div");
+  el.textContent = source;
   return el;
 }
 
@@ -17,120 +32,154 @@ function original(kind: BlockKind, source: string, level?: number) {
   return { kind, level, source };
 }
 
-describe("blockToMarkdown: round-trip (unedited DOM reproduces original source)", () => {
+function headingLevel(source: string): number {
+  return (source.match(/^#+/)?.[0] ?? "#").length;
+}
+
+describe("blockToMarkdown: round-trip against real markdown-it output", () => {
   it("heading", () => {
     const source = "## Title **x**";
-    const el = wrapper("<h2>Title <strong>x</strong></h2>");
-    expect(blockToMarkdown(el, original("heading", source, 2))).toBe(source);
+    expect(blockToMarkdown(render(source), original("heading", source, headingLevel(source)))).toBe(
+      source,
+    );
   });
 
-  it("paragraph", () => {
-    const source = "Hello **x**";
-    const el = wrapper("<p>Hello <strong>x</strong></p>");
-    expect(blockToMarkdown(el, original("paragraph", source))).toBe(source);
+  it("paragraph: bold, italic, code, link, bare URL, image, escaped *", () => {
+    const source =
+      'Hello **x** and *y* and `z` and [link](https://a.com) and https://example.com and ![alt](https://img.example/a.png "title") and escaped \\*star\\*';
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
   });
 
-  it("list (unordered, with a nested list)", () => {
-    const source = "- Parent\n  - Child";
-    const el = wrapper("<ul><li>Parent<ul><li>Child</li></ul></li></ul>");
-    expect(blockToMarkdown(el, original("list", source))).toBe(source);
+  it("tight list", () => {
+    const source = "- One\n- Two\n- Three";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
   });
 
-  it("list (ordered)", () => {
-    const source = "1. One\n2. Two";
-    const el = wrapper("<ol><li>One</li><li>Two</li></ol>");
-    expect(blockToMarkdown(el, original("list", source))).toBe(source);
+  it("loose list", () => {
+    const source = "- a\n\n- b\n  - nested";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
   });
 
-  it("code", () => {
-    const source = "```js\nconst x = 1;\n```";
-    const el = wrapper("<pre><code>const x = 1;</code></pre>");
-    expect(blockToMarkdown(el, original("code", source))).toBe(source);
+  it("nested ordered list, start 0", () => {
+    const source = "0. Zero\n   - Child";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
+  });
+
+  it("nested ordered list, start 10+", () => {
+    const source = "10. Ten\n11. Eleven\n    - Child";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
+  });
+
+  it("task list", () => {
+    const source = "- [ ] Todo\n- [x] Done";
+    expect(blockToMarkdown(render(source), original("list", source))).toBe(source);
+  });
+
+  it("fenced code with a language", () => {
+    const source = "```js\nconst x = 1;\nconst y = 2;\n```";
+    expect(blockToMarkdown(render(source), original("code", source))).toBe(source);
+  });
+
+  it("indented code", () => {
+    const source = "    indented code\n    line2";
+    expect(blockToMarkdown(render(source), original("code", source))).toBe(source);
+  });
+
+  it("quote with 2 paragraphs", () => {
+    const source = "> Hello\n>\n> World";
+    expect(blockToMarkdown(render(source), original("quote", source))).toBe(source);
   });
 
   it("table", () => {
     const source = "| A | B |\n| - | - |\n| 1 | 2 |";
-    const el = wrapper("");
-    el.textContent = source;
-    expect(blockToMarkdown(el, original("table", source))).toBe(source);
-  });
-
-  it("quote", () => {
-    const source = "> Hello";
-    const el = wrapper("<blockquote>\n<p>Hello</p>\n</blockquote>");
-    expect(blockToMarkdown(el, original("quote", source))).toBe(source);
+    expect(blockToMarkdown(renderRaw(source), original("table", source))).toBe(source);
   });
 
   it("hr", () => {
     const source = "---";
-    const el = wrapper("");
-    el.textContent = source;
-    expect(blockToMarkdown(el, original("hr", source))).toBe(source);
-  });
-
-  it("other", () => {
-    const source = "<!-- a raw block markdown-it didn't classify -->";
-    const el = wrapper("");
-    el.textContent = source;
-    expect(blockToMarkdown(el, original("other", source))).toBe(source);
+    expect(blockToMarkdown(renderRaw(source), original("hr", source))).toBe(source);
   });
 });
 
-describe("blockToMarkdown: inline formatting", () => {
-  it("produces exact markdown for bold, italic, code and link", () => {
-    const source = "Hello **x** and *y* and `z` and [link](https://a.com)";
-    const el = wrapper(
-      '<p>Hello <strong>x</strong> and <em>y</em> and <code>z</code> and <a href="https://a.com">link</a></p>',
-    );
-    expect(blockToMarkdown(el, original("paragraph", source))).toBe(source);
+describe("blockToMarkdown: inline details", () => {
+  it("hard break renders as two trailing spaces plus newline", () => {
+    const source = "Line one  \nLine two";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
   });
 
-  it("keeps a hard break as two trailing spaces plus newline", () => {
-    const source = "Line one  \nLine two";
-    const el = wrapper("<p>Line one<br>Line two</p>");
-    expect(blockToMarkdown(el, original("paragraph", source))).toBe(source);
+  it("mailto autolink round-trips as a bare address, not a markdown link", () => {
+    const source = "mail me at foo@example.com";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+
+  it("inline code containing a backtick uses a longer fence", () => {
+    const source = "code with backtick: ``a`b``";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+
+  it("image without a title", () => {
+    const source = "![alt](https://img.example/a.png)";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+});
+
+describe("blockToMarkdown: escaping and entities", () => {
+  it("round-trips backslash-escaped *, _, ` and [ together", () => {
+    const source = "Escaped \\*star\\*, \\_underscore\\_, \\`code\\`, and \\[bracket]";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+
+  it("escapes a freshly-typed character once the source shows it needed escaping", () => {
+    // The block already escaped "*" once (elsewhere in its source); a *new*
+    // "*" typed during editing gets escaped too, since the rule is
+    // block-level (does this source ever escape "*"?), not per-position.
+    const source = "Already \\*escaped\\* once";
+    const el = render(source);
+    (el.querySelector("p") as HTMLElement).textContent = "Already *escaped* once, and *more*";
+    expect(blockToMarkdown(el, original("paragraph", source))).toBe(
+      "Already \\*escaped\\* once, and \\*more\\*",
+    );
+  });
+
+  it("leaves a freshly-typed character alone when the source never escaped it", () => {
+    const source = "Hello world";
+    const el = render(source);
+    // Simulate an edit: the user typed a literal "*" that was never in the
+    // source, escaped or not — nothing here tells us it needs escaping.
+    (el.querySelector("p") as HTMLElement).textContent = "Hello *world*";
+    expect(blockToMarkdown(el, original("paragraph", source))).toBe("Hello *world*");
+  });
+
+  it("leaves an unescaped character alone when the source used it unescaped", () => {
+    const source = "5 * 3 = 15";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+
+  it("re-encodes & back to &amp; only when the source spelled it that way", () => {
+    const entitySource = "Tom &amp; Jerry";
+    expect(blockToMarkdown(render(entitySource), original("paragraph", entitySource))).toBe(
+      entitySource,
+    );
+
+    const literalSource = "Tom & Jerry";
+    expect(blockToMarkdown(render(literalSource), original("paragraph", literalSource))).toBe(
+      literalSource,
+    );
   });
 });
 
 describe("blockToMarkdown: ordered list start number", () => {
-  it("keeps the original start number and renumbers from it", () => {
+  it("renumbers sequentially from the DOM's current order even after a reorder", () => {
+    // Started at 3; the DOM's second and third <li> have been swapped, so
+    // the written-back list must still read 3, 4, 5 in DOM order rather
+    // than copying the stale original numbers.
     const source = "3. Three\n4. Four\n5. Five";
-    const el = wrapper('<ol start="3"><li>Three</li><li>Four</li><li>Five</li></ol>');
-    expect(blockToMarkdown(el, original("list", source))).toBe(source);
-  });
-
-  it("renumbers sequentially even if an item was reordered", () => {
-    // Started at 3; the DOM's second <li> now reads "Five" (moved up), so
-    // the written-back list must still read 3, 4, 5 in DOM order.
-    const source = "3. Three\n4. Four\n5. Five";
-    const el = wrapper('<ol start="3"><li>Three</li><li>Five</li><li>Four</li></ol>');
+    const el = render(source);
+    const items = Array.from(el.querySelectorAll("li"));
+    const ol = el.querySelector("ol") as HTMLElement;
+    ol.innerHTML = "";
+    ol.append(items[0] as Node, items[2] as Node, items[1] as Node);
     expect(blockToMarkdown(el, original("list", source))).toBe("3. Three\n4. Five\n5. Four");
-  });
-});
-
-describe("blockToMarkdown: task list items", () => {
-  it("keeps [ ] and [x] markers", () => {
-    const source = "- [ ] Todo\n- [x] Done";
-    const el = wrapper(
-      '<ul><li><input type="checkbox"> Todo</li><li><input type="checkbox" checked> Done</li></ul>',
-    );
-    expect(blockToMarkdown(el, original("list", source))).toBe(source);
-  });
-});
-
-describe("blockToMarkdown: escaping", () => {
-  it("escapes a markdown-significant character the source never used", () => {
-    const source = "Hello world";
-    const el = wrapper("<p>Hello *world*</p>");
-    // The source never contained "*", so a literal "*" typed during editing
-    // must be escaped rather than silently turning into emphasis.
-    expect(blockToMarkdown(el, original("paragraph", source))).toBe("Hello \\*world\\*");
-  });
-
-  it("leaves a character alone when the source already used it", () => {
-    const source = "Hello *world* already italic";
-    const el = wrapper("<p>Hello *world* still here</p>");
-    expect(blockToMarkdown(el, original("paragraph", source))).toBe("Hello *world* still here");
   });
 });
 
