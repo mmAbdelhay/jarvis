@@ -1482,16 +1482,25 @@ describe("createPlanPanel: block editing fix round 1", () => {
     ).toBeTruthy();
   });
 
-  it("minor: a same-path reload while editing (not dirty) exits editing rather than leaving a detached container", async () => {
+  // Superseded by fix round 2, item 3: a clean (not dirty) same-path reload
+  // no longer unconditionally exits editing — it re-anchors to the same
+  // block instead (see "createPlanPanel: block editing fix round 2",
+  // item3b), so the block being open for editing does not, on its own,
+  // leave a detached container; only a block that's genuinely gone from
+  // the reloaded doc does.
+  it("minor: a same-path reload while editing (not dirty) re-anchors rather than leaving a detached container", async () => {
     const { panel, api } = setup();
     await panel.open(doc.path);
     click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
-    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
+    const editable = panel.element.querySelector(".plan-block-edit__rich");
+    expect(editable).toBeTruthy();
 
     panel.notifyChanged(doc.path);
     await flush();
 
-    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+    // Still open — the container is the *same* live node (reused, per
+    // renderEditingBlock), never a stale reference to something detached.
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBe(editable);
     expect(api.plansRead).toHaveBeenCalledTimes(2);
   });
 
@@ -1526,5 +1535,342 @@ describe("createPlanPanel: block editing fix round 1", () => {
     );
     document.removeEventListener("keydown", outerHandler);
     expect(outerHandler).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPlanPanel: block editing fix round 2", () => {
+  function paragraphEl(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+  }
+
+  async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
+    click(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panelElement);
+    editable.querySelector("p")!.textContent = text;
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function selectText(node: Node, start: number, end: number): void {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Item 1 --------------------------------------------------------------
+
+  it("item1: after ⌘S, the toolbar Comment button anchors its draft to the new block id", async () => {
+    const savedDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1000,
+      blocks: [
+        blocks[0]!,
+        { ...blocks[1]!, id: "paragraph-1-new", source: "Ship the useful feature quickly." },
+      ],
+    };
+    const api = fakeApi({
+      plansWriteBlock: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }),
+    );
+    await flush();
+
+    click(panel.element.querySelector(".plan-block-edit__comment"));
+    const textarea = panel.element.querySelector<HTMLTextAreaElement>(
+      ".plan-panel__comment-box textarea",
+    )!;
+    textarea.value = "Note";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    click(panel.element.querySelector('[data-action="add-comment"]'));
+    await flush();
+
+    expect(api.plansAddComment).toHaveBeenCalledWith(doc.path, "paragraph-1-new", "", "Note");
+  });
+
+  it("item1: after ⌘S, a text selection also anchors its comment draft to the new block id", async () => {
+    const savedDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1000,
+      blocks: [
+        blocks[0]!,
+        { ...blocks[1]!, id: "paragraph-1-new", source: "Ship the useful feature quickly." },
+      ],
+    };
+    const api = fakeApi({
+      plansWriteBlock: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }),
+    );
+    await flush();
+
+    const textNode = editable.querySelector("p")!.firstChild!;
+    selectText(textNode, 0, 4);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    click(panel.element.querySelector('[data-action="comment-selection"]'));
+
+    const textarea = panel.element.querySelector<HTMLTextAreaElement>(
+      ".plan-panel__comment-box textarea",
+    )!;
+    textarea.value = "Note";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    click(panel.element.querySelector('[data-action="add-comment"]'));
+    await flush();
+
+    expect(api.plansAddComment).toHaveBeenCalledWith(doc.path, "paragraph-1-new", "Ship", "Note");
+  });
+
+  // Item 2 --------------------------------------------------------------
+
+  it("item2: leaving via the link URL input to an element outside the panel does not steal focus back, and saves once", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    editable.focus();
+    const text = editable.querySelector("p")!.firstChild!;
+    selectText(text, 9, 23);
+
+    click(panel.element.querySelector(".plan-block-edit__link"));
+    const urlInput = panel.element.querySelector<HTMLInputElement>(".plan-block-edit__link-input")!;
+    urlInput.focus();
+    urlInput.value = "https://example.com";
+    await flush();
+
+    outside.focus(); // real focus move -> blur(urlInput, relatedTarget=outside)
+    await flush();
+
+    expect(document.activeElement).toBe(outside);
+    expect(api.plansWriteBlock).toHaveBeenCalledTimes(1);
+    expect(api.plansWriteBlock).toHaveBeenCalledWith(
+      doc.path,
+      "paragraph-1",
+      "Ship the [useful feature](https://example.com) safely.",
+      doc.mtimeMs,
+    );
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+  });
+
+  // Item 3 --------------------------------------------------------------
+
+  it("item3a: typing while a reload's own awaits are in flight is not dropped", async () => {
+    let resolveRead: (value: PlanResult<PlanDoc>) => void;
+    const plansRead = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value: doc })
+      .mockImplementationOnce(
+        () =>
+          new Promise<PlanResult<PlanDoc>>((resolve) => {
+            resolveRead = resolve;
+          }),
+      );
+    const api = fakeApi({ plansRead });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+
+    panel.notifyChanged(doc.path); // not dirty yet -> loadDocument starts, awaiting plansRead
+
+    editable.querySelector("p")!.textContent = "Ship the useful feature quickly.";
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+
+    resolveRead!({ ok: true, value: doc });
+    await flush();
+
+    expect(paragraphEl(panel.element)).toBe(editable); // same live node, not rebuilt
+    expect(editable.querySelector("p")!.textContent).toBe("Ship the useful feature quickly.");
+    expect(panel.element.querySelector<HTMLElement>(".plan-panel__unsaved")?.hidden).toBe(false);
+  });
+
+  it("item3b: a watcher echo right after ⌘S keeps the block open for editing", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }),
+    );
+    await flush();
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
+
+    panel.notifyChanged(doc.path); // watcher echo: clean now (just saved) -> reload runs immediately
+    await flush();
+
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeTruthy();
+    expect(vi.mocked(api.plansRead)).toHaveBeenCalledTimes(2);
+  });
+
+  // Item 4 (minor) --------------------------------------------------------
+
+  it("item4a: mousedown on a link inside a different block does not record a pending switch target", async () => {
+    const linkedDoc: PlanDoc = {
+      ...doc,
+      blocks: [
+        { ...blocks[0]!, html: '<h1>Build <a href="https://example.com">it</a></h1>' },
+        blocks[1]!,
+      ],
+    };
+    let resolveWrite: (value: PlanResult<PlanDoc>) => void;
+    const writeBlock = vi.fn(
+      () =>
+        new Promise<PlanResult<PlanDoc>>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+    const api = fakeApi({
+      plansRead: vi.fn(async () => ({ ok: true as const, value: linkedDoc })),
+      plansWriteBlock: writeBlock,
+    });
+    const { panel } = setup(api);
+    await panel.open(linkedDoc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const link = panel.element.querySelector("a")!;
+
+    link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: link }));
+
+    resolveWrite!({ ok: true, value: linkedDoc });
+    await flush();
+
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeNull();
+  });
+
+  it("item4b: a pending switch target only opens on a real click with a collapsed selection", async () => {
+    const { panel } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentB = panel.element.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+    const headingText = contentB.querySelector("h1")!.firstChild!;
+
+    contentB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    editableA.dispatchEvent(new FocusEvent("blur", { relatedTarget: contentB }));
+    // The mousedown turned into a text selection on B, not a plain click.
+    selectText(headingText, 0, 4);
+    contentB.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    contentB.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeNull();
+  });
+
+  it("item4c: a stale pending target does not auto-open after an unrelated Esc", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editableA = paragraphEl(panel.element);
+    const contentB = panel.element.querySelector<HTMLElement>('[data-block-id="heading-1"]')!;
+
+    // Records a pending target for B, but the user changes their mind and
+    // cancels A instead of ever completing a click on B.
+    contentB.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    editableA.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+    expect(
+      panel.element.querySelector('[data-block-id="heading-1"] .plan-block-edit__rich'),
+    ).toBeNull();
+  });
+
+  // Item 5 ----------------------------------------------------------------
+
+  it("item5: Enter at the end of a paragraph inserts a double <br>, and an untouched trailing break is not saved", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    const p = editable.querySelector("p")!;
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    range.collapse(false); // caret at the very end
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    editable.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(p.querySelectorAll("br")).toHaveLength(2);
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+    // No trailing hard break saved -- the user never typed anything after it.
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+  });
+
+  // Item 6 ------------------------------------------------------------------
+
+  it("item6: Enter in a heading does nothing (single-line)", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="heading-1"]'));
+    const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+    const textNode = editable.querySelector("h1")!.firstChild!;
+    selectText(textNode, 2, 2);
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    editable.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(editable.querySelector("br")).toBeNull();
+    expect(editable.querySelector("h1")?.textContent).toBe("Build it");
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+    expect(api.plansWriteBlock).not.toHaveBeenCalled();
+  });
+
+  it("item6: pasted newlines in a heading become spaces", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-block-id="heading-1"]'));
+    const editable = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+    const h1 = editable.querySelector("h1")!;
+    const range = document.createRange();
+    range.selectNodeContents(h1);
+    range.collapse(false);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: (type: string) => (type === "text/plain" ? "and\nmore" : "") },
+    });
+    editable.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(editable.querySelector("br")).toBeNull();
+    expect(h1.textContent).toBe("Build itand more");
+
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+    expect(api.plansWriteBlock).toHaveBeenCalledWith(
+      doc.path,
+      "heading-1",
+      "# Build itand more",
+      doc.mtimeMs,
+    );
   });
 });

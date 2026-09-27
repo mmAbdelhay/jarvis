@@ -248,18 +248,50 @@ describe("blockToMarkdown: defensive against a split editable container (fix rou
     expect(blockToMarkdown(el, original("paragraph", source))).toBe("First line.  \nSecond line.");
   });
 
-  it("heading: a stray sibling block joins in rather than being dropped", () => {
+  // Fix round 2, item 6 (controller ruling): headings are single-line, so
+  // the defensive join uses a space here, not paragraph's hard break — a
+  // heading can never legitimately contain one.
+  it("heading: a stray sibling block joins in with a space rather than a hard break", () => {
     const source = "# Title";
     const el = render(source);
     const second = document.createElement("div");
     second.textContent = "More.";
     el.append(second);
-    expect(blockToMarkdown(el, original("heading", source, 1))).toBe("# Title  \nMore.");
+    expect(blockToMarkdown(el, original("heading", source, 1))).toBe("# Title More.");
   });
 
   it("paragraph: a single top-level <p> still round-trips exactly as before (no regression)", () => {
     const source = "Hello **world**.";
     expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+});
+
+// Fix round 2, item 7: quoteToMarkdown only ever collected `:scope > p`
+// children — a stray top-level <div> or bare text node beside them (the
+// same category of bug C1 fixed for paragraph/heading) was silently
+// dropped instead of joined in as its own paragraph.
+describe("blockToMarkdown: quote keeps stray top-level children (fix round 2, item 7)", () => {
+  it("a stray top-level <div> beside <p> children joins in as its own paragraph", () => {
+    const source = "> Hello";
+    const el = render(source);
+    const blockquote = el.querySelector("blockquote")!;
+    const stray = document.createElement("div");
+    stray.textContent = "World";
+    blockquote.append(stray);
+    expect(blockToMarkdown(el, original("quote", source))).toBe("> Hello\n>\n> World");
+  });
+
+  it("a stray bare top-level text node beside <p> children joins in as its own paragraph", () => {
+    const source = "> Hello";
+    const el = render(source);
+    const blockquote = el.querySelector("blockquote")!;
+    blockquote.append(document.createTextNode("World"));
+    expect(blockToMarkdown(el, original("quote", source))).toBe("> Hello\n>\n> World");
+  });
+
+  it("still round-trips an ordinary multi-paragraph quote exactly as before (no regression)", () => {
+    const source = "> Hello\n>\n> World";
+    expect(blockToMarkdown(render(source), original("quote", source))).toBe(source);
   });
 });
 
