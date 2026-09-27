@@ -22,7 +22,13 @@
 // disconnected bookkeeping structure) — everything else about a phone's
 // request (policy gating, dispatch, the wire's req/res/err/sub frames) is
 // the real, unmodified production path.
-import type { AuthenticatedDevice, Bridge, BridgeDeps, SocketLike } from "@jarvis/remote";
+import type {
+  AuthenticatedDevice,
+  Bridge,
+  BridgeDeps,
+  OwnerAuth,
+  SocketLike,
+} from "@jarvis/remote";
 import {
   createConnection,
   EXPO_PUSH_URL,
@@ -45,6 +51,12 @@ import {
   remotePushPolicies,
   type StreamOwners,
 } from "./remote-push-policy.js";
+
+/** Owner login is tested inside @jarvis/remote: connections here open unlocked, never expiring. */
+const UNLOCKED_OWNER_AUTH: OwnerAuth = {
+  sessionAtHello: () => ({ until: Number.POSITIVE_INFINITY, familyId: "f".repeat(32) }),
+  handle: async () => ({ kind: "error", code: "unsupported" }),
+};
 
 const D1: AuthenticatedDevice = { id: "d".repeat(32), name: "Phone" };
 const D1_TOKEN = "T".repeat(43);
@@ -393,6 +405,8 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
         onOpen: () => {},
         onAuthFailed: () => {},
         onClosed: () => {},
+        ownerAuth: UNLOCKED_OWNER_AUTH,
+        onLock: () => {},
       });
       connections.set(device.id, deviceConnection);
       let nextId = 1;

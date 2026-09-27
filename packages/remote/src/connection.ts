@@ -24,23 +24,46 @@
 // left to a desktop-side allowlist), and a `{ch,key}` target additionally
 // needs `authorizeKey` to accept it and a free slot under
 // `MAX_KEYED_SUBSCRIPTIONS`.
+//
+// Phase 0 (owner login): an open connection is device-authenticated but
+// *locked* until the owner logs in over the `auth:*` channels, which
+// `deps.ownerAuth` answers before the `handle` router ever sees them.
+// While locked, every other `req`, every `sub` and every `blob` is refused
+// `locked`. A login, resume or refresh unlocks it until the access token's
+// expiry; at that instant, on logout, or when the hub locks it (owner
+// credentials invalidated, token family revoked) it locks again: its
+// subscriptions are dropped, an `auth:state` push tells the client, and
+// `deps.onLock` tears the device's sidecars down. The socket stays open.
 
 import type { AuditEvent, AuditLog } from "./audit.js";
 import { describeError } from "./io.js";
 import type { Clock, SocketLike, Timers } from "./io.js";
 import { createRateLimiter, type RateLimiter } from "./limits.js";
 import { createOutbox, type Outbox } from "./outbox.js";
+import type { AuthSession, OwnerAuth } from "./owner-auth.js";
+import { isAuthChannel } from "./owner-auth.js";
 import { isKeyedPolicy, MAX_KEYED_SUBSCRIPTIONS } from "./policy.js";
-import type { ChannelPolicies } from "./policy.js";
-import type { ClientMessage, RemoteErrorCode, ServerMessage, SubTarget } from "./protocol.js";
+import type { ChannelPolicies, ChannelPolicy } from "./policy.js";
+import type {
+  AuthChannel,
+  AuthLockReason,
+  AuthStatePush,
+  ClientMessage,
+  RemoteErrorCode,
+  ServerMessage,
+  SubTarget,
+} from "./protocol.js";
 import {
+  AUTH_STATE_CHANNEL,
   BLOB_IDLE_TIMEOUT_MS,
   CLOSE,
   encodeMessage,
   HANDSHAKE_TIMEOUT_MS,
   isValidBlobShape,
+  LOCKED_ALLOWED,
   MAX_BLOB_CHUNK_BYTES,
   MAX_MISSED_PONGS,
+  parseAuthArgs,
   parseClientMessage,
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
@@ -85,6 +108,20 @@ export const AUDIT_KEY_MAX_CHARS = 64;
  * `AUDIT_PROBE_LINES_PER_CONNECTION`'s own cap-then-silence shape.
  */
 export const AUDIT_INPUT_KEYS_PER_CONNECTION = 256;
+
+/** `sub` frames carry no id: a refused one is answered `err locked` with this id (clients number requests from 1). */
+export const LOCKED_SUB_ERROR_ID = 0;
+
+/**
+ * Node's `setTimeout` fires at once for a delay past 2^31-1 ms, so the
+ * expiry timer never waits longer than this; on firing early it re-arms.
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** The auth:state push rides the ordinary push lane, so it needs a policy the desktop never declares. */
+const AUTH_STATE_POLICY: ChannelPolicy = { kind: "reliable" };
+
+const LOCKED_ALLOWED_SET: ReadonlySet<string> = new Set(LOCKED_ALLOWED);
 
 export type AuthenticatedDevice = { id: string; name: string };
 
@@ -136,6 +173,12 @@ export type ConnectionDeps = {
   /** M12 Task 3: the desktop's own classifier for `channel` — this file
    *  never names a channel, it only asks. */
   auditPolicy(channel: string): AuditPolicy;
+  /** Phase 0: answers every `auth:*` request (bridge-wide instance). */
+  ownerAuth: OwnerAuth;
+  /** Phase 0: fired once per unlocked-to-locked transition, after the
+   *  subscriptions are dropped — the bridge destroys the device's sidecar
+   *  handles and live sidecar sockets here. */
+  onLock(deviceId: string): void;
 };
 
 export type Connection = {
@@ -150,15 +193,22 @@ export type Connection = {
    *  holds that exact `{ch,key}` target. */
   subscribes(channel: string, key?: string): boolean;
   close(code: number, reason: string): void;
+  /**
+   * Locks an unlocked connection (only one unlocked by `onlyFamily`, when
+   * given) without closing its socket. True when it actually locked.
+   */
+  lock(reason: AuthLockReason, onlyFamily?: string): boolean;
 };
 
 type ReqMessage = Extract<ClientMessage, { t: "req" }>;
 type SubMessage = Extract<ClientMessage, { t: "sub" }>;
 type BlobMessage = Extract<ClientMessage, { t: "blob" }>;
 
+type ConnAuth = { unlocked: false } | ({ unlocked: true } & AuthSession);
+
 type ConnState =
   | { phase: "awaiting-hello" }
-  | { phase: "open"; device: AuthenticatedDevice }
+  | { phase: "open"; device: AuthenticatedDevice; auth: ConnAuth }
   | { phase: "closed"; device: AuthenticatedDevice | undefined };
 
 /**
@@ -219,6 +269,12 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
 
   let blobPhase: BlobPhase = { kind: "none" };
   let blobIdleTimer: unknown;
+
+  // Phase 0: the access-expiry timer of an unlocked connection, and a
+  // counter bumped on every lock — a `req`/blob admitted while unlocked
+  // whose handler settles after a lock is answered `locked`, not delivered.
+  let expiryTimer: unknown;
+  let lockEpoch = 0;
 
   let closedHandled = false;
 
@@ -373,6 +429,77 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     blobIdleTimer = undefined;
   }
 
+  function clearExpiryTimer(): void {
+    if (expiryTimer === undefined) return;
+    deps.timers.clearTimeout(expiryTimer);
+    expiryTimer = undefined;
+  }
+
+  /** No timer for a session that never expires (a test double's `Infinity`). */
+  function armExpiryTimer(until: number): void {
+    clearExpiryTimer();
+    if (!Number.isFinite(until)) return;
+    const delay = Math.min(Math.max(0, until - deps.now()), MAX_TIMER_DELAY_MS);
+    expiryTimer = deps.timers.setTimeout(fireExpiry, delay);
+  }
+
+  function fireExpiry(): void {
+    expiryTimer = undefined;
+    if (state.phase !== "open" || !state.auth.unlocked) return;
+    if (deps.now() < state.auth.until) {
+      armExpiryTimer(state.auth.until);
+      return;
+    }
+    lock("expired");
+  }
+
+  function isUnlocked(): boolean {
+    return state.phase === "open" && state.auth.unlocked;
+  }
+
+  function unlock(session: AuthSession): void {
+    if (state.phase !== "open") return;
+    state = {
+      phase: "open",
+      device: state.device,
+      auth: { unlocked: true, until: session.until, familyId: session.familyId },
+    };
+    armExpiryTimer(session.until);
+  }
+
+  /** Every unlocked-to-locked transition (see the file header). */
+  function lock(reason: AuthLockReason, onlyFamily?: string): boolean {
+    if (state.phase !== "open" || !state.auth.unlocked) return false;
+    if (onlyFamily !== undefined && state.auth.familyId !== onlyFamily) return false;
+    const { device } = state;
+    state = { phase: "open", device, auth: { unlocked: false } };
+    lockEpoch += 1;
+    clearExpiryTimer();
+    for (const channel of subscribed) outbox?.purge(channel, undefined);
+    subscribed.clear();
+    for (const id of keyedSubscribed) {
+      const split = id.indexOf("\u{0}");
+      outbox?.purge(id.slice(0, split), id.slice(split + 1));
+    }
+    keyedSubscribed.clear();
+    // An upload in flight is refused now; its remaining frames are counted
+    // and dropped so the stream stays in step.
+    if (blobPhase.kind === "receiving") {
+      const { id, ch, declared, chunks, received, chunksLeft } = blobPhase;
+      blobPhase = { kind: "discarding", id, declared, received, chunksLeft };
+      sendErr(id, "locked");
+      logBlob(ch, declared, chunks, "aborted:locked");
+    }
+    const payload: AuthStatePush = { locked: true, reason };
+    outbox?.push(AUTH_STATE_CHANNEL, payload, undefined);
+    try {
+      deps.onLock(device.id);
+    } catch (error) {
+      deps.log(`connection: onLock threw: ${describeError(error)}`);
+    }
+    return true;
+  }
+
   /** Rule 3's "arm the idle timer in every non-closing branch" and rule 4's re-arm on every binary frame — always a fresh 30s window, never additive. */
   function armBlobIdleTimer(): void {
     clearBlobIdleTimer();
@@ -478,13 +605,13 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     }
 
     clearHandshakeTimer();
-    state = { phase: "open", device: authenticated };
+    state = { phase: "open", device: authenticated, auth: { unlocked: false } };
     // The outbox is created the instant this connection becomes open, so
     // even a hub `onOpen` that closes it right back out (below) always has
     // one to dispose.
     outbox = createOutbox({
       socket,
-      policies: deps.policies,
+      policies: new Map([...deps.policies, [AUTH_STATE_CHANNEL, AUTH_STATE_POLICY]]),
       now: deps.now,
       timers: deps.timers,
       log: deps.log,
@@ -502,6 +629,13 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     if (state.phase !== "open") return;
     send({ t: "welcome", v: PROTOCOL_VERSION, capabilities: [...deps.policies.keys()].sort() });
     armHeartbeat();
+    let initial: AuthSession | undefined;
+    try {
+      initial = deps.ownerAuth.sessionAtHello(authenticated);
+    } catch (error) {
+      deps.log(`connection: sessionAtHello threw: ${describeError(error)}`);
+    }
+    if (initial !== undefined) unlock(initial);
   }
 
   function withRateLimit(id: number, whenAllowed: () => void): void {
@@ -512,7 +646,61 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     whenAllowed();
   }
 
+  /** The Phase 0 gate: auth channels go to `ownerAuth`, anything else needs an unlocked connection. */
+  function routeReq(message: ReqMessage, device: AuthenticatedDevice): void {
+    const unlocked = isUnlocked();
+    if (isAuthChannel(message.ch)) {
+      if (!unlocked && !LOCKED_ALLOWED_SET.has(message.ch)) {
+        sendErr(message.id, "locked");
+        return;
+      }
+      handleAuthReq(message.id, message.ch, message.a, device);
+      return;
+    }
+    if (!unlocked) {
+      sendErr(message.id, "locked");
+      return;
+    }
+    handleReq(message, device);
+  }
+
+  function handleAuthReq(
+    id: number,
+    channel: AuthChannel,
+    rawArgs: unknown[],
+    device: AuthenticatedDevice,
+  ): void {
+    const args = parseAuthArgs(channel, rawArgs);
+    if (args === undefined) {
+      sendErr(id, "bad-request");
+      return;
+    }
+    const session: AuthSession | undefined =
+      state.phase === "open" && state.auth.unlocked
+        ? { until: state.auth.until, familyId: state.auth.familyId }
+        : undefined;
+    deps.ownerAuth.handle(channel, args, { device, source: deps.source, session }).then(
+      (outcome) => {
+        if (state.phase !== "open") return;
+        if (outcome.kind === "error") {
+          sendErr(id, outcome.code);
+          return;
+        }
+        const { effect } = outcome;
+        if (effect !== undefined && "unlock" in effect) unlock(effect.unlock);
+        if (effect !== undefined && "lock" in effect) lock(effect.lock);
+        deliverOutcome(id, { kind: "value", value: outcome.value });
+      },
+      (error: unknown) => {
+        deps.log(`connection: ownerAuth(${channel}) rejected: ${describeError(error)}`);
+        if (state.phase !== "open") return;
+        sendErr(id, "internal");
+      },
+    );
+  }
+
   function handleReq(message: ReqMessage, device: AuthenticatedDevice): void {
+    const epoch = lockEpoch;
     let result: Promise<RequestOutcome>;
     try {
       result = deps.handle(message.ch, message.a, device);
@@ -527,6 +715,10 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
       (outcome) => {
         recordRemoteCallAudit(device, message.ch, message.a, auditOutcomeOf(outcome));
         if (state.phase !== "open") return;
+        if (lockEpoch !== epoch) {
+          sendErr(message.id, "locked");
+          return;
+        }
         deliverOutcome(message.id, outcome);
       },
       (error: unknown) => {
@@ -589,6 +781,11 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
       logBlob(ch, bytes, chunks, outcome);
     }
 
+    if (!isUnlocked()) {
+      discardAfterRefusal("locked", "refused:locked");
+      return;
+    }
+
     if (!limiter.take()) {
       discardAfterRefusal("rate-limited", "refused:rate-limited");
       return;
@@ -649,6 +846,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     device: AuthenticatedDevice,
   ): void {
     const bytes = concatParts(finished.parts, finished.declared);
+    const epoch = lockEpoch;
     let result: Promise<RequestOutcome>;
     try {
       result = deps.handle(finished.ch, finished.a, device, bytes);
@@ -663,6 +861,10 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
       (outcome) => {
         recordRemoteCallAudit(device, finished.ch, finished.a, auditOutcomeOf(outcome));
         if (state.phase !== "open") return;
+        if (lockEpoch !== epoch) {
+          sendErr(finished.id, "locked");
+          return;
+        }
         deliverOutcome(finished.id, outcome);
       },
       (_error: unknown) => {
@@ -759,6 +961,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     clearHeartbeatTimer();
     clearCongestionTerminateTimer();
     clearBlobIdleTimer();
+    clearExpiryTimer();
     blobPhase = { kind: "none" };
     auditedInputKeys.clear();
     outbox?.dispose();
@@ -785,12 +988,16 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
         close(CLOSE.badFrame, "");
         return;
       case "req":
-        withRateLimit(message.id, () => handleReq(message, device));
+        withRateLimit(message.id, () => routeReq(message, device));
         return;
       case "sub":
         // A sub frame takes one limiter token too — refused, the whole
         // frame is silently ignored (there is no `id` to answer an err to).
         if (!limiter.take()) return;
+        if (!isUnlocked()) {
+          sendErr(LOCKED_SUB_ERROR_ID, "locked");
+          return;
+        }
         handleSub(message, device);
         return;
       case "pong":
@@ -894,6 +1101,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     clearHeartbeatTimer();
     clearCongestionTerminateTimer();
     clearBlobIdleTimer();
+    clearExpiryTimer();
     blobPhase = { kind: "none" };
     auditedInputKeys.clear();
     outbox?.dispose();
@@ -904,7 +1112,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
   }
 
   function push(channel: string, payload: unknown, key: string | undefined): void {
-    if (state.phase !== "open") return;
+    if (state.phase !== "open" || !state.auth.unlocked) return;
     const policy = deps.policies.get(channel);
     if (policy === undefined) return;
     if (isKeyedPolicy(policy)) {
@@ -947,6 +1155,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
         ? subscribed.has(channel)
         : keyedSubscribed.has(keyedTargetId(channel, key)),
     close,
+    lock,
   };
 
   return connection;

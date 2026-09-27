@@ -32,6 +32,8 @@ import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
 import type { OwnerHashParams } from "./owner.js";
 import { createOwnerStore } from "./owner.js";
+import { createOwnerAuth } from "./owner-auth.js";
+import { createSessionStore } from "./sessions.js";
 import { describeError } from "./io.js";
 import type { Clock, RandomBytes, RemoteFs, SessionHandlers, SocketLike, Timers } from "./io.js";
 import type { ChannelPolicies } from "./policy.js";
@@ -103,7 +105,10 @@ export type RemoteProblem =
   | "no-owner-password"
   /** owner.json exists but could not be read or parsed — sticky, like
    *  devices-unreadable. */
-  | "owner-unreadable";
+  | "owner-unreadable"
+  /** sessions.json exists but could not be read — sticky; the bridge never
+   *  listens rather than overwrite the refresh tokens it holds. */
+  | "sessions-unreadable";
 
 /** What desktop Settings shows of the owner account — never a hash, a
  *  salt or a passkey's public key. */
@@ -279,6 +284,7 @@ function isStickyProblem(problem: RemoteProblem | undefined): boolean {
     problem === "devices-unreadable" ||
     problem === "devices-write-failed" ||
     problem === "owner-unreadable" ||
+    problem === "sessions-unreadable" ||
     problem === "listen-failed" ||
     problem === "certificate-failed"
   );
@@ -376,6 +382,35 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     deps.log(`bridge: owner.load failed: ${describeError(error)}`);
     auditLog.record({ kind: "error", detail: describeError(error) });
   }
+  const sessions = createSessionStore({
+    fs: deps.fs,
+    path: join(deps.dir, "sessions.json"),
+    random: deps.random,
+    now: deps.now,
+    enforceFileModes: deps.enforceFileModes,
+  });
+  // Loaded before anything can issue or refresh a token: the first write
+  // would otherwise replace sessions.json with only the new records.
+  let sessionsReadable = true;
+  try {
+    await sessions.load();
+  } catch (error) {
+    sessionsReadable = false;
+    problem ??= "sessions-unreadable";
+    deps.log(`bridge: sessions.load failed: ${describeError(error)}`);
+    auditLog.record({ kind: "error", detail: describeError(error) });
+  }
+
+  const ownerAuth = createOwnerAuth({
+    owner,
+    sessions,
+    audit: auditLog,
+    log: deps.log,
+    lockFamily(familyId, reason) {
+      hub.lockFamily(familyId, reason);
+    },
+  });
+
   // Owner-account changes (set/change password, passkey delete) run one at
   // a time: a change verifies the current password and then replaces it,
   // and two of those interleaving could both pass the check.
@@ -553,6 +588,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       !idleDisabled &&
       devicesReadable &&
       ownerReadable &&
+      sessionsReadable &&
       owner.hasPassword() &&
       host !== undefined &&
       (devices.count() > 0 || pairing.status().kind !== "closed" || pairSessions > 0);
@@ -716,6 +752,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     log: deps.log,
     audit: auditLog,
     auditPolicy: deps.auditPolicy,
+    ownerAuth,
+    onLock(deviceId) {
+      teardownDeviceSidecars(deviceId);
+    },
     touch(id) {
       devices
         .touch(id)
@@ -890,21 +930,35 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     return pairing.decide(requestId, approve);
   }
 
-  async function revoke(deviceId: string): Promise<boolean> {
-    unsavedPushRegistrations.delete(deviceId);
-    const written = devices.revoke(deviceId);
-    // Rule 5: a revoked device's handles die before its sockets do.
+  /**
+   * Rule 5: a device's sidecar handles die before its live sidecar sockets
+   * do. Controller ruling (Task 2 fix round 1): an already-piped upgrade or
+   * a still-streaming response must die with its handle, not linger until
+   * the phone drops it or the listener restarts. Used by revoke (before
+   * `hub.closeDevice`, per the ruling's ordering) and by every lock (Phase
+   * 0: sidecars follow the session). Returns the sidecar sockets closed.
+   */
+  function teardownDeviceSidecars(deviceId: string): number {
     const clearedCount = sidecarRegistry.revokeDevice(deviceId);
     if (clearedCount > 0) {
       auditLog.record({ kind: "sidecars-cleared", count: clearedCount });
     }
-    // Controller ruling (Task 2 fix round 1): revocation must be total —
-    // an already-piped upgrade or a still-streaming response for this
-    // device must die with its handle, not linger until the phone drops it
-    // or the listener restarts. Right after `revokeDevice`, before
-    // `hub.closeDevice` (the `/rpc` session), per the ruling's ordering.
-    const closedSidecarSockets = currentProxy?.closeDevice(deviceId) ?? 0;
+    return currentProxy?.closeDevice(deviceId) ?? 0;
+  }
+
+  async function revoke(deviceId: string): Promise<boolean> {
+    unsavedPushRegistrations.delete(deviceId);
+    const written = devices.revoke(deviceId);
+    // Phase 0: the device's refresh tokens go with it (gone from memory now;
+    // the write is awaited below).
+    const sessionsRevoked = sessions.revokeDevice(deviceId);
+    const closedSidecarSockets = teardownDeviceSidecars(deviceId);
     const closed = hub.closeDevice(deviceId, CLOSE.revoked);
+    try {
+      await sessionsRevoked;
+    } catch (error) {
+      deps.log(`bridge: sessions.revokeDevice failed: ${describeError(error)}`);
+    }
     let ok: boolean;
     try {
       ok = await written;
@@ -1071,13 +1125,27 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   /**
    * The one place every owner-credential invalidation (spec rule 8)
    * converges: a password change, a passkey delete, "Sign out everywhere".
-   * Phase 0 Tasks 3-4 fill this in — revoke every refresh token and lock
-   * every open connection. Until then it only marks the spot; nothing here
-   * yet holds a session to invalidate.
+   * Synchronously: a login or refresh still in flight is refused, every
+   * access token and refresh token is gone from memory, every open
+   * connection is locked (its socket left open), and every device's sidecar
+   * handles and live sidecar sockets are destroyed. Only the sessions.json
+   * write lands later.
    */
   function invalidateOwnerSessions(
     _reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere",
-  ): void {}
+  ): void {
+    ownerAuth.invalidate();
+    sessions.revokeAll().catch((error: unknown) => {
+      deps.log(`bridge: sessions.revokeAll failed: ${describeError(error)}`);
+    });
+    hub.lockAll("signed-out");
+    const clearedCount = sidecarRegistry.count();
+    sidecarRegistry.clear();
+    if (clearedCount > 0) {
+      auditLog.record({ kind: "sidecars-cleared", count: clearedCount });
+    }
+    for (const device of devices.list()) currentProxy?.closeDevice(device.id);
+  }
 
   function ownerStatus(): OwnerStatus {
     return {
@@ -1181,6 +1249,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     await auditLog.flushed();
     await devices.flushed();
     await owner.flushed();
+    await sessions.flushed();
   }
 
   return {

@@ -19,7 +19,7 @@ import type { Bridge, RemoteStatus } from "./bridge.js";
 import { createBridge } from "./bridge.js";
 import { loadCertificate } from "./certificate.js";
 import { nodeFs, nodeTimers } from "./node-io.js";
-import { ownerFileWithPassword } from "./owner-double.js";
+import { OWNER_TEST_PASSWORD, ownerFileWithPassword } from "./owner-double.js";
 import { OUTBOX_TICK_MS } from "./outbox.js";
 import { STREAM_MAX_BYTES, utf8Bytes } from "./policy.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
@@ -310,6 +310,11 @@ describe("bridge.integration", () => {
   it("connectDevice welcomes with the subscribable capabilities and calls/pushes round-trip", async () => {
     session = await connectDevice(link, credential);
     expect(session.welcome.capabilities).toEqual(["metrics:update", "test:stream"]);
+    // Phase 0: every connection opens locked until the owner logs in.
+    expect(await session.call("projects:list")).toMatchObject({ t: "err", code: "locked" });
+    expect(await session.call("auth:login", { password: OWNER_TEST_PASSWORD })).toMatchObject({
+      t: "res",
+    });
 
     const res = await session.call("projects:list");
     expect(res).toMatchObject({ t: "res", v: ["alpha", "beta"] });

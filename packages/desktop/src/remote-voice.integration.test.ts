@@ -21,6 +21,7 @@ import {
   createConnection,
   PROTOCOL_VERSION,
   type AuthenticatedDevice,
+  type OwnerAuth,
   type SocketLike,
 } from "@jarvis/remote";
 import { runCommandWithLimits, transcodeToWhisperWavCommand } from "@jarvis/platform";
@@ -39,6 +40,12 @@ import { TRANSCODE_TIMEOUT_MS, TRANSCRIBE_TIMEOUT_MS } from "./voice-upload.js";
 import { createVoiceUploadHandler, type VoiceUploadDeps } from "./voice-upload.js";
 import type { UtteranceDeps } from "./voice-turn.js";
 import { handleUtterance } from "./voice-turn.js";
+
+/** Owner login is tested inside @jarvis/remote: connections here open unlocked, never expiring. */
+const UNLOCKED_OWNER_AUTH: OwnerAuth = {
+  sessionAtHello: () => ({ until: Number.POSITIVE_INFINITY, familyId: "f".repeat(32) }),
+  handle: async () => ({ kind: "error", code: "unsupported" }),
+};
 
 const DEVICE: AuthenticatedDevice = { id: "d".repeat(32), name: "Phone" };
 const TOKEN = "t".repeat(43);
@@ -221,6 +228,8 @@ function buildHarness(transcode: VoiceUploadDeps["transcode"], tempRoot: string)
     onOpen: () => {},
     onAuthFailed: () => {},
     onClosed: () => {},
+    ownerAuth: UNLOCKED_OWNER_AUTH,
+    onLock: () => {},
   });
 
   let nextId = 1;

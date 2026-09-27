@@ -13,9 +13,10 @@ import {
   OWNER_TEST_PASSWORD,
   ownerFileWithPassword,
 } from "./owner-double.js";
-import type { RandomBytes } from "./io.js";
+import type { RandomBytes, SessionHandlers } from "./io.js";
 import { CLOSE, parsePairingUri, PROTOCOL_VERSION } from "./protocol.js";
 import type { SidecarProxy } from "./proxy.js";
+import { ACCESS_TTL_MS } from "./sessions.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
 import { FakeSocket } from "./socket-double.js";
 
@@ -57,6 +58,30 @@ function countingRandom(): RandomBytes {
 /** Waits for every already-queued microtask (the bridge's reconcile chain included) to drain, via a real macrotask tick. */
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+const LOGIN_ID = 9_000;
+
+/**
+ * Phase 0: logs an open /rpc connection in with the owner password and
+ * waits for the answer (a real scrypt check, at the test cost), then
+ * forgets every frame sent so far.
+ */
+async function login(
+  handlers: SessionHandlers | undefined,
+  socket: FakeSocket,
+  password: string = OWNER_TEST_PASSWORD,
+): Promise<Record<string, unknown>> {
+  handlers?.onText(reqFrame(LOGIN_ID, "auth:login", [{ password }]));
+  for (let i = 0; i < 200; i++) {
+    const answer = socket.sent.find((frame) => frame.id === LOGIN_ID);
+    if (answer !== undefined) {
+      socket.sent = [];
+      return answer;
+    }
+    await flush();
+  }
+  throw new Error("auth:login never answered");
 }
 
 function helloFrame(deviceId: string, token: string): string {
@@ -546,6 +571,7 @@ describe("createBridge: pairing a device end-to-end", () => {
     const rpcHandlers = h.listenCalls[0]?.onSocket("rpc", rpcSocket, "10.0.0.9:1");
     rpcHandlers?.onText(helloFrame(deviceId, token));
     expect(rpcSocket.sent.some((frame) => frame.t === "welcome")).toBe(true);
+    await login(rpcHandlers, rpcSocket);
 
     rpcHandlers?.onText(reqFrame(1, "projects:list"));
     await flush();
@@ -585,6 +611,7 @@ describe("createBridge: pairing a device end-to-end", () => {
     const rpcSocket = new FakeSocket();
     const rpcHandlers = h.listenCalls[0]?.onSocket("rpc", rpcSocket, "10.0.0.9:1");
     rpcHandlers?.onText(helloFrame(deviceId, token));
+    await login(rpcHandlers, rpcSocket);
     rpcHandlers?.onText(reqFrame(1, "projects:list", []));
     await flush();
 
@@ -605,7 +632,7 @@ describe("createBridge: push", () => {
     const socket = new FakeSocket();
     const handlers = h.listenCalls[0]?.onSocket("rpc", socket, "10.0.0.5:1");
     handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
-    socket.sent = [];
+    await login(handlers, socket);
 
     bridge.push("metrics:update", { cpu: 1 });
     expect(socket.sent).toEqual([]);
@@ -630,6 +657,7 @@ describe("createBridge: hasSubscriber", () => {
     const socket = new FakeSocket();
     const handlers = h.listenCalls[0]?.onSocket("rpc", socket, "10.0.0.5:1");
     handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+    await login(handlers, socket);
     expect(bridge.hasSubscriber("metrics:update")).toBe(false);
 
     handlers?.onText(subFrame(["metrics:update"]));
@@ -822,6 +850,7 @@ describe("createBridge: push", () => {
     const socket = new FakeSocket();
     const handlers = h.listenCalls[0]?.onSocket("rpc", socket, "10.0.0.5:1");
     handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+    await login(handlers, socket);
     handlers?.onText(subFrame(["metrics:update"]));
 
     expect(bridge.watchingDevices("metrics:update")).toEqual(new Set([device?.deviceId]));
@@ -1130,6 +1159,7 @@ describe("createBridge: auditPolicy dep reaches the connection", () => {
     const rpcSocket = new FakeSocket();
     const rpcHandlers = h.listenCalls[0]?.onSocket("rpc", rpcSocket, "10.0.0.9:1");
     rpcHandlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+    await login(rpcHandlers, rpcSocket);
     rpcHandlers?.onText(reqFrame(1, "spy:channel"));
     await flush();
 
@@ -1969,5 +1999,176 @@ describe("createBridge: owner password gate (Phase 0)", () => {
       code: "unavailable",
     });
     expect(h.fs.files.get(OWNER_PATH)?.data).toBe("{");
+  });
+});
+
+describe("createBridge: owner login (Phase 0)", () => {
+  const SESSIONS_PATH = join(DIR, "sessions.json");
+  const TARGET: SidecarTarget = { kind: "editor", port: 4001 };
+
+  function lockedErr(id: number) {
+    return { t: "err", id, code: "locked", text: "err:locked", language: "en" };
+  }
+
+  /** Two paired devices, sidecar proxy on (a spy `closeDevice`), both connected but not logged in. */
+  async function twoDevices() {
+    const closeDevice = vi.fn((_deviceId: string) => 0);
+    const h = makeHarness({
+      cert: certWith("configured", ["laptop.tailnet.ts.net"]),
+      createProxy: () => ({ handleRequest: vi.fn(), handleUpgrade: vi.fn(), closeDevice }),
+    });
+    const [one, two] = await seedDevices(h.fs, h.random, h.clock.now, ["Phone", "Laptop"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({ ...ON_127(), sidecarProxy: true });
+    const connect = (device: { deviceId: string; token: string } | undefined, source: string) => {
+      const socket = new FakeSocket();
+      const handlers = h.listenCalls[0]?.onSocket("rpc", socket, source);
+      handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
+      socket.sent = [];
+      return { socket, handlers, id: device?.deviceId ?? "" };
+    };
+    return { h, bridge, closeDevice, a: connect(one, "10.0.0.5:1"), b: connect(two, "10.0.0.6:1") };
+  }
+
+  it("a paired device opens locked: a req is refused locked, auth:status is answered", async () => {
+    const { a } = await twoDevices();
+    a.handlers?.onText(reqFrame(1, "projects:list"));
+    a.handlers?.onText(reqFrame(2, "auth:status"));
+    await flush();
+    expect(a.socket.sent).toEqual([
+      lockedErr(1),
+      { t: "res", id: 2, v: { locked: true, hasPasskeys: false } },
+    ]);
+  });
+
+  it("a wrong password is forbidden and audited login-failed, never with the password", async () => {
+    const { h, a } = await twoDevices();
+    const wrong = "definitely not the owner password";
+    expect(await login(a.handlers, a.socket, wrong)).toMatchObject({ t: "err", code: "forbidden" });
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain(`login-failed deviceId="${a.id}"`);
+    expect(lines).not.toContain(wrong);
+  });
+
+  it("after login a req passes and auth:status reports the access expiry", async () => {
+    const { a } = await twoDevices();
+    const answer = await login(a.handlers, a.socket);
+    const tokens = answer.v as { accessExpiresAt: number };
+    a.handlers?.onText(reqFrame(1, "projects:list"));
+    a.handlers?.onText(reqFrame(2, "auth:status"));
+    await flush();
+    expect(a.socket.sent).toEqual([
+      { t: "res", id: 1, v: null },
+      {
+        t: "res",
+        id: 2,
+        v: { locked: false, hasPasskeys: false, accessExpiresAt: tokens.accessExpiresAt },
+      },
+    ]);
+  });
+
+  it("signOutEverywhere locks every connection within 1s, keeps the sockets, drops subscriptions, tears down all sidecars and kills refresh tokens", async () => {
+    const { h, bridge, closeDevice, a, b } = await twoDevices();
+    const answer = await login(a.handlers, a.socket);
+    await login(b.handlers, b.socket);
+    a.handlers?.onText(subFrame(["metrics:update"]));
+    b.handlers?.onText(subFrame(["metrics:update"]));
+    expect(bridge.publishSidecar(a.id, TARGET)).toHaveProperty("url");
+
+    const signedOut = bridge.signOutEverywhere();
+    h.clock.advance(1_000);
+
+    for (const conn of [a, b]) {
+      expect(conn.socket.sent).toEqual([
+        { t: "psh", ch: "auth:state", p: { locked: true, reason: "signed-out" }, seq: 1 },
+      ]);
+      expect(conn.socket.closed).toBeUndefined();
+    }
+    expect(bridge.hasSubscriber("metrics:update")).toBe(false);
+    expect(new Set(closeDevice.mock.calls.map(([id]) => id))).toEqual(new Set([a.id, b.id]));
+    await signedOut;
+
+    a.socket.sent = [];
+    a.handlers?.onText(reqFrame(3, "projects:list"));
+    expect(a.socket.sent).toEqual([lockedErr(3)]);
+    const { refreshToken } = answer.v as { refreshToken: string };
+    expect(await login(a.handlers, a.socket, OWNER_TEST_PASSWORD)).toMatchObject({ t: "res" });
+    a.handlers?.onText(reqFrame(4, "auth:refresh", [{ refreshToken }]));
+    for (let i = 0; i < 20; i++) await flush();
+    expect(a.socket.sent).toContainEqual({
+      t: "err",
+      id: 4,
+      code: "forbidden",
+      text: "err:forbidden",
+      language: "en",
+    });
+    const lines = (await auditLines(h.fs)).join("\n");
+    expect(lines).toContain("sidecars-cleared count=1");
+  });
+
+  it("a password change locks every open connection at once", async () => {
+    const { bridge, a } = await twoDevices();
+    await login(a.handlers, a.socket);
+    await bridge.setOwnerPassword(OWNER_TEST_PASSWORD, "a brand new owner password");
+    a.handlers?.onText(reqFrame(5, "projects:list"));
+    expect(a.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "signed-out" }, seq: 1 },
+      lockedErr(5),
+    ]);
+  });
+
+  it("logout locks only that connection and closes its device's sidecar sockets (proxy double)", async () => {
+    const { bridge, closeDevice, a, b } = await twoDevices();
+    await login(a.handlers, a.socket);
+    await login(b.handlers, b.socket);
+    expect(bridge.publishSidecar(a.id, TARGET)).toHaveProperty("url");
+
+    a.handlers?.onText(reqFrame(6, "auth:logout"));
+    for (let i = 0; i < 5; i++) await flush();
+
+    expect(a.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "logout" }, seq: 1 },
+      { t: "res", id: 6, v: null },
+    ]);
+    expect(closeDevice).toHaveBeenCalledWith(a.id);
+    expect(closeDevice).not.toHaveBeenCalledWith(b.id);
+    b.handlers?.onText(reqFrame(7, "projects:list"));
+    await flush();
+    expect(b.socket.sent).toEqual([{ t: "res", id: 7, v: null }]);
+  });
+
+  it("access expiry locks the connection and tears its sidecars down", async () => {
+    const { h, closeDevice, a } = await twoDevices();
+    await login(a.handlers, a.socket);
+    h.clock.advance(ACCESS_TTL_MS);
+    expect(a.socket.sent).toContainEqual({
+      t: "psh",
+      ch: "auth:state",
+      p: { locked: true, reason: "expired" },
+      seq: 1,
+    });
+    expect(closeDevice).toHaveBeenCalledWith(a.id);
+  });
+
+  it("revoke deletes the device's refresh tokens", async () => {
+    const { h, bridge, a } = await twoDevices();
+    await login(a.handlers, a.socket);
+    expect(h.fs.files.get(SESSIONS_PATH)?.data).toContain(a.id);
+    await bridge.revoke(a.id);
+    expect(h.fs.files.get(SESSIONS_PATH)?.data).not.toContain(a.id);
+  });
+
+  it("an unreadable sessions.json is sticky sessions-unreadable: never listens, never overwritten", async () => {
+    const h = makeHarness();
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const read = h.fs.readFile.bind(h.fs);
+    h.fs.readFile = async (path) => {
+      if (path === SESSIONS_PATH) throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return read(path);
+    };
+    const bridge = await createBridge(h.deps);
+    await bridge.apply(ON_127());
+    expect(h.listenCalls).toEqual([]);
+    expect(bridge.status().problem).toBe("sessions-unreadable");
   });
 });

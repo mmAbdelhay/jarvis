@@ -26,6 +26,23 @@ export type {
   SetOwnerPasswordResult,
 } from "./bridge.js";
 export type { OwnerHashParams, PasskeyRecord } from "./owner.js";
+export {
+  createOwnerAuth,
+  isAuthChannel,
+  MAX_CONCURRENT_PASSWORD_CHECKS,
+  MAX_QUEUED_PASSWORD_CHECKS,
+  NO_LOGIN_LIMITS,
+} from "./owner-auth.js";
+export type {
+  AuthContext,
+  AuthEffect,
+  AuthOutcome,
+  AuthSession,
+  BridgeOwnerAuth,
+  LoginLimits,
+  OwnerAuth,
+  OwnerAuthDeps,
+} from "./owner-auth.js";
 // `createConnection` itself was previously reachable only transitively
 // (bridge.ts -> hub.ts -> connection.ts, already inside this file's own
 // reachability graph below) but never re-exported directly — every other

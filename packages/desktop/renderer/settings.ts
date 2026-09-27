@@ -1674,6 +1674,7 @@ function renderRemotePairArea(): void {
     status.problem !== "devices-unreadable" &&
     status.problem !== "no-owner-password" &&
     status.problem !== "owner-unreadable" &&
+    status.problem !== "sessions-unreadable" &&
     status.pairing.kind === "closed"
   );
 

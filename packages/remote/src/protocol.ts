@@ -15,6 +15,8 @@
 
 import { isSubscriptionKey } from "./policy.js";
 export {
+  AUTH_CHANNELS,
+  AUTH_STATE_CHANNEL,
   BLOB_IDLE_TIMEOUT_MS,
   CLOSE,
   DEVICE_ID_PATTERN,
@@ -22,6 +24,7 @@ export {
   formatPairingUri,
   HANDSHAKE_TIMEOUT_MS,
   isValidBlobShape,
+  LOCKED_ALLOWED,
   MAX_BLOB_BYTES,
   MAX_BLOB_CHUNK_BYTES,
   MAX_BLOB_CHUNKS,
@@ -35,6 +38,13 @@ export {
   SECRET_PATTERN,
 } from "@jarvis/wire";
 export type {
+  AuthArgs,
+  AuthChannel,
+  AuthLockReason,
+  AuthResults,
+  AuthStatePush,
+  AuthStatus,
+  AuthTokens,
   ClientMessage,
   PairClientMessage,
   PairingLink,

@@ -11,6 +11,7 @@ import type {
 import { createHub, MAX_CLIENTS, MAX_PENDING } from "./hub.js";
 import type { HubDeps } from "./hub.js";
 import type { SessionHandlers, SocketLike } from "./io.js";
+import { TEST_FAMILY_ID, unlockedOwnerAuth } from "./owner-auth-double.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
 import { CLOSE, PROTOCOL_VERSION } from "./protocol.js";
 import { FakeSocket } from "./socket-double.js";
@@ -83,6 +84,7 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
   const touch = vi.fn();
   const onConnectionsChanged = vi.fn();
   const onDeviceDisconnected = vi.fn();
+  const onLock = vi.fn<(deviceId: string) => void>();
   const pairSession = overrides.pairSession ?? vi.fn();
   const authorizeKey: AuthorizeKey = overrides.authorizeKey ?? (() => true);
   const deps: HubDeps = {
@@ -97,6 +99,8 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
     log,
     audit,
     auditPolicy: overrides.auditPolicy ?? (() => "never"),
+    ownerAuth: unlockedOwnerAuth(),
+    onLock,
     touch,
     onConnectionsChanged,
     onDeviceDisconnected,
@@ -112,6 +116,7 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
     touch,
     onConnectionsChanged,
     onDeviceDisconnected,
+    onLock,
     pairSession,
     deps,
   };
@@ -554,5 +559,46 @@ describe("createHub: auditPolicy pass-through", () => {
       channel: "spy:channel",
       outcome: "ok",
     });
+  });
+});
+
+describe("createHub: owner-login locks (Phase 0)", () => {
+  function lockPushes(socket: FakeSocket) {
+    return socket.sent.filter((frame) => frame.ch === "auth:state");
+  }
+
+  it("lockAll locks every open connection without closing any, and drops their subscriptions", () => {
+    const { hub, onLock } = makeHarness();
+    const one = openDevice(hub, 1);
+    const two = openDevice(hub, 2);
+    one.handlers.onText(subFrame(["metrics:update"]));
+    two.handlers.onText(subFrame(["metrics:update"]));
+
+    expect(hub.lockAll("signed-out")).toBe(2);
+
+    expect(hub.hasSubscriber("metrics:update")).toBe(false);
+    expect(one.socket.closed).toBeUndefined();
+    expect(two.socket.closed).toBeUndefined();
+    expect(lockPushes(one.socket)).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "signed-out" }, seq: 1 },
+    ]);
+    expect(onLock.mock.calls).toEqual([[deviceId(1)], [deviceId(2)]]);
+    expect(hub.lockAll("signed-out")).toBe(0);
+  });
+
+  it("lockDevice locks only that device's connections", () => {
+    const { hub } = makeHarness();
+    const one = openDevice(hub, 1);
+    const two = openDevice(hub, 2);
+    expect(hub.lockDevice(deviceId(1), "signed-out")).toBe(1);
+    expect(lockPushes(one.socket)).toHaveLength(1);
+    expect(lockPushes(two.socket)).toHaveLength(0);
+  });
+
+  it("lockFamily locks only connections unlocked by that family", () => {
+    const { hub } = makeHarness();
+    openDevice(hub, 1);
+    expect(hub.lockFamily("0".repeat(32), "logout")).toBe(0);
+    expect(hub.lockFamily(TEST_FAMILY_ID, "logout")).toBe(1);
   });
 });

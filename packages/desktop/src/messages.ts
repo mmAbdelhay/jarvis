@@ -1073,6 +1073,10 @@ export const MESSAGES = {
         ar: "تعذّرت قراءة ملف حساب المالك، فبقي الوصول عن بُعد متوقفًا.",
         en: "The owner account file could not be read, so remote access stays off.",
       },
+      "sessions-unreadable": {
+        ar: "تعذّرت قراءة ملف جلسات الدخول، فبقي الوصول عن بُعد متوقفًا.",
+        en: "The sign-in sessions file could not be read, so remote access stays off.",
+      },
     };
     return text[problem][language];
   },

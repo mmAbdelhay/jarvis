@@ -18,8 +18,10 @@ import { createConnection } from "./connection.js";
 import { describeError } from "./io.js";
 import type { SessionHandlers, SocketLike } from "./io.js";
 import { type AuthBackoff, createAuthBackoff } from "./limits.js";
+import type { OwnerAuth } from "./owner-auth.js";
 import type { ChannelPolicies, ChannelPolicy } from "./policy.js";
 import { isKeyedPolicy, isSubscriptionKey } from "./policy.js";
+import type { AuthLockReason } from "./protocol.js";
 import { CLOSE } from "./protocol.js";
 
 export const MAX_CLIENTS = 8;
@@ -40,6 +42,10 @@ export type HubDeps = {
    *  never classifies a channel itself, it only forwards. */
   auditPolicy(channel: string): AuditPolicy;
   backoff?: AuthBackoff;
+  /** Phase 0: pass-through to `ConnectionDeps.ownerAuth`. */
+  ownerAuth: OwnerAuth;
+  /** Phase 0: pass-through to `ConnectionDeps.onLock`. */
+  onLock(deviceId: string): void;
   touch(deviceId: string): void;
   onConnectionsChanged(): void;
   onDeviceDisconnected(deviceId: string): void;
@@ -56,6 +62,11 @@ export type Hub = {
   watchingDevices(channel: string, key?: string): ReadonlySet<string>;
   closeDevice(deviceId: string, code: number): number;
   closeAll(code: number): void;
+  /** Phase 0: locks every open connection (sockets stay open); returns how many were unlocked. */
+  lockAll(reason: AuthLockReason): number;
+  lockDevice(deviceId: string, reason: AuthLockReason): number;
+  /** Locks every open connection unlocked by `familyId` (logout, refresh-token reuse). */
+  lockFamily(familyId: string, reason: AuthLockReason): number;
   connectedDeviceIds(): ReadonlySet<string>;
 };
 
@@ -147,6 +158,8 @@ export function createHub(deps: HubDeps): Hub {
       log: deps.log,
       audit: deps.audit,
       auditPolicy: deps.auditPolicy,
+      ownerAuth: deps.ownerAuth,
+      onLock: deps.onLock,
 
       onOpen(c) {
         freeSlot();
@@ -221,6 +234,18 @@ export function createHub(deps: HubDeps): Hub {
     if (set.size === 0) byDevice.delete(deviceId);
   }
 
+  /** Locks over a snapshot: a lock's `onLock` may run code that changes the live sets. */
+  function lockEach(
+    connections: Iterable<Connection>,
+    lockOne: (connection: Connection) => boolean,
+  ): number {
+    let locked = 0;
+    for (const connection of [...connections]) {
+      if (lockOne(connection)) locked += 1;
+    }
+    return locked;
+  }
+
   /** Rule 7: fires at most once per transition, a throw logged rather than left to escape into caller code. */
   function fireDeviceDisconnected(deviceId: string): void {
     try {
@@ -292,6 +317,18 @@ export function createHub(deps: HubDeps): Hub {
       // `auth-failed` timeout after the wire is already gone.
       for (const abort of pending.values()) abort(code);
       for (const connection of open) connection.close(code, "");
+    },
+
+    lockAll(reason) {
+      return lockEach(open, (connection) => connection.lock(reason));
+    },
+
+    lockDevice(deviceId, reason) {
+      return lockEach(byDevice.get(deviceId) ?? [], (connection) => connection.lock(reason));
+    },
+
+    lockFamily(familyId, reason) {
+      return lockEach(open, (connection) => connection.lock(reason, familyId));
     },
 
     connectedDeviceIds() {

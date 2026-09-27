@@ -628,7 +628,7 @@ describe("the remote access panel", () => {
     expect(parts.before + parts.after).not.toContain("{name}");
   });
 
-  it("covers all seven RemoteProblem values, bilingually and distinctly", () => {
+  it("covers all eight RemoteProblem values, bilingually and distinctly", () => {
     const problems = [
       "bad-address",
       "listen-failed",
@@ -637,6 +637,7 @@ describe("the remote access panel", () => {
       "devices-write-failed",
       "no-owner-password",
       "owner-unreadable",
+      "sessions-unreadable",
     ] as const;
     for (const problem of problems) {
       const en = MESSAGES.remoteProblem(problem, "en");

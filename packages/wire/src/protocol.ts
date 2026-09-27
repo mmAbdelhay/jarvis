@@ -125,6 +125,22 @@ export const LOCKED_ALLOWED: readonly AuthChannel[] = [
   "auth:logout",
 ];
 
+/**
+ * The one push a connection receives without subscribing: sent the moment
+ * an unlocked connection locks (access expiry, logout, a revoked token
+ * family, or an owner-credential invalidation), as
+ * `{t:"psh", ch:"auth:state", p:{locked:true, reason}, seq}`. Its `seq`
+ * is the connection's ordinary push sequence. The /rpc socket stays open;
+ * the client shows its unlock screen and logs in again on the same socket.
+ * A `sub` frame refused while locked (it carries no id) is answered with
+ * `err` id 0 code "locked" — clients number their requests from 1.
+ */
+export const AUTH_STATE_CHANNEL = "auth:state";
+/** `signed-out`: the owner password changed, a passkey was deleted, the
+ *  owner signed out everywhere, or this login's token family was revoked. */
+export type AuthLockReason = "expired" | "logout" | "signed-out";
+export type AuthStatePush = { locked: true; reason: AuthLockReason };
+
 /** Access and refresh tokens: 32 random bytes as lowercase hex. */
 export const AUTH_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 export const MAX_PASSWORD_LENGTH = 1_024;

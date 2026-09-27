@@ -86,7 +86,13 @@ export type AuditEvent =
   | { kind: "owner-password-set" }
   | { kind: "owner-password-changed" }
   | { kind: "passkey-deleted"; credentialTail: string }
-  | { kind: "signed-out-everywhere" };
+  | { kind: "signed-out-everywhere" }
+  // Phase 0: remote owner logins over auth:login, and a rotated refresh
+  // token presented again (its whole family is revoked). The device id and
+  // source only — never the password or any token.
+  | { kind: "login-succeeded"; deviceId: string; source: string }
+  | { kind: "login-failed"; deviceId: string; source: string }
+  | { kind: "refresh-reuse"; deviceId: string; source: string };
 
 export type AuditLog = { record(event: AuditEvent): void; flushed(): Promise<void> };
 
