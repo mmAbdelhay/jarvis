@@ -177,10 +177,15 @@ requires a signed-in connection.
 - a **refresh token** that gets a new access token without the password. It
   expires after 7 days unused, and 30 days after the sign-in that started it,
   whatever happens. Each refresh replaces it with a new one and retires the
-  old one. If a retired refresh token is ever presented again, the laptop
-  assumes it was copied. It ends that sign-in and every token descended from
-  it, and it shows a desktop notification: "An old sign-in session was
-  reused".
+  old one. If the reply carrying the new one is lost (the network drops
+  mid-refresh), the phone retries with the token it still holds. Within 10
+  minutes, and only while the new token has never been used, the laptop
+  issues a fresh pair instead and cancels the unused one (audited
+  `refresh-retry`). Later than that, the sign-in ends quietly and the phone
+  asks for the password (`refresh-stale`). Any other retired refresh token
+  presented again is assumed to be copied: the laptop ends that sign-in and
+  every token descended from it, and shows a desktop notification: "An old
+  sign-in session was reused".
 
 The laptop keeps only SHA-256 hashes of refresh tokens, in `sessions.json`.
 Access tokens are held in memory only, so restarting Jarvis or the bridge
@@ -191,7 +196,8 @@ whole bridge:
 
 - **Per device.** After 5 wrong passwords, that device cannot try again for
   1 minute. Each further wrong password doubles the wait, up to 1 hour. A
-  successful sign-in resets the count.
+  successful sign-in resets the count. The laptop shows a desktop
+  notification naming the device, at most once per device every 15 minutes.
 - **Across all devices.** 20 wrong passwords within one hour pause every
   sign-in, from every device, for 15 minutes. The laptop shows a desktop
   notification: "Remote sign-in paused".
@@ -203,7 +209,8 @@ say whether it was right. The audit log records each sign-in
 with `scope=device` or `scope=global`), and attempts refused during a
 lockout. Those refusals are collected into one `login-refused` line with a
 `count` per device per minute, so a device retrying in a loop cannot flood
-the log.
+the log. Attempts refused because too many password checks were already
+waiting are logged the same way, with `scope=capacity`.
 
 **What signs devices out.** Each of these ends signed-in sessions:
 
@@ -222,9 +229,14 @@ and its live sidecar connections are cut mid-stream, the same way revocation
 cuts them. A device that is not signed in cannot open a new one.
 
 **On the phone.** After pairing, the phone shows an unlock screen. Enter the
-owner password once. The phone then stores the refresh token in the
-keychain/keystore, where reading it needs the phone's own Face ID,
-fingerprint or passcode, so later unlocks go through that OS prompt. The
+owner password once. If the phone has a screen lock, the app then keeps the
+refresh token in the phone's secure storage: the iOS keychain (only while a
+passcode is set, on this device only) or Android storage encrypted with an
+Android Keystore key. It is never included in backups. Before reading it,
+the app asks for Face ID, fingerprint or the phone's passcode, so later
+unlocks go through that prompt. The app makes that check, not the stored
+key: the key is not bound to biometrics, so something that can run code as
+the app on an unlocked phone could read the token without a prompt. The
 password field is always there as a fallback. A phone with no biometrics or
 passcode set up keeps nothing, and asks for the password every time. The app
 also locks itself after 15 minutes with no touches. You can choose 5, 15, 30
