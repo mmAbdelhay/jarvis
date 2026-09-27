@@ -1,4 +1,4 @@
-import type { Session, SessionOutput } from "@jarvis/core";
+import type { Session, SessionOutput, SessionState } from "@jarvis/core";
 import type { TranscriptEntry } from "@jarvis/platform";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { currentView, showView } from "./views.js";
@@ -387,6 +387,28 @@ export function setKnownAgents(agents: string[]): void {
   knownAgents = agents;
 }
 
+/** Configured project names (jarvis.yaml's `projects:`) — the edit form's
+ *  project select offers these plus "no project", the same pair
+ *  history:edit itself accepts (an unconfigured name is rejected there).
+ *  app.ts sets this from getProjects() the same two places it already
+ *  keeps its own `knownProjects` in sync. */
+let knownProjects: string[] = [];
+export function setKnownProjects(projects: string[]): void {
+  knownProjects = projects;
+}
+
+/** The one row currently showing its inline edit form (bug 7), or none.
+ *  Only one at a time: opening a second closes whichever was open, the
+ *  same one-at-a-time rule the table's own sort/filter controls assume. */
+let editingId: string | undefined;
+
+/** Every SessionState, for the edit form's state select — duplicated here
+ *  rather than imported as a value from @jarvis/core (a renderer module may
+ *  only import *types* from a workspace package; see
+ *  no-value-imports.test.ts). The same convention app.ts's own
+ *  LIVE_STATES follows. */
+const SESSION_STATES: readonly SessionState[] = ["starting", "running", "waiting", "done", "dead"];
+
 /** The project filter offers what the table actually contains — a project
  *  with no sessions would be a dead end. The agent filter is different on
  *  purpose: it also offers every registry agent, even one with nothing
@@ -462,7 +484,17 @@ function drawRows(): void {
     table.append(empty);
     return;
   }
-  body.replaceChildren(...shown.map(buildSessionTableRow));
+  body.replaceChildren(...shown.flatMap(buildSessionRows));
+}
+
+/** A session's own row, plus its inline edit form (bug 7) directly beneath
+ *  it when that row is the one being edited — a second `<tr>` rather than
+ *  a hidden fragment inside the first, so the edit form gets a table row's
+ *  own full width regardless of the table's column layout. */
+function buildSessionRows(session: Session): HTMLElement[] {
+  const row = buildSessionTableRow(session);
+  if (editingId !== session.id) return [row];
+  return [row, buildEditRow(session)];
 }
 
 /** An arrow on the column being sorted, so the order is never a mystery. */
@@ -562,11 +594,160 @@ function buildSessionTableRow(session: Session): HTMLElement {
       void resumeInTerminal(session.id);
     });
     actions.append(resume);
+
+    // Stored rows only (bug 7) — an external row has no sessionStore row
+    // to edit at all, only a live process-scan chip above.
+    const edit = document.createElement("button");
+    edit.type = "button";
+    // Shares Resume's own styling (styles-tokens.test.ts requires a real
+    // background rule, not a browser-default button) — "session-table-edit"
+    // is its own hook for selecting just this button.
+    edit.className = "session-table-resume session-table-edit";
+    edit.textContent = "✎";
+    edit.title = "Edit";
+    edit.addEventListener("click", (event) => {
+      // Same reason as resume's own stopPropagation: opening the edit form
+      // must not also open the session's terminal.
+      event.stopPropagation();
+      editingId = editingId === session.id ? undefined : session.id;
+      drawRows();
+    });
+    actions.append(edit);
   }
 
   row.append(main, agent, state, when, actions);
   row.addEventListener("click", () => void openSession(session));
   return row;
+}
+
+/**
+ * The inline form a row's ✎ button opens (bug 7). Electron has no
+ * `prompt()` (see api.ts's own note on that), so this is a real form built
+ * into the table rather than a dialog: summary, project, agent, model and
+ * state, with Save/Cancel and a status line for whatever history:edit
+ * rejects (an unknown project/agent, a bad state, or a state edit while
+ * SessionManager still owns the row).
+ */
+function buildEditRow(session: Session): HTMLElement {
+  const tr = document.createElement("tr");
+  tr.className = "session-edit-row";
+  const td = document.createElement("td");
+  td.className = "session-edit-cell";
+  // One cell spanning every column — main/agent/state/when/actions — so
+  // the form reads as this row's own full-width drawer, not a fifth
+  // narrow column squeezed beside the others.
+  td.colSpan = 5;
+
+  const summaryInput = document.createElement("input");
+  summaryInput.type = "text";
+  summaryInput.className = "session-edit-summary";
+  summaryInput.value = session.summary;
+  summaryInput.setAttribute("aria-label", "Summary");
+
+  const projectSelect = document.createElement("select");
+  projectSelect.className = "session-edit-project";
+  // The session's own current project is always offered even if it is not
+  // (or no longer) a configured one — same reasoning as the agent select
+  // below, and for the same reason: a <select> silently falls back to its
+  // first option when `.value` names one that isn't there, which would
+  // make an untouched project field look like an edit to "No project".
+  const projectNames = [
+    ...new Set(session.project === null ? knownProjects : [...knownProjects, session.project]),
+  ].sort((a, b) => a.localeCompare(b));
+  // "" is the same "no project" value history:edit itself treats as
+  // clearing the override — never NO_PROJECT, which is session-filter.ts's
+  // own sentinel for a different job (filtering the table, not editing a
+  // row).
+  projectSelect.append(option("", "No project"), ...projectNames.map((p) => option(p, p)));
+  projectSelect.value = session.project ?? "";
+
+  const agentSelect = document.createElement("select");
+  agentSelect.className = "session-edit-agent";
+  // The session's own current agent is always offered even if it is not
+  // (or no longer) a registry id — same reasoning as agentOptions() for
+  // the filter dropdown: a row must never show a value its own select has
+  // no option for.
+  const agentIds = [...new Set([...knownAgents, session.agentId])].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  agentSelect.append(...agentIds.map((id) => option(id, id)));
+  agentSelect.value = session.agentId;
+
+  const modelInput = document.createElement("input");
+  modelInput.type = "text";
+  modelInput.className = "session-edit-model";
+  modelInput.value = session.model ?? "";
+  modelInput.setAttribute("aria-label", "Model");
+
+  const stateSelect = document.createElement("select");
+  stateSelect.className = "session-edit-state";
+  stateSelect.append(...SESSION_STATES.map((s) => option(s, s)));
+  stateSelect.value = session.state;
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "session-table-resume";
+  save.textContent = "Save";
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "session-table-resume";
+  cancel.textContent = "Cancel";
+
+  const status = document.createElement("span");
+  status.className = "session-edit-status";
+
+  save.addEventListener("click", () => void saveEdit());
+
+  async function saveEdit(): Promise<void> {
+    // Only the fields the reader actually touched — the same "changed
+    // fields only" patch history:edit's own doc expects, so an untouched
+    // field's existing override (if any) is left alone rather than
+    // re-asserted.
+    const patch: Record<string, string> = {};
+    if (summaryInput.value !== session.summary) patch["summary"] = summaryInput.value;
+    if (projectSelect.value !== (session.project ?? "")) patch["project"] = projectSelect.value;
+    if (agentSelect.value !== session.agentId) patch["agentId"] = agentSelect.value;
+    if (modelInput.value !== (session.model ?? "")) patch["model"] = modelInput.value;
+    if (stateSelect.value !== session.state) patch["state"] = stateSelect.value;
+
+    if (Object.keys(patch).length === 0) {
+      editingId = undefined;
+      drawRows();
+      return;
+    }
+
+    try {
+      const result = await window.jarvis.editSession(session.id, patch);
+      if (!result.ok) {
+        status.textContent = result.text;
+        return;
+      }
+    } catch (error) {
+      status.textContent = errorMessage(error);
+      return;
+    }
+    editingId = undefined;
+    await renderSessionTable();
+  }
+
+  cancel.addEventListener("click", () => {
+    editingId = undefined;
+    drawRows();
+  });
+
+  td.append(
+    summaryInput,
+    projectSelect,
+    agentSelect,
+    modelInput,
+    stateSelect,
+    save,
+    cancel,
+    status,
+  );
+  tr.append(td);
+  return tr;
 }
 
 /** One muted fragment of a row's second line. */

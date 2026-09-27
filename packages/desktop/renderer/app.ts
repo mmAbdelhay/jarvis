@@ -51,6 +51,7 @@ import {
   renderSessionTable,
   renderVoiceTarget,
   setKnownAgents,
+  setKnownProjects,
   updateSessionHeader,
   wireSessionsRefresh,
   wireSessionView,
@@ -418,6 +419,7 @@ function wireNav(): void {
         .getProjects()
         .then((projects) => {
           knownProjects = projects;
+          setKnownProjects(projects);
           refreshWorkspaceProjects(projects);
           renderSessions(latestSessions);
         })
@@ -444,6 +446,7 @@ function wireNav(): void {
     .getProjects()
     .then((projects) => {
       knownProjects = projects;
+      setKnownProjects(projects);
       initWorkspace(projects);
       // The centre may already have rendered its empty state before this
       // resolved; with the names in hand it has something to say.
