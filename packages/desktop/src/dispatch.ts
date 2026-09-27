@@ -27,6 +27,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import type { DockerConfig, PlanCommentStore, PlanFiles } from "@jarvis/platform";
+import { isWithin } from "@jarvis/platform";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   isFileId,
@@ -221,14 +222,15 @@ export type DispatchDeps = {
   terminal: TerminalHandlers;
   // terminal:attach's backlog read; not part of TerminalHandlers because it
   // reads the shell manager directly rather than going through terminal.ts.
-  // `has`/`write` back plans:send (Task 5): the same ShellManager.write
-  // path terminal:input uses, and the same existence check that decides
-  // whether a paneKey names a pane at all.
+  // `write` backs plans:send (Task 5): the same ShellManager.write path
+  // terminal:input uses. plans:send finds a pane (and whether it has
+  // exited) through `panes()`, already declared below — never a separate
+  // `has`, which does not distinguish a live pane from an exited one still
+  // holding its retained log (ruling 12).
   shells: {
     log(paneKey: string): string;
     snapshot(paneKey: string): StreamSnapshot;
     panes(): readonly TerminalPaneInfo[];
-    has(paneKey: string): boolean;
     write(paneKey: string, data: string): void;
   };
   followers: DockerFollowers;
@@ -304,6 +306,15 @@ export type DispatchDeps = {
     // Injected, like `readFile` above, so this file does no I/O of its
     // own and stays testable without a real filesystem.
     isDirectory(path: string): Promise<boolean>;
+    // Every configured project's own directory (config.projects' values,
+    // read live so a Settings save is picked up on the next call) — the
+    // other half of plans:list's own `cwd` containment check
+    // (resolvePlansCwd): a candidate must be, or live under, either the
+    // calling pane's own start directory or one of these, or it is
+    // refused. Without this a remote caller could hand plans:list any
+    // existing absolute directory on the host and have it probed for
+    // `docs/superpowers/{specs,plans}` — this is what stops that.
+    projectRoots(): readonly string[];
   };
 };
 
@@ -337,23 +348,34 @@ const MAX_PLAN_SOURCE_BYTES = 1024 * 1024;
 
 /**
  * plans:list's own `cwd` argument: used only when it is a string, at most
- * MAX_PLAN_ARG_CHARS long, and — per `isDirectory` — names a directory
- * that exists right now. Anything else falls back to `paneKey`'s own
- * recorded start directory (`terminal.paneStartDir`), and a `paneKey` this
- * process never started falls back to `undefined`, the same "list what the
- * agent-only directories hold" default `PlanFiles.list` already gives an
- * unrooted caller.
+ * MAX_PLAN_ARG_CHARS long, equal to or inside either the calling pane's
+ * own recorded start directory or one of the app's configured project
+ * roots, and — per `isDirectory` — names a directory that exists right
+ * now. The containment check runs before `isDirectory`'s own `stat`, so a
+ * candidate outside both never reaches the filesystem at all: a remote
+ * caller cannot use this argument to probe for the existence of an
+ * arbitrary directory elsewhere on the host.
+ *
+ * Anything that fails any of those falls back to `paneKey`'s own recorded
+ * start directory, and a `paneKey` this process never started falls back
+ * to `undefined`, the same "list what the agent-only directories hold"
+ * default `PlanFiles.list` already gives an unrooted caller.
  */
 async function resolvePlansCwd(
   candidate: unknown,
   paneKey: string,
   terminal: Pick<TerminalHandlers, "paneStartDir">,
   isDirectory: (path: string) => Promise<boolean>,
+  projectRoots: readonly string[],
 ): Promise<string | undefined> {
+  const startDir = terminal.paneStartDir(paneKey);
   if (typeof candidate === "string" && candidate.length <= MAX_PLAN_ARG_CHARS) {
-    if (await isDirectory(candidate)) return candidate;
+    const withinKnownRoot =
+      (startDir !== undefined && isWithin(candidate, startDir)) ||
+      projectRoots.some((root) => isWithin(candidate, root));
+    if (withinKnownRoot && (await isDirectory(candidate))) return candidate;
   }
-  return terminal.paneStartDir(paneKey);
+  return startDir;
 }
 
 export function createDispatchTable(deps: DispatchDeps): DispatchTable {
@@ -1119,7 +1141,13 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "plans:list": async ([paneKeyArg, cwdArg]) => {
       const paneKey =
         typeof paneKeyArg === "string" && paneKeyArg.length <= MAX_PLAN_ARG_CHARS ? paneKeyArg : "";
-      const cwd = await resolvePlansCwd(cwdArg, paneKey, deps.terminal, deps.plans.isDirectory);
+      const cwd = await resolvePlansCwd(
+        cwdArg,
+        paneKey,
+        deps.terminal,
+        deps.plans.isDirectory,
+        deps.plans.projectRoots(),
+      );
       return deps.plans.files.list(cwd);
     },
 
@@ -1150,18 +1178,28 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     },
 
     // Computed fresh every call, never cached: `anchorComments` needs the
-    // plan's *current* blocks, and a comment store read that throws (a
-    // corrupt-beyond-repair file, an IO error) is mapped to "no stored
-    // comments" rather than left to reject this call — plans:comments has
-    // no failure shape of its own to report it through, and an empty
-    // result is exactly what a caller already treats "nothing on file" as.
-    // A path this process cannot currently read (forbidden, missing, or
-    // simply invalid) is not a separate error either: `blocks` is just []
-    // in that case, which `anchorComments` already turns into every
-    // stored comment coming back `orphaned` — never dropped, and never an
-    // error a plan panel would have to special-case.
+    // plan's *current* blocks. Two different kinds of "can't read this
+    // path" are handled differently, deliberately:
+    //  - Not `isAllowed` at all (outside the allowed plan directories, or
+    //    simply not a path this process ever accepted) — the security
+    //    boundary every other path-bearing channel enforces. Nothing
+    //    stored under that path is shown, ever: `[]`, the same as if
+    //    nothing had ever been commented there.
+    //  - `isAllowed` but `read` still fails for some other reason (the
+    //    file was deleted, is temporarily too large, an IO error) —
+    //    `blocks` is just [] in that case, which `anchorComments` already
+    //    turns into every stored comment coming back `orphaned` rather
+    //    than dropped. This is graceful degradation for an allowed path
+    //    whose file merely is not there right now, not a security gate,
+    //    so it never empties the result the way the first case does.
+    // A store read that throws (a corrupt-beyond-repair file, an IO
+    // error) is mapped to "no stored comments" rather than left to reject
+    // this call — plans:comments has no failure shape of its own to
+    // report it through, and an empty result is exactly what a caller
+    // already treats "nothing on file" as.
     "plans:comments": async ([pathArg]) => {
       if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) return [];
+      if (!(await deps.plans.files.isAllowed(pathArg))) return [];
       let stored: PlanComment[];
       try {
         stored = await deps.plans.comments.list(pathArg);
@@ -1189,6 +1227,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       if (typeof quoteArg !== "string" || typeof bodyArg !== "string") {
         throw new Error("plans:addComment: invalid comment text");
+      }
+      // Re-checked here the same as every other path-bearing channel
+      // (defence for a remote caller): a comment is never filed against a
+      // path outside the allowed plan directories, even though nothing
+      // downstream of `comments.add` would itself read that path from
+      // disk. Same rejection style as the type/length checks above — this
+      // channel has no failure shape of its own to return one through.
+      if (!(await deps.plans.files.isAllowed(pathArg))) {
+        throw new Error("plans:addComment: path not allowed");
       }
       return deps.plans.comments.add({
         path: pathArg,
@@ -1256,7 +1303,14 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       const selected = stored.filter((comment) => wanted.has(comment.id));
       if (selected.length === 0) return { ok: false, reason: "no-comments" };
 
-      if (!deps.shells.has(paneKeyArg)) return { ok: false, reason: "no-pane" };
+      // Not just "does this process know the pane" — ShellManager keeps a
+      // pane's retained log around after its shell exits (ruling 12), so
+      // an exited pane is still "known" and a write to it would silently
+      // no-op, leaving `markSent` called for a comment nothing actually
+      // delivered. `panes()` carries the live/exited distinction `has`
+      // alone does not.
+      const pane = deps.shells.panes().find((candidate) => candidate.paneKey === paneKeyArg);
+      if (pane === undefined || pane.exited) return { ok: false, reason: "no-pane" };
 
       const read = await deps.plans.files.read(pathArg);
       const blocks = read.ok ? read.value.blocks : [];

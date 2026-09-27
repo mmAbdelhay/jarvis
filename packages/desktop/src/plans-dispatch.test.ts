@@ -8,7 +8,7 @@
 // channel group.
 import type { PlanBlock } from "@jarvis/core";
 import { describe, expect, it, vi } from "vitest";
-import { CHANNEL_POLICY } from "./remote-policy.js";
+import { CHANNEL_POLICY, REMOTE_EFFECT } from "./remote-policy.js";
 import { createDispatchTable, DESKTOP_ORIGIN, type Origin } from "./dispatch.js";
 import { fakeDeps } from "./dispatch.test.js";
 
@@ -37,7 +37,7 @@ const BLOCK: PlanBlock = {
 const PLAN_DOC = { path: "/plans/x.md", mtimeMs: 100, blocks: [BLOCK] };
 
 describe("plans:* dispatch: routing", () => {
-  it("plans:list uses the given cwd when it names an existing directory", async () => {
+  it("plans:list uses the given cwd when it equals the pane's own start directory", async () => {
     const list = vi.fn(async () => ({ session: undefined, planMode: [], repo: [] }));
     const deps = fakeDeps({
       plans: {
@@ -45,6 +45,7 @@ describe("plans:* dispatch: routing", () => {
         files: { ...fakeDeps().plans.files, list },
         isDirectory: vi.fn(async (path: string) => path === "/repo"),
       },
+      terminal: { ...fakeDeps().terminal, paneStartDir: vi.fn(() => "/repo") },
     });
     const table = createDispatchTable(deps);
 
@@ -52,6 +53,23 @@ describe("plans:* dispatch: routing", () => {
 
     expect(list).toHaveBeenCalledWith("/repo");
     expect(result).toEqual({ session: undefined, planMode: [], repo: [] });
+  });
+
+  it("plans:list uses the given cwd when it is inside a configured project root", async () => {
+    const list = vi.fn(async () => ({ session: undefined, planMode: [], repo: [] }));
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, list },
+        isDirectory: vi.fn(async () => true),
+        projectRoots: vi.fn(() => ["/home/user/project"]),
+      },
+    });
+    const table = createDispatchTable(deps);
+
+    await call(table, "plans:list", "pane-1", "/home/user/project/packages/desktop");
+
+    expect(list).toHaveBeenCalledWith("/home/user/project/packages/desktop");
   });
 
   it("plans:list falls back to the pane's own recorded start directory when cwd does not exist", async () => {
@@ -68,6 +86,28 @@ describe("plans:* dispatch: routing", () => {
 
     await call(table, "plans:list", "pane-1", "/does/not/exist");
 
+    expect(list).toHaveBeenCalledWith("/pane/start");
+  });
+
+  it("plans:list refuses a cwd outside both the pane's start dir and every project root, even if it exists (stops remote directory probing)", async () => {
+    const list = vi.fn(async () => ({ session: undefined, planMode: [], repo: [] }));
+    const isDirectory = vi.fn(async () => true);
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, list },
+        isDirectory,
+        projectRoots: vi.fn(() => ["/home/user/project"]),
+      },
+      terminal: { ...fakeDeps().terminal, paneStartDir: vi.fn(() => "/pane/start") },
+    });
+    const table = createDispatchTable(deps);
+
+    await callAs(table, REMOTE_ORIGIN, "plans:list", "pane-1", "/etc");
+
+    // Never even reaches the filesystem check for the out-of-bounds
+    // candidate — the containment check runs first.
+    expect(isDirectory).not.toHaveBeenCalled();
     expect(list).toHaveBeenCalledWith("/pane/start");
   });
 
@@ -281,6 +321,174 @@ describe("plans:* dispatch: the remote-caller path defence", () => {
     expect(list).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: false, reason: "forbidden" });
   });
+
+  // Fix round 1: plans:addComment and plans:comments had skipped this
+  // re-check entirely.
+  it("plans:addComment rejects a disallowed path, the same rejection style as its other guards", async () => {
+    const isAllowed = vi.fn(async () => false);
+    const add = vi.fn(async () => {
+      throw new Error("must not be called");
+    });
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, isAllowed },
+        comments: { ...fakeDeps().plans.comments, add },
+      },
+    });
+    const table = createDispatchTable(deps);
+
+    await expect(
+      callAs(table, REMOTE_ORIGIN, "plans:addComment", "/etc/passwd", "b1", "quote", "body"),
+    ).rejects.toThrow();
+
+    expect(isAllowed).toHaveBeenCalledWith("/etc/passwd");
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("plans:comments returns [] for a disallowed path, never the comments stored under it", async () => {
+    const isAllowed = vi.fn(async () => false);
+    const list = vi.fn(async () => [
+      {
+        id: "c1",
+        path: "/etc/passwd",
+        blockId: "b1",
+        quote: "",
+        body: "should never surface",
+        createdAt: 1,
+      },
+    ]);
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, isAllowed },
+        comments: { ...fakeDeps().plans.comments, list },
+      },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await callAs(table, REMOTE_ORIGIN, "plans:comments", "/etc/passwd");
+
+    expect(isAllowed).toHaveBeenCalledWith("/etc/passwd");
+    expect(list).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+});
+
+describe("plans:* dispatch: argument caps", () => {
+  const OVER_CAP = "x".repeat(4097);
+
+  it.each([
+    ["plans:read", ["/plans/x.md"]] as const,
+    ["plans:writeBlock", ["/plans/x.md", "b1", "src", 1]] as const,
+    ["plans:comments", ["/plans/x.md"]] as const,
+    ["plans:addComment", ["/plans/x.md", "b1", "q", "body"]] as const,
+  ])("%s refuses a non-string path", async (channel, args) => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const badArgs = [123, ...args.slice(1)];
+
+    if (channel === "plans:addComment") {
+      await expect(call(table, channel, ...badArgs)).rejects.toThrow();
+    } else {
+      const result = await call(table, channel, ...badArgs);
+      expect(result).toMatchObject(channel === "plans:comments" ? [] : { ok: false });
+    }
+  });
+
+  it("plans:read refuses a path over 4096 characters", async () => {
+    const isAllowed = vi.fn(async () => true);
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, files: { ...fakeDeps().plans.files, isAllowed } },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:read", OVER_CAP);
+
+    expect(isAllowed).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, reason: "forbidden" });
+  });
+
+  it("plans:comments refuses a path over 4096 characters", async () => {
+    const isAllowed = vi.fn(async () => true);
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, files: { ...fakeDeps().plans.files, isAllowed } },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:comments", OVER_CAP);
+
+    expect(isAllowed).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+
+  it("plans:updateComment refuses a non-string id and one over 4096 characters", async () => {
+    const update = vi.fn(async () => undefined);
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, comments: { ...fakeDeps().plans.comments, update } },
+    });
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "plans:updateComment", 123, "body")).toBeUndefined();
+    expect(await call(table, "plans:updateComment", OVER_CAP, "body")).toBeUndefined();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("plans:deleteComment refuses a non-string id and one over 4096 characters", async () => {
+    const remove = vi.fn(async () => true);
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, comments: { ...fakeDeps().plans.comments, remove } },
+    });
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "plans:deleteComment", 123)).toBe(false);
+    expect(await call(table, "plans:deleteComment", OVER_CAP)).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("plans:* dispatch: store failures never crash the handler", () => {
+  it("plans:updateComment maps a store throw onto undefined", async () => {
+    const update = vi.fn(async () => {
+      throw new Error("invalid body");
+    });
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, comments: { ...fakeDeps().plans.comments, update } },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:updateComment", "c1", "x".repeat(5000));
+
+    expect(result).toBeUndefined();
+  });
+
+  it("plans:deleteComment maps a store throw onto false", async () => {
+    const remove = vi.fn(async () => {
+      throw new Error("io error");
+    });
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, comments: { ...fakeDeps().plans.comments, remove } },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:deleteComment", "c1");
+
+    expect(result).toBe(false);
+  });
+
+  it("plans:comments maps a comment-store throw onto []", async () => {
+    const list = vi.fn(async () => {
+      throw new Error("corrupt file");
+    });
+    const deps = fakeDeps({
+      plans: { ...fakeDeps().plans, comments: { ...fakeDeps().plans.comments, list } },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:comments", "/plans/x.md");
+
+    expect(result).toEqual([]);
+  });
 });
 
 describe("plans:send", () => {
@@ -293,15 +501,17 @@ describe("plans:send", () => {
     createdAt: 1,
   };
 
-  function sendDeps(overrides: { list?: (typeof comment)[]; hasPane?: boolean } = {}) {
+  function sendDeps(overrides: { list?: (typeof comment)[]; paneExited?: boolean } = {}) {
     const write = vi.fn();
     const markSent = vi.fn(async () => undefined);
     const deps = fakeDeps({
       shells: {
         log: vi.fn(() => ""),
         snapshot: vi.fn(() => ({ text: "", end: 0 })),
-        panes: vi.fn(() => []),
-        has: vi.fn(() => overrides.hasPane ?? true),
+        // "pane-1" is what every test in this block calls plans:send
+        // with, except the dedicated "unknown pane" test below, which
+        // uses a paneKey ("ghost-pane") that never appears here at all.
+        panes: vi.fn(() => [{ paneKey: "pane-1", exited: overrides.paneExited ?? false }]),
         write,
       },
       plans: {
@@ -351,13 +561,28 @@ describe("plans:send", () => {
   });
 
   it("returns no-pane for an unknown pane once there is something to send", async () => {
-    const { deps, write } = sendDeps({ hasPane: false });
+    const { deps, write } = sendDeps();
     const table = createDispatchTable(deps);
 
     const result = await call(table, "plans:send", "ghost-pane", "/plans/x.md", ["c1"]);
 
     expect(result).toEqual({ ok: false, reason: "no-pane" });
     expect(write).not.toHaveBeenCalled();
+  });
+
+  // Fix round 1: ShellManager keeps a pane's retained log around after its
+  // shell exits (ruling 12), so it is still "known" — write must not be
+  // attempted, and the comment must not be marked sent, for a pane that is
+  // known but exited.
+  it("returns no-pane for an exited-but-retained pane, and never marks the comment sent", async () => {
+    const { deps, write, markSent } = sendDeps({ paneExited: true });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:send", "pane-1", "/plans/x.md", ["c1"]);
+
+    expect(result).toEqual({ ok: false, reason: "no-pane" });
+    expect(write).not.toHaveBeenCalled();
+    expect(markSent).not.toHaveBeenCalled();
   });
 });
 
@@ -381,6 +606,25 @@ describe("plans:* remote policy", () => {
     expect(PLAN_CHANNELS).toHaveLength(8);
     for (const channel of PLAN_CHANNELS) {
       expect(CHANNEL_POLICY[channel], channel).toBe("remote");
+    }
+  });
+
+  it("classifies all eight plans:* channels' own audit effect correctly", () => {
+    // tsc: REMOTE_EFFECT is `satisfies Record<RemoteChannel, "read" | "mutate" | "input">`
+    // (remote-policy.ts) — a channel missing from it is already a compile
+    // error there. This is the runtime half: the *value* each one holds.
+    const expected: Record<(typeof PLAN_CHANNELS)[number], "read" | "mutate" | "input"> = {
+      "plans:list": "read",
+      "plans:read": "read",
+      "plans:comments": "read",
+      "plans:writeBlock": "mutate",
+      "plans:addComment": "mutate",
+      "plans:updateComment": "mutate",
+      "plans:deleteComment": "mutate",
+      "plans:send": "input",
+    };
+    for (const channel of PLAN_CHANNELS) {
+      expect(REMOTE_EFFECT[channel], channel).toBe(expected[channel]);
     }
   });
 });

@@ -96,7 +96,6 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       log: vi.fn(() => "backlog"),
       snapshot: vi.fn(() => ({ text: "backlog", end: 7 })),
       panes: vi.fn(() => []),
-      has: vi.fn(() => true),
       write: vi.fn(),
     },
     followers: {
@@ -235,6 +234,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
         markSent: vi.fn(async () => undefined),
       },
       isDirectory: vi.fn(async () => false),
+      projectRoots: vi.fn(() => []),
     },
     ...overrides,
   } as DispatchDeps;
@@ -595,7 +595,6 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "tab-10:split-a", exited: false },
           { paneKey: "tab-1ish", exited: false },
         ]),
-        has: vi.fn(() => true),
         write: vi.fn(),
       },
     });
@@ -630,7 +629,6 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "terminal-tab", exited: false },
           { paneKey: "closed-tab", exited: true },
         ]),
-        has: vi.fn(() => true),
         write: vi.fn(),
       },
     });

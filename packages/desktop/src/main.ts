@@ -2189,6 +2189,10 @@ app.whenReady().then(async () => {
             return false;
           }
         },
+        // Live, not a snapshot — config.projects is mutated in place on a
+        // Settings save (writeConfig above), so a project added or removed
+        // is reflected on the very next plans:list call.
+        projectRoots: () => Object.values(config.projects),
       },
     });
     for (const [channel, handler] of Object.entries(dispatch)) {
