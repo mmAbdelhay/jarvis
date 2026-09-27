@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -41,13 +42,15 @@ import {
 import { expoSecureStore } from "@/lib/secure-store";
 import { systemTransport } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
-import { createTrustRoutingTransport } from "@/lib/trust-routing-transport";
+import { createAppTransport } from "@/lib/trust-routing-transport";
 
-const CLIENT_STRING = `jarvis-mobile/${Constants.expoConfig?.version ?? "0.0.0"}/${Platform.OS}`;
+const CLIENT_STRING = clientStringFor(Platform.OS, Constants.expoConfig?.version ?? "0.0.0");
+const PLATFORM = clientPlatformFor(Platform.OS);
 // M11 rule 6: constructed once, module-wide — a link with a `name` pairs
 // through `systemTransport` (OS trust store), one without pins natively
-// through `nativeTransport`, exactly as before.
-const transport = createTrustRoutingTransport({ pin: nativeTransport, system: systemTransport });
+// through `nativeTransport`, exactly as before. Task 13: the browser build
+// always dials through `systemTransport` (createAppTransport).
+const transport = createAppTransport(PLATFORM, { pin: nativeTransport, system: systemTransport });
 
 type PairFailureReason = Exclude<PairOutcome, { ok: true }>["reason"];
 // Screen-only conditions (I5, Important-1): `pair()` itself either
@@ -95,6 +98,8 @@ function errorKey(reason: ScreenFailure) {
       return "pair.saveFailed" as const;
     case "check-failed":
       return "pair.checkFailed" as const;
+    case "web-needs-certificate":
+      return "pair.webNeedsCertificate" as const;
     // Neither of these is ever produced by `pair()` today (host-needed is
     // resolved before `pair()` is called, through the "needsHost"/"confirm"
     // steps; a busy laptop's own close code maps to `expired` — see
@@ -258,7 +263,7 @@ export default function PairScreen() {
       pendingLinkRef.current = null;
       safeSetPhase({ kind: "waiting" });
       const outcome = await pair(
-        { transport, clock: realClock, client: CLIENT_STRING },
+        { transport, clock: realClock, client: CLIENT_STRING, platform: PLATFORM },
         link,
         name,
       );

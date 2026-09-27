@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { speechLanguageTag, splitForSpeech, voiceMatches } from "./speaker";
+import { hasVoiceAmong, speechLanguageTag, splitForSpeech, voiceMatches } from "./speaker";
 
 describe("speechLanguageTag", () => {
   test("ar", () => {
@@ -146,5 +146,19 @@ describe("voiceMatches", () => {
 
   test("en matches en-GB", () => {
     expect(voiceMatches("en-GB", "en")).toBe(true);
+  });
+});
+
+describe("hasVoiceAmong (web speechSynthesis, Task 13)", () => {
+  test("true when a voice matches the language", () => {
+    expect(hasVoiceAmong([{ language: "en-US" }, { language: "ar-SA" }], "ar")).toBe(true);
+  });
+
+  test("false when no voice matches — the UI then shows the text", () => {
+    expect(hasVoiceAmong([{ language: "en-US" }], "ar")).toBe(false);
+  });
+
+  test("false for an empty voice list (unlike the native speaker's lenient default)", () => {
+    expect(hasVoiceAmong([], "en")).toBe(false);
   });
 });

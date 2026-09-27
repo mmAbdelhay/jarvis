@@ -71,3 +71,20 @@ export function parsePageMessage(text: unknown): PageMessage | undefined {
 export function encodeNativeMessage(message: NativeMessage): string {
   return JSON.stringify(message);
 }
+
+/**
+ * The web build's terminal is a sandboxed `srcdoc` iframe (Task 13), so its
+ * messages arrive on the app's own `window` alongside anything else any
+ * other frame or window posts there. Only a message whose `source` is that
+ * iframe's own `contentWindow` is parsed — and then through the same
+ * field-by-field `parsePageMessage`, never forwarded raw. A frame with no
+ * window yet (`null`/`undefined`) matches nothing.
+ */
+export function parseFrameMessage(
+  event: { source: unknown; data: unknown },
+  frameWindow: unknown,
+): PageMessage | undefined {
+  if (frameWindow === null || frameWindow === undefined) return undefined;
+  if (event.source !== frameWindow) return undefined;
+  return parsePageMessage(event.data);
+}

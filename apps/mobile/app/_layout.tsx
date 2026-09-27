@@ -20,6 +20,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { appActivityFor } from "@/lib/app-lifecycle";
 import { createAuthSession } from "@/lib/auth-session";
+import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
 import { connectFromStoredPairing as connectFromStored } from "@/lib/connect-stored";
 import { createConnectionStore } from "@/lib/connection-store";
@@ -39,16 +40,18 @@ import { RpcContext } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import { systemTransport } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
-import { createTrustRoutingTransport } from "@/lib/trust-routing-transport";
+import { createAppTransport } from "@/lib/trust-routing-transport";
 import { createUnpairedHandler } from "@/lib/unpaired-handler";
 import { shouldShowUnlock } from "@/lib/unlock-screen";
 import { VoiceProvider } from "@/lib/voice-context";
 
-const CLIENT_STRING = `jarvis-mobile/${Constants.expoConfig?.version ?? "0.0.0"}/${Platform.OS}`;
+const CLIENT_STRING = clientStringFor(Platform.OS, Constants.expoConfig?.version ?? "0.0.0");
+const PLATFORM = clientPlatformFor(Platform.OS);
 // M11 rule 6: constructed once, module-wide — a pairing with a `name`
 // routes through `systemTransport` (OS trust store), one without pins
-// natively through `nativeTransport`, exactly as before.
-const transport = createTrustRoutingTransport({ pin: nativeTransport, system: systemTransport });
+// natively through `nativeTransport`, exactly as before. Task 13: the
+// browser build always dials through `systemTransport` (createAppTransport).
+const transport = createAppTransport(PLATFORM, { pin: nativeTransport, system: systemTransport });
 
 // Composes the app's two per-app controller providers into the one slot
 // `RootLayout`'s tree already had for `VoiceProvider` alone (fix round 1,

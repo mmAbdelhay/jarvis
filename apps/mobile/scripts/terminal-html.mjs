@@ -153,11 +153,26 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "var controller=createPageController({" +
     "term:term," +
     "fit:function(){fitAddon.fit();}," +
-    "post:function(s){window.ReactNativeWebView.postMessage(s);}," +
+    // Task 13: the same page also runs in the browser build, as a sandboxed
+    // `srcdoc` iframe (TerminalWebView.web.tsx) with no ReactNativeWebView
+    // bridge — there it posts to its parent. `"*"` is unavoidable: a
+    // sandboxed srcdoc frame has an opaque origin and cannot name its
+    // parent's; the parent filters on `event.source` instead, and only
+    // ready/resize/modes/wheel (never terminal content) is ever posted.
+    "post:function(s){" +
+    "if(window.ReactNativeWebView){window.ReactNativeWebView.postMessage(s);}" +
+    'else if(window.parent!==window){window.parent.postMessage(s,"*");}' +
+    "}," +
     "applyFixedSize:applyFixedSize," +
     'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;}' +
     "});" +
-    'window.addEventListener("message",function(e){controller.receive(e.data);});' +
+    // In the iframe, only the parent (the app) may drive the terminal; the
+    // native WebView's own injected events carry no source, and are
+    // accepted exactly as before.
+    'window.addEventListener("message",function(e){' +
+    "if(!window.ReactNativeWebView&&e.source!==window.parent)return;" +
+    "controller.receive(e.data);" +
+    "});" +
     'document.addEventListener("message",function(e){controller.receive(e.data);});' +
     'window.addEventListener("resize",function(){controller.layoutChanged();});' +
     // Bug 9: touch scrolling — xterm 6's own viewport is wheel-only, so

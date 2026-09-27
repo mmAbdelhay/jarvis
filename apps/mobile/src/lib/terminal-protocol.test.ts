@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeNativeMessage, parsePageMessage } from "./terminal-protocol";
+import { encodeNativeMessage, parseFrameMessage, parsePageMessage } from "./terminal-protocol";
 
 describe("parsePageMessage", () => {
   it("parses a valid ready message to exactly its fields", () => {
@@ -106,5 +106,39 @@ describe("encodeNativeMessage", () => {
   it("round-trips a size message through JSON.parse", () => {
     const encoded = encodeNativeMessage({ t: "size", cols: 80, rows: 24 });
     expect(JSON.parse(encoded)).toEqual({ t: "size", cols: 80, rows: 24 });
+  });
+});
+
+describe("parseFrameMessage (web iframe, Task 13)", () => {
+  const frameWindow = { name: "terminal-frame" };
+  const ready = JSON.stringify({ t: "ready", cols: 80, rows: 24 });
+
+  it("parses a message whose source is the terminal iframe's own window", () => {
+    expect(parseFrameMessage({ source: frameWindow, data: ready }, frameWindow)).toEqual({
+      t: "ready",
+      cols: 80,
+      rows: 24,
+    });
+  });
+
+  it("drops a well-formed message from any other source", () => {
+    expect(
+      parseFrameMessage({ source: { name: "other" }, data: ready }, frameWindow),
+    ).toBeUndefined();
+    expect(parseFrameMessage({ source: null, data: ready }, frameWindow)).toBeUndefined();
+  });
+
+  it("drops everything while the iframe has no window yet (null/undefined never match)", () => {
+    expect(parseFrameMessage({ source: null, data: ready }, null)).toBeUndefined();
+    expect(parseFrameMessage({ source: undefined, data: ready }, undefined)).toBeUndefined();
+  });
+
+  it("still runs the field-by-field parse on a message from the iframe", () => {
+    expect(
+      parseFrameMessage({ source: frameWindow, data: JSON.stringify({ t: "evil" }) }, frameWindow),
+    ).toBeUndefined();
+    expect(
+      parseFrameMessage({ source: frameWindow, data: { t: "ready" } }, frameWindow),
+    ).toBeUndefined();
   });
 });

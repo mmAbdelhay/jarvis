@@ -286,6 +286,10 @@ export const STRINGS = {
     en: "Pair",
     ar: "اقتران",
   },
+  "pair.webNeedsCertificate": {
+    en: "Browser access needs Tailscale with a real certificate.",
+    ar: "الوصول من المتصفح يحتاج إلى Tailscale بشهادة حقيقية.",
+  },
   "pair.clearFailed": {
     en: "Couldn't remove the old pairing from this phone.",
     ar: "تعذّرت إزالة الاقتران القديم من هذا الهاتف.",
@@ -637,6 +641,10 @@ export const STRINGS = {
   "sidecars.openAgain": {
     en: "Open again",
     ar: "افتح مرة أخرى",
+  },
+  "sidecars.openedInTab": {
+    en: "Opened in a new tab.",
+    ar: "فُتح في علامة تبويب جديدة.",
   },
   "sidecars.loadFailed": {
     en: "Couldn't load. Try again.",

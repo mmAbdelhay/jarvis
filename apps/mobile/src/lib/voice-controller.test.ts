@@ -12,7 +12,7 @@ import type { Credential, Endpoint, RpcError, RpcResult } from "./rpc-client";
 import { createRpcClient } from "./rpc-client";
 import type { SpeakOutcome, Speaker } from "./speaker";
 import { REPLY_WAIT_MS, type VoiceControllerDeps, createVoiceController } from "./voice-controller";
-import type { MicPermission, VoiceRecorder } from "./voice-recorder";
+import type { MicPermission, RecordingFormat, VoiceRecorder } from "./voice-recorder";
 
 const ENDPOINT: Endpoint = { host: "192.168.1.5", port: 4317, fingerprint: "a".repeat(64) };
 const CREDENTIAL: Credential = { deviceId: "d".repeat(32), token: "T".repeat(43) };
@@ -139,6 +139,7 @@ function createFakeRecorder(clock: ReturnType<typeof createFakeClock>) {
   let recording = false;
   let startedAt = 0;
   let nextUri = 0;
+  let format: RecordingFormat = "m4a";
   const calls: string[] = [];
 
   const recorder: VoiceRecorder = {
@@ -164,7 +165,7 @@ function createFakeRecorder(clock: ReturnType<typeof createFakeClock>) {
       recording = false;
       const durationMs = clock.now() - startedAt;
       nextUri += 1;
-      return { uri: `file:///rec-${nextUri}.m4a`, durationMs };
+      return { uri: `file:///rec-${nextUri}.m4a`, durationMs, format };
     },
     elapsedMs() {
       return recording ? clock.now() - startedAt : 0;
@@ -185,6 +186,9 @@ function createFakeRecorder(clock: ReturnType<typeof createFakeClock>) {
     },
     setStopShouldFail(value: boolean): void {
       stopShouldFail = value;
+    },
+    setFormat(value: RecordingFormat): void {
+      format = value;
     },
   };
 }
@@ -321,6 +325,37 @@ async function recordAndStop(h: ReturnType<typeof createHarness>, ms: number): P
 }
 
 // -------------------------------------------------------------------------
+
+describe("voice-controller: upload format follows the recording (Task 13)", () => {
+  it('sends format "m4a" for a native (m4a) recording', async () => {
+    const h = createHarness();
+    const socket = connectAndOpen(h.client, h.transport);
+    await flush();
+    h.controller.focus({ kind: "brain" });
+    await flush();
+    answerLatest(socket, "turns:list", []);
+    await flush();
+
+    await recordAndStop(h, 2_000);
+    const first = findBlobFrame(socket, "remote:uploadAudio");
+    expect((first?.header.a[0] as Record<string, unknown> | undefined)?.format).toBe("m4a");
+  });
+
+  it('sends format "webm" when the recorder produced webm', async () => {
+    const h = createHarness();
+    h.recorderFake.setFormat("webm");
+    const socket = connectAndOpen(h.client, h.transport);
+    await flush();
+    h.controller.focus({ kind: "brain" });
+    await flush();
+    answerLatest(socket, "turns:list", []);
+    await flush();
+
+    await recordAndStop(h, 2_000);
+    const blob = findBlobFrame(socket, "remote:uploadAudio");
+    expect((blob?.header.a[0] as Record<string, unknown> | undefined)?.format).toBe("webm");
+  });
+});
 
 describe("voice-controller: brain happy path", () => {
   it("focuses, records, uploads with no targetSessionId, and speaks a matching reply", async () => {
@@ -1691,7 +1726,7 @@ describe("voice-controller: rule 11 — speakableNow() requires !recorderInFligh
           recording = false;
           const durationMs = clock.now() - startedAt;
           nextUri += 1;
-          return { uri: `file:///gate-rec-${nextUri}.m4a`, durationMs };
+          return { uri: `file:///gate-rec-${nextUri}.m4a`, durationMs, format: "m4a" as const };
         },
         elapsedMs() {
           return recording ? clock.now() - startedAt : 0;

@@ -116,7 +116,7 @@ export function buildVoiceRecorder(
       const { uri } = recorder;
       // No logging of `uri` here or anywhere in this file.
       if (!uri || !durationMs) return undefined;
-      return { uri, durationMs };
+      return { uri, durationMs, format: "m4a" };
     },
     elapsedMs() {
       return recorder.getStatus().durationMillis;

@@ -93,7 +93,11 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     const navigated: string[] = [];
 
     // --- 1. pair() over /pair; savePairing stores the token only under jarvis.token ---
-    const pairPromise = pair({ transport, clock, client: CLIENT_STRING }, LINK, DEVICE_NAME);
+    const pairPromise = pair(
+      { transport, clock, client: CLIENT_STRING, platform: "native" as const },
+      LINK,
+      DEVICE_NAME,
+    );
     const pairSocket = latestSocket(transport);
     pairSocket.emit({ kind: "open" });
     expect(frame(pairSocket.sent[0] ?? "")).toMatchObject({ t: "pair", secret: LINK.secret });

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createFakeClock } from "./clock";
 import type { FakeSocket } from "./fake-transport";
 import { createFakeTransport } from "./fake-transport";
-import { needsHost, pair, withHost } from "./pairing";
+import { linkRefusedOn, needsHost, pair, withHost } from "./pairing";
 import type { PairOutcome } from "./pairing";
 import type { Transport, TransportEvent, TransportSocket } from "./transport";
 
@@ -29,7 +29,7 @@ function setup() {
   return {
     transport,
     clock,
-    deps: { transport, clock, client: CLIENT_STRING },
+    deps: { transport, clock, client: CLIENT_STRING, platform: "native" as const },
   };
 }
 
@@ -287,13 +287,15 @@ describe("pair", () => {
 
       let settled = false;
       let outcome: PairOutcome | undefined;
-      const promise = pair({ transport, clock, client: CLIENT_STRING }, LINK, DEVICE_NAME).then(
-        (o) => {
-          settled = true;
-          outcome = o;
-          return o;
-        },
-      );
+      const promise = pair(
+        { transport, clock, client: CLIENT_STRING, platform: "native" as const },
+        LINK,
+        DEVICE_NAME,
+      ).then((o) => {
+        settled = true;
+        outcome = o;
+        return o;
+      });
 
       // If the pre-open deadline were armed unconditionally after
       // `transport.open()` returns, it would silently replace the 75s
@@ -337,7 +339,11 @@ describe("pair", () => {
         },
       };
 
-      pair({ transport, clock, client: CLIENT_STRING }, LINK, DEVICE_NAME);
+      pair(
+        { transport, clock, client: CLIENT_STRING, platform: "native" as const },
+        LINK,
+        DEVICE_NAME,
+      );
       capturedOnEvent?.({ kind: "open" });
       // A hypothetical buggy transport re-firing `open` after the first —
       // none of ours does this today, but `pair()` must not resend.
@@ -450,5 +456,42 @@ describe("withHost", () => {
 
   it("returns undefined for :: (still unspecified, not a dialable host)", () => {
     expect(withHost(LINK, "::")).toBeUndefined();
+  });
+});
+
+describe("linkRefusedOn (Task 13: the browser build needs a real certificate)", () => {
+  it("refuses a fingerprint-only link (no name) on web", () => {
+    expect(linkRefusedOn(LINK, "web")).toBe(true);
+  });
+
+  it("accepts a link with a name on web, and every link on native", () => {
+    expect(linkRefusedOn({ ...LINK, name: "laptop.tail1234.ts.net" }, "web")).toBe(false);
+    expect(linkRefusedOn(LINK, "native")).toBe(false);
+  });
+});
+
+describe("pair on web", () => {
+  it("resolves web-needs-certificate for a fingerprint-only link without ever opening a socket", async () => {
+    const transport = createFakeTransport();
+    const clock = createFakeClock();
+    const outcome = await pair(
+      { transport, clock, client: "web", platform: "web" },
+      LINK,
+      DEVICE_NAME,
+    );
+    expect(outcome).toEqual({ ok: false, reason: "web-needs-certificate" });
+    expect(transport.sockets).toHaveLength(0);
+  });
+
+  it('dials a named link through system trust and sends client "web"', () => {
+    const transport = createFakeTransport();
+    const clock = createFakeClock();
+    const name = "laptop.tail1234.ts.net";
+    void pair({ transport, clock, client: "web", platform: "web" }, { ...LINK, name }, DEVICE_NAME);
+    const socket = latestSocket(transport);
+    expect(socket.url).toBe(`wss://${name}:${LINK.port}/pair`);
+    expect(socket.trust).toEqual({ kind: "system" });
+    socket.emit({ kind: "open" });
+    expect(JSON.parse(socket.sent[0]).client).toBe("web");
   });
 });
