@@ -21,8 +21,14 @@ const SCRIPT: WebAsset = {
   type: "text/javascript; charset=utf-8",
   etag: '"script-etag"',
 };
+const TERMINAL: WebAsset = {
+  bytes: Buffer.from("<main>terminal</main>"),
+  type: "text/html; charset=utf-8",
+  etag: '"terminal-etag"',
+};
 const MANIFEST = new Map([
   ["/index.html", INDEX],
+  ["/terminal.html", TERMINAL],
   ["/_expo/static/js/web/entry-abc123.js", SCRIPT],
 ]);
 
@@ -130,6 +136,36 @@ describe("webHeaders", () => {
     });
   });
 
+  it("lets only /terminal.html be framed, and only by the app's own origin", () => {
+    expect(
+      webHeaders({
+        name: "jarvis.test",
+        bridgePort: 9443,
+        path: "/terminal.html",
+        asset: TERMINAL,
+      })["Content-Security-Policy"],
+    ).toBe(
+      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+    );
+  });
+
+  it.each([
+    "/index.html",
+    "/terminal.htm",
+    "/terminal.html/",
+    "/x/terminal.html",
+    "/Terminal.html",
+    "/terminal.86caae84490bea57.js",
+  ])("keeps frame-ancestors 'none' for %s", (path) => {
+    expect(
+      webHeaders({ name: "jarvis.test", bridgePort: 9443, path, asset: INDEX })[
+        "Content-Security-Policy"
+      ],
+    ).toBe(
+      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    );
+  });
+
   it.each([
     ["/index.html", "no-cache"],
     ["/projects/alpha", "no-cache"],
@@ -148,6 +184,15 @@ describe("createWebRequestHandler", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers.ETag).toBe('"script-etag"');
     expect(res.body).toEqual(SCRIPT.bytes);
+  });
+
+  it("serves /terminal.html (query ignored) framable by 'self', and index.html not", () => {
+    const terminal = handle({ url: "/terminal.html?v=1" }).res;
+    expect(terminal.body).toEqual(TERMINAL.bytes);
+    expect(terminal.headers["Content-Security-Policy"]).toContain("frame-ancestors 'self';");
+    const index = handle({ url: "/" }).res;
+    expect(index.body).toEqual(INDEX.bytes);
+    expect(index.headers["Content-Security-Policy"]).toContain("frame-ancestors 'none';");
   });
 
   it("serves HEAD headers without a body", () => {

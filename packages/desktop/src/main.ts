@@ -1541,9 +1541,10 @@ app.whenReady().then(async () => {
             webExportDir({
               packaged: app.isPackaged,
               resourcesPath: process.resourcesPath,
-              // From dist/src/main.js: the repo root, then the mobile app's
-              // web export (apps/mobile `export:web`).
-              devDir: fileURLToPath(new URL("../../../../apps/mobile/dist-web", import.meta.url)),
+              // From dist/src/main.js: packages/desktop/web, where `pnpm build`
+              // copies the mobile app's web export (scripts/copy-web.mjs) —
+              // the same directory electron-builder ships.
+              devDir: fileURLToPath(new URL("../../web", import.meta.url)),
             }),
           fs: nodeWebExportFs,
           build: buildWebManifest,

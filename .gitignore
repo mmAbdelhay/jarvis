@@ -34,6 +34,9 @@ apps/mobile/.expo/
 apps/mobile/node_modules/
 # Expo web export output (`pnpm --dir apps/mobile export:web`).
 apps/mobile/dist-web/
+# Its copy inside the desktop package (packages/desktop/scripts/copy-web.mjs),
+# which electron-builder ships as <resources>/web.
+packages/desktop/web/
 
 # Firebase's per-project Android credential (M10, push notifications):
 # `app.config.ts` picks it up by name when present and omits

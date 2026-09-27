@@ -8,6 +8,7 @@ const REQUEST_TIMEOUT_MS = 5_000;
 const HEADERS_TIMEOUT_MS = 5_000;
 const MAX_CONNECTIONS = 64;
 const ETAG_PREFIX_LENGTH = 16;
+const TERMINAL_PATH = "/terminal.html";
 
 export type WebAsset = { bytes: Buffer; type: string; etag: string };
 export type WebManifest = ReadonlyMap<string, WebAsset>;
@@ -55,8 +56,12 @@ export function webHeaders(options: {
   const cacheControl = options.path.startsWith("/_expo/static/")
     ? "public, max-age=31536000, immutable"
     : "no-cache";
+  // The app renders its terminal in a sandboxed <iframe src="/terminal.html">,
+  // so that one exact path may be framed by the app's own origin. Every other
+  // response, index.html included, still refuses to be framed at all.
+  const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
   return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Content-Type": options.asset.type,

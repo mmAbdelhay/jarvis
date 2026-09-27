@@ -124,4 +124,26 @@ describe("electron-builder.yml", () => {
     const c = (await config()) as unknown as { afterPack: string };
     expect(c.afterPack).toBe("scripts/vmp-sign.cjs");
   });
+
+  it("ships the browser client's export beside the archive, at resources/web", async () => {
+    // main.ts reads `<process.resourcesPath>/web` when packaged
+    // (web-export.ts webExportDir); anywhere else and Settings says "not built".
+    const c = (await config()) as unknown as { extraResources: unknown };
+    expect(c.extraResources).toEqual([{ from: "web", to: "web" }]);
+  });
+
+  it("builds the web export after packages/wire/dist exists, then copies it in", async () => {
+    // `expo export` resolves @jarvis/wire through its dist/, which `tsc -b`
+    // emits; the copy is what electron-builder's `from: web` picks up.
+    const pkg = JSON.parse(await readFile("packages/desktop/package.json", "utf8")) as {
+      scripts: { build: string };
+    };
+    const steps = pkg.scripts.build.split(" && ");
+    const tsc = steps.indexOf("tsc -b ../../tsconfig.json");
+    const exportWeb = steps.indexOf("pnpm --dir ../../apps/mobile export:web");
+    const copyWeb = steps.indexOf("node scripts/copy-web.mjs");
+    expect(tsc).toBeGreaterThanOrEqual(0);
+    expect(exportWeb).toBeGreaterThan(tsc);
+    expect(copyWeb).toBe(exportWeb + 1);
+  });
 });

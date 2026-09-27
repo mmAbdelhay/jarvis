@@ -71,6 +71,25 @@ files:
   # each target's own `files:` below, not here — see the note above `mac:`.)
 
 # ---------------------------------------------------------------------------
+# The browser client, beside the archive rather than inside it
+# ---------------------------------------------------------------------------
+#
+# `web/` is the mobile app's static web export, copied in by `pnpm build`
+# (scripts/copy-web.mjs); the remote bridge's web listener serves it to a
+# paired browser. It is not app code, so it goes to Contents/Resources/web
+# (resources/web on Linux and Windows) instead of into app.asar, and main.ts
+# reads it from `process.resourcesPath` when packaged (web-export.ts).
+#
+# Outside the archive because it is served, not run: the loader reads it as
+# ordinary files with plain node:fs calls (lstat, recursive readdir, open),
+# and keeping it a real directory means none of that depends on Electron's
+# asar emulation. Nothing is gained by sealing it either — every paired
+# browser downloads these bytes anyway.
+extraResources:
+  - from: web
+    to: web
+
+# ---------------------------------------------------------------------------
 # node-pty must live outside the asar archive
 # ---------------------------------------------------------------------------
 #
