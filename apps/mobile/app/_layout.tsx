@@ -32,7 +32,8 @@ import { clearPairing } from "@/lib/pairing-record";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
-import { createRefreshStore } from "@/lib/refresh-store";
+import { createDeviceAuth } from "@/lib/device-auth";
+import { refreshStore } from "@/lib/refresh-store";
 import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
@@ -101,9 +102,8 @@ export default function RootLayout() {
     authSessionRef.current = createAuthSession({
       rpc: client,
       clock: realClock,
-      refreshStore: createRefreshStore(() =>
-        t(languageRef.current ?? "en", "auth.biometricPrompt"),
-      ),
+      refreshStore,
+      deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
       idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
       log: (line) => console.log(line),
     });
@@ -260,6 +260,11 @@ export default function RootLayout() {
   // Set between a push and the route actually reaching /unlock, so a
   // second state change in that window can't stack a second unlock screen.
   const unlockPushPending = useRef(false);
+  // Any move out of "locked" also clears it, so a push that never reached
+  // /unlock can't block every later one.
+  useEffect(() => {
+    if (connectionState !== "locked") unlockPushPending.current = false;
+  }, [connectionState]);
   useEffect(() => {
     if (!ready) return;
     if (pathname === "/unlock") {

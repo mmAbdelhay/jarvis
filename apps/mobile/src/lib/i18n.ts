@@ -937,7 +937,10 @@ export const STRINGS = {
   },
   "auth.password": { en: "Password", ar: "كلمة المرور" },
   "auth.unlock": { en: "Unlock", ar: "فتح القفل" },
-  "auth.useBiometric": { en: "Unlock with biometrics", ar: "الفتح بالبصمة أو الوجه" },
+  "auth.useBiometric": {
+    en: "Unlock with Face ID, fingerprint or passcode",
+    ar: "الفتح بالوجه أو البصمة أو رمز المرور",
+  },
   "auth.biometricPrompt": {
     en: "Confirm it's you to unlock Jarvis",
     ar: "أكّد هويتك لفتح قفل Jarvis",
@@ -953,8 +956,8 @@ export const STRINGS = {
   },
   "auth.failed": { en: "Couldn't unlock. Try again.", ar: "تعذّر فتح القفل. حاول مجددًا." },
   "auth.noBiometric": {
-    en: "Biometric unlock is off because this phone has no screen lock or biometrics set up, so you'll enter your password each time.",
-    ar: "الفتح بالبصمة أو الوجه متوقف لأن هذا الهاتف ليس عليه قفل شاشة أو بصمة مُعدّة، لذا ستُدخل كلمة المرور في كل مرة.",
+    en: "Quick unlock is off because this phone has no screen lock (passcode) set up, so you'll enter your password each time.",
+    ar: "الفتح السريع متوقف لأن هذا الهاتف ليس عليه قفل شاشة (رمز مرور) مُعدّ، لذا ستُدخل كلمة المرور في كل مرة.",
   },
   "auth.reason.idle": { en: "Locked after inactivity.", ar: "تم القفل بعد فترة من عدم النشاط." },
   "auth.reason.expired": { en: "Your session expired.", ar: "انتهت صلاحية جلستك." },

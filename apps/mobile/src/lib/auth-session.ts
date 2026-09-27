@@ -1,7 +1,8 @@
 // Phase 0 owner login, the phone's half (pure logic — refresh-store.ts is
 // the native adapter). Every /rpc connection opens locked; this module
 // unlocks it with the owner password (`auth:login`) or the stored refresh
-// token (`auth:refresh`, read behind the biometric prompt), keeps it
+// token (`auth:refresh`, read only after the device-owner check —
+// Face ID, fingerprint or the device passcode), keeps it
 // unlocked by refreshing at 80% of the access lifetime, resumes a
 // reconnect's locked welcome with the still-valid access token
 // (`auth:resume`), and locks again after `idleMs` without a touch.
@@ -33,11 +34,15 @@ const RESUME_MARGIN_MS = 5_000;
 const MIN_LIFETIME_MS = 60_000;
 const MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 
-/** The biometric-gated store the refresh token lives in. */
-export type RefreshStore = SecureStore & {
-  /** False when the phone has no passcode/biometrics: nothing can be
-   *  stored, so every unlock needs the password. */
-  canUseBiometrics(): boolean;
+/** The device-owner check in front of the stored refresh token
+ *  (device-auth.ts wraps expo-local-authentication). */
+export type DeviceAuth = {
+  /** False when the phone has no passcode (nor biometrics): no refresh
+   *  token is stored, so every unlock needs the password. */
+  hasPasscode(): Promise<boolean>;
+  /** Face ID / fingerprint, falling back to the device passcode. True
+   *  only when the owner passed it. */
+  authenticate(): Promise<boolean>;
 };
 
 export type AuthLockCause = "idle" | AuthLockReason;
@@ -46,7 +51,7 @@ export type UnlockOutcome =
   | "unlocked"
   /** Nothing stored (or biometrics changed): use the password. */
   | "no-stored-token"
-  /** The biometric prompt was dismissed or failed. */
+  /** The device-owner check was dismissed or failed. */
   | "cancelled"
   /** The stored token was refused (reused, revoked, expired) and deleted. */
   | "password-required"
@@ -64,12 +69,19 @@ export type AuthView = {
    *  instead of raising the biometric prompt over it. */
   busy: boolean;
   biometricUnavailable: boolean;
+  /** The unlock screen may raise the device-owner check on its own: true
+   *  at launch and on every return to the foreground, false after an
+   *  in-app idle lock, a logout, or once an unlock was attempted. */
+  autoPrompt: boolean;
 };
 
 export type AuthSessionDeps = {
   rpc: Pick<RpcClient, "call" | "onState" | "onPush" | "state" | "unlock" | "lock">;
   clock: Clock;
-  refreshStore: RefreshStore;
+  /** Plain secure storage (no per-read prompt): rotation writes never
+   *  prompt. The device-owner check gates reads instead. */
+  refreshStore: SecureStore;
+  deviceAuth: DeviceAuth;
   idleMs: number;
   log(line: string): void;
 };
@@ -130,7 +142,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   let view: AuthView = {
     lockedLocally: false,
     busy: false,
-    biometricUnavailable: !deps.refreshStore.canUseBiometrics(),
+    biometricUnavailable: false,
+    autoPrompt: true,
   };
 
   let idleMs = deps.idleMs;
@@ -214,8 +227,19 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
 
   function lockLocally(cause: AuthLockCause): void {
     dropSession();
-    setView({ lockedLocally: true, lockCause: cause });
+    setView({ lockedLocally: true, lockCause: cause, autoPrompt: false });
     deps.rpc.lock();
+  }
+
+  async function hasPasscode(): Promise<boolean> {
+    let has = false;
+    try {
+      has = await deps.deviceAuth.hasPasscode();
+    } catch {
+      has = false;
+    }
+    if (view.biometricUnavailable === has) setView({ biometricUnavailable: !has });
+    return has;
   }
 
   function idleLock(): void {
@@ -224,8 +248,9 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   }
 
   async function storeRefreshToken(token: string): Promise<void> {
-    if (!deps.refreshStore.canUseBiometrics()) {
-      if (!view.biometricUnavailable) setView({ biometricUnavailable: true });
+    if (!(await hasPasscode())) {
+      // No passcode: nothing may sit on disk without a device lock.
+      await deleteStored();
       return;
     }
     try {
@@ -305,7 +330,10 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     setView({ busy: true });
     try {
       if (access !== undefined && access.expiresAt - deps.clock.now() > RESUME_MARGIN_MS) {
+        const startedEpoch = epoch;
         const result = await deps.rpc.call("auth:resume", [{ accessToken: access.token }]);
+        // Dropped meanwhile (idle lock, logout, a revocation): stay locked.
+        if (startedEpoch !== epoch || view.lockedLocally) return;
         if (result.ok && (result.value as { locked?: unknown } | null)?.locked === false) {
           deps.rpc.unlock();
           return;
@@ -345,7 +373,8 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     }
     // logout / signed-out: this login's refresh tokens were revoked too.
     dropSession();
-    setView({ lockedLocally: true, lockCause: reason });
+    // Nothing left to unlock with: no automatic device-owner prompt.
+    setView({ lockedLocally: true, lockCause: reason, autoPrompt: false });
     void deleteStored();
   });
 
@@ -366,25 +395,37 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   }
 
   async function unlockWithStoredRefresh(): Promise<UnlockOutcome> {
-    if (!deps.refreshStore.canUseBiometrics()) return "no-stored-token";
+    if (view.autoPrompt) setView({ autoPrompt: false });
+    if (refreshing !== undefined) return refreshing;
+    if (!(await hasPasscode())) return "no-stored-token";
+    let passed = false;
+    try {
+      passed = await deps.deviceAuth.authenticate();
+    } catch {
+      passed = false;
+    }
+    if (!passed) return "cancelled"; // the token is never read
+    // Single-flight across the prompt: a refresh that started meanwhile
+    // already spent the stored token; never replay it.
     if (refreshing !== undefined) return refreshing;
     let stored: string | undefined;
     try {
       stored = await deps.refreshStore.get(REFRESH_TOKEN_KEY);
     } catch {
-      return "cancelled";
+      return "failed";
     }
     if (stored === undefined) return "no-stored-token";
+    if (refreshing !== undefined) return refreshing;
     touch();
     return refreshWith(stored);
   }
 
+  /** Local effects first, so an offline (or hanging) `auth:logout` can
+   *  never leave the phone unlocked or the stored token behind. */
   async function logout(): Promise<void> {
-    dropSession();
-    await deps.rpc.call("auth:logout", [{}]);
+    lockLocally("logout");
     await deleteStored();
-    setView({ lockedLocally: true, lockCause: "logout" });
-    deps.rpc.lock();
+    await deps.rpc.call("auth:logout", [{}]);
   }
 
   async function forget(): Promise<void> {
@@ -398,12 +439,13 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   }
 
   function setAppActive(active: boolean): void {
-    if (!active || access === undefined) return;
+    if (!active) return;
     // Timers may not have run while suspended: check both deadlines now.
-    if (deps.clock.now() - lastActivityAt >= idleMs) {
-      idleLock();
-      return;
-    }
+    if (access !== undefined && deps.clock.now() - lastActivityAt >= idleMs) idleLock();
+    // A return to the foreground may raise the device-owner check itself
+    // (also after the idle lock just above).
+    if (!view.autoPrompt) setView({ autoPrompt: true });
+    if (access === undefined) return;
     touch();
     armIdleTimer();
     if (refreshDueAt !== undefined && deps.clock.now() >= refreshDueAt) {

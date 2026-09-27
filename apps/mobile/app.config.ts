@@ -63,13 +63,14 @@ const config: ExpoConfig = {
   // everything under `modules/*`.
   plugins: [
     "expo-router",
+    "expo-secure-store",
     [
-      "expo-secure-store",
+      "expo-local-authentication",
       {
-        // Phase 0 owner login: the stored refresh token is read behind
-        // Face ID (src/lib/refresh-store.ts).
+        // Phase 0 owner login: Face ID in front of the stored refresh
+        // token (src/lib/device-auth.ts). NSFaceIDUsageDescription.
         faceIDPermission:
-          "Jarvis uses Face ID to unlock your session without typing your password. / يستخدم Jarvis بصمة الوجه لفتح جلستك دون كتابة كلمة المرور.",
+          "Jarvis uses Face ID to unlock your session without typing your password.",
       },
     ],
     "expo-camera",

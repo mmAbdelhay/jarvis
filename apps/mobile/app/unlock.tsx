@@ -5,7 +5,7 @@
 // connection is open again. The decisions live in unlock-screen.ts and
 // auth-session.ts; this file is layout and wiring.
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -39,7 +39,6 @@ export default function UnlockScreen() {
   const [password, setPassword] = useState("");
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<MessageKey | undefined>(undefined);
-  const triedBiometric = useRef(false);
 
   useEffect(() => connection.subscribe(setConnectionView), [connection]);
   useEffect(() => auth.subscribe(setAuthView), [auth]);
@@ -70,15 +69,16 @@ export default function UnlockScreen() {
     finish(await auth.unlockWithStoredRefresh());
   }, [auth, finish]);
 
-  // Biometrics first, once per visit, once the connection can take it and
-  // no automatic resume is already running.
+  // The device-owner check raises itself only at launch and on a return
+  // to the foreground (`autoPrompt`, consumed by the attempt) — never
+  // after an in-app idle lock, where the button is there instead — and
+  // only once the connection can take it and no automatic resume runs.
   useEffect(() => {
-    if (!locked || authView.busy || authView.biometricUnavailable || triedBiometric.current) {
+    if (!locked || authView.busy || authView.biometricUnavailable || !authView.autoPrompt) {
       return;
     }
-    triedBiometric.current = true;
     void tryBiometric();
-  }, [locked, authView.busy, authView.biometricUnavailable, tryBiometric]);
+  }, [locked, authView.busy, authView.biometricUnavailable, authView.autoPrompt, tryBiometric]);
 
   async function submitPassword(): Promise<void> {
     if (password === "" || working) return;

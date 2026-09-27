@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { AuthView } from "./auth-session";
 import { lockCauseKey, shouldShowUnlock, unlockMessageKey } from "./unlock-screen";
 
-const UNLOCKED: AuthView = { lockedLocally: false, busy: false, biometricUnavailable: false };
+const UNLOCKED: AuthView = {
+  lockedLocally: false,
+  busy: false,
+  biometricUnavailable: false,
+  autoPrompt: false,
+};
 
 describe("unlock-screen", () => {
   it("shows the unlock screen when the connection is locked or the phone locked itself", () => {

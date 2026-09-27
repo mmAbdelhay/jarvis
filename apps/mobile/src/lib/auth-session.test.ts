@@ -1,9 +1,10 @@
 import { AUTH_STATE_CHANNEL } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
-import type { RefreshStore } from "./auth-session";
+import type { DeviceAuth } from "./auth-session";
 import { createFakeClock } from "./clock";
 import type { ClientState, RpcResult } from "./rpc-client";
+import type { SecureStore } from "./secure-store";
 
 const MIN = 60_000;
 const ACCESS_TTL = 15 * MIN;
@@ -99,17 +100,14 @@ function createRpcDouble(clock: ReturnType<typeof createFakeClock>) {
 }
 
 /** Records every write so a test can assert what did (and didn't) reach it. */
-function createStoreDouble(events: string[], options: { biometrics?: boolean } = {}) {
+function createStoreDouble(events: string[]) {
   const values = new Map<string, string>();
   const writes: Array<{ key: string; value: string }> = [];
+  let reads = 0;
   let failNextSet = false;
-  let failNextGet = false;
-  const store: RefreshStore = {
+  const store: SecureStore = {
     async get(key) {
-      if (failNextGet) {
-        failNextGet = false;
-        throw new Error("cancelled");
-      }
+      reads += 1;
       return values.get(key);
     },
     async set(key, value) {
@@ -125,38 +123,50 @@ function createStoreDouble(events: string[], options: { biometrics?: boolean } =
       events.push("store.delete");
       values.delete(key);
     },
-    canUseBiometrics: () => options.biometrics ?? true,
   };
   return {
     store,
     values,
     writes,
+    reads: () => reads,
     failNextSet: () => {
       failNextSet = true;
     },
-    failNextGet: () => {
-      failNextGet = true;
+  };
+}
+
+/** The device-owner check: passcode presence and the prompt's answer. */
+function createDeviceAuthDouble(options: { passcode?: boolean }) {
+  const state = { passcode: options.passcode ?? true, pass: true, prompts: 0 };
+  const auth: DeviceAuth = {
+    hasPasscode: async () => state.passcode,
+    authenticate: async () => {
+      state.prompts += 1;
+      return state.pass;
     },
   };
+  return { auth, state };
 }
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
-function setup(options: { biometrics?: boolean } = {}) {
+function setup(options: { passcode?: boolean } = {}) {
   const clock = createFakeClock();
   const double = createRpcDouble(clock);
-  const store = createStoreDouble(double.events, options);
+  const store = createStoreDouble(double.events);
+  const device = createDeviceAuthDouble(options);
   const logs: string[] = [];
   const session = createAuthSession({
     rpc: double.rpc,
     clock,
     refreshStore: store.store,
+    deviceAuth: device.auth,
     idleMs: IDLE,
     log: (line) => logs.push(line),
   });
-  return { clock, double, store, session, logs };
+  return { clock, double, store, session, logs, device };
 }
 
 function tokenArg(call: Call | undefined, field: string): string | undefined {
@@ -194,10 +204,12 @@ describe("auth-session: password login", () => {
     expect(await session.unlockWithPassword("pw")).toBe("offline");
   });
 
-  it("with no biometrics on the phone, keeps nothing on disk and says so", async () => {
-    const { store, session } = setup({ biometrics: false });
+  it("with no passcode on the phone, stores no refresh token and says so", async () => {
+    const { store, session } = setup({ passcode: false });
+    store.values.set(REFRESH_TOKEN_KEY, "stale");
     expect(await session.unlockWithPassword("pw")).toBe("unlocked");
     expect(store.writes).toEqual([]);
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
     expect(session.get().biometricUnavailable).toBe(true);
   });
 
@@ -273,11 +285,23 @@ describe("auth-session: stored refresh (biometric) unlock", () => {
     expect(double.calls).toEqual([]);
   });
 
-  it("answers cancelled when the biometric prompt fails", async () => {
-    const { store, session } = setup();
+  it("a failed device-owner check never reads the stored token", async () => {
+    const { store, session, device, double } = setup();
     store.values.set(REFRESH_TOKEN_KEY, token());
-    store.failNextGet();
+    device.state.pass = false;
     expect(await session.unlockWithStoredRefresh()).toBe("cancelled");
+    expect(device.state.prompts).toBe(1);
+    expect(store.reads()).toBe(0);
+    expect(double.calls).toEqual([]);
+  });
+
+  it("with no passcode, neither prompts nor reads: the password is needed", async () => {
+    const { store, session, device } = setup({ passcode: false });
+    store.values.set(REFRESH_TOKEN_KEY, token());
+    expect(await session.unlockWithStoredRefresh()).toBe("no-stored-token");
+    expect(device.state.prompts).toBe(0);
+    expect(store.reads()).toBe(0);
+    expect(session.get().biometricUnavailable).toBe(true);
   });
 
   it("a refused (reused/invalid) token is deleted and the password is required", async () => {
@@ -454,5 +478,57 @@ describe("auth-session: secrets", () => {
     for (const secret of [...accessTokens, ...secrets, "correct horse"]) {
       expect(logged).not.toContain(secret);
     }
+  });
+});
+
+describe("auth-session: fix round 1", () => {
+  it("a resume reply landing after the idle lock does not reopen the connection", async () => {
+    const { clock, double, session } = setup();
+    await session.unlockWithPassword("pw");
+    let answer: (result: RpcResult) => void = () => {};
+    double.reply("auth:resume", new Promise<RpcResult>((resolve) => (answer = resolve)));
+    double.setState("reconnecting");
+    double.setState("locked");
+    await flush(); // the resume goes out and waits
+    expect(double.calls.map((c) => c.channel)).toContain("auth:resume");
+    clock.advance(IDLE); // the idle lock fires meanwhile
+    const before = double.events.length;
+    answer({ ok: true, value: { locked: false, hasPasskeys: false } });
+    await flush();
+    expect(double.events.slice(before)).not.toContain("unlock");
+    expect(double.rpc.state()).toBe("locked");
+    expect(session.get()).toMatchObject({ lockedLocally: true, lockCause: "idle" });
+  });
+
+  it("logout offline still deletes the stored token and locks locally", async () => {
+    const { double, store, session } = setup();
+    await session.unlockWithPassword("pw");
+    double.reply("auth:logout", { ok: false, error: { kind: "offline" } });
+    await session.logout();
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    expect(double.rpc.state()).toBe("locked");
+    expect(session.get()).toMatchObject({ lockedLocally: true, lockCause: "logout" });
+  });
+
+  it("autoPrompt: on at launch, off after an in-app idle lock, on again in the foreground", async () => {
+    const { clock, session } = setup();
+    expect(session.get().autoPrompt).toBe(true);
+    await session.unlockWithPassword("pw");
+    clock.advance(IDLE);
+    await flush();
+    expect(session.get()).toMatchObject({ lockCause: "idle", autoPrompt: false });
+    session.setAppActive(false);
+    session.setAppActive(true);
+    expect(session.get().autoPrompt).toBe(true);
+  });
+
+  it("autoPrompt stays on when the foreground return itself idle-locks", async () => {
+    const { clock, session } = setup();
+    await session.unlockWithPassword("pw");
+    await session.unlockWithStoredRefresh(); // consumes the launch autoPrompt
+    expect(session.get().autoPrompt).toBe(false);
+    (clock as unknown as { now: () => number }).now = () => IDLE * 3;
+    session.setAppActive(true);
+    expect(session.get()).toMatchObject({ lockCause: "idle", autoPrompt: true });
   });
 });
