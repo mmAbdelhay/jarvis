@@ -94,6 +94,11 @@ describe("listenTls: sidecar proxy routing", () => {
   async function startListener(
     proxy: ReturnType<typeof fakeProxy> | undefined,
     webOrigin?: () => string | undefined,
+    onSocket: Parameters<typeof listenTls>[0]["onSocket"] = () => ({
+      onText: () => {},
+      onBinary: () => {},
+      onClose: () => {},
+    }),
   ) {
     createdServers.length = 0;
     createdWssInstances.length = 0;
@@ -104,7 +109,7 @@ describe("listenTls: sidecar proxy routing", () => {
       key: "key",
       proxy,
       webOrigin: webOrigin ?? (() => undefined),
-      onSocket: () => ({ onText: () => {}, onBinary: () => {}, onClose: () => {} }),
+      onSocket,
       log: () => {},
     });
     const server = createdServers[0];
@@ -247,6 +252,66 @@ describe("listenTls: sidecar proxy routing", () => {
 
     expect(createdWssInstances.at(-1)?.handleUpgrade).toHaveBeenCalledOnce();
     expect(socket.destroy).not.toHaveBeenCalled();
+    await listener.close();
+  });
+
+  /** Completes a mocked `handleUpgrade` with a fake `ws`; returns whether it was terminated. */
+  function completeUpgrade(): { terminated: () => boolean } {
+    const call = createdWssInstances.at(-1)?.handleUpgrade.mock.calls[0];
+    const done = call?.[3] as ((ws: unknown) => void) | undefined;
+    let terminated = false;
+    const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      terminate: () => {
+        terminated = true;
+      },
+    });
+    done?.(ws);
+    return { terminated: () => terminated };
+  }
+
+  // Phase 1 final review I1: the bridge needs each socket's Origin class to
+  // close the web ones when the web listener goes.
+  it.each([
+    ["/rpc", undefined, "none"],
+    ["/pair", "jarvis-app://native", "native"],
+    ["/rpc", WEB_ORIGIN, "web"],
+    ["/pair", WEB_ORIGIN, "web"],
+  ])("hands %s with Origin %s to onSocket as origin class %s", async (url, origin, expected) => {
+    const onSocket = vi.fn((..._args: unknown[]) => ({
+      onText: () => {},
+      onBinary: () => {},
+      onClose: () => {},
+    }));
+    const { server, listener } = await startListener(undefined, () => WEB_ORIGIN, onSocket);
+    const { req, socket } = upgradeRequest(url, origin);
+    Object.assign(req.socket, { setNoDelay: () => {} });
+
+    server.emit("upgrade", req, socket, Buffer.alloc(0));
+    completeUpgrade();
+
+    expect(onSocket).toHaveBeenCalledOnce();
+    expect(onSocket.mock.calls[0]?.[3]).toBe(expected);
+    await listener.close();
+  });
+
+  it("terminates a web-origin upgrade the web origin changed under before it completed", async () => {
+    const onSocket = vi.fn((..._args: unknown[]) => ({
+      onText: () => {},
+      onBinary: () => {},
+      onClose: () => {},
+    }));
+    let webOrigin: string | undefined = WEB_ORIGIN;
+    const { server, listener } = await startListener(undefined, () => webOrigin, onSocket);
+    const { req, socket } = upgradeRequest("/rpc", WEB_ORIGIN);
+    Object.assign(req.socket, { setNoDelay: () => {} });
+
+    server.emit("upgrade", req, socket, Buffer.alloc(0));
+    webOrigin = undefined;
+    const { terminated } = completeUpgrade();
+
+    expect(terminated()).toBe(true);
+    expect(onSocket).not.toHaveBeenCalled();
     await listener.close();
   });
 

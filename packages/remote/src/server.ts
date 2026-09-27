@@ -13,7 +13,7 @@ import type { Listen, ListenOptions, Listener } from "./bridge.js";
 import { describeError } from "./io.js";
 import type { SocketLike } from "./io.js";
 import { MAX_TEXT_FRAME_BYTES } from "./protocol.js";
-import { originAllowed } from "./origin.js";
+import { originAllowed, originClass } from "./origin.js";
 import { parseProxyPath } from "./proxy-rewrite.js";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -158,6 +158,14 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
         return;
       }
       wss.handleUpgrade(request, socket, head, (ws) => {
+        // Classed again at completion (final review I1): the web listener
+        // may have closed between the check above and now, and the bridge
+        // closes web-origin sockets only among those it has been handed.
+        const origin = originClass(request.headers.origin, options.webOrigin());
+        if (origin === undefined) {
+          ws.terminate();
+          return;
+        }
         // The upgrade event's socket is typed as the generic `Duplex`, but
         // an HTTPS server's connections are always `net.Socket` (here, a
         // `tls.TLSSocket`, which extends it) — `setNoDelay` is real at
@@ -165,7 +173,12 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
         if (kind === "rpc")
           (socket as unknown as { setNoDelay(enable: boolean): void }).setNoDelay(true);
         const adapter = toSocketLike(ws);
-        const handlers = options.onSocket(kind, adapter, request.socket.remoteAddress ?? "");
+        const handlers = options.onSocket(
+          kind,
+          adapter,
+          request.socket.remoteAddress ?? "",
+          origin,
+        );
         ws.on("message", (data: Buffer, isBinary: boolean) => {
           // A binary frame's byte cap (MAX_BLOB_CHUNK_BYTES) is enforced
           // twice: `ws`'s own `maxPayload` (below, MAX_TEXT_FRAME_BYTES)

@@ -532,6 +532,52 @@ describe("createHub: closeAll and disconnection", () => {
   });
 });
 
+describe("createHub: closeWebOrigin (Phase 1 final review I1)", () => {
+  it("closes open and pending web-origin sockets only, leaving no-Origin and native ones open", () => {
+    const pairOnClose = vi.fn();
+    const pairSession = vi.fn(
+      (): SessionHandlers => ({ onText: vi.fn(), onBinary: vi.fn(), onClose: pairOnClose }),
+    );
+    const { hub, clock } = makeHarness({ pairSession });
+    const web = new FakeSocket();
+    hub.accept("rpc", web, "10.0.0.1:1", "web").onText(helloFrame(1));
+    const native = new FakeSocket();
+    hub.accept("rpc", native, "10.0.0.2:1", "native").onText(helloFrame(2));
+    const plain = new FakeSocket();
+    hub.accept("rpc", plain, "10.0.0.3:1").onText(helloFrame(3));
+    const webPending = new FakeSocket();
+    hub.accept("rpc", webPending, "10.0.4.1:1", "web");
+    const webPair = new FakeSocket();
+    hub.accept("pair", webPair, "10.0.4.2:1", "web");
+    const nativePair = new FakeSocket();
+    hub.accept("pair", nativePair, "10.0.4.3:1", "native");
+
+    expect(hub.closeWebOrigin(1001)).toEqual(new Set([deviceId(1)]));
+
+    expect(web.closed).toEqual({ code: 1001, reason: "" });
+    expect(webPending.closed).toEqual({ code: 1001, reason: "" });
+    expect(webPair.closed).toEqual({ code: 1001, reason: "" });
+    expect(pairOnClose).toHaveBeenCalledTimes(1);
+    expect(native.closed).toBeUndefined();
+    expect(plain.closed).toBeUndefined();
+    expect(nativePair.closed).toBeUndefined();
+    // Only the two open non-web connections' heartbeats stay armed: the web
+    // pending connection's handshake timer went with it.
+    expect(clock.pending()).toBe(2);
+  });
+
+  it("a web socket that already closed is not closed again", () => {
+    const { hub } = makeHarness();
+    const web = new FakeSocket();
+    const handlers = hub.accept("rpc", web, "10.0.0.1:1", "web");
+    handlers.onText(helloFrame(1));
+    handlers.onClose(1006);
+
+    expect(hub.closeWebOrigin(1001)).toEqual(new Set());
+    expect(web.closed).toBeUndefined();
+  });
+});
+
 // M12 Task 3: HubDeps.auditPolicy is a pure pass-through to the connection
 // it creates — proven with a spy policy that only this test's own channel
 // resolves to "always".

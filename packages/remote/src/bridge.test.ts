@@ -18,6 +18,7 @@ import { createDeviceStore } from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import { MAX_PENDING } from "./hub.js";
 import type { DesktopNoticeKind } from "./owner-auth.js";
+import type { OriginClass } from "./origin.js";
 import {
   OWNER_TEST_HASH_PARAMS,
   OWNER_TEST_PASSWORD,
@@ -299,9 +300,10 @@ async function connectLoggedIn(
   h: ReturnType<typeof makeHarness>,
   device: { deviceId: string; token: string } | undefined,
   source = "10.0.0.5:1",
+  origin?: OriginClass,
 ): Promise<{ socket: FakeSocket; handlers: SessionHandlers | undefined }> {
   const socket = new FakeSocket();
-  const handlers = h.listenCalls.at(-1)?.onSocket("rpc", socket, source);
+  const handlers = h.listenCalls.at(-1)?.onSocket("rpc", socket, source, origin);
   handlers?.onText(helloFrame(device?.deviceId ?? "", device?.token ?? ""));
   socket.sent = [];
   expect(await login(handlers, socket)).toMatchObject({ t: "res" });
@@ -2508,6 +2510,7 @@ describe("createBridge: passkeys (Phase 0)", () => {
 
 describe("createBridge: web listener (Phase 1)", () => {
   const NAME = "laptop.tailnet.ts.net";
+  const SIDECAR: SidecarTarget = { kind: "editor", port: 4001 };
   const CONFIGURED = certWith("configured", [NAME]);
   const WEB_ON = (port = 7717): Parameters<Bridge["apply"]>[0] => ({
     ...ON_127(port),
@@ -2702,6 +2705,51 @@ describe("createBridge: web listener (Phase 1)", () => {
     expect(h.webListeners[0]?.closed).toBe(true);
     expect(h.listeners[0]?.closed).toBe(false);
     expect(h.listenCalls[0]?.webOrigin()).toBeUndefined();
+  });
+
+  // Phase 1 final review I1: the web Origin is checked once per upgrade, so
+  // the connections it admitted must go when the web listener does.
+  it("turning web off alone closes browser-origin sockets and leaves no-Origin/native sockets open", async () => {
+    const h = makeHarness({ cert: CONFIGURED });
+    const [browser, phone, cli] = await seedDevices(h.fs, h.random, h.clock.now, [
+      "Browser",
+      "Phone",
+      "CLI",
+    ]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({ ...WEB_ON(), sidecarProxy: true });
+    const web = await connectLoggedIn(h, browser, "10.0.0.5:1", "web");
+    const native = await connectLoggedIn(h, phone, "10.0.0.6:1", "native");
+    const plain = await connectLoggedIn(h, cli, "10.0.0.7:1");
+    const webPair = new FakeSocket();
+    h.listenCalls[0]?.onSocket("pair", webPair, "10.0.0.8:1", "web");
+    expect(bridge.publishSidecar(browser?.deviceId ?? "", SIDECAR)).toMatchObject({
+      url: expect.any(String),
+    });
+
+    await bridge.apply({ ...ON_127(), sidecarProxy: true });
+
+    expect(h.listeners[0]?.closed).toBe(false);
+    expect(web.socket.closed).toEqual({ code: CLOSE.goingAway, reason: "" });
+    expect(webPair.closed).toEqual({ code: CLOSE.goingAway, reason: "" });
+    expect(native.socket.closed).toBeUndefined();
+    expect(plain.socket.closed).toBeUndefined();
+    expect((await auditLines(h.fs)).join("\n")).toContain(" sidecars-cleared count=1");
+  });
+
+  it("a web port change closes browser-origin sockets", async () => {
+    const { h, bridge } = await start();
+    const web = new FakeSocket();
+    h.listenCalls[0]?.onSocket("rpc", web, "10.0.0.5:1", "web");
+    const native = new FakeSocket();
+    h.listenCalls[0]?.onSocket("rpc", native, "10.0.0.6:1", "native");
+
+    await bridge.apply({ ...WEB_ON(), web: { enabled: true, port: 7719 } });
+
+    expect(h.listeners[0]?.closed).toBe(false);
+    expect(bridge.status().web).toMatchObject({ kind: "on", port: 7719 });
+    expect(web.closed).toEqual({ code: CLOSE.goingAway, reason: "" });
+    expect(native.closed).toBeUndefined();
   });
 
   it("re-applying the same config keeps the one web listener", async () => {

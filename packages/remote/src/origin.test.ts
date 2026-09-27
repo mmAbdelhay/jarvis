@@ -1,6 +1,6 @@
 import { NATIVE_ORIGIN } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
-import { originAllowed } from "./origin.js";
+import { originAllowed, originClass } from "./origin.js";
 
 describe("originAllowed", () => {
   const webOrigin = "https://mac.tail.ts.net:4318";
@@ -23,5 +23,20 @@ describe("originAllowed", () => {
 
   it.each(cases)("checks header=%j with web origin=%j", (header, configuredWebOrigin, allowed) => {
     expect(originAllowed(header, configuredWebOrigin)).toBe(allowed);
+  });
+});
+
+describe("originClass", () => {
+  const webOrigin = "https://mac.tail.ts.net:4318";
+
+  it.each([
+    [undefined, webOrigin, "none"],
+    [NATIVE_ORIGIN, webOrigin, "native"],
+    [webOrigin, webOrigin, "web"],
+    [webOrigin, undefined, undefined],
+    ["https://mac.tail.ts.net:4317", webOrigin, undefined],
+    [[webOrigin], webOrigin, undefined],
+  ] as const)("classes header=%j with web origin=%j as %j", (header, configured, expected) => {
+    expect(originClass(header as string | string[] | undefined, configured)).toBe(expected);
   });
 });

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { setImmediate as yieldToLoop, setTimeout as delay } from "node:timers/promises";
+import { NATIVE_ORIGIN } from "@jarvis/wire";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Bridge, RemoteStatus } from "./bridge.js";
 import { createBridge } from "./bridge.js";
@@ -609,5 +610,69 @@ describe("bridge.integration: the web origin drives the real Origin check", () =
     // Same bridge listener (only the web toggle changed), same origin text.
     expect(bridge.status().listening?.port).toBe(bridgePort);
     expect(await upgradeReply(bridgePort, web.origin)).toBe("");
+  });
+  // Final review I1: an already-open browser socket must not outlive the
+  // web listener just because its Origin was only checked at upgrade.
+  it("turning web off closes an open browser-origin socket and leaves a native one open", async () => {
+    await bridge.apply(config(true));
+    await bridge.openPairing();
+    const web = bridge.status().web;
+    if (web?.kind !== "on") throw new Error(`expected web on, got ${JSON.stringify(web)}`);
+    const bridgePort = bridge.status().listening?.port ?? 0;
+
+    /** Opens a raw `/pair` upgrade; `closeFrame` settles on the server's first WebSocket close frame (opcode 0x8). */
+    async function openUpgrade(origin: string) {
+      const socket = await rawConnect("127.0.0.1", bridgePort);
+      let upgraded = false;
+      let sawClose = false;
+      let onUpgrade: (head: string) => void = () => {};
+      const upgrade = new Promise<string>((resolve) => {
+        onUpgrade = resolve;
+      });
+      let onClose: () => void = () => {};
+      const closeFrame = new Promise<void>((resolve) => {
+        onClose = resolve;
+      });
+      socket.on("data", (chunk: Buffer) => {
+        let frames = chunk;
+        if (!upgraded) {
+          upgraded = true;
+          const text = chunk.toString("latin1");
+          const end = text.indexOf("\r\n\r\n");
+          onUpgrade(text);
+          frames = chunk.subarray(end + 4);
+        }
+        if (frames.length > 0 && (frames[0] ?? 0) === 0x88) {
+          sawClose = true;
+          onClose();
+        }
+      });
+      socket.write(
+        [
+          "GET /pair HTTP/1.1",
+          `Host: 127.0.0.1:${bridgePort}`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+          `Origin: ${origin}`,
+          "\r\n",
+        ].join("\r\n"),
+      );
+      expect(await upgrade).toMatch(/^HTTP\/1\.1 101 /);
+      return { socket, closeFrame, sawClose: () => sawClose };
+    }
+
+    const browser = await openUpgrade(web.origin);
+    const native = await openUpgrade(NATIVE_ORIGIN);
+
+    await bridge.apply(config(false));
+    await browser.closeFrame;
+    await yieldToLoop();
+
+    expect(browser.sawClose()).toBe(true);
+    expect(native.sawClose()).toBe(false);
+    browser.socket.destroy();
+    native.socket.destroy();
   });
 });

@@ -30,6 +30,7 @@ import type {
 import type { DevicePush, DeviceStore } from "./devices.js";
 import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
+import type { OriginClass } from "./origin.js";
 import type { OwnerHashParams } from "./owner.js";
 import { createOwnerStore } from "./owner.js";
 import { createLoginLimits } from "./login-limits.js";
@@ -99,7 +100,14 @@ export type ListenOptions = {
   // upgrade; `undefined` means only no-Origin and the native Origin pass
   // the `/rpc` and `/pair` check (origin.ts).
   webOrigin: () => string | undefined;
-  onSocket(kind: "rpc" | "pair", socket: SocketLike, remoteAddress: string): SessionHandlers;
+  // `origin` is the upgrade's Origin class (origin.ts); omitted means no
+  // Origin. Web-origin sockets are closed when the web listener closes.
+  onSocket(
+    kind: "rpc" | "pair",
+    socket: SocketLike,
+    remoteAddress: string,
+    origin?: OriginClass,
+  ): SessionHandlers;
   log(line: string): void;
 };
 
@@ -851,6 +859,13 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     const old = webListener;
     webListener = undefined;
     webListening = undefined;
+    // Final review I1: the web Origin is checked once per upgrade, so every
+    // socket it admitted (rpc or pair, logged in or not) goes with the
+    // listener, and so do those browsers' sidecar handles. Run even with no
+    // listener up: it is a no-op then.
+    for (const deviceId of hub.closeWebOrigin(CLOSE.goingAway)) {
+      teardownDeviceSidecars(deviceId);
+    }
     if (old === undefined) return;
     try {
       await old.close();
@@ -944,9 +959,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     kind: "rpc" | "pair",
     socket: SocketLike,
     remoteAddress: string,
+    origin?: OriginClass,
   ): SessionHandlers {
     const source = canonicalAddress(remoteAddress) ?? remoteAddress;
-    return hub.accept(kind, socket, source);
+    return hub.accept(kind, socket, source, origin);
   }
 
   const pairing = createPairing({
