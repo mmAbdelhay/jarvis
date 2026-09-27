@@ -3,6 +3,8 @@ import { Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } fro
 import { t, type Language } from "../lib/i18n";
 import type { PlansStore } from "../lib/plans-store";
 import { theme } from "../lib/theme";
+import { planErrorText } from "./plan-error";
+import { planBlockPlainText } from "./plain-text";
 import type { PlanBlock } from "./types";
 
 export function PlanBlockSheet(props: {
@@ -14,37 +16,44 @@ export function PlanBlockSheet(props: {
   const [mode, setMode] = useState<"comment" | "edit">("comment");
   const [body, setBody] = useState("");
   const [source, setSource] = useState("");
+  const [activeBlock, setActiveBlock] = useState<PlanBlock>();
   useEffect(() => {
     setMode("comment");
     setBody("");
     setSource(props.block?.source ?? "");
+    setActiveBlock(props.block);
   }, [props.block]);
-  const block = props.block;
+  const block = activeBlock ?? props.block;
   if (block === undefined) return null;
   const blockId = block.id;
-  const quote = block.source.slice(0, 120);
+  const quote = planBlockPlainText(block.source);
 
   async function queue(sendNow: boolean) {
     if (body.trim() === "") return;
-    const oldIds = new Set(props.store.state.comments.map((comment) => comment.id));
-    await props.store.addComment(blockId, quote, body.trim());
-    if (sendNow) {
-      const added = props.store.state.comments.find(
-        (comment) => !oldIds.has(comment.id) && comment.sentAt === undefined,
-      );
-      if (added !== undefined) await props.store.send([added.id]);
-    }
+    const added = await props.store.addComment(blockId, quote, body.trim());
+    if (!added.ok) return;
+    if (sendNow && !(await props.store.send([added.value.id])).ok) return;
     props.onClose();
   }
 
   async function save() {
+    const path = props.store.state.doc?.path;
     const result = await props.store.writeBlock(blockId, source);
     if (result === "conflict") {
+      if (path === undefined) return;
+      await props.store.open(path);
+      const fresh = props.store.state.doc?.blocks.find((item) => item.id === blockId);
       Alert.alert(t(props.language, "plans.changedOnDisk"));
-      await props.store.open(props.store.state.doc?.path ?? blockId);
+      if (fresh === undefined) {
+        props.onClose();
+        return;
+      }
+      setActiveBlock(fresh);
+      setSource(fresh.source);
       return;
     }
     if (result === "ok") props.onClose();
+    else Alert.alert(planErrorText(props.language, props.store.state.error?.code ?? "saveFailed"));
   }
 
   return (
@@ -65,6 +74,16 @@ export function PlanBlockSheet(props: {
               </TouchableOpacity>
             ))}
           </View>
+          {props.store.state.error !== undefined && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>
+                {planErrorText(props.language, props.store.state.error.code)}
+              </Text>
+              {props.store.state.error.detail !== undefined && (
+                <Text style={styles.errorDetail}>{props.store.state.error.detail}</Text>
+              )}
+            </View>
+          )}
           {mode === "comment" ? (
             <>
               <Text style={styles.label}>{t(props.language, "plans.quotedText")}</Text>
@@ -158,6 +177,15 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: theme.colors.selected },
   segmentText: { color: theme.colors.textMuted, fontFamily: theme.font.semibold },
   segmentTextActive: { color: theme.colors.text },
+  errorBanner: {
+    backgroundColor: theme.colors.surfaceAlt,
+    borderColor: theme.colors.warning,
+    borderWidth: 1,
+    borderRadius: theme.radius.sm,
+    padding: theme.spacing.sm,
+  },
+  errorText: { color: theme.colors.warning, fontFamily: theme.font.semibold },
+  errorDetail: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
   label: { color: theme.colors.textMuted, fontFamily: theme.font.semibold },
   quote: {
     color: theme.colors.textSecondary,

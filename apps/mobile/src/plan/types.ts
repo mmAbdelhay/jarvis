@@ -35,5 +35,5 @@ export type PlanComment = {
 
 export type AnchoredComment = PlanComment & {
   number: number;
-  anchor: { kind: "block"; blockId: string } | { kind: "orphaned" };
+  anchor: { kind: "block"; blockId: string; text: string } | { kind: "orphaned" };
 };

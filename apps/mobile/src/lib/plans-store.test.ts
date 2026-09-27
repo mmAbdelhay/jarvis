@@ -53,7 +53,9 @@ describe("createPlansStore", () => {
   });
 
   it("opens a plan then loads its anchored comments", async () => {
-    const anchored = [{ ...comment, number: 1, anchor: { kind: "block", blockId: "b1" } }];
+    const anchored = [
+      { ...comment, number: 1, anchor: { kind: "block", blockId: "b1", text: "Hello" } },
+    ];
     const client = fakeClient([ok({ ok: true, value: doc }), ok(anchored)]);
     const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
     await store.open(doc.path);
@@ -66,11 +68,16 @@ describe("createPlansStore", () => {
   });
 
   it("adds a comment using the open path and refreshes anchored comments", async () => {
-    const anchored = [{ ...comment, number: 1, anchor: { kind: "block", blockId: "b1" } }];
+    const anchored = [
+      { ...comment, number: 1, anchor: { kind: "block", blockId: "b1", text: "Hello" } },
+    ];
     const client = fakeClient([ok({ ok: true, value: doc }), ok([]), ok(comment), ok(anchored)]);
     const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
     await store.open(doc.path);
-    await store.addComment("b1", "Hello", "Tighten this");
+    await expect(store.addComment("b1", "Hello", "Tighten this")).resolves.toEqual({
+      ok: true,
+      value: comment,
+    });
     expect(client.call.mock.calls.slice(-2)).toEqual([
       ["plans:addComment", [doc.path, "b1", "Hello", "Tighten this"]],
       ["plans:comments", [doc.path]],
@@ -78,8 +85,30 @@ describe("createPlansStore", () => {
     expect(store.state.comments).toEqual(anchored);
   });
 
+  it("returns an error code and preserves server detail when adding a comment fails", async () => {
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      {
+        ok: false,
+        error: { kind: "remote", code: "internal", text: "disk denied", language: "en" },
+      },
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+    const result = await store.addComment("b1", "Hello", "Tighten this");
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "saveFailed", detail: "disk denied" },
+    });
+    expect(store.state.error).toEqual({ code: "saveFailed", detail: "disk denied" });
+    expect(client.call).toHaveBeenCalledTimes(3);
+  });
+
   it("sends selected ids and reloads comments", async () => {
-    const anchored = [{ ...comment, number: 1, anchor: { kind: "block", blockId: "b1" } }];
+    const anchored = [
+      { ...comment, number: 1, anchor: { kind: "block", blockId: "b1", text: "Hello" } },
+    ];
     const client = fakeClient([
       ok({ ok: true, value: doc }),
       ok(anchored),
@@ -88,11 +117,31 @@ describe("createPlansStore", () => {
     ]);
     const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
     await store.open(doc.path);
-    await store.send(["c1"]);
+    await expect(store.send(["c1"])).resolves.toEqual({ ok: true, value: undefined });
     expect(client.call.mock.calls.slice(-2)).toEqual([
       ["plans:send", ["pane-1", doc.path, ["c1"]]],
       ["plans:comments", [doc.path]],
     ]);
+    expect(store.state.comments[0]?.sentAt).toBe(3);
+  });
+
+  it("surfaces a plans:send domain refusal and does not reload comments", async () => {
+    const anchored = [
+      { ...comment, number: 1, anchor: { kind: "block", blockId: "b1", text: "Hello" } },
+    ];
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok(anchored),
+      ok({ ok: false, reason: "no-pane" }),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+    await expect(store.send()).resolves.toEqual({
+      ok: false,
+      error: { code: "noPane" },
+    });
+    expect(store.state.error).toEqual({ code: "noPane" });
+    expect(client.call).toHaveBeenCalledTimes(3);
   });
 
   it("does nothing when send has no queued comments", async () => {
@@ -120,6 +169,38 @@ describe("createPlansStore", () => {
       12,
     ]);
     expect(store.state.doc?.mtimeMs).toBe(13);
+  });
+
+  it("stores the returned document after a successful block write", async () => {
+    const changed = { ...doc, mtimeMs: 14, blocks: [{ ...doc.blocks[0]!, source: "Changed" }] };
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      ok({ ok: true, value: changed }),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+    await expect(store.writeBlock("b1", "Changed")).resolves.toBe("ok");
+    expect(store.state.doc).toEqual(changed);
+    expect(store.state.error).toBeUndefined();
+  });
+
+  it("ignores an older open response after a newer path has been requested", async () => {
+    const resolvers: ((result: RpcResult) => void)[] = [];
+    const client = fakeClient([]);
+    client.call.mockImplementation(
+      () => new Promise<RpcResult>((resolve) => resolvers.push(resolve)),
+    );
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    const oldOpen = store.open("/old.md");
+    const newOpen = store.open("/new.md");
+    resolvers[1]!(ok({ ok: true, value: { ...doc, path: "/new.md" } }));
+    await vi.waitFor(() => expect(client.call).toHaveBeenCalledTimes(3));
+    resolvers[2]!(ok([]));
+    await newOpen;
+    resolvers[0]!(ok({ ok: true, value: { ...doc, path: "/old.md" } }));
+    await oldOpen;
+    expect(store.state.doc?.path).toBe("/new.md");
   });
 
   it("subscribes to plans:changed and refreshes the matching open plan", async () => {

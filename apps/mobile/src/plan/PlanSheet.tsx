@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
   Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
@@ -14,6 +14,7 @@ import type { PlansStore } from "../lib/plans-store";
 import { theme } from "../lib/theme";
 import { PlanBlockSheet } from "./PlanBlockSheet";
 import { PlanCommentsScreen } from "./PlanCommentsScreen";
+import { planErrorText } from "./plan-error";
 import { buildPlanPage } from "./plan-page";
 import type { PlanBlock, PlanEntry } from "./types";
 
@@ -25,6 +26,7 @@ export function PlanSheet(props: {
   onClose(): void;
 }) {
   const [, redraw] = useState(0);
+  const { height } = useWindowDimensions();
   const [picker, setPicker] = useState(false);
   const [commentsScreen, setCommentsScreen] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<PlanBlock>();
@@ -46,7 +48,15 @@ export function PlanSheet(props: {
     () =>
       state.doc === undefined
         ? undefined
-        : buildPlanPage(state.doc, state.comments, props.language),
+        : buildPlanPage(state.doc, state.comments, props.language, {
+            surface: theme.colors.surface,
+            ground: theme.colors.ground,
+            text: theme.colors.text,
+            textSecondary: theme.colors.textSecondary,
+            accent: theme.colors.accent,
+            warning: theme.colors.warning,
+            selected: theme.colors.selected,
+          }),
     [state.doc, state.comments, props.language],
   );
 
@@ -63,7 +73,7 @@ export function PlanSheet(props: {
   return (
     <Modal transparent animationType="slide" visible={props.visible} onRequestClose={props.onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { height: height * 0.82 }]}>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <TouchableOpacity style={styles.planTitle} onPress={() => setPicker((value) => !value)}>
@@ -103,6 +113,16 @@ export function PlanSheet(props: {
               }}
             />
           )}
+          {state.error !== undefined && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>
+                {planErrorText(props.language, state.error.code)}
+              </Text>
+              {state.error.detail !== undefined && (
+                <Text style={styles.errorDetail}>{state.error.detail}</Text>
+              )}
+            </View>
+          )}
           {commentsScreen ? (
             <PlanCommentsScreen
               comments={state.comments}
@@ -112,9 +132,7 @@ export function PlanSheet(props: {
             />
           ) : html === undefined ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>
-                {state.error ?? t(props.language, "plans.noPlans")}
-              </Text>
+              <Text style={styles.emptyText}>{t(props.language, "plans.noPlans")}</Text>
             </View>
           ) : (
             <WebView
@@ -209,7 +227,6 @@ function PlanPicker(props: {
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: {
-    height: Dimensions.get("window").height * 0.82,
     backgroundColor: theme.colors.surface,
     borderTopStartRadius: theme.radius.lg,
     borderTopEndRadius: theme.radius.lg,
@@ -240,6 +257,15 @@ const styles = StyleSheet.create({
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   closeText: { color: theme.colors.textMuted, fontSize: 30, lineHeight: 32 },
   webview: { flex: 1, backgroundColor: theme.colors.surface },
+  errorBanner: {
+    backgroundColor: theme.colors.surfaceAlt,
+    borderBottomColor: theme.colors.warning,
+    borderBottomWidth: 1,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+  },
+  errorText: { color: theme.colors.warning, fontFamily: theme.font.semibold },
+  errorDetail: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing.lg },
   emptyText: { color: theme.colors.textMuted, textAlign: "center" },
   picker: {
