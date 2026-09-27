@@ -29,6 +29,12 @@ export const CHANNEL_POLICY = {
   "voice:list": "remote",
   "voice:preview": "desktop-only",
   "history:list": "remote",
+  // Desktop-only: an outbound request to a third-party IP-geolocation
+  // service, made only from the laptop's own "Use my location" button
+  // after navigator.geolocation has already failed there — a paired phone
+  // has its own device location and must never be able to trigger a
+  // laptop-side network request like this one.
+  "prayer:locateIp": "desktop-only",
   // Remote (M7): the same read-only Session[] as the sessions:update push,
   // pullable so a phone can render the session table before the first push.
   "sessions:list": "remote",

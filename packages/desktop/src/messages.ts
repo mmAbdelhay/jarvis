@@ -580,6 +580,11 @@ export const MESSAGES = {
     language === "ar" ? "الموقع الحالي" : "Current location",
   prayerDenied: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `رُفض الموقع؛ يُستخدم ${name}` : `Location denied; using ${name}`,
+  // Bug 5: shown after navigator.geolocation has already failed and the
+  // main-process IP lookup (ip-locate.ts) succeeded instead — names the
+  // source so a coarse, IP-derived location is never mistaken for GPS.
+  prayerLocatedByIp: (name: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تحديد الموقع عبر IP: ${name}` : `Located by IP: ${name}`,
   prayerNext: (name: string, duration: string, language: "ar" | "en"): string =>
     language === "ar" ? `${name} بعد ${duration}` : `${name} in ${duration}`,
   // The 5 minutes right after a prayer's own time — the header names it

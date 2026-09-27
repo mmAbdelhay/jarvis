@@ -26,6 +26,9 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     },
     orchestrator: { handle: vi.fn(async () => undefined), transcript: vi.fn(() => []) },
     sessionStore: { history: vi.fn(() => []) },
+    ipLocate: {
+      lookup: vi.fn(async () => ({ latitude: 31.2, longitude: 29.9, name: "Alexandria, Egypt" })),
+    },
     sessions: {
       log: vi.fn(() => "backlog"),
       write: vi.fn(),
@@ -283,6 +286,16 @@ describe("dispatch table: sessions and git", () => {
 
     expect(await call(table, "sessions:refresh", "junk")).toBe(result);
     expect(deps.refreshSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("prayer:locateIp ignores its args and forwards to deps.ipLocate.lookup", async () => {
+    const deps = fakeDeps();
+    const result = { latitude: 1, longitude: 2, name: "X" };
+    (deps.ipLocate.lookup as ReturnType<typeof vi.fn>).mockResolvedValue(result);
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "prayer:locateIp", "junk")).toBe(result);
+    expect(deps.ipLocate.lookup).toHaveBeenCalledTimes(1);
   });
 
   it("session:input types only when both arguments are strings", async () => {

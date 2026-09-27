@@ -273,13 +273,38 @@ export function initPrayerSettings(updateDraft: (patch: PrayerConfig) => Promise
   };
   latitude.addEventListener("change", saveCoordinates);
   longitude.addEventListener("change", saveCoordinates);
-  locate.addEventListener("click", () => {
-    if (!navigator.geolocation) {
-      status.textContent = MESSAGES.prayerUnavailable(PRIMARY_LANGUAGE);
+  // Bug 5: navigator.geolocation on Linux/Windows Electron goes through
+  // Google's network location service, which needs an API key Jarvis does
+  // not ship — the error callback fires every time there. macOS instead
+  // depends on the OS's own CoreLocation permission, deniable by the user.
+  // Either way, once geolocation itself has failed or timed out, this
+  // falls back to a main-process IP lookup (ip-locate.ts) rather than
+  // leaving the button simply not working.
+  const locateByIpFallback = async (): Promise<void> => {
+    const result = await window.jarvis.locateByIp();
+    if ("error" in result) {
+      status.textContent = MESSAGES.prayerDenied(
+        formDraft.location?.name ?? MESSAGES.prayerAlexandria(PRIMARY_LANGUAGE),
+        PRIMARY_LANGUAGE,
+      );
+      locate.disabled = false;
       return;
     }
+    const location = { latitude: result.latitude, longitude: result.longitude, name: result.name };
+    formDraft = { ...formDraft, location };
+    latitude.value = String(location.latitude);
+    longitude.value = String(location.longitude);
+    void updateDraft(formDraft);
+    status.textContent = MESSAGES.prayerLocatedByIp(location.name, PRIMARY_LANGUAGE);
+    locate.disabled = false;
+  };
+  locate.addEventListener("click", () => {
     locate.disabled = true;
     status.textContent = MESSAGES.prayerLocating(PRIMARY_LANGUAGE);
+    if (!navigator.geolocation) {
+      void locateByIpFallback();
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         const location = {
@@ -295,13 +320,9 @@ export function initPrayerSettings(updateDraft: (patch: PrayerConfig) => Promise
         locate.disabled = false;
       },
       () => {
-        status.textContent = MESSAGES.prayerDenied(
-          formDraft.location?.name ?? MESSAGES.prayerAlexandria(PRIMARY_LANGUAGE),
-          PRIMARY_LANGUAGE,
-        );
-        locate.disabled = false;
+        void locateByIpFallback();
       },
-      { timeout: 12_000, maximumAge: 300_000 },
+      { timeout: 8_000, maximumAge: 300_000 },
     );
   });
 }

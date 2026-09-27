@@ -76,6 +76,11 @@ export const INVOKE_CHANNELS = {
   startVoice: "voice:start",
   stopVoice: "voice:stop",
   getHistory: "history:list",
+  // Bug 5: a main-process IP-geolocation fallback, called only after
+  // navigator.geolocation has already failed in the renderer. Desktop-only
+  // (remote-policy.ts) — an outbound request a paired phone must never be
+  // able to trigger through the laptop.
+  locateByIp: "prayer:locateIp",
   listSessions: "sessions:list",
   // A phone or the desktop's own Refresh button asking for a fresh look at
   // the machine, not just Jarvis's own state: re-imports any new

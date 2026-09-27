@@ -32,6 +32,7 @@ import {
   type RemoteStatus,
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
+import type { IpLocateResult } from "./ip-locate.js";
 import { isDevToolsDock, type BrowserHost } from "./browser-host.js";
 import type { JarvisConfig } from "./config.js";
 import {
@@ -156,6 +157,11 @@ export type DispatchDeps = {
     transcript(): Turn[];
   };
   sessionStore: { history(): unknown };
+  // Bug 5's fallback lookup (ip-locate.ts), built in main.ts around the
+  // platform's global fetch — the same seam favicon-fetch.ts and the
+  // Expo push sender already use rather than @jarvis/platform's apiFetch
+  // or undici directly.
+  ipLocate: { lookup(): Promise<IpLocateResult> };
   sessions: {
     log(sessionId: string): string;
     write(sessionId: string, data: string): void;
@@ -317,6 +323,9 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
     "history:list": () => sessionStore.history(),
+    // Bug 5: ignores its args, same as sessions:list/sessions:refresh above
+    // — the only "argument" is which laptop clicked "Use my location".
+    "prayer:locateIp": () => deps.ipLocate.lookup(),
     // The live session list, pullable (M7 ruling 10): the same Session[]
     // "sessions:update" pushes. Ignores its args — no filtering, no
     // projection, no argument coercion, so nothing arrives that could name

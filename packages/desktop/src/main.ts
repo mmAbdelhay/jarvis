@@ -177,6 +177,7 @@ import { BrowserHost } from "./browser-host.js";
 import { createSidecarReaper } from "./sidecar-reaper.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
+import { locateByIp } from "./ip-locate.js";
 import { isAllowedNavigation } from "./navigation.js";
 import {
   createCompletionSource,
@@ -2083,6 +2084,10 @@ app.whenReady().then(async () => {
       setup,
       orchestrator,
       sessionStore,
+      // Bug 5: the platform's own global fetch, the same one the Expo push
+      // sender (remote-access.ts) and api-executor.ts already rely on
+      // existing, rather than @jarvis/platform's apiFetch or undici.
+      ipLocate: { lookup: () => locateByIp({ fetch: (url, init) => fetch(url, init) }) },
       // Same four methods SessionManager itself implements, plus `list`
       // overridden to the merged view (mergedSessions()) — everything
       // else stays a direct call through to the real manager, which is

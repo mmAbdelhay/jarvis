@@ -77,6 +77,7 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
+import type { IpLocateResult } from "./ip-locate.js";
 import {
   isCleanScalar,
   prepareRemoteApiRequest,
@@ -372,6 +373,11 @@ export type RendererApi = {
   // not pushed like sessions:update — there is no live subscriber to keep
   // in sync, only a snapshot to render once.
   getHistory(): Promise<Session[]>;
+  // Bug 5's fallback: called from the "Use my location" button only after
+  // navigator.geolocation has already errored or timed out in the
+  // renderer. Main-process only — the outbound request itself is made
+  // there (ip-locate.ts) — and desktop-only by policy.
+  locateByIp(): Promise<IpLocateResult>;
   // The live session list, pullable (M7 ruling 10): the same Session[] the
   // "sessions:update" push carries. The renderer does not call this — it
   // already gets sessions:update — this exists so a phone can render the
