@@ -178,12 +178,17 @@ export const MESSAGES = {
       : "Changed on disk — reapply your edit?",
   planApply: (language: "ar" | "en"): string => (language === "ar" ? "تطبيق" : "Apply"),
   planDiscard: (language: "ar" | "en"): string => (language === "ar" ? "تجاهل" : "Discard"),
+  // Fix round 1, I4: the label above the conflict notice's read-only
+  // preview of what Apply would actually overwrite.
+  planEditConflictCurrent: (language: "ar" | "en"): string =>
+    language === "ar" ? "حاليًا:" : "Currently:",
   // Apply's own last-resort failure: the reloaded doc has neither the
-  // original block id nor anything left at its old position, so there is
-  // nothing left to write the edit back onto.
+  // original block id nor anything left at its old position (fix round 1,
+  // I4: or something of a different kind entirely), so there is nothing
+  // left to write the edit back onto.
   planEditConflictGone: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "لم يعد هذا القسم موجودًا — عدّلك محفوظ أدناه، لكن لا يمكن حفظه."
+      ? "لم يعد هذا القسم موجودًا — تعديلك محفوظ أدناه، لكن لا يمكن حفظه."
       : "This section is gone — your edit is kept below, but can't be saved.",
   // S1: relative-time units composed by plan-panel.ts as `${count}${unit}`
   // — t() takes no interpolation args, so the count/unit split stays here.

@@ -127,14 +127,40 @@ function inlineToMarkdown(el: Element, source: string): string {
   return childNodesToMarkdown(el.childNodes, source);
 }
 
+/**
+ * Fix round 1, C1: a live contenteditable can end up holding more than one
+ * top-level p/div/h1-6 child — an Enter or paste the edit-mode handlers
+ * didn't fully intercept, an IME commit, browser-specific quirks — even
+ * though plan-panel.ts's own keydown/paste handlers try to keep a
+ * paragraph/heading down to exactly one. `el.querySelector(...)` only ever
+ * finds the *first* such node in document order, silently discarding
+ * everything after it; this instead collects every top-level text-block
+ * child and, when there's more than one, joins them with a hard break
+ * rather than keeping only the first.
+ */
+function topLevelTextBlocks(el: HTMLElement): HTMLElement[] {
+  return Array.from(el.children).filter((child): child is HTMLElement => {
+    const tag = child.tagName.toLowerCase();
+    return tag === "p" || tag === "div" || /^h[1-6]$/.test(tag);
+  });
+}
+
+function joinedOrSingleInline(el: HTMLElement, fallback: Element, source: string): string {
+  const blocks = topLevelTextBlocks(el);
+  if (blocks.length > 1) {
+    return blocks.map((block) => inlineToMarkdown(block, source)).join("  \n");
+  }
+  return inlineToMarkdown(fallback, source);
+}
+
 function headingToMarkdown(el: HTMLElement, level: number, source: string): string {
   const heading = el.querySelector("h1,h2,h3,h4,h5,h6") ?? el;
-  return `${"#".repeat(Math.max(level, 1))} ${inlineToMarkdown(heading, source)}`;
+  return `${"#".repeat(Math.max(level, 1))} ${joinedOrSingleInline(el, heading, source)}`;
 }
 
 function paragraphToMarkdown(el: HTMLElement, source: string): string {
   const paragraph = el.querySelector("p") ?? el;
-  return inlineToMarkdown(paragraph, source);
+  return joinedOrSingleInline(el, paragraph, source);
 }
 
 function quoteLines(content: string): string {

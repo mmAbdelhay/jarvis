@@ -224,6 +224,45 @@ describe("blockToMarkdown: ordered list start number", () => {
   });
 });
 
+// Fix round 1, C1: a real contenteditable can end up with more than one
+// top-level p/div/h* child (an unhandled Enter, a paste, an IME commit) even
+// though plan-panel.ts's own edit-mode keydown/paste handlers try to
+// prevent it — the converter itself must not silently keep only the first
+// and drop the rest.
+describe("blockToMarkdown: defensive against a split editable container (fix round 1, C1)", () => {
+  it("paragraph: two top-level <p> children join with a hard break instead of dropping the second", () => {
+    const source = "First line.";
+    const el = render(source);
+    const second = document.createElement("p");
+    second.textContent = "Second line.";
+    el.append(second);
+    expect(blockToMarkdown(el, original("paragraph", source))).toBe("First line.  \nSecond line.");
+  });
+
+  it("paragraph: a stray top-level <div> (a real browser's own Enter split) also joins in", () => {
+    const source = "First line.";
+    const el = render(source);
+    const second = document.createElement("div");
+    second.textContent = "Second line.";
+    el.append(second);
+    expect(blockToMarkdown(el, original("paragraph", source))).toBe("First line.  \nSecond line.");
+  });
+
+  it("heading: a stray sibling block joins in rather than being dropped", () => {
+    const source = "# Title";
+    const el = render(source);
+    const second = document.createElement("div");
+    second.textContent = "More.";
+    el.append(second);
+    expect(blockToMarkdown(el, original("heading", source, 1))).toBe("# Title  \nMore.");
+  });
+
+  it("paragraph: a single top-level <p> still round-trips exactly as before (no regression)", () => {
+    const source = "Hello **world**.";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+  });
+});
+
 describe("isNoopEdit", () => {
   it("is a no-op when the text is unchanged", () => {
     expect(isNoopEdit("Hello world", "Hello world")).toBe(true);

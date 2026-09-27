@@ -68,14 +68,29 @@ type EditingState = {
    *  stable anchor used to find "the same block" again after a save
    *  changes its content-hashed id (see blockId() in @jarvis/core). */
   index: number;
+  /** The block's own kind, fixed for the life of this edit (only its
+   *  source changes) — Enter's rich/list split and the paste handler both
+   *  need it without re-deriving it from `currentDoc` each time. */
+  kind: PlanBlock["kind"];
   mode: EditMode;
   /** Undefined only for the instant between opening the edit and
    *  renderEditingBlock building the first DOM node — every listener reads
    *  it lazily, by which point it always exists. */
   container: HTMLElement | undefined;
+  /** The outer `.plan-block-edit` wrapper (toolbar + container + hint),
+   *  reassigned on every renderEditingBlock call. Fix round 1, I1: the
+   *  container's own blur listener checks `wrap.contains(relatedTarget)`
+   *  so focusing the toolbar's own link-URL input doesn't read as leaving
+   *  the edit. */
+  wrap: HTMLElement | undefined;
   /** Set only by a real `input` event in `container` — a click that opens
    *  the block and a blur that immediately follows it must never write. */
   dirty: boolean;
+  /** Fix round 1, I2: incremented on every `input` event. finishEditing
+   *  snapshots this before a ⌘S save's own await and compares it after, so
+   *  typing that happens *during* an in-flight save is never mistaken for
+   *  "nothing changed since" and silently dropped. */
+  inputCount: number;
   baseMtimeMs: number;
   saving: boolean;
 };
@@ -85,9 +100,22 @@ type ConflictState = {
   blockId: string;
   /** Index fallback for Apply, same reasoning as EditingState.index. */
   index: number;
+  /** Fix round 1, I4: Apply's index fallback only fires when the block now
+   *  at that index is still the same kind as the one that was being
+   *  edited — otherwise the whole document reshuffled and index alone
+   *  proves nothing. */
+  kind: PlanBlock["kind"];
   text: string;
   reason: "conflict" | "missing-block";
 };
+
+/** Fix round 1, minor: the block a mousedown landed on while a *different*
+ *  block was being edited. Recorded on mousedown (before any blur/save that
+ *  mousedown triggers) and consumed once the outgoing edit actually
+ *  settles, so switching blocks while a save is in flight still opens the
+ *  new one automatically — the user needing a second click for that was
+ *  the bug (see beginEditingBlock/consumePendingEditTarget). */
+type PendingEditTarget = { blockId: string; index: number };
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -174,12 +202,16 @@ function editModeForKind(kind: PlanBlock["kind"]): EditMode {
 
 /** Apply's own target-id rule: the block the failed write aimed at, if it's
  *  still there under the fresh doc — otherwise whatever now sits at the same
- *  index. A block's id is a hash of its own kind+source (@jarvis/core's
- *  blockId()), so any real content change on disk changes it; the index is
- *  what survives that when the edit's own target block is what changed. */
+ *  index, but only if it's still the *same kind* (fix round 1, I4): the
+ *  index alone proves nothing once the document has genuinely reshuffled
+ *  (a block inserted/removed elsewhere), and writing the edited text onto
+ *  an unrelated block would be worse than refusing. A block's id is a hash
+ *  of its own kind+source (@jarvis/core's blockId()), so any real content
+ *  change on disk changes it. */
 function pickConflictTargetId(doc: PlanDoc, state: ConflictState): string | undefined {
   if (doc.blocks.some((candidate) => candidate.id === state.blockId)) return state.blockId;
-  return doc.blocks[state.index]?.id;
+  const atIndex = doc.blocks[state.index];
+  return atIndex && atIndex.kind === state.kind ? atIndex.id : undefined;
 }
 
 function planSendErrorKey(reason: PlanSendError["reason"]): MessageKey {
@@ -268,6 +300,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   let loadId = 0;
   let editing: EditingState | undefined;
   let conflict: ConflictState | undefined;
+  let pendingEditTarget: PendingEditTarget | undefined;
   // Set while `editing` is dirty and notifyChanged fires for this path — the
   // reload it would normally trigger is deferred until the edit is saved or
   // discarded (see notifyChanged below), and this is the one thing that
@@ -577,24 +610,81 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     container.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  /** A real Enter in a code/raw contenteditable often inserts a new block
-   *  element rather than a "\n" text node — which blockToMarkdown's
-   *  `.textContent` read would then silently drop, since `.textContent`
-   *  never inserts a separator between sibling elements. This inserts a
-   *  literal newline character instead, so what's typed is exactly what
-   *  gets saved. */
-  function insertPlainNewline(container: HTMLElement): void {
+  /** Inserts `text` as a single literal text node at the caret — used for
+   *  code/raw's Enter (a literal "\n") and for a code/raw paste (clipboard
+   *  text verbatim, embedded newlines and all). A text node's content is
+   *  just a string, so a literal "\n" inside it round-trips exactly through
+   *  blockToMarkdown's `.textContent` reads — unlike a real Enter's default
+   *  contenteditable behavior, which often inserts a *new block element*
+   *  instead of a "\n" character, silently dropped by `.textContent` since
+   *  it never inserts a separator between sibling elements. */
+  function insertTextNode(container: HTMLElement, text: string): void {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
     range.deleteContents();
-    const node = document.createTextNode("\n");
+    const node = document.createTextNode(text);
     range.insertNode(node);
     range.setStartAfter(node);
     range.setEndAfter(node);
     selection.removeAllRanges();
     selection.addRange(range);
     container.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  /** Inserts `text` at the caret for *rich* mode (paragraph/heading/quote/
+   *  list): each embedded newline becomes a `<br>` hard break, never a new
+   *  top-level p/div/h* sibling — a literal "\n" text node here would
+   *  either render as a soft break inside the same paragraph or, on a
+   *  blank line, split what should be one block's markdown into two when
+   *  written back. Used by both Enter (fix round 1, C1) and paste. */
+  function insertHardBreak(container: HTMLElement): void {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const br = document.createElement("br");
+    range.insertNode(br);
+    range.setStartAfter(br);
+    range.setEndAfter(br);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    container.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function insertPastedRichText(container: HTMLElement, text: string): void {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const fragment = document.createDocumentFragment();
+    text.split("\n").forEach((line, index) => {
+      if (index > 0) fragment.append(document.createElement("br"));
+      if (line.length > 0) fragment.append(document.createTextNode(line));
+    });
+    const lastNode = fragment.lastChild;
+    range.insertNode(fragment);
+    if (lastNode) {
+      range.setStartAfter(lastNode);
+      range.setEndAfter(lastNode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    container.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  /** Fix round 1, C1/C2: every edit mode gets a paste handler that always
+   *  preventDefault()s the browser's own paste (which could otherwise
+   *  insert rich HTML — multiple lines as separate <div>/<p> elements that
+   *  blockToMarkdown's `.textContent`/first-match reads would flatten or
+   *  drop) and inserts only the clipboard's plain text, by hand. */
+  function onEditingPaste(event: ClipboardEvent, state: EditingState): void {
+    event.preventDefault();
+    if (!state.container) return;
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    if (text === "") return;
+    if (state.mode === "rich") insertPastedRichText(state.container, text);
+    else insertTextNode(state.container, text);
   }
 
   /** Link: wraps the selection in `<a href="">`, then swaps in an inline URL
@@ -619,7 +709,14 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     const commit = (): void => {
       if (settled) return;
       settled = true;
-      anchor.setAttribute("href", input.value.trim());
+      const url = input.value.trim();
+      // Fix round 1, I1: an anchor nobody gave a URL is not a link — leaving
+      // it wrapped would silently write `[text]()` on save.
+      if (url === "") {
+        anchor.replaceWith(document.createTextNode(anchor.textContent ?? ""));
+      } else {
+        anchor.setAttribute("href", url);
+      }
       input.remove();
       container.dispatchEvent(new Event("input", { bubbles: true }));
       container.focus();
@@ -711,17 +808,32 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     const meta = event.metaKey || event.ctrlKey;
     if (event.key === "Escape") {
       event.preventDefault();
+      // Fix round 1, minor: without this, Esc also reaches any ancestor
+      // Esc-handling (a future panel-level Esc-to-close, a global keymap) —
+      // the editor owns this keypress once it's handling it.
+      event.stopPropagation();
       void finishEditing("escape");
       return;
     }
     if (meta && (event.key === "s" || event.key === "S")) {
       event.preventDefault();
+      event.stopPropagation();
       void finishEditing("cmd-s");
       return;
     }
-    if (state.mode !== "rich" && event.key === "Enter" && !meta) {
+    if (event.key === "Enter" && !meta) {
+      // Fix round 1, C1: paragraph/heading/quote get a hard break, same as
+      // Shift+Enter (shiftKey is irrelevant here — both hit this branch);
+      // list is the one rich kind left alone, since Enter there creates a
+      // real new <li> that renderList already knows how to read back.
+      if (state.mode === "rich") {
+        if (state.kind === "list") return;
+        event.preventDefault();
+        if (state.container) insertHardBreak(state.container);
+        return;
+      }
       event.preventDefault();
-      if (state.container) insertPlainNewline(state.container);
+      if (state.container) insertTextNode(state.container, "\n");
       return;
     }
     if (state.mode !== "rich") return;
@@ -766,18 +878,37 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     const state = editing;
     if (!state) return el("div", "plan-block-edit");
     const wrap = el("div", "plan-block-edit");
+    // Reassigned on every render (even those that reuse `state.container`)
+    // — the blur listener below reads it lazily, by which point it's
+    // always this render's own wrap.
+    state.wrap = wrap;
     if (state.mode === "rich") wrap.append(renderToolbar(block, state));
     const firstRender = state.container === undefined;
     if (!state.container) {
       const container = buildEditableContainer(block, state.mode);
-      container.contentEditable = "true";
+      // setAttribute, not the `.contentEditable` property: real Chromium
+      // reflects either the same way, but the property setter alone
+      // leaves the element non-focusable under jsdom (no attribute is
+      // ever actually set), which would make every blur/focus test below
+      // silently no-op instead of exercising the real bug.
+      container.setAttribute("contenteditable", state.mode === "rich" ? "true" : "plaintext-only");
       container.addEventListener("input", () => {
         if (editing !== state) return;
         state.dirty = true;
+        state.inputCount += 1;
         updateHeaderDirtyUi();
       });
       container.addEventListener("keydown", (event) => onEditingKeydown(event, state));
-      container.addEventListener("blur", () => void finishEditing("blur"));
+      container.addEventListener("paste", (event) => onEditingPaste(event, state));
+      container.addEventListener("blur", (event) => {
+        // Fix round 1, I1: focus moving to the toolbar's own link-URL
+        // input (or anywhere else inside this same edit wrapper) is not
+        // leaving the edit — only a blur whose relatedTarget is outside
+        // `state.wrap` entirely commits/exits.
+        const related = event.relatedTarget;
+        if (related instanceof Node && state.wrap?.contains(related)) return;
+        void finishEditing("blur");
+      });
       state.container = container;
     }
     wrap.append(state.container);
@@ -798,13 +929,32 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     editing = {
       blockId: block.id,
       index,
+      kind: block.kind,
       mode: editModeForKind(block.kind),
       container: undefined,
+      wrap: undefined,
       dirty: false,
+      inputCount: 0,
       baseMtimeMs: currentDoc.mtimeMs,
       saving: false,
     };
     renderDocument();
+  }
+
+  /** Fix round 1, minor: resolves a mousedown-recorded switch target once
+   *  the block it interrupted has actually finished exiting — see
+   *  PendingEditTarget's own comment for why this exists. Looked up by id,
+   *  falling back to index the same way finishEditing/applyConflict do,
+   *  since the outgoing edit's own save may have changed ids around it. */
+  function consumePendingEditTarget(): void {
+    const pending = pendingEditTarget;
+    pendingEditTarget = undefined;
+    if (!pending || !currentDoc || editing || conflict || disposed) return;
+    const target =
+      currentDoc.blocks.find((candidate) => candidate.id === pending.blockId) ??
+      currentDoc.blocks[pending.index];
+    if (!target) return;
+    void beginEditingBlock(target, currentDoc.blocks.indexOf(target));
   }
 
   /** Clears `editing` and either re-renders in place or, if a disk change
@@ -818,9 +968,10 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     if (diskChangedWhileDirty && path) {
       diskChangedWhileDirty = false;
       void loadDocument(path);
-      return;
+    } else {
+      renderDocument();
     }
-    renderDocument();
+    consumePendingEditTarget();
   }
 
   /** Save-or-revert for the block currently in `editing`. `"escape"` always
@@ -859,18 +1010,31 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       return;
     }
     state.saving = true;
+    // Fix round 1, I2: snapshotted before the await, compared after — an
+    // `input` that happens while this write is in flight bumps
+    // state.inputCount past this, so it's never mistaken for "nothing
+    // changed since the save started" and left clean when it isn't.
+    const inputCountAtSaveStart = state.inputCount;
     let result: PlanResult<PlanDoc>;
     try {
       result = await api.plansWriteBlock(currentDoc.path, block.id, next, state.baseMtimeMs);
     } catch {
+      if (disposed) return;
       actionError = t("planActionError");
       exitEditing();
       return;
     }
+    if (disposed) return;
     if (!result.ok) {
       if (result.reason === "conflict" || result.reason === "missing-block") {
         if (result.doc) currentDoc = result.doc;
-        conflict = { blockId: block.id, index: state.index, text: next, reason: result.reason };
+        conflict = {
+          blockId: block.id,
+          index: state.index,
+          kind: block.kind,
+          text: next,
+          reason: result.reason,
+        };
         editing = undefined;
         // The doc is already fresh from this failed write's own `doc`, and
         // `conflict` now owns the panel's write path — a deferred reload
@@ -885,23 +1049,29 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     }
     currentDoc = result.value;
     diskChangedWhileDirty = false;
+    state.saving = false;
     if (reason === "blur") {
-      editing = undefined;
-    } else {
-      const fresh = currentDoc.blocks[state.index];
-      editing = fresh
-        ? {
-            blockId: fresh.id,
-            index: state.index,
-            mode: state.mode,
-            container: undefined,
-            dirty: false,
-            baseMtimeMs: currentDoc.mtimeMs,
-            saving: false,
-          }
-        : undefined;
+      exitEditing();
+      return;
     }
-    renderDocument();
+    // "cmd-s": keep editing the SAME container/state in place rather than
+    // rebuilding it — a re-render here would reconstruct the editable DOM
+    // fresh from the doc's own (just-saved) html, discarding any input
+    // that happened while the write above was in flight (I2).
+    const fresh = currentDoc.blocks[state.index];
+    if (!fresh) {
+      exitEditing();
+      return;
+    }
+    state.blockId = fresh.id;
+    state.baseMtimeMs = currentDoc.mtimeMs;
+    state.dirty = state.inputCount !== inputCountAtSaveStart;
+    // The outer `.plan-block` row's own data-block-id is stamped once at
+    // render time and there is no re-render here to refresh it — patched
+    // directly so a comment opened right after this save still anchors to
+    // the block's real (now content-hashed-different) id.
+    state.container?.closest<HTMLElement>(".plan-block")?.setAttribute("data-block-id", fresh.id);
+    updateHeaderDirtyUi();
   }
 
   /** The "Changed on disk — reapply your edit?" notice (D2): a standalone
@@ -910,11 +1080,36 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
    *  a comment draft whose block is gone. */
   function renderConflictNotice(): HTMLElement {
     const state = conflict;
-    if (!state) return el("div", "plan-panel__conflict");
+    if (!state || !currentDoc) return el("div", "plan-panel__conflict");
     const box = el("div", "plan-panel__conflict");
     box.append(el("p", "plan-panel__conflict-notice", t("planEditConflictNotice")));
+
+    // Fix round 1, I4: shows exactly what Apply would overwrite, so the
+    // user isn't reapplying blind — or, if Apply has nothing left to
+    // target (pickConflictTargetId's own id-then-same-kind-index rule),
+    // says so up front rather than waiting for a click to find out.
+    const targetId = pickConflictTargetId(currentDoc, state);
+    const targetBlock = targetId
+      ? currentDoc.blocks.find((candidate) => candidate.id === targetId)
+      : undefined;
+    if (targetBlock) {
+      box.append(el("p", "plan-panel__conflict-current-label", t("planEditConflictCurrent")));
+      const preview = el("pre", "plan-panel__conflict-current");
+      preview.textContent = targetBlock.source;
+      box.append(preview);
+    } else {
+      box.append(el("p", "plan-panel__conflict-gone", t("planEditConflictGone")));
+    }
+
     const textarea = el("textarea", "plan-panel__conflict-textarea");
     textarea.value = state.text;
+    // Fix round 1, I3: without this, an unrelated re-render (toggling
+    // Source, opening the picker) rebuilds this textarea from `state.text`
+    // as it was when the conflict first appeared, silently dropping
+    // anything typed into it since.
+    textarea.addEventListener("input", () => {
+      if (conflict) conflict.text = textarea.value;
+    });
     const actions = el("div", "plan-panel__comment-actions");
     const discard = button("plan-panel__secondary", t("planDiscard"), "discard-edit-conflict");
     const apply = button("plan-panel__primary", t("planApply"), "apply-edit-conflict");
@@ -924,9 +1119,11 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       if (diskChangedWhileDirty && path) {
         diskChangedWhileDirty = false;
         void loadDocument(path);
+        consumePendingEditTarget();
         return;
       }
       renderDocument();
+      consumePendingEditTarget();
     });
     apply.addEventListener("click", () => void applyConflict(textarea.value));
     actions.append(discard, apply);
@@ -947,14 +1144,22 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     try {
       result = await api.plansWriteBlock(currentDoc.path, targetId, text, currentDoc.mtimeMs);
     } catch {
+      if (disposed) return;
       actionError = t("planActionError");
       renderDocument();
       return;
     }
+    if (disposed) return;
     if (!result.ok) {
       if (result.reason === "conflict" || result.reason === "missing-block") {
         if (result.doc) currentDoc = result.doc;
-        conflict = { blockId: targetId, index: conflict.index, text, reason: result.reason };
+        conflict = {
+          blockId: targetId,
+          index: conflict.index,
+          kind: conflict.kind,
+          text,
+          reason: result.reason,
+        };
         renderDocument();
         return;
       }
@@ -965,6 +1170,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     currentDoc = result.value;
     conflict = undefined;
     renderDocument();
+    consumePendingEditTarget();
   }
 
   function renderBlock(block: PlanBlock, index: number): HTMLElement {
@@ -997,8 +1203,21 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     } else {
       content.append(parseBlockHtml(block.html));
       for (const comment of blockComments) wrapFirstText(content, comment.quote);
-      content.addEventListener("click", () => {
+      // Fix round 1, minor: recorded before any blur this mousedown itself
+      // triggers (switching away from a different block being edited) —
+      // see PendingEditTarget's own comment.
+      content.addEventListener("mousedown", () => {
+        pendingEditTarget =
+          editing && editing.blockId !== block.id ? { blockId: block.id, index } : undefined;
+      });
+      content.addEventListener("click", (event) => {
         hooks.onBlockClick?.(block, content);
+        // Fix round 1, I5: a click that's really the tail end of a text
+        // selection (for the selection-comment button) or that landed on a
+        // real link must not also start editing the block underneath it.
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed && content.contains(selection.anchorNode)) return;
+        if (event.target instanceof Element && event.target.closest("a")) return;
         void beginEditingBlock(block, index);
       });
     }
@@ -1210,6 +1429,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     loadError = undefined;
     currentDoc = result.value;
     comments = nextComments;
+    // Fix round 1, minor: a reload always invalidates the live editable DOM
+    // (this function is only ever reached for a non-dirty edit — see
+    // notifyChanged's own deferral — so nothing valuable is lost), and
+    // never rebuilds it itself; leaving `editing` set here would dangle it
+    // against a block that may no longer even exist post-reload.
+    editing = undefined;
     // I2: a same-path reload (file changed on disk) must not throw away
     // what the user was doing — only a genuinely different document resets
     // the draft, the Source toggle and the tray's "show all" state.
@@ -1257,8 +1482,14 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       range.endContainer.nodeType === Node.ELEMENT_NODE
         ? (range.endContainer as Element)
         : range.endContainer.parentElement;
-    const startBlock = start?.closest<HTMLElement>(".plan-block");
-    const endBlock = end?.closest<HTMLElement>(".plan-block");
+    // Fix round 1, I6: the rich edit container also carries `.plan-block`
+    // (for its typography) but no `data-block-id` of its own — closest()
+    // would otherwise find IT first for a selection made while editing,
+    // producing a draft anchored to blockId "". Skipping it here means
+    // closest() keeps walking up to the outer `.plan-block` (`content`,
+    // renderBlock's own), which does carry the real id.
+    const startBlock = start?.closest<HTMLElement>(".plan-block:not(.plan-block-edit__rich)");
+    const endBlock = end?.closest<HTMLElement>(".plan-block:not(.plan-block-edit__rich)");
     if (!startBlock || startBlock !== endBlock || !root.contains(startBlock)) return;
     const action = button("plan-panel__selection-comment", t("planComment"), "comment-selection");
     // I1: keep the selection alive through the button's own mousedown so a
