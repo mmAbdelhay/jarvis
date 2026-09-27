@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import {
   chmod,
   mkdir,
@@ -357,6 +358,80 @@ describe("read", () => {
     const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
     const result = await planFiles.read(path);
     expect(result).toEqual({ ok: false, reason: "too-large" });
+  });
+
+  it("reads a plan file just under the 1 MiB cap in full, without truncating it", async () => {
+    const base = await tempDir("read-just-under-base");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const path = join(plansDir, "big.md");
+    // Distinct content per position (not a repeated byte) so a truncation
+    // bug would show up as a length mismatch, not just a shorter run of
+    // the same character.
+    const body = Array.from({ length: 1024 * 1024 - 10 }, (_, i) => String(i % 10)).join("");
+    await writeFile(path, body);
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const result = await planFiles.read(path);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.blocks.map((b) => b.source).join("\n")).toBe(body);
+    }
+  });
+
+  it("returns too-large for a plan file exactly 1 byte over the cap", async () => {
+    const base = await tempDir("read-just-over-base");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const path = join(plansDir, "huge.md");
+    await writeFile(path, "x".repeat(1024 * 1024 + 1));
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+    const result = await planFiles.read(path);
+    expect(result).toEqual({ ok: false, reason: "too-large" });
+  });
+
+  it("assembles content correctly even when the underlying fs.read only ever returns a short read", async () => {
+    const base = await tempDir("read-short-reads-base");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const path = join(plansDir, "chunked.md");
+    // Distinct content per position, sized so it takes many short reads to
+    // assemble and is unambiguous if any chunk is dropped or misplaced.
+    const body = Array.from({ length: 200_000 }, (_, i) => String(i % 10)).join("");
+    await writeFile(path, body);
+
+    // A fake fs whose file handle never returns more than 4096 bytes from
+    // a single `read()` call, regardless of how much the caller asked for
+    // — a legal short read, exercising the read loop rather than relying
+    // on a single call happening to fill the buffer.
+    const CHUNK = 4096;
+    const chunkedFs: typeof fsPromises = {
+      ...fsPromises,
+      async open(...args: Parameters<typeof fsPromises.open>) {
+        const real = await fsPromises.open(...args);
+        return {
+          ...real,
+          async read(
+            buffer: Buffer,
+            offset: number,
+            length: number,
+            position: number,
+          ): Promise<{ bytesRead: number; buffer: Buffer }> {
+            return real.read(buffer, offset, Math.min(length, CHUNK), position);
+          },
+          stat: () => real.stat(),
+          close: () => real.close(),
+        } as unknown as Awaited<ReturnType<typeof fsPromises.open>>;
+      },
+    } as unknown as typeof fsPromises;
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base, fs: chunkedFs });
+    const result = await planFiles.read(path);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.blocks.map((b) => b.source).join("\n")).toBe(body);
+    }
   });
 
   it("reads and parses an allowed plan file", async () => {

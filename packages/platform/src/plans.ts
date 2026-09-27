@@ -422,7 +422,19 @@ export function createPlanFiles(deps: {
         // apart from "exactly at the cap" without ever buffering a whole
         // oversized file just to reject it.
         const buffer = Buffer.alloc(MAX_PLAN_BYTES + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        // A single `read()` call is not guaranteed to fill the buffer even
+        // when the file has that many bytes left — a short read (an
+        // interrupted syscall, a network filesystem, a pipe-like special
+        // file) is legal and silently truncated the content here before
+        // this loop existed. Keep reading at the current offset until
+        // either the buffer is full (then the too-large check below fires)
+        // or a read returns 0 bytes, which is the actual EOF.
+        let bytesRead = 0;
+        while (bytesRead < buffer.length) {
+          const result = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+          if (result.bytesRead === 0) break;
+          bytesRead += result.bytesRead;
+        }
         if (bytesRead > MAX_PLAN_BYTES) return { ok: false, reason: "too-large" };
         const content = buffer.subarray(0, bytesRead).toString("utf8");
         return {
