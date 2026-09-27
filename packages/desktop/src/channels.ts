@@ -26,6 +26,10 @@ export type PushChannels = IpcChannels & {
   "docker:log": { tabId: string; chunk: string };
   "workspace:devtoolsDockChosen": DevToolsDock;
   "workspace:devtoolsClosed": string;
+  // Main pushes this after the tab menu's own Rename item is clicked (bug
+  // 2): the renderer owns the inline rename input, so main only names which
+  // chip should start it.
+  "workspace:tabRename": string;
   // remote-access.ts's `onStatus` — always local to this window (ruling 36).
   // A paired phone never receives this: the wire protocol
   // (packages/remote/src/protocol.ts's ServerMessage) has no message that
@@ -76,6 +80,16 @@ export const INVOKE_CHANNELS = {
   startVoice: "voice:start",
   stopVoice: "voice:stop",
   getHistory: "history:list",
+  // Bug 5: a main-process IP-geolocation fallback, called only after
+  // navigator.geolocation has already failed in the renderer. Desktop-only
+  // (remote-policy.ts) — an outbound request a paired phone must never be
+  // able to trigger through the laptop.
+  locateByIp: "prayer:locateIp",
+  // Bug 7: edits a stored session's summary/project/agentId/model/state on
+  // top of what the transcript importer or SessionManager last wrote —
+  // see SessionStore.edit's own doc (core/session/types.ts) for why this
+  // never touches the row those two maintain.
+  editSession: "history:edit",
   listSessions: "sessions:list",
   // A phone or the desktop's own Refresh button asking for a fresh look at
   // the machine, not just Jarvis's own state: re-imports any new
@@ -109,6 +123,12 @@ export const INVOKE_CHANNELS = {
   setDevToolsBounds: "workspace:devtoolsBounds",
   setDevToolsDock: "workspace:devtoolsDock",
   showDevToolsDockMenu: "workspace:devtoolsDockMenu",
+  // Bug 2: a native Electron context menu (Rename/Reload/Close) rather than
+  // a DOM popover — a hosted tab's WebContentsView paints above the
+  // renderer regardless of any popover, so the old DOM menu had to be sunk
+  // under it and immediately vanished. [tabId, x, y]; x/y are the click's
+  // own clientX/clientY, so the menu opens where the user right-clicked.
+  tabMenu: "workspace:tabMenu",
   setWorkspaceVisible: "workspace:visible",
   hideAllTabs: "workspace:hideAll",
   requestPictureInPicture: "workspace:pip",
@@ -225,6 +245,7 @@ export const PUSH_CHANNELS = {
   onTerminalExit: "terminal:exit",
   onDockerLog: "docker:log",
   onRemoteStatus: "remote:update",
+  onTabRename: "workspace:tabRename",
 } as const satisfies Record<PushKey, string>;
 
 /**

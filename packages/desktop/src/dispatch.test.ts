@@ -25,11 +25,18 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       install: vi.fn(async () => ({ ok: true, value: undefined })),
     },
     orchestrator: { handle: vi.fn(async () => undefined), transcript: vi.fn(() => []) },
-    sessionStore: { history: vi.fn(() => []) },
+    sessionStore: { history: vi.fn(() => []), edit: vi.fn() },
+    ipLocate: {
+      lookup: vi.fn(async () => ({ latitude: 31.2, longitude: 29.9, name: "Alexandria, Egypt" })),
+    },
     sessions: {
       log: vi.fn(() => "backlog"),
       write: vi.fn(),
       resize: vi.fn(),
+      // Bug 7: undefined by default — "not a session SessionManager
+      // currently owns", the common case a fake exercising history:edit
+      // starts from.
+      get: vi.fn(() => undefined),
       snapshot: vi.fn(() => ({ text: "backlog", end: 7 })),
       list: vi.fn(() => []),
     },
@@ -126,6 +133,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       containers: vi.fn(async () => ({ ok: true, value: [] })),
     },
     projects: { app: {} },
+    agents: { ids: vi.fn(() => ["claude-acme"]) },
     dockerConfig: { app: [{ name: "Web", container: "web" }] },
     language: "en",
     api: {
@@ -285,6 +293,16 @@ describe("dispatch table: sessions and git", () => {
     expect(deps.refreshSessions).toHaveBeenCalledTimes(1);
   });
 
+  it("prayer:locateIp ignores its args and forwards to deps.ipLocate.lookup", async () => {
+    const deps = fakeDeps();
+    const result = { latitude: 1, longitude: 2, name: "X" };
+    (deps.ipLocate.lookup as ReturnType<typeof vi.fn>).mockResolvedValue(result);
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "prayer:locateIp", "junk")).toBe(result);
+    expect(deps.ipLocate.lookup).toHaveBeenCalledTimes(1);
+  });
+
   it("session:input types only when both arguments are strings", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
@@ -328,6 +346,78 @@ describe("dispatch table: sessions and git", () => {
     await call(table, "terminal:resize", "t1", 1.5, 24);
     expect(deps.terminal.resize).toHaveBeenCalledTimes(1);
     expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 80, 24);
+  });
+
+  // Bug 8: the desktop owns a pane/session's terminal size once it has set
+  // one — a phone's own resize must not squeeze the desktop's pane back
+  // down to phone width. "Desktop" vs "remote" comes from the dispatch
+  // path's own `origin` (never spoofable via a payload field), never a
+  // flag the caller supplies.
+  describe("terminal:resize / session:resize ownership (bug 8)", () => {
+    it("ignores a remote resize once the desktop has sized this pane", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(1);
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 120, 40);
+    });
+
+    it("applies a remote resize to a pane the desktop has never sized", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(1);
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 40, 100);
+    });
+
+    it("still applies a later desktop resize after an earlier remote one", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100);
+      await call(table, "terminal:resize", "t1", 120, 40);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(2);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t1", 120, 40);
+    });
+
+    it("ignores a remote session:resize once the desktop has sized this session", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "session:resize", "s1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "session:resize", "s1", 40, 100);
+
+      expect(deps.sessions.resize).toHaveBeenCalledTimes(1);
+      expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 120, 40);
+    });
+
+    it("applies a remote session:resize to a session the desktop has never sized", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await callAs(table, REMOTE_ORIGIN, "session:resize", "s1", 40, 100);
+
+      expect(deps.sessions.resize).toHaveBeenCalledTimes(1);
+      expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 40, 100);
+    });
+
+    it("tracks ownership separately per pane/session id", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t2", 40, 100);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(2);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(1, "t1", 120, 40);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t2", 40, 100);
+    });
   });
 
   // Replaces ipc.test.ts's "passes the argument, not the event" source grep:
@@ -1339,9 +1429,182 @@ describe("dispatch table: git, setup and history (deferred M2 table tests)", () 
 
   it("history:list returns sessionStore.history()'s value as is", async () => {
     const history = [{ id: "s1" }];
-    const deps = fakeDeps({ sessionStore: { history: vi.fn(() => history) } });
+    const deps = fakeDeps({ sessionStore: { history: vi.fn(() => history), edit: vi.fn() } });
     const table = createDispatchTable(deps);
     expect(await call(table, "history:list")).toBe(history);
+  });
+
+  describe("history:edit (bug 7)", () => {
+    it("forwards a valid patch to sessionStore.edit and reports ok", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", {
+        summary: "Renamed",
+        project: "app",
+        agentId: "claude-acme",
+        model: "opus",
+        state: "done",
+      });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", {
+        summary: "Renamed",
+        project: "app",
+        agentId: "claude-acme",
+        model: "opus",
+        state: "done",
+      });
+    });
+
+    it("forwards only the keys present in the patch", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "history:edit", "s1", { summary: "Renamed" });
+
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { summary: "Renamed" });
+    });
+
+    it("rejects a non-string id", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", 42, { summary: "x" })).toEqual(
+        invalidArgument("en"),
+      );
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-object patch", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", "s1", "nope")).toEqual(invalidArgument("en"));
+      expect(await call(table, "history:edit", "s1", null)).toEqual(invalidArgument("en"));
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects a patch field of the wrong type", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", "s1", { summary: 7 })).toEqual(
+        invalidArgument("en"),
+      );
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown project", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { project: "not-a-project" });
+
+      expect(result).toEqual({
+        ok: false,
+        text: MESSAGES.unknownProject("en"),
+        language: "en",
+      });
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("allows clearing a project override with an empty string", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { project: "" });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { project: "" });
+    });
+
+    // Bug 7 follow-up: "No project" is a real, storable choice — the UI
+    // sends an explicit `null`, distinct from `""` (which clears the
+    // override back to whatever the importer set).
+    it('accepts an explicit null project ("No project")', async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { project: null });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { project: null });
+    });
+
+    it("rejects a project value that is neither a string nor null", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", "s1", { project: 7 })).toEqual(
+        invalidArgument("en"),
+      );
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown agent", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { agentId: "nope" });
+
+      expect(result).toEqual({
+        ok: false,
+        text: MESSAGES.unknownAgent("en"),
+        language: "en",
+      });
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects a state value outside the SessionState union", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      expect(await call(table, "history:edit", "s1", { state: "paused" })).toEqual(
+        invalidArgument("en"),
+      );
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("rejects a state edit while SessionManager still owns the session", async () => {
+      const deps = fakeDeps({
+        sessions: { ...fakeDeps().sessions, get: vi.fn(() => ({ id: "s1" })) },
+      });
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { state: "done" });
+
+      expect(result).toEqual({
+        ok: false,
+        text: MESSAGES.cannotEditLiveSessionState("en"),
+        language: "en",
+      });
+      expect(deps.sessionStore.edit).not.toHaveBeenCalled();
+    });
+
+    it("still allows non-state fields to change while the session is live", async () => {
+      const deps = fakeDeps({
+        sessions: { ...fakeDeps().sessions, get: vi.fn(() => ({ id: "s1" })) },
+      });
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { summary: "Renamed" });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { summary: "Renamed" });
+    });
+
+    it("allows clearing a state override with an empty string even while live", async () => {
+      const deps = fakeDeps({
+        sessions: { ...fakeDeps().sessions, get: vi.fn(() => ({ id: "s1" })) },
+      });
+      const table = createDispatchTable(deps);
+
+      const result = await call(table, "history:edit", "s1", { state: "" });
+
+      expect(result).toEqual({ ok: true, value: null });
+      expect(deps.sessionStore.edit).toHaveBeenCalledWith("s1", { state: "" });
+    });
   });
 });
 

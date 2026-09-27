@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { KeyName, TerminalModes } from "./terminal-keys";
-import { ctrlByte, KEY_BAR, keyBytes } from "./terminal-keys";
+import { ctrlByte, KEY_BAR, keyBytes, sgrWheelSequence } from "./terminal-keys";
 
 const NORMAL: TerminalModes = { applicationCursor: false };
 const APP_CURSOR: TerminalModes = { applicationCursor: true };
@@ -102,5 +102,18 @@ describe("ctrlByte", () => {
     expect(ctrlByte("")).toBeUndefined();
     expect(ctrlByte("1")).toBeUndefined();
     expect(ctrlByte("é")).toBeUndefined();
+  });
+});
+
+// Bug 9: a touch-drag scroll gesture, in the alternate screen buffer while
+// a program has mouse tracking on, is sent as an SGR mouse-wheel escape —
+// button code 64 (up) / 65 (down), terminated "M" for a press.
+describe("sgrWheelSequence", () => {
+  it("encodes wheel-up as button 64", () => {
+    expect(sgrWheelSequence("up")).toBe("\x1b[<64;1;1M");
+  });
+
+  it("encodes wheel-down as button 65", () => {
+    expect(sgrWheelSequence("down")).toBe("\x1b[<65;1;1M");
   });
 });

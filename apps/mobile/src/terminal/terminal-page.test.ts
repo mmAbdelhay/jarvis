@@ -4,13 +4,19 @@ import { createPageController, type PageDeps, type PageTerminal } from "./termin
 function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
   written: string[];
   resetCount: number;
+  scrolls: number[];
   setSize(cols: number, rows: number): void;
   setApplicationCursor(value: boolean): void;
+  setBufferType(value: "normal" | "alternate"): void;
+  setMouseTrackingMode(value: PageTerminal["modes"]["mouseTrackingMode"]): void;
 } {
   let cols = 80;
   let rows = 24;
   let applicationCursorKeysMode = false;
+  let mouseTrackingMode: PageTerminal["modes"]["mouseTrackingMode"] = "none";
+  let bufferType: "normal" | "alternate" = "normal";
   const written: string[] = [];
+  const scrolls: number[] = [];
   let resetCount = 0;
 
   return {
@@ -21,7 +27,10 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
       return rows;
     },
     get modes() {
-      return { applicationCursorKeysMode };
+      return { applicationCursorKeysMode, mouseTrackingMode };
+    },
+    get buffer() {
+      return { active: { type: bufferType } };
     },
     write(data: string, done: () => void) {
       written.push(data);
@@ -30,7 +39,11 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
     reset() {
       resetCount += 1;
     },
+    scrollLines(amount: number) {
+      scrolls.push(amount);
+    },
     written,
+    scrolls,
     get resetCount() {
       return resetCount;
     },
@@ -41,12 +54,23 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
     setApplicationCursor(value: boolean) {
       applicationCursorKeysMode = value;
     },
+    setBufferType(value: "normal" | "alternate") {
+      bufferType = value;
+    },
+    setMouseTrackingMode(value: PageTerminal["modes"]["mouseTrackingMode"]) {
+      mouseTrackingMode = value;
+    },
     ...overrides,
   };
 }
 
-function makeDeps(term: PageTerminal): PageDeps & { posted: unknown[]; fitCount: number } {
+function makeDeps(term: PageTerminal): PageDeps & {
+  posted: unknown[];
+  fitCount: number;
+  fixedSizes: { cols: number; rows: number }[];
+} {
   const posted: unknown[] = [];
+  const fixedSizes: { cols: number; rows: number }[] = [];
   let fitCount = 0;
   return {
     term,
@@ -56,7 +80,15 @@ function makeDeps(term: PageTerminal): PageDeps & { posted: unknown[]; fitCount:
     post(text: string) {
       posted.push(JSON.parse(text));
     },
+    applyFixedSize(cols: number, rows: number) {
+      fixedSizes.push({ cols, rows });
+      (term as unknown as { setSize(c: number, r: number): void }).setSize(cols, rows);
+    },
+    lineHeightPx() {
+      return 20;
+    },
     posted,
+    fixedSizes,
     get fitCount() {
       return fitCount;
     },
@@ -219,6 +251,174 @@ describe("createPageController", () => {
 
     expect(deps.posted).toEqual([{ t: "resize", cols: 100, rows: 30 }]);
     expect(deps.fitCount).toBe(2);
+  });
+
+  // Bug 8: a fixed size from native switches the page into rendering at
+  // exactly that size, rather than fitting to the WebView's own layout.
+  describe('receive({"t":"size", ...})', () => {
+    it("applies the fixed size instead of fit(), and posts resize if it changed", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+      const fitCountBefore = deps.fitCount;
+
+      controller.receive('{"t":"size","cols":100,"rows":30}');
+
+      expect(deps.fixedSizes).toEqual([{ cols: 100, rows: 30 }]);
+      expect(deps.fitCount).toBe(fitCountBefore); // fit() itself never called
+      expect(deps.posted).toEqual([{ t: "resize", cols: 100, rows: 30 }]);
+    });
+
+    it("a later layoutChanged() reapplies the fixed size rather than calling fit()", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"size","cols":100,"rows":30}');
+      deps.posted.length = 0;
+      deps.fixedSizes.length = 0;
+      const fitCountBefore = deps.fitCount;
+
+      controller.layoutChanged();
+
+      expect(deps.fixedSizes).toEqual([{ cols: 100, rows: 30 }]);
+      expect(deps.fitCount).toBe(fitCountBefore);
+    });
+
+    it('receive({"t":"fit"}) also reapplies the fixed size once one is set', () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"size","cols":100,"rows":30}');
+      deps.fixedSizes.length = 0;
+
+      controller.receive('{"t":"fit"}');
+
+      expect(deps.fixedSizes).toEqual([{ cols: 100, rows: 30 }]);
+    });
+
+    it("ignores a size message with a non-number cols/rows", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+
+      controller.receive('{"t":"size","cols":"100","rows":30}');
+
+      expect(deps.fixedSizes).toEqual([]);
+      expect(deps.posted).toEqual([]);
+    });
+  });
+
+  // Bug 9: xterm 6 dropped native touch scrolling — the page does it itself
+  // via touchStart/touchMove/touchEnd, driven by the WebView's raw touch
+  // deltas (dy in px, lineHeightPx() from the fake deps standing in for
+  // the real font metrics).
+  describe("touch scrolling (bug 9)", () => {
+    it("a drag of exactly N line-heights scrolls N lines in the normal buffer", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-60); // finger moves up 3 line-heights (20px each)
+
+      expect(term.scrolls).toEqual([1, 1, 1]);
+    });
+
+    it("dragging down scrolls up (toward scrollback), content follows the finger", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(40); // finger moves down 2 line-heights
+
+      expect(term.scrolls).toEqual([-1, -1]);
+    });
+
+    it("a sub-line-height drag scrolls nothing yet, and a tap (no movement) scrolls nothing", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-5);
+      controller.touchEnd();
+
+      controller.touchStart();
+      controller.touchMove(0);
+      controller.touchEnd();
+
+      expect(term.scrolls).toEqual([]);
+    });
+
+    it("accumulates a drag across several touchMove calls", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-15); // 15px: under one line-height (20px), no scroll yet
+      controller.touchMove(-15); // 30px total: one line-height, 10px left over
+      controller.touchMove(-15); // 45px total: a second line-height, 5px left over
+
+      expect(term.scrolls).toEqual([1, 1]);
+    });
+
+    it("touchEnd drops any leftover sub-line-height remainder", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-15);
+      controller.touchEnd();
+      controller.touchStart();
+      controller.touchMove(-15); // would have completed the drag if carried over
+
+      expect(term.scrolls).toEqual([]);
+    });
+
+    it("in the alternate buffer with mouse tracking on, emits a wheel message instead of scrolling", () => {
+      const term = makeFakeTerminal();
+      term.setBufferType("alternate");
+      term.setMouseTrackingMode("vt200");
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+
+      controller.touchStart();
+      controller.touchMove(-20);
+
+      expect(term.scrolls).toEqual([]);
+      expect(deps.posted).toEqual([{ t: "wheel", direction: "down" }]);
+    });
+
+    it("in the alternate buffer without mouse tracking, does nothing at all", () => {
+      const term = makeFakeTerminal();
+      term.setBufferType("alternate");
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+
+      controller.touchStart();
+      controller.touchMove(-60);
+
+      expect(term.scrolls).toEqual([]);
+      expect(deps.posted).toEqual([]);
+    });
   });
 
   it(

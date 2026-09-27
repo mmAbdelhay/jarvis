@@ -173,6 +173,127 @@ describe("prayer settings", () => {
     });
   });
 
+  // Bug 5: navigator.geolocation errors on Linux/Windows without a Google
+  // API key, and on macOS when the OS permission is denied. Either way the
+  // button now falls back to the main-process IP lookup instead of just
+  // showing "Location denied".
+  describe("Use my location — IP fallback", () => {
+    const layout = () =>
+      (document.body.innerHTML = `<div id="settings-prayer-heading"></div><label><span id="settings-prayer-enabled-label"></span></label><input id="settings-prayer-enabled" type="checkbox"><button id="settings-prayer-locate"></button><span id="settings-prayer-location"></span><label><span id="settings-prayer-latitude-label"></span></label><input id="settings-prayer-latitude"><label><span id="settings-prayer-longitude-label"></span></label><input id="settings-prayer-longitude"><div id="settings-prayer-note"></div>${NOTIFY_FIELDS}<div id="header-prayer"><svg class="prayer-ring"><circle class="prayer-ring-fill"></circle></svg><span class="prayer-label"></span></div>`);
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, "geolocation");
+      Reflect.deleteProperty(window as unknown as Record<string, unknown>, "jarvis");
+    });
+
+    it("falls back to the IP lookup and names the source once geolocation errors", async () => {
+      layout();
+      syncPrayerSettings({ enabled: true });
+      const updateDraft = vi.fn(async () => undefined);
+      initPrayerSettings(updateDraft);
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: {
+          getCurrentPosition: (_success: unknown, error: (err: unknown) => void) => error({}),
+        },
+      });
+      const locateByIp = vi.fn(async () => ({
+        latitude: 31.2,
+        longitude: 29.9,
+        name: "Alexandria, Egypt",
+      }));
+      (window as unknown as { jarvis: { locateByIp: typeof locateByIp } }).jarvis = {
+        locateByIp,
+      };
+
+      document.getElementById("settings-prayer-locate")?.dispatchEvent(new Event("click"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(locateByIp).toHaveBeenCalledTimes(1);
+      expect((document.getElementById("settings-prayer-latitude") as HTMLInputElement).value).toBe(
+        "31.2",
+      );
+      expect((document.getElementById("settings-prayer-longitude") as HTMLInputElement).value).toBe(
+        "29.9",
+      );
+      expect(document.getElementById("settings-prayer-location")?.textContent).toBe(
+        MESSAGES.prayerLocatedByIp("Alexandria, Egypt", PRIMARY_LANGUAGE),
+      );
+      expect(updateDraft).toHaveBeenLastCalledWith({
+        enabled: true,
+        location: { latitude: 31.2, longitude: 29.9, name: "Alexandria, Egypt" },
+      });
+    });
+
+    it("falls back to the IP lookup when navigator.geolocation is unavailable at all", async () => {
+      layout();
+      syncPrayerSettings({ enabled: true });
+      initPrayerSettings(vi.fn(async () => undefined));
+      Reflect.deleteProperty(navigator, "geolocation");
+      const locateByIp = vi.fn(async () => ({ latitude: 1, longitude: 2, name: "X" }));
+      (window as unknown as { jarvis: { locateByIp: typeof locateByIp } }).jarvis = {
+        locateByIp,
+      };
+
+      document.getElementById("settings-prayer-locate")?.dispatchEvent(new Event("click"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(locateByIp).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the denied message when both geolocation and the IP fallback fail", async () => {
+      layout();
+      syncPrayerSettings({ enabled: true });
+      initPrayerSettings(vi.fn(async () => undefined));
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: {
+          getCurrentPosition: (_success: unknown, error: (err: unknown) => void) => error({}),
+        },
+      });
+      const locateByIp = vi.fn(async () => ({ error: "unavailable" }));
+      (window as unknown as { jarvis: { locateByIp: typeof locateByIp } }).jarvis = {
+        locateByIp,
+      };
+
+      document.getElementById("settings-prayer-locate")?.dispatchEvent(new Event("click"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(document.getElementById("settings-prayer-location")?.textContent).toBe(
+        MESSAGES.prayerDenied(MESSAGES.prayerAlexandria(PRIMARY_LANGUAGE), PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("still uses the live coordinates when navigator.geolocation succeeds, never calling the IP fallback", async () => {
+      layout();
+      syncPrayerSettings({ enabled: true });
+      initPrayerSettings(vi.fn(async () => undefined));
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: {
+          getCurrentPosition: (
+            success: (pos: { coords: { latitude: number; longitude: number } }) => void,
+          ) => success({ coords: { latitude: 30, longitude: 31 } }),
+        },
+      });
+      const locateByIp = vi.fn(async () => ({ latitude: 1, longitude: 2, name: "X" }));
+      (window as unknown as { jarvis: { locateByIp: typeof locateByIp } }).jarvis = {
+        locateByIp,
+      };
+
+      document.getElementById("settings-prayer-locate")?.dispatchEvent(new Event("click"));
+      await Promise.resolve();
+
+      expect(locateByIp).not.toHaveBeenCalled();
+      expect(document.getElementById("settings-prayer-location")?.textContent).toBe(
+        MESSAGES.prayerCurrentLocation(PRIMARY_LANGUAGE),
+      );
+    });
+  });
+
   it("syncs the notify toggles from the config, defaulting to on/10/on when notify is absent", () => {
     document.body.innerHTML = `<div id="settings-prayer-heading"></div><label><span id="settings-prayer-enabled-label"></span></label><input id="settings-prayer-enabled" type="checkbox"><button id="settings-prayer-locate"></button><span id="settings-prayer-location"></span><label><span id="settings-prayer-latitude-label"></span></label><input id="settings-prayer-latitude"><label><span id="settings-prayer-longitude-label"></span></label><input id="settings-prayer-longitude"><div id="settings-prayer-note"></div>${NOTIFY_FIELDS}<div id="header-prayer"><svg class="prayer-ring"><circle class="prayer-ring-fill"></circle></svg><span class="prayer-label"></span></div>`;
 

@@ -30,6 +30,7 @@ import {
 } from "electron";
 import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
+import { windowChrome } from "./window-chrome.js";
 import { createBroadcaster, rendererSink } from "./broadcast.js";
 import { preloadChannelArgs } from "./channels.js";
 import { dbGateLoginAnswer } from "./dbgate-login.js";
@@ -176,6 +177,7 @@ import { BrowserHost } from "./browser-host.js";
 import { createSidecarReaper } from "./sidecar-reaper.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
+import { locateByIp } from "./ip-locate.js";
 import { isAllowedNavigation } from "./navigation.js";
 import {
   createCompletionSource,
@@ -680,6 +682,10 @@ app.whenReady().then(async () => {
       // the bundle at package time and from the dock while developing, which
       // is what setDockIcon below is for.
       icon: iconPath("icon.png"),
+      // Bug 1: Linux (GNOME/Wayland especially) and some Windows configs
+      // leave the WM drawing no min/max/close decorations at all. See
+      // window-chrome.ts — darwin gets {} back and is unaffected.
+      ...windowChrome(process.platform),
       webPreferences: {
         preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
         // argv rather than an IPC call, because the renderer needs both
@@ -2078,6 +2084,10 @@ app.whenReady().then(async () => {
       setup,
       orchestrator,
       sessionStore,
+      // Bug 5: the platform's own global fetch, the same one the Expo push
+      // sender (remote-access.ts) and api-executor.ts already rely on
+      // existing, rather than @jarvis/platform's apiFetch or undici.
+      ipLocate: { lookup: () => locateByIp({ fetch: (url, init) => fetch(url, init) }) },
       // Same four methods SessionManager itself implements, plus `list`
       // overridden to the merged view (mergedSessions()) — everything
       // else stays a direct call through to the real manager, which is
@@ -2089,6 +2099,11 @@ app.whenReady().then(async () => {
         resize: (id, cols, rows) => sessions.resize(id, cols, rows),
         snapshot: (id) => sessions.snapshot(id),
         list: () => mergedSessions(),
+        // Bug 7: SessionManager's own map, never the merged view above — an
+        // "external" row from process-scan.ts is never something
+        // SessionManager owns, and history:edit's live check is about
+        // exactly that ownership.
+        get: (id) => sessions.get(id),
       },
       refreshSessions,
       sessionTranscript,
@@ -2109,6 +2124,9 @@ app.whenReady().then(async () => {
       chat,
       docker,
       projects: config.projects,
+      // Bug 7: a live accessor, not a snapshot — registry.replace() (a
+      // Settings save) can swap the registry after this table is built.
+      agents: { ids: () => registry.list().map((agent) => agent.id) },
       dockerConfig: config.docker,
       language: PRIMARY_LANGUAGE,
       api,
@@ -2138,6 +2156,13 @@ app.whenReady().then(async () => {
       buildMenu: (template) => Menu.buildFromTemplate(template),
       workspace,
       chooseDock: (dock) => broadcast.local("workspace:devtoolsDockChosen", dock),
+      // Bug 2: the tab menu's Reload and Close run the same dispatch table
+      // entries workspace:reload/workspace:close already do (terminal
+      // close, follower unfollow, desktopSizedPanes cleanup for close) —
+      // called directly rather than duplicated here.
+      reloadTab: (tabId) => void dispatch["workspace:reload"]([tabId], DESKTOP_ORIGIN),
+      closeTab: (tabId) => void dispatch["workspace:close"]([tabId], DESKTOP_ORIGIN),
+      startTabRename: (tabId) => broadcast.local("workspace:tabRename", tabId),
       language: PRIMARY_LANGUAGE,
     });
     workspace.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));

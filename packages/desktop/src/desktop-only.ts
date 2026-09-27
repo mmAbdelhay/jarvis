@@ -1,4 +1,4 @@
-// The four handlers that hold a BrowserWindow, the screen, a native dialog
+// The five handlers that hold a BrowserWindow, the screen, a native dialog
 // or a native menu. They can never run for a phone, so they are registered
 // here rather than entering the transport-agnostic table, and
 // `ElectronBoundChannel` in dispatch.ts keeps the table from accepting them.
@@ -8,6 +8,7 @@ import type { ElectronBoundChannel } from "./dispatch.js";
 import type { ReportedRect } from "./ipc.js";
 import { MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
+import { tabMenuTemplate } from "./tab-menu.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 
 // Only the one field displayScale() reads — the real Display carries 18
@@ -20,6 +21,7 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "workspace:bounds",
   "workspace:devtoolsBounds",
   "workspace:devtoolsDockMenu",
+  "workspace:tabMenu",
   "dialog:pickFiles",
 ];
 
@@ -32,10 +34,18 @@ export type DesktopOnlyDeps = {
   screen: { getDisplayMatching(bounds: Parameters<Screen["getDisplayMatching"]>[0]): DisplayMatch };
   dialog: Pick<Dialog, "showOpenDialog">;
   buildMenu: (template: MenuItemConstructorOptions[]) => {
-    popup(options: { window: BrowserWindow }): void;
+    popup(options: { window: BrowserWindow; x?: number; y?: number }): void;
   }; // Menu.buildFromTemplate
   workspace: Pick<BrowserHost, "setBounds" | "setDevToolsBounds">;
   chooseDock: (dock: DevToolsDock) => void; // broadcast.local("workspace:devtoolsDockChosen", dock)
+  // Bug 2: the tab menu's own three items. Reload and Close run the exact
+  // dispatch.ts handlers workspace:reload/workspace:close already use
+  // (main.ts calls the dispatch table's own entries) — this file duplicates
+  // none of that logic. Rename has nothing to run here at all: it only
+  // tells the renderer which chip should start its own inline rename.
+  reloadTab: (tabId: string) => void;
+  closeTab: (tabId: string) => void;
+  startTabRename: (tabId: string) => void; // broadcast.local("workspace:tabRename", tabId)
   language: "ar" | "en";
 };
 
@@ -78,6 +88,32 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
     deps
       .buildMenu([item("undocked"), item("left"), item("bottom"), item("right")])
       .popup({ window: deps.window });
+  });
+  // Bug 2: a chip's Rename/Reload/Close menu, native for the same reason
+  // the DevTools dock menu above is — a hosted tab's WebContentsView paints
+  // above the whole renderer, so a DOM popover drawn under it (the fix
+  // syncHostedView carried before this) was invisible, and sinking the
+  // hosted view to show it dismissed the popover in the same stroke. `x`
+  // and `y` are the renderer's own clientX/clientY from the contextmenu
+  // event, so the menu opens exactly where the user right-clicked rather
+  // than wherever the cursor happens to be when this IPC round trip lands.
+  deps.handle("workspace:tabMenu", (_event, tabId, x, y) => {
+    if (typeof tabId !== "string") return;
+    if (typeof x !== "number" || !Number.isFinite(x)) return;
+    if (typeof y !== "number" || !Number.isFinite(y)) return;
+    const template = tabMenuTemplate(
+      {
+        rename: MESSAGES.tabMenuRename(deps.language),
+        reload: MESSAGES.tabMenuReload(deps.language),
+        close: MESSAGES.tabMenuClose(deps.language),
+      },
+      {
+        onRename: () => deps.startTabRename(tabId),
+        onReload: () => deps.reloadTab(tabId),
+        onClose: () => deps.closeTab(tabId),
+      },
+    );
+    deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
   });
   // A native picker, for a multipart file field and for importing a
   // collection. Cancelling returns [] — it is not a failure.

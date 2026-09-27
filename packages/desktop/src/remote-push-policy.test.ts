@@ -14,6 +14,7 @@ const DESKTOP_ONLY = new Set([
   "voice:hotkeys",
   "workspace:devtoolsDockChosen",
   "workspace:devtoolsClosed",
+  "workspace:tabRename",
   "remote:update",
 ]);
 

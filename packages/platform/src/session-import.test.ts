@@ -486,6 +486,7 @@ describe("createSessionImporter", () => {
       return [...this.rows.values()];
     }
     updateGit(): void {}
+    edit(): void {}
   }
 
   /**

@@ -225,6 +225,11 @@ const lastActiveTabByProject = new Map<string, string>();
 type TabChipHandle = {
   element: HTMLElement;
   update: (tab: WorkspaceTab, activeTabId: string | undefined) => void;
+  /** Starts this chip's inline rename input — the same one double-click
+   *  starts. Bug 2: main's own tab menu has no rename UI of its own; it
+   *  pushes onTabRename(tabId) after its Rename item is clicked, and
+   *  initWorkspace calls this to open the input the renderer already has. */
+  startRename: () => void;
 };
 
 /** Keyed by tab id, so a tab's chip survives every render its tab survives
@@ -1140,6 +1145,10 @@ export function initWorkspace(projects: string[]): void {
     renderDevTools();
     reportWorkspaceBounds();
   });
+  // Bug 2: the native tab menu's Rename item has no rename UI of its own —
+  // main only names which chip should start it, and the chip already knows
+  // how (the same input double-click opens).
+  window.jarvis.onTabRename((tabId) => tabChips.get(tabId)?.startRename());
   loadDevToolsLayout();
   // Main starts at its own default; this is what brings it in line with the
   // side remembered from last time before any DevTools are opened.
@@ -1638,41 +1647,13 @@ function renderDocker(
   dockerAttached = showing;
 }
 
-/** Hides a chip's own context menu, undoing openTabMenu below. Shared by
- *  every item's click and by the light-dismiss `toggle` event, the same
- *  split block-view.ts's hideMoreMenu uses for the block "more" menu. */
-function hideTabMenu(menu: HTMLElement): void {
-  if (typeof menu.hidePopover === "function") {
-    try {
-      menu.hidePopover();
-    } catch {
-      // Already light-dismissed (an outside click, or Escape).
-    }
-  }
-  menu.hidden = true;
-}
-
-/** Opens a chip's context menu in the top layer, positioned off the click
- *  that asked for it — same Popover API and clamped placement as the
- *  block's own "more" menu (block-view.ts), so a chip near the window's
- *  edge never draws off screen. */
-function openTabMenu(menu: HTMLElement, event: MouseEvent): void {
-  menu.hidden = false;
-  if (typeof menu.showPopover !== "function") return;
-  menu.showPopover();
-  const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
-}
-
 /** Builds one tab chip and the `update` closure that catches it up to a
  *  later WorkspaceTab, so the strip's reconcile (renderWorkspace) can reuse
  *  the same element — and the same drag/context-menu listeners, attached
  *  here exactly once — across every render the tab survives.
  *
  *  `tab` is a `let`, reassigned by `update`: every closure below
- *  (drag/drop, click, the menu items, startRename) reads it live rather
+ *  (drag/drop, click, the context menu, startRename) reads it live rather
  *  than a value frozen at creation, so a chip built for one WorkspaceTab
  *  keeps acting on the current one after a reuse. Only `tab.id` actually
  *  needs that — it never changes for a chip kept in `tabChips` by that same
@@ -1766,45 +1747,20 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
     void window.jarvis.closeTab(tab.id);
   });
 
-  const menu = document.createElement("div");
-  menu.className = "workspace-tab-menu";
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("popover", "auto");
-  menu.hidden = true;
-  menu.addEventListener("toggle", () => {
-    if (menu.matches(":popover-open")) return;
-    menu.hidden = true;
-  });
-  // Without this a click inside the menu bubbles to `element` and activates
-  // the tab underneath it on its way out, same reason `close` above stops it.
-  menu.addEventListener("click", (event) => event.stopPropagation());
-
-  const menuItem = (label: string, run: () => void): HTMLButtonElement => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "workspace-tab-menu-item";
-    button.setAttribute("role", "menuitem");
-    button.textContent = label;
-    button.addEventListener("click", () => {
-      hideTabMenu(menu);
-      run();
-    });
-    return button;
-  };
-
-  menu.append(
-    menuItem(MESSAGES.tabMenuRename(PRIMARY_LANGUAGE), startRename),
-    menuItem(MESSAGES.tabMenuReload(PRIMARY_LANGUAGE), () => void window.jarvis.tabReload(tab.id)),
-    menuItem(MESSAGES.tabMenuClose(PRIMARY_LANGUAGE), () => void window.jarvis.closeTab(tab.id)),
-  );
-
+  // Bug 2: a native Electron context menu (Rename/Reload/Close), not a DOM
+  // popover — a hosted tab's WebContentsView paints above the whole
+  // renderer regardless of any popover's top layer, so the old DOM menu had
+  // to be sunk under it and vanished the instant it opened. main pops the
+  // menu at this exact point and runs Reload/Close itself; Rename comes
+  // back on onTabRename (see initWorkspace) since only the renderer owns
+  // the inline rename input.
   element.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openTabMenu(menu, event);
+    void window.jarvis.tabMenu(tab.id, event.clientX, event.clientY);
   });
 
-  element.append(title, close, menu);
+  element.append(title, close);
 
   const update = (nextTab: WorkspaceTab, nextActiveTabId: string | undefined): void => {
     tab = nextTab;
@@ -1818,7 +1774,7 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
   };
   update(tab, activeTabId);
 
-  return { element, update };
+  return { element, update, startRename };
 }
 
 function renderCollapsedGroup(project: string, count: number): HTMLElement {

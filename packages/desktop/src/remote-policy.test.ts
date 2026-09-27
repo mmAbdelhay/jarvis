@@ -31,6 +31,7 @@ describe("remote policy", () => {
     "workspace:devtoolsBounds",
     "workspace:devtoolsDock",
     "workspace:devtoolsDockMenu",
+    "workspace:tabMenu",
     "workspace:visible",
     "workspace:hideAll",
     "workspace:pip",
@@ -49,6 +50,11 @@ describe("remote policy", () => {
     "settings:testAgent",
     "api:saveSettings",
     "remote:tailscaleCert",
+    // Bug 5: an outbound IP-geolocation request the laptop makes for
+    // itself only after navigator.geolocation has already failed there.
+    "prayer:locateIp",
+    // Bug 7: no phone Sessions UI exists yet to edit a record from.
+    "history:edit",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);

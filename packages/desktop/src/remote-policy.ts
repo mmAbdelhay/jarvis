@@ -29,6 +29,17 @@ export const CHANNEL_POLICY = {
   "voice:list": "remote",
   "voice:preview": "desktop-only",
   "history:list": "remote",
+  // Desktop-only: an outbound request to a third-party IP-geolocation
+  // service, made only from the laptop's own "Use my location" button
+  // after navigator.geolocation has already failed there — a paired phone
+  // has its own device location and must never be able to trigger a
+  // laptop-side network request like this one.
+  "prayer:locateIp": "desktop-only",
+  // Desktop-only (bug 7): edits a session's own recorded fields — the same
+  // class of persistent, laptop-controlled state settings:save and
+  // api:saveSettings are already desktop-only for. Revisit alongside those
+  // when a phone Settings/Sessions UI ships.
+  "history:edit": "desktop-only",
   // Remote (M7): the same read-only Session[] as the sessions:update push,
   // pullable so a phone can render the session table before the first push.
   "sessions:list": "remote",
@@ -65,6 +76,10 @@ export const CHANNEL_POLICY = {
   "workspace:devtoolsBounds": "desktop-only",
   "workspace:devtoolsDock": "desktop-only",
   "workspace:devtoolsDockMenu": "desktop-only",
+  // Bug 2: pops a native menu over the LAPTOP's own window at a laptop
+  // screen coordinate — the same class of laptop-screen concern
+  // workspace:devtoolsDockMenu is desktop-only for.
+  "workspace:tabMenu": "desktop-only",
   "workspace:visible": "desktop-only",
   "workspace:hideAll": "desktop-only",
   "workspace:pip": "desktop-only",

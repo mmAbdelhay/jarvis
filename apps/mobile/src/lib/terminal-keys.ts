@@ -98,3 +98,19 @@ export function ctrlByte(character: string): string | undefined {
   }
   return CTRL_PUNCTUATION.get(character);
 }
+
+// Bug 9: SGR (1006) mouse-wheel button codes — 64 for wheel-up, 65 for
+// wheel-down, the same encoding xterm.js's own mouse handling sends for a
+// real wheel event. Column/row are fixed at the top-left cell: the touch
+// page (terminal-page.ts) tracks only a scroll direction, never a cell
+// position, so a wheel event's exact coordinates are not meaningful here —
+// what a mouse-tracking program reads off this is the direction, same as
+// every other terminal's "scroll" mouse wheel report.
+const SGR_WHEEL_BUTTON: Record<"up" | "down", number> = { up: 64, down: 65 };
+
+/** The exact bytes a real terminal sends for a mouse wheel scroll, SGR
+ *  (`\x1b[<...M`) encoded — `\x1b[<64;1;1M` for up, `\x1b[<65;1;1M` for
+ *  down. */
+export function sgrWheelSequence(direction: "up" | "down"): string {
+  return `\x1b[<${SGR_WHEEL_BUTTON[direction]};1;1M`;
+}

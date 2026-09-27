@@ -14,6 +14,7 @@ import {
   type ProviderStatus,
   type Session,
   type SessionChanges,
+  type SessionEditPatch,
   type SessionOutput,
   type StreamSnapshot,
   type SystemMetrics,
@@ -77,6 +78,7 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
+import type { IpLocateResult } from "./ip-locate.js";
 import {
   isCleanScalar,
   prepareRemoteApiRequest,
@@ -372,6 +374,19 @@ export type RendererApi = {
   // not pushed like sessions:update — there is no live subscriber to keep
   // in sync, only a snapshot to render once.
   getHistory(): Promise<Session[]>;
+  // Bug 5's fallback: called from the "Use my location" button only after
+  // navigator.geolocation has already errored or timed out in the
+  // renderer. Main-process only — the outbound request itself is made
+  // there (ip-locate.ts) — and desktop-only by policy.
+  locateByIp(): Promise<IpLocateResult>;
+  // Bug 7 ("edit any session record"): patch keys are optional and an
+  // empty string clears that field's own override — see
+  // SessionEditPatch's own doc (core/session/types.ts). Rejects (ok:
+  // false) an unknown project/agent, a bad state value, or a state edit
+  // for a session SessionManager currently owns. Stored-only: the Session
+  // view offers no edit control for an "external" row, and this never
+  // resolves for one either — there is no stored row to edit.
+  editSession(id: string, patch: SessionEditPatch): Promise<GitViewResult<null>>;
   // The live session list, pullable (M7 ruling 10): the same Session[] the
   // "sessions:update" push carries. The renderer does not call this — it
   // already gets sessions:update — this exists so a phone can render the
@@ -496,6 +511,11 @@ export type RendererApi = {
   /** A tab's DevTools closed without the renderer asking: the user closed
    *  their undocked window. */
   onDevToolsClosed(cb: (tabId: string) => void): void;
+  /** Pops a chip's native Rename/Reload/Close menu at (x, y) — the click's
+   *  own clientX/clientY. Reload and Close run in main directly; Rename
+   *  arrives back on onTabRename so the renderer's own inline input opens. */
+  tabMenu(tabId: string, x: number, y: number): Promise<void>;
+  onTabRename(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;

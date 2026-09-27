@@ -136,6 +136,31 @@ describe("parseSnapshot", () => {
     expect(Object.keys(result as object).sort()).toEqual(["end", "text"]);
   });
 
+  // Bug 8: a snapshot may also carry the pty's real size, once one has
+  // ever been set — this is how a phone learns to render at that size
+  // instead of guessing from its own screen.
+  it("accepts cols/rows when both are valid dimensions", () => {
+    const result = parseSnapshot({ text: "hi", end: 2, cols: 80, rows: 24 });
+    expect(result).toEqual({ text: "hi", end: 2, cols: 80, rows: 24 });
+  });
+
+  it("omits cols/rows (without rejecting the snapshot) when either is missing or invalid", () => {
+    expect(parseSnapshot({ text: "hi", end: 2, cols: 80 })).toEqual({ text: "hi", end: 2 });
+    expect(parseSnapshot({ text: "hi", end: 2, rows: 24 })).toEqual({ text: "hi", end: 2 });
+    expect(parseSnapshot({ text: "hi", end: 2, cols: 0, rows: 24 })).toEqual({
+      text: "hi",
+      end: 2,
+    });
+    expect(parseSnapshot({ text: "hi", end: 2, cols: "80", rows: 24 })).toEqual({
+      text: "hi",
+      end: 2,
+    });
+    expect(parseSnapshot({ text: "hi", end: 2, cols: 1.5, rows: 24 })).toEqual({
+      text: "hi",
+      end: 2,
+    });
+  });
+
   it("rejects end < text.length", () => {
     expect(parseSnapshot({ text: "hello", end: 2 })).toBeUndefined();
   });

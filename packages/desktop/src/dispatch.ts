@@ -15,7 +15,14 @@
 // This file imports nothing from electron and reads nothing from
 // process.platform (platform-convention.test.ts). Whatever needs either is
 // built in main.ts and handed in through DispatchDeps.
-import type { HandleOptions, Session, StreamSnapshot, Turn } from "@jarvis/core";
+import {
+  isSessionState,
+  type HandleOptions,
+  type Session,
+  type SessionEditPatch,
+  type StreamSnapshot,
+  type Turn,
+} from "@jarvis/core";
 import type { DockerConfig } from "@jarvis/platform";
 import {
   isFileId,
@@ -32,6 +39,7 @@ import {
   type RemoteStatus,
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
+import type { IpLocateResult } from "./ip-locate.js";
 import { isDevToolsDock, type BrowserHost } from "./browser-host.js";
 import type { JarvisConfig } from "./config.js";
 import {
@@ -127,13 +135,14 @@ export type SidecarPublisher = {
       };
 };
 
-/** The four handlers that hold a BrowserWindow, the screen, a native dialog
+/** The five handlers that hold a BrowserWindow, the screen, a native dialog
  *  or a native menu. They can never run for a phone, so they never enter the
  *  table — desktop-only.ts registers them. */
 export type ElectronBoundChannel =
   | "workspace:bounds"
   | "workspace:devtoolsBounds"
   | "workspace:devtoolsDockMenu"
+  | "workspace:tabMenu"
   | "dialog:pickFiles";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
@@ -155,7 +164,12 @@ export type DispatchDeps = {
     // than replaying a push it never received.
     transcript(): Turn[];
   };
-  sessionStore: { history(): unknown };
+  sessionStore: { history(): unknown; edit(id: string, patch: SessionEditPatch): void };
+  // Bug 5's fallback lookup (ip-locate.ts), built in main.ts around the
+  // platform's global fetch — the same seam favicon-fetch.ts and the
+  // Expo push sender already use rather than @jarvis/platform's apiFetch
+  // or undici directly.
+  ipLocate: { lookup(): Promise<IpLocateResult> };
   sessions: {
     log(sessionId: string): string;
     write(sessionId: string, data: string): void;
@@ -164,6 +178,12 @@ export type DispatchDeps = {
     // Jarvis's own sessions plus whatever the last process scan found
     // running outside it (main.ts merges the two) — see sessions:refresh.
     list(): Session[];
+    // Bug 7: whether SessionManager itself currently owns `id` — reads the
+    // live map straight from SessionManager.get, never sessionStore, since
+    // an id present here is exactly the "the pty still observes this
+    // session's state directly" case "history:edit" must refuse a state
+    // edit for.
+    get(id: string): { id: string } | undefined;
   };
   // Backfills any new transcripts and re-scans the process table
   // (process-scan.ts) for agents Jarvis did not start, updates the merged
@@ -210,6 +230,10 @@ export type DispatchDeps = {
   docker: DockerHandlers;
   // config.projects — membership checks only.
   projects: Record<string, unknown>;
+  // registry.list() (bug 7's "history:edit"), narrowed to the one check
+  // that handler needs — a live accessor rather than a snapshot, since the
+  // registry can be replaced (Settings save) after this table is built.
+  agents: { ids(): readonly string[] };
   // For isDeclaredContainer.
   dockerConfig: DockerConfig;
   language: "ar" | "en";
@@ -290,6 +314,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     bookmarks,
     settings,
   } = deps;
+  // Bug 8: the desktop owns a pane/session's terminal size once it has set
+  // one. A phone's `terminal:resize`/`session:resize` otherwise resizes the
+  // one shared pty to phone width, squeezing the desktop's own view of it —
+  // remembering which ids the desktop itself has already sized is what lets
+  // a remote resize keep applying only to a pane/session opened solely from
+  // the phone (never sized by the desktop). "Desktop" vs "remote" comes
+  // from `origin`, which the dispatch path derives itself and a payload
+  // cannot spoof — never a flag read out of `args`.
+  const desktopSizedPanes = new Set<string>();
+  const desktopSizedSessions = new Set<string>();
   return {
     "setup:check": () => setup.check(),
     "setup:install": ([id]) => setup.install(id),
@@ -317,6 +351,72 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
     "history:list": () => sessionStore.history(),
+    // Bug 5: ignores its args, same as sessions:list/sessions:refresh above
+    // — the only "argument" is which laptop clicked "Use my location".
+    "prayer:locateIp": () => deps.ipLocate.lookup(),
+    // Bug 7 ("edit any session record"): validates each field present in
+    // `patch` and forwards only those to sessionStore.edit — see
+    // SessionEditPatch's own doc for why a key absent from `patch` must
+    // never reach the store as an explicit clear.
+    "history:edit": ([id, patch]) => {
+      if (typeof id !== "string" || id === "") return invalidArgument(deps.language);
+      if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
+        return invalidArgument(deps.language);
+      }
+      const raw = patch as Record<string, unknown>;
+      const edited: SessionEditPatch = {};
+      for (const key of ["summary", "project", "agentId", "model", "state"] as const) {
+        if (!(key in raw)) continue;
+        const value = raw[key];
+        // `project` alone accepts `null` — the UI's explicit "No project"
+        // choice (see SessionEditPatch's own doc) — every other field is
+        // string-only, "" meaning "clear this override".
+        if (key === "project") {
+          if (value !== null && typeof value !== "string") return invalidArgument(deps.language);
+          if (value !== null && value !== "" && deps.projects[value] === undefined) {
+            return {
+              ok: false,
+              text: MESSAGES.unknownProject(deps.language),
+              language: deps.language,
+            };
+          }
+          edited.project = value;
+          continue;
+        }
+        if (typeof value !== "string") return invalidArgument(deps.language);
+        if (key === "state") {
+          if (value !== "" && !isSessionState(value)) return invalidArgument(deps.language);
+          // SessionManager owns state for a session it is currently
+          // running (the pty observes it directly) — an edit must not
+          // race that, even though the same call may still rename it,
+          // move it to another project, or change its agent/model.
+          if (value !== "" && deps.sessions.get(id) !== undefined) {
+            return {
+              ok: false,
+              text: MESSAGES.cannotEditLiveSessionState(deps.language),
+              language: deps.language,
+            };
+          }
+          edited.state = value as SessionEditPatch["state"];
+          continue;
+        }
+        if (key === "agentId") {
+          if (value !== "" && !deps.agents.ids().includes(value)) {
+            return {
+              ok: false,
+              text: MESSAGES.unknownAgent(deps.language),
+              language: deps.language,
+            };
+          }
+          edited.agentId = value;
+          continue;
+        }
+        if (key === "summary") edited.summary = value;
+        if (key === "model") edited.model = value;
+      }
+      deps.sessionStore.edit(id, edited);
+      return { ok: true, value: null };
+    },
     // The live session list, pullable (M7 ruling 10): the same Session[]
     // "sessions:update" pushes. Ignores its args — no filtering, no
     // projection, no argument coercion, so nothing arrives that could name
@@ -358,9 +458,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "voice:target": ([sessionId]) => {
       deps.voice.setTarget(typeof sessionId === "string" ? sessionId : undefined);
     },
-    "session:resize": ([sessionId, cols, rows]) => {
+    "session:resize": ([sessionId, cols, rows], origin) => {
       if (typeof sessionId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
+      if (origin.kind === "remote") {
+        // The desktop already claimed this session's size — a remote
+        // resize is dropped rather than shrinking the pty to phone width.
+        if (desktopSizedSessions.has(sessionId)) return;
+      } else {
+        desktopSizedSessions.add(sessionId);
+      }
       sessions.resize(sessionId, cols, rows);
     },
     "git:changes": ([sessionId]) => git.changes(sessionId as string),
@@ -393,6 +500,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       deps.terminal.close(id);
       deps.followers.unfollow(id, DESKTOP_OWNER);
       workspace.close(id);
+      // Bug 8: a closed tab's id is free to be a fresh pane again (a new
+      // tab can reuse workspace ids over a long session) — forgetting it
+      // here is what lets that fresh pane start unowned rather than
+      // inheriting a stale "the desktop already sized this" from the tab
+      // that used to have this id.
+      desktopSizedPanes.delete(id);
     },
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
@@ -729,6 +842,9 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     },
     "terminal:closePane": ([paneKey]) => {
       terminal.closePane(paneKey as string);
+      // Bug 8: same reasoning as workspace:close above, for a split's own
+      // pane key rather than its tab's.
+      desktopSizedPanes.delete(paneKey as string);
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(
@@ -743,9 +859,16 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },
-    "terminal:resize": ([tabId, cols, rows]) => {
+    "terminal:resize": ([tabId, cols, rows], origin) => {
       if (typeof tabId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
+      if (origin.kind === "remote") {
+        // The desktop already claimed this pane's size — see the comment
+        // by `desktopSizedPanes`'s declaration.
+        if (desktopSizedPanes.has(tabId)) return;
+      } else {
+        desktopSizedPanes.add(tabId);
+      }
       terminal.resize(tabId, cols, rows);
     },
     "terminal:settings": () => terminal.settings(),

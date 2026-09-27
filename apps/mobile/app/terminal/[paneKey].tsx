@@ -7,6 +7,7 @@
 // an unvalidated pane). Never creates, splits or closes a pane — only ever
 // attaches to one the laptop already has.
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
@@ -34,6 +35,7 @@ import {
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import type { KeyName } from "@/lib/terminal-keys";
+import { sgrWheelSequence } from "@/lib/terminal-keys";
 import { createTerminalInput } from "@/lib/terminal-input";
 import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
@@ -90,6 +92,33 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
       setConnection(client.state());
       return () => unsubscribeConnection();
     }, [client]),
+  );
+
+  // Bug 10: app/_layout.tsx locks PORTRAIT_UP globally; unlocks the moment
+  // this screen gains focus so the OS can rotate to landscape for a wider
+  // terminal, re-locks to PORTRAIT_UP the moment it loses focus or unmounts
+  // (`useFocusEffect`'s cleanup runs for both) — same pattern as
+  // sidecar-view.tsx's own landscape fix. Wrapped in try/catch: the web
+  // target and some simulators reject these calls outright.
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          await ScreenOrientation.unlockAsync();
+        } catch {
+          // Simulator/web: no native orientation lock to unlock. Nothing to do.
+        }
+      })();
+      return () => {
+        void (async () => {
+          try {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+          } catch {
+            // Simulator/web: no native orientation lock to set. Nothing to do.
+          }
+        })();
+      };
+    }, []),
   );
 
   // Rule 6 / bite-proof "pane-key validation": re-checked on every focus
@@ -249,6 +278,10 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
         onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
         onModes={(modes) => inputRef.current?.setModes(modes)}
         onNeedsReplay={() => streamRef.current?.restart(sink)}
+        fixedSize={streamView.size}
+        onWheel={(direction) => {
+          void inputRef.current?.sendText(sgrWheelSequence(direction));
+        }}
       />
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
       <KeyBar

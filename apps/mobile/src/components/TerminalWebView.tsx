@@ -29,10 +29,20 @@ export type TerminalWebViewProps = {
   onResize(size: { cols: number; rows: number }): void;
   onModes(modes: TerminalModes): void;
   onNeedsReplay(): void;
+  // Bug 8: the pty's real size, once the attach snapshot has reported one
+  // (SessionStreamView.size) — the page renders at exactly this instead of
+  // fitting to the WebView's own layout. Undefined until then, and again
+  // whenever the caller's own size isn't known yet (a pane no one has ever
+  // resized).
+  fixedSize?: { cols: number; rows: number };
+  // Bug 9: a touch-drag scroll gesture in the alternate screen buffer,
+  // while some program has mouse tracking on — the caller turns this into
+  // an SGR wheel escape sent the same way a keystroke is (sendText).
+  onWheel(direction: "up" | "down"): void;
 };
 
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebViewProps>(
-  function TerminalWebView({ onReady, onResize, onModes, onNeedsReplay }, ref) {
+  function TerminalWebView({ onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize }, ref) {
     const webViewRef = useRef<WebView>(null);
     const [remountKey, setRemountKey] = useState(0);
 
@@ -42,6 +52,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     const attachBufferRef = useRef("");
     const attachOverflowedRef = useRef(false);
     const attachDroppedCharsRef = useRef(0);
+    // Bug 8: the last fixed size this component knows about — resent to
+    // the page on every `ready` (including a reattach after a crash
+    // remount), not just when the prop itself changes, since a fresh page
+    // load has no memory of what an earlier load was told.
+    const fixedSizeRef = useRef<{ cols: number; rows: number } | undefined>(fixedSize);
+    fixedSizeRef.current = fixedSize;
     const readyGateRef = useRef<ReturnType<typeof createTerminalReadyGate> | null>(null);
     if (readyGateRef.current === null) readyGateRef.current = createTerminalReadyGate();
     const droppedMessageCountRef = useRef(0);
@@ -182,6 +198,16 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
               getBatcher().write(buffered);
             }
             onReady({ cols: message.cols, rows: message.rows });
+            // Bug 8: a fresh page load (including a reattach after a crash
+            // remount) starts out fit-sized — it has to be told the fixed
+            // size again, since it has no memory of an earlier load.
+            if (fixedSizeRef.current !== undefined) {
+              postToPage({
+                t: "size",
+                cols: fixedSizeRef.current.cols,
+                rows: fixedSizeRef.current.rows,
+              });
+            }
             if (overflowed || isReattach) {
               if (overflowed) {
                 console.log(
@@ -202,10 +228,31 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
           case "modes":
             onModes({ applicationCursor: message.applicationCursor });
             return;
+          case "wheel":
+            onWheel(message.direction);
+            return;
         }
       },
-      [onReady, onResize, onModes, onNeedsReplay, resetAttachState, getBatcher],
+      [
+        onReady,
+        onResize,
+        onModes,
+        onNeedsReplay,
+        onWheel,
+        postToPage,
+        resetAttachState,
+        getBatcher,
+      ],
     );
+
+    // Bug 8: pushes a size change to an already-open page — the initial
+    // size is instead sent from the "ready" handler above, since a size
+    // arriving before the page has ever loaded has nowhere to go yet.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on fixedSize's own cols/rows, deliberately not the object itself — a new object with the same values must not re-post.
+    useEffect(() => {
+      if (!readyRef.current || fixedSize === undefined) return;
+      postToPage({ t: "size", cols: fixedSize.cols, rows: fixedSize.rows });
+    }, [fixedSize?.cols, fixedSize?.rows, postToPage]);
 
     const handleLayout = useCallback(
       (_event: LayoutChangeEvent) => {

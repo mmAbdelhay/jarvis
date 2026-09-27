@@ -217,6 +217,36 @@ describe("createSessionStream: attach buffering", () => {
     },
   );
 
+  // Bug 8: a snapshot carrying the pty's real size surfaces it on the view,
+  // so the screen can tell its terminal to render at that exact size.
+  it("surfaces the snapshot's cols/rows on the view once live", async () => {
+    const { client, transport, clock } = createEnv();
+    client.connect(ENDPOINT, CREDENTIAL);
+    const socket = completeHandshake(transport);
+    const stream = createStream(client, clock);
+    const sink = createRecordingSink();
+    stream.open(sink);
+
+    const req = reqFrames(socket)[0];
+    await answerSnapshot(socket, req.id as number, { text: "", end: 0, cols: 80, rows: 24 });
+
+    expect(stream.get().size).toEqual({ cols: 80, rows: 24 });
+  });
+
+  it("leaves size undefined when the snapshot carries none", async () => {
+    const { client, transport, clock } = createEnv();
+    client.connect(ENDPOINT, CREDENTIAL);
+    const socket = completeHandshake(transport);
+    const stream = createStream(client, clock);
+    const sink = createRecordingSink();
+    stream.open(sink);
+
+    const req = reqFrames(socket)[0];
+    await answerSnapshot(socket, req.id as number, { text: "", end: 0 });
+
+    expect(stream.get().size).toBeUndefined();
+  });
+
   it("a push for another session never reaches the sink, and is counted as ignored", async () => {
     const { client, transport, clock } = createEnv();
     client.connect(ENDPOINT, CREDENTIAL);

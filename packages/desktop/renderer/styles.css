@@ -186,6 +186,36 @@
     border-bottom: 1px solid var(--border);
     container: topbar / inline-size;
     overflow: hidden;
+    /* Bug 1: Linux/Windows hide the native frame in favour of Electron's own
+       titleBarOverlay (window-chrome.ts), so the bar itself is now the only
+       thing left to drag the window by. */
+    -webkit-app-region: drag;
+  }
+
+  /* Without this none of the topbar's own controls could be clicked at all
+     — a drag region swallows every pointer event under it. */
+  .topbar button,
+  .topbar select,
+  .topbar input,
+  .topbar .pill,
+  .topbar .prayer-chip,
+  .topbar .topbar-metrics,
+  .topbar .topbar-danger-dot {
+    -webkit-app-region: no-drag;
+  }
+
+  /* The titlebar overlay's min/max/close buttons paint over the window's
+     own top-right corner (top-left in RTL) on Linux/Windows only — macOS
+     keeps its WM-drawn traffic lights and never sets the platform-* class
+     (see app.ts). `titlebar-area-width`/`-x` are the rectangle Chromium
+     leaves clear of those buttons; the gap between that and the full width
+     is exactly how much room to reserve. Falls back to 0 (100vw - 100vw)
+     wherever the env() vars are unset, e.g. darwin or an older Chromium. */
+  body.platform-linux .topbar,
+  body.platform-win32 .topbar {
+    padding-inline-end: calc(
+      20px + (100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+    );
   }
 
   .topbar > * {
@@ -362,6 +392,7 @@
 
   @container topbar (max-width: 899px) {
     #remote-pill-text { display: none; }
+    #topbar-metrics { display: none; }
   }
 
   /* No `display` here: an author rule on `.main` itself would out-cascade
@@ -2280,38 +2311,6 @@
   .workspace-tab-close { opacity: 0.6; }
   .workspace-tab-close:hover { opacity: 1; color: var(--del); }
 
-  /* The tab chip's right-click menu: Rename / Reload / Close. Same Popover
-     API and the same top-layer/fixed-position shape as .block-more-menu, so
-     it draws over everything (including the tab strip's own overflow-x
-     scroll) instead of being clipped by an ancestor. */
-  .workspace-tab-menu {
-    position: fixed;
-    inset: auto;
-    z-index: 1;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--r-control);
-    font: 12px/1.6 var(--font-ui);
-    width: max-content;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  }
-  .workspace-tab-menu[hidden] { display: none; }
-  .workspace-tab-menu-item {
-    color: var(--text);
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    padding: 2px 6px;
-    text-align: start;
-    font: inherit;
-  }
-  .workspace-tab-menu-item:hover { background: var(--accent-quiet); }
-
   /* A non-selected project's tabs, stacked into one pill rather than left
      flat in the same row as the selected project's own tabs. Clicking it
      switches to that project (workspace.ts's switchToProject). */
@@ -2605,6 +2604,7 @@
   }
 
   .settings-row input[type="text"],
+  .settings-row input[type="number"],
   .settings-row select {
     font: inherit;
     font-size: 13px;
@@ -2615,9 +2615,14 @@
     padding: 5px var(--s2);
     width: 100%;
     min-width: 0;
+    /* Without this a number input's spin buttons render in the light UA
+       style regardless of --text/--background above, which only cover the
+       text itself. */
+    color-scheme: dark;
   }
 
   .settings-row input[type="text"]:focus,
+  .settings-row input[type="number"]:focus,
   .settings-row select:focus {
     outline: none;
     border-color: var(--accent);
@@ -2674,6 +2679,7 @@
     flex-shrink: 0;
   }
   .settings-field input[type="text"],
+  .settings-field input[type="number"],
   .settings-field select {
     font: inherit;
     font-size: 12px;
@@ -2684,6 +2690,9 @@
     padding: 6px 10px;
     flex-grow: 1;
     max-width: 480px;
+    /* Prayer latitude/longitude/notify-minutes are type="number" — without
+       this their spin buttons render in the light UA style. */
+    color-scheme: dark;
   }
   /* The first switch in Settings. Built from a real checkbox so it keeps
      the keyboard and the accessibility tree it was born with — the input
@@ -2934,6 +2943,17 @@
 
   .session-cell-actions { vertical-align: middle; text-align: right; }
 
+  /* Resume and the edit button, in one line. A flex row on this wrapper —
+     never on the <td> itself (see .session-cell-state above: display:flex
+     on a table cell takes it out of table layout and loses the row's shared
+     height and border) — so the pair never wraps onto two lines the way it
+     did when the actions column got squeezed. */
+  .session-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+  }
+
   /* Ninety-six buttons compete with the content they sit beside, so the
      button waits for the row. Keyboard focus shows it too — hover is not a
      thing every user has. */
@@ -2947,7 +2967,10 @@
     background: var(--surface-raised);
     border: 1px solid var(--border);
     border-radius: var(--r-control);
-    padding: 3px 10px;
+    height: 24px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
     white-space: nowrap;
     cursor: pointer;
     /* Ninety-six buttons compete with the content they sit beside, so it
@@ -2959,8 +2982,33 @@
 
   .session-table-resume:hover { color: var(--text); border-color: var(--border-strong); }
 
+  /* A compact square icon button — its own class and its own rule, not
+     Resume's reused — the same height as Resume, placed beside it. */
+  .session-table-edit {
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 90ms ease-out;
+  }
+
+  .session-table-edit:hover { color: var(--text); border-color: var(--border-strong); }
+
   .session-table-row:hover .session-table-resume,
-  .session-table-resume:focus-visible { opacity: 1; }
+  .session-table-row:hover .session-table-edit,
+  .session-table-resume:focus-visible,
+  .session-table-edit:focus-visible { opacity: 1; }
 
   .session-table-status {
     min-height: 16px;
@@ -2968,6 +3016,118 @@
     font-size: 11px;
     color: var(--del);
   }
+
+  /* The row's edit form (bug 7 follow-up: "the ui design is so wrong") — a
+     panel inset under the row rather than bare, browser-default controls.
+     Colours and radius are the same tokens .settings-field's own dark
+     control look uses (styles.css ~2669 and its later override ~4427), not
+     a new look invented for this one form. */
+  .session-edit-cell { padding: 0; }
+
+  .session-edit-panel {
+    /* So the grid below can react to the *panel's* own width rather than
+       the viewport's — the table sits beside the bookmarks rail and the
+       terminal, so its own width is what actually narrows. */
+    container: session-edit / inline-size;
+    padding: var(--s3);
+    background: var(--surface-alt);
+    border-top: 1px solid var(--hairline-soft);
+    border-radius: var(--r-control);
+  }
+
+  .session-edit-grid {
+    display: grid;
+    /* Title reads first and longest, so it gets the wide column; the other
+       four are equal narrow ones. */
+    grid-template-columns: 2fr repeat(4, 1fr);
+    gap: var(--s2) var(--s3);
+  }
+
+  @container session-edit (max-width: 900px) {
+    .session-edit-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .session-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    min-width: 0;
+  }
+
+  .session-edit-field label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  .session-edit-field input,
+  .session-edit-field select {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    min-height: 34px;
+    padding: 6px 10px;
+    /* Same reason as .settings-field's own inputs: without this a select's
+       popup and a text input's caret render in the light UA style. */
+    color-scheme: dark;
+  }
+
+  .session-edit-field input:focus,
+  .session-edit-field select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .session-edit-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-top: var(--s3);
+  }
+
+  .session-edit-status {
+    flex: 1 1 auto;
+    font-size: 11px;
+    color: var(--bad);
+  }
+
+  /* Document order is Save then Cancel (session-view.ts's own comment on
+     why: existing callers address them by position) — `order` alone moves
+     Cancel to Save's left, reading as ghost-then-primary without touching
+     that document order. */
+  .session-edit-cancel {
+    order: 1;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+
+  .session-edit-cancel:hover { color: var(--text); border-color: var(--border-strong); }
+
+  .session-edit-save {
+    order: 2;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent-text);
+    background: var(--accent-quiet);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-control);
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+
+  .session-edit-save:hover { color: var(--text); border-color: var(--accent); }
 
   /* A recorded conversation, laid out as one. The terminal beside it is for
      output that really is a terminal's; this is prose and reads as prose. */
@@ -4204,6 +4364,14 @@
 .pill { display: flex; align-items: center; gap: 7px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); font: 12px var(--font-ui); }
 .pill:hover { border: 0; background: transparent; }
 .pill-dot { width: 7px; height: 7px; }
+/* The ambient readout users asked back after board 0 removed it. Same
+   values as the Dashboard's SYSTEM card, glanceable from every route;
+   collapses below 900px (the @container rule above) so the topbar never
+   wraps, leaving the danger dot as the only signal at that width. */
+.topbar-metrics { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.topbar-metrics .unit { color: var(--text-muted); font-size: 10px; }
+.topbar-metrics .sep { color: var(--border-strong); }
+.topbar-metrics .metric--danger { color: var(--bad); }
 /* board 0's danger dot: on only when renderMetrics() (app.ts) finds CPU or
    disk at/above 95%, named in its own tooltip. Sits before "Online" so a
    machine in real trouble is the first thing the strip says. */

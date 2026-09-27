@@ -2,6 +2,22 @@ import type { AgentConfig } from "../registry/types.js";
 
 export type SessionState = "starting" | "running" | "waiting" | "done" | "dead";
 
+/** Every valid `SessionState`, in the one order they occur in a session's
+ *  life — shared so a validator (the sqlite store's own row check, the
+ *  desktop dispatch table's "history:edit" handler) never keeps its own,
+ *  independently-drifting copy of this list. */
+export const SESSION_STATES: readonly SessionState[] = [
+  "starting",
+  "running",
+  "waiting",
+  "done",
+  "dead",
+];
+
+export function isSessionState(value: string): value is SessionState {
+  return (SESSION_STATES as readonly string[]).includes(value);
+}
+
 export type Session = {
   id: string;
   /**
@@ -78,6 +94,33 @@ export type Session = {
  * and `CommandRunner`. The concrete sqlite-backed implementation lives in
  * `@jarvis/platform`; `@jarvis/desktop` composes it into `SessionManager`.
  */
+/**
+ * A user edit on top of a session's own recorded fields (bug 7: "edit any
+ * session record"). Every key is optional — a patch names only the fields
+ * a Save button actually changed — and, for whichever key is present, an
+ * empty string clears that field's own override, reverting to whatever
+ * `upsert`/`upsertImported` last wrote there rather than pinning it to "".
+ *
+ * Validating each field (a real SessionState, a configured project, a
+ * known agent id, "not while the session is live") is the IPC handler's
+ * job (dispatch.ts's "history:edit"), not this store's — the same split
+ * `upsert`/`upsertImported` already draw between the shape of a row and
+ * the shape of a request.
+ */
+export type SessionEditPatch = {
+  summary?: string;
+  // Unlike the other fields, `project` distinguishes three states rather
+  // than two: omitted (no change), `""` (clear the override, revert to
+  // whatever the importer/SessionManager set), and `null` (an explicit
+  // "no project" override — the UI's "No project" choice sends this, since
+  // an empty string here would otherwise be indistinguishable from
+  // "clear").
+  project?: string | null;
+  agentId?: string;
+  model?: string;
+  state?: SessionState | "";
+};
+
 export interface SessionStore {
   // Called on every session state transition (including the initial
   // "starting" row) — upserts by `session.id`, so a session's history is
@@ -106,8 +149,30 @@ export interface SessionStore {
    * process a transcript knows nothing about.
    */
   upsertImported(session: Session, options: { owned: boolean }): void;
-  // All recorded sessions, most recently active first.
+  // All recorded sessions, most recently active first. Applies every
+  // recorded `edit()` override on top of the row `upsert`/`upsertImported`
+  // last wrote, so a later importer rescan or SessionManager transition
+  // never silently wipes a user's edit.
   history(): Session[];
+  /**
+   * Applies a user edit on top of a session's row (bug 7) — never writes
+   * into the row `upsert`/`upsertImported` maintain, so a later importer
+   * rescan or SessionManager state transition can never silently wipe an
+   * edit, and an edit can never silently wipe a field the transcript or
+   * the live process is still the authority for. `history()` (and any
+   * other row read) applies these via the underlying row as the default,
+   * the override as the override.
+   *
+   * A key left out of `patch` leaves any existing override for that field
+   * untouched. A key present with an empty string clears that field's own
+   * override, reverting to whatever the underlying row holds — it does
+   * not pin the field to "".
+   *
+   * An id with no session row yet still records the override (the same
+   * "matches zero rows is fine" tolerance `updateGit` documents above) —
+   * it simply has nothing to show until a row with that id exists.
+   */
+  edit(id: string, patch: SessionEditPatch): void;
   // Records the git change counts for one already-persisted session —
   // called from ChangeTracker.onChange() as a repo's counts change, and
   // again as the session ends, so the row a finished session leaves behind
@@ -198,6 +263,14 @@ export type SessionOutput = {
 export type StreamSnapshot = {
   text: string;
   end: number;
+  /** The pty's current size, present only once a resize (from either the
+   *  desktop or a phone) has actually landed for this session/pane — see
+   *  SessionManager.resize / ShellManager.resize. A remote (phone) client
+   *  uses this to render at the pty's real size instead of guessing from
+   *  its own screen (bug 8); omitted rather than a guessed default so a
+   *  client can tell "not yet known" apart from a real size. */
+  cols?: number;
+  rows?: number;
 };
 
 export type StartInput = {

@@ -29,6 +29,20 @@
       <button id="nav-settings" class="nav-btn" type="button">Settings</button>
     </div>
     <div class="status-group">
+    <!-- board 0 removed this ambient CPU/RAM/DISK/network readout in favour
+         of the danger dot alone; brought back on request. renderMetrics
+         (app.ts) fills it from the same values as the Dashboard's SYSTEM
+         card. Collapses below 900px (styles.css's @container rule) so the
+         topbar never wraps — the danger dot below still covers that width. -->
+    <span id="topbar-metrics" class="topbar-metrics mono">
+      <span class="unit">CPU</span><span id="header-cpu">--%</span>
+      <span class="sep">·</span>
+      <span class="unit">RAM</span><span id="header-mem">--%</span>
+      <span class="sep">·</span>
+      <span class="unit">DISK</span><span id="header-disk">--%</span>
+      <span class="sep">·</span>
+      <span id="header-net">↓0.0 ↑0.0 Mbps</span>
+    </span>
     <!-- board 0's danger dot: shown only when renderMetrics() finds disk or
          CPU at/above 95%, named in its own tooltip so "why is there a red
          dot" has an answer without opening the Dashboard. -->

@@ -10,6 +10,9 @@
 //
 // Each test re-imports the module fresh: it holds module-level state (the
 // terminal instance, which session is open, the voice target).
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "@jarvis/core";
 import type { RendererApi } from "../src/ipc.js";
@@ -61,6 +64,7 @@ type Jarvis = Pick<
   | "sendSessionInput"
   | "resizeSession"
   | "setVoiceTarget"
+  | "editSession"
 >;
 
 function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
@@ -74,6 +78,7 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
+    editSession: vi.fn(async () => ({ ok: true as const, value: null })),
     ...overrides,
   };
   (window as unknown as { jarvis: Jarvis }).jarvis = api;
@@ -1019,6 +1024,312 @@ describe("session table", () => {
 
     expect(document.getElementById("session-transcript")?.hidden).toBe(false);
     expect(document.getElementById("session-transcript")?.textContent).toMatch(/transcript/i);
+  });
+
+  // Bug 7: "edit any session record" — a stored row gets a second control
+  // beside Resume, opening an inline form rather than a prompt() (Electron
+  // has none — see api.ts).
+  describe("editing a session record", () => {
+    const editRow = (): HTMLElement | null =>
+      document.querySelector("#session-table-body > tr.session-edit-row");
+
+    it("gives a stored row an edit button that opens a prefilled inline form", async () => {
+      stubJarvis({
+        getHistory: vi.fn(async () => [
+          makeSession({
+            id: "s1",
+            summary: "Fix the bug",
+            project: "acme",
+            agentId: "claude-acme",
+          }),
+        ]),
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+
+      const buttons = rows()[0]?.querySelectorAll("button");
+      expect(buttons?.[1]?.textContent).toBe("✎");
+      buttons?.[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const form = editRow();
+      expect(form).not.toBeNull();
+      expect(form?.querySelector<HTMLInputElement>(".session-edit-summary")?.value).toBe(
+        "Fix the bug",
+      );
+      expect(form?.querySelector<HTMLSelectElement>(".session-edit-project")?.value).toBe("acme");
+      expect(form?.querySelector<HTMLSelectElement>(".session-edit-agent")?.value).toBe(
+        "claude-acme",
+      );
+      expect(form?.querySelector<HTMLSelectElement>(".session-edit-state")?.value).toBe("running");
+    });
+
+    it("toggles the form closed on a second click of the same row's edit button", async () => {
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]) });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+
+      const edit = () => rows()[0]?.querySelectorAll("button")[1];
+      edit()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(editRow()).not.toBeNull();
+
+      edit()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(editRow()).toBeNull();
+    });
+
+    it("does not navigate into the session when the edit button is clicked", async () => {
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]) });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+
+      expect(document.getElementById("session-table")?.hidden).toBe(false);
+    });
+
+    it("cancel closes the form without calling editSession", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]), editSession });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const cancel = editRow()?.querySelectorAll("button")[1];
+      expect(cancel?.textContent).toBe("Cancel");
+      cancel?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      expect(editRow()).toBeNull();
+      expect(editSession).not.toHaveBeenCalled();
+    });
+
+    it("save sends only the fields that changed", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({
+        getHistory: vi.fn(async () => [
+          makeSession({ id: "s1", summary: "Old summary", project: "acme" }),
+        ]),
+        editSession,
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const summaryInput = editRow()?.querySelector<HTMLInputElement>(".session-edit-summary");
+      expect(summaryInput).not.toBeNull();
+      summaryInput!.value = "New summary";
+      const save = editRow()?.querySelectorAll("button")[0];
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editSession).toHaveBeenCalledWith("s1", { summary: "New summary" });
+    });
+
+    it("does nothing when Save is clicked with no changes", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]), editSession });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      editRow()
+        ?.querySelectorAll("button")[0]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+
+      expect(editSession).not.toHaveBeenCalled();
+      expect(editRow()).toBeNull();
+    });
+
+    it("shows the rejection text and keeps the form open when history:edit rejects the patch", async () => {
+      const editSession = vi.fn(async () => ({
+        ok: false as const,
+        text: "I don't know an agent by that id.",
+        language: "en" as const,
+      }));
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]), editSession });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const summaryInput = editRow()?.querySelector<HTMLInputElement>(".session-edit-summary");
+      summaryInput!.value = "changed";
+      editRow()
+        ?.querySelectorAll("button")[0]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editRow()?.querySelector(".session-edit-status")?.textContent).toBe(
+        "I don't know an agent by that id.",
+      );
+      expect(editRow()).not.toBeNull();
+    });
+
+    it("closes the form and reloads the table after a successful save", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      const getHistory = vi.fn(async () => [makeSession({ id: "s1" })]);
+      stubJarvis({ getHistory, editSession });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const summaryInput = editRow()?.querySelector<HTMLInputElement>(".session-edit-summary");
+      summaryInput!.value = "changed";
+      editRow()
+        ?.querySelectorAll("button")[0]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editRow()).toBeNull();
+      expect(getHistory).toHaveBeenCalledTimes(2);
+    });
+
+    // Bug 7 follow-up: "No project" must pin the session to no project, not
+    // merely clear whatever override already existed — the store treats an
+    // empty-string patch as "clear", which would let the importer's project
+    // come right back. The UI has to send an explicit `null` instead.
+    it("save sends an explicit null project when 'No project' is chosen", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({
+        getHistory: vi.fn(async () => [makeSession({ id: "s1", project: "acme" })]),
+        editSession,
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const projectSelect = editRow()?.querySelector<HTMLSelectElement>(".session-edit-project");
+      projectSelect!.value = "";
+      const save = editRow()?.querySelectorAll("button")[0];
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editSession).toHaveBeenCalledWith("s1", { project: null });
+    });
+
+    it("offers configured projects (plus 'No project') set via setKnownProjects", async () => {
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1", project: "acme" })]) });
+      const { renderSessionTable, setKnownProjects } = await import("./session-view.js");
+      setKnownProjects(["acme", "storefront"]);
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const options = [
+        ...(editRow()?.querySelectorAll<HTMLOptionElement>(".session-edit-project option") ?? []),
+      ].map((o) => o.value);
+      expect(options).toEqual(["", "acme", "storefront"]);
+    });
+
+    // The redesign (user: "the ui design is so wrong") replaced bare
+    // aria-labels with real <label for> elements, and gave the form
+    // Enter-to-save / Escape-to-cancel — neither existed before.
+    it("labels every field with a real <label for> pointing at its control", async () => {
+      stubJarvis({
+        getHistory: vi.fn(async () => [
+          makeSession({
+            id: "s1",
+            summary: "Fix the bug",
+            project: "acme",
+            agentId: "claude-acme",
+          }),
+        ]),
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const form = editRow();
+      const expectations: Array<[string, string]> = [
+        [".session-edit-summary", "Title"],
+        [".session-edit-project", "Project"],
+        [".session-edit-agent", "Agent"],
+        [".session-edit-model", "Model"],
+        [".session-edit-state", "State"],
+      ];
+      for (const [selector, text] of expectations) {
+        const control = form?.querySelector<HTMLElement>(selector);
+        expect(control?.id, `${selector} has an id`).toBeTruthy();
+        const label = form?.querySelector<HTMLLabelElement>(`label[for="${control?.id}"]`);
+        expect(label?.textContent, `label for ${selector}`).toBe(text);
+      }
+    });
+
+    it("Enter in a text input saves", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({
+        getHistory: vi.fn(async () => [makeSession({ id: "s1", summary: "Old summary" })]),
+        editSession,
+      });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const summaryInput = editRow()?.querySelector<HTMLInputElement>(".session-edit-summary");
+      summaryInput!.value = "New summary";
+      summaryInput?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(editSession).toHaveBeenCalledWith("s1", { summary: "New summary" });
+    });
+
+    it("Escape cancels the form without calling editSession", async () => {
+      const editSession = vi.fn(async () => ({ ok: true as const, value: null }));
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]), editSession });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const summaryInput = editRow()?.querySelector<HTMLInputElement>(".session-edit-summary");
+      summaryInput?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      expect(editRow()).toBeNull();
+      expect(editSession).not.toHaveBeenCalled();
+    });
+
+    it("the edit cell colspans every column of the real table header", async () => {
+      stubJarvis({ getHistory: vi.fn(async () => [makeSession({ id: "s1" })]) });
+      const { renderSessionTable } = await import("./session-view.js");
+      await renderSessionTable();
+      rows()[0]
+        ?.querySelectorAll("button")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const html = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "index.html"),
+        "utf8",
+      );
+      const theadMatch = /id="session-table"[\s\S]*?<thead>([\s\S]*?)<\/thead>/.exec(html);
+      const columnCount = (theadMatch?.[1]?.match(/<th\b/g) ?? []).length;
+      expect(columnCount).toBeGreaterThan(0);
+
+      const td = editRow()?.querySelector<HTMLTableCellElement>(".session-edit-cell");
+      expect(td?.colSpan).toBe(columnCount);
+    });
   });
 });
 

@@ -34,6 +34,8 @@ describe("MESSAGES", () => {
       MESSAGES.tabMenuRename,
       MESSAGES.tabMenuReload,
       MESSAGES.tabMenuClose,
+      MESSAGES.unknownAgent,
+      MESSAGES.cannotEditLiveSessionState,
     ];
     for (const message of unary) expect(message("ar")).not.toBe(message("en"));
     expect(MESSAGES.prayerDenied("Alexandria", "ar")).not.toBe(

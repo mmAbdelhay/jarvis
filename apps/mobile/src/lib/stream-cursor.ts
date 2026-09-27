@@ -64,12 +64,26 @@ export function applySnapshot(rendered: number, snapshot: StreamSnapshot): Curso
   return { write: text, gapUnits: missing - text.length, reset: false, rendered: end };
 }
 
+/** Same bounds as the terminal page's own dimension check
+ *  (terminal-protocol.ts's `isDimension`) — kept as a private copy rather
+ *  than a shared import since the two files parse unrelated wire shapes. */
+function isTermDimension(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 1000;
+}
+
 export function parseSnapshot(value: unknown): StreamSnapshot | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const obj = value as Record<string, unknown>;
   if (typeof obj.text !== "string") return undefined;
   if (typeof obj.end !== "number" || !Number.isSafeInteger(obj.end)) return undefined;
   if (obj.end < 0 || obj.end < obj.text.length) return undefined;
+  // Bug 8: the pty's real size, when the laptop has one to report — never
+  // half a pair (one present, one missing/invalid means neither is used),
+  // and never something that invalidates the rest of an otherwise-good
+  // snapshot.
+  if (isTermDimension(obj.cols) && isTermDimension(obj.rows)) {
+    return { text: obj.text, end: obj.end, cols: obj.cols, rows: obj.rows };
+  }
   return { text: obj.text, end: obj.end };
 }
 
