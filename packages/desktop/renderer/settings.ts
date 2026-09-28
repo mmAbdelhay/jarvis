@@ -1720,7 +1720,7 @@ function renderRemotePairArea(): void {
     // above — drawn only here, only from this remote:update-fed status, and
     // never toDataURL'd, saved or logged (M4 ruling 34's fallback stays the
     // link text, for a QR the phone's camera can't read).
-    qrToCanvas(qrCanvas, encodeQr(status.pairing.uri), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+    drawQrOrClear(qrCanvas, status.pairing.uri);
     qrCanvas.hidden = false;
     // Only the tail, never the fingerprint or the secret — see
     // fingerprintTailFromUri's own comment for why it doesn't import the
@@ -1784,8 +1784,21 @@ function renderRemoteWeb(status: RemoteStatus): void {
   }
   access.hidden = false;
   urlEl.textContent = url;
-  qrToCanvas(qr, encodeQr(url), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+  drawQrOrClear(qr, url);
   qrNote.textContent = MESSAGES.remoteWebQrNote(status.pairing.kind === "open", language);
+}
+
+/** Draws `text` as a QR code, or clears the canvas when it cannot be
+ *  encoded — never a stale code from an earlier status, and never a throw
+ *  out of a status render (the text link beside it still works). Logs only
+ *  the failure, never the secret-bearing text. */
+function drawQrOrClear(canvas: HTMLCanvasElement, text: string): void {
+  try {
+    qrToCanvas(canvas, encodeQr(text), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+  } catch {
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    console.error("settings: the QR code could not be drawn");
+  }
 }
 
 /** Task 4 rule 4: the bridge's own idle-timer status (RemoteStatus.idle,

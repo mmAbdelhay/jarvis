@@ -1,6 +1,7 @@
-// A small, dependency-free QR Code encoder: byte mode only, error
-// correction level M, versions 1 through 10 (the smallest that fits is
-// chosen automatically). Vendored rather than pulled in as a dependency
+// A small, dependency-free QR Code encoder: byte mode only, versions 1
+// through 20 at error correction level M, falling back to level L when a
+// text is too long for 20-M (the smallest that fits is chosen
+// automatically). Vendored rather than pulled in as a dependency
 // (M4 ruling 34 / M6 ruling 3): the renderer has no bundler, and
 // packages/desktop/renderer/vendor/ already hosts xterm's own prebuilt
 // bundle under the same convention.
@@ -8,7 +9,7 @@
 // Implements ISO/IEC 18004: Reed-Solomon error correction over GF(256),
 // the standard function patterns (finder, separator, timing, alignment,
 // dark module), format information (a BCH(15,5) code) and, for versions
-// 7-10, version information (a BCH(18,6) code), then picks whichever of
+// 7 and up, version information (a BCH(18,6) code), then picks whichever of
 // the eight mask patterns scores lowest under the standard's four
 // penalty rules.
 //
@@ -22,53 +23,95 @@
 export interface QrCode {
   size: number;
   modules: boolean[][];
+  /** The error-correction level used: M, or L past version 20-M. */
+  level: QrErrorLevel;
 }
 
-// --- capacity tables (error correction level M only), index = version-1 --
+// --- capacity tables, index = version-1 ------------------------------------
 
-/** Total codewords (data + error correction), per version, 1..10. */
-const TOTAL_CODEWORDS: readonly number[] = [26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
-/** Error-correction codewords per block, level M, per version, 1..10. */
-const ECC_PER_BLOCK: readonly number[] = [10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
-/** Number of error-correction blocks, level M, per version, 1..10. */
-const NUM_BLOCKS: readonly number[] = [1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
-/** Bits left over after the last codeword once the grid is filled
- *  zig-zag, per version, 1..10 — placed as zero bits, never decoded. */
-const REMAINDER_BITS: readonly number[] = [0, 7, 7, 7, 7, 7, 0, 0, 0, 0];
-/** Alignment pattern centre coordinates, per version, 2..10 (version 1 has
- *  none). ISO/IEC 18004 Annex E. */
-const ALIGNMENT_COORDS: Readonly<Record<number, readonly number[]>> = {
-  2: [6, 18],
-  3: [6, 22],
-  4: [6, 26],
-  5: [6, 30],
-  6: [6, 34],
-  7: [6, 22, 38],
-  8: [6, 24, 42],
-  9: [6, 26, 46],
-  10: [6, 28, 50],
+/** The highest version this encoder builds. A 20-M code holds 666 bytes,
+ *  far past any pairing link; 20-L holds 858. */
+const MAX_VERSION = 20;
+
+export type QrErrorLevel = "L" | "M";
+
+/** Error-correction codewords per block, per version, 1..20 (ISO/IEC 18004
+ *  Table 9). */
+const ECC_PER_BLOCK: Readonly<Record<QrErrorLevel, readonly number[]>> = {
+  L: [7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28],
+  M: [10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26],
 };
+/** Number of error-correction blocks, per version, 1..20 (Table 9). */
+const NUM_BLOCKS: Readonly<Record<QrErrorLevel, readonly number[]>> = {
+  L: [1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8],
+  M: [1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16],
+};
+
+/** Modules left for data and error correction once every function pattern
+ *  is drawn (finders, timing, alignment, format and version information). */
+function rawDataModules(version: number): number {
+  let result = (16 * version + 128) * version + 64;
+  if (version >= 2) {
+    const alignCount = Math.floor(version / 7) + 2;
+    result -= (25 * alignCount - 10) * alignCount - 55;
+    if (version >= 7) result -= 36;
+  }
+  return result;
+}
+
+/** Total codewords (data + error correction). The rest of the raw modules
+ *  (0 or 7 bits, or 3/4 for the larger versions) are remainder bits,
+ *  placed as zeros and never decoded. */
+function totalCodewords(version: number): number {
+  return Math.floor(rawDataModules(version) / 8);
+}
+
+function remainderBits(version: number): number {
+  return rawDataModules(version) % 8;
+}
+
+/** Alignment pattern centre coordinates (ISO/IEC 18004 Annex E): none for
+ *  version 1, otherwise 6 plus evenly spaced positions ending 7 in from the
+ *  far edge. */
+function alignmentCoords(version: number): readonly number[] {
+  if (version === 1) return [];
+  const count = Math.floor(version / 7) + 2;
+  const size = 17 + 4 * version;
+  const step = Math.ceil((version * 4 + 4) / (count * 2 - 2)) * 2;
+  const coords = [6];
+  for (let position = size - 7; coords.length < count; position -= step) {
+    coords.splice(1, 0, position);
+  }
+  return coords;
+}
 
 const MODE_BYTE = 0b0100;
 /** ISO/IEC 18004 Table 25 error-correction-level indicator: L=01 M=00 Q=11 H=10. */
-const EC_LEVEL_M_BITS = 0b00;
+const EC_LEVEL_BITS: Readonly<Record<QrErrorLevel, number>> = { L: 0b01, M: 0b00 };
 
-function dataCodewordCount(version: number): number {
-  return TOTAL_CODEWORDS[version - 1]! - ECC_PER_BLOCK[version - 1]! * NUM_BLOCKS[version - 1]!;
+function dataCodewordCount(version: number, level: QrErrorLevel): number {
+  return totalCodewords(version) - ECC_PER_BLOCK[level][version - 1]! * NUM_BLOCKS[level][version - 1]!;
 }
 
 function charCountBits(version: number): number {
   return version <= 9 ? 8 : 16;
 }
 
-function chooseVersion(byteLength: number): number {
-  for (let version = 1; version <= 10; version += 1) {
-    const headerBits = 4 + charCountBits(version);
-    const capacityBits = dataCodewordCount(version) * 8;
-    const maxBytes = Math.floor((capacityBits - headerBits) / 8);
-    if (byteLength <= maxBytes) return version;
+function fitsIn(byteLength: number, version: number, level: QrErrorLevel): boolean {
+  const headerBits = 4 + charCountBits(version);
+  const capacityBits = dataCodewordCount(version, level) * 8;
+  return byteLength <= Math.floor((capacityBits - headerBits) / 8);
+}
+
+/** The smallest version that holds the text at level M; past version 20-M,
+ *  the smallest at level L (less error correction beats no code at all). */
+function chooseVersion(byteLength: number): { version: number; level: QrErrorLevel } {
+  for (const level of ["M", "L"] as const) {
+    for (let version = 1; version <= MAX_VERSION; version += 1) {
+      if (fitsIn(byteLength, version, level)) return { version, level };
+    }
   }
-  throw new Error(`text too long for a version 1-10 QR code at level M (${byteLength} bytes)`);
+  throw new Error(`text too long for a version 1-${MAX_VERSION} QR code (${byteLength} bytes)`);
 }
 
 // --- a plain bit buffer, MSB-first -----------------------------------------
@@ -162,7 +205,10 @@ class QrBuilder {
   readonly modules: boolean[][];
   private readonly isFunction: boolean[][];
 
-  constructor(private readonly version: number) {
+  constructor(
+    private readonly version: number,
+    private readonly level: QrErrorLevel,
+  ) {
     this.size = 17 + 4 * version;
     this.modules = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));
     this.isFunction = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));
@@ -203,8 +249,8 @@ class QrBuilder {
   }
 
   private drawAlignmentPatterns(): void {
-    const coords = ALIGNMENT_COORDS[this.version];
-    if (coords === undefined) return;
+    const coords = alignmentCoords(this.version);
+    if (coords.length === 0) return;
     const first = coords[0]!;
     const last = coords[coords.length - 1]!;
     for (const r of coords) {
@@ -275,7 +321,7 @@ class QrBuilder {
   }
 
   drawFormatBits(mask: number): void {
-    const bits = computeFormatBits(mask);
+    const bits = computeFormatBits(this.level, mask);
     const getBit = (i: number): boolean => ((bits >>> i) & 1) === 1;
     // ISO/IEC 18004 §7.9 / figure 25: the first copy runs down column 8
     // beside the top-left finder (bits 0-5 at rows 0-5), then around the
@@ -386,24 +432,22 @@ function finderPenalty(line: readonly boolean[]): number {
 /** BCH(15,5): 5 data bits (2-bit EC level + 3-bit mask) plus 10 error
  *  correction bits, generator 0x537, XORed with the fixed mask 0x5412
  *  (ISO/IEC 18004 Annex C). */
-function computeFormatBits(mask: number): number {
-  const data = (EC_LEVEL_M_BITS << 3) | mask;
+function computeFormatBits(level: QrErrorLevel, mask: number): number {
+  const data = (EC_LEVEL_BITS[level] << 3) | mask;
   let rem = data;
   for (let i = 0; i < 10; i += 1) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
   return ((data << 10) | rem) ^ 0x5412;
 }
 
 /** BCH(18,6): the 6-bit version number plus 12 error correction bits,
- *  generator 0x1f25 (ISO/IEC 18004 Annex D). Only used for versions 7-10. */
+ *  generator 0x1f25 (ISO/IEC 18004 Annex D). Only used for versions 7 and up. */
 function computeVersionBits(version: number): number {
   let rem = version;
   for (let i = 0; i < 12; i += 1) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
   return (version << 12) | rem;
 }
 
-export function encodeQr(text: string, level: "M" = "M"): QrCode {
-  void level; // the only level this encoder implements; kept for interface parity
-
+export function encodeQr(text: string): QrCode {
   const bytes: number[] = [];
   for (const ch of text) {
     const code = ch.codePointAt(0) ?? 0;
@@ -413,14 +457,14 @@ export function encodeQr(text: string, level: "M" = "M"): QrCode {
     bytes.push(code);
   }
 
-  const version = chooseVersion(bytes.length);
+  const { version, level } = chooseVersion(bytes.length);
 
   const buffer = new BitBuffer();
   buffer.appendBits(MODE_BYTE, 4);
   buffer.appendBits(bytes.length, charCountBits(version));
   for (const byte of bytes) buffer.appendBits(byte, 8);
 
-  const capacityBits = dataCodewordCount(version) * 8;
+  const capacityBits = dataCodewordCount(version, level) * 8;
   buffer.appendBits(0, Math.min(4, capacityBits - buffer.length));
   while (buffer.length % 8 !== 0) buffer.appendBits(0, 1);
   const padBytes = [0xec, 0x11];
@@ -432,8 +476,8 @@ export function encodeQr(text: string, level: "M" = "M"): QrCode {
 
   const allDataCodewords = buffer.toBytes();
 
-  const numBlocks = NUM_BLOCKS[version - 1]!;
-  const eccLen = ECC_PER_BLOCK[version - 1]!;
+  const numBlocks = NUM_BLOCKS[level][version - 1]!;
+  const eccLen = ECC_PER_BLOCK[level][version - 1]!;
   const shortLen = Math.floor(allDataCodewords.length / numBlocks);
   const numLongBlocks = allDataCodewords.length % numBlocks;
 
@@ -460,9 +504,9 @@ export function encodeQr(text: string, level: "M" = "M"): QrCode {
 
   const finalBits = new BitBuffer();
   for (const byte of [...interleavedData, ...interleavedEcc]) finalBits.appendBits(byte, 8);
-  finalBits.appendBits(0, REMAINDER_BITS[version - 1]!);
+  finalBits.appendBits(0, remainderBits(version));
 
-  const builder = new QrBuilder(version);
+  const builder = new QrBuilder(version, level);
   builder.drawFunctionPatterns();
   builder.placeData(finalBits.toBitArray());
 
@@ -481,5 +525,5 @@ export function encodeQr(text: string, level: "M" = "M"): QrCode {
   builder.applyMask(bestMask);
   builder.drawFormatBits(bestMask);
 
-  return { size: builder.size, modules: builder.modules };
+  return { size: builder.size, modules: builder.modules, level };
 }

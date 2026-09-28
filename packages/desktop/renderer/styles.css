@@ -2555,15 +2555,17 @@
 
   /* The pairing link carries the secret, so it is a one-motion copy: the
      whole thing selects on a single click/tap rather than a careful drag. */
-  .settings-remote-pair-code { user-select: all; }
+  .settings-remote-pair-code { user-select: all; overflow-wrap: anywhere; }
 
   /* Drawn at a small internal resolution (settings.ts QR_MODULE_PX) and
      scaled up to this fixed box — pixelated keeps the module edges crisp
-     instead of blurring them like the browser's default smoothing. */
+     instead of blurring them like the browser's default smoothing. The box
+     is never smaller than the canvas itself (a version-11 web pairing link
+     is 69 modules × 3px = 207px), so scaling never drops a module row. */
   .settings-remote-pair-qr {
     display: block;
-    width: 176px;
-    height: 176px;
+    width: 244px;
+    height: 244px;
     margin: var(--s2) 0;
     image-rendering: pixelated;
   }
