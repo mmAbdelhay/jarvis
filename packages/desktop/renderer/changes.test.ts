@@ -188,7 +188,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     })),
     openRemotePairing: vi.fn(async () => ({ ok: true as const, value: undefined })),
     cancelRemotePairing: vi.fn(async () => {}),
-    decideRemotePairing: vi.fn(async () => {}),
+    decideRemotePairing: vi.fn(async () => true),
     revokeRemoteDevice: vi.fn(async () => ({ ok: true as const, value: undefined })),
     ownerStatus: vi.fn(async () => ({ hasPassword: true, passkeys: [] })),
     setOwnerPassword: vi.fn(async () => ({ ok: true as const })),

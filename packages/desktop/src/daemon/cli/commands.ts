@@ -45,6 +45,9 @@ export type CliIo = {
   err(line: string): void;
   /** Whether stdin is a terminal a password can be typed into. */
   readonly stdinIsTTY: boolean;
+  /** Whether stdout is a terminal — the only place `pair` prints its
+   *  secret-bearing link and QR. */
+  readonly stdoutIsTTY: boolean;
   /** One line typed without echo; `undefined` on Ctrl-C or end of input. */
   readHidden(prompt: string): Promise<string | undefined>;
   /** The next line of stdin (echoed on a terminal); `undefined` at its end. */
@@ -131,6 +134,12 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   // it at once, whether or not the daemon runs.
   if (args.kind === "set-password" && !args.stdin && !io.stdinIsTTY) {
     io.err(CLI_MESSAGES.needsTerminal(language));
+    return DAEMON_EXIT.usage;
+  }
+  // The pairing link and its QR carry the pairing secret: printed into a
+  // pipe or a redirect they would outlive the window in a file or a log.
+  if (args.kind === "pair" && !io.stdoutIsTTY) {
+    io.err(CLI_MESSAGES.pairNeedsTerminal(language));
     return DAEMON_EXIT.usage;
   }
 
@@ -316,8 +325,14 @@ async function pair(client: CliClient, deps: CliDeps): Promise<number> {
       const answer = await io.readLine(CLI_MESSAGES.pairApprovePrompt(language));
       if (settled) return;
       const approve = yes(answer);
-      await client.invoke("remote:decidePair", [request.requestId, approve]);
-      if (approve) {
+      // The daemon says whether the answer reached the request: one that
+      // expired (or was cancelled) while the prompt waited is reported as
+      // such, never as approved or declined.
+      const reached = await client.invoke("remote:decidePair", [request.requestId, approve]);
+      if (reached !== true) {
+        io.err(CLI_MESSAGES.pairRequestGone(language));
+        finish(DAEMON_EXIT.failed);
+      } else if (approve) {
         io.out(CLI_MESSAGES.pairApproved(language));
         finish(DAEMON_EXIT.ok);
       } else {

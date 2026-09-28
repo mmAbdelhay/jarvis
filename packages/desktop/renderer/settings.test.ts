@@ -243,7 +243,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
       }),
     openRemotePairing: () => Promise.resolve({ ok: true, value: undefined }),
     cancelRemotePairing: () => Promise.resolve(),
-    decideRemotePairing: () => Promise.resolve(),
+    decideRemotePairing: () => Promise.resolve(true),
     revokeRemoteDevice: () => Promise.resolve({ ok: true, value: undefined }),
     // Phase 0: every harness starts with an owner password already set, so
     // the Enable switch behaves as it did before the gate existed; the
@@ -2177,7 +2177,7 @@ describe("remote access section", () => {
       onRemoteStatus: (cb: (status: ReturnType<typeof statusOf>) => void) => {
         pushed = cb;
       },
-      decideRemotePairing: () => Promise.resolve(),
+      decideRemotePairing: () => Promise.resolve(true),
     });
     await settle();
 
@@ -3159,7 +3159,7 @@ describe("Settings: owner account (Phase 0)", () => {
       onRemoteStatus: (cb) => {
         push = cb;
       },
-      decideRemotePairing: () => Promise.resolve(),
+      decideRemotePairing: () => Promise.resolve(true),
     });
     const status = (ownerVersion: number): Pushed => ({
       enabled: true,

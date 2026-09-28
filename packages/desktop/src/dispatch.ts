@@ -953,10 +953,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // Ignored unless both arguments are already the shape the confirmation
     // dialog can only ever produce — a phone cannot reach this channel at
     // all (desktop-only), but the coercion stays exactly as strict as every
-    // other boundary here.
+    // other boundary here. The result says whether the decision reached a
+    // live request: the jarvisd CLI reports "approved" only then (a y/N
+    // answered after the request expired lands on nothing).
     "remote:decidePair": ([requestId, approve]) => {
-      if (typeof requestId !== "string" || typeof approve !== "boolean") return;
-      deps.remote.decidePairing(requestId, approve);
+      if (typeof requestId !== "string" || typeof approve !== "boolean") return false;
+      return deps.remote.decidePairing(requestId, approve);
     },
     "remote:revoke": async ([deviceId]) => {
       if (typeof deviceId !== "string") return invalidArgument(deps.language);

@@ -4,7 +4,8 @@
 // one chunk (`printf 'old\nnew\n' | jarvisd set-password --stdin`) are both
 // kept. A hidden read switches the terminal to raw mode, where nothing is
 // echoed and Ctrl-C arrives as a byte rather than a signal; it echoes
-// nothing back, not even a mask, and restores the mode however it ends.
+// nothing back, not even a mask, and restores the mode however it ends —
+// Enter, Ctrl-C, Ctrl-D, or a terminating signal from outside.
 //
 // No electron here (core/no-electron.test.ts).
 import type { CliIo } from "./commands.js";
@@ -15,12 +16,21 @@ type Output = { write(text: string): unknown };
 const CTRL_C = "\u0003";
 const CTRL_D = "\u0004";
 const BACKSPACE = new Set(["\u007f", "\b"]);
+/** Signals that end the process, with the shell's 128+n exit code. */
+const TERMINATING: readonly ["SIGINT" | "SIGTERM" | "SIGHUP", number][] = [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+];
 
 export function nodeCliIo(streams: {
   stdin: Input;
   stdout: Output;
   stderr: Output;
-  onSignal(signal: "SIGINT", listener: () => void): () => void;
+  stdoutIsTTY: boolean;
+  onSignal(signal: "SIGINT" | "SIGTERM" | "SIGHUP", listener: () => void): () => void;
+  /** Ends the process with `code` (after a terminating signal). */
+  exit(code: number): void;
 }): CliIo {
   const { stdin, stdout, stderr } = streams;
   let buffer = "";
@@ -44,6 +54,7 @@ export function nodeCliIo(streams: {
     out: (line) => void stdout.write(`${line}\n`),
     err: (line) => void stderr.write(`${line}\n`),
     stdinIsTTY: stdin.isTTY === true,
+    stdoutIsTTY: streams.stdoutIsTTY,
 
     readLine(prompt) {
       if (prompt !== undefined) stderr.write(prompt);
@@ -77,7 +88,17 @@ export function nodeCliIo(streams: {
       stderr.write(prompt);
       return new Promise((resolve) => {
         let value: string[] = [];
+        // A kill while the terminal is raw (SIGTERM, SIGHUP, an external
+        // SIGINT) would otherwise leave the user's shell with echo off:
+        // restore the mode first, then end as the signal would have.
+        const offSignals = TERMINATING.map(([signal, code]) =>
+          streams.onSignal(signal, () => {
+            finish(undefined);
+            streams.exit(code);
+          }),
+        );
         const finish = (result: string | undefined) => {
+          for (const off of offSignals.splice(0)) off();
           stdin.off("data", onData);
           stdin.setRawMode(false);
           stdin.pause();

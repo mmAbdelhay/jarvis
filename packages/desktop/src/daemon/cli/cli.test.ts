@@ -25,6 +25,8 @@ type FakeIo = CliIo & {
 
 function fakeIo(options: {
   tty?: boolean;
+  /** stdout is a terminal unless said otherwise. */
+  stdoutTty?: boolean;
   lines?: (string | undefined)[];
   hidden?: (string | undefined)[];
   /** Keep readLine pending instead of answering (Ctrl-C tests). */
@@ -38,6 +40,7 @@ function fakeIo(options: {
     errLines: [],
     prompts: [],
     stdinIsTTY: options.tty ?? false,
+    stdoutIsTTY: options.stdoutTty ?? true,
     out: (line) => void io.outLines.push(line),
     err: (line) => void io.errLines.push(line),
     readLine(prompt) {
@@ -391,11 +394,12 @@ describe("pair", () => {
     },
   });
 
-  function pairingClient(sequence: RemoteStatus[]) {
+  function pairingClient(sequence: RemoteStatus[], decisionReached = true) {
     let index = 0;
     return fakeClient((channel) => {
       if (channel === "remote:pair") return { ok: true, value: undefined };
       if (channel === "remote:status") return sequence[Math.min(index++, sequence.length - 1)];
+      if (channel === "remote:decidePair") return decisionReached;
       return undefined;
     });
   }
@@ -451,6 +455,33 @@ describe("pair", () => {
       expect(client.calls.at(-1)?.channel).toBe("remote:cancelPair");
       expect(client.calls.map((call) => call.channel)).not.toContain("remote:decidePair");
       expect(io.errLines).toContain(CLI_MESSAGES.cancelled("en"));
+    }
+  });
+
+  it("refuses when stdout is not a terminal, before connecting", async () => {
+    const io = fakeIo({ stdoutTty: false });
+    const connect = vi.fn();
+    const code = await runCli(["pair"], { ...deps(io, pairingClient([open])), connect });
+    expect(code).toBe(2);
+    expect(connect).not.toHaveBeenCalled();
+    expect(io.outLines).toEqual([]);
+    expect(io.errLines).toEqual([CLI_MESSAGES.pairNeedsTerminal("en")]);
+    expect(CLI_MESSAGES.pairNeedsTerminal("ar")).not.toBe(CLI_MESSAGES.pairNeedsTerminal("en"));
+  });
+
+  it("reports a request that ended before the answer, never 'Approved'", async () => {
+    for (const answer of ["y", "n"]) {
+      const io = fakeIo({ lines: [answer] });
+      const client = pairingClient([open, confirming], false);
+      const d = deps(io, client);
+      const done = runCli(["pair"], d);
+      await flush();
+      d.tick();
+      expect(await done).toBe(1);
+      expect(client.calls.at(-1)?.channel).toBe("remote:decidePair");
+      expect(io.errLines).toContain(CLI_MESSAGES.pairRequestGone("en"));
+      expect(io.outLines).not.toContain(CLI_MESSAGES.pairApproved("en"));
+      expect(io.errLines).not.toContain(CLI_MESSAGES.pairDeclined("en"));
     }
   });
 

@@ -36,6 +36,8 @@ async function main(argv: readonly string[]): Promise<void> {
     stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
+    stdoutIsTTY: process.stdout.isTTY === true,
+    exit: (code) => process.exit(code),
     onSignal(signal, listener) {
       process.on(signal, listener);
       return () => process.off(signal, listener);

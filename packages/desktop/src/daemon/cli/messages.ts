@@ -167,6 +167,18 @@ export const CLI_MESSAGES = {
   },
   deviceIdle: (language: Language): string => pick(language, "غير متصل", "offline"),
   never: (language: Language): string => pick(language, "أبدًا", "never"),
+  pairNeedsTerminal: (language: Language): string =>
+    pick(
+      language,
+      "يحتاج pair إلى طرفية: رابط الإقران ورمزه يحملان سرّ الإقران، فلا يُطبعان في ملف أو أنبوب.",
+      "pair needs a terminal: the pairing link and QR carry the pairing secret, so they are never printed into a file or a pipe.",
+    ),
+  pairRequestGone: (language: Language): string =>
+    pick(
+      language,
+      "انتهى طلب الإقران قبل وصول ردّك، فلم يُطبَّق شيء.",
+      "The pairing request ended before your answer reached it; nothing was applied.",
+    ),
   pairAppLink: (language: Language): string =>
     pick(language, "رابط تطبيق الهاتف:", "Phone app link:"),
   pairWebLink: (language: Language): string => pick(language, "رابط المتصفح:", "Browser link:"),

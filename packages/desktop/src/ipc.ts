@@ -812,8 +812,10 @@ export type RendererApi = {
   openRemotePairing(): Promise<GitViewResult<undefined>>;
   cancelRemotePairing(): Promise<void>;
   /** The laptop's second human step (spec): names the requesting device
-   *  before a token is ever minted. */
-  decideRemotePairing(requestId: string, approve: boolean): Promise<void>;
+   *  before a token is ever minted. Resolves true when the decision
+   *  reached the request, false when that request was already gone
+   *  (expired, cancelled, or another decision won). */
+  decideRemotePairing(requestId: string, approve: boolean): Promise<boolean>;
   revokeRemoteDevice(deviceId: string): Promise<GitViewResult<undefined>>;
   /** Phase 0: whether an owner password exists, and the stored passkeys
    *  (id, label, createdAt only). Desktop-only by policy. */

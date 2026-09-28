@@ -1224,10 +1224,18 @@ describe("dispatch table: remote controls", () => {
   it('remote:decidePair("id","yes") is ignored: decidePairing is only called for a real boolean', async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    await call(table, "remote:decidePair", "id", "yes");
+    expect(await call(table, "remote:decidePair", "id", "yes")).toBe(false);
     expect(deps.remote.decidePairing).not.toHaveBeenCalled();
     await call(table, "remote:decidePair", "id", true);
     expect(deps.remote.decidePairing).toHaveBeenCalledWith("id", true);
+  });
+
+  it("remote:decidePair returns whether the decision reached a live request", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    vi.mocked(deps.remote.decidePairing).mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect(await call(table, "remote:decidePair", "live", true)).toBe(true);
+    expect(await call(table, "remote:decidePair", "gone", true)).toBe(false);
   });
 
   it("remote:revoke refuses a non-string id with invalidArgument", async () => {
