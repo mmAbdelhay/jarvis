@@ -6,6 +6,7 @@ import {
   activeNavKey,
   clockText,
   runningCountOf,
+  shellLaptopName,
   topBarModel,
   wideNavItems,
 } from "./wide-shell-model";
@@ -183,5 +184,22 @@ describe("clockText", () => {
   it("shows 24-hour minutes", () => {
     expect(clockText(new Date(2026, 8, 28, 7, 5, 59))).toBe("07:05");
     expect(clockText(new Date(2026, 8, 28, 18, 12))).toBe("18:12");
+  });
+});
+
+describe("shellLaptopName", () => {
+  it("uses the laptop's display name when the pairing record has one", () => {
+    expect(shellLaptopName({ laptopName: "Studio Mac", name: "studio.tail1.ts.net" })).toBe(
+      "Studio Mac",
+    );
+  });
+
+  it("falls back to the machine label of the certificate name (what pairing stores today)", () => {
+    expect(shellLaptopName({ name: "e1089167.tailfee19e.ts.net" })).toBe("e1089167");
+  });
+
+  it("shows nothing for a pinned (IP) pairing with no name", () => {
+    expect(shellLaptopName({})).toBeUndefined();
+    expect(shellLaptopName(undefined)).toBeUndefined();
   });
 });

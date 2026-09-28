@@ -22,7 +22,13 @@ import type { TopBarView } from "@/lib/top-bar-store";
 import { topBarStoreFor } from "@/lib/top-bar-store";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { textDirection } from "@/lib/voice-screen";
-import { activeNavKey, clockText, topBarModel, wideNavItems } from "@/lib/wide-shell-model";
+import {
+  activeNavKey,
+  clockText,
+  shellLaptopName,
+  topBarModel,
+  wideNavItems,
+} from "@/lib/wide-shell-model";
 
 export function WideShell(props: { children: React.ReactNode }): React.JSX.Element {
   const layout = useLayoutClass();
@@ -52,13 +58,14 @@ function useClock(): string {
 
 /** The paired laptop's name, from the same pairing record the phone's
  *  Dashboard header reads. A re-pair goes through /pair, which remounts the
- *  shell, so reading it once per mount is enough. */
+ *  shell, so reading it once per mount is enough. Falls back to the
+ *  certificate's machine label (see `shellLaptopName`). */
 function useLaptopName(): string | undefined {
   const [name, setName] = useState<string | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     void loadPairing(expoSecureStore).then((loaded) => {
-      if (!cancelled) setName(loaded?.record.laptopName);
+      if (!cancelled) setName(shellLaptopName(loaded?.record));
     });
     return () => {
       cancelled = true;

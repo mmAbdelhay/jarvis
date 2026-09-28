@@ -120,6 +120,19 @@ export function topBarModel(input: {
   };
 }
 
+/** The laptop name beside the connection pill: the record's display name,
+ *  else the machine label of the certificate name a system-trust pairing
+ *  dials (`studio` of `studio.tail1.ts.net`; no current pairing flow
+ *  stores a display name). A pinned IP pairing has neither. */
+export function shellLaptopName(
+  record: { laptopName?: string; name?: string } | undefined,
+): string | undefined {
+  const display = record?.laptopName?.trim();
+  if (display !== undefined && display.length > 0) return display;
+  const label = record?.name?.split(".")[0]?.trim();
+  return label === undefined || label.length === 0 ? undefined : label;
+}
+
 /** The desktop clock: 24-hour HH:MM, Latin digits in both languages. */
 export function clockText(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");

@@ -12,3 +12,9 @@ export function phoneBackHandler(showBack: boolean, clear: () => void): () => bo
     return true;
   };
 }
+
+/** Whether to register that listener: only Android has a hardware Back
+ *  (react-native-web's BackHandler logs an error when used). */
+export function phoneBackListens(platform: string, showBack: boolean): boolean {
+  return platform === "android" && showBack;
+}
