@@ -209,7 +209,14 @@ export const STRINGS = {
   "plans.queue": { en: "Queue", ar: "إضافة إلى الانتظار" },
   "plans.sendNow": { en: "Send now", ar: "إرسال الآن" },
   "plans.save": { en: "Save", ar: "حفظ" },
-  "plans.changedOnDisk": { en: "Changed on disk", ar: "تغيّرت الخطة على القرص" },
+  "plans.changedOnDiskKept": {
+    en: "The plan changed on disk — your text is kept. Save again to apply it.",
+    ar: "تغيّرت الخطة على القرص — نصّك محفوظ. احفظ مرة أخرى لتطبيقه.",
+  },
+  "plans.blockGoneKept": {
+    en: "This section is gone — your text is kept below, but can't be saved.",
+    ar: "لم يعد هذا القسم موجودًا — نصّك محفوظ أدناه، لكن لا يمكن حفظه.",
+  },
   "plans.queuedCount": { en: "{count} comments queued", ar: "{count} تعليقات في الانتظار" },
   "plans.sendToClaude": { en: "Send to Claude", ar: "إرسال إلى Claude" },
   "plans.sendCountToClaude": {

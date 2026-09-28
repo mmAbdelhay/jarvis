@@ -17,12 +17,18 @@ export function PlanBlockSheet(props: {
   const [body, setBody] = useState("");
   const [source, setSource] = useState("");
   const [activeBlock, setActiveBlock] = useState<PlanBlock>();
+  const [notice, setNotice] = useState<"changedOnDisk" | "blockGone">();
+  const { store } = props;
   useEffect(() => {
     setMode("comment");
     setBody("");
     setSource(props.block?.source ?? "");
     setActiveBlock(props.block);
-  }, [props.block]);
+    setNotice(undefined);
+    // Final fix wave M4: an error left over from an earlier action is not
+    // about this block — never show it as this sheet opens.
+    if (props.block !== undefined) store.clearError();
+  }, [props.block, store]);
   const block = activeBlock ?? props.block;
   if (block === undefined) return null;
   const blockId = block.id;
@@ -36,24 +42,23 @@ export function PlanBlockSheet(props: {
     props.onClose();
   }
 
+  // Final fix wave I4: a refused save never replaces what the user typed.
+  // On a conflict only the target (and so the base mtime) moves to the
+  // fresh doc — Save again applies the same text; a block that is gone
+  // keeps the sheet open with the text and a notice instead of closing.
   async function save() {
-    const path = props.store.state.doc?.path;
-    const result = await props.store.writeBlock(blockId, source);
-    if (result === "conflict") {
-      if (path === undefined) return;
-      await props.store.open(path);
-      const fresh = props.store.state.doc?.blocks.find((item) => item.id === blockId);
-      Alert.alert(t(props.language, "plans.changedOnDisk"));
-      if (fresh === undefined) {
-        props.onClose();
-        return;
-      }
-      setActiveBlock(fresh);
-      setSource(fresh.source);
+    if (notice === "blockGone" || block === undefined) return;
+    const outcome = await props.store.saveBlock(block, source);
+    if (outcome.kind === "saved") {
+      props.onClose();
       return;
     }
-    if (result === "ok") props.onClose();
-    else Alert.alert(planErrorText(props.language, props.store.state.error?.code ?? "saveFailed"));
+    if (outcome.kind === "kept") {
+      if (outcome.block !== undefined) setActiveBlock(outcome.block);
+      setNotice(outcome.notice);
+      return;
+    }
+    Alert.alert(planErrorText(props.language, props.store.state.error?.code ?? "saveFailed"));
   }
 
   return (
@@ -112,6 +117,16 @@ export function PlanBlockSheet(props: {
             </>
           ) : (
             <>
+              {notice !== undefined && (
+                <View style={styles.errorBanner}>
+                  <Text style={styles.errorText}>
+                    {t(
+                      props.language,
+                      notice === "blockGone" ? "plans.blockGoneKept" : "plans.changedOnDiskKept",
+                    )}
+                  </Text>
+                </View>
+              )}
               <TextInput
                 multiline
                 value={source}
@@ -120,11 +135,13 @@ export function PlanBlockSheet(props: {
               />
               <View style={styles.actions}>
                 <Action label={t(props.language, "common.cancel")} onPress={props.onClose} />
-                <Action
-                  primary
-                  label={t(props.language, "plans.save")}
-                  onPress={() => void save()}
-                />
+                {notice !== "blockGone" && (
+                  <Action
+                    primary
+                    label={t(props.language, "plans.save")}
+                    onPress={() => void save()}
+                  />
+                )}
               </View>
             </>
           )}

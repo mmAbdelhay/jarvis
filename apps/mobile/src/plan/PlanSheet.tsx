@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -11,11 +12,12 @@ import {
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import { t, type Language } from "../lib/i18n";
 import type { PlansStore } from "../lib/plans-store";
+import { allowTerminalNavigation, TERMINAL_WEBVIEW_PROPS } from "../lib/terminal-webview-config";
 import { theme } from "../lib/theme";
 import { PlanBlockSheet } from "./PlanBlockSheet";
 import { PlanCommentsScreen } from "./PlanCommentsScreen";
 import { planErrorText } from "./plan-error";
-import { buildPlanPage } from "./plan-page";
+import { buildPlanPage, parsePlanPageMessage } from "./plan-page";
 import type { PlanBlock, PlanEntry } from "./types";
 
 export function PlanSheet(props: {
@@ -33,12 +35,7 @@ export function PlanSheet(props: {
   useEffect(() => props.store.subscribe(() => redraw((value) => value + 1)), [props.store]);
   useEffect(() => {
     if (!props.visible) return;
-    void props.store.load().then(() => {
-      if (props.store.state.doc !== undefined) return;
-      const list = props.store.state.list;
-      const first = list?.session ?? list?.planMode[0] ?? list?.repo[0];
-      if (first !== undefined) void props.store.open(first.path);
-    });
+    void props.store.openDefault();
   }, [props.visible, props.store]);
 
   const state = props.store.state;
@@ -61,12 +58,14 @@ export function PlanSheet(props: {
   );
 
   function onMessage(event: WebViewMessageEvent) {
-    try {
-      const message = JSON.parse(event.nativeEvent.data) as { type?: unknown; id?: unknown };
-      if (message.type !== "block" || typeof message.id !== "string") return;
+    // Final fix wave I5: the page never navigates itself — a link tap
+    // arrives here, and only an http(s) URL (parsePlanPageMessage) is ever
+    // handed to the OS. Malformed or other messages are ignored.
+    const message = parsePlanPageMessage(event.nativeEvent.data);
+    if (message?.kind === "link") {
+      void Linking.openURL(message.url).catch(() => undefined);
+    } else if (message?.kind === "block") {
       setSelectedBlock(state.doc?.blocks.find((block) => block.id === message.id));
-    } catch {
-      // Ignore malformed messages. The page should only send the tiny block-id shape above.
     }
   }
 
@@ -136,13 +135,9 @@ export function PlanSheet(props: {
             </View>
           ) : (
             <WebView
-              source={{ html }}
-              originWhitelist={["about:blank"]}
-              javaScriptEnabled
-              domStorageEnabled={false}
-              allowFileAccess={false}
-              allowUniversalAccessFromFileURLs={false}
-              mixedContentMode="never"
+              {...TERMINAL_WEBVIEW_PROPS}
+              source={{ html, baseUrl: "about:blank" }}
+              onShouldStartLoadWithRequest={(request) => allowTerminalNavigation(request.url)}
               onMessage={onMessage}
               style={styles.webview}
             />

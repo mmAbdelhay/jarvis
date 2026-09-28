@@ -220,4 +220,121 @@ describe("createPlansStore", () => {
     unsubscribe();
     expect(client.unsubscribe).toHaveBeenCalledWith("plans:changed");
   });
+  // Final fix wave I4: a phone conflict keeps what the user typed — only the
+  // base mtime moves to the fresh doc — and a block that is gone keeps the
+  // sheet open with the text and a notice.
+  it("saveBlock on a conflict keeps the block (by id) and moves the base mtime, so a retry writes the typed text", async () => {
+    const fresh = { ...doc, mtimeMs: 13 };
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      ok({ ok: false, reason: "conflict", doc: fresh }),
+      ok({ ok: true, value: fresh }),
+      ok([]),
+      ok({ ok: true, value: { ...fresh, mtimeMs: 14 } }),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+
+    const outcome = await store.saveBlock(doc.blocks[0]!, "Typed");
+    expect(outcome).toEqual({ kind: "kept", block: fresh.blocks[0], notice: "changedOnDisk" });
+
+    await expect(store.saveBlock(fresh.blocks[0]!, "Typed")).resolves.toEqual({ kind: "saved" });
+    expect(client.call).toHaveBeenLastCalledWith("plans:writeBlock", [doc.path, "b1", "Typed", 13]);
+  });
+
+  it("saveBlock on a conflict falls back to the same-kind block at the same index when the id changed", async () => {
+    const changed = { ...doc.blocks[0]!, id: "b1-changed", source: "Hello there" };
+    const fresh = { ...doc, mtimeMs: 13, blocks: [changed] };
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      ok({ ok: false, reason: "conflict", doc: fresh }),
+      ok({ ok: true, value: fresh }),
+      ok([]),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+
+    await expect(store.saveBlock(doc.blocks[0]!, "Typed")).resolves.toEqual({
+      kind: "kept",
+      block: changed,
+      notice: "changedOnDisk",
+    });
+  });
+
+  it("saveBlock reports a gone block (missing-block, or nothing left to target) without discarding anything", async () => {
+    const fresh = { ...doc, mtimeMs: 13, blocks: [] };
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      ok({ ok: false, reason: "missing-block", doc: fresh }),
+      ok({ ok: true, value: fresh }),
+      ok([]),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+
+    await expect(store.saveBlock(doc.blocks[0]!, "Typed")).resolves.toEqual({
+      kind: "kept",
+      block: undefined,
+      notice: "blockGone",
+    });
+  });
+
+  it("saveBlock reports any other failure as an error", async () => {
+    const client = fakeClient([
+      ok({ ok: true, value: doc }),
+      ok([]),
+      ok({ ok: false, reason: "io" }),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open(doc.path);
+    await expect(store.saveBlock(doc.blocks[0]!, "Typed")).resolves.toEqual({ kind: "error" });
+  });
+
+  // Final fix wave M4.
+  it("clearError drops a stale error and notifies subscribers", async () => {
+    const client = fakeClient([{ ok: false, error: { kind: "offline" } } as RpcResult]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.load();
+    expect(store.state.error).toBeDefined();
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.clearError();
+    expect(store.state.error).toBeUndefined();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  // Final fix wave M5: the terminal header's "Plan · N" is right before the
+  // sheet is ever opened.
+  it("openDefault loads the list, opens the session plan and its comments", async () => {
+    const anchored = [
+      { ...comment, number: 1, anchor: { kind: "block", blockId: "b1", text: "Hello" } },
+    ];
+    const client = fakeClient([ok(list), ok({ ok: true, value: doc }), ok(anchored)]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+
+    await store.openDefault();
+
+    expect(client.call.mock.calls).toEqual([
+      ["plans:list", ["pane-1"]],
+      ["plans:read", [list.session.path]],
+      ["plans:comments", [doc.path]],
+    ]);
+    expect(store.state.comments).toEqual(anchored);
+  });
+
+  it("openDefault keeps an already-open plan instead of switching back", async () => {
+    const client = fakeClient([
+      ok({ ok: true, value: { ...doc, path: "/other.md" } }),
+      ok([]),
+      ok(list),
+    ]);
+    const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+    await store.open("/other.md");
+    await store.openDefault();
+    expect(store.state.doc?.path).toBe("/other.md");
+    expect(client.call).toHaveBeenCalledTimes(3);
+  });
 });

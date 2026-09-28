@@ -91,6 +91,11 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
   );
   const plansStore = useMemo(() => createPlansStore({ client, paneKey }), [client, paneKey]);
   useEffect(() => plansStore.subscribe(() => setPlanRevision((value) => value + 1)), [plansStore]);
+  // Final fix wave M5: the header's "Plan · N" counts the open plan's queued
+  // comments, so the default plan is opened on mount, not first on sheet open.
+  useEffect(() => {
+    void plansStore.openDefault();
+  }, [plansStore]);
 
   useFocusEffect(
     useCallback(() => {

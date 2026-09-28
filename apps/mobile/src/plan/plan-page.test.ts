@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnchoredComment, PlanDoc } from "./types";
-import { buildPlanPage } from "./plan-page";
+import { buildPlanPage, parsePlanPageMessage } from "./plan-page";
 
 const colors = {
   surface: "rgb(1,2,3)",
@@ -66,5 +66,60 @@ describe("buildPlanPage", () => {
     expect(page).not.toContain('<button class="pin"');
     expect(page).toContain('JSON.stringify({type:"block",id:block.dataset.blockId})');
     expect(page).toContain('if(event.target.closest("a"))return');
+  });
+});
+
+// Final fix wave I5: a link tap never navigates the WebView — the page
+// cancels it and hands the href to React Native, which opens only http(s).
+describe("plan page links", () => {
+  it("the page script cancels a link tap and posts {type:'link', href} instead of a block id", () => {
+    const linkDoc: PlanDoc = {
+      ...doc,
+      blocks: [{ ...doc.blocks[0]!, html: '<p>See <a href="https://example.com/x">docs</a></p>' }],
+    };
+    const page = buildPlanPage(linkDoc, [], "en", colors);
+    const script = page.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+    const posted: string[] = [];
+    const listeners: Array<(event: unknown) => void> = [];
+    let prevented = false;
+    const anchor = {
+      getAttribute: (name: string) => (name === "href" ? "https://example.com/x" : null),
+    };
+    const target = {
+      closest: (selector: string) => (selector === "a[href]" || selector === "a" ? anchor : null),
+    };
+    const fakeDocument = {
+      addEventListener: (_type: string, listener: (event: unknown) => void) =>
+        listeners.push(listener),
+      querySelectorAll: () => [],
+    };
+    const fakeWindow = { ReactNativeWebView: { postMessage: (data: string) => posted.push(data) } };
+    new Function("window", "document", script)(fakeWindow, fakeDocument);
+
+    for (const listener of listeners) {
+      listener({ target, preventDefault: () => (prevented = true) });
+    }
+
+    expect(prevented).toBe(true);
+    expect(posted.map((data) => JSON.parse(data))).toEqual([
+      { type: "link", href: "https://example.com/x" },
+    ]);
+  });
+
+  it("parsePlanPageMessage opens only http(s) links", () => {
+    const link = (href: string) => parsePlanPageMessage(JSON.stringify({ type: "link", href }));
+    expect(link("https://example.com/a")).toEqual({ kind: "link", url: "https://example.com/a" });
+    expect(link("http://example.com/a")).toEqual({ kind: "link", url: "http://example.com/a" });
+    expect(link("jarvis://pair?x=1")).toBeUndefined();
+    expect(link("javascript:alert(1)")).toBeUndefined();
+    expect(link("JavaScript:alert(1)")).toBeUndefined();
+    expect(link("data:text/html,hi")).toBeUndefined();
+    expect(link("/relative")).toBeUndefined();
+    expect(parsePlanPageMessage(JSON.stringify({ type: "block", id: "b1" }))).toEqual({
+      kind: "block",
+      id: "b1",
+    });
+    expect(parsePlanPageMessage("not json")).toBeUndefined();
+    expect(parsePlanPageMessage(JSON.stringify({ type: "link", href: 5 }))).toBeUndefined();
   });
 });

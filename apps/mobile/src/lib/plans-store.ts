@@ -1,5 +1,12 @@
 import type { RpcClient, RpcResult } from "./rpc-client";
-import type { AnchoredComment, PlanComment, PlanDoc, PlanList, PlanResult } from "../plan/types";
+import type {
+  AnchoredComment,
+  PlanBlock,
+  PlanComment,
+  PlanDoc,
+  PlanList,
+  PlanResult,
+} from "../plan/types";
 
 export type PlansState = {
   list?: PlanList;
@@ -22,13 +29,33 @@ export type PlanActionResult<T = undefined> =
   | { ok: true; value: T }
   | { ok: false; error: PlanError };
 
+/** Final fix wave I4: what became of an edited block's save. `kept` means
+ *  the write was refused because the plan changed (or the block is gone):
+ *  the caller keeps the user's typed text, retargeted at `block` — the
+ *  same block in the fresh doc, whose mtime is now the base — or, with no
+ *  `block`, just shown alongside the notice. */
+export type BlockSaveOutcome =
+  | { kind: "saved" }
+  | { kind: "kept"; block: PlanBlock | undefined; notice: "changedOnDisk" | "blockGone" }
+  | { kind: "error" };
+
 export type PlansStore = {
   state: PlansState;
   load(): Promise<void>;
   open(path: string): Promise<void>;
+  /** Final fix wave M5: loads the list and, unless a plan is already open,
+   *  opens the pane's default plan (session, else the newest plan-mode or
+   *  repo entry) with its comments. */
+  openDefault(): Promise<void>;
   addComment(blockId: string, quote: string, body: string): Promise<PlanActionResult<PlanComment>>;
   send(ids?: string[]): Promise<PlanActionResult>;
-  writeBlock(blockId: string, source: string): Promise<"ok" | "conflict" | "error">;
+  writeBlock(
+    blockId: string,
+    source: string,
+  ): Promise<"ok" | "conflict" | "missing-block" | "error">;
+  saveBlock(block: PlanBlock, source: string): Promise<BlockSaveOutcome>;
+  /** Final fix wave M4: drops a stale error (e.g. when a sheet opens). */
+  clearError(): void;
   subscribe(cb: () => void): () => void;
 };
 
@@ -165,7 +192,10 @@ export function createPlansStore(deps: PlansStoreDeps): PlansStore {
     return { ok: true, value: undefined };
   }
 
-  async function writeBlock(blockId: string, source: string): Promise<"ok" | "conflict" | "error"> {
+  async function writeBlock(
+    blockId: string,
+    source: string,
+  ): Promise<"ok" | "conflict" | "missing-block" | "error"> {
     const current = state.doc;
     if (current === undefined) return "error";
     const result = await deps.client.call("plans:writeBlock", [
@@ -184,12 +214,47 @@ export function createPlansStore(deps: PlansStoreDeps): PlansStore {
       if (outcome.doc !== undefined) state.doc = outcome.doc;
       state.error = reasonError(outcome.reason, "saveFailed", outcome.detail);
       emit();
-      return outcome.reason === "conflict" ? "conflict" : "error";
+      return outcome.reason === "conflict" || outcome.reason === "missing-block"
+        ? outcome.reason
+        : "error";
     }
     state.doc = outcome.value;
     state.error = undefined;
     emit();
     return "ok";
+  }
+
+  async function saveBlock(block: PlanBlock, source: string): Promise<BlockSaveOutcome> {
+    const before = state.doc;
+    const result = await writeBlock(block.id, source);
+    if (result === "ok") return { kind: "saved" };
+    if (result === "error" || before === undefined) return { kind: "error" };
+    // Re-read (doc + comments) so the base mtime and the pins are current;
+    // the typed text itself stays with the caller untouched.
+    await open(before.path);
+    const fresh = state.doc;
+    const index = before.blocks.findIndex((item) => item.id === block.id);
+    const atIndex = index < 0 ? undefined : fresh?.blocks[index];
+    const target =
+      fresh?.blocks.find((item) => item.id === block.id) ??
+      (atIndex?.kind === block.kind ? atIndex : undefined);
+    return target === undefined
+      ? { kind: "kept", block: undefined, notice: "blockGone" }
+      : { kind: "kept", block: target, notice: "changedOnDisk" };
+  }
+
+  async function openDefault(): Promise<void> {
+    await load();
+    if (state.doc !== undefined) return;
+    const list = state.list;
+    const first = list?.session ?? list?.planMode[0] ?? list?.repo[0];
+    if (first !== undefined) await open(first.path);
+  }
+
+  function clearError(): void {
+    if (state.error === undefined) return;
+    state.error = undefined;
+    emit();
   }
 
   function subscribe(cb: () => void): () => void {
@@ -211,5 +276,16 @@ export function createPlansStore(deps: PlansStoreDeps): PlansStore {
     };
   }
 
-  return { state, load, open, addComment, send, writeBlock, subscribe };
+  return {
+    state,
+    load,
+    open,
+    openDefault,
+    addComment,
+    send,
+    writeBlock,
+    saveBlock,
+    clearError,
+    subscribe,
+  };
 }
