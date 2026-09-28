@@ -51,6 +51,7 @@ describe("wideNavItems", () => {
       STRINGS["nav.voice"].ar,
       STRINGS["nav.settings"].ar,
     ]);
+    for (const item of items) expect(item.label).toMatch(/^[؀-ۿ\s]+$/);
   });
 });
 

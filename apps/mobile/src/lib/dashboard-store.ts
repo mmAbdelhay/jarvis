@@ -72,7 +72,7 @@ function parseProjects(value: unknown): ProjectSummary[] {
 // parse the same way) — this derives the Dashboard's narrower
 // `SessionSummary` from its result rather than re-checking the same
 // fields independently.
-function parseSessions(value: unknown): SessionSummary[] {
+export function parseSessions(value: unknown): SessionSummary[] {
   if (!Array.isArray(value)) return [];
   const sessions: SessionSummary[] = [];
   for (const item of value) {
@@ -101,7 +101,7 @@ const REQUIRED_METRIC_KEYS = [
   "uptimeSeconds",
 ] as const;
 
-function parseMetrics(value: unknown): SystemMetrics | undefined {
+export function parseMetrics(value: unknown): SystemMetrics | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const obj = value as Record<string, unknown>;
   for (const key of REQUIRED_METRIC_KEYS) {

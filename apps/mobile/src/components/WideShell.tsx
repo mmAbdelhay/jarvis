@@ -12,21 +12,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionView } from "@/lib/connection-store";
-import type { DashboardView } from "@/lib/dashboard-store";
-import { createDashboardStore } from "@/lib/dashboard-store";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
+import type { TopBarView } from "@/lib/top-bar-store";
+import { topBarStoreFor } from "@/lib/top-bar-store";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { textDirection } from "@/lib/voice-screen";
-import {
-  activeNavKey,
-  clockText,
-  runningCountOf,
-  topBarModel,
-  wideNavItems,
-} from "@/lib/wide-shell-model";
+import { activeNavKey, clockText, topBarModel, wideNavItems } from "@/lib/wide-shell-model";
 
 export function WideShell(props: { children: React.ReactNode }): React.JSX.Element {
   const layout = useLayoutClass();
@@ -60,21 +54,16 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
   const pathname = usePathname();
   const client = useRpcClient();
   const connectionStore = useConnectionStore();
-  // The same store and pushes the Dashboard uses (metrics:update,
-  // sessions:update); the client ref-counts the subscriptions.
-  const store = useMemo(() => createDashboardStore({ client }), [client]);
-  const [view, setView] = useState<DashboardView>(store.get());
+  // One shared store per client for every top bar (tabs shell, Settings):
+  // cached metrics show at once, and no extra list calls.
+  const store = topBarStoreFor(client);
+  const [view, setView] = useState<TopBarView>(store.get());
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   const clock = useClock();
 
   useEffect(() => {
     setView(store.get());
-    const unsubscribe = store.subscribe(setView);
-    store.focus();
-    return () => {
-      unsubscribe();
-      store.blur();
-    };
+    return store.subscribe(setView);
   }, [store]);
   useEffect(() => {
     setConnection(connectionStore.get());
@@ -83,7 +72,7 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
 
   const model = topBarModel({
     metrics: view.metrics,
-    runningCount: runningCountOf(view.sessions),
+    runningCount: view.runningCount,
     connection,
     compact: props.compact,
   });
@@ -93,7 +82,7 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
     // `direction` mirrors the whole bar in Arabic on native and web alike.
     <View style={[styles.bar, { paddingTop: props.topInset, direction: textDirection(language) }]}>
       <Text style={styles.brand}>JARVIS</Text>
-      <View style={styles.nav}>
+      <View style={styles.nav} accessibilityRole="tablist">
         {wideNavItems(language).map((item) => {
           const on = item.key === active;
           return (
@@ -103,7 +92,7 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
               onPress={() => {
                 if (!on) router.navigate(item.href);
               }}
-              accessibilityRole="button"
+              accessibilityRole="tab"
               accessibilityState={{ selected: on }}
             >
               <Text style={[styles.navText, on && styles.navTextOn]}>{item.label}</Text>
