@@ -466,11 +466,27 @@ function trimTrailingPerLine(text: string): string {
     .join("\n");
 }
 
+// Drops wholly-blank lines off the end of `text`. A block's own `source`
+// can end with one or more blank lines it never actually "owns" — parsePlan
+// gives a list immediately followed by another block a range that absorbs
+// the blank separator line between them (see blocks.ts's replaceBlock doc
+// comment) — while a reconstruction built from that block's own rendered
+// content (listToMarkdown, in particular) has no reason to reproduce a
+// separator belonging to the next block. That mismatch must not itself read
+// as an edit.
+function trimTrailingBlankLines(text: string): string {
+  const lines = text.split("\n");
+  while (lines.length > 1 && lines.at(-1) === "") lines.pop();
+  return lines.join("\n");
+}
+
 /**
  * The no-op rule: an edit that reduces to the original source once each
- * line's trailing whitespace is trimmed is not a real edit, and should not
- * trigger a write.
+ * line's trailing whitespace, then any wholly-blank trailing lines, are
+ * trimmed from both sides is not a real edit, and should not trigger a
+ * write.
  */
 export function isNoopEdit(next: string, source: string): boolean {
-  return trimTrailingPerLine(next) === trimTrailingPerLine(source);
+  const normalize = (text: string) => trimTrailingBlankLines(trimTrailingPerLine(text));
+  return normalize(next) === normalize(source);
 }

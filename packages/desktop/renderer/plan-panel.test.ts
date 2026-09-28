@@ -1006,6 +1006,60 @@ describe("createPlanPanel: block editing (Task 7b)", () => {
     expect(writeBlock).toHaveBeenCalledTimes(1);
   });
 
+  // Bug fix: applyConflict bailed on `disposed || !conflict` BEFORE doing
+  // its result.ok bookkeeping (currentDoc, lastOwnWrite, comments refresh).
+  // Discard clears `conflict` without waiting for an Apply write already in
+  // flight; when that write later lands successfully, the old code threw
+  // away the fresh doc/mtime entirely even though the write had already
+  // landed on disk. The next save then went out with a stale mtimeMs and
+  // was falsely rejected as a conflict against the panel's own prior write.
+  it("keeps currentDoc's fresh mtime once an in-flight Apply write lands, even after Discard cleared the conflict first", async () => {
+    const revisedDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1000,
+      blocks: [blocks[0]!, { ...blocks[1]!, id: "paragraph-1-changed" }],
+    };
+    const appliedDoc: PlanDoc = { ...revisedDoc, mtimeMs: revisedDoc.mtimeMs + 1000 };
+    let resolveApply!: (value: PlanResult<PlanDoc>) => void;
+    const writeBlock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: "conflict" as const, doc: revisedDoc })
+      .mockImplementationOnce(
+        () =>
+          new Promise<PlanResult<PlanDoc>>((resolve) => {
+            resolveApply = resolve;
+          }),
+      )
+      .mockResolvedValue({ ok: true, value: appliedDoc });
+    const api = fakeApi({ plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    paragraphEl(panel.element).dispatchEvent(new Event("blur"));
+    await flush();
+
+    click(panel.element.querySelector('[data-action="apply-edit-conflict"]'));
+    await flush(); // Apply's write is now in flight, paused on resolveApply
+
+    click(panel.element.querySelector('[data-action="discard-edit-conflict"]'));
+    expect(panel.element.querySelector(".plan-panel__conflict")).toBeNull();
+
+    resolveApply({ ok: true, value: appliedDoc });
+    await flush();
+
+    // A brand new edit starts editing with `baseMtimeMs: currentDoc.mtimeMs`
+    // -- if the panel kept the stale revisedDoc, this save goes out with
+    // the wrong mtime and would be a false conflict against its own write.
+    clickBlock(panel.element.querySelector('[data-block-id="heading-1"]'));
+    const heading = panel.element.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+    heading.querySelector("h1")!.textContent = "Build it now";
+    heading.dispatchEvent(new Event("input", { bubbles: true }));
+    heading.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(writeBlock.mock.calls.at(-1)?.[3]).toBe(appliedDoc.mtimeMs);
+  });
+
   // Superseded by fix round 3, item A: loadDocument itself now decides
   // echo-vs-real-change and dirty-vs-clean, which needs the freshly read
   // mtime — so notifyChanged forwards unconditionally rather than

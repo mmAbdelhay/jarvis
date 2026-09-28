@@ -75,7 +75,11 @@ export function parsePlanPageMessage(data: string): PlanPageMessage | undefined 
       return undefined;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    return { kind: "link", url: message.href };
+    // Bug fix: hand back the parsed `url.href`, not the raw `message.href`
+    // string that was only validated in shape -- otherwise onMessage's
+    // Linking.openURL acts on text nobody actually parsed, defeating the
+    // point of validating it here at all.
+    return { kind: "link", url: url.href };
   }
   return undefined;
 }

@@ -257,6 +257,18 @@ function usesCrlf(markdown: string): boolean {
  * splicing so the result doesn't end up with mixed line endings — a bare
  * `\n` from the replacement sitting next to `\r\n` from the rest of the
  * file.
+ *
+ * A block's own range can absorb the blank line that separates it from the
+ * next block — markdown-it's `token.map` does this for a list immediately
+ * followed by another block, so `block.source` itself ends with `"\n"` (see
+ * `parsePlan`'s doc comment). A caller that reconstructs `newSource` from
+ * that block's own rendered content alone (e.g. the renderer's
+ * `listToMarkdown`) has no reason to reproduce a separator that belongs to
+ * the *next* block, so it never emits one. Splicing that shorter text in
+ * naively would silently drop the separator and merge the two blocks on
+ * re-parse — this counts the original range's own trailing blank lines and
+ * always re-appends exactly that many, regardless of how many (if any)
+ * `newSource` itself ends with.
  */
 export function replaceBlock(
   markdown: string,
@@ -266,7 +278,30 @@ export function replaceBlock(
   const lines = markdown.split("\n");
   const crlf = usesCrlf(markdown);
   const hadTrailingNewline = markdown.endsWith("\n");
+
+  // Trailing blank (empty, or whitespace-only) lines at the END of the
+  // replaced range, in the ORIGINAL file — counted back from `block.end - 1`
+  // so a CRLF line's own trailing `\r` doesn't make it look non-blank.
+  let originalTrailingBlankLines = 0;
+  for (let i = block.end - 1; i >= block.start; i--) {
+    const line = lines[i] ?? "";
+    const stripped = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (stripped.trim() !== "") break;
+    originalTrailingBlankLines++;
+  }
+
   const normalizedNewLines = newSource.replace(/\r\n?/g, "\n").split("\n");
+  // Strip whatever trailing blank lines `newSource` itself ends with — it
+  // may have none (the common case above), or more than the original range
+  // had (an edit that was typed/pasted with extra blank lines at the end) —
+  // so the count re-appended below is always exactly the original's own,
+  // never added on top of it.
+  while (normalizedNewLines.length > 1 && normalizedNewLines.at(-1) === "") {
+    normalizedNewLines.pop();
+  }
+  for (let i = 0; i < originalTrailingBlankLines; i++) {
+    normalizedNewLines.push("");
+  }
 
   // The replacement's last line becomes the file's own last line — with no
   // line break after it — exactly when this block reaches the true end of a

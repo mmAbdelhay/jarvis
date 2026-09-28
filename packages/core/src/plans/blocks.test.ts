@@ -141,6 +141,71 @@ describe("replaceBlock", () => {
     expect(result).toBe("A.\r\n\r\nX.");
     expect(result.endsWith("\r")).toBe(false);
   });
+
+  // Critical bug: parsePlan gives a list block's line range through the
+  // blank line that separates it from the next block (markdown-it's own
+  // token.map includes it), so `block.source` for "- a\n- b\n\npara" is
+  // "- a\n- b\n" — but a converter that reconstructs a list from its own DOM
+  // (plan-dom-markdown's listToMarkdown) never emits that trailing blank
+  // line back. Splicing its output in naively drops the separator, and the
+  // paragraph becomes a lazy continuation of the list on re-parse.
+  describe("keeps the separator blank line a block's range absorbed (data-corruption fix)", () => {
+    it("a list edit without the trailing blank line keeps the paragraph after it separate", () => {
+      const doc = "- a\n- b\n\npara";
+      const blocks = parsePlan(doc);
+      const list = blocks[0];
+      if (list === undefined) throw new Error("expected the list block");
+      expect(list.kind).toBe("list");
+      expect(list.source).toBe("- a\n- b\n"); // absorbs the blank separator line
+
+      // The converter's real output for an edited list never carries the
+      // trailing blank line — this is deliberately just "- a\n- b2".
+      const result = replaceBlock(doc, list, "- a\n- b2");
+
+      expect(result).toBe("- a\n- b2\n\npara");
+      const reparsed = parsePlan(result);
+      expect(reparsed.map((b) => b.kind)).toEqual(["list", "paragraph"]);
+      expect(reparsed[1]?.source).toBe("para");
+    });
+
+    it("CRLF: the re-appended blank line matches the file's own line ending", () => {
+      const doc = "- a\r\n- b\r\n\r\npara";
+      const blocks = parsePlan(doc);
+      const list = blocks[0];
+      if (list === undefined) throw new Error("expected the list block");
+
+      const result = replaceBlock(doc, list, "- a\n- b2");
+
+      expect(result).toBe("- a\r\n- b2\r\n\r\npara");
+      expect(/(?<!\r)\n/.test(result)).toBe(false);
+    });
+
+    it("a block without trailing blank lines is unchanged (no spurious blank line added)", () => {
+      const doc = "Paragraph 0.\n\nParagraph 1.\n\nParagraph 2.";
+      const blocks = parsePlan(doc);
+      const target = blocks[1];
+      if (target === undefined) throw new Error("expected block 1");
+      expect(target.source).toBe("Paragraph 1."); // no trailing blank line absorbed
+
+      const result = replaceBlock(doc, target, "Edited.");
+
+      expect(result).toBe("Paragraph 0.\n\nEdited.\n\nParagraph 2.");
+    });
+
+    it("an edit that itself ends with extra blank lines is normalised to the original count", () => {
+      const doc = "- a\n- b\n\npara";
+      const blocks = parsePlan(doc);
+      const list = blocks[0];
+      if (list === undefined) throw new Error("expected the list block");
+
+      // The edit text itself carries 3 trailing blank lines -- more than
+      // the original range's 1 -- and must be normalised down to 1, not
+      // added on top of it.
+      const result = replaceBlock(doc, list, "- a\n- b2\n\n\n");
+
+      expect(result).toBe("- a\n- b2\n\npara");
+    });
+  });
 });
 
 describe("parsePlan — HTML safety and links", () => {

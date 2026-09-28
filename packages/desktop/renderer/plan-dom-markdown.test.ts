@@ -317,6 +317,23 @@ describe("isNoopEdit", () => {
   it("does not ignore leading whitespace", () => {
     expect(isNoopEdit("  Hello", "Hello")).toBe(false);
   });
+
+  // Bug fix: parsePlan's block.source for a list immediately followed by a
+  // blank line then another block absorbs that trailing blank line (see
+  // blocks.test.ts), but listToMarkdown's own reconstruction never emits
+  // one. An untouched list block must still read as a no-op edit despite
+  // that mismatch, or it triggers a write on a plain click-then-blur.
+  it("is a no-op for a list whose source absorbed the trailing blank line that separates it from the next block", () => {
+    const source = "- a\n- b\n";
+    const next = blockToMarkdown(render(source), original("list", source));
+    expect(next).toBe("- a\n- b"); // the converter never emits that blank line
+    expect(isNoopEdit(next, source)).toBe(true);
+  });
+
+  it("is not a no-op when a list's content actually changed, even with the trailing blank line mismatch", () => {
+    const source = "- a\n- b\n";
+    expect(isNoopEdit("- a\n- b2", source)).toBe(false);
+  });
 });
 
 describe("final fix wave I1: markup rich editing must not drop", () => {

@@ -110,6 +110,16 @@ describe("plan page links", () => {
     const link = (href: string) => parsePlanPageMessage(JSON.stringify({ type: "link", href }));
     expect(link("https://example.com/a")).toEqual({ kind: "link", url: "https://example.com/a" });
     expect(link("http://example.com/a")).toEqual({ kind: "link", url: "http://example.com/a" });
+    // Bug fix: the validated URL is a `new URL(href)` object, but the raw,
+    // unparsed `href` string was returned instead of its own `.href` --
+    // handing the OS the string that was validated only in shape, not the
+    // one that was actually parsed (a classic validate-one-thing,
+    // act-on-another gap). The default-port case below is a deterministic,
+    // Node-stable way to prove the two diverge.
+    expect(link("https://example.com:443/a")).toEqual({
+      kind: "link",
+      url: "https://example.com/a",
+    });
     expect(link("jarvis://pair?x=1")).toBeUndefined();
     expect(link("javascript:alert(1)")).toBeUndefined();
     expect(link("JavaScript:alert(1)")).toBeUndefined();

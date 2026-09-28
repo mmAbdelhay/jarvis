@@ -1505,6 +1505,17 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       renderDocument();
       return;
     }
+    // Bug fix: this write already landed on disk once `result.ok` — that
+    // bookkeeping must happen regardless of whether Discard already cleared
+    // `conflict` (or the panel got disposed) while the write was in flight.
+    // Skipping it left `currentDoc`/`lastOwnWrite` stale even though the
+    // file had moved on, so the panel's own next save went out with a
+    // stale mtimeMs and was falsely rejected as a conflict against itself.
+    if (result.ok) {
+      currentDoc = result.value;
+      lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
+      void refreshCommentsAfterOwnWrite(currentDoc.path);
+    }
     if (disposed || !conflict) return;
     if (!result.ok) {
       if (result.doc) currentDoc = result.doc;
@@ -1518,11 +1529,8 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       renderDocument();
       return;
     }
-    currentDoc = result.value;
-    lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
     conflict = undefined;
     renderDocument();
-    void refreshCommentsAfterOwnWrite(currentDoc.path);
     consumePendingEditTarget();
   }
 
