@@ -514,9 +514,31 @@ export function createPlanFiles(deps: {
 
         const newStatted = await statOrReason(real);
         if (!newStatted.ok) return newStatted.result;
+        let finalInfo = newStatted.info;
+
+        // On some filesystems (observed on Linux ext4 in CI) a write can
+        // land within the same mtime tick as the file's previous mtime, so
+        // the rename above may leave `real`'s mtime unchanged from
+        // `baseMtimeMs` rather than strictly later. A second, already-
+        // queued write holding that same `baseMtimeMs` would then read this
+        // tied mtime, see it match, and wrongly proceed — a lost update.
+        // Guarantee every successful write moves mtime strictly forward by
+        // force-advancing it one millisecond past base when the tick tied
+        // or (impossibly, but just as unsafe) went backward.
+        if (finalInfo.mtimeMs <= baseMtimeMs) {
+          try {
+            await fs.utimes(real, finalInfo.atime, new Date(Math.floor(baseMtimeMs) + 1));
+          } catch (error) {
+            return { ok: false, reason: "io", detail: String(error) };
+          }
+          const restatted = await statOrReason(real);
+          if (!restatted.ok) return restatted.result;
+          finalInfo = restatted.info;
+        }
+
         return {
           ok: true,
-          value: { path, mtimeMs: newStatted.info.mtimeMs, blocks: parsePlan(updated) },
+          value: { path, mtimeMs: finalInfo.mtimeMs, blocks: parsePlan(updated) },
         };
       });
     },

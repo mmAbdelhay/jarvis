@@ -575,6 +575,76 @@ describe("writeBlock", () => {
     }
   });
 
+  it("advances mtime past base even when a write lands in the same mtime tick, so a queued stale write still conflicts", async () => {
+    const base = await tempDir("write-same-tick");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const path = join(plansDir, "doc.md");
+    const source = ["# Title", "", "First paragraph.", "", "- item one", "- item two", ""].join(
+      "\n",
+    );
+    await writeFile(path, source);
+
+    // Force a whole-second mtime: immune to any sub-second precision the
+    // underlying filesystem might not preserve, so setting it again below
+    // round-trips back to exactly this same value.
+    const fixedMtime = new Date(Math.floor(Date.now() / 1000) * 1000);
+    await utimes(path, fixedMtime, fixedMtime);
+    const info = await stat(path);
+    const mtimeMs = info.mtimeMs;
+
+    // A fs wrapper that, right after the atomic rename lands the new
+    // content, forces the file's mtime back to exactly the base mtime —
+    // reproducing the same-tick collision this fix guards against: on some
+    // filesystems a write can land within the same mtime tick as the
+    // file's previous mtime, so a naive post-write stat would equal
+    // `baseMtimeMs`, and a second queued write holding that same base
+    // would wrongly pass the conflict check and silently discard the
+    // first write.
+    let forced = false;
+    const sameTickFs: typeof fsPromises = {
+      ...fsPromises,
+      async rename(...args: Parameters<typeof fsPromises.rename>) {
+        await fsPromises.rename(...args);
+        if (!forced) {
+          forced = true;
+          const target = args[1] as string;
+          await fsPromises.utimes(target, fixedMtime, fixedMtime);
+        }
+      },
+    } as unknown as typeof fsPromises;
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base, fs: sameTickFs });
+    const blocks = parsePlan(source);
+    const heading = blocks.find((b) => b.kind === "heading");
+    const paragraph = blocks.find((b) => b.kind === "paragraph");
+    if (heading === undefined || paragraph === undefined) {
+      throw new Error("fixture is missing a heading or paragraph block");
+    }
+
+    const first = await planFiles.writeBlock(path, heading.id, "# Edit A", mtimeMs);
+    expect(first.ok).toBe(true);
+    if (first.ok) {
+      // Despite the forced same-tick collision, the fix must have bumped
+      // mtime strictly past base.
+      expect(first.value.mtimeMs).toBeGreaterThan(mtimeMs);
+    }
+
+    // A second write still holding the original base mtime — as a writer
+    // queued behind the first would be — must now conflict rather than
+    // silently overwrite it.
+    const second = await planFiles.writeBlock(path, paragraph.id, "Edit B.", mtimeMs);
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.reason).toBe("conflict");
+      expect(second.doc?.mtimeMs).toBeGreaterThan(mtimeMs);
+    }
+
+    const written = await readFile(path, "utf8");
+    expect(written).toContain("# Edit A");
+    expect(written).not.toContain("Edit B.");
+  });
+
   it("replaces one block's source and leaves every other line identical", async () => {
     const { path, source, mtimeMs, planFiles } = await planWithFile("write-ok");
     const blocks = parsePlan(source);
