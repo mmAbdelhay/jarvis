@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, Text } from "react-native";
 import { t } from "@/lib/i18n";
@@ -17,10 +17,14 @@ export default function SessionScreen() {
   const language = useLanguage();
   const router = useRouter();
   const { kind } = useLayoutClass();
-  const redirect = id === undefined ? undefined : wideRedirectFor(kind, id);
+  const focused = useIsFocused();
+  const redirect = wideRedirectFor(kind, id);
+  // Only while this screen is on top: a session route buried under Changes
+  // or Transcript must not pop them when the window widens. It redirects
+  // once the user comes back to it.
   useEffect(() => {
-    if (redirect !== undefined) router[WIDE_REDIRECT_METHOD](redirect);
-  }, [redirect, router]);
+    if (focused && redirect !== undefined) router[WIDE_REDIRECT_METHOD](redirect);
+  }, [focused, redirect, router]);
   // Never mount the detail here while redirecting: the split mounts its own.
   if (redirect !== undefined) return null;
   if (id === undefined) return <Text style={styles.status}>{t(language, "session.notFound")}</Text>;

@@ -1,7 +1,15 @@
 import type { SessionState } from "@jarvis/core";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  I18nManager,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/components/SessionRow";
 import { formatSessionElapsed } from "@/lib/format";
@@ -15,8 +23,9 @@ import {
   openSession,
   SESSIONS_LIST_WIDTH,
   sessionTarget,
+  sessionPresence,
   sessionsSplit,
-  splitDirection,
+  splitLayout,
 } from "@/lib/session-nav";
 import { sessionRouteId } from "@/lib/session-screen";
 import type { SessionRowView, SessionsView } from "@/lib/sessions-store";
@@ -81,13 +90,28 @@ export default function SessionsScreen() {
   const { kind } = useLayoutClass();
   const wide = kind === "wide";
   const selectedId = sessionRouteId(useLocalSearchParams().id);
-  const split = sessionsSplit(kind, selectedId);
-  const direction = splitDirection(language);
+  // Set once a `sessions:list` has answered since mount: until then an
+  // empty list says nothing about whether the selected session exists.
+  const [listed, setListed] = useState(false);
+  const loadingSeen = useRef(false);
+  const presence = sessionPresence({
+    listed,
+    loading: view.loading,
+    failed: view.error !== undefined,
+    found: selectedId !== undefined && store.find(selectedId) !== undefined,
+  });
+  const split = sessionsSplit(kind, selectedId, presence);
+  const layout = splitLayout({ language, platformRtl: I18nManager.getConstants().isRTL });
+  const paneDirection = { direction: layout.paneDirection };
 
   useFocusEffect(
     useCallback(() => {
       setView(store.get());
-      const unsubscribe = store.subscribe(setView);
+      const unsubscribe = store.subscribe((next) => {
+        setView(next);
+        if (next.loading) loadingSeen.current = true;
+        else if (loadingSeen.current) setListed(true);
+      });
       store.focus();
       return () => {
         unsubscribe();
@@ -193,26 +217,19 @@ export default function SessionsScreen() {
   );
 
   return (
-    <View style={[styles.split, { flexDirection: direction.flexDirection }]}>
+    // Mirrored like the top bar: the container takes the reading direction
+    // (a plain row, so native's forced RTL never flips it twice) and each
+    // pane goes back to the platform's own direction.
+    <View style={[styles.split, { direction: layout.direction }]}>
       {split.showList && (
         // Always wrapped, so a rotation never remounts the list either. The
         // pane, not the ScrollView, takes the width: on web the refresh
         // control repeats the ScrollView's style on an inner element.
-        <View
-          style={
-            wide
-              ? [
-                  styles.listPane,
-                  direction.divider === "right" ? styles.dividerRight : styles.dividerLeft,
-                ]
-              : styles.fill
-          }
-        >
-          {list}
-        </View>
+        <View style={[wide ? styles.listPane : styles.fill, paneDirection]}>{list}</View>
       )}
+      {wide && split.showList && <View style={styles.divider} />}
       {split.detailKey !== undefined && (
-        <View style={[styles.detailPane, !wide && { paddingTop: insets.top }]}>
+        <View style={[styles.detailPane, paneDirection, !wide && { paddingTop: insets.top }]}>
           {split.showBack && (
             <TouchableOpacity
               style={styles.back}
@@ -228,7 +245,7 @@ export default function SessionsScreen() {
         </View>
       )}
       {split.showEmpty && (
-        <View style={styles.emptyPane}>
+        <View style={[styles.emptyPane, paneDirection]}>
           <Text style={styles.empty}>{t(language, "sessions.pick")}</Text>
         </View>
       )}
@@ -237,11 +254,10 @@ export default function SessionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  split: { flex: 1, backgroundColor: theme.colors.background },
+  split: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
   fill: { flex: 1 },
   listPane: { width: SESSIONS_LIST_WIDTH, flexShrink: 0 },
-  dividerRight: { borderRightWidth: 1, borderRightColor: theme.colors.hairlineSoft },
-  dividerLeft: { borderLeftWidth: 1, borderLeftColor: theme.colors.hairlineSoft },
+  divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
   detailPane: { flex: 1, minWidth: 0 },
   emptyPane: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   back: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: theme.colors.ground },

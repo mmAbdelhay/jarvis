@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-// The real stack router expo-router runs (an internal module, but the only
-// honest way to show what `dismissTo` does to the history in node).
-import { StackRouter } from "expo-router/build/react-navigation/routers/StackRouter";
 import {
   openSession,
+  sessionPresence,
   sessionTarget,
   sessionsSplit,
-  splitDirection,
+  firstChildSide,
+  splitLayout,
   WIDE_REDIRECT_METHOD,
   wideRedirectFor,
 } from "./session-nav";
@@ -51,6 +50,11 @@ describe("wideRedirectFor", () => {
     expect(wideRedirectFor("wide", "a")).toBe("/sessions?id=a");
   });
 
+  it("sends an invalid id on wide to the split with nothing selected", () => {
+    expect(wideRedirectFor("wide", undefined)).toBe("/sessions");
+    expect(wideRedirectFor("phone", undefined)).toBeUndefined();
+  });
+
   it("leaves a phone on the session screen", () => {
     expect(wideRedirectFor("phone", "a")).toBeUndefined();
   });
@@ -80,6 +84,20 @@ describe("sessionsSplit (Review Focus 1)", () => {
     });
   });
 
+  it("falls back to the empty pane on wide when the list no longer has the session", () => {
+    expect(sessionsSplit("wide", "a", "missing")).toEqual({
+      showList: true,
+      detailKey: undefined,
+      showEmpty: true,
+      showBack: false,
+    });
+    // Still loading, or offline: keep the selection.
+    expect(sessionsSplit("wide", "a", "unknown").detailKey).toBe("a");
+    expect(sessionsSplit("wide", "a", "found").detailKey).toBe("a");
+    // A phone keeps its detail, which shows its own not-found text.
+    expect(sessionsSplit("phone", "a", "missing").detailKey).toBe("a");
+  });
+
   it("shows an empty pane on wide with no selection, and the plain list on a phone", () => {
     expect(sessionsSplit("wide", undefined)).toEqual({
       showList: true,
@@ -96,58 +114,79 @@ describe("sessionsSplit (Review Focus 1)", () => {
   });
 });
 
-describe("splitDirection (Review Focus 5)", () => {
-  it("puts the list first in English and on the right in Arabic", () => {
-    expect(splitDirection("en")).toEqual({ flexDirection: "row", divider: "right" });
-    expect(splitDirection("ar")).toEqual({ flexDirection: "row-reverse", divider: "left" });
+describe("sessionPresence", () => {
+  const base = { listed: true, loading: false, failed: false, found: false };
+  it("is missing only after a clean list without the session", () => {
+    expect(sessionPresence(base)).toBe("missing");
+    expect(sessionPresence({ ...base, found: true })).toBe("found");
+  });
+
+  it("is unknown before the first list, while loading, or after a failed list", () => {
+    expect(sessionPresence({ ...base, listed: false })).toBe("unknown");
+    expect(sessionPresence({ ...base, loading: true })).toBe("unknown");
+    expect(sessionPresence({ ...base, failed: true })).toBe("unknown");
   });
 });
 
+describe("splitLayout (Review Focus 5)", () => {
+  const listSide = (language: "ar" | "en", platformRtl: boolean) =>
+    firstChildSide(splitLayout({ language, platformRtl }).direction);
+
+  it("puts the list on the right in Arabic on native, where _layout forced RTL", () => {
+    expect(listSide("ar", true)).toBe("right");
+  });
+
+  it("puts the list on the right in Arabic on web, where forceRTL is ignored", () => {
+    expect(listSide("ar", false)).toBe("right");
+  });
+
+  it("puts the list on the left in English on both", () => {
+    expect(listSide("en", false)).toBe("left");
+    // English chosen but the RTL force not yet undone (it needs a restart).
+    expect(listSide("en", true)).toBe("left");
+  });
+
+  it("keeps each pane in the platform's own direction, like the phone screens", () => {
+    expect(splitLayout({ language: "ar", platformRtl: true }).paneDirection).toBe("rtl");
+    expect(splitLayout({ language: "ar", platformRtl: false }).paneDirection).toBe("ltr");
+  });
+});
+
+// A local model of the root stack, with expo-router's documented semantics:
+// `replace` swaps the top route for a new one; `dismissTo` pops back to an
+// existing route of that name, or replaces the top route when none exists.
+type Route = { key: string; name: string };
+let nextKey = 0;
+function apply(stack: Route[], method: "replace" | "dismissTo", name: string): Route[] {
+  const fresh = { key: `k${nextKey++}`, name };
+  if (method === "dismissTo") {
+    const at = stack.map((r) => r.name).lastIndexOf(name);
+    if (at !== -1) return stack.slice(0, at + 1);
+  }
+  return [...stack.slice(0, -1), fresh];
+}
+const names = (stack: Route[]) => stack.map((r) => r.name);
+
 describe("the wide redirect's history (Review Focus 3)", () => {
-  const router = StackRouter({});
-  const routeNames = ["(tabs)", "session/[id]"];
-  const options = { routeNames, routeParamList: {}, routeGetIdList: {} };
-  // What `router.dismissTo("/sessions?id=a")` dispatches on the root stack.
-  const redirect = {
-    type: "POP_TO" as const,
-    payload: { name: "(tabs)", params: { screen: "sessions", params: { id: "a" } } },
-  };
+  const redirect = (stack: Route[]) => apply(stack, WIDE_REDIRECT_METHOD, "(tabs)");
 
   it("is a dismissTo, never a push", () => {
     expect(WIDE_REDIRECT_METHOD).toBe("dismissTo");
   });
 
   it("replaces a deep-linked session screen, leaving nothing to go back to", () => {
-    const state = {
-      stale: false as const,
-      type: "stack" as const,
-      key: "root",
-      index: 0,
-      routeNames,
-      preloadedRoutes: [],
-      routes: [{ key: "s", name: "session/[id]", params: { id: "a" } }],
-    };
-    const next = router.getStateForAction(state, redirect, options);
-    expect(next?.routes.map((r) => r.name)).toEqual(["(tabs)"]);
-    expect(next?.index).toBe(0);
-    expect(router.getStateForAction(next as never, { type: "GO_BACK" }, options)).toBeNull();
+    const next = redirect([{ key: "s", name: "session/[id]" }]);
+    expect(names(next)).toEqual(["(tabs)"]);
   });
 
   it("returns to the existing tabs after a phone push, with no second tabs entry", () => {
-    const state = {
-      stale: false as const,
-      type: "stack" as const,
-      key: "root",
-      index: 1,
-      routeNames,
-      preloadedRoutes: [],
-      routes: [
-        { key: "t", name: "(tabs)", params: undefined },
-        { key: "s", name: "session/[id]", params: { id: "a" } },
-      ],
-    };
-    const next = router.getStateForAction(state, redirect, options);
-    expect(next?.routes.map((r) => r.key)).toEqual(["t"]);
-    expect(next?.routes[0]?.params).toEqual({ screen: "sessions", params: { id: "a" } });
+    const tabs = { key: "t", name: "(tabs)" };
+    const next = redirect([tabs, { key: "s", name: "session/[id]" }]);
+    expect(next).toEqual([tabs]);
+    // What `replace` would have done instead: a second tabs navigator.
+    expect(names(apply([tabs, { key: "s", name: "session/[id]" }], "replace", "(tabs)"))).toEqual([
+      "(tabs)",
+      "(tabs)",
+    ]);
   });
 });

@@ -36,9 +36,12 @@ export function openSession(router: SessionRouter, target: SessionTarget): void 
   else router.navigate({ pathname: target.href, params: target.params });
 }
 
-/** The `/session/[id]` route on a wide screen shows the split instead. */
-export function wideRedirectFor(kind: LayoutClass, id: string): string | undefined {
-  return kind === "wide" ? `/sessions?id=${encodeURIComponent(id)}` : undefined;
+/** The `/session/[id]` route on a wide screen shows the split instead; an
+ *  invalid id goes to the split with nothing selected, never a dead page
+ *  (this route has no header and no shell on wide). */
+export function wideRedirectFor(kind: LayoutClass, id: string | undefined): string | undefined {
+  if (kind !== "wide") return undefined;
+  return id === undefined ? "/sessions" : `/sessions?id=${encodeURIComponent(id)}`;
 }
 
 /** How the route performs that redirect. `dismissTo` replaces the session
@@ -59,8 +62,31 @@ export type SessionsSplit = {
   showBack: boolean;
 };
 
-export function sessionsSplit(kind: LayoutClass, id: string | undefined): SessionsSplit {
+/** Whether the selected id is in the laptop's session list: "unknown"
+ *  while the list is loading or failed to load. */
+export type SessionPresence = "found" | "missing" | "unknown";
+
+export function sessionPresence(input: {
+  /** A `sessions:list` has answered since the screen mounted. */
+  listed: boolean;
+  loading: boolean;
+  failed: boolean;
+  found: boolean;
+}): SessionPresence {
+  if (input.found) return "found";
+  if (!input.listed || input.loading || input.failed) return "unknown";
+  return "missing";
+}
+
+export function sessionsSplit(
+  kind: LayoutClass,
+  selected: string | undefined,
+  presence: SessionPresence = "unknown",
+): SessionsSplit {
   const wide = kind === "wide";
+  // Wide: a session the list no longer has falls back to the empty pane,
+  // with the list beside it to pick another.
+  const id = wide && presence === "missing" ? undefined : selected;
   return {
     showList: wide || id === undefined,
     detailKey: id,
@@ -69,17 +95,31 @@ export function sessionsSplit(kind: LayoutClass, id: string | undefined): Sessio
   };
 }
 
-/** The list pane is first in reading order: left in English, right in
- *  Arabic. Only the pane order flips, so the panes' own content keeps the
- *  phone's direction. `divider` is the side of the list pane facing the
- *  detail. */
-export function splitDirection(language: Language): {
-  flexDirection: "row" | "row-reverse";
-  divider: "left" | "right";
-} {
-  return language === "ar"
-    ? { flexDirection: "row-reverse", divider: "left" }
-    : { flexDirection: "row", divider: "right" };
+export type SplitLayout = {
+  /** The split container's layout direction: the reading direction, so
+   *  the list (its first child) sits on the reading-start side. */
+  direction: "rtl" | "ltr";
+  /** Each pane's own direction: what the platform already lays out, so
+   *  the panes' content matches the phone screens. */
+  paneDirection: "rtl" | "ltr";
+};
+
+/** The split mirrors like the top bar: `direction`, never `row-reverse`.
+ *  `platformRtl` is `I18nManager.getConstants().isRTL`: true on native once
+ *  _layout.tsx has forced RTL for Arabic, always false on web (where
+ *  react-native-web ignores forceRTL). A reversed row would flip twice on
+ *  native. */
+export function splitLayout(input: { language: Language; platformRtl: boolean }): SplitLayout {
+  return {
+    direction: input.language === "ar" ? "rtl" : "ltr",
+    paneDirection: input.platformRtl ? "rtl" : "ltr",
+  };
+}
+
+/** Where a `flexDirection: "row"` container in `direction` puts its first
+ *  child (Yoga and the browser agree): the physical side the list lands on. */
+export function firstChildSide(direction: "rtl" | "ltr"): "left" | "right" {
+  return direction === "rtl" ? "right" : "left";
 }
 
 export const SESSIONS_LIST_WIDTH = 360;
