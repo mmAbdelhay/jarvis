@@ -91,8 +91,8 @@ function PanelHeader(props: { title: string }) {
  *  `useAuthCardRootStyle()`, since its phone `flex: 1` would collapse to
  *  nothing inside a card that sizes to its content.
  *
- *  The ScrollView is there on a phone too, not scrolling and stretching its
- *  content to the screen, so crossing the breakpoint keeps the same tree
+ *  The ScrollView is there on a phone too, not scrolling and holding its
+ *  content to the screen's height, so crossing the breakpoint keeps the same tree
  *  (no remount mid-pairing). Taps always reach the page, as with a View. */
 export function AuthCard(props: { children: React.ReactNode }) {
   const layout = useLayoutClass();
@@ -183,8 +183,11 @@ const styles = StyleSheet.create({
   // The card's body: as tall as the content, shrinking to the card (and so
   // scrolling) when the window is shorter.
   cardScroll: { flexGrow: 0, flexShrink: 1 },
-  // A phone: the page's own `flex: 1` root fills the screen as before.
-  fillContent: { flexGrow: 1 },
+  // A phone: exactly the screen's height, so the page's own `flex: 1` root
+  // fills it and (unlock's ScrollView) scrolls a taller page. `flexGrow`
+  // alone would let react-native-web's content container (`flex-shrink:
+  // 0`) grow to the content and clip it in a phone browser (final review I1).
+  fillContent: { flex: 1 },
   card: {
     flexGrow: 0,
     flexShrink: 1,

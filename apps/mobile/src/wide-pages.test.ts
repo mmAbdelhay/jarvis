@@ -70,3 +70,18 @@ describe("src/screens/SettingsSections.tsx", () => {
     );
   });
 });
+
+// Final review I1: on a phone the AuthCard's non-scrolling ScrollView must
+// pin its content to the screen height (`flex: 1`), so the page's own
+// `flex: 1` ScrollView gets a bounded height and scrolls. `flexGrow: 1`
+// let react-native-web's content container (`flex-shrink: 0`) grow to the
+// content, which clipped a tall unlock page in a phone browser.
+describe("src/components/WidePanel.tsx AuthCard", () => {
+  it("gives the phone content container flex: 1, not flexGrow: 1", () => {
+    const source = read("src/components/WidePanel.tsx");
+    expect(source).toMatch(
+      /contentContainerStyle=\{frame\.scrolls \? undefined : styles\.fillContent\}/,
+    );
+    expect(source).toMatch(/fillContent: \{ flex: 1 \}/);
+  });
+});
