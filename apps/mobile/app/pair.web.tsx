@@ -395,7 +395,7 @@ export default function PairWebScreen() {
               tail: phase.fingerprintTail,
             })}
           </Text>
-          <Text style={styles.label}>{t(language, "pair.trustSystem")}</Text>
+          <Text style={styles.label}>{t(language, platformKey("pair.trustSystem", PLATFORM))}</Text>
           <Text style={styles.label}>{t(language, "pair.deviceName")}</Text>
           <TextInput
             style={styles.input}

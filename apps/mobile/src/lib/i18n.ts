@@ -1029,6 +1029,10 @@ export const STRINGS = {
   },
   // D8: the browser build's own wording where a string says "this phone"
   // (platformKey picks the ".web" key on web).
+  "pair.trustSystem.web": {
+    en: "Trusts the certificate through this browser's own trust store (Tailscale)",
+    ar: "يثق بالشهادة عبر مخزن الثقة الخاص بهذا المتصفح (Tailscale)",
+  },
   "settings.unpair.web": {
     en: "Unpair this browser",
     ar: "إلغاء اقتران هذا المتصفح",
