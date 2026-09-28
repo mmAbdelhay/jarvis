@@ -60,32 +60,67 @@ Node or Electron process the phone does not have.
 
 The session screen renders a display-only xterm page in a locked WebView; native compose and key controls send raw input over the shared client. `apps/mobile/scripts/build-terminal-html.mjs` reads the desktop's vendored terminal bundles and palette only at generation time. The committed page has one hashed script, no network access and LTR terminal layout; tests detect drift from those inputs.
 
-## Two platforms
+## Three platforms
 
-macOS and Linux, and the rule that keeps them one codebase: **a function whose
-behaviour differs by OS takes the platform as a parameter**. Only `main.ts`
-and `preload.cts` read `process.platform`; the renderer receives it over the
-bridge as `window.jarvis.platform`. `platform-convention.test.ts` enforces it.
+macOS, Linux and Windows, and the rule that keeps them one codebase: **a
+function whose behaviour differs by OS takes the platform as a parameter**.
+Only the process entry points read `process.platform` — `main.ts`,
+`preload.cts`, `daemon-main.ts` and the `jarvisd` CLI (`jarvisd.ts`) — plus
+`pty.ts` and `sdk-executable.ts`, which locate per-platform native binaries.
+The renderer receives it over the bridge as `window.jarvis.platform`.
+`platform-convention.test.ts` holds that allowlist.
 
-There is no CI and one laptop, so this is not tidiness — a function that reads
-`process.platform` at the point of use can only be tested on the OS the test
-happens to run on, and half the app would be asserted by nothing. See
-[conventions](conventions.md).
+This is not tidiness. A function that reads `process.platform` at the point
+of use can only be tested on the OS the test happens to run on, and two
+thirds of the app would be asserted by nothing. Taking it as a parameter
+means every branch runs on every OS. See [conventions](conventions.md).
+
+**CI runs the whole suite on all three.** `.github/workflows/ci.yml` runs
+one job per OS (`ubuntu-latest`, `macos-latest`, `windows-latest`, with
+`fail-fast` off) on every pull request and every push to `master`. Each job
+uses Node 24 and runs `pnpm install --frozen-lockfile --ignore-scripts`,
+`pnpm bootstrap --pty-only` (the node-pty binding, compiled on Linux),
+then `pnpm lint`, `pnpm typecheck`, `pnpm build` and `pnpm test`.
+`.github/workflows/docs.yml` builds the docs site on Ubuntu and publishes
+it from `master`.
 
 The places that actually differ are few, and each is a named function with
-both branches tested:
+every branch tested:
 
 | Concern | Module |
 |---|---|
-| Shell integration | `platform/zsh-integration.ts`, `bash-integration.ts`, dispatched by `shell-integration.ts` |
+| Shell integration | `platform/zsh-integration.ts`, `bash-integration.ts`, `powershell-integration.ts`, dispatched by `shell-integration.ts` |
 | Which shell, and how it is started | `platform/shell.ts` — `shellCommand`, `shellArgs` |
-| History format | `platform/completion.ts` — `parseZshHistory`, `parseBashHistory` |
-| Microphone | `desktop/recorder.ts` — `recorderCommand` |
+| History format | `platform/completion.ts` — `parseZshHistory`, `parseBashHistory`, `parsePowerShellHistory` |
+| Resolving a bare command name | `platform/executable.ts` — `resolveExecutable` (PATHEXT, `.cmd` through cmd.exe) |
+| Microphone | `desktop/recorder.ts` — `recorderCommand` (avfoundation, PulseAudio, DirectShow) |
 | Audio playback | `platform/piper.ts` — `audioPlayer` |
-| Speech routing | `platform/piper.ts` — `RoutedSpeech`, `silentSpeech` |
+| Speech routing | `platform/piper.ts` — `RoutedSpeech`, `silentSpeech`; Windows' system voice is `platform/speech-windows.ts` |
+| Voice hotkeys | `desktop/hotkeys.ts` — `registerVoiceHotkeys` (a fallback pair on Windows) |
 | Keyboard chords and their labels | `desktop/renderer/keys.ts` |
 | Application menu | `desktop/app-menu.ts` |
 | Sidecar default paths | `platform/headlamp.ts` — `defaultHeadlampBinary` |
+| The daemon's control endpoint | `desktop/daemon/control/endpoint.ts` — `controlPaths`: a Unix socket, or on Windows a named pipe with a random name per start (`windowsPipeName`) |
+| The daemon's login item | `desktop/daemon/service-darwin.ts` (LaunchAgent), `service-linux.ts` (systemd user unit), `service-win32.ts` (an HKCU `Run` value, `JarvisDaemon`, that starts `Jarvis.exe --jarvis-daemon`) |
+
+**What CI does not prove on Windows.** The unit tests for the service
+builders and the pipe name run on every OS, but these are skipped on
+`windows-latest`:
+
+- The daemon's end-to-end tests: `daemon-main.e2e.test.ts`,
+  `daemon/mode.e2e.test.ts` and `daemon/cli/jarvisd.e2e.test.ts`. None of them
+  starts a real `jarvisd` on a named pipe.
+- The `bin/jarvisd` launcher test (`jarvisd-launcher.test.ts`).
+- The control test for an impostor server that cannot prove the secret.
+- The socket adapter's restart-through-the-service-manager test, because
+  Windows has no service manager that restarts `jarvisd`.
+- File-mode checks (0600/0700), because Windows relies on the user
+  profile's ACL.
+
+So on Windows, background mode (the `Run` value, `--jarvis-daemon`, the
+named pipe and restarts) rests on unit tests and a manual pass, not on CI.
+The Editor tab has no Windows build at all (code-server ships none); see
+[installation](../guide/installation.md#on-windows).
 
 ## Inside `desktop`
 
