@@ -129,7 +129,26 @@ describe("electron-builder.yml", () => {
     // main.ts reads `<process.resourcesPath>/web` when packaged
     // (web-export.ts webExportDir); anywhere else and Settings says "not built".
     const c = (await config()) as unknown as { extraResources: unknown };
-    expect(c.extraResources).toEqual([{ from: "web", to: "web" }]);
+    expect(c.extraResources).toContainEqual({ from: "web", to: "web" });
+  });
+
+  it("ships the jarvisd launchers beside the archive, at resources/bin", async () => {
+    // bin/jarvisd and bin/jarvisd.cmd find the app binary relative to
+    // resources/bin (jarvisd-launcher.test.ts); anywhere else they cannot.
+    const c = (await config()) as unknown as { extraResources: unknown };
+    expect(c.extraResources).toContainEqual({ from: "bin", to: "bin" });
+  });
+
+  it("keeps the daemon and its CLI inside app.asar, where script-path.ts looks", async () => {
+    // Packaged, the daemon runs as <resources>/app.asar/dist/src/daemon-main.js
+    // and the CLI as .../dist/src/daemon/cli/jarvisd.js. Both come in through
+    // dist/**; an exclusion that caught either would ship an app whose
+    // background toggle starts nothing.
+    const c = (await config()) as unknown as { files: string[] };
+    expect(c.files).toContain("dist/**/*");
+    for (const glob of c.files.filter((f) => f.startsWith("!"))) {
+      expect(glob).not.toMatch(/daemon|dist\/\*\*\/\*\.js$/);
+    }
   });
 
   it("builds the web export after packages/wire/dist exists, then copies it in", async () => {

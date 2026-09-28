@@ -186,6 +186,7 @@ files, rendered — so the links below work whether you read them here or there.
 - [Workspace tabs](docs/guide/workspace-tabs.md) — browser, Editor, Database, Terminal, API
 - [The API client](docs/guide/api-client.md) — collections, environments, scripts, auth, cookies
 - [Remote access](docs/guide/remote-access.md) — pairing the phone app, Tailscale, certificates, the audit log
+- [Background daemon](docs/guide/background-daemon.md) — keep Jarvis running after the app quits, the `jarvisd` command
 - [Troubleshooting](docs/guide/troubleshooting.md) — what breaks, and what it means
 
 **Working on it**
@@ -241,7 +242,7 @@ and read by a fresh reviewer before the next begins.
 ## What it exposes
 
 Jarvis is built for one person on one machine, and most of it touches no
-network at all. Six things are worth knowing before you run it somewhere
+network at all. Seven things are worth knowing before you run it somewhere
 shared.
 
 **The Database tab is reachable from your network while it is open.**
@@ -335,6 +336,20 @@ accepts `/rpc` and `/pair` connections only from the web app's origin, from
 the phone app (`Origin: jarvis-app://native`), or with no `Origin` at all.
 A browser pairs and signs in like a phone, and can also use a passkey. See
 [the browser client](docs/guide/remote-access.md#the-browser-client).
+
+**The background daemon's control socket is local only, and it is owner-level
+access.** With **Keep Jarvis running in the background** on (off by default),
+the terminals, agent runs and remote access live in `jarvisd`, which keeps
+running after the app quits. The app and the `jarvisd` command drive it
+through a control socket (a named pipe on Windows) that listens on no
+network, only in `~/.config/jarvis/run`. That directory is 0700 and the socket
+and secret 0600 on macOS and Linux; on Windows they sit in your user
+profile and the pipe name is random at every start. A client has to prove it
+knows the secret in that directory through a mutual HMAC challenge, and the
+secret itself is never sent. Once in, it can do what Settings does: set the owner
+password, approve pairings, revoke devices, open terminals. It is not asked
+for the owner password, so anything running as you can administer Jarvis.
+See [Background daemon](docs/guide/background-daemon.md).
 
 ## Licence
 

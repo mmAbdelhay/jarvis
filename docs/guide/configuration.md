@@ -151,6 +151,9 @@ prayer:                         # optional; defaults to disabled
     beforeMinutes: 10            # 1-60
     atTime: true                 # desktop notification right at each prayer's own time
 
+daemon:                         # optional; absent means off
+  enabled: false                # Settings → General → Keep Jarvis running in the background
+
 remote:                         # optional; absent means the bridge does not exist
   enabled: false                # nothing can reach this machine until this is true
   bindAddress: 127.0.0.1        # an IP address, never a hostname; Settings lists yours
@@ -195,6 +198,23 @@ turning each off is one number rather than a mode.
 The suspend and stop timers are checked once a minute, so anything can outlive
 its timeout by up to a minute. `terminalScrollback` is read when a pane is
 built, so a change reaches new terminals rather than open ones.
+
+## `daemon:` — the background daemon
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `false` | Runs the terminals, agent runs and remote access in `jarvisd`, a background process that keeps going after the app quits. The app becomes a window onto it. |
+
+Turn it on and off from **Settings → General → Keep Jarvis running in the
+background**, not by editing the file. The toggle installs and removes the
+service with the operating system (a LaunchAgent, a systemd user unit or a
+Windows Run value) and moves the open window over. Editing the key by hand
+only changes what the next launch tries. Saving other settings, from this
+machine or from a phone, never changes this key. When it is off, the
+section is left out of the file.
+
+See [Background daemon](background-daemon.md) for what it creates, the
+`jarvisd` command, and its security model.
 
 ## `remote:` — reaching this machine from your phone
 

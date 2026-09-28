@@ -8,6 +8,19 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Background daemon: **Settings → General → Keep Jarvis running in the
+  background** (`daemon.enabled`, off by default) moves terminals, agent
+  runs, the remote bridge and the browser client into `jarvisd`, a
+  background process that keeps running after you quit the app. It is
+  registered as a LaunchAgent on macOS, a systemd user unit on Linux (use
+  `loginctl enable-linger` on a headless server) and an HKCU Run value on
+  Windows. Reopening the app shows the same tabs and terminals. Turning it
+  on or off closes the terminals that were open. The new `jarvisd` command
+  (`status`, `set-password`, `pair`, `devices`, `revoke`, `sign-out-all`,
+  `web on|off`, `stop`, `run`) administers it with no window, for example
+  over SSH. It uses a local control socket that only your user can open,
+  and a launcher ships in the app's `resources/bin`. See [Background
+  daemon](docs/guide/background-daemon.md).
 - Owner login for remote access: pairing now identifies a device, and
   every connection stays locked until it signs in with an owner password
   set in Settings → Remote access → Owner account (at least 12

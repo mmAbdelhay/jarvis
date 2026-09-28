@@ -88,6 +88,26 @@ files:
 extraResources:
   - from: web
     to: web
+  # The `jarvisd` launchers (bin/jarvisd for macOS and Linux, bin/jarvisd.cmd
+  # for Windows), at Contents/Resources/bin (resources/bin elsewhere). Each
+  # finds the app binary it ships beside and runs the CLI script inside
+  # app.asar with ELECTRON_RUN_AS_NODE=1. Outside the archive because a shell
+  # has to run them; PATH is left alone — docs/guide/background-daemon.md
+  # says how to add them.
+  - from: bin
+    to: bin
+
+# ---------------------------------------------------------------------------
+# The background daemon and its CLI stay inside app.asar
+# ---------------------------------------------------------------------------
+#
+# jarvisd is dist/src/daemon-main.js and its command line is
+# dist/src/daemon/cli/jarvisd.js — both already in `files` through dist/**,
+# and neither is copied out. They import the whole dist tree and
+# node_modules, which live in the archive, and Electron's asar support stays
+# on when the app binary runs as plain Node (ELECTRON_RUN_AS_NODE=1). The
+# service definitions and `--jarvis-daemon` name the script by that path
+# (daemon/script-path.ts).
 
 # ---------------------------------------------------------------------------
 # node-pty must live outside the asar archive

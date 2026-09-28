@@ -74,6 +74,7 @@ export default defineConfig({
           { text: "Workspace tabs", link: "/docs/guide/workspace-tabs" },
           { text: "The API client", link: "/docs/guide/api-client" },
           { text: "Remote access", link: "/docs/guide/remote-access" },
+          { text: "Background daemon", link: "/docs/guide/background-daemon" },
           { text: "Troubleshooting", link: "/docs/guide/troubleshooting" },
         ],
       },

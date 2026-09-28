@@ -1,0 +1,32 @@
+#!/bin/sh
+# jarvisd — the Jarvis daemon's command line, run with the Jarvis binary this
+# file ships beside (<resources>/bin/jarvisd; electron-builder.yml).
+#
+# The CLI is a script inside app.asar, and the app binary runs it as plain
+# Node when ELECTRON_RUN_AS_NODE=1 is set — there is no separate Node to
+# install. Nothing here touches PATH: add this directory to PATH, or symlink
+# this file into a directory that is on it (the symlink is followed back
+# here). See docs/guide/background-daemon.md.
+set -e
+
+self=$0
+while [ -h "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+resources=$(cd "$(dirname "$self")/.." && pwd -P)
+
+if [ -x "$resources/../MacOS/Jarvis" ]; then
+  app=$resources/../MacOS/Jarvis
+elif [ -x "$resources/../jarvis" ]; then
+  app=$resources/../jarvis
+else
+  echo "jarvisd: the Jarvis binary is not next to $resources" >&2
+  echo "jarvisd: لم يُعثر على ملف Jarvis التنفيذي بجانب $resources" >&2
+  exit 1
+fi
+
+ELECTRON_RUN_AS_NODE=1 exec "$app" "$resources/app.asar/dist/src/daemon/cli/jarvisd.js" "$@"

@@ -7,6 +7,11 @@
 # every line.
 * text=auto eol=lf
 
+# The one exception: a Windows batch file is read by cmd.exe, whose parser
+# mis-handles labels and multi-line blocks in LF-only files. The jarvisd
+# launcher (packages/desktop/bin/jarvisd.cmd) is shipped as it is checked out.
+*.cmd text eol=crlf
+
 # Binary assets, never touched.
 *.png binary
 *.icns binary
