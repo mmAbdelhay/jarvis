@@ -51,6 +51,12 @@ files:
   - "!dist/**/*.test.d.ts"
   - "!dist/**/*.d.ts"
   - "!**/*.tsbuildinfo"
+  # renderer/vendor/ holds a vendored TypeScript source (qr.ts, with its test
+  # and fixtures), which the vendor glob above and copy-vendor.mjs's copy
+  # into dist/renderer/vendor would otherwise ship. The browser runs the
+  # compiled .js; no .ts under either renderer tree is read at runtime.
+  - "!renderer/**/*.ts"
+  - "!dist/renderer/**/*.ts"
   # The same for the other workspace packages, which arrive through
   # node_modules (as pnpm symlinks that electron-builder follows and
   # materialises into the archive) and so escape the globs above.
@@ -69,6 +75,12 @@ files:
   - "!**/node_modules/@jarvis/remote/src/**"
   # (@anthropic-ai/claude-agent-sdk's per-platform runtimes are excluded in
   # each target's own `files:` below, not here — see the note above `mac:`.)
+  #
+  # A platform's own `files:` replaces this list for that platform rather
+  # than adding to it — the task-25 mac package shipped renderer .ts
+  # sources, tests and tsconfig.tsbuildinfo that way. So each platform block
+  # below starts with this whole list, verbatim, and then adds its own
+  # exclusions (electron-builder.test.ts holds them in step).
 
 # ---------------------------------------------------------------------------
 # The browser client, beside the archive rather than inside it
@@ -182,6 +194,24 @@ npmRebuild: false
 # time.
 mac:
   files:
+    # The shared list above, verbatim — see the note at its end.
+    - "dist/**/*"
+    - "renderer/index.html"
+    - "renderer/styles.css"
+    - "renderer/vendor/**/*"
+    - "package.json"
+    - "!dist/**/*.test.js"
+    - "!dist/**/*.test.js.map"
+    - "!dist/**/*.test.d.ts"
+    - "!dist/**/*.d.ts"
+    - "!**/*.tsbuildinfo"
+    - "!renderer/**/*.ts"
+    - "!dist/renderer/**/*.ts"
+    - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
+    - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
+    - "!**/node_modules/@jarvis/remote/dist/probe-client.*"
+    - "!**/node_modules/@jarvis/remote/scripts/**"
+    - "!**/node_modules/@jarvis/remote/src/**"
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{linux,win32}-*/**"
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**"
   target:
@@ -222,6 +252,24 @@ mac:
 # copy of one picture, free to drift from the first.
 win:
   files:
+    # The shared list above, verbatim — see the note at its end.
+    - "dist/**/*"
+    - "renderer/index.html"
+    - "renderer/styles.css"
+    - "renderer/vendor/**/*"
+    - "package.json"
+    - "!dist/**/*.test.js"
+    - "!dist/**/*.test.js.map"
+    - "!dist/**/*.test.d.ts"
+    - "!dist/**/*.d.ts"
+    - "!**/*.tsbuildinfo"
+    - "!renderer/**/*.ts"
+    - "!dist/renderer/**/*.ts"
+    - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
+    - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
+    - "!**/node_modules/@jarvis/remote/dist/probe-client.*"
+    - "!**/node_modules/@jarvis/remote/scripts/**"
+    - "!**/node_modules/@jarvis/remote/src/**"
     # Only the host's own agent SDK runtime — see the note above `mac:`.
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux}-*/**"
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**"
@@ -258,6 +306,24 @@ win:
 # release/linux-unpacked regardless.
 linux:
   files:
+    # The shared list above, verbatim — see the note at its end.
+    - "dist/**/*"
+    - "renderer/index.html"
+    - "renderer/styles.css"
+    - "renderer/vendor/**/*"
+    - "package.json"
+    - "!dist/**/*.test.js"
+    - "!dist/**/*.test.js.map"
+    - "!dist/**/*.test.d.ts"
+    - "!dist/**/*.d.ts"
+    - "!**/*.tsbuildinfo"
+    - "!renderer/**/*.ts"
+    - "!dist/renderer/**/*.ts"
+    - "!**/node_modules/@jarvis/*/dist/**/*.test.js"
+    - "!**/node_modules/@jarvis/*/dist/**/*.d.ts"
+    - "!**/node_modules/@jarvis/remote/dist/probe-client.*"
+    - "!**/node_modules/@jarvis/remote/scripts/**"
+    - "!**/node_modules/@jarvis/remote/src/**"
     # Only the host's own agent SDK runtime — see the note above `mac:`.
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,win32}-*/**"
     - "!**/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/**"
