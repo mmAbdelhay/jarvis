@@ -31,6 +31,8 @@ export type SessionRowProps = {
   // read-only row still reads its ordinary running/waiting/done state too.
   externalLabel?: string;
   onPress?: () => void;
+  // Wide sessions split: the row whose detail is open beside the list.
+  selected?: boolean;
 };
 
 export function SessionRow({
@@ -41,6 +43,7 @@ export function SessionRow({
   elapsed,
   externalLabel,
   onPress,
+  selected,
 }: SessionRowProps) {
   const running = isRunning(state);
   const waiting = state === "waiting";
@@ -51,12 +54,13 @@ export function SessionRow({
       : theme.colors.disabledDot;
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={selected ? [styles.row, styles.rowSelected] : styles.row}
       onPress={onPress}
       disabled={onPress === undefined}
       activeOpacity={0.7}
       accessibilityRole={onPress !== undefined ? "button" : undefined}
       accessibilityLabel={onPress !== undefined ? summary : undefined}
+      accessibilityState={selected ? { selected: true } : undefined}
     >
       <View
         style={[
@@ -110,6 +114,7 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 68,
   },
+  rowSelected: { backgroundColor: theme.colors.selected, borderColor: theme.colors.accent },
   indicator: {
     width: 10,
     height: 10,

@@ -410,6 +410,14 @@ export const STRINGS = {
     en: "No sessions.",
     ar: "لا توجد جلسات.",
   },
+  "sessions.pick": {
+    en: "Select a session to see it here.",
+    ar: "اختر جلسة لعرضها هنا.",
+  },
+  "sessions.back": {
+    en: "All sessions",
+    ar: "كل الجلسات",
+  },
   "sessions.state.starting": {
     en: "Starting",
     ar: "قيد البدء",

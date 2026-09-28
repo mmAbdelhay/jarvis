@@ -156,9 +156,18 @@ describe("key-bar presentation metadata", () => {
   });
 });
 
+function sessionScreenFiles(here: string): string {
+  return (
+    readFileSync(resolve(here, "../../app/session/[id].tsx"), "utf8") +
+    readFileSync(resolve(here, "../screens/SessionDetail.tsx"), "utf8")
+  );
+}
+
 describe("session route input boundary", () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const screenSource = readFileSync(resolve(here, "../../app/session/[id].tsx"), "utf8");
+  // The route is a thin wrapper since the wide layout; the screen's body
+  // lives in SessionDetail.tsx, so the scan reads both, route first.
+  const screenSource = sessionScreenFiles(here);
   const composeSource = readFileSync(resolve(here, "../components/ComposeBar.tsx"), "utf8");
 
   it("passes the sole local route param through sessionRouteId and never includes CR", () => {
@@ -191,7 +200,7 @@ describe("session route input boundary", () => {
 // test.include and these screens can't be imported and rendered directly.
 describe("app/session/[id].tsx and app/terminal/[paneKey].tsx source scan: landscape orientation", () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sessionScreenSource = readFileSync(resolve(here, "../../app/session/[id].tsx"), "utf8");
+  const sessionScreenSource = sessionScreenFiles(here);
   const terminalScreenSource = readFileSync(
     resolve(here, "../../app/terminal/[paneKey].tsx"),
     "utf8",

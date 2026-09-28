@@ -21,6 +21,7 @@ import { useLanguage } from "@/lib/language-context";
 import { loadPairing } from "@/lib/pairing-record";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
+import { openSession, sessionTarget } from "@/lib/session-nav";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import {
@@ -56,7 +57,8 @@ export default function DashboardScreen() {
   // Wide: the WideShell top bar replaces the phone header (brand,
   // connection pill, History and Settings buttons) and the panels sit in a
   // grid; phone keeps today's stacked screen unchanged.
-  const wide = useLayoutClass().kind === "wide";
+  const layout = useLayoutClass();
+  const wide = layout.kind === "wide";
   const { width } = useWindowDimensions();
   useFocusEffect(
     useCallback(() => {
@@ -119,8 +121,7 @@ export default function DashboardScreen() {
           sessions={view.sessions}
           now={now}
           wide={wide}
-          // TODO(wide Task 3): wide goes to `/sessions?id=<id>` via its helper.
-          onOpenSession={(id) => router.push({ pathname: "/session/[id]", params: { id } })}
+          onOpenSession={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
           onAllSessions={() => router.push("/sessions")}
           onHistory={() => router.push("/history")}
         />

@@ -1,5 +1,5 @@
 import type { SessionState } from "@jarvis/core";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,9 +11,19 @@ import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import type { SessionDateGroup } from "@/lib/session-date-groups";
 import { groupEndedByDate } from "@/lib/session-date-groups";
+import {
+  openSession,
+  SESSIONS_LIST_WIDTH,
+  sessionTarget,
+  sessionsSplit,
+  splitDirection,
+} from "@/lib/session-nav";
+import { sessionRouteId } from "@/lib/session-screen";
 import type { SessionRowView, SessionsView } from "@/lib/sessions-store";
 import { createSessionsStore } from "@/lib/sessions-store";
 import { theme } from "@/lib/theme";
+import { useLayoutClass } from "@/lib/use-layout-class";
+import { SessionDetail } from "@/screens/SessionDetail";
 
 const STATE_KEYS: Record<SessionState, MessageKey> = {
   starting: "sessions.state.starting",
@@ -53,6 +63,12 @@ function dateGroupLabelText(label: SessionDateGroup["label"], language: Language
 // The full session table (Task 7): every session the laptop knows about,
 // grouped active/ended. Screen logic (subscribing on focus, parsing,
 // grouping) lives in sessions-store.ts; this file is layout only.
+//
+// Wide layout (2026-09-28 spec §3): the list (360px) and the `?id=`
+// session's detail side by side, the list on the right in Arabic. The
+// detail is keyed by id only (session-nav.ts `sessionsSplit`), so crossing
+// the breakpoint keeps it mounted with its one subscription; a phone that
+// inherits a selection from a rotation shows that detail with a way back.
 export default function SessionsScreen() {
   const language = useLanguage();
   const router = useRouter();
@@ -62,6 +78,11 @@ export default function SessionsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"active" | "ended">("active");
   const insets = useSafeAreaInsets();
+  const { kind } = useLayoutClass();
+  const wide = kind === "wide";
+  const selectedId = sessionRouteId(useLocalSearchParams().id);
+  const split = sessionsSplit(kind, selectedId);
+  const direction = splitDirection(language);
 
   useFocusEffect(
     useCallback(() => {
@@ -84,11 +105,9 @@ export default function SessionsScreen() {
     void store.pullToRefresh().finally(() => setRefreshing(false));
   }, [store]);
 
-  const openSession = useCallback(
-    (id: string) => {
-      router.push({ pathname: "/session/[id]", params: { id } });
-    },
-    [router],
+  const selectSession = useCallback(
+    (id: string) => openSession(router, sessionTarget(kind, id)),
+    [router, kind],
   );
 
   const empty = view.active.length === 0 && view.ended.length === 0;
@@ -114,15 +133,16 @@ export default function SessionsScreen() {
               }
               // A row outside Jarvis has no pty behind it — never navigate
               // into a terminal nothing is attached to.
-              onPress={row.origin === "external" ? undefined : () => openSession(row.id)}
+              onPress={row.origin === "external" ? undefined : () => selectSession(row.id)}
+              selected={wide && row.id === selectedId}
             />
           ))}
         </View>
       ),
-    [language, openSession, now],
+    [language, selectSession, now, wide, selectedId],
   );
 
-  return (
+  const list = (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
@@ -171,9 +191,61 @@ export default function SessionsScreen() {
       {view.error?.kind === "remote" && <Text style={styles.error}>{view.error.text}</Text>}
     </ScrollView>
   );
+
+  return (
+    <View style={[styles.split, { flexDirection: direction.flexDirection }]}>
+      {split.showList && (
+        // Always wrapped, so a rotation never remounts the list either. The
+        // pane, not the ScrollView, takes the width: on web the refresh
+        // control repeats the ScrollView's style on an inner element.
+        <View
+          style={
+            wide
+              ? [
+                  styles.listPane,
+                  direction.divider === "right" ? styles.dividerRight : styles.dividerLeft,
+                ]
+              : styles.fill
+          }
+        >
+          {list}
+        </View>
+      )}
+      {split.detailKey !== undefined && (
+        <View style={[styles.detailPane, !wide && { paddingTop: insets.top }]}>
+          {split.showBack && (
+            <TouchableOpacity
+              style={styles.back}
+              onPress={() => router.setParams({ id: undefined })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.backText}>
+                {language === "ar" ? "›" : "‹"} {t(language, "sessions.back")}
+              </Text>
+            </TouchableOpacity>
+          )}
+          <SessionDetail key={split.detailKey} id={split.detailKey} embedded store={store} />
+        </View>
+      )}
+      {split.showEmpty && (
+        <View style={styles.emptyPane}>
+          <Text style={styles.empty}>{t(language, "sessions.pick")}</Text>
+        </View>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  split: { flex: 1, backgroundColor: theme.colors.background },
+  fill: { flex: 1 },
+  listPane: { width: SESSIONS_LIST_WIDTH, flexShrink: 0 },
+  dividerRight: { borderRightWidth: 1, borderRightColor: theme.colors.hairlineSoft },
+  dividerLeft: { borderLeftWidth: 1, borderLeftColor: theme.colors.hairlineSoft },
+  detailPane: { flex: 1, minWidth: 0 },
+  emptyPane: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  back: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: theme.colors.ground },
+  backText: { color: theme.colors.primary, fontFamily: theme.font.semibold, fontSize: 14 },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

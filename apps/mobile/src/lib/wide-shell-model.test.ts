@@ -126,6 +126,45 @@ describe("topBarModel", () => {
   });
 });
 
+describe("topBarModel laptop name", () => {
+  it("shows the paired laptop's name, trimmed", () => {
+    const model = topBarModel({
+      runningCount: 0,
+      connection: OPEN,
+      compact: false,
+      laptopName: "  Studio Mac ",
+    });
+    expect(model.laptopName).toBe("Studio Mac");
+  });
+
+  it("hides a missing or blank name", () => {
+    expect(topBarModel({ runningCount: 0, connection: OPEN, compact: false }).laptopName).toBe(
+      undefined,
+    );
+    expect(
+      topBarModel({ runningCount: 0, connection: OPEN, compact: false, laptopName: "  " })
+        .laptopName,
+    ).toBe(undefined);
+  });
+
+  it("keeps the name when compact, in a narrower slot", () => {
+    const compact = topBarModel({
+      runningCount: 0,
+      connection: OPEN,
+      compact: true,
+      laptopName: "M",
+    });
+    const full = topBarModel({
+      runningCount: 0,
+      connection: OPEN,
+      compact: false,
+      laptopName: "M",
+    });
+    expect(compact.laptopName).toBe("M");
+    expect(compact.laptopNameMaxWidth).toBeLessThan(full.laptopNameMaxWidth);
+  });
+});
+
 describe("runningCountOf", () => {
   it("counts starting, running and waiting sessions", () => {
     expect(

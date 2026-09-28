@@ -75,6 +75,10 @@ export type TopBarModel = {
   readout: TopBarReadout;
   running: { count: number; idle: boolean };
   pill: ConnectionPillModel;
+  /** The paired laptop's display name beside the connection pill (the
+   *  phone shows it in the Dashboard header), truncated to its slot. */
+  laptopName: string | undefined;
+  laptopNameMaxWidth: number;
 };
 
 function ratioPercent(used: number, total: number): string {
@@ -102,13 +106,17 @@ export function topBarModel(input: {
   runningCount: number;
   connection: ConnectionView;
   compact: boolean;
+  laptopName?: string;
 }): TopBarModel {
+  const name = input.laptopName?.trim();
   return {
     showMetrics: !input.compact,
     showPillLabel: !input.compact,
     readout: readoutOf(input.metrics),
     running: { count: input.runningCount, idle: input.runningCount === 0 },
     pill: connectionPillModel(input.connection),
+    laptopName: name === undefined || name.length === 0 ? undefined : name,
+    laptopNameMaxWidth: input.compact ? 96 : 180,
   };
 }
 

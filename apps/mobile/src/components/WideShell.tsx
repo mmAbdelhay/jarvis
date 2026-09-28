@@ -14,7 +14,9 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area
 import type { ConnectionView } from "@/lib/connection-store";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
+import { loadPairing } from "@/lib/pairing-record";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
+import { expoSecureStore } from "@/lib/secure-store";
 import { theme } from "@/lib/theme";
 import type { TopBarView } from "@/lib/top-bar-store";
 import { topBarStoreFor } from "@/lib/top-bar-store";
@@ -48,6 +50,23 @@ function useClock(): string {
   return text;
 }
 
+/** The paired laptop's name, from the same pairing record the phone's
+ *  Dashboard header reads. A re-pair goes through /pair, which remounts the
+ *  shell, so reading it once per mount is enough. */
+function useLaptopName(): string | undefined {
+  const [name, setName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void loadPairing(expoSecureStore).then((loaded) => {
+      if (!cancelled) setName(loaded?.record.laptopName);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return name;
+}
+
 function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Element {
   const language = useLanguage();
   const router = useRouter();
@@ -60,6 +79,7 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
   const [view, setView] = useState<TopBarView>(store.get());
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   const clock = useClock();
+  const laptopName = useLaptopName();
 
   useEffect(() => {
     setView(store.get());
@@ -75,6 +95,7 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
     runningCount: view.runningCount,
     connection,
     compact: props.compact,
+    laptopName,
   });
   const active = activeNavKey(pathname);
 
@@ -115,11 +136,27 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
             <Text style={styles.metricValue}>{model.readout.net}</Text>
           </View>
         )}
-        <View style={styles.pill} accessible accessibilityLabel={t(language, model.pill.key)}>
+        <View
+          style={[styles.pill, styles.connectionPill]}
+          accessible
+          accessibilityLabel={
+            model.laptopName === undefined
+              ? t(language, model.pill.key)
+              : `${t(language, model.pill.key)} · ${model.laptopName}`
+          }
+        >
           <View style={[styles.dot, { backgroundColor: theme.colors[model.pill.tone] }]} />
           {model.showPillLabel && (
             <Text style={styles.pillText} numberOfLines={1}>
               {t(language, model.pill.key)}
+            </Text>
+          )}
+          {model.laptopName !== undefined && (
+            <Text
+              style={[styles.laptopName, { maxWidth: model.laptopNameMaxWidth }]}
+              numberOfLines={1}
+            >
+              {model.laptopName}
             </Text>
           )}
         </View>
@@ -189,8 +226,15 @@ const styles = StyleSheet.create({
   },
   sep: { color: theme.colors.border, fontFamily: theme.font.mono, fontSize: 11 },
   pill: { flexDirection: "row", alignItems: "center", gap: 7 },
+  connectionPill: { flexShrink: 1, minWidth: 0 },
   dot: { width: 7, height: 7, borderRadius: theme.radius.full },
   pillText: { color: theme.colors.textSecondary, fontFamily: theme.font.body, fontSize: 12 },
+  laptopName: {
+    flexShrink: 1,
+    color: theme.colors.textMuted,
+    fontFamily: theme.font.body,
+    fontSize: 12,
+  },
   // Not mono: the label is Arabic in ar, which the mono face lacks.
   running: { color: theme.colors.accentText, fontFamily: theme.font.medium, fontSize: 12 },
   runningIdle: { color: theme.colors.textMuted },

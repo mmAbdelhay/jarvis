@@ -357,7 +357,10 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="session/[id]"
                   options={{
-                    headerShown: true,
+                    // Wide: this screen only redirects to the sessions
+                    // split, so it draws no header while it does.
+                    headerShown: layout.kind !== "wide",
+                    animation: layout.kind === "wide" ? "none" : "default",
                     // Fix round 1 (Important 1): `title`, not `headerTitle` — the
                     // screen's own `<Stack.Screen options={{ title: row.summary }} />`
                     // merges into this component's options via
