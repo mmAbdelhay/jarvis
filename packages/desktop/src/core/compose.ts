@@ -319,6 +319,12 @@ export type Core = {
   announceStartup(): Promise<void>;
   /** Releases every child this process started. Idempotent. */
   stop(): void;
+  /** The daemon's graceful stop: the remote bridge (and its web listener)
+   *  is stopped and awaited first, so no remote client acts on a sidecar or
+   *  a terminal mid-teardown; then stop() releases the sidecars and, after
+   *  them, the ptys, in releaseChildren's order; then the bridge's and the
+   *  uploads' own stops are awaited. Idempotent, like stop(). */
+  shutdown(): Promise<void>;
 };
 
 export async function createCore(deps: CoreDeps): Promise<Core> {
@@ -1640,6 +1646,18 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // alive at once, each holding a port and a kubeconfig exec plugin.
   // Idempotent because the paths below overlap on a clean quit.
   let released = false;
+  // Stopped once, whichever of releaseChildren and shutdown gets there
+  // first; both see the same promise. Never rejects: a failure is logged.
+  let remoteStopped: Promise<void> | undefined;
+  const stopRemote = (): Promise<void> => {
+    remoteStopped ??= remoteAccess
+      .stop()
+      .catch((error: unknown) =>
+        console.error(`remote bridge: stop failed: ${errorMessage(error)}`),
+      );
+    return remoteStopped;
+  };
+  let uploadsStopped: Promise<void> = Promise.resolve();
   const releaseChildren = (): void => {
     if (released) return;
     released = true;
@@ -1670,11 +1688,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // to disk before the process actually exits on a fast quit — a real,
     // accepted gap (M4 final review, minor), not one this fix wave closes.
     safely("remote bridge", () => {
-      void remoteAccess
-        .stop()
-        .catch((error: unknown) =>
-          console.error(`remote bridge: stop failed: ${errorMessage(error)}`),
-        );
+      void stopRemote();
     });
     // Clears the notifier's own quiet timers and unsubscribes from
     // sessions/onTurn — otherwise both outlive the window they were
@@ -1685,7 +1699,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // own stop() above — a fast quit may not see this finish flushing
     // either, and that is the same accepted gap.
     safely("uploads", () => {
-      void uploadStore
+      uploadsStopped = uploadStore
         .stop()
         .catch((error: unknown) => console.error(`uploads: stop failed: ${errorMessage(error)}`));
     });
@@ -2229,5 +2243,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     },
     announceStartup,
     stop: releaseChildren,
+    async shutdown() {
+      await stopRemote();
+      releaseChildren();
+      await uploadsStopped;
+    },
   };
 }

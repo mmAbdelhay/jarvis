@@ -74,6 +74,9 @@ function fakeCore() {
       lifecycle.push("announceStartup");
     },
     stop: () => lifecycle.push("stop"),
+    shutdown: async () => {
+      lifecycle.push("shutdown");
+    },
   };
   return { core, calls, answers, link, tabs, stored, config, lifecycle };
 }

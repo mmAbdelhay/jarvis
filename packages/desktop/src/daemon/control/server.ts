@@ -51,9 +51,24 @@ const MAX_INFLIGHT_REQUESTS = 256;
 /** Unauthenticated connections held at once; on Windows any local user can open one. */
 export const MAX_PENDING_HANDSHAKES = 16;
 
+/** Which authenticated client a request came from, so a handler can keep
+ *  per-client state (the daemon's attached desktop app) and drop it when
+ *  that client goes. */
+export interface ControlConnection {
+  /** Unique for this server's lifetime. */
+  readonly id: number;
+  /** Runs once, when this client's connection closes. */
+  onClose(listener: () => void): void;
+}
+
 export interface ControlHandlers {
-  invoke(channel: string, args: unknown[]): Promise<unknown>;
-  upload(channel: string, args: unknown[], bytes: Uint8Array): Promise<unknown>;
+  invoke(channel: string, args: unknown[], connection: ControlConnection): Promise<unknown>;
+  upload(
+    channel: string,
+    args: unknown[],
+    bytes: Uint8Array,
+    connection: ControlConnection,
+  ): Promise<unknown>;
 }
 
 export interface ControlServer {
@@ -90,6 +105,7 @@ export async function createControlServer(
   const clients = new Set<Client>();
   const connectListeners = new Set<() => void>();
   let pendingHandshakes = 0;
+  let nextConnectionId = 1;
   const selfCheck = {
     token: Buffer.from(deps.randomBytes(32)),
     arrived: undefined as (() => void) | undefined,
@@ -138,6 +154,14 @@ export async function createControlServer(
       if (socket.writableLength > MAX_OUTBOUND_BYTES) fail();
     };
     const client: Client = { send, seq: 0 };
+    const closeListeners: Array<() => void> = [];
+    const connection: ControlConnection = {
+      id: nextConnectionId++,
+      onClose(listener) {
+        if (phase === "closing") listener();
+        else closeListeners.push(listener);
+      },
+    };
 
     const respond = (id: number, run: () => Promise<unknown>) => {
       if (inflight >= MAX_INFLIGHT_REQUESTS) {
@@ -234,13 +258,13 @@ export async function createControlServer(
         const done = blob;
         blob = undefined;
         return respond(done.id, () =>
-          handlers.upload(done.ch, done.a, Buffer.concat(done.parts, done.bytes)),
+          handlers.upload(done.ch, done.a, Buffer.concat(done.parts, done.bytes), connection),
         );
       }
       const message = frame.kind === "json" ? parseClientMessage(frame.value) : undefined;
       if (message === undefined) return fail();
       if (message.t === "req")
-        return respond(message.id, () => handlers.invoke(message.ch, message.a));
+        return respond(message.id, () => handlers.invoke(message.ch, message.a, connection));
       if (!isValidBlobShape(message.bytes, message.chunks)) return fail();
       blob = { ...message, parts: [], received: 0 };
     };
@@ -251,6 +275,13 @@ export async function createControlServer(
       phase = "closing";
       sockets.delete(socket);
       clients.delete(client);
+      for (const listener of closeListeners.splice(0)) {
+        try {
+          listener();
+        } catch {
+          // One listener's failure must not keep the others from running.
+        }
+      }
     });
     socket.on("data", (chunk: Buffer) => {
       if (phase === "closing") return;

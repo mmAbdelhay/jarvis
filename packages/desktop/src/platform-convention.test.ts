@@ -10,13 +10,19 @@ import { describe, expect, it } from "vitest";
 // OS the test happens to run on — and the whole Linux port would then be
 // asserted by nothing. Parametrised, one `pnpm test` proves both.
 //
-// main.ts and preload.cts are the impure edges: they read it once and pass it
-// down. pty.ts reads it inside ensureSpawnHelperExecutable, which is resolving
+// main.ts, preload.cts and daemon-main.ts (jarvisd's entry) are the impure
+// edges: they read it once and pass it down. pty.ts reads it inside ensureSpawnHelperExecutable, which is resolving
 // a path in the running process's own node_modules and has nothing to hand it
 // in from. sdk-executable.ts is the same case: it names the Agent SDK's
 // per-platform binary package next to the SDK this process loaded, and its
 // pure parts take platform/arch as parameters and are tested for all of them.
-const ALLOWED = new Set(["main.ts", "preload.cts", "pty.ts", "sdk-executable.ts"]);
+const ALLOWED = new Set([
+  "main.ts",
+  "preload.cts",
+  "daemon-main.ts",
+  "pty.ts",
+  "sdk-executable.ts",
+]);
 
 const ROOTS = [
   "packages/core/src",
