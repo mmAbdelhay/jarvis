@@ -21,9 +21,10 @@ import { fileURLToPath } from "node:url";
 import { PRIMARY_LANGUAGE } from "../../messages.js";
 import { encodeQr } from "../../vendor/qr.js";
 import { readBuildId } from "../build-id.js";
-import { connectControl } from "../control/client.js";
+import { connectControl, requestControlStop } from "../control/client.js";
 import { nodeControlDeps } from "../control/deps.js";
 import { runDirectoryFor } from "../control/endpoint.js";
+import { daemonAnswers } from "../control/liveness.js";
 import { runCli } from "./commands.js";
 import { nodeCliIo } from "./node-io.js";
 
@@ -48,6 +49,9 @@ async function main(argv: readonly string[]): Promise<void> {
     io,
     language: PRIMARY_LANGUAGE,
     connect: () => connectControl({ platform, runDirectory, build, deps: nodeControlDeps() }),
+    requestStop: () =>
+      requestControlStop({ platform, runDirectory, build, deps: nodeControlDeps() }),
+    daemonAnswers: () => daemonAnswers(platform, runDirectory, nodeControlDeps()),
     // daemon-main runs on import, reads the same argv (`run`), and exits
     // the process itself when it stops — this promise never settles.
     runDaemon: async () => {

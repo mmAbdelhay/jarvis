@@ -25,6 +25,25 @@ function xml(value: string): string {
     .replaceAll("'", "&apos;");
 }
 
+function unxml(value: string): string {
+  return value.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name] ?? "");
+}
+
+const XML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+/** The binary an installed plist runs (ProgramArguments' first string), as
+ *  buildDarwinService wrote it; undefined when the file has none. */
+export function darwinRecordedExecPath(plist: string): string | undefined {
+  const match = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(plist);
+  return match?.[1] === undefined ? undefined : unxml(match[1]);
+}
+
 export function buildDarwinService(options: {
   home: string;
   uid: number;

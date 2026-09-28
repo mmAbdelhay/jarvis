@@ -99,6 +99,13 @@ describe.skipIf(WINDOWS)("jarvisd, end to end", () => {
     const second = startDaemon(home);
     await expect(second.exited).resolves.toBe(3);
     await expect(app.invoke("settings:read", [])).resolves.toEqual(settings);
+    // Under a service manager the same refusal exits 0, so launchd's
+    // KeepAlive {SuccessfulExit: false} does not start it again every 10 s.
+    for (const supervisor of ["launchd", "systemd"]) {
+      const supervised = startDaemon(home, { JARVISD_SUPERVISOR: supervisor });
+      await expect(supervised.exited).resolves.toBe(0);
+    }
+    await expect(app.invoke("settings:read", [])).resolves.toEqual(settings);
 
     const secret = readFileSync(join(run, "control.secret"), "utf8").trim();
     daemon.child.kill("SIGTERM");

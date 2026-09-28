@@ -7,8 +7,16 @@
 // (mode.test.ts). main.ts wires the real ones, with process.platform read
 // there.
 //
-//   launch, daemon off ............ in-process.
-//   launch, daemon on ............. connect; else start the service (install
+//   launch, daemon off ............ in-process — unless a daemon already
+//                                   answers (a foreground `jarvisd run`, one
+//                                   a failed path left): then attach to it
+//                                   for this session, the setting untouched
+//                                   (review I1); if it can't be attached (another
+//                                   build), ask: stop it and run inside the
+//                                   app, or quit. Never a second core.
+//   launch, daemon on ............. the service first re-installed if it
+//                                   names another binary (a moved app);
+//                                   connect; else start the service (install
 //                                   it first if it is gone), wait up to
 //                                   SOCKET_WAIT_MS; else ask: run inside the
 //                                   app this time (in-process, this session
@@ -24,7 +32,11 @@
 //                                   the app in-process.
 //   restart ....................... the service manager's restart; where
 //                                   there is none (Windows): daemon:stop,
-//                                   wait for it to go, start.
+//                                   wait for it to go, start. Refused when
+//                                   attached with the setting off: the
+//                                   service did not start that daemon.
+//   turn on, attached, setting off  write the setting and install the
+//                                   service; the running daemon stays.
 //   stop now ...................... daemon:stop (a clean exit, which no
 //                                   service manager restarts), then relaunch
 //                                   in-process for this session; the service
@@ -187,7 +199,12 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     return waitGone(STARTED_STOP_WAIT_MS);
   }
 
+  const notService = (): string => MESSAGES.daemonNotService(PRIMARY_LANGUAGE);
+
   async function restartDaemon(): Promise<void> {
+    // Attached with the setting off, the daemon is not the service's (a
+    // foreground `jarvisd run`): restarting the service would start another.
+    if (!enabled) throw new Error(notService());
     const outcome = await deps.service.restart();
     if (outcome?.reason !== "use-control-socket") return;
     if (await deps.daemonAnswers()) await deps.requestDaemonStop();
@@ -215,8 +232,32 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     }
   }
 
+  /** Attached with the setting off: the daemon already runs and the app
+   *  already uses it, so only the setting and the service are left. */
+  async function adoptAttached(): Promise<ChangeResult> {
+    let installed = false;
+    try {
+      await deps.config.write(true);
+      enabled = true;
+      await deps.service.install();
+      installed = true;
+    } catch (error) {
+      failure = await failed(error);
+      deps.log(`turning the background service on failed: ${failure.reason}`);
+      if (!installed) {
+        await deps.config.write(false).catch((undo: unknown) => {
+          deps.log(`undoing daemon.enabled failed: ${describe(undo)}`);
+        });
+        enabled = false;
+      }
+      return { ok: false, reason: "failed", detail: failure.reason };
+    }
+    failure = undefined;
+    return { ok: true };
+  }
+
   async function turnOn(): Promise<ChangeResult> {
-    if (link !== undefined) return { ok: true };
+    if (link !== undefined) return enabled ? { ok: true } : adoptAttached();
     if (!(await deps.confirm("enable"))) return { ok: false, reason: "cancelled" };
     failure = undefined;
     const wasEnabled = enabled;
@@ -270,7 +311,9 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
   }
 
   async function turnOff(): Promise<ChangeResult> {
-    if (!enabled && link === undefined) return { ok: true };
+    // Already off — also when attached to a daemon the service did not
+    // start (Stop now is what stops that one).
+    if (!enabled) return { ok: true };
     if (link !== undefined && !(await deps.confirm("disable"))) {
       return { ok: false, reason: "cancelled" };
     }
@@ -330,10 +373,53 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     enabled = true;
   }
 
+  /** Stuck: a daemon we won't run a second core beside. */
+  async function refuseStuck(): Promise<LaunchResult<L>> {
+    failure = { ...(failure ?? { reason: "" }), reason: stuck() };
+    await deps.showError(MESSAGES.daemonStuckTitle(PRIMARY_LANGUAGE), stuck());
+    return { kind: "quit" };
+  }
+
+  /** Setting off: attach to a daemon that answers anyway; else in-process. */
+  async function launchOff(): Promise<LaunchResult<L>> {
+    if (!(await deps.daemonAnswers().catch(() => false))) return { kind: "in-process" };
+    try {
+      link = await deps.connect(0);
+      deps.log("the setting is off, but a Jarvis daemon is running: attached to it");
+      return { kind: "daemon", link };
+    } catch (error) {
+      failure = await failed(error);
+      deps.log(`a Jarvis daemon is running but could not be attached: ${failure.reason}`);
+    }
+    if ((await deps.chooseFallback(failure)) === "quit") return { kind: "quit" };
+    // Not the service's daemon: only the control socket stops it.
+    try {
+      if (await deps.daemonAnswers()) await deps.requestDaemonStop();
+    } catch (error) {
+      deps.log(`daemon:stop failed: ${describe(error)}`);
+    }
+    if (await waitGone(STARTED_STOP_WAIT_MS)) return { kind: "in-process" };
+    return refuseStuck();
+  }
+
+  /** A moved app (or macOS App Translocation) leaves the service naming a
+   *  binary that is gone or another build: install it again from here. */
+  async function healService(): Promise<void> {
+    try {
+      if (!(await deps.service.isStale())) return;
+      deps.log("the installed background service names another copy of Jarvis; reinstalling it");
+      await deps.service.install();
+    } catch (error) {
+      deps.log(`checking the installed service failed: ${describe(error)}`);
+    }
+  }
+
   return {
     async launch({ inAppThisSession }) {
       enabled = await deps.config.read();
-      if (!enabled || inAppThisSession) return { kind: "in-process" };
+      if (inAppThisSession) return { kind: "in-process" };
+      if (!enabled) return launchOff();
+      await healService();
       try {
         link = await deps.connect(0);
         return { kind: "daemon", link };
@@ -352,9 +438,7 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
       if (choice === "quit") return { kind: "quit" };
       // In the app this time — once nothing started above still runs.
       if (await stopStarted()) return { kind: "in-process" };
-      failure = { ...failure, reason: stuck() };
-      await deps.showError(MESSAGES.daemonStuckTitle(PRIMARY_LANGUAGE), stuck());
-      return { kind: "quit" };
+      return refuseStuck();
     },
 
     setEnabled: (next) => exclusive(() => (next ? turnOn() : turnOff())),
@@ -370,6 +454,7 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
             detail: MESSAGES.daemonNotAttached(PRIMARY_LANGUAGE),
           };
         }
+        if (!enabled) return { ok: false, reason: "failed", detail: notService() };
         try {
           await restartDaemon();
           return { ok: true };

@@ -5,7 +5,8 @@
 //     command is an argv array run without a shell;
 //   - the socket CoreClient (core/socket-core-client.ts) over this user's
 //     control endpoint, for this app's build;
-//   - the liveness probe and daemon:stop over a control connection;
+//   - the liveness probe, and the stop: a hello with intent "stop", which a
+//     daemon of any build honours (review C1);
 //   - daemon.enabled in jarvis.yaml (config-file.ts);
 //   - the daemon log's last line.
 //
@@ -17,13 +18,12 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { writeAtomically } from "@jarvis/platform";
 import { connectSocketCoreClient, type SocketCoreClient } from "../core/socket-core-client.js";
 import { readDaemonEnabled, writeDaemonEnabled } from "./config-file.js";
-import { connectControl } from "./control/client.js";
+import { connectControl, requestControlStop } from "./control/client.js";
 import { nodeControlDeps } from "./control/deps.js";
 import { runDirectoryFor } from "./control/endpoint.js";
 import { daemonAnswers } from "./control/liveness.js";
 import { daemonLogPath } from "./log-file.js";
 import type { DaemonModeDeps } from "./mode.js";
-import { DAEMON_REQUESTS } from "./protocol.js";
 import {
   type CommandResult,
   createServiceManager,
@@ -44,6 +44,8 @@ export type NodeModeOptions = {
   execPath: string;
   /** daemonScriptPath(...) — Task 21's single resolver. */
   daemonScript: string;
+  /** Linux: $APPIMAGE, when the app runs from an AppImage. */
+  appImage?: string;
   /** This app's build (readBuildId): the control handshake compares it. */
   build: string;
   configPath: string;
@@ -75,6 +77,7 @@ const serviceFs: ServiceFileSystem = {
     await mkdir(path, options);
   },
   rm: (path, options) => rm(path, options),
+  readFile: (path) => readFile(path, "utf8"),
   exists: async (path) => {
     try {
       await stat(path);
@@ -140,14 +143,20 @@ export async function lastLineOf(path: string): Promise<string | undefined> {
 export function nodeDaemonModeDeps(options: NodeModeOptions): NodeModeDeps {
   const { platform } = options;
   const runDirectory = runDirectoryFor({ platform, home: options.home });
-  const control = () =>
-    connectControl({ platform, runDirectory, build: options.build, deps: nodeControlDeps() });
+  const controlOptions = () => ({
+    platform,
+    runDirectory,
+    build: options.build,
+    deps: nodeControlDeps(),
+  });
+  const control = () => connectControl(controlOptions());
   const service = createServiceManager({
     platform: servicePlatform(platform),
     home: options.home,
     uid: options.uid,
     execPath: options.execPath,
     daemonScript: options.daemonScript,
+    ...(options.appImage === undefined ? {} : { appImage: options.appImage }),
     fs: serviceFs,
     run: runCommand,
     spawnDetached,
@@ -176,14 +185,7 @@ export function nodeDaemonModeDeps(options: NodeModeOptions): NodeModeDeps {
         initialTimeoutMs: timeoutMs,
       }),
     daemonAnswers: () => daemonAnswers(platform, runDirectory, nodeControlDeps()),
-    async requestDaemonStop() {
-      const connection = await control();
-      try {
-        await connection.invoke(DAEMON_REQUESTS.stop, []);
-      } finally {
-        connection.close();
-      }
-    },
+    requestDaemonStop: () => requestControlStop(controlOptions()),
     config: {
       read: () => readDaemonEnabled(options.configPath, configIo),
       write: (enabled) => writeDaemonEnabled(options.configPath, enabled, configIo),

@@ -5,7 +5,9 @@
 // kept. A hidden read switches the terminal to raw mode, where nothing is
 // echoed and Ctrl-C arrives as a byte rather than a signal; it echoes
 // nothing back, not even a mask, and restores the mode however it ends —
-// Enter, Ctrl-C, Ctrl-D, or a terminating signal from outside.
+// Enter, Ctrl-C, Ctrl-D, or a terminating signal from outside. A key that
+// sends an escape sequence (arrows, Home, Delete, F-keys, Alt+key) adds
+// nothing: the whole sequence is dropped, never its printable tail.
 //
 // No electron here (core/no-electron.test.ts).
 import type { CliIo } from "./commands.js";
@@ -16,6 +18,28 @@ type Output = { write(text: string): unknown };
 const CTRL_C = "\u0003";
 const CTRL_D = "\u0004";
 const BACKSPACE = new Set(["\u007f", "\b"]);
+const ESC = "\u001b";
+
+/** Where a hidden read is in an escape sequence: ESC, then CSI (ESC [ …
+ *  parameters … a final byte 0x40–0x7E) or SS3 (ESC O and one byte);
+ *  anything else after ESC is Alt+key, one byte. */
+type EscapeState = "none" | "esc" | "csi" | "ss3";
+
+/** The state after `character`, which is dropped unless the state was "none". */
+function nextEscapeState(state: EscapeState, character: string): EscapeState {
+  switch (state) {
+    case "none":
+      return character === ESC ? "esc" : "none";
+    case "esc":
+      return character === "[" ? "csi" : character === "O" ? "ss3" : "none";
+    case "csi": {
+      const code = character.codePointAt(0) ?? 0;
+      return code >= 0x40 && code <= 0x7e ? "none" : "csi";
+    }
+    case "ss3":
+      return "none";
+  }
+}
 /** Signals that end the process, with the shell's 128+n exit code. */
 const TERMINATING: readonly ["SIGINT" | "SIGTERM" | "SIGHUP", number][] = [
   ["SIGINT", 130],
@@ -88,6 +112,7 @@ export function nodeCliIo(streams: {
       stderr.write(prompt);
       return new Promise((resolve) => {
         let value: string[] = [];
+        let sequence: EscapeState = "none";
         // A kill while the terminal is raw (SIGTERM, SIGHUP, an external
         // SIGINT) would otherwise leave the user's shell with echo off:
         // restore the mode first, then end as the signal would have.
@@ -110,6 +135,9 @@ export function nodeCliIo(streams: {
           for (const character of chunk) {
             if (character === "\r" || character === "\n") return finish(value.join(""));
             if (character === CTRL_C) return finish(undefined);
+            const inSequence = sequence !== "none" || character === ESC;
+            sequence = nextEscapeState(sequence, character);
+            if (inSequence) continue;
             if (character === CTRL_D && value.length === 0) return finish(undefined);
             if (BACKSPACE.has(character)) value.pop();
             else if (character >= " ") value.push(character);

@@ -1,6 +1,6 @@
-import { buildDarwinService } from "./service-darwin.js";
-import { buildLinuxService } from "./service-linux.js";
-import { buildWindowsService } from "./service-win32.js";
+import { buildDarwinService, darwinRecordedExecPath } from "./service-darwin.js";
+import { buildLinuxService, linuxRecordedExecPath } from "./service-linux.js";
+import { buildWindowsService, windowsRecordedExecPath } from "./service-win32.js";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 export type ServiceStatus = "not-installed" | "stopped" | "running" | "unknown";
@@ -10,6 +10,7 @@ export interface ServiceFileSystem {
   mkdir(path: string, options: { recursive: true }): Promise<void>;
   rm(path: string, options: { force: true }): Promise<void>;
   exists(path: string): Promise<boolean>;
+  readFile(path: string): Promise<string>;
 }
 
 export interface CommandResult {
@@ -32,6 +33,9 @@ export interface ServiceManager {
   stop(): Promise<undefined | ControlSocketRequired>;
   restart(): Promise<undefined | ControlSocketRequired>;
   status(): Promise<ServiceStatus>;
+  /** True when the service is installed but names another binary than
+   *  this app's (a moved app, macOS App Translocation, another AppImage). */
+  isStale(): Promise<boolean>;
 }
 
 export interface CreateServiceManagerOptions {
@@ -40,6 +44,8 @@ export interface CreateServiceManagerOptions {
   uid: number;
   execPath: string;
   daemonScript: string;
+  /** Linux: $APPIMAGE when the app runs from an AppImage (service-linux.ts). */
+  appImage?: string;
   fs: ServiceFileSystem;
   run: RunCommand;
   spawnDetached: SpawnDetached;
@@ -54,6 +60,16 @@ export function createServiceManager(options: CreateServiceManagerOptions): Serv
       throw new Error(`${command[0]} exited with code ${result.code}`);
     }
     return result;
+  };
+
+  /** Installed, and naming another binary than `expected`. */
+  const fileIsStale = async (
+    filePath: string,
+    recorded: (text: string) => string | undefined,
+    expected: string,
+  ): Promise<boolean> => {
+    if (!(await options.fs.exists(filePath))) return false;
+    return recorded(await options.fs.readFile(filePath)) !== expected;
   };
 
   if (options.platform === "darwin") {
@@ -94,6 +110,7 @@ export function createServiceManager(options: CreateServiceManagerOptions): Serv
         }
         return (await options.fs.exists(service.filePath)) ? "stopped" : "not-installed";
       },
+      isStale: () => fileIsStale(service.filePath, darwinRecordedExecPath, options.execPath),
     };
   }
 
@@ -138,6 +155,8 @@ export function createServiceManager(options: CreateServiceManagerOptions): Serv
         if (result.code === 3) return "stopped";
         return "unknown";
       },
+      isStale: () =>
+        fileIsStale(service.filePath, linuxRecordedExecPath, options.appImage ?? options.execPath),
     };
   }
 
@@ -161,6 +180,11 @@ export function createServiceManager(options: CreateServiceManagerOptions): Serv
     async status() {
       const result = await options.run(...service.commands.status);
       return result.code === 0 ? "stopped" : "not-installed";
+    },
+    async isStale() {
+      const result = await options.run(...service.commands.status);
+      if (result.code !== 0) return false;
+      return windowsRecordedExecPath(result.stdout) !== options.execPath;
     },
   };
 }

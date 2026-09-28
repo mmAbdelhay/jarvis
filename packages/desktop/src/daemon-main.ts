@@ -97,6 +97,7 @@ async function main(argv: readonly string[]): Promise<void> {
       ? {}
       : { requestRestart: () => requestStop("restart", DAEMON_EXIT.restart) }),
     log: error,
+    info,
     now: Date.now,
     timers: {
       setInterval(callback, ms) {
@@ -117,9 +118,13 @@ async function main(argv: readonly string[]): Promise<void> {
     deps: nodeControlDeps(),
   });
   if (started.kind === "busy") {
-    error("another jarvisd is already running; exiting");
+    // Under a service manager, busy is a clean exit: launchd's KeepAlive
+    // {SuccessfulExit: false} would otherwise start it again every 10 s for
+    // as long as another daemon (a foreground `jarvisd run`) holds the lock.
+    // systemd has RestartPreventExitStatus=3 as well. By hand it stays 3.
+    info("another jarvisd is already running; exiting");
     restoreConsole();
-    process.exit(DAEMON_EXIT.busy);
+    process.exit(supervisor === undefined ? DAEMON_EXIT.busy : DAEMON_EXIT.ok);
   }
   const server = started.server;
 

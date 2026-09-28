@@ -11,6 +11,7 @@ import {
   ControlRequestError,
   ControlRestartRequired,
   connectControl,
+  requestControlStop,
 } from "./client.js";
 import { type ControlClock, type ControlDeps, nodeControlDeps } from "./deps.js";
 import { controlPaths } from "./endpoint.js";
@@ -41,6 +42,7 @@ const echoHandlers: ControlHandlers = {
     if (channel === "test:bigint") return 1n;
     return { channel, args };
   },
+  stop() {},
   async upload(channel, args, bytes) {
     return {
       channel,
@@ -178,7 +180,13 @@ async function staleSocket(runDirectory: string): Promise<void> {
 async function handshake(
   endpoint: string,
   secretHex: string,
-  options: { nonceC?: string; proof?: (nonceS: string, nonceC: string) => string; v?: number } = {},
+  options: {
+    nonceC?: string;
+    proof?: (nonceS: string, nonceC: string) => string;
+    v?: number;
+    build?: string;
+    intent?: string;
+  } = {},
 ): Promise<{ connection: Raw; nonceS: string; proof: string }> {
   const connection = await raw(endpoint);
   const nonceC = options.nonceC ?? randomBytes(32).toString("hex");
@@ -186,8 +194,9 @@ async function handshake(
     encodeJsonFrame({
       t: "hello",
       v: options.v ?? CONTROL_PROTOCOL_VERSION,
-      build: "build-1",
+      build: options.build ?? "build-1",
       nonceC,
+      ...(options.intent === undefined ? {} : { intent: options.intent }),
     }),
   );
   await until(() => connection.frames.length >= 1);
@@ -395,6 +404,77 @@ describe("the control transport", () => {
       "challenge",
       "restart-required",
     ]);
+  });
+
+  // Review C1: a daemon of another build must still be stoppable without a
+  // service manager (Windows, a foreground `jarvisd run`), or an update
+  // leaves the app facing a daemon it can neither use nor stop.
+  it("stops a daemon of another build when the hello says intent stop", async () => {
+    const { runDirectory } = await fixture();
+    let stops = 0;
+    await start(runDirectory, {
+      build: "build-new",
+      handlers: { ...echoHandlers, stop: () => void stops++ },
+    });
+    await requestControlStop({
+      platform: PLATFORM,
+      runDirectory,
+      build: "build-old",
+      deps: nodeControlDeps(),
+    });
+    expect(stops).toBe(1);
+    // A plain hello from the same old build is still told to restart.
+    await expect(client(runDirectory, "build-old")).rejects.toBeInstanceOf(ControlRestartRequired);
+    expect(stops).toBe(1);
+  });
+
+  it("stops across a protocol version mismatch too, answering stopping and nothing else", async () => {
+    const { runDirectory } = await fixture();
+    let stops = 0;
+    const server = await start(runDirectory, {
+      handlers: { ...echoHandlers, stop: () => void stops++ },
+    });
+    const secret = await readFile(controlPaths(PLATFORM, runDirectory).secretPath, "utf8");
+    const { connection } = await handshake(server.endpoint, secret, {
+      v: CONTROL_PROTOCOL_VERSION + 1,
+      build: "another",
+      intent: "stop",
+    });
+    await connection.closed;
+    expect(connection.frames.map((f) => (f as { value: { t: string } }).value.t)).toEqual([
+      "challenge",
+      "stopping",
+    ]);
+    expect(stops).toBe(1);
+  });
+
+  it("stops nothing for an intent-stop hello with a wrong proof, or an unknown intent", async () => {
+    const { runDirectory } = await fixture();
+    let stops = 0;
+    const server = await start(runDirectory, {
+      handlers: { ...echoHandlers, stop: () => void stops++ },
+    });
+    const secret = await readFile(controlPaths(PLATFORM, runDirectory).secretPath, "utf8");
+    const wrong = await handshake(server.endpoint, secret, {
+      intent: "stop",
+      proof: () => "00".repeat(32),
+    });
+    await wrong.connection.closed;
+    expect(wrong.connection.frames).toHaveLength(1);
+
+    const odd = await raw(server.endpoint);
+    odd.socket.write(
+      encodeJsonFrame({
+        t: "hello",
+        v: CONTROL_PROTOCOL_VERSION,
+        build: "build-1",
+        nonceC: randomBytes(32).toString("hex"),
+        intent: "restart",
+      }),
+    );
+    await odd.closed;
+    expect(odd.frames).toEqual([]);
+    expect(stops).toBe(0);
   });
 
   it("round-trips a 16 MiB blob", async () => {

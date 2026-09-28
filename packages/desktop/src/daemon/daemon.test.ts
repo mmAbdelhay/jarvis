@@ -89,10 +89,12 @@ function bindingDouble(options: { supervised?: boolean } = {}) {
   const requestStop = vi.fn();
   const requestRestart = vi.fn();
   const logs: string[] = [];
+  const infos: string[] = [];
   const binding = createDaemonBinding({
     requestStop,
     ...(options.supervised === true ? { requestRestart } : {}),
     log: (line) => logs.push(line),
+    info: (line) => infos.push(line),
     now: () => 1000,
     instance: "run-1",
     timers: {
@@ -117,6 +119,7 @@ function bindingDouble(options: { supervised?: boolean } = {}) {
     requestStop,
     requestRestart,
     logs,
+    infos,
     ...fake,
   };
 }
@@ -169,6 +172,7 @@ describe("daemon binding: dispatch", () => {
     const binding = createDaemonBinding({
       requestStop: () => {},
       log: () => {},
+      info: () => {},
       now: () => 0,
       timers: { setInterval: () => 0, clearInterval: () => {}, defer: () => {} },
     });
@@ -221,13 +225,26 @@ describe("daemon binding: dispatch", () => {
   });
 
   it("answers daemon:stop first and starts the stop after the reply", async () => {
-    const { binding, deferred, requestStop } = bindingDouble();
+    const { binding, deferred, requestStop, logs, infos } = bindingDouble();
     await expect(
       binding.handlers.invoke(DAEMON_REQUESTS.stop, [], connectionDouble().connection),
     ).resolves.toEqual({ stopping: true });
     expect(requestStop).not.toHaveBeenCalled();
     for (const run of deferred) run();
     expect(requestStop).toHaveBeenCalledOnce();
+    // A stop that was asked for is routine: info, not error (review minor 4).
+    expect(infos).toEqual(["stop requested over the control socket"]);
+    expect(logs).toEqual([]);
+  });
+
+  it("stops on a hello's intent stop, after the answer is queued, logged at info", () => {
+    const { binding, deferred, requestStop, logs, infos } = bindingDouble();
+    binding.handlers.stop();
+    expect(requestStop).not.toHaveBeenCalled();
+    for (const run of deferred) run();
+    expect(requestStop).toHaveBeenCalledOnce();
+    expect(infos).toEqual(["stop requested over the control socket"]);
+    expect(logs).toEqual([]);
   });
 
   it("lets the app broadcast only the host's own notices", async () => {

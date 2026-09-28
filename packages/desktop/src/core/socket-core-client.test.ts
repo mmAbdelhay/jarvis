@@ -110,6 +110,7 @@ async function startDaemon(
     requestStop: () => {},
     ...(restart === undefined ? {} : { requestRestart: () => void restart() }),
     log: () => {},
+    info: () => {},
     now: Date.now,
     timers: {
       setInterval: (callback, ms) => setInterval(callback, ms),

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createServiceManager, type ServiceFileSystem, type ServicePlatform } from "./service.js";
+import { buildDarwinService } from "./service-darwin.js";
+import { buildLinuxService } from "./service-linux.js";
 
 type Operation =
   | ["mkdir", string, { recursive: true }]
   | ["writeFile", string, string, { mode?: number } | undefined]
-  | ["rm", string, { force: true }];
+  | ["rm", string, { force: true }]
+  | ["readFile", string];
 type Invocation = [string, readonly string[]];
 
 function setup(
@@ -12,6 +15,10 @@ function setup(
   options: {
     installed?: boolean;
     results?: Array<{ code: number; stdout: string; stderr: string }>;
+    /** What the installed service file holds. */
+    file?: string;
+    execPath?: string;
+    appImage?: string;
   } = {},
 ) {
   const operations: Operation[] = [];
@@ -23,6 +30,11 @@ function setup(
       void operations.push(["writeFile", path, contents, writeOptions]),
     rm: async (path, rmOptions) => void operations.push(["rm", path, rmOptions]),
     exists: async () => options.installed ?? true,
+    readFile: async (path) => {
+      operations.push(["readFile", path]);
+      if (options.file === undefined) throw new Error("ENOENT");
+      return options.file;
+    },
   };
   const results = [...(options.results ?? [])];
   const manager = createServiceManager({
@@ -30,9 +42,11 @@ function setup(
     home: "/Users/Jarvis User",
     uid: 502,
     execPath:
-      platform === "win32"
+      options.execPath ??
+      (platform === "win32"
         ? "C:\\Program Files\\Jarvis\\Jarvis.exe"
-        : "/Applications/Jarvis App/Jarvis",
+        : "/Applications/Jarvis App/Jarvis"),
+    ...(options.appImage === undefined ? {} : { appImage: options.appImage }),
     daemonScript: "/Applications/Jarvis App/daemon-main.js",
     fs,
     run: async (command, args) => {
@@ -206,5 +220,64 @@ describe("createServiceManager", () => {
       });
       await expect(manager.uninstall()).resolves.toBeUndefined();
     }
+  });
+
+  describe("isStale: the installed service names another binary (a moved app)", () => {
+    const definition = (platform: "darwin" | "linux", execPath: string, appImage?: string) =>
+      platform === "darwin"
+        ? buildDarwinService({ home: "/h", uid: 1, execPath, daemonScript: "/d.js" }).contents
+        : buildLinuxService({
+            home: "/h",
+            execPath,
+            daemonScript: "/d.js",
+            ...(appImage === undefined ? {} : { appImage }),
+          }).contents;
+
+    it.each(["darwin", "linux"] as const)(
+      "%s: stale only when the file names another binary",
+      async (platform) => {
+        const moved = setup(platform, { file: definition(platform, "/Old Place/Jarvis") });
+        await expect(moved.manager.isStale()).resolves.toBe(true);
+        const same = setup(platform, {
+          file: definition(platform, "/Applications/Jarvis App/Jarvis"),
+        });
+        await expect(same.manager.isStale()).resolves.toBe(false);
+        const absent = setup(platform, { installed: false });
+        await expect(absent.manager.isStale()).resolves.toBe(false);
+        // A file it can't read back is rewritten rather than trusted.
+        const garbled = setup(platform, { file: "garbled" });
+        await expect(garbled.manager.isStale()).resolves.toBe(true);
+      },
+    );
+
+    it("linux AppImage: compares against $APPIMAGE, not the mount's execPath", async () => {
+      const file = definition("linux", "/tmp/.mount_a/jarvis", "/home/u/Jarvis.AppImage");
+      const same = setup("linux", {
+        file,
+        execPath: "/tmp/.mount_b/jarvis",
+        appImage: "/home/u/Jarvis.AppImage",
+      });
+      await expect(same.manager.isStale()).resolves.toBe(false);
+      const moved = setup("linux", {
+        file,
+        execPath: "/tmp/.mount_b/jarvis",
+        appImage: "/home/u/New/Jarvis.AppImage",
+      });
+      await expect(moved.manager.isStale()).resolves.toBe(true);
+    });
+
+    it("win32: reads the Run value through reg query", async () => {
+      const value = (path: string) => ({
+        code: 0,
+        stdout: `\r\nHKEY_CURRENT_USER\\...\\Run\r\n    JarvisDaemon    REG_SZ    "${path}" --jarvis-daemon\r\n`,
+        stderr: "",
+      });
+      const moved = setup("win32", { results: [value("D:\\Old\\Jarvis.exe")] });
+      await expect(moved.manager.isStale()).resolves.toBe(true);
+      const same = setup("win32", { results: [value("C:\\Program Files\\Jarvis\\Jarvis.exe")] });
+      await expect(same.manager.isStale()).resolves.toBe(false);
+      const absent = setup("win32", { results: [{ code: 1, stdout: "", stderr: "not found" }] });
+      await expect(absent.manager.isStale()).resolves.toBe(false);
+    });
   });
 });

@@ -30,7 +30,6 @@ import { DAEMON_EXIT } from "../args.js";
 import { ControlRestartRequired } from "../control/client.js";
 import { errorCode } from "../control/deps.js";
 import { ControlRequestError } from "../control/messages.js";
-import { DAEMON_REQUESTS } from "../protocol.js";
 import { type CliCommand, parseCliArgs } from "./args.js";
 import { formatDevices, formatStatus, terminalSafe } from "./format.js";
 import { CLI_MESSAGES } from "./messages.js";
@@ -68,6 +67,11 @@ export type CliDeps = {
   io: CliIo;
   language: Language;
   connect(): Promise<CliClient>;
+  /** `jarvisd stop`: a hello with intent "stop" (control/client.ts
+   *  requestControlStop), honoured by a daemon of any build. */
+  requestStop(): Promise<void>;
+  /** Whether a daemon still answers on the control endpoint. */
+  daemonAnswers(): Promise<boolean>;
   /** `jarvisd run`: the daemon in this process (daemon-main.ts). */
   runDaemon(): Promise<number>;
   encodeQr(text: string): QrMatrix;
@@ -82,8 +86,9 @@ export type CliDeps = {
 
 /** How often `pair` re-reads the status, besides the daemon's pushes. */
 export const PAIR_POLL_MS = 1_000;
-/** How long `stop` waits for the daemon to close the connection. */
+/** How long `stop` waits for the daemon to let go of its endpoint. */
 export const STOP_WAIT_MS = 15_000;
+const STOP_POLL_MS = 200;
 
 const NOT_RUNNING_CODES = new Set(["ENOENT", "ECONNREFUSED", "ENOTSOCK"]);
 
@@ -136,11 +141,28 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     io.err(CLI_MESSAGES.needsTerminal(language));
     return DAEMON_EXIT.usage;
   }
+  // The other way round: a line read from a terminal is echoed, so the
+  // password would land on screen — and, in a Jarvis terminal, in its
+  // scrollback and on every device following it.
+  if (args.kind === "set-password" && args.stdin && io.stdinIsTTY) {
+    io.err(CLI_MESSAGES.stdinIsTerminal(language));
+    return DAEMON_EXIT.usage;
+  }
   // The pairing link and its QR carry the pairing secret: printed into a
   // pipe or a redirect they would outlive the window in a file or a log.
   if (args.kind === "pair" && !io.stdoutIsTTY) {
     io.err(CLI_MESSAGES.pairNeedsTerminal(language));
     return DAEMON_EXIT.usage;
+  }
+
+  if (args.kind === "stop") {
+    try {
+      return await stopDaemon(deps);
+    } catch (error) {
+      const { text, code } = explain(error, language);
+      io.err(text);
+      return code;
+    }
   }
 
   let client: CliClient | undefined;
@@ -157,7 +179,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
 }
 
 async function runCommand(
-  command: Exclude<CliCommand, { kind: "run" | "help" }>,
+  command: Exclude<CliCommand, { kind: "run" | "help" | "stop" }>,
   client: CliClient,
   deps: CliDeps,
 ): Promise<number> {
@@ -209,23 +231,22 @@ async function runCommand(
       io.out(CLI_MESSAGES.webSaved(command.enabled, language));
       return DAEMON_EXIT.ok;
     }
-    case "stop": {
-      // The daemon answers first and stops after; its closing the
-      // connection is the sign it got there.
-      let timer: unknown;
-      const closed = new Promise<boolean>((resolve) => {
-        client.onClose(() => resolve(true));
-        timer = deps.timers.setTimeout(() => resolve(false), STOP_WAIT_MS);
-      });
-      await client.invoke(DAEMON_REQUESTS.stop, []);
-      io.out(CLI_MESSAGES.stopping(language));
-      const stopped = await closed;
-      deps.timers.clearTimeout(timer);
-      if (!stopped) throw new CommandFailed(CLI_MESSAGES.stillRunning(language));
-      io.out(CLI_MESSAGES.stopped(language));
-      return DAEMON_EXIT.ok;
-    }
   }
+}
+
+/** Asks with intent stop — no welcome needed, so a daemon of another build
+ *  stops too — then waits for the endpoint to go. */
+async function stopDaemon(deps: CliDeps): Promise<number> {
+  const { io, language } = deps;
+  await deps.requestStop();
+  io.out(CLI_MESSAGES.stopping(language));
+  const deadline = deps.now() + STOP_WAIT_MS;
+  while (await deps.daemonAnswers()) {
+    if (deps.now() >= deadline) throw new CommandFailed(CLI_MESSAGES.stillRunning(language));
+    await new Promise<void>((resolve) => deps.timers.setTimeout(resolve, STOP_POLL_MS));
+  }
+  io.out(CLI_MESSAGES.stopped(language));
+  return DAEMON_EXIT.ok;
 }
 
 async function setPassword(stdin: boolean, client: CliClient, deps: CliDeps): Promise<number> {

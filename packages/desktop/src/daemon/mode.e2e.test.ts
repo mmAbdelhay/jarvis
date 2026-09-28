@@ -76,6 +76,7 @@ function recordingService(calls: string[]): ServiceManager {
       return { ok: false, reason: "use-control-socket" };
     },
     status: async () => "stopped",
+    isStale: async () => false,
   };
 }
 
@@ -92,14 +93,17 @@ function recordingWrites(link: SocketCoreClient | undefined, events: string[]) {
   };
 }
 
-async function setup(home: string) {
+async function setup(
+  home: string,
+  options: { enabled?: boolean; build?: string; fallback?: "in-app" | "quit" } = {},
+) {
   const configPath = join(home, ".config", "jarvis", "jarvis.yaml");
   await ensureConfigFile(configPath);
   const io = {
     readFile: (path: string) => readFile(path, "utf8"),
     writeFile: (path: string, text: string) => writeAtomically(path, text),
   };
-  await writeDaemonEnabled(configPath, true, io);
+  await writeDaemonEnabled(configPath, options.enabled ?? true, io);
   const serviceCalls: string[] = [];
   const events: string[] = [];
   const links: SocketCoreClient[] = [];
@@ -109,7 +113,7 @@ async function setup(home: string) {
     uid: process.getuid?.() ?? 0,
     execPath: process.execPath,
     daemonScript: SCRIPT,
-    build: readBuildId(join(DIST_SRC, "..", "build-stamp.json")),
+    build: options.build ?? readBuildId(join(DIST_SRC, "..", "build-stamp.json")),
     configPath,
     restartDaemon: async () => {
       throw new Error("no restart in this test");
@@ -139,7 +143,7 @@ async function setup(home: string) {
     },
     chooseFallback: async () => {
       events.push("fallback");
-      return "quit";
+      return options.fallback ?? "quit";
     },
     stopInProcess: async () => {
       events.push("stopInProcess");
@@ -226,4 +230,67 @@ describe.skipIf(WINDOWS)("background mode against a real foreground jarvisd", ()
     // The 10 s socket wait, really waited.
     expect(Date.now() - started).toBeGreaterThanOrEqual(9_000);
   }, 60_000);
+
+  // Review C1: an app (or CLI) of another build meets a daemon no service
+  // manager restarts. The stop must still work, or the user is locked out.
+  it("stops a daemon of another build with intent stop; a plain connect is still told to restart", async () => {
+    const home = await scratchHome();
+    const daemon = startDaemon(home);
+    const { real } = await setup(home, { build: "an-older-build" });
+    await until(() => real.daemonAnswers(), "the daemon's socket");
+    await expect(real.connect(0)).rejects.toThrow(/different build/);
+    expect(daemon.child.exitCode).toBeNull();
+
+    await real.requestDaemonStop();
+    await expect(daemon.exited).resolves.toBe(0);
+    expect(await real.daemonAnswers()).toBe(false);
+  }, 60_000);
+
+  // Review I1: the setting is off, but a daemon runs (here a foreground
+  // `jarvisd run`): the app attaches to it rather than build a second core.
+  it("setting off, a daemon running: attaches to it for the session, no service call, setting untouched", async () => {
+    const home = await scratchHome();
+    const daemon = startDaemon(home);
+    const { mode, real, configPath, serviceCalls, events, links } = await setup(home, {
+      enabled: false,
+    });
+    await until(() => real.daemonAnswers(), "the daemon's socket");
+
+    const launch = await mode.launch({ inAppThisSession: false });
+    expect(launch.kind).toBe("daemon");
+    await expect((links[0] as SocketCoreClient).invoke("settings:read", [])).resolves.toBeTypeOf(
+      "object",
+    );
+    await until(async () => (await mode.status()).state.kind === "running", "running");
+    expect(await mode.status()).toMatchObject({
+      enabled: false,
+      inApp: false,
+      state: { kind: "running", pid: daemon.child.pid },
+    });
+    expect(serviceCalls).toEqual([]);
+    expect(events).toEqual([]);
+    expect(readFileSync(configPath, "utf8")).not.toContain("daemon:\n  enabled: true");
+
+    // With nothing running, the same launch is in-process, as before.
+    expect(await mode.stopNow()).toEqual({ ok: true });
+    await expect(daemon.exited).resolves.toBe(0);
+    const again = await setup(home, { enabled: false });
+    expect(await again.mode.launch({ inAppThisSession: false })).toEqual({ kind: "in-process" });
+  }, 90_000);
+
+  it("setting off, a daemon of another build: run in the app stops it over the socket first", async () => {
+    const home = await scratchHome();
+    const daemon = startDaemon(home);
+    const { mode, real, serviceCalls, events } = await setup(home, {
+      enabled: false,
+      build: "an-older-build",
+      fallback: "in-app",
+    });
+    await until(() => real.daemonAnswers(), "the daemon's socket");
+
+    expect(await mode.launch({ inAppThisSession: false })).toEqual({ kind: "in-process" });
+    await expect(daemon.exited).resolves.toBe(0);
+    expect(events).toEqual(["fallback"]);
+    expect(serviceCalls).toEqual([]);
+  }, 90_000);
 });

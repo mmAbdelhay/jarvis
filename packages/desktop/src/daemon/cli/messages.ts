@@ -115,6 +115,12 @@ export const CLI_MESSAGES = {
       "يحتاج set-password إلى طرفية ليسأل عن كلمة المرور. استخدم --stdin لتمريرها من برنامج.",
       "set-password needs a terminal to ask for the password. Use --stdin to pass it from a script.",
     ),
+  stdinIsTerminal: (language: Language): string =>
+    pick(
+      language,
+      "لن يقرأ --stdin كلمة المرور من طرفية لأنها ستظهر أثناء الكتابة. شغّل jarvisd set-password بدون --stdin ليسألك عنها مخفية.",
+      "--stdin won't read a password from a terminal, where it would show as you type. Run jarvisd set-password without --stdin to be asked for it hidden.",
+    ),
   noPasswordOnStdin: (language: Language): string =>
     pick(
       language,

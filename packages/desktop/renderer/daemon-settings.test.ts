@@ -41,6 +41,25 @@ describe("Settings → General: the background service's view of a status", () =
     });
   });
 
+  // Review I1: the setting is off, but the app found a daemon running and
+  // attached to it rather than start a second core.
+  it("attached with the setting off: says so, in both languages, with Stop now", () => {
+    for (const language of ["en", "ar"] as const) {
+      const view = daemonSettingsView(
+        { enabled: false, inApp: false, state: { kind: "running", pid: 812, uptimeMs: 60_000 } },
+        language,
+      );
+      expect(view).toEqual({
+        toggleOn: false,
+        line: MESSAGES.daemonStateAttached(812, MESSAGES.daemonUptime(60_000, language), language),
+        warning: false,
+        showDaemonActions: true,
+      });
+    }
+    expect(MESSAGES.daemonStateAttached(812, "1m", "en")).toContain("already running");
+    expect(MESSAGES.daemonStateAttached(812, "1m", "ar")).toMatch(/[\u0600-\u06ff]/);
+  });
+
   it("failed: the reason and the log's last line, as a warning", () => {
     expect(
       daemonSettingsView(

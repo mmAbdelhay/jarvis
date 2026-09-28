@@ -17,7 +17,10 @@
 // wrong proof closes the connection without a reply, so an unauthenticated
 // peer learns nothing, not even the build. A client that proves itself but
 // runs another build or protocol version is told restart-required, so an
-// updated app can restart an old daemon. After the welcome, frames are
+// updated app can restart an old daemon — unless its hello said intent
+// "stop": then, whatever the build or version, it is told stopping and the
+// daemon stops (review C1), so a daemon no service manager restarts can
+// still be stopped by an app or CLI of another build. After the welcome, frames are
 // @jarvis/wire req/blob in and res/err/psh out; the handlers apply the desktop
 // origin themselves.
 import type { Server, Socket } from "node:net";
@@ -69,6 +72,9 @@ export interface ControlHandlers {
     bytes: Uint8Array,
     connection: ControlConnection,
   ): Promise<unknown>;
+  /** A proven client's hello asked the daemon to stop. Called once
+   *  `stopping` has been queued on that connection. */
+  stop(): void;
 }
 
 export interface ControlServer {
@@ -222,6 +228,12 @@ export async function createControlServer(
       onAuthenticated = () => {
         deps.clock.clearTimeout(timer);
         leaveHandshake();
+        if (hello.intent === "stop") {
+          phase = "closing";
+          socket.end(encodeJsonFrame({ t: "stopping" }));
+          handlers.stop();
+          return;
+        }
         if (hello.v !== CONTROL_PROTOCOL_VERSION || hello.build !== build) {
           phase = "closing";
           socket.end(encodeJsonFrame({ t: "restart-required", build }));

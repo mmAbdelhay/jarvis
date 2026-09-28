@@ -22,21 +22,55 @@ function systemdQuote(value: string): string {
     .replaceAll("$", () => "$$")}"`;
 }
 
+/** The binary an installed unit runs (ExecStart's first quoted word), as
+ *  buildLinuxService wrote it; undefined when the unit has none. */
+export function linuxRecordedExecPath(unit: string): string | undefined {
+  const match = /^ExecStart="((?:[^"\\]|\\.)*)"/m.exec(unit);
+  if (match?.[1] === undefined) return undefined;
+  return match[1].replace(
+    /\\(.)|%%|\$\$/g,
+    (whole, escaped: string | undefined) => escaped ?? whole[0] ?? "",
+  );
+}
+
+/**
+ * The systemd user unit.
+ *
+ * Restart=on-failure brings the daemon back after a crash and after a
+ * restart exit (75); RestartPreventExitStatus=3 keeps "another jarvisd
+ * already runs" from respawning every RestartSec. KillMode=process: a stop
+ * signals the daemon alone, which closes its own ptys, so a detached job a
+ * Jarvis terminal started (a tmux server, nohup, docker compose) outlives a
+ * daemon stop or restart, as it outlives the app in-process.
+ *
+ * From an AppImage, execPath and the daemon script sit in the image's
+ * /tmp/.mount_* directory, gone once the app quits, so the unit runs the
+ * .AppImage file itself ($APPIMAGE) with --jarvis-daemon, which under a
+ * service manager runs the daemon in the foreground (main.ts).
+ */
 export function buildLinuxService(options: {
   home: string;
   execPath: string;
   daemonScript: string;
+  /** $APPIMAGE, when the app runs from an AppImage. */
+  appImage?: string;
 }): LinuxServiceDefinition {
   const filePath = `${options.home}/.config/systemd/user/jarvisd.service`;
+  const exec =
+    options.appImage === undefined
+      ? `ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} ${systemdQuote("run")}
+Environment=ELECTRON_RUN_AS_NODE=1`
+      : `ExecStart=${systemdQuote(options.appImage)} ${systemdQuote("--jarvis-daemon")}`;
   const contents = `[Unit]
 Description=Jarvis background daemon
 
 [Service]
-ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} ${systemdQuote("run")}
-Environment=ELECTRON_RUN_AS_NODE=1
+${exec}
 Environment=JARVISD_SUPERVISOR=systemd
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=3
+KillMode=process
 
 [Install]
 WantedBy=default.target

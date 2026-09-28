@@ -10,6 +10,13 @@ export interface WindowsServiceDefinition {
 
 const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
+/** The binary the Run value starts, read from `reg query`'s output (the
+ *  quoted path before --jarvis-daemon); undefined when there is none. */
+export function windowsRecordedExecPath(regQueryOutput: string): string | undefined {
+  const match = /JarvisDaemon\s+REG_SZ\s+"([^"]*)"/.exec(regQueryOutput);
+  return match?.[1];
+}
+
 export function buildWindowsService(options: { execPath: string }): WindowsServiceDefinition {
   return {
     commands: {

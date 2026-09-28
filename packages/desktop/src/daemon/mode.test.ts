@@ -52,6 +52,8 @@ type Options = {
   useInProcessFails?: boolean;
   /** Writes go through daemonSettingWriter to the last link, as main.ts's. */
   routeWrites?: boolean;
+  /** The installed service names another binary (a moved app). */
+  stale?: boolean | Error;
 };
 
 function harness(options: Options = {}) {
@@ -82,6 +84,10 @@ function harness(options: Options = {}) {
       stop: socketOrNothing("stop"),
       restart: socketOrNothing("restart"),
       status: async () => options.serviceStatus ?? "stopped",
+      isStale: async () => {
+        if (options.stale instanceof Error) throw options.stale;
+        return options.stale ?? false;
+      },
     },
     installStarts: options.installStarts ?? true,
     async connect(timeoutMs) {
@@ -280,6 +286,122 @@ describe("daemon mode: app launch", () => {
   });
 });
 
+describe("daemon mode: setting off, but a daemon already runs (review I1)", () => {
+  it("attaches to it for this session instead of starting a second core", async () => {
+    const h = harness({ enabled: false, answersFor: 1 });
+    const result = await h.mode.launch({ inAppThisSession: false });
+    expect(result).toEqual({ kind: "daemon", link: h.links[0] });
+    // No service call, and the setting is left as it is.
+    expect(noLogs(h.events)).toEqual(["connect(0)"]);
+    expect(h.enabled()).toBe(false);
+    expect(await h.mode.status()).toEqual({
+      enabled: false,
+      inApp: false,
+      state: { kind: "running", pid: 4242, uptimeMs: 9_000 },
+    });
+  });
+
+  it("one it can't attach to (another build): stops it over the socket before running in the app", async () => {
+    const h = harness({
+      enabled: false,
+      answersFor: 2,
+      connects: [new Error("runs a different build")],
+      fallback: "in-app",
+    });
+    expect(await h.mode.launch({ inAppThisSession: false })).toEqual({ kind: "in-process" });
+    expect(noLogs(h.events)).toEqual([
+      "connect(0)",
+      "fallback? runs a different build | error: the core failed to start: EACCES",
+      "daemon:stop",
+    ]);
+  });
+
+  it("one it can't attach to and that won't stop: an error and a quit, never a second core", async () => {
+    const h = harness({
+      enabled: false,
+      answersFor: 10_000,
+      connects: [new Error("runs a different build")],
+      fallback: "in-app",
+    });
+    expect(await h.mode.launch({ inAppThisSession: false })).toEqual({ kind: "quit" });
+    expect(noLogs(h.events).slice(-2)).toEqual([
+      "daemon:stop",
+      "error Jarvis's background service won't stop",
+    ]);
+
+    const quits = harness({
+      enabled: false,
+      answersFor: 1,
+      connects: [new Error("x")],
+      fallback: "quit",
+    });
+    expect(await quits.mode.launch({ inAppThisSession: false })).toEqual({ kind: "quit" });
+  });
+
+  it("turning the setting on while attached writes it and installs the service, and nothing else", async () => {
+    const h = harness({ enabled: false, answersFor: 1 });
+    await h.mode.launch({ inAppThisSession: false });
+    expect(await h.mode.setEnabled(true)).toEqual({ ok: true });
+    expect(noLogs(h.events)).toEqual(["connect(0)", "config true", "install"]);
+    expect((await h.mode.status()).enabled).toBe(true);
+
+    // Windows: the Run value only; the daemon already runs.
+    const windows = harness({ enabled: false, answersFor: 1, installStarts: false });
+    await windows.mode.launch({ inAppThisSession: false });
+    expect(await windows.mode.setEnabled(true)).toEqual({ ok: true });
+    expect(noLogs(windows.events)).toEqual(["connect(0)", "config true", "install"]);
+  });
+
+  it("restart is refused: the service did not start this daemon, so it can't restart it", async () => {
+    const h = harness({ enabled: false, answersFor: 1 });
+    await h.mode.launch({ inAppThisSession: false });
+    expect(await h.mode.restart()).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: MESSAGES.daemonNotService(PRIMARY_LANGUAGE),
+    });
+    // Nor does the adapter's answer to restart-required touch a service.
+    await expect(h.mode.restartDaemon()).rejects.toThrow(MESSAGES.daemonNotService("en"));
+    expect(noLogs(h.events)).toEqual(["connect(0)"]);
+  });
+
+  it("turning it off is a no-op (it is off), and stop now stops the daemon and relaunches in the app", async () => {
+    const h = harness({ enabled: false, answersFor: 1 });
+    await h.mode.launch({ inAppThisSession: false });
+    expect(await h.mode.setEnabled(false)).toEqual({ ok: true });
+    expect(await h.mode.stopNow()).toEqual({ ok: true });
+    expect(noLogs(h.events)).toEqual([
+      "connect(0)",
+      "daemon:stop",
+      "link.stop",
+      "relaunch inApp=true",
+    ]);
+  });
+});
+
+describe("daemon mode: a moved app's stale service (fix wave)", () => {
+  it("reinstalls a service that names another binary before connecting", async () => {
+    const h = harness({ enabled: true, stale: true });
+    expect((await h.mode.launch({ inAppThisSession: false })).kind).toBe("daemon");
+    expect(noLogs(h.events)).toEqual(["install", "connect(0)"]);
+  });
+
+  it("leaves a current service alone, never checks when the setting is off, and goes on if the check fails", async () => {
+    const current = harness({ enabled: true, stale: false });
+    await current.mode.launch({ inAppThisSession: false });
+    expect(noLogs(current.events)).toEqual(["connect(0)"]);
+
+    const off = harness({ enabled: false, stale: true });
+    await off.mode.launch({ inAppThisSession: false });
+    expect(off.events).toEqual([]);
+
+    const failing = harness({ enabled: true, stale: new Error("EACCES") });
+    expect((await failing.mode.launch({ inAppThisSession: false })).kind).toBe("daemon");
+    expect(noLogs(failing.events)).toEqual(["connect(0)"]);
+    expect(failing.events).toContain("log checking the installed service failed: EACCES");
+  });
+});
+
 describe("daemon mode: turning it on", () => {
   it("confirms, installs and starts, waits for the socket, switches, then stops the in-process core", async () => {
     const h = harness({ enabled: false });
@@ -359,7 +481,9 @@ describe("daemon mode: turning it on", () => {
       connects: [new Error("timed out")],
       answersFor: 2,
     });
-    await h.mode.launch({ inAppThisSession: false });
+    // In-process from the start, without the launch's probe, so the two
+    // answers belong to the daemon the start brings up late.
+    await h.mode.launch({ inAppThisSession: true });
     expect((await h.mode.setEnabled(true)).ok).toBe(false);
     expect(noLogs(h.events)).toEqual([
       "confirm enable",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDarwinService } from "./service-darwin.js";
+import { buildDarwinService, darwinRecordedExecPath } from "./service-darwin.js";
 
 describe("buildDarwinService", () => {
   it("builds an escaped launch agent and exact launchctl argv", () => {
@@ -52,5 +52,20 @@ describe("buildDarwinService", () => {
       stop: ["launchctl", ["bootout", "gui/501/dev.jarvis.daemon"]],
       status: ["launchctl", ["print", "gui/501/dev.jarvis.daemon"]],
     });
+  });
+
+  it.each([
+    "/Applications/Jarvis & Co.app/Contents/MacOS/Jarvis <Dev> 'q' \"d\"",
+    "/private/var/folders/xy/T/AppTranslocation/ABC/d/Jarvis.app/Contents/MacOS/Jarvis",
+    "/Applications/جارفيس.app/Contents/MacOS/Jarvis",
+  ])("reads back the binary a plist records: %s", (execPath) => {
+    const service = buildDarwinService({
+      home: "/Users/u",
+      uid: 501,
+      execPath,
+      daemonScript: "/d.js",
+    });
+    expect(darwinRecordedExecPath(service.contents)).toBe(execPath);
+    expect(darwinRecordedExecPath("<plist><dict></dict></plist>")).toBeUndefined();
   });
 });

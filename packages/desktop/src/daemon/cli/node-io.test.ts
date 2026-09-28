@@ -80,4 +80,39 @@ describe("nodeCliIo hidden reads", () => {
     await expect(first).resolves.toBe("one");
     await expect(t.io.readLine()).resolves.toBe("two");
   });
+
+  // Review minor 6: an arrow key is ESC [ A. Kept, its "[A" would become
+  // part of a password the owner never meant to type.
+  it.each([
+    ["arrow keys", "pass\u001b[Aword\u001b[B\u001b[C\u001b[D\r"],
+    ["Home/End and Delete (with parameters)", "\u001b[1~pass\u001b[3~word\u001b[4~\r"],
+    ["modified arrows", "pass\u001b[1;5Cword\r"],
+    ["application-mode arrows (SS3)", "\u001bOApass\u001bOBword\r"],
+    ["Alt+key", "pass\u001bxword\r"],
+  ])("drops whole escape sequences: %s", async (_name, typed) => {
+    const t = fakeTerminal();
+    const read = t.io.readHidden("Password: ");
+    t.stdin.emit("data", typed);
+    await expect(read).resolves.toBe("password");
+  });
+
+  it("drops an escape sequence split across chunks", async () => {
+    const t = fakeTerminal();
+    const read = t.io.readHidden("Password: ");
+    t.stdin.emit("data", "pass\u001b");
+    t.stdin.emit("data", "[");
+    t.stdin.emit("data", "1;2");
+    t.stdin.emit("data", "Dword\r");
+    await expect(read).resolves.toBe("password");
+  });
+
+  it("starts the next hidden read clean after one ended mid-sequence", async () => {
+    const t = fakeTerminal();
+    const first = t.io.readHidden("Password: ");
+    t.stdin.emit("data", "x\u001b[\u0003");
+    await expect(first).resolves.toBeUndefined();
+    const second = t.io.readHidden("Password: ");
+    t.stdin.emit("data", "Aok\r");
+    await expect(second).resolves.toBe("Aok");
+  });
 });

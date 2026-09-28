@@ -35,6 +35,21 @@ tries to start it and waits up to 10 seconds. If that fails, it asks you
 whether to **Run inside the app this time** or **Quit**. Running inside the
 app leaves the setting on.
 
+When the setting is off but a daemon is already running, for example one
+you started with `jarvisd run`, the app does not start a second copy of the
+work beside it. It attaches to that daemon for this session instead, and
+the status line says **Attached to a jarvisd that was already running**.
+The setting stays off. **Stop now** stops that daemon and restarts Jarvis
+inside the app. **Restart daemon** is refused, because the service manager
+did not start that daemon. Turning the setting on while attached registers
+the service and leaves the running daemon as it is. If the running daemon
+can't be attached, because it is from another build, the app asks whether to
+stop it and **Run inside the app this time**, or **Quit**.
+
+Jarvis runs one window per user. Opening it again, from the Dock, a launcher
+or a shortcut, brings the open window forward instead of starting a second
+copy.
+
 The setting is `daemon.enabled` in `jarvis.yaml` (see
 the `daemon:` section of [configuration](configuration.md)). Change it
 from Settings rather than by hand: the toggle is what installs and removes
@@ -57,11 +72,16 @@ no screen, for example a server you reach over SSH.
 | `jarvisd revoke <id>` | Unpairs a device. Its sign-ins end. |
 | `jarvisd sign-out-all [--yes]` | Signs every phone and browser out. It asks first unless you pass `--yes`. |
 | `jarvisd web on` / `jarvisd web off` | Turns browser access on or off. |
-| `jarvisd stop` | Stops the daemon and waits for it to exit. |
+| `jarvisd stop` | Stops the daemon and waits for it to exit. It works on a daemon of any build, so it also stops an old daemon after an update. |
 | `jarvisd --help` | Shows this list. |
 
 `set-password` refuses to read a password from a pipe unless you pass
-`--stdin`. `pair` prints the pairing link and QR code only to a terminal.
+`--stdin`, and refuses `--stdin` when standard input is a terminal, where the
+password would show as you type. `pair` prints the pairing link and QR code
+only to a terminal.
+
+In a hidden prompt, keys that send escape sequences, such as the arrow
+keys, Home, End and Delete, add nothing to the password.
 
 Prompts go to standard error, so standard output carries only the answer.
 
@@ -71,8 +91,8 @@ Exit codes:
 |---|---|
 | `0` | Done. |
 | `1` | Failed: the daemon refused, the connection dropped, you answered no, or the daemon runs a different build. |
-| `2` | Usage error, or `set-password` from a pipe without `--stdin`. |
-| `3` | The daemon is not running. For `jarvisd run`: another daemon already is. |
+| `2` | Usage error, `set-password` from a pipe without `--stdin`, or `set-password --stdin` from a terminal. |
+| `3` | The daemon is not running. For `jarvisd run`: another daemon already is. When launchd or systemd starts the daemon and another one already runs, it exits `0` instead, so the service manager does not keep starting it again. |
 
 ### Running `jarvisd`
 
@@ -109,10 +129,14 @@ ELECTRON_RUN_AS_NODE=1 /Applications/Jarvis.app/Contents/MacOS/Jarvis \
   /Applications/Jarvis.app/Contents/Resources/app.asar/dist/src/daemon/cli/jarvisd.js status
 ```
 
+On Windows, run the launcher itself rather than setting
+`ELECTRON_RUN_AS_NODE` in your console. Set there, it stays set for every
+program you start from that console, and any Electron app among them, Jarvis
+included, would start as plain Node and fail:
+
 ```bat
 rem Windows
-set ELECTRON_RUN_AS_NODE=1
-"C:\path\to\Jarvis\Jarvis.exe" "C:\path\to\Jarvis\resources\app.asar\dist\src\daemon\cli\jarvisd.js" status
+"C:\path\to\Jarvis\resources\bin\jarvisd.cmd" status
 ```
 
 From a source checkout, after `pnpm build`:
@@ -150,15 +174,28 @@ at login, and launchd starts it again if it exits with an error. Its
 standard output and error go to `~/.config/jarvis/logs/jarvisd.out.log` and
 `jarvisd.err.log`.
 
-The plist names the app's binary by its full path. Move Jarvis to
-`/Applications` before turning the setting on. If you move the app later,
-turn the setting off and on again so the plist points at the new place.
+The plist names the app's binary by its full path. If you move the app
+later, the next time you open it Jarvis sees that the plist names another
+copy and registers the service again from the new place. That restarts the
+daemon, so terminals running in the background close.
+
+Move Jarvis to `/Applications` before turning the setting on. An app run
+straight from Downloads or from the disk image runs from a temporary
+location that macOS can change, and each change means another
+re-registration.
 
 ### Linux
 
 A systemd user unit at `~/.config/systemd/user/jarvisd.service`, enabled for
 `default.target` with `Restart=on-failure`. Read its output with
 `journalctl --user -u jarvisd`.
+
+The unit sets `RestartPreventExitStatus=3`, so a daemon that finds another
+one already running is not started again every few seconds. It also sets
+`KillMode=process`: stopping or restarting the daemon closes its terminals,
+but a program you detached from one of them, such as a `tmux` server, a
+`nohup` job or `docker compose`, keeps running, as it does when you quit the
+app with the setting off.
 
 A user unit runs only while you are logged in. On a headless server, where
 you want the daemon running with nobody logged in, enable lingering for
@@ -168,10 +205,12 @@ your user once. This needs sudo, so Jarvis does not do it for you:
 sudo loginctl enable-linger "$USER"
 ```
 
-The unit names the app's binary by its full path, and an AppImage runs from
-a temporary mount that changes every time. For the background daemon, run
-Jarvis from an unpacked copy at a fixed place, for example
-`./Jarvis.AppImage --appimage-extract` and then `squashfs-root/jarvis`.
+The unit names the app by its full path. For an AppImage it names the
+`.AppImage` file itself, with `--jarvis-daemon`, because the AppImage's
+contents are mounted at a temporary path that changes every time. If you
+move the app or the `.AppImage` file later, the next time you open Jarvis it
+sees that the unit names another copy and writes the unit again from the
+new place. That restarts the daemon.
 
 ### Windows
 
@@ -182,7 +221,9 @@ rights. That flag makes the app start the daemon in the background, with no
 window, and exit.
 
 Windows has no service manager watching the daemon. If it crashes it stays
-down until you sign in again or open Jarvis.
+down until you sign in again or open Jarvis. If you move the Jarvis folder,
+the next time you open Jarvis it writes the `JarvisDaemon` value again with
+the new path.
 
 ## Security
 
@@ -230,11 +271,15 @@ run directory.
 
 **"The Jarvis daemon runs a different build. Restart it, then try again."**
 After an update, the app and the CLI refuse to talk to a daemon from an
-older build. The app restarts the daemon itself, through the service
-manager, at most three times in ten minutes. After that the status line says
-it failed. For the CLI, restart the daemon: **Settings → General → Restart
-daemon**, or on a machine with no screen `systemctl --user restart jarvisd`
-(Linux) or `launchctl kickstart -k gui/$(id -u)/dev.jarvis.daemon` (macOS).
+older build. The app restarts the daemon itself, at most three times in ten
+minutes: through the service manager, or on Windows by stopping it and
+starting the new one. After that the status line says it failed. Stopping
+works across builds, so **Stop now**, turning the setting off, **Run inside
+the app this time** and `jarvisd stop` all reach an old daemon. For the CLI,
+restart the daemon: **Settings → General → Restart daemon**, or on a machine
+with no screen `systemctl --user restart jarvisd` (Linux),
+`launchctl kickstart -k gui/$(id -u)/dev.jarvis.daemon` (macOS), or
+`jarvisd stop` and then open Jarvis (Windows).
 
 **The daemon keeps restarting.** A restart from Settings makes the daemon
 exit with code 75, and launchd or systemd starts it again. That is
@@ -248,8 +293,7 @@ and start it again.
 
 **The app says it couldn't reach its background service.** The dialog shows
 the last line of `jarvisd.log`. Choose **Run inside the app this time** to
-keep working, then look at the log. On macOS a moved app is a common cause;
-see [macOS](#macos) above.
+keep working, then look at the log.
 
 **"Jarvis's background service won't stop."** A daemon started while
 turning the setting on, or while the app tried to reach it, did not stop

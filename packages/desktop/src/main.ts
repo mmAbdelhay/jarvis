@@ -46,41 +46,52 @@ import { decidePermission } from "./permissions.js";
 import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { daemonScriptPath } from "./daemon/script-path.js";
+import { launchDaemonFromApp } from "./daemon/app-launcher.js";
+import { claimSingleInstance } from "./single-instance.js";
 import { openBridgeWebUrl } from "./open-external-guard.js";
 import type { RemoteStatus } from "@jarvis/remote";
 
 /**
- * `<Jarvis binary> --jarvis-daemon`: start jarvisd and get out of the way.
+ * `<Jarvis binary> --jarvis-daemon`: start jarvisd (daemon/app-launcher.ts).
  *
  * Windows' autostart (the HKCU Run value, service-win32.ts) and its start
  * button launch the app binary with this flag, since there is no separate
- * Node to run the daemon with. The binary runs itself again as plain Node
- * (ELECTRON_RUN_AS_NODE) on the daemon's script, detached and without a
- * console window, and this process exits before it is ready — no window,
- * no core, no second anything. The daemon takes its own single-instance
- * lock, so a second launch exits there with code 3.
+ * Node to run the daemon with; so does a Linux AppImage's systemd unit
+ * (service-linux.ts), whose binary lives in a mount that is gone once the
+ * app quits. No window and no core either way, and no single-instance lock:
+ * this starts the daemon whether or not the app is open. The daemon takes
+ * its own lock, so a second launch exits there.
  */
 const launchingDaemon = process.argv.includes("--jarvis-daemon");
 if (launchingDaemon) {
-  const script = daemonScriptPath({
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    distSrcDir: dirname(fileURLToPath(import.meta.url)),
+  launchDaemonFromApp({
+    execPath: process.execPath,
+    script: daemonScriptPath({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      distSrcDir: dirname(fileURLToPath(import.meta.url)),
+    }),
+    env: process.env,
+    spawn(command, args, options) {
+      const child = spawn(command, [...args], options);
+      return {
+        onExit: (listener) => void child.once("exit", (code) => listener(code)),
+        onError: (listener) => void child.on("error", listener),
+        kill: (signal) => void child.kill(signal),
+        unref: () => void child.unref(),
+      };
+    },
+    onSignal: (signal, listener) => void process.on(signal, listener),
+    exit: (code) => app.exit(code),
+    log: (line) => console.error(line),
   });
-  try {
-    spawn(process.execPath, [script, "run"], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      detached: true,
-      windowsHide: true,
-      stdio: "ignore",
-    })
-      .on("error", (error) => console.error(`jarvisd failed to start: ${errorMessage(error)}`))
-      .unref();
-  } catch (error) {
-    console.error(`jarvisd failed to start: ${errorMessage(error)}`);
-  }
-  app.exit(0);
 }
+
+/** The app's window, once there is one: a second instance brings it forward. */
+let focusAppWindow: () => void = () => {};
+
+/** One app per user data directory (single-instance.ts, review I1). */
+const onlyInstance = !launchingDaemon && claimSingleInstance(app, () => focusAppWindow());
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -328,7 +339,8 @@ export let widevineReady: Promise<void> | undefined;
 
 app.whenReady().then(async () => {
   // Launching the daemon only: no window, no core (see launchingDaemon).
-  if (launchingDaemon) return;
+  // A second instance: the first has been told, and this one is quitting.
+  if (launchingDaemon || !onlyInstance) return;
   setDockIcon();
 
   // Electron's default menu is the standard Mac menu bar on darwin — which is
@@ -385,6 +397,8 @@ app.whenReady().then(async () => {
       home: homedir(),
       uid: process.getuid?.() ?? 0,
       execPath: process.execPath,
+      // An AppImage's own file: execPath is inside its temporary mount.
+      ...(platform === "linux" && process.env.APPIMAGE ? { appImage: process.env.APPIMAGE } : {}),
       daemonScript: daemonScriptPath({
         packaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
@@ -488,6 +502,12 @@ app.whenReady().then(async () => {
     );
     const { window, views, local } = createDesktopHost(client);
     appWindow = window;
+    focusAppWindow = () => {
+      if (window.isDestroyed()) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    };
     /** A thrown mode call becomes the renderer's failed result. */
     const settle = (run: () => Promise<ChangeResult>): Promise<ChangeResult> =>
       run().catch((error: unknown) => ({

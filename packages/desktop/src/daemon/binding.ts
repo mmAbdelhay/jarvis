@@ -64,7 +64,10 @@ export type DaemonBindingDeps = {
    *  manager to start the daemon again. Absent when none runs it. Called
    *  after the request that asked for it has been answered. */
   requestRestart?(): void;
+  /** Errors and warnings. */
   log(line: string): void;
+  /** Routine events: a stop that was asked for. */
+  info(line: string): void;
   now(): number;
   timers: {
     setInterval(callback: () => void, ms: number): unknown;
@@ -221,15 +224,22 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
         await core.reapplyRemote();
         return null;
       case DAEMON_REQUESTS.stop:
-        deps.log("stop requested over the control socket");
-        deps.timers.defer(deps.requestStop);
+        stop();
         return { stopping: true };
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }
   }
 
+  /** daemon:stop, or a hello's intent stop (any build): the answer goes out
+   *  first, the graceful stop after. */
+  function stop(): void {
+    deps.info("stop requested over the control socket");
+    deps.timers.defer(deps.requestStop);
+  }
+
   const handlers: ControlHandlers = {
+    stop,
     async invoke(channel, args, connection) {
       const core = await bound;
       if (channel.startsWith("daemon:")) return internal(core, channel, args, connection);

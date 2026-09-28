@@ -4,14 +4,25 @@
 // (hello, challenge, auth — see handshake.ts), restart-required and the
 // daemon's own start-up probe are the control socket's own.
 //
-// Frozen contract: hello, challenge, auth and restart-required must keep
-// these shapes across every CONTROL_PROTOCOL_VERSION. A version mismatch is
-// itself reported through them — an app meeting a daemon of another version
-// has to be able to authenticate and read restart-required to recover.
+// Frozen contract: hello (with its optional intent), challenge, auth,
+// restart-required and stopping must keep these shapes across every
+// CONTROL_PROTOCOL_VERSION. A version mismatch is itself reported through
+// them — an app meeting a daemon of another version has to be able to
+// authenticate and read restart-required to recover, and to stop that
+// daemon (intent "stop") where no service manager can (review C1).
 import { REMOTE_ERROR_CODES, type RemoteErrorCode, type ServerMessage } from "@jarvis/wire";
 import { HEX32_PATTERN } from "./handshake.js";
 
-export type ControlHello = { t: "hello"; v: number; build: string; nonceC: string };
+/** `intent: "stop"` asks the daemon to stop once the client has proven
+ *  itself, whatever build or protocol version either side runs; the daemon
+ *  answers `stopping` and serves nothing else on that connection. */
+export type ControlHello = {
+  t: "hello";
+  v: number;
+  build: string;
+  nonceC: string;
+  intent?: "stop";
+};
 export type ControlChallenge = { t: "challenge"; nonceS: string; proof: string };
 export type ControlAuth = { t: "auth"; proof: string };
 /** Sent by a starting daemon to itself, to confirm the endpoint reaches it. */
@@ -24,7 +35,8 @@ export type ControlClientMessage =
 export type ControlServerMessage =
   | Exclude<ServerMessage, { t: "ping" }>
   | ControlChallenge
-  | { t: "restart-required"; build: string };
+  | { t: "restart-required"; build: string }
+  | { t: "stopping" };
 
 /** A handler's typed refusal; anything else a handler throws is sent as "internal". */
 export class ControlRequestError extends Error {
@@ -67,9 +79,10 @@ export function parseOpening(value: unknown): ControlHello | ControlProbe | unde
   if (value.t === "probe")
     return isHex32(value.token) ? { t: "probe", token: value.token } : undefined;
   if (value.t !== "hello") return undefined;
-  const { v, build, nonceC } = value;
+  const { v, build, nonceC, intent } = value;
   if (!isId(v) || !isBuild(build) || !isHex32(nonceC)) return undefined;
-  return { t: "hello", v, build, nonceC };
+  if (intent === undefined) return { t: "hello", v, build, nonceC };
+  return intent === "stop" ? { t: "hello", v, build, nonceC, intent } : undefined;
 }
 
 export function parseAuth(value: unknown): ControlAuth | undefined {
@@ -107,6 +120,8 @@ export function parseServerMessage(value: unknown): ControlServerMessage | undef
     }
     case "restart-required":
       return isBuild(value.build) ? { t: "restart-required", build: value.build } : undefined;
+    case "stopping":
+      return { t: "stopping" };
     case "res":
       return isId(value.id) ? { t: "res", id: value.id, v: value.v } : undefined;
     case "err": {

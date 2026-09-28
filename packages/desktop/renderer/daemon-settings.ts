@@ -33,16 +33,18 @@ export function daemonSettingsView(status: DaemonStatus, language: Language): Da
   switch (state.kind) {
     case "starting":
       return { ...base, line: MESSAGES.daemonStateStarting(language), warning: false };
-    case "running":
+    case "running": {
+      const uptime = MESSAGES.daemonUptime(state.uptimeMs, language);
       return {
         ...base,
-        line: MESSAGES.daemonStateRunning(
-          state.pid,
-          MESSAGES.daemonUptime(state.uptimeMs, language),
-          language,
-        ),
+        // Attached with the setting off: a daemon the app found running
+        // (a foreground `jarvisd run`), not the service's.
+        line: status.enabled
+          ? MESSAGES.daemonStateRunning(state.pid, uptime, language)
+          : MESSAGES.daemonStateAttached(state.pid, uptime, language),
         warning: false,
       };
+    }
     case "failed":
       return {
         ...base,

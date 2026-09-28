@@ -137,6 +137,8 @@ function deps(
     language: "en",
     connect: typeof client === "function" ? client : async () => client,
     runDaemon: vi.fn(async () => 0),
+    requestStop: async () => {},
+    daemonAnswers: async () => false,
     encodeQr,
     now: () => 1_000_000,
     timers: {
@@ -293,6 +295,20 @@ describe("set-password", () => {
     expect(code).toBe(2);
     expect(connect).not.toHaveBeenCalled();
     expect(io.errLines).toEqual([CLI_MESSAGES.needsTerminal("en")]);
+  });
+
+  // Review minor 5: --stdin on a terminal would echo the password into it
+  // (and into a Jarvis terminal's scrollback and its remote followers).
+  it("refuses --stdin when stdin is a terminal, before connecting", async () => {
+    const io = fakeIo({ tty: true, lines: [PASSWORD] });
+    const connect = vi.fn();
+    const code = await runCli(["set-password", "--stdin"], {
+      ...deps(io, fakeClient(owner(false))),
+      connect,
+    });
+    expect(code).toBe(2);
+    expect(connect).not.toHaveBeenCalled();
+    expect(io.errLines).toEqual([CLI_MESSAGES.stdinIsTerminal("en")]);
   });
 
   it("reads one line with --stdin and never shows the password", async () => {
@@ -610,15 +626,66 @@ describe("status, devices, revoke, sign-out-all, web, stop", () => {
     expect(failIo.errLines).toEqual(["Invalid settings. remote.web.port"]);
   });
 
-  it("stop sends daemon:stop and waits for the connection to close", async () => {
+  // Review C1: stop is a hello with intent "stop", which a daemon of any
+  // build honours, then a wait for the endpoint to go — not a request over
+  // a welcomed connection, which another build's daemon refuses.
+  it("stop asks with intent stop, needs no welcomed connection, and waits for the daemon to go", async () => {
     const io = fakeIo({});
-    const client = fakeClient((channel) => {
-      if (channel === "daemon:stop") setTimeout(() => client.drop(), 0);
-      return { stopping: true };
+    const connect = vi.fn(async () => fakeClient(() => undefined) as CliClient);
+    const answers = [true, true, false];
+    const events: string[] = [];
+    const code = await runCli(["stop"], {
+      ...deps(io, connect),
+      requestStop: async () => void events.push("intent stop"),
+      daemonAnswers: async () => {
+        events.push("probe");
+        return answers.shift() ?? false;
+      },
+      timers: { ...deps(io, connect).timers, setTimeout: (callback) => setTimeout(callback, 0) },
     });
-    expect(await runCli(["stop"], deps(io, client))).toBe(0);
-    expect(client.calls).toEqual([{ channel: "daemon:stop", args: [] }]);
+    expect(code).toBe(0);
+    expect(connect).not.toHaveBeenCalled();
+    expect(events).toEqual(["intent stop", "probe", "probe", "probe"]);
     expect(io.outLines).toEqual([CLI_MESSAGES.stopping("en"), CLI_MESSAGES.stopped("en")]);
+  });
+
+  it("stop reports a daemon still answering after the wait, and a daemon that isn't running", async () => {
+    const io = fakeIo({});
+    let time = 0;
+    const base = deps(
+      io,
+      fakeClient(() => undefined),
+    );
+    const code = await runCli(["stop"], {
+      ...base,
+      now: () => time,
+      requestStop: async () => {},
+      daemonAnswers: async () => true,
+      timers: {
+        ...base.timers,
+        setTimeout: (callback, ms) => {
+          time += ms;
+          return setTimeout(callback, 0);
+        },
+      },
+    });
+    expect(code).toBe(1);
+    expect(io.errLines).toEqual([CLI_MESSAGES.stillRunning("en")]);
+
+    const gone = fakeIo({});
+    const missing = Object.assign(new Error("connect ENOENT"), { code: "ENOENT" });
+    expect(
+      await runCli(["stop"], {
+        ...deps(
+          gone,
+          fakeClient(() => undefined),
+        ),
+        requestStop: async () => {
+          throw missing;
+        },
+      }),
+    ).toBe(3);
+    expect(gone.errLines).toEqual([CLI_MESSAGES.notRunning("en")]);
   });
 });
 

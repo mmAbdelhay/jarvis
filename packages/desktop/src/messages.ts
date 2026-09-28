@@ -620,6 +620,14 @@ export const MESSAGES = {
     language === "ar"
       ? "لا يعمل جارفيس في الخلفية الآن."
       : "Jarvis isn't running in the background right now.",
+  daemonNotService: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم تبدأ خدمة الخلفية هذه النسخة من jarvisd، فلا يستطيع جارفيس إعادة تشغيلها. أعد تشغيلها حيث تعمل."
+      : "This jarvisd wasn't started by the background service, so Jarvis can't restart it. Restart it where it runs.",
+  daemonStateAttached: (pid: number, uptime: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `متصل بخدمة jarvisd كانت تعمل مسبقًا (العملية ${pid}، منذ ${uptime}). الإعداد متوقف، فلن تبدأ عند تسجيل الدخول.`
+      : `Attached to a jarvisd that was already running (pid ${pid}, up ${uptime}). The setting is off, so it won't start at login.`,
   daemonRunInApp: (language: "ar" | "en"): string =>
     language === "ar" ? "التشغيل داخل التطبيق هذه المرة" : "Run inside the app this time",
   daemonQuit: (language: "ar" | "en"): string => (language === "ar" ? "إنهاء" : "Quit"),

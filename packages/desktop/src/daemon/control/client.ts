@@ -53,6 +53,30 @@ export interface ConnectControlOptions {
 class ProtocolError extends Error {}
 
 export async function connectControl(options: ConnectControlOptions): Promise<ControlClient> {
+  const opened = await openControl(options, undefined);
+  if (opened === "stopping") throw new ProtocolError("Unexpected control stop");
+  return opened;
+}
+
+/**
+ * Asks the daemon to stop, whatever build or protocol version it runs
+ * (review C1): a hello with intent "stop", the same mutual proof as any
+ * connection, then the daemon's `stopping`. Resolves once the daemon has
+ * accepted; it exits after its graceful stop, so a caller that must know it
+ * is gone polls the endpoint (liveness.ts). Rejects as connectControl does
+ * when nothing answers or the proof fails.
+ */
+export async function requestControlStop(options: ConnectControlOptions): Promise<void> {
+  const opened = await openControl(options, "stop");
+  if (opened === "stopping") return;
+  opened.close();
+  throw new ProtocolError("The Jarvis daemon did not accept the stop");
+}
+
+async function openControl(
+  options: ConnectControlOptions,
+  intent: "stop" | undefined,
+): Promise<ControlClient | "stopping"> {
   const { deps } = options;
   const endpoint = await endpointFor({
     platform: options.platform,
@@ -67,7 +91,7 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
   const nonceC = Buffer.from(deps.randomBytes(NONCE_BYTES));
   const socket = deps.net.connect(endpoint);
 
-  return new Promise<ControlClient>((resolve, reject) => {
+  return new Promise<ControlClient | "stopping">((resolve, reject) => {
     let phase: "hello" | "auth" | "open" | "closed" = "hello";
     let failure: Error | undefined;
     let nextId = 1;
@@ -156,6 +180,12 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
           failure = new ControlRestartRequired(message.build);
           return socket.destroy();
         }
+        if (message.t === "stopping" && intent === "stop") {
+          deps.clock.clearTimeout(timer);
+          phase = "closed";
+          resolve("stopping");
+          return socket.destroy();
+        }
         throw new ProtocolError("Unexpected control frame before welcome");
       }
       if (message.t === "psh") {
@@ -178,6 +208,7 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
         v: CONTROL_PROTOCOL_VERSION,
         build: options.build,
         nonceC: nonceC.toString("hex"),
+        ...(intent === undefined ? {} : { intent }),
       };
       socket.write(encodeJsonFrame(hello));
     });
