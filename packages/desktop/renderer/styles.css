@@ -4976,6 +4976,13 @@
   white-space: pre-wrap;
 }
 
+/* Final fix wave I1: the inert stand-in for a remote image while editing. */
+.plan-block-edit__image {
+  color: var(--text-muted);
+  font-style: italic;
+  border-bottom: 1px dotted var(--text-muted);
+}
+
 .plan-block-edit__toolbar {
   position: absolute;
   z-index: 2;
@@ -5056,6 +5063,13 @@
 }
 
 .plan-panel__conflict-gone {
+  margin: 0 0 var(--s2);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+/* Final fix wave I3: why a non-conflict save failed. */
+.plan-panel__conflict-reason {
   margin: 0 0 var(--s2);
   color: var(--warn);
   font-size: 12px;

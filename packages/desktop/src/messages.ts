@@ -182,6 +182,12 @@ export const MESSAGES = {
     language === "ar"
       ? "تغيّر هذا الملف على القرص — أتريد إعادة تطبيق تعديلك؟"
       : "Changed on disk — reapply your edit?",
+  // Final fix wave I3: a block save that failed for a reason other than a
+  // conflict — the notice keeps the typed text, with the reason under it.
+  planEditSaveFailed: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر حفظ تعديلك — نصّك محفوظ أدناه."
+      : "Couldn't save your edit — your text is kept below.",
   planApply: (language: "ar" | "en"): string => (language === "ar" ? "تطبيق" : "Apply"),
   planDiscard: (language: "ar" | "en"): string => (language === "ar" ? "تجاهل" : "Discard"),
   // Fix round 1, I4: the label above the conflict notice's read-only

@@ -1,7 +1,12 @@
 import type { AnchoredComment, PlanBlock, PlanComment } from "@jarvis/core";
 import type { PlanDoc, PlanList, PlanResult } from "@jarvis/platform";
 import type { MessageKey } from "../src/messages.js";
-import { blockToMarkdown, isNoopEdit } from "./plan-dom-markdown.js";
+import {
+  blockToMarkdown,
+  hasOnlyRichMarkup,
+  isNoopEdit,
+  replaceImagesWithPlaceholders,
+} from "./plan-dom-markdown.js";
 
 export type PlanPanelApi = {
   plansList(paneKey: string, cwd?: string): Promise<PlanList>;
@@ -117,7 +122,9 @@ type ConflictState = {
    *  proves nothing. */
   kind: PlanBlock["kind"];
   text: string;
-  reason: "conflict" | "missing-block";
+  /** Final fix wave I3: every failed write lands here, not only a
+   *  conflict — "rejected" is the IPC promise itself rejecting. */
+  reason: PlanReadError["reason"] | "rejected";
 };
 
 /** A block the user clicked while a *different* block's own save (always
@@ -263,6 +270,21 @@ function editModeForKind(kind: PlanBlock["kind"]): EditMode {
   return "raw"; // table | hr | other
 }
 
+/** Final fix wave I1 (controller ruling): a rich-kind block whose HTML
+ *  holds any element its rich converter can't read back (a code block
+ *  inside a list item, a list inside a quote, …) edits as raw markdown
+ *  instead, so saving can never silently drop that markup. */
+function editModeForBlock(block: PlanBlock): EditMode {
+  const mode = editModeForKind(block.kind);
+  if (mode !== "rich") return mode;
+  return hasOnlyRichMarkup(inertFragment(block.html), block.kind) ? "rich" : "raw";
+}
+
+/** The failure notice's own reason line, translated. */
+function conflictReasonKey(reason: ConflictState["reason"]): MessageKey {
+  return reason === "rejected" ? "planActionError" : planErrorKey(reason);
+}
+
 /** Apply's own target-id rule: the block the failed write aimed at, if it's
  *  still there under the fresh doc — otherwise whatever now sits at the same
  *  index, but only if it's still the *same kind* (fix round 1, I4): the
@@ -308,9 +330,17 @@ function removeRemoteImages(container: ParentNode): void {
  * independent layer if this step is ever skipped.
  */
 function parseBlockHtml(html: string): DocumentFragment {
+  const fragment = inertFragment(html);
+  removeRemoteImages(fragment);
+  return fragment;
+}
+
+/** Trusted block HTML parsed inside an inert `<template>` (see
+ *  parseBlockHtml): nothing in it fetches until it's moved into the live
+ *  document, which only ever happens after its remote images are replaced. */
+function inertFragment(html: string): DocumentFragment {
   const template = document.createElement("template");
   template.innerHTML = html;
-  removeRemoteImages(template.content);
   return template.content;
 }
 
@@ -1086,8 +1116,12 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       code.append(parseBlockHtml(block.html));
       return code;
     }
+    // Final fix wave I1: not parseBlockHtml — its alt-text stand-in drops
+    // each remote image's src, which a save would then write back without.
     const rich = el("div", "plan-block-edit__rich plan-block");
-    rich.append(parseBlockHtml(block.html));
+    const fragment = inertFragment(block.html);
+    replaceImagesWithPlaceholders(fragment);
+    rich.append(fragment);
     return rich;
   }
 
@@ -1165,7 +1199,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       blockId: block.id,
       index,
       kind: block.kind,
-      mode: editModeForKind(block.kind),
+      mode: editModeForBlock(block),
       container: undefined,
       wrap: undefined,
       dirty: false,
@@ -1214,6 +1248,66 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     }
   }
 
+  /** Final fix wave I3: every failed write — a conflict, any other
+   *  PlanResult failure reason, or the IPC promise itself rejecting — hands
+   *  the typed text to the notice (`conflict`) with its reason, never
+   *  discarding it. A failure that carries a fresh `doc` (conflict,
+   *  missing-block) adopts it; any other leaves `currentDoc` as it was, so
+   *  Apply retries against the same base. */
+  function failWrite(
+    state: EditingState,
+    block: PlanBlock,
+    text: string,
+    reason: ConflictState["reason"],
+    doc: PlanDoc | undefined,
+  ): void {
+    if (doc) {
+      currentDoc = doc;
+      // The doc is already fresh from this failed write's own `doc`, and
+      // `conflict` now owns the panel's write path — a deferred reload
+      // (exitEditing) would be redundant and could clobber `conflict`.
+      // Without a fresh doc the deferral stays: Discard reloads then.
+      diskChangedWhileDirty = false;
+    }
+    conflict = { blockId: block.id, index: state.index, kind: block.kind, text, reason };
+    editing = undefined;
+    renderDocument();
+    // Fix round 3, item B: `editing` just became undefined the same way
+    // exitEditing() would have left it, so a block switch that was waiting
+    // on *this* save still resolves — blocked, harmlessly, by
+    // consumePendingEditTarget's own conflict guard.
+    consumePendingEditTarget();
+  }
+
+  /** Final fix wave I6: an own write changes the edited block's id (main
+   *  re-points its comments to the new id), and the watcher echo of that
+   *  write is ignored, so the comments are re-fetched here. Pins and the
+   *  tray are patched in place while an editor or a comment draft is open
+   *  (a full render would rebuild them from scratch); otherwise the
+   *  document simply re-renders. */
+  async function refreshCommentsAfterOwnWrite(path: string): Promise<void> {
+    let next: AnchoredComment[];
+    try {
+      next = await api.plansComments(path);
+    } catch {
+      return; // the pins just stay as they were; the write itself succeeded
+    }
+    if (disposed || currentDoc?.path !== path) return;
+    comments = next;
+    if (!editing && !draft) {
+      renderDocument();
+      return;
+    }
+    const doc = currentDoc;
+    for (const row of root.querySelectorAll<HTMLElement>(".plan-panel__block-row")) {
+      const id = row.querySelector<HTMLElement>(":scope > [data-block-id]")?.dataset.blockId;
+      const block = doc.blocks.find((candidate) => candidate.id === id);
+      const gutter = row.querySelector(":scope > .plan-panel__gutter");
+      if (block && gutter) gutter.replaceWith(renderGutter(block));
+    }
+    root.querySelector(".plan-panel__tray")?.replaceWith(renderTray());
+  }
+
   /** Save-or-revert for the block currently in `editing`. `"escape"` always
    *  discards without writing; `"blur"`/`"cmd-s"` write only when a real
    *  `input` happened and the result isn't a no-op against the block's own
@@ -1242,12 +1336,16 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       exitEditing();
       return;
     }
-    const next = state.container
-      ? blockToMarkdown(
-          state.mode === "rich" ? withoutTrailingBreaks(state.container) : state.container,
-          { kind: block.kind, level: block.level, source: block.source },
-        )
-      : block.source;
+    // Raw mode holds the block's markdown verbatim, whatever its kind
+    // (final fix wave I1: a rich kind can open raw too).
+    const next = !state.container
+      ? block.source
+      : state.mode === "raw"
+        ? (state.container.textContent ?? "")
+        : blockToMarkdown(
+            state.mode === "rich" ? withoutTrailingBreaks(state.container) : state.container,
+            { kind: block.kind, level: block.level, source: block.source },
+          );
     const shouldWrite = state.dirty && !isNoopEdit(next, block.source);
     if (!shouldWrite) {
       if (reason === "blur") {
@@ -1264,52 +1362,36 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     // state.inputCount past this, so it's never mistaken for "nothing
     // changed since the save started" and left clean when it isn't.
     const inputCountAtSaveStart = state.inputCount;
+    const blockCountBefore = currentDoc.blocks.length;
     let result: PlanResult<PlanDoc>;
     try {
       result = await api.plansWriteBlock(currentDoc.path, block.id, next, state.baseMtimeMs);
     } catch {
       if (disposed) return;
-      actionError = t("planActionError");
-      exitEditing();
-      consumePendingEditTarget();
+      failWrite(state, block, next, "rejected", undefined);
       return;
     }
     if (disposed) return;
     if (!result.ok) {
-      if (result.reason === "conflict" || result.reason === "missing-block") {
-        if (result.doc) currentDoc = result.doc;
-        conflict = {
-          blockId: block.id,
-          index: state.index,
-          kind: block.kind,
-          text: next,
-          reason: result.reason,
-        };
-        editing = undefined;
-        // The doc is already fresh from this failed write's own `doc`, and
-        // `conflict` now owns the panel's write path — a deferred reload
-        // (exitEditing) would be redundant and could clobber `conflict`.
-        diskChangedWhileDirty = false;
-        renderDocument();
-        // Fix round 3, item B: `editing` just became undefined the same
-        // way exitEditing() would have left it, so a block switch that
-        // was waiting on *this* save (not a fresh one on the now-shown
-        // conflict notice, which beginEditingBlock itself refuses while
-        // `conflict` is set) still opens once it's blocked, harmlessly, by
-        // consumePendingEditTarget's own conflict guard.
-        consumePendingEditTarget();
-        return;
-      }
-      actionError = t(planErrorKey(result.reason));
-      exitEditing();
-      consumePendingEditTarget();
+      failWrite(state, block, next, result.reason, result.doc);
       return;
     }
     currentDoc = result.value;
     lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
     diskChangedWhileDirty = false;
     state.saving = false;
-    if (reason === "blur") {
+    void refreshCommentsAfterOwnWrite(currentDoc.path);
+    // Final fix wave I2: a ⌘S whose text no longer maps onto exactly this
+    // one block (a pasted blank line split it, a raw edit added a block)
+    // can't keep editing in place — the live container would still hold
+    // every resulting block's text, and the next save would write all of
+    // it over the first one. Exits and re-renders instead, as blur does.
+    const fresh = currentDoc.blocks[state.index];
+    const structureChanged =
+      currentDoc.blocks.length !== blockCountBefore ||
+      fresh?.start !== block.start ||
+      (fresh !== undefined && fresh.end - fresh.start !== next.split("\n").length);
+    if (reason === "blur" || !fresh || structureChanged) {
       exitEditing();
       consumePendingEditTarget();
       return;
@@ -1318,12 +1400,6 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     // rebuilding it — a re-render here would reconstruct the editable DOM
     // fresh from the doc's own (just-saved) html, discarding any input
     // that happened while the write above was in flight (I2).
-    const fresh = currentDoc.blocks[state.index];
-    if (!fresh) {
-      exitEditing();
-      consumePendingEditTarget();
-      return;
-    }
     state.blockId = fresh.id;
     state.baseMtimeMs = currentDoc.mtimeMs;
     state.dirty = state.inputCount !== inputCountAtSaveStart;
@@ -1353,7 +1429,16 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     const state = conflict;
     if (!state || !currentDoc) return el("div", "plan-panel__conflict");
     const box = el("div", "plan-panel__conflict");
-    box.append(el("p", "plan-panel__conflict-notice", t("planEditConflictNotice")));
+    if (state.reason === "conflict" || state.reason === "missing-block") {
+      box.append(el("p", "plan-panel__conflict-notice", t("planEditConflictNotice")));
+    } else {
+      // Final fix wave I3: a save that failed for any other reason keeps
+      // the text here too, saying why.
+      box.append(
+        el("p", "plan-panel__conflict-notice", t("planEditSaveFailed")),
+        el("p", "plan-panel__conflict-reason", t(conflictReasonKey(state.reason))),
+      );
+    }
 
     // Fix round 1, I4: shows exactly what Apply would overwrite, so the
     // user isn't reapplying blind — or, if Apply has nothing left to
@@ -1415,26 +1500,21 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     try {
       result = await api.plansWriteBlock(currentDoc.path, targetId, text, currentDoc.mtimeMs);
     } catch {
-      if (disposed) return;
-      actionError = t("planActionError");
+      if (disposed || !conflict) return;
+      conflict = { ...conflict, text, reason: "rejected" };
       renderDocument();
       return;
     }
-    if (disposed) return;
+    if (disposed || !conflict) return;
     if (!result.ok) {
-      if (result.reason === "conflict" || result.reason === "missing-block") {
-        if (result.doc) currentDoc = result.doc;
-        conflict = {
-          blockId: targetId,
-          index: conflict.index,
-          kind: conflict.kind,
-          text,
-          reason: result.reason,
-        };
-        renderDocument();
-        return;
-      }
-      actionError = t(planErrorKey(result.reason));
+      if (result.doc) currentDoc = result.doc;
+      conflict = {
+        blockId: targetId,
+        index: conflict.index,
+        kind: conflict.kind,
+        text,
+        reason: result.reason,
+      };
       renderDocument();
       return;
     }
@@ -1442,16 +1522,19 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     lastOwnWrite = { path: currentDoc.path, mtimeMs: currentDoc.mtimeMs };
     conflict = undefined;
     renderDocument();
+    void refreshCommentsAfterOwnWrite(currentDoc.path);
     consumePendingEditTarget();
   }
 
-  function renderBlock(block: PlanBlock): HTMLElement {
-    const row = el("div", "plan-panel__block-row");
-    const gutter = el("div", "plan-panel__gutter");
-    const blockComments = comments.filter(
+  function blockCommentsFor(block: PlanBlock): AnchoredComment[] {
+    return comments.filter(
       (comment) => comment.anchor.kind === "block" && comment.anchor.blockId === block.id,
     );
-    for (const comment of blockComments) {
+  }
+
+  function renderGutter(block: PlanBlock): HTMLElement {
+    const gutter = el("div", "plan-panel__gutter");
+    for (const comment of blockCommentsFor(block)) {
       const pin = button(
         `plan-panel__pin ${comment.sentAt === undefined ? "plan-panel__pin--queued" : "plan-panel__pin--sent"}`,
         String(comment.number),
@@ -1467,6 +1550,13 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       renderDocument();
     });
     gutter.append(addPin);
+    return gutter;
+  }
+
+  function renderBlock(block: PlanBlock): HTMLElement {
+    const row = el("div", "plan-panel__block-row");
+    const gutter = renderGutter(block);
+    const blockComments = blockCommentsFor(block);
 
     const content = el("div", "plan-block");
     content.dataset.blockId = block.id;
@@ -1896,6 +1986,13 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   document.addEventListener("mouseup", onBlockMouseUp);
 
   async function openPanel(path?: string): Promise<void> {
+    // Final fix wave M3: reopening a hidden panel onto the document being
+    // edited keeps everything as it was — a reload here would only read
+    // back the same file and flag it "changed on disk" under a dirty edit.
+    if (editing && path !== undefined && path === currentDoc?.path) {
+      setOpen(true);
+      return;
+    }
     setOpen(true);
     loadError = undefined;
     actionError = undefined;

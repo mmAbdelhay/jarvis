@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import MarkdownIt from "markdown-it";
 import { describe, expect, it } from "vitest";
-import { blockToMarkdown, isNoopEdit, type BlockKind } from "./plan-dom-markdown.js";
+import {
+  blockToMarkdown,
+  hasOnlyRichMarkup,
+  isNoopEdit,
+  replaceImagesWithPlaceholders,
+  type BlockKind,
+} from "./plan-dom-markdown.js";
 
 // Task 1's own parse options: no raw HTML passthrough, bare URLs/emails
 // autolinked, smart quotes/dashes off. Every rendered-HTML fixture below is
@@ -310,5 +316,48 @@ describe("isNoopEdit", () => {
 
   it("does not ignore leading whitespace", () => {
     expect(isNoopEdit("  Hello", "Hello")).toBe(false);
+  });
+});
+
+describe("final fix wave I1: markup rich editing must not drop", () => {
+  it("strikethrough round-trips as ~~text~~ (<s> and <del>)", () => {
+    const source = "Keep ~~this~~ and **that**.";
+    expect(blockToMarkdown(render(source), original("paragraph", source))).toBe(source);
+    const del = document.createElement("div");
+    del.innerHTML = "<p>a <del>b</del></p>";
+    expect(blockToMarkdown(del, original("paragraph", "a b"))).toBe("a ~~b~~");
+  });
+
+  it('a remote image becomes an inert placeholder (no <img>, no src) that round-trips to ![alt](src "title")', () => {
+    const source =
+      'See ![diagram](https://example.com/d.png "Flow") and ![x](data:image/png;base64,AA).';
+    const el = render(source);
+    replaceImagesWithPlaceholders(el);
+
+    const images = el.querySelectorAll("img");
+    expect(images).toHaveLength(1);
+    expect(images[0]?.getAttribute("src")).toBe("data:image/png;base64,AA");
+    const placeholder = el.querySelector<HTMLElement>(".plan-block-edit__image");
+    expect(placeholder?.getAttribute("contenteditable")).toBe("false");
+    expect(placeholder?.hasAttribute("src")).toBe(false);
+    expect(placeholder?.dataset.src).toBe("https://example.com/d.png");
+    expect(placeholder?.textContent).toBe("diagram");
+    expect(blockToMarkdown(el, original("paragraph", source))).toBe(source);
+  });
+
+  it("hasOnlyRichMarkup accepts what each rich converter reads back", () => {
+    const check = (source: string, kind: BlockKind, task = false) =>
+      hasOnlyRichMarkup(task ? renderTaskList(source) : render(source), kind);
+    expect(check("## A *b* `c` [d](https://e.f) ~~g~~", "heading")).toBe(true);
+    expect(check("Line one  \nline ![i](https://x.y/i.png) **b**", "paragraph")).toBe(true);
+    expect(check("- [ ] one\n- [x] two\n  1. nested", "list", true)).toBe(true);
+    expect(check("> quoted\n>\n> second", "quote")).toBe(true);
+  });
+
+  it("hasOnlyRichMarkup rejects an element its converter would drop", () => {
+    expect(hasOnlyRichMarkup(render("- item\n\n  ```\n  code\n  ```"), "list")).toBe(false);
+    expect(hasOnlyRichMarkup(render("> - listed in a quote"), "quote")).toBe(false);
+    expect(hasOnlyRichMarkup(render("> > nested quote"), "quote")).toBe(false);
+    expect(hasOnlyRichMarkup(render("- # heading in a list"), "list")).toBe(false);
   });
 });

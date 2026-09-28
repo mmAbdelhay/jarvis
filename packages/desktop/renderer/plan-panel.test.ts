@@ -2606,3 +2606,350 @@ describe("createPlanPanel: block editing fix round 5", () => {
     expect(headingEditor(panel.element)).toBeNull();
   });
 });
+
+describe("createPlanPanel: final fix wave", () => {
+  function paragraphEl(panelElement: HTMLElement): HTMLElement {
+    return panelElement.querySelector<HTMLElement>(".plan-block-edit__rich")!;
+  }
+
+  async function editParagraph(panelElement: HTMLElement, text: string): Promise<void> {
+    clickBlock(panelElement.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panelElement);
+    editable.querySelector("p")!.textContent = text;
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function cmdS(target: Element): void {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }));
+  }
+
+  function pasteEvent(text: string): Event {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: (type: string) => (type === "text/plain" ? text : "") },
+    });
+    return event;
+  }
+
+  function docWith(extra: PlanBlock[]): PlanResult<PlanDoc> {
+    return { ok: true, value: { ...doc, blocks: extra } };
+  }
+
+  // I1 -------------------------------------------------------------------
+
+  it("I1: an image in an edited paragraph keeps its src on save, and is never a live remote <img>", async () => {
+    const source = 'See ![diagram](https://example.com/d.png "Flow") now.';
+    const imageDoc = docWith([
+      blocks[0]!,
+      {
+        ...blocks[1]!,
+        source,
+        html: '<p>See <img src="https://example.com/d.png" alt="diagram" title="Flow"> now.</p>',
+      },
+    ]);
+    const api = fakeApi({ plansRead: vi.fn(async () => imageDoc) });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    expect(editable.querySelector("img")).toBeNull();
+    expect(editable.querySelector(".plan-block-edit__image")?.textContent).toBe("diagram");
+    const first = editable.querySelector("p")!.firstChild!;
+    first.textContent = "Look at ";
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(api.plansWriteBlock).toHaveBeenCalledWith(
+      doc.path,
+      "paragraph-1",
+      'Look at ![diagram](https://example.com/d.png "Flow") now.',
+      doc.mtimeMs,
+    );
+  });
+
+  it("I1: strikethrough survives a rich edit", async () => {
+    const strikeDoc = docWith([
+      blocks[0]!,
+      { ...blocks[1]!, source: "Drop ~~old~~ plan.", html: "<p>Drop <s>old</s> plan.</p>" },
+    ]);
+    const api = fakeApi({ plansRead: vi.fn(async () => strikeDoc) });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    editable.querySelector("p")!.lastChild!.textContent = " idea.";
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    editable.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(api.plansWriteBlock).toHaveBeenCalledWith(
+      doc.path,
+      "paragraph-1",
+      "Drop ~~old~~ idea.",
+      doc.mtimeMs,
+    );
+  });
+
+  it("I1: a block holding markup the rich converter can't read back opens in raw mode", async () => {
+    const source = "- item\n\n  ```\n  code\n  ```";
+    const listDoc = docWith([
+      {
+        id: "list-1",
+        kind: "list",
+        start: 0,
+        end: 5,
+        source,
+        html: "<ul>\n<li>\n<p>item</p>\n<pre><code>code\n</code></pre>\n</li>\n</ul>\n",
+      },
+    ]);
+    const api = fakeApi({ plansRead: vi.fn(async () => listDoc) });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+
+    clickBlock(panel.element.querySelector('[data-block-id="list-1"]'));
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+    const raw = panel.element.querySelector<HTMLElement>(".plan-block-edit__raw")!;
+    expect(raw.getAttribute("contenteditable")).toBe("plaintext-only");
+    expect(raw.textContent).toBe(source);
+    raw.textContent = "- item\n\n  ```\n  code *x*\n  ```";
+    raw.dispatchEvent(new Event("input", { bubbles: true }));
+    raw.dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(api.plansWriteBlock).toHaveBeenCalledWith(
+      doc.path,
+      "list-1",
+      "- item\n\n  ```\n  code *x*\n  ```",
+      doc.mtimeMs,
+    );
+  });
+
+  // I2 -------------------------------------------------------------------
+
+  it("I2: ⌘S of a paste that splits the block exits and re-renders, so the next save can't duplicate", async () => {
+    const splitDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1,
+      blocks: [
+        blocks[0]!,
+        { id: "p-a", kind: "paragraph", start: 1, end: 2, source: "a", html: "<p>a</p>" },
+        { id: "p-b", kind: "paragraph", start: 3, end: 4, source: "b", html: "<p>b</p>" },
+      ],
+    };
+    const writeBlock = vi.fn(
+      async (): Promise<PlanResult<PlanDoc>> => ({ ok: true, value: splitDoc }),
+    );
+    const api = fakeApi({ plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+
+    clickBlock(panel.element.querySelector('[data-block-id="paragraph-1"]'));
+    const editable = paragraphEl(panel.element);
+    const range = document.createRange();
+    range.selectNodeContents(editable.querySelector("p")!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    editable.dispatchEvent(pasteEvent("a\n\nb"));
+    cmdS(editable);
+    await flush();
+
+    expect(writeBlock).toHaveBeenCalledTimes(1);
+    expect(panel.element.querySelector(".plan-block-edit__rich")).toBeNull();
+    expect(panel.element.querySelectorAll('[data-block-id="p-a"]')).toHaveLength(1);
+    expect(panel.element.querySelectorAll('[data-block-id="p-b"]')).toHaveLength(1);
+
+    clickBlock(panel.element.querySelector('[data-block-id="p-a"]'));
+    const again = paragraphEl(panel.element);
+    expect(again.textContent).toBe("a");
+    again.querySelector("p")!.textContent = "a2";
+    again.dispatchEvent(new Event("input", { bubbles: true }));
+    cmdS(again);
+    await flush();
+
+    expect(writeBlock).toHaveBeenLastCalledWith(doc.path, "p-a", "a2", splitDoc.mtimeMs);
+  });
+
+  it("I2: ⌘S of a raw table edit that adds a blank line (a new block) exits and re-renders", async () => {
+    const tableSource = "| A |\n| - |\n| 1 |";
+    const table: PlanBlock = {
+      id: "table-1",
+      kind: "table",
+      start: 0,
+      end: 3,
+      source: tableSource,
+      html: "<table></table>",
+    };
+    const tableDoc = docWith([table]);
+    const afterDoc = docWith([
+      table,
+      { id: "p-new", kind: "paragraph", start: 4, end: 5, source: "Note", html: "<p>Note</p>" },
+    ]);
+    const writeBlock = vi.fn(async () => afterDoc);
+    const api = fakeApi({ plansRead: vi.fn(async () => tableDoc), plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+
+    clickBlock(panel.element.querySelector('[data-block-id="table-1"]'));
+    const raw = panel.element.querySelector<HTMLElement>(".plan-block-edit__raw")!;
+    raw.textContent = `${tableSource}\n\nNote`;
+    raw.dispatchEvent(new Event("input", { bubbles: true }));
+    cmdS(raw);
+    await flush();
+
+    expect(writeBlock).toHaveBeenCalledWith(
+      doc.path,
+      "table-1",
+      `${tableSource}\n\nNote`,
+      doc.mtimeMs,
+    );
+    expect(panel.element.querySelector(".plan-block-edit__raw")).toBeNull();
+    expect(panel.element.querySelector('[data-block-id="p-new"]')?.textContent).toBe("Note");
+  });
+
+  // I3 -------------------------------------------------------------------
+
+  it("I3: a not-found write keeps the typed text in the notice with a translated reason", async () => {
+    const writeBlock = vi.fn(
+      async (): Promise<PlanResult<PlanDoc>> => ({ ok: false, reason: "not-found" }),
+    );
+    const api = fakeApi({ plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    paragraphEl(panel.element).dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(panel.element.querySelector(".plan-panel__conflict-notice")?.textContent).toBe(
+      "planEditSaveFailed",
+    );
+    expect(panel.element.querySelector(".plan-panel__conflict-reason")?.textContent).toBe(
+      "planErrorNotFound",
+    );
+    expect(
+      panel.element.querySelector<HTMLTextAreaElement>(".plan-panel__conflict-textarea")?.value,
+    ).toBe("Ship the useful feature quickly.");
+  });
+
+  it("I3: a rejected write keeps the typed text, and Apply retries it", async () => {
+    const writeBlock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ipc down"))
+      .mockResolvedValueOnce({ ok: true, value: doc });
+    const api = fakeApi({ plansWriteBlock: writeBlock });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    cmdS(paragraphEl(panel.element));
+    await flush();
+
+    expect(panel.element.querySelector(".plan-panel__conflict-reason")?.textContent).toBe(
+      "planActionError",
+    );
+    expect(
+      panel.element.querySelector<HTMLTextAreaElement>(".plan-panel__conflict-textarea")?.value,
+    ).toBe("Ship the useful feature quickly.");
+
+    click(panel.element.querySelector('[data-action="apply-edit-conflict"]'));
+    await flush();
+    expect(writeBlock).toHaveBeenLastCalledWith(
+      doc.path,
+      "paragraph-1",
+      "Ship the useful feature quickly.",
+      doc.mtimeMs,
+    );
+    expect(panel.element.querySelector(".plan-panel__conflict")).toBeNull();
+  });
+
+  // I6 -------------------------------------------------------------------
+
+  it("I6: after a ⌘S save, pins are re-fetched and patched without touching the live editor", async () => {
+    const savedDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1,
+      blocks: [blocks[0]!, { ...blocks[1]!, id: "paragraph-2", source: "Ship it quickly." }],
+    };
+    const moved = comment({
+      blockId: "paragraph-2",
+      anchor: { kind: "block", blockId: "paragraph-2", text: "Ship it quickly." },
+    });
+    const second = comment({
+      id: "comment-2",
+      number: 2,
+      blockId: "paragraph-2",
+      anchor: moved.anchor,
+    });
+    const plansComments = vi
+      .fn()
+      .mockResolvedValueOnce([comment()])
+      .mockResolvedValue([moved, second]);
+    const api = fakeApi({
+      plansComments,
+      plansWriteBlock: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship it quickly.");
+    const editable = paragraphEl(panel.element);
+    cmdS(editable);
+    await flush();
+
+    expect(plansComments).toHaveBeenCalledTimes(2);
+    expect(paragraphEl(panel.element)).toBe(editable);
+    expect(
+      blockRow(panel.element, "paragraph-2").querySelectorAll(".plan-panel__pin"),
+    ).toHaveLength(2);
+    expect(panel.element.querySelector(".plan-panel__tray-summary")?.textContent).toContain(
+      "2 planComments",
+    );
+  });
+
+  it("I6: after a blur save, the re-pointed comment's pin shows on the saved block", async () => {
+    const savedDoc: PlanDoc = {
+      ...doc,
+      mtimeMs: doc.mtimeMs + 1,
+      blocks: [blocks[0]!, { ...blocks[1]!, id: "paragraph-2", source: "Ship it quickly." }],
+    };
+    const moved = comment({
+      blockId: "paragraph-2",
+      anchor: { kind: "block", blockId: "paragraph-2", text: "Ship it quickly." },
+    });
+    const plansComments = vi.fn().mockResolvedValueOnce([comment()]).mockResolvedValue([moved]);
+    const api = fakeApi({
+      plansComments,
+      plansWriteBlock: vi.fn(async () => ({ ok: true as const, value: savedDoc })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship it quickly.");
+    paragraphEl(panel.element).dispatchEvent(new Event("blur"));
+    await flush();
+
+    expect(
+      blockRow(panel.element, "paragraph-2").querySelectorAll(".plan-panel__pin"),
+    ).toHaveLength(1);
+  });
+
+  // M3 -------------------------------------------------------------------
+
+  it("M3: hiding and reopening the panel mid-edit keeps the edit and raises no disk-changed badge", async () => {
+    const { panel, api } = setup();
+    await panel.open(doc.path);
+    await editParagraph(panel.element, "Ship the useful feature quickly.");
+    const editable = paragraphEl(panel.element);
+    const reads = vi.mocked(api.plansRead).mock.calls.length;
+
+    panel.close();
+    panel.toggle();
+    await flush();
+
+    expect(panel.isOpen()).toBe(true);
+    expect(vi.mocked(api.plansRead).mock.calls.length).toBe(reads);
+    expect(paragraphEl(panel.element)).toBe(editable);
+    expect(panel.element.querySelector<HTMLElement>(".plan-panel__disk-changed")?.hidden).toBe(
+      true,
+    );
+  });
+});

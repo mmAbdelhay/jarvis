@@ -58,6 +58,67 @@ function codeSpanFence(content: string): string {
   return "`".repeat(longest + 1);
 }
 
+function imageMarkdown(src: string, alt: string, title: string | null): string {
+  return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
+}
+
+/** The class of the inert element that stands in for a remote image inside
+ *  an editable block (see replaceImagesWithPlaceholders). */
+export const IMAGE_PLACEHOLDER_CLASS = "plan-block-edit__image";
+
+/**
+ * Final fix wave I1: an editable block must keep each image's src so it
+ * can be written back, but a live `<img>` with a remote src would fetch it.
+ * Every non-`data:` image under `root` is replaced by a non-editable
+ * `<span>` that shows the alt text and carries src/alt/title only as data
+ * attributes — never a URL attribute the browser acts on — which
+ * blockToMarkdown turns back into `![alt](src "title")`. `data:` images
+ * stay real `<img>`s, as in read mode.
+ */
+export function replaceImagesWithPlaceholders(root: ParentNode): void {
+  for (const image of Array.from(root.querySelectorAll("img"))) {
+    const src = image.getAttribute("src") ?? "";
+    if (src.startsWith("data:image/")) continue;
+    const placeholder = document.createElement("span");
+    placeholder.className = IMAGE_PLACEHOLDER_CLASS;
+    placeholder.setAttribute("contenteditable", "false");
+    placeholder.dataset.src = src;
+    const alt = image.getAttribute("alt") ?? "";
+    placeholder.dataset.alt = alt;
+    const title = image.getAttribute("title");
+    if (title !== null) placeholder.dataset.title = title;
+    placeholder.textContent = alt;
+    image.replaceWith(placeholder);
+  }
+}
+
+const INLINE_TAGS = ["strong", "b", "em", "i", "code", "a", "img", "br", "s", "del"];
+const RICH_TAGS: Partial<Record<BlockKind, readonly string[]>> = {
+  heading: ["h1", "h2", "h3", "h4", "h5", "h6", ...INLINE_TAGS],
+  paragraph: ["p", ...INLINE_TAGS],
+  list: ["ul", "ol", "li", "p", "input", ...INLINE_TAGS],
+  quote: ["blockquote", "p", ...INLINE_TAGS],
+};
+
+/**
+ * Final fix wave I1 (controller ruling): whether every element under `root`
+ * is one `kind`'s rich converter reads back. Anything else (a fenced code
+ * block or a heading inside a list, a list or a nested quote inside a
+ * quote, …) would be silently dropped on save, so such a block edits as
+ * raw markdown text instead. A blockquote nested in a blockquote is
+ * refused too, since quoteToMarkdown only reads one level.
+ */
+export function hasOnlyRichMarkup(root: ParentNode, kind: BlockKind): boolean {
+  const allowed = RICH_TAGS[kind];
+  if (!allowed) return false;
+  for (const element of Array.from(root.querySelectorAll("*"))) {
+    const tag = element.tagName.toLowerCase();
+    if (!allowed.includes(tag)) return false;
+    if (tag === "blockquote" && element.parentElement?.closest("blockquote")) return false;
+  }
+  return true;
+}
+
 function childNodesToMarkdown(nodes: ArrayLike<ChildNode>, source: string): string {
   let out = "";
   let previousWasBr = false;
@@ -110,12 +171,21 @@ function elementToMarkdown(el: HTMLElement, source: string): string {
       }
       return `[${childNodesToMarkdown(el.childNodes, source)}](${href})`;
     }
-    case "img": {
-      const src = el.getAttribute("src") ?? "";
-      const alt = el.getAttribute("alt") ?? "";
-      const title = el.getAttribute("title");
-      return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
-    }
+    case "s":
+    case "del":
+      return `~~${childNodesToMarkdown(el.childNodes, source)}~~`;
+    case "img":
+      return imageMarkdown(
+        el.getAttribute("src") ?? "",
+        el.getAttribute("alt") ?? "",
+        el.getAttribute("title"),
+      );
+    case "span":
+      // replaceImagesWithPlaceholders' own inert stand-in for a remote image.
+      if (el.classList.contains(IMAGE_PLACEHOLDER_CLASS)) {
+        return imageMarkdown(el.dataset.src ?? "", el.dataset.alt ?? "", el.dataset.title ?? null);
+      }
+      return escapeIfNeeded(el.textContent ?? "", source);
     case "br":
       return "  \n";
     default:
