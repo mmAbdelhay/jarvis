@@ -3,6 +3,7 @@ import type { ConnectionState } from "../core/socket-core-client.js";
 import {
   createDaemonMode,
   type DaemonLink,
+  daemonSettingWriter,
   type DaemonModeDeps,
   IN_APP_FLAG,
   relaunchArgs,
@@ -22,6 +23,10 @@ function fakeLink(events: string[], name = "link"): FakeLink {
     info: async () => ({ pid: 4242, startedAt: 1_000 }),
     reapplyRemote: async () => {
       events.push("reapplyRemote");
+    },
+    setDaemonEnabled: async (enabled) => {
+      if (link.state.kind !== "connected") throw new Error("The Jarvis daemon is not connected");
+      events.push(`daemon writes ${enabled}`);
     },
     connection: () => link.state,
     stop: () => {
@@ -44,6 +49,9 @@ type Options = {
   /** How many polls the daemon keeps answering after a stop. */
   answersFor?: number;
   uninstallFails?: boolean;
+  useInProcessFails?: boolean;
+  /** Writes go through daemonSettingWriter to the last link, as main.ts's. */
+  routeWrites?: boolean;
 };
 
 function harness(options: Options = {}) {
@@ -92,10 +100,18 @@ function harness(options: Options = {}) {
     requestDaemonStop: record("daemon:stop"),
     config: {
       read: async () => enabled,
-      async write(next) {
-        events.push(`config ${next}`);
-        enabled = next;
-      },
+      write: options.routeWrites
+        ? daemonSettingWriter(
+            () => ({ attached: links.at(-1) }),
+            async (next) => {
+              events.push(`config ${next}`);
+              enabled = next;
+            },
+          )
+        : async (next) => {
+            events.push(`config ${next}`);
+            enabled = next;
+          },
     },
     async confirm(change) {
       events.push(`confirm ${change}`);
@@ -109,6 +125,7 @@ function harness(options: Options = {}) {
     useDaemon: (link) => events.push(`useDaemon ${link.name}`),
     useInProcess: async () => {
       events.push("useInProcess");
+      if (options.useInProcessFails) throw new Error("createCore failed");
     },
     showError: async (title) => {
       events.push(`error ${title}`);
@@ -469,6 +486,43 @@ describe("daemon mode: turning it off", () => {
     expect(await h.mode.status()).toMatchObject({ enabled: true, inApp: true });
   });
 
+  it("with the attached daemon down: writes the file itself, and still stops, uninstalls and relaunches", async () => {
+    const h = harness({ enabled: true, routeWrites: true });
+    await h.mode.launch({ inAppThisSession: false });
+    h.links[0]!.state = { kind: "reconnecting", attempt: 3, inMs: 2_000 };
+    expect(await h.mode.setEnabled(false)).toEqual({ ok: true });
+    expect(noLogs(h.events)).toEqual([
+      "connect(0)",
+      "confirm disable",
+      "config false",
+      "stop",
+      "uninstall",
+      "link.stop",
+      "relaunch inApp=false",
+    ]);
+    expect(h.enabled()).toBe(false);
+  });
+
+  it("with the attached daemon up: the daemon writes the setting", async () => {
+    const h = harness({ enabled: true, routeWrites: true });
+    await h.mode.launch({ inAppThisSession: false });
+    await h.mode.setEnabled(false);
+    expect(noLogs(h.events)).toContain("daemon writes false");
+    expect(noLogs(h.events)).not.toContain("config false");
+  });
+
+  it("restores the setting before the relaunch when no core will start in the app", async () => {
+    const h = harness({ enabled: true, uninstallFails: true, useInProcessFails: true });
+    await h.mode.launch({ inAppThisSession: false });
+    expect((await h.mode.setEnabled(false)).ok).toBe(false);
+    expect(noLogs(h.events).slice(-3)).toEqual([
+      "useInProcess",
+      "config true",
+      "relaunch inApp=true",
+    ]);
+    expect(h.enabled()).toBe(true);
+  });
+
   it("gives up waiting after 10 s and goes on", async () => {
     const h = harness({ enabled: true, answersFor: 1_000 });
     await h.mode.launch({ inAppThisSession: false });
@@ -559,6 +613,32 @@ describe("daemon mode: status while connected", () => {
       throw new Error("not connected");
     };
     expect((await h.mode.status()).state).toEqual({ kind: "starting" });
+  });
+});
+
+describe("who writes daemon.enabled", () => {
+  it("the in-process core first, then a connected daemon, else the file", async () => {
+    const calls: string[] = [];
+    const inProcess = {
+      setDaemonEnabled: async (enabled: boolean) => {
+        calls.push(`core ${enabled}`);
+      },
+    };
+    const link = fakeLink(calls);
+    const file = async (enabled: boolean) => {
+      calls.push(`file ${enabled}`);
+    };
+    await daemonSettingWriter(() => ({ inProcess, attached: link }), file)(true);
+    await daemonSettingWriter(() => ({ attached: link }), file)(true);
+    link.state = { kind: "restarting" };
+    await daemonSettingWriter(() => ({ attached: link }), file)(false);
+    await daemonSettingWriter(() => ({}), file)(false);
+    expect(calls).toEqual(["core true", "daemon writes true", "file false", "file false"]);
+  });
+
+  it("the stuck message tells the user to quit", () => {
+    expect(MESSAGES.daemonStuck("en")).toContain("Quit Jarvis");
+    expect(MESSAGES.daemonStuck("ar")).toContain("أغلق جارفيس");
   });
 });
 

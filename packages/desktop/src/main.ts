@@ -28,6 +28,7 @@ import { DEFAULT_CONFIG_PATH } from "./config.js";
 import { readBuildId } from "./daemon/build-id.js";
 import {
   createDaemonMode,
+  daemonSettingWriter,
   IN_APP_FLAG,
   relaunchArgs,
   type ChangeResult,
@@ -403,12 +404,10 @@ app.whenReady().then(async () => {
         // save or the bridge's idle auto-disable. With no core at all
         // (between a daemon's stop and a relaunch) the file is written
         // directly: nothing else is writing it then.
-        write: (enabled) =>
-          inProcessCore !== undefined
-            ? inProcessCore.setDaemonEnabled(enabled)
-            : attached !== undefined
-              ? attached.setDaemonEnabled(enabled)
-              : nodeDeps.config.write(enabled),
+        write: daemonSettingWriter(
+          () => ({ inProcess: inProcessCore, attached }),
+          nodeDeps.config.write,
+        ),
       },
       async confirm(change) {
         const options = {

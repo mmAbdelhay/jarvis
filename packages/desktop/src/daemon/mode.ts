@@ -64,6 +64,7 @@ export type DaemonStatus = {
 export interface DaemonLink {
   info(): Promise<DaemonInfo>;
   reapplyRemote(): Promise<void>;
+  setDaemonEnabled(enabled: boolean): Promise<void>;
   connection(): ConnectionState;
   stop(): void;
 }
@@ -304,7 +305,10 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
           await deps.useInProcess();
         } catch (start) {
           deps.log(`starting the core in the app failed: ${describe(start)}`);
+          // Before the relaunch, which exits this process at once.
+          await restoreEnabled();
           deps.relaunch({ inApp: true });
+          return { ok: false, reason: "failed", detail: failure.reason };
         }
       }
       await restoreEnabled();
@@ -430,6 +434,27 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
       if (failure !== undefined) return { ...base, state: { kind: "failed", ...failure } };
       return { ...base, state: { kind: "off" } };
     },
+  };
+}
+
+/** Who writes daemon.enabled: the core that is live, through its own
+ *  serialized config writer — the in-process one, else the attached daemon
+ *  while it is connected — and the file directly only when no core is
+ *  reachable (a daemon down or gone), when nothing else is writing it. */
+export function daemonSettingWriter(
+  live: () => {
+    inProcess?: { setDaemonEnabled(enabled: boolean): Promise<void> } | undefined;
+    attached?: DaemonLink | undefined;
+  },
+  file: (enabled: boolean) => Promise<void>,
+): (enabled: boolean) => Promise<void> {
+  return (enabled) => {
+    const { inProcess, attached } = live();
+    if (inProcess !== undefined) return inProcess.setDaemonEnabled(enabled);
+    if (attached !== undefined && attached.connection().kind === "connected") {
+      return attached.setDaemonEnabled(enabled);
+    }
+    return file(enabled);
   };
 }
 

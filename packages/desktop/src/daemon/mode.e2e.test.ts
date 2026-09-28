@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ensureConfigFile } from "../config.js";
 import type { SocketCoreClient } from "../core/socket-core-client.js";
 import { readBuildId } from "./build-id.js";
-import { createDaemonMode, type DaemonMode } from "./mode.js";
+import { createDaemonMode, type DaemonMode, daemonSettingWriter } from "./mode.js";
 import { nodeDaemonModeDeps } from "./mode-node.js";
 import type { ServiceManager } from "./service.js";
 import { writeDaemonEnabled } from "./config-file.js";
@@ -79,6 +79,19 @@ function recordingService(calls: string[]): ServiceManager {
   };
 }
 
+/** The link, with its daemon-side writes recorded. */
+function recordingWrites(link: SocketCoreClient | undefined, events: string[]) {
+  if (link === undefined) return undefined;
+  return {
+    ...link,
+    connection: () => link.connection(),
+    setDaemonEnabled: (enabled: boolean) => {
+      events.push(`daemon writes ${enabled}`);
+      return link.setDaemonEnabled(enabled);
+    },
+  };
+}
+
 async function setup(home: string) {
   const configPath = join(home, ".config", "jarvis", "jarvis.yaml");
   await ensureConfigFile(configPath);
@@ -109,14 +122,10 @@ async function setup(home: string) {
     // As main.ts does: through the attached daemon's own config writer.
     config: {
       read: real.config.read,
-      write: (enabled) => {
-        const link = links.at(-1);
-        if (link !== undefined && link.connection().kind === "connected") {
-          events.push(`daemon writes ${enabled}`);
-          return link.setDaemonEnabled(enabled);
-        }
-        return real.config.write(enabled);
-      },
+      write: daemonSettingWriter(
+        () => ({ attached: recordingWrites(links.at(-1), events) }),
+        real.config.write,
+      ),
     },
     async connect(timeoutMs) {
       const link = await real.connect(timeoutMs);
