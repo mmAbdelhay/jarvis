@@ -30,6 +30,11 @@ export type PushChannels = IpcChannels & {
   // 2): the renderer owns the inline rename input, so main only names which
   // chip should start it.
   "workspace:tabRename": string;
+  // Task 8: main pushes this after the tab menu's own Plans item is
+  // clicked — the renderer owns every tab's plan panel, so main only names
+  // which tab's panel should toggle (the same division of labour
+  // workspace:tabRename already follows for Rename).
+  "workspace:tabPlans": string;
   // remote-access.ts's `onStatus` — always local to this window (ruling 36).
   // A paired phone never receives this: the wire protocol
   // (packages/remote/src/protocol.ts's ServerMessage) has no message that
@@ -37,6 +42,12 @@ export type PushChannels = IpcChannels & {
   // classifies this channel "desktop-only", so it never reaches
   // remotePushPolicies() for a phone to subscribe to in the first place.
   "remote:update": RemoteStatus;
+  // Task 5 (plan panel): a plan file main.ts is watching changed on disk.
+  // The payload is the file's own path, never its contents — the same
+  // "push says look again" contract turn:new and workspace:update already
+  // follow — so the renderer (and, via REMOTE_PUSH_POLICY, a paired phone)
+  // re-reads with plansRead/plansComments on receipt.
+  "plans:changed": string;
 };
 
 /**
@@ -233,6 +244,24 @@ export const INVOKE_CHANNELS = {
   // keyPath and turns remote.sidecarProxy on, through the same serialized
   // writeConfig queue Settings' own save uses. See tailscale-cert.ts.
   tailscaleCert: "remote:tailscaleCert",
+  // Task 5 (plan panel): main's own read/write/comment surface for a plan
+  // file — reachable from a paired phone exactly like every other
+  // remote-legal channel (remote-policy.ts).
+  plansList: "plans:list",
+  plansRead: "plans:read",
+  plansWriteBlock: "plans:writeBlock",
+  plansComments: "plans:comments",
+  plansAddComment: "plans:addComment",
+  plansUpdateComment: "plans:updateComment",
+  plansDeleteComment: "plans:deleteComment",
+  plansSend: "plans:send",
+  // Task 8 (controller ruling): main's webContents deny every
+  // target=_blank outright (setWindowOpenHandler), so a plan block's own
+  // rendered link has no route to the OS browser without this. Electron-
+  // bound (dispatch.ts's ElectronBoundChannel) and desktop-only
+  // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
+  // and length gate before shell.openExternal ever runs.
+  plansOpenLink: "plans:openLink",
   // Desktop-only (Phase 1): opens the browser client in the system
   // browser. Takes no URL — main builds it from the bridge's own status.
   openWebClient: "remote:openWebClient",
@@ -259,6 +288,8 @@ export const PUSH_CHANNELS = {
   onDockerLog: "docker:log",
   onRemoteStatus: "remote:update",
   onTabRename: "workspace:tabRename",
+  onPlansChanged: "plans:changed",
+  onTabPlans: "workspace:tabPlans",
 } as const satisfies Record<PushKey, string>;
 
 /**

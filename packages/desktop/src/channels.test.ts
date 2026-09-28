@@ -47,6 +47,7 @@ describe("the channel table", () => {
       "docker:log",
       "git:counts",
       "metrics:update",
+      "plans:changed",
       "providers:update",
       "remote:update",
       "session:output",
@@ -61,6 +62,7 @@ describe("the channel table", () => {
       "voice:speaking",
       "workspace:devtoolsClosed",
       "workspace:devtoolsDockChosen",
+      "workspace:tabPlans",
       "workspace:tabRename",
       "workspace:update",
     ]);

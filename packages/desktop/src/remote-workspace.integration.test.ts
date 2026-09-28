@@ -269,6 +269,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
         log: vi.fn(() => ""),
         snapshot: vi.fn(() => ({ text: "", end: 0 })),
         panes: vi.fn(() => shellsPanes),
+        write: vi.fn(),
       },
       followers,
       git,

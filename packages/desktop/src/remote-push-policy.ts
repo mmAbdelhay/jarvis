@@ -7,8 +7,8 @@
 // tsc error, never a channel a phone silently never receives (or, worse,
 // silently does). "desktop-only" channels are this window's own chrome or
 // name a local child process a phone never started (setup:output,
-// voice:hotkeys, the two DevTools notices, the tab-rename notice,
-// remote:update); every other
+// voice:hotkeys, the two DevTools notices, the tab-rename and tab-plans
+// notices, remote:update); every other
 // channel gets a real ChannelPolicy.
 //
 // The three stream channels (terminal:data, session:output, docker:log)
@@ -95,6 +95,9 @@ export const REMOTE_PUSH_POLICY: {
   "workspace:devtoolsClosed": "desktop-only",
   // A phone has no chip of its own on the laptop's tab strip to rename.
   "workspace:tabRename": "desktop-only",
+  // Task 8: nor a laptop-side plan panel of its own to toggle — a phone
+  // reads and edits plans through its own plans-store.ts (mobile) instead.
+  "workspace:tabPlans": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",
@@ -112,7 +115,13 @@ export const REMOTE_PUSH_POLICY: {
   "voice:speaking": { kind: "reliable" },
   "voice:notice": { kind: "reliable" },
   "workspace:update": { kind: "reliable" },
-  // Keyed, unlike the five reliable channels above: a phone that only cares
+  // Task 5: unkeyed, like the five above it — plans-store.ts (mobile)
+  // subscribes to the bare channel, never a per-path key, since it wants
+  // every plan's own change notice regardless of which one it currently
+  // has open (it re-derives what to do with each payload itself: reload
+  // the open doc if the path matches, refresh the list either way).
+  "plans:changed": { kind: "reliable" },
+  // Keyed, unlike the six reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },
 

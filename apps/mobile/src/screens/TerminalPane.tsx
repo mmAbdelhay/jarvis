@@ -39,7 +39,9 @@ import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { createPlansStore } from "@/lib/plans-store";
 import { parseTerminalPanes, resolvePane } from "@/lib/workspace-store";
+import { PlanSheet } from "@/plan/PlanSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type ValidationPhase = "checking" | "notFound" | "ok";
@@ -88,6 +90,8 @@ function TerminalPaneBody({
   const [connection, setConnection] = useState(client.state());
   const [armed, setArmed] = useState(false);
   const [keyNotice, setKeyNotice] = useState("");
+  const [planVisible, setPlanVisible] = useState(false);
+  const [, setPlanRevision] = useState(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
   const inputRef = useRef<SessionInput | undefined>(undefined);
@@ -101,6 +105,13 @@ function TerminalPaneBody({
     }),
     [],
   );
+  const plansStore = useMemo(() => createPlansStore({ client, paneKey }), [client, paneKey]);
+  useEffect(() => plansStore.subscribe(() => setPlanRevision((value) => value + 1)), [plansStore]);
+  // Final fix wave M5: the header's "Plan · N" counts the open plan's queued
+  // comments, so the default plan is opened on mount, not first on sheet open.
+  useEffect(() => {
+    void plansStore.openDefault();
+  }, [plansStore]);
 
   useFocusEffect(
     useCallback(() => {
@@ -273,6 +284,15 @@ function TerminalPaneBody({
   }
 
   const statusKey = streamStatusKey(streamView);
+  const planButton = (
+    <TouchableOpacity style={styles.planButton} onPress={() => setPlanVisible(true)}>
+      <Text style={styles.planButtonText}>
+        {t(language, "plans.header", {
+          count: plansStore.state.comments.filter((comment) => comment.sentAt === undefined).length,
+        })}
+      </Text>
+    </TouchableOpacity>
+  );
   return (
     // iOS: KeyboardAvoidingView's padding behavior, as before. Android: no
     // behavior (a plain View) and the screen pads itself from the measured
@@ -285,7 +305,16 @@ function TerminalPaneBody({
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      {!embedded && <Stack.Screen options={{ title: paneKey }} />}
+      {!embedded && (
+        <Stack.Screen
+          options={{
+            title: paneKey,
+            headerRight: () => planButton,
+          }}
+        />
+      )}
+      {/* Wide layout: no stack header, so the same button sits above the pane. */}
+      {embedded && <View style={styles.planRow}>{planButton}</View>}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -340,6 +369,13 @@ function TerminalPaneBody({
           onSent={() => setArmed(inputRef.current?.ctrlArmed() ?? false)}
         />
       </View>
+      <PlanSheet
+        visible={planVisible}
+        store={plansStore}
+        language={language}
+        tabTitle={paneKey}
+        onClose={() => setPlanVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -349,4 +385,7 @@ const styles = StyleSheet.create({
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   composeRow: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
+  planRow: { flexDirection: "row", justifyContent: "flex-end" },
+  planButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: theme.spacing.sm },
+  planButtonText: { color: theme.colors.accent, fontFamily: theme.font.semibold },
 });

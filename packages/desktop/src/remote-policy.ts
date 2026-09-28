@@ -232,6 +232,30 @@ export const CHANNEL_POLICY = {
   // exactly the class of persistent, laptop-controlled-tool config change
   // settings:save and settings:testAgent are already desktop-only for.
   "remote:tailscaleCert": "desktop-only",
+  // Remote, all eight (Task 5, plan panel spec): the same "parity of
+  // content, not of the tab model" rule this file's header states for
+  // sessions/git/bookmarks applies to a plan and its comments — a paired
+  // phone reads, comments on and sends feedback on exactly the plan
+  // surface the desktop panel does. `plans:list`'s own `cwd` argument and
+  // `plans:writeBlock`/`plans:read`/`plans:comments`'s `path` are
+  // re-checked against `PlanFiles.isAllowed` in the handler regardless of
+  // origin (dispatch.ts) — this entry only decides whether a phone may
+  // call the channel at all, never whether a given path is inside the
+  // allowed plan directories.
+  "plans:list": "remote",
+  "plans:read": "remote",
+  "plans:writeBlock": "remote",
+  "plans:comments": "remote",
+  "plans:addComment": "remote",
+  "plans:updateComment": "remote",
+  "plans:deleteComment": "remote",
+  "plans:send": "remote",
+  // Desktop-only (Task 8, controller ruling): runs Electron's
+  // `shell.openExternal` on the LAPTOP, opening the OS's own browser — the
+  // same class of laptop-screen/laptop-process concern every other
+  // Electron-bound channel in this table already is. A paired phone opens
+  // a plan's links with its own OS, not this one's.
+  "plans:openLink": "desktop-only",
   // Desktop-only (Phase 1): opens a browser on the laptop itself; a phone
   // has no business launching programs here.
   "remote:openWebClient": "desktop-only",
@@ -370,6 +394,19 @@ export const REMOTE_EFFECT = {
   "projects:list": "read",
   "remote:registerPush": "mutate",
   "remote:unregisterPush": "mutate",
+  // Task 5: `plans:send` pastes formatted feedback into an already-open
+  // pane's shell — a keystroke-style write into a live session, the same
+  // class `terminal:input` is `input` for, keyed on its own `args[0]`
+  // (`paneKey`). The four comment CRUD channels are `mutate` (they persist
+  // to plan-comments.json); the three reads are `read`.
+  "plans:list": "read",
+  "plans:read": "read",
+  "plans:comments": "read",
+  "plans:writeBlock": "mutate",
+  "plans:addComment": "mutate",
+  "plans:updateComment": "mutate",
+  "plans:deleteComment": "mutate",
+  "plans:send": "input",
 } as const satisfies Record<RemoteChannel, "read" | "mutate" | "input">;
 
 /** M12 Task 3: how often `channel`'s outcome gets a `remote-call` audit

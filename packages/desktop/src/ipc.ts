@@ -6,11 +6,13 @@ import {
   sessionLabel,
   type AgentConfig,
   type AgentHealth,
+  type AnchoredComment,
   type CommandRunner,
   type GitChanges,
   type GitFileDiff,
   type GitOutcome,
   type GitProvider,
+  type PlanComment,
   type ProviderStatus,
   type Session,
   type SessionChanges,
@@ -68,6 +70,9 @@ import type {
   FaviconStore,
   HeadlampManager,
   InstalledVoice,
+  PlanDoc,
+  PlanList,
+  PlanResult,
   ShellManager,
   Workflow,
   WorkflowsConfig,
@@ -512,11 +517,15 @@ export type RendererApi = {
   /** A tab's DevTools closed without the renderer asking: the user closed
    *  their undocked window. */
   onDevToolsClosed(cb: (tabId: string) => void): void;
-  /** Pops a chip's native Rename/Reload/Close menu at (x, y) — the click's
-   *  own clientX/clientY. Reload and Close run in main directly; Rename
-   *  arrives back on onTabRename so the renderer's own inline input opens. */
+  /** Pops a chip's native Rename/Reload/Close/Plans menu at (x, y) — the
+   *  click's own clientX/clientY. Reload and Close run in main directly;
+   *  Rename arrives back on onTabRename so the renderer's own inline input
+   *  opens, and Plans arrives back on onTabPlans (Task 8) so the renderer
+   *  toggles that tab's own plan panel — main knows only which tab, never
+   *  whether the panel is open. */
   tabMenu(tabId: string, x: number, y: number): Promise<void>;
   onTabRename(cb: (tabId: string) => void): void;
+  onTabPlans(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;
@@ -852,6 +861,75 @@ export type RendererApi = {
    *  notifier to weigh a push against — desktop-only, and never the
    *  command that ran. */
   reportCommandFinished(paneKey: string, seconds: number, ok: boolean): Promise<void>;
+  /** Every plan surface for `paneKey`'s pane: `session` is the plan a
+   *  session's own transcript last named for its project (if any),
+   *  `planMode` is Claude Code's own plan-mode scratch files, `repo` is
+   *  `docs/superpowers/{specs,plans}` under whatever directory `cwd`
+   *  resolves to. `cwd` is honoured only when it names a directory that
+   *  currently exists; the pane's own recorded start directory is the
+   *  fallback, so the renderer never has to track one of its own. */
+  plansList(paneKey: string, cwd?: string): Promise<PlanList>;
+  /** One plan file's parsed blocks, guarded the same way every plan read
+   *  is (dispatch.ts): a path outside the allowed plan directories comes
+   *  back `forbidden`. */
+  plansRead(path: string): Promise<PlanResult<PlanDoc>>;
+  /** Replaces one block's own source text. Refused with `conflict`
+   *  (carrying the file's current `doc` so the caller can rebase) on a
+   *  stale `baseMtimeMs` — the same optimistic-write discipline every
+   *  other editable panel in this app already follows. */
+  plansWriteBlock(
+    path: string,
+    blockId: string,
+    source: string,
+    baseMtimeMs: number,
+  ): Promise<PlanResult<PlanDoc>>;
+  /** Every comment on `path`, anchored against a fresh read of the plan —
+   *  a comment whose block moved or was removed comes back `orphaned`
+   *  rather than dropped. A forbidden path (outside the allowed plan
+   *  directories) returns `[]` — nothing stored under it is ever shown.
+   *  An allowed path whose file cannot currently be read (missing, too
+   *  large, an IO error) still returns whatever comments are on record
+   *  for it, all orphaned, never an error — the terminal chip row's own
+   *  "absent, never wrong" posture, applied to comments instead of git
+   *  status. */
+  plansComments(path: string): Promise<AnchoredComment[]>;
+  /** Adds one comment anchored to `blockId`, `quote` copied from the
+   *  plan's own rendered text (used only as a fallback anchor if
+   *  `blockId` no longer matches a block). */
+  plansAddComment(path: string, blockId: string, quote: string, body: string): Promise<PlanComment>;
+  /** Edits a comment's own body; `undefined` for an id that no longer
+   *  exists. Re-queues the comment for `plansSend` — editing a comment
+   *  that was already sent clears its own `sentAt`. */
+  plansUpdateComment(id: string, body: string): Promise<PlanComment | undefined>;
+  plansDeleteComment(id: string): Promise<boolean>;
+  /** Formats every named comment id still on `path` (an id for another
+   *  file, or one already deleted, is silently dropped — never an error on
+   *  its own) into one message and pastes it into `paneKey`'s shell the
+   *  same way terminal:input would, wrapped in a bracketed paste
+   *  (bracketed.ts's `bracketedSubmit`) so a multi-comment message lands
+   *  as one submitted block rather than one line per Enter. `no-comments`
+   *  covers both "the ids named nothing on this path" and "none were left
+   *  after filtering"; `no-pane` is an unknown or closed pane. */
+  plansSend(
+    paneKey: string,
+    path: string,
+    commentIds: string[],
+  ): Promise<
+    { ok: true; sent: number } | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" }
+  >;
+  /** A plan file main is watching changed on disk. `path` is the file
+   *  itself, never its contents — the renderer re-reads with
+   *  plansRead/plansComments on receipt, the same "push says look again"
+   *  contract turn:new and workspace:update already follow. */
+  onPlansChanged(cb: (path: string) => void): void;
+  /** Task 8 (controller ruling): opens a plan block's own rendered link in
+   *  the OS browser, via Electron's `shell.openExternal` — main's
+   *  webContents deny every `target=_blank` outright, so a plan link has no
+   *  other route out of the window. Desktop-only, and refused for anything
+   *  but an `http:`/`https:`/`mailto:` URL under 2048 characters
+   *  (desktop-only.ts's own validator, never trusted from the renderer
+   *  alone since the renderer only renders what plansRead handed it). */
+  plansOpenLink(url: string): Promise<void>;
 };
 
 export type WiringDeps = {
@@ -1853,6 +1931,21 @@ export type TerminalHandlers = {
    *  be wrong rather than absent. Only a path that was never supplied
    *  falls back to that starting directory. */
   chips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
+  /** The directory `paneKey`'s shell was *started* in — the pane's own key
+   *  first, its tab as the fallback, the same resolution `chips`/
+   *  `suggest`/`history`/`listDir` all use. `undefined` for a pane this
+   *  process never started. A plain, synchronous read of `directories`
+   *  for a caller outside this closure: dispatch.ts's `plans:list` uses it
+   *  to pick a default project when the renderer supplies no `cwd` of its
+   *  own (or one that no longer exists). */
+  paneStartDir(paneKey: string): string | undefined;
+  /** Every distinct directory a currently-open pane's shell was started
+   *  in, deduplicated. main.ts's own answer to "which projects are open
+   *  right now" for `PlanFiles.watch`'s `cwds` accessor (@jarvis/platform),
+   *  so the plan watcher only follows `docs/superpowers/{specs,plans}`
+   *  under a project actually open in a terminal — never every configured
+   *  project, and never one that used to be open and has since closed. */
+  paneStartDirs(): readonly string[];
 };
 
 /** The chip row above a terminal's prompt — a runtime version, the
@@ -2633,6 +2726,15 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         deletions: changes?.deletions ?? 0,
         runtime,
       };
+    },
+
+    paneStartDir(paneKey) {
+      if (!isString(paneKey)) return undefined;
+      return directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+    },
+
+    paneStartDirs() {
+      return [...new Set(directories.values())];
     },
   };
 }

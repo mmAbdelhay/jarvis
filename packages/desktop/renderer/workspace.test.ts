@@ -225,6 +225,13 @@ function harness(): Recorded[] {
     resizeTerminal: record("resizeTerminal"),
     onTerminalData: () => {},
     onTerminalExit: () => {},
+    // Task 8: workspace-terminal.ts's initWorkspaceTerminals subscribes to
+    // both unconditionally, so the module import throws without them even
+    // in a test that never opens a terminal tab's plan panel.
+    onTabPlans: () => {},
+    onPlansChanged: () => {},
+    plansList: () => Promise.resolve({ session: undefined, planMode: [], repo: [] }),
+    plansOpenLink: () => Promise.resolve(),
     listBookmarks: () => Promise.resolve({ ok: true, value: [] }),
     addBookmark: (...args: unknown[]) => {
       calls.push({ call: "addBookmark", args });
