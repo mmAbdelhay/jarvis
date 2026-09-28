@@ -7,7 +7,13 @@ import { ELECTRON_BOUND_CHANNELS } from "../desktop-only.js";
 import { DESKTOP_ORIGIN, type DispatchTable, type Handler, type Origin } from "../dispatch.js";
 import { ViewReconciler } from "../view-reconciler.js";
 import type { Core } from "./compose.js";
-import { inProcessCoreClient, type DesktopHost } from "./core-client.js";
+import {
+  inProcessCoreClient,
+  throughJson,
+  type CoreClient,
+  type DesktopHost,
+} from "./core-client.js";
+import { faviconIntake } from "./favicon-intake.js";
 import { createHostLink } from "./host-link.js";
 import { TabHost } from "./tab-host.js";
 
@@ -35,16 +41,16 @@ function fakeCore() {
   const broadcast = createBroadcaster({ toRenderer: link.toClients });
   const tabs = new TabHost();
   const stored: unknown[][] = [];
-  const favicons = {
-    put: async (...args: unknown[]) => {
+  const favicons = faviconIntake({
+    put: async (...args) => {
       stored.push(["put", ...args]);
-      return { ok: true };
+      return { ok: true, value: undefined };
     },
-    putMiss: async (...args: unknown[]) => {
+    putMiss: async (...args) => {
       stored.push(["putMiss", ...args]);
-      return { ok: true };
+      return { ok: true, value: undefined };
     },
-  } as unknown as FaviconStore;
+  } satisfies Pick<FaviconStore, "put" | "putMiss">);
   const config = { allowPopups: true, suspendTabsAfterMs: 900_000 };
   const lifecycle: string[] = [];
 
@@ -333,11 +339,15 @@ describe("inProcessCoreClient: host hooks", () => {
     expect(views.map((view) => view.destroyed)).toEqual([true, true]);
   });
 
-  it("stores the host's favicon fetches in the core's cache", async () => {
+  it("stores the host's favicon fetches in the core's cache, sent as base64", async () => {
     const { core, stored } = fakeCore();
-    const client = inProcessCoreClient(core);
+    const client = inProcessCoreClient(core, { roundTrip: true });
     const bytes = new Uint8Array([1, 2, 3]);
-    await client.favicons.put("https://example.com/", bytes, "image/png");
+    await client.favicons.put(
+      "https://example.com/",
+      Buffer.from(bytes).toString("base64"),
+      "image/png",
+    );
     await client.favicons.putMiss("https://nothing.example/");
     expect(stored).toEqual([
       ["put", "https://example.com/", bytes, "image/png"],
@@ -371,5 +381,164 @@ describe("inProcessCoreClient: host hooks", () => {
       "announceStartup",
       "stop",
     ]);
+  });
+});
+
+// The contract is JSON values only (core-client.ts). In round-trip mode the
+// adapter puts every argument and result through JSON, as the socket will,
+// so a non-JSON value — a Uint8Array above all — fails here, now.
+describe("inProcessCoreClient: round-trip mode", () => {
+  /** Calls every member of the client and every hook of the host at least
+   *  once, with the shapes the app really sends. Returns what it called. */
+  async function exerciseEverything(client: CoreClient, fake: ReturnType<typeof fakeCore>) {
+    const called = new Set<string>();
+    const note = (name: string) => called.add(name);
+    const pushes: unknown[] = [];
+    client.onPush((channel, payload) => pushes.push([channel, payload]));
+    note("onPush");
+    const states: unknown[] = [];
+    client.workspace.onChange((state) => states.push(state));
+    note("workspace.onChange");
+    client.workspace.onViewRequest((request) => states.push(request));
+    note("workspace.onViewRequest");
+
+    fake.answers.set("settings:read", async () => ({ ok: true, value: { projects: { a: "/a" } } }));
+    await client.invoke("settings:read", ["x", 1, true, null, { nested: ["y"] }]);
+    note("invoke");
+    fake.tabs.onChange((state) => fake.core.broadcast.send("workspace:update", state));
+    client.broadcast("turn:new", { role: "assistant", text: "hi", language: "en", at: 1 });
+    note("broadcast");
+    client.workspace.open("acme", "a.com");
+    client.workspace.open("acme", "b.com");
+    note("workspace.open");
+    const id = client.workspace.state().tabs[0]!.id;
+    note("workspace.state");
+    client.workspace.reportPage(id, {
+      kind: "navigated",
+      url: "https://a.com/x",
+      canGoBack: true,
+      canGoForward: false,
+    });
+    note("workspace.reportPage");
+    client.workspace.suspend(id);
+    note("workspace.suspend");
+    await client.favicons.put(
+      "https://a.com/",
+      Buffer.from([1, 2]).toString("base64"),
+      "image/png",
+    );
+    note("favicons.put");
+    await client.favicons.putMiss("https://b.com/");
+    note("favicons.putMiss");
+    client.hostConfig();
+    note("hostConfig");
+    void client.firstRun;
+    note("firstRun");
+    await client.dbgateCredentialFor(5000);
+    note("dbgateCredentialFor");
+    client.voice.start();
+    client.voice.stop();
+    note("voice.start");
+    note("voice.stop");
+    client.startRemote();
+    note("startRemote");
+    await client.announceStartup();
+    note("announceStartup");
+
+    const host = recordingHost();
+    const detach = client.attachHost(host.host);
+    note("attachHost");
+    fake.link.host.isFocused();
+    fake.link.host.isAwake();
+    fake.link.host.requestFavicon("acme", "https://a.com/");
+    fake.link.host.sweepIdleViews();
+    fake.link.host.showNotification("title", "body");
+    await fake.link.host.openExternal("https://web.example/");
+    fake.link.host.restart();
+    fake.link.host.destroyViews();
+    detach();
+    client.stop();
+    note("stop");
+    return { called, pushes, states, hostSeen: host.seen };
+  }
+
+  /** Every callable or value on the client, nested groups flattened. */
+  function members(client: CoreClient): string[] {
+    const names: string[] = [];
+    for (const [key, value] of Object.entries(client)) {
+      if (value !== null && typeof value === "object") {
+        for (const inner of Object.keys(value)) names.push(`${key}.${inner}`);
+      } else names.push(key);
+    }
+    return names.sort();
+  }
+
+  it("carries every member's arguments and results as JSON, with nothing lost", async () => {
+    const fake = fakeCore();
+    const client = inProcessCoreClient(fake.core, { roundTrip: true });
+    const { called, pushes, states, hostSeen } = await exerciseEverything(client, fake);
+
+    expect([...called].sort()).toEqual(members(client));
+    expect(fake.calls[0]?.args).toEqual(["x", 1, true, null, { nested: ["y"] }]);
+    expect(pushes.map((push) => (push as unknown[])[0])).toContain("turn:new");
+    expect(states.length).toBeGreaterThan(0);
+    expect(hostSeen.map((entry) => entry[0])).toEqual([
+      "requestFavicon",
+      "sweepIdleViews",
+      "showNotification",
+      "openExternal",
+      "restart",
+      "destroyViews",
+    ]);
+    expect(fake.stored[0]?.[2]).toEqual(new Uint8Array([1, 2]));
+  });
+
+  it("refuses a Uint8Array anywhere it would cross, as a socket frame would", async () => {
+    const fake = fakeCore();
+    const client = inProcessCoreClient(fake.core, { roundTrip: true });
+    // Raw bytes where base64 belongs: the mistake the contract exists for.
+    expect(() =>
+      client.favicons.put("https://a/", new Uint8Array([1]) as unknown as string, "image/png"),
+    ).toThrow(/favicons\.put.*Uint8Array/);
+    await expect(client.invoke("settings:read", [new Uint8Array([1])])).rejects.toThrow(
+      /Uint8Array/,
+    );
+    fake.answers.set("settings:read", () => new Map());
+    await expect(client.invoke("settings:read", [])).rejects.toThrow(/Map is not JSON/);
+    // A push is refused per listener and logged, like any failed delivery.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const seen: unknown[] = [];
+      client.onPush((_channel, payload) => seen.push(payload));
+      fake.link.toClients("terminal:data", new Uint8Array([1]));
+      expect(seen).toEqual([]);
+      expect(String(errors.mock.calls[0]?.[0])).toMatch(/terminal:data.*Uint8Array/);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("names what breaks the contract, and passes what keeps it", () => {
+    expect(() => throughJson({ at: new Date(0) }, "x")).toThrow("x.at: a Date is not JSON");
+    expect(() => throughJson([1, undefined], "x")).toThrow("x[1]: undefined in an array");
+    expect(() => throughJson({ n: Number.NaN }, "x")).toThrow("x.n: NaN is not JSON");
+    expect(() => throughJson({ f: () => 1 }, "x")).toThrow("x.f: a function is not JSON");
+    expect(() => throughJson(new Set([1]), "x")).toThrow("x: a Set is not JSON");
+    expect(throughJson({ a: [1, "b", null, { c: true }], gone: undefined }, "x")).toEqual({
+      a: [1, "b", null, { c: true }],
+    });
+    expect(throughJson(undefined, "x")).toBeUndefined();
+  });
+
+  it("turns a rejection into a message-only error, as an error frame would carry", async () => {
+    const fake = fakeCore();
+    fake.answers.set("settings:read", async () => {
+      throw Object.assign(new TypeError("boom"), { secret: "x" });
+    });
+    const client = inProcessCoreClient(fake.core, { roundTrip: true });
+    const error = await client.invoke("settings:read", []).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("boom");
+    expect(error).not.toHaveProperty("secret");
   });
 });

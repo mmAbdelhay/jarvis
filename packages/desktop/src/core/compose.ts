@@ -33,6 +33,7 @@ import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
 import { createHostLink, type DesktopHost } from "./host-link.js";
+import { faviconIntake, type FaviconIntake } from "./favicon-intake.js";
 import { createDispatchTable, type DispatchTable } from "../dispatch.js";
 import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
@@ -89,7 +90,6 @@ import {
   codeServerKey,
   createDbGateManager,
   type DbGateManager,
-  type FaviconStore,
   createFaviconStore,
   createFsImportDeps,
   createGitProvider,
@@ -300,8 +300,9 @@ export type Core = {
   broadcast: Broadcaster;
   /** The Workspace's tab state. */
   tabs: TabHost;
-  /** The favicon cache bookmarks read and hosted pages fill. */
-  favicons: FaviconStore;
+  /** Where hosted pages' favicons land, as base64 (favicon-intake.ts) — the
+   *  cache bookmarks read. */
+  favicons: FaviconIntake;
   /** Hands the core a desktop app's window, pages and OS services. Returns
    *  the detach. */
   attachHost(host: DesktopHost): () => void;
@@ -2209,7 +2210,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     dispatch,
     broadcast,
     tabs: workspace,
-    favicons,
+    favicons: faviconIntake(favicons),
     attachHost: (desktop) => hostLink.attach(desktop),
     onPush: (listener) => hostLink.onPush(listener),
     voiceControl: { start: startVoice, stop: stopVoice },

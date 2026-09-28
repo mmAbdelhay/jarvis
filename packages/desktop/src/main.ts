@@ -149,7 +149,17 @@ function createDesktopHost(client: CoreClient) {
    *  live in favicon-fetch.ts, where they are testable without Electron.
    *  This is only the binding of the store to it. */
   async function cacheFavicon(pageUrl: string, iconUrl: string, from: Session): Promise<void> {
-    await fetchFavicon(client.favicons, pageUrl, iconUrl, from);
+    // The core takes the icon as base64: CoreClient carries JSON values only.
+    await fetchFavicon(
+      {
+        put: (url, bytes, type) =>
+          client.favicons.put(url, Buffer.from(bytes).toString("base64"), type),
+        putMiss: (url) => client.favicons.putMiss(url),
+      },
+      pageUrl,
+      iconUrl,
+      from,
+    );
   }
 
   /** The fallback path, for a bookmark never opened in Jarvis — which is
@@ -193,9 +203,9 @@ function createDesktopHost(client: CoreClient) {
 
   // Every push the core sends this app, into this window's renderer.
   const toWindow = rendererSink(window);
-  client.onPush(toWindow);
+  const stopPushes = client.onPush(toWindow);
 
-  client.attachHost({
+  const detach = client.attachHost({
     isFocused: () => window.isFocused(),
     isAwake: () => window.isVisible() && !window.isMinimized(),
     requestFavicon,
@@ -214,6 +224,19 @@ function createDesktopHost(client: CoreClient) {
       app.relaunch();
       app.exit(0);
     },
+  });
+
+  // The window is going: stop reaching into it, then drop its pages here,
+  // without waiting for the core to ask. Registered before main's own
+  // "closed" listener, so this runs before the core's stop(); the core's
+  // own views teardown then finds no host and does nothing. A core in
+  // jarvisd keeps running after the window closes, so it would never ask.
+  // Detaching first also stops a core timer from calling isFocused() on a
+  // destroyed BrowserWindow, which throws.
+  window.on("closed", () => {
+    stopPushes();
+    detach();
+    views.destroy();
   });
 
   /** A push about this window alone — its DevTools, its tab chips — which
