@@ -8,6 +8,7 @@
       "!**/dist",
       "!release",
       "!packages/desktop/renderer/vendor",
+      "!packages/desktop/src/vendor",
       "!spikes",
       "!design",
       "!pnpm-lock.yaml",

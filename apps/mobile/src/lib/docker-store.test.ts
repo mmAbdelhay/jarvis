@@ -28,6 +28,7 @@ function createEnv(capabilities = CAPS) {
   const clock = createFakeClock();
   const client = createRpcClient({
     transport,
+    lockedAtWelcome: false,
     clock,
     random: () => 0.5,
     client: "jarvis-mobile-test",

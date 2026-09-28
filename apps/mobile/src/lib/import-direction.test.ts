@@ -135,4 +135,29 @@ describe("import direction: apps/mobile -> @jarvis/* (final review M4)", () => {
     ].join("\n");
     expect(findOffenses(text)).toEqual([]);
   });
+  it("the scan includes the browser build's .web.ts/.web.tsx siblings (Task 13)", () => {
+    const scanned = collectSourceFiles(join(MOBILE_ROOT, "src"));
+    expect(scanned).toContain(join(MOBILE_ROOT, "src", "lib", "native-notifications.web.ts"));
+    expect(scanned).toContain(join(MOBILE_ROOT, "src", "components", "TerminalWebView.web.tsx"));
+  });
+  it(
+    "no .web.ts(x) file value-imports its own base module, which on web resolves to itself " +
+      "[bite-proof: import buildSpeaker from ./native-speaker in native-speaker.web.ts and this fails]",
+    () => {
+      const offenders: string[] = [];
+      for (const dir of [join(MOBILE_ROOT, "app"), join(MOBILE_ROOT, "src")]) {
+        for (const file of collectSourceFiles(dir)) {
+          const match = /([^/]+)\.web\.tsx?$/.exec(file);
+          if (match === null) continue;
+          const base = match[1];
+          const selfImport = new RegExp(
+            `^(?:import|export)\\s+(?!type\\b)[^;]*?from\\s*["'](?:\\./|@/[a-z]+/)${base}["']`,
+            "m",
+          );
+          if (selfImport.test(readFileSync(file, "utf8"))) offenders.push(file);
+        }
+      }
+      expect(offenders).toEqual([]);
+    },
+  );
 });

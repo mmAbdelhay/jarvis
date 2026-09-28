@@ -30,14 +30,16 @@ import {
   type BridgeDeps,
   type ExpoPushMessage,
   type FetchLike,
+  type OwnerStatus,
   type PairingResult,
   type PushSender,
   type RemoteStatus,
   type RequestHandler,
+  type SetOwnerPasswordResult,
 } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration } from "@jarvis/wire";
 import type { Broadcaster } from "./broadcast.js";
-import type { RemoteConfig } from "./config.js";
+import { effectiveWebPort, type RemoteConfig } from "./config.js";
 import type { DispatchTable, Handler, RemoteControls, SidecarPublisher } from "./dispatch.js";
 import { MESSAGES } from "./messages.js";
 import type { PushTarget } from "./notify.js";
@@ -48,6 +50,8 @@ import {
   type StreamOwners,
 } from "./remote-push-policy.js";
 import { auditPolicyFor, CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
+
+const CLOSED_OWNER_STATUS: OwnerStatus = { hasPassword: false, passkeys: [] };
 
 const CLOSED_STATUS: RemoteStatus = {
   enabled: false,
@@ -134,6 +138,7 @@ export type RemoteAccessDeps = {
     | "onStatus"
     | "onDeviceDisconnected"
     | "onIdleDisabled"
+    | "notifyDesktop"
   >;
   // Backs remoteKeyAuthorizer's pane/session/docker-follower checks — real
   // ShellManager/SessionManager/DockerFollowers methods in main.ts.
@@ -158,6 +163,10 @@ export type RemoteAccessDeps = {
   // which packages/remote leaves optional for its own callers) because the
   // desktop always has a disk to write this to.
   onIdleDisabled(): void;
+  // Phase 0: shows a desktop OS notification (main.ts: Electron
+  // `Notification`). This file picks the bilingual text for the bridge's
+  // notice kind; main.ts only displays it.
+  showNotification(title: string, body: string): void;
   // M10 Task 4: the Expo push sender's own outbound HTTP client — injected
   // exactly like `io`, so a test drives the whole send lifecycle with a
   // fake `fetch` and never a real socket.
@@ -202,6 +211,9 @@ function toBridgeConfig(config: RemoteConfig): BridgeConfig {
     port: config.port,
     sidecarProxy: config.sidecarProxy,
     idleDisableMinutes: config.idleDisableMinutes,
+    // Phase 1: config.ts has already refused an enabled web section whose
+    // effective port is out of range or equal to the bridge's own.
+    web: { enabled: config.web.enabled, port: effectiveWebPort(config) },
     tls: {
       ...(config.tls.certPath !== undefined ? { certPath: config.tls.certPath } : {}),
       ...(config.tls.keyPath !== undefined ? { keyPath: config.tls.keyPath } : {}),
@@ -262,8 +274,12 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           policies: remotePushPolicies(),
           authorizeKey: remoteKeyAuthorizer(deps.streams),
           blobLimit: (channel) => blobLimitOf(deps.blobs(), channel),
-          errorText: (code) => ({
-            text: MESSAGES.remoteErrorText(code, deps.language),
+          errorText: (code, authChannel) => ({
+            text:
+              (authChannel === undefined
+                ? undefined
+                : MESSAGES.remoteAuthErrorText(authChannel, code, deps.language)) ??
+              MESSAGES.remoteErrorText(code, deps.language),
             language: deps.language,
           }),
           // M12 Task 3, rule 9: the desktop's own classifier, over the
@@ -273,6 +289,10 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           onStatus,
           onDeviceDisconnected: deps.onDeviceDisconnected,
           onIdleDisabled: deps.onIdleDisabled,
+          notifyDesktop: (kind, deviceName) => {
+            const { title, body } = MESSAGES.remoteSecurityNotice(kind, deps.language, deviceName);
+            deps.showNotification(title, body);
+          },
         })
         .then((created) => {
           bridge = created;
@@ -415,6 +435,19 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
     },
     hasSubscriber(channel: string): boolean {
       return bridge?.hasSubscriber(channel) ?? false;
+    },
+    // Phase 0: plain pass-throughs to the bridge's owner store, with the
+    // same closed defaults as every other control before the bridge exists.
+    ownerStatus: () => bridge?.ownerStatus() ?? CLOSED_OWNER_STATUS,
+    async setOwnerPassword(current, next): Promise<SetOwnerPasswordResult> {
+      if (bridge === undefined) return { ok: false, code: "unavailable" };
+      return bridge.setOwnerPassword(current, next);
+    },
+    async deletePasskey(credentialId: string): Promise<boolean> {
+      return bridge === undefined ? false : bridge.deletePasskey(credentialId);
+    },
+    async signOutEverywhere(): Promise<void> {
+      await bridge?.signOutEverywhere();
     },
     publishSidecar,
     pushSettings: () => currentPush,

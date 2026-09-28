@@ -60,58 +60,110 @@ Node or Electron process the phone does not have.
 
 The session screen renders a display-only xterm page in a locked WebView; native compose and key controls send raw input over the shared client. `apps/mobile/scripts/build-terminal-html.mjs` reads the desktop's vendored terminal bundles and palette only at generation time. The committed page has one hashed script, no network access and LTR terminal layout; tests detect drift from those inputs.
 
-## Two platforms
+## Three platforms
 
-macOS and Linux, and the rule that keeps them one codebase: **a function whose
-behaviour differs by OS takes the platform as a parameter**. Only `main.ts`
-and `preload.cts` read `process.platform`; the renderer receives it over the
-bridge as `window.jarvis.platform`. `platform-convention.test.ts` enforces it.
+macOS, Linux and Windows, and the rule that keeps them one codebase: **a
+function whose behaviour differs by OS takes the platform as a parameter**.
+Only the process entry points read `process.platform` — `main.ts`,
+`preload.cts`, `daemon-main.ts` and the `jarvisd` CLI (`jarvisd.ts`) — plus
+`pty.ts` and `sdk-executable.ts`, which locate per-platform native binaries.
+The renderer receives it over the bridge as `window.jarvis.platform`.
+`platform-convention.test.ts` holds that allowlist.
 
-There is no CI and one laptop, so this is not tidiness — a function that reads
-`process.platform` at the point of use can only be tested on the OS the test
-happens to run on, and half the app would be asserted by nothing. See
-[conventions](conventions.md).
+This is not tidiness. A function that reads `process.platform` at the point
+of use can only be tested on the OS the test happens to run on, and two
+thirds of the app would be asserted by nothing. Taking it as a parameter
+means every branch runs on every OS. See [conventions](conventions.md).
+
+**CI runs the whole suite on all three.** `.github/workflows/ci.yml` runs
+one job per OS (`ubuntu-latest`, `macos-latest`, `windows-latest`, with
+`fail-fast` off) on every pull request and every push to `master`. Each job
+uses Node 24 and runs `pnpm install --frozen-lockfile --ignore-scripts`,
+`pnpm bootstrap --pty-only` (the node-pty binding, compiled on Linux),
+then `pnpm lint`, `pnpm typecheck`, `pnpm build` and `pnpm test`.
+`.github/workflows/docs.yml` builds the docs site on Ubuntu and publishes
+it from `master`.
 
 The places that actually differ are few, and each is a named function with
-both branches tested:
+every branch tested:
 
 | Concern | Module |
 |---|---|
-| Shell integration | `platform/zsh-integration.ts`, `bash-integration.ts`, dispatched by `shell-integration.ts` |
+| Shell integration | `platform/zsh-integration.ts`, `bash-integration.ts`, `powershell-integration.ts`, dispatched by `shell-integration.ts` |
 | Which shell, and how it is started | `platform/shell.ts` — `shellCommand`, `shellArgs` |
-| History format | `platform/completion.ts` — `parseZshHistory`, `parseBashHistory` |
-| Microphone | `desktop/recorder.ts` — `recorderCommand` |
+| History format | `platform/completion.ts` — `parseZshHistory`, `parseBashHistory`, `parsePowerShellHistory` |
+| Resolving a bare command name | `platform/executable.ts` — `resolveExecutable` (PATHEXT, `.cmd` through cmd.exe) |
+| Microphone | `desktop/recorder.ts` — `recorderCommand` (avfoundation, PulseAudio, DirectShow) |
 | Audio playback | `platform/piper.ts` — `audioPlayer` |
-| Speech routing | `platform/piper.ts` — `RoutedSpeech`, `silentSpeech` |
+| Speech routing | `platform/piper.ts` — `RoutedSpeech`, `silentSpeech`; Windows' system voice is `platform/speech-windows.ts` |
+| Voice hotkeys | `desktop/hotkeys.ts` — `registerVoiceHotkeys` (a fallback pair on Windows) |
 | Keyboard chords and their labels | `desktop/renderer/keys.ts` |
 | Application menu | `desktop/app-menu.ts` |
 | Sidecar default paths | `platform/headlamp.ts` — `defaultHeadlampBinary` |
+| The daemon's control endpoint | `desktop/daemon/control/endpoint.ts` — `controlPaths`: a Unix socket, or on Windows a named pipe with a random name per start (`windowsPipeName`) |
+| The daemon's login item | `desktop/daemon/service-darwin.ts` (LaunchAgent), `service-linux.ts` (systemd user unit), `service-win32.ts` (an HKCU `Run` value, `JarvisDaemon`, that starts `Jarvis.exe --jarvis-daemon`) |
+
+**What CI does not prove on Windows.** The unit tests for the service
+builders and the pipe name run on every OS, but these are skipped on
+`windows-latest`:
+
+- The daemon's end-to-end tests: `daemon-main.e2e.test.ts`,
+  `daemon/mode.e2e.test.ts` and `daemon/cli/jarvisd.e2e.test.ts`. None of them
+  starts a real `jarvisd` on a named pipe.
+- The `bin/jarvisd` launcher test (`jarvisd-launcher.test.ts`).
+- The control test for an impostor server that cannot prove the secret.
+- The socket adapter's restart-through-the-service-manager test, because
+  Windows has no service manager that restarts `jarvisd`.
+- File-mode checks (0600/0700), because Windows relies on the user
+  profile's ACL.
+
+So on Windows, background mode (the `Run` value, `--jarvis-daemon`, the
+named pipe and restarts) rests on unit tests and a manual pass, not on CI.
+The Editor tab has no Windows build at all (code-server ships none); see
+[installation](../guide/installation.md#on-windows).
 
 ## Inside `desktop`
 
 ```
-src/main.ts          composes everything, owns the window, registers IPC
-src/ipc.ts           every handler, as pure functions over injected deps
-src/preload.cts      the only bridge; contextIsolation is on
-src/browser-host.ts  the Workspace's tabs, Electron-free and unit tested
-src/electron-view.ts the one file that constructs a WebContentsView
-src/sidecar-reaper.ts when a sidecar nobody is looking at should be stopped
-src/remote-idle.ts  main-process write-back after the bridge's idle timer fires
-src/remote-access.ts the request, push and audit lane between main and remote
-renderer/            the UI. No Node. Type-only imports from the packages.
+src/main.ts              the Electron host: owns the window, holds one CoreClient
+src/core/compose.ts      createCore — the whole core, with no window (below)
+src/core/core-client.ts  the CoreClient seam and its in-process adapter
+src/core/tab-host.ts     TabHost: the Workspace's tab state, Electron-free
+src/ipc.ts               handler bodies, as pure functions over injected deps
+src/dispatch.ts          the one table of handlers, keyed by channel, any transport
+src/desktop-only.ts      the few handlers that need a window, a dialog or a view
+src/preload.cts          the only bridge; contextIsolation is on
+src/view-reconciler.ts   ViewReconciler: one WebContentsView per tab that wants one
+src/browser-host.ts      HostedView and ViewFactory: the types a view is built to
+src/electron-view.ts     the one file that constructs a WebContentsView
+src/daemon-main.ts       jarvisd: the core behind a local control socket
+src/daemon/              the control socket, service installers, mode switching
+src/sidecar-reaper.ts    when a sidecar nobody is looking at should be stopped
+src/remote-idle.ts       the write-back after the bridge's idle timer fires
+src/remote-access.ts     the request, push and audit lane between core and remote
+renderer/                the UI. No Node. Type-only imports from the packages.
 ```
 
-**`browser-host.ts` contains no Electron import.** Tab lifecycle — partitions,
-eviction, visibility, suspension, which tab is active — is ordinary logic, and
-keeping Electron behind `ViewFactory` is what lets all of it run in plain
-Vitest. `electron-view.ts` is the only place a view is constructed.
+**The tab state is `TabHost`; the pages are `ViewReconciler`'s.** Which tabs
+exist, their order, the active one, eviction past `MAX_TABS` (8 tabs that
+hold a page) and what each page last reported live in `core/tab-host.ts`,
+which has no Electron import and runs unchanged in the headless daemon. The
+Electron half, `view-reconciler.ts`, *follows* that state: each snapshot is
+diffed against the views it holds, a tab `hasView` wants gets a view, and a
+view whose tab closed or was suspended is destroyed. Applying the same
+snapshot twice does nothing. Bounds, visibility, DevTools and back/forward
+are the reconciler's alone, because only a window can decide them. What a
+page does crosses back as a small `PageFact` (`reportPage`). Electron stays
+behind `ViewFactory` (`browser-host.ts`), so the reconciler runs in plain
+Vitest too; `electron-view.ts` is the only place a view is constructed.
 
-**Suspension is the host destroying a view and keeping its tab.**
-`sweepIdle()` — driven by a once-a-minute timer in `main.ts` — destroys the
-`HostedView` behind any tab that has sat hidden past
-`performance.suspendTabsAfterMinutes` and marks the tab `suspended`. The row
-in `TabStore` is untouched, so nothing about the tab strip changes; `activate`
-sees the flag and builds a new view before showing it.
+**Suspension is the host destroying a view and keeping its tab.** The
+core's once-a-minute sweep asks the attached host to `sweepIdleViews()`;
+the reconciler reports every tab that has sat hidden past
+`performance.suspendTabsAfterMinutes` as `TabHost.suspend(id)`. The tab is
+marked `suspended`, `hasView` turns false, and the reconciler destroys the
+view on the next snapshot. The row stays, so nothing about the tab strip
+changes; `TabHost.activate` sees the flag and asks for a fresh page.
 
 This is tab suspension; it is separate from the remote bridge's idle
 auto-disable, which closes the listener when no paired phone is connected and
@@ -120,15 +172,15 @@ no pairing activity is keeping it open.
 Rebuilding needs one thing the host cannot know. A hosted app's sidecar may
 have been stopped underneath it and restarted on a different free port, so the
 address the tab was suspended holding points at nothing. `resumeUrl` is
-injected for exactly that: `main.ts` routes the answer through the same
-handler the tab's own button uses, so "reuse if running, start if not" is
-decided in one place.
+injected into `TabHost` for exactly that: `createCore` routes the answer
+through the same handler the tab's own button uses, so "reuse if running,
+start if not" is decided in one place.
 
 **Stopping a sidecar is decided outside the managers.** Nothing calls
 `CodeServerManager.open()` again while you type in the editor, so a "last
 used" stamp kept manager-side goes stale on the instance actually in use.
-Only the workspace's tabs know what is needed, so `main.ts` computes that set
-each sweep and `sidecar-reaper.ts` holds the grace period over it; the
+Only the workspace's tabs know what is needed, so the core computes that set
+each sweep, right after the idle views are suspended, and `sidecar-reaper.ts` holds the grace period over it; the
 managers only learn `stop(key)` and `runningKeys()`. `codeServerKey` is
 exported and shared because the reaper builds its keys from config, from the
 other end entirely.
@@ -138,6 +190,156 @@ import is a bare specifier that survives compilation and 404s at runtime in the
 bundle; `no-value-imports.test.ts` enforces it, and it exists because that
 mistake was made.
 
+## The core and its hosts
+
+Everything that is not a window — the dispatch table, the agents and ptys,
+the sidecar managers, `TabHost`, the notifier, the remote bridge — is built
+by one function, `createCore` in `core/compose.ts`. It imports no Electron
+(`core/no-electron.test.ts`), so the same core runs in two places:
+
+```
+   Electron app (main.ts)                    jarvisd (daemon-main.ts)
+   ┌──────────────────────────┐              ┌────────────────────────┐
+   │ window, ViewReconciler,  │              │ createCore()           │
+   │ preload, desktop-only    │              │  + remote bridge       │
+   │          │               │   control    │  + web listener        │
+   │     CoreClient ──────────┼── socket ────┤ daemon/binding.ts      │
+   │   in-process │ socket    │   (local)    │ control/server.ts      │
+   │          ▼               │              └────────────────────────┘
+   │ createCore() (in-process)│
+   └──────────────────────────┘
+```
+
+**`CoreClient` is the one door from the host into the core**
+(`core/core-client.ts`; `main-core-seam.test.ts` keeps `main.ts` to it).
+Two adapters implement it:
+
+- `inProcessCoreClient` wraps a `createCore()` in the app's own process.
+  Nothing is translated; a request reaches the dispatch table in the same
+  tick.
+- `connectSocketCoreClient` (`core/socket-core-client.ts`) speaks to
+  `jarvisd` over the control socket. The synchronous reads (`firstRun`,
+  `hostConfig()`, `workspace.state()`) come from a local cache that the
+  connect snapshot fills and the daemon's pushes keep current. A drop
+  rejects the calls in flight and reconnects with backoff; each reconnect is
+  a full resync.
+
+`switchableCoreClient` sits in front of both, so **Keep Jarvis running in
+the background** moves every listener and the attached host from one core
+to the other without a new window. `daemon/mode.ts` owns every transition
+(launch, turn on, turn off, a daemon of another build) as pure logic over
+injected doubles.
+
+**The contract is JSON only.** Every argument and every result that
+crosses is a plain object, array, string, finite number, boolean or null —
+no `Uint8Array`, `Map`, `Date`, class instance or function. Binary crosses
+as base64 (a favicon, decoded and capped at 256 KiB in the core). The
+in-process adapter's `roundTrip` test mode pushes every value through
+`throughJson`, so a non-JSON value fails a unit test rather than a socket.
+Every stream is one ordered stream: a push the core sends while handling a
+request arrives before that request settles, and a view request follows the
+tab state that made it.
+
+**The host gives the core a `DesktopHost`** (`core/host-link.ts`): window
+focus, whether the screen is awake, favicon fetches, `sweepIdleViews`,
+`destroyViews`, OS notifications, opening the system browser and restart.
+With no host attached — a headless daemon — each answers safely ("not
+focused, not awake") or is logged, never lost silently. The handlers that
+need a real window, dialog, menu or view stay in the host
+(`desktop-only.ts`) and never enter the core's table, so neither the bridge
+nor the socket can reach them.
+
+**`jarvisd`** is `daemon-main.ts` run under Node (packaged:
+`ELECTRON_RUN_AS_NODE=1` against the Jarvis binary). The control server
+starts first because it *is* the single-instance lock, then the core,
+bound to the socket by `daemon/binding.ts`, then the bridge. Every request on
+the socket runs with the desktop's own origin.
+
+- **Where it listens.** A Unix socket in `~/.config/jarvis/run` (a 0700
+  directory; socket and secret 0600). On Windows, a named pipe whose name
+  is `jarvisd-` plus 16 random hex chosen at each start and published in
+  `control.endpoint`, because the pipe namespace is machine-wide.
+- **The handshake** (`daemon/control/handshake.ts`) is mutual HMAC-SHA256,
+  server first. The daemon writes a fresh secret at every start; each side
+  proves it knows it by signing the other side's fresh 32-byte nonce with
+  its own label (`jarvisd-server` / `jarvisd-client`). The secret never
+  crosses the wire, a recorded proof is useless on the next connection, and
+  a squatter on the endpoint can neither harvest the secret nor pass the
+  client's check. A client of another build is told `restart-required`.
+- **The pid lock** (`daemon/control/lock.ts`) is `run/jarvisd.pid`,
+  holding `<pid>:<random token>` and created exclusively. A lock is stale
+  when its pid is dead, is this process's own, or is alive with nothing
+  answering on the endpoint (checked twice, a grace period apart). Taking
+  one over is serialised by a second exclusive file,
+  `jarvisd.pid.takeover`, so of any number of racing starters exactly one
+  wins; the others exit with code 3.
+- **Service installers** (`daemon/service*.ts`) turn the setting into an
+  OS login item: a LaunchAgent at
+  `~/Library/LaunchAgents/dev.jarvis.daemon.plist` on macOS, a systemd user
+  unit at `~/.config/systemd/user/jarvisd.service` on Linux, and a
+  `JarvisDaemon` value under `HKCU\…\CurrentVersion\Run` on Windows. Each
+  builder is a pure function of its inputs, tested on every OS; the service
+  is re-installed when it names another binary (a moved app).
+
+See [Background daemon](../guide/background-daemon.md) for the user side.
+
+## Remote security layers
+
+A browser or phone reaches the core through four layers. Each is
+its own module in `@jarvis/remote`, and each fails closed:
+
+```
+ device ──TLS 1.3──► Origin check ──► device token ──► owner login ──► dispatch
+                     (origin.ts)      (pairing)        (owner-auth.ts)
+```
+
+1. **Device pairing** says *which device* is talking. Approving the
+   laptop's dialog issues a device token, and every connection presents it
+   first. Revoking a device cuts its connections and its sidecar handles.
+2. **Owner login** says *that the owner is holding it*. An authenticated
+   connection starts **locked** (`connection.ts`): it answers only the
+   `auth:*` channels (status, password or passkey login, passkey
+   registration, refresh, resume, logout), and every other request,
+   subscription and upload is refused `locked`. A login unlocks it until the
+   access token expires; logout, a password change or a revoked token family
+   locks it again. The socket stays open, its subscriptions are dropped, and
+   its sidecars are torn down.
+   - The password is an scrypt hash (N=2^17, r=8, p=1) in `owner.json`
+     (`owner.ts`), set only on the laptop, at least 12 characters. Without
+     one the bridge does not start.
+   - Passkeys are WebAuthn, browser only: the relying party is the
+     certificate's DNS name and the expected origin is the web listener's.
+     With either unknown, every passkey ceremony answers `unsupported`.
+   - Tokens (`sessions.ts`): a 15-minute access token held in memory only,
+     and a rotating refresh token that dies after 7 days unused or 30 days
+     after its sign-in. Only SHA-256 hashes of refresh tokens reach
+     `sessions.json`. A lost reply may be retried within 10 minutes; any
+     other reuse of a retired refresh token revokes its whole family.
+   - Limits (`login-limits.ts`, `owner-auth.ts`): 5 wrong passwords per
+     device, then a lockout from 1 minute doubling to 1 hour; 20 failures
+     across the bridge in an hour lock everyone out for 15 minutes. At most
+     2 scrypt checks run at once, with 8 queued; one more is refused
+     `rate-limited`.
+3. **The web listener is its own origin** (`web-server.ts`). The browser
+   client is served from a second TLS listener on its own port (the
+   bridge's plus one, 7718 by default), because a browser treats each port
+   as a separate origin: the sidecar pages proxied under `/s/<handle>/…` run
+   on the bridge's origin and cannot read the web app's storage. The
+   listener serves only the app's static files — `GET` or `HEAD`, exactly
+   one `Host` header matching the certificate name and port, no `..` or
+   encoded tricks, no upgrade — under a strict Content-Security-Policy.
+   Anything else has its socket destroyed with no reply.
+4. **Origin checks** (`origin.ts`) guard the bridge's `/rpc` and `/pair`
+   upgrades: no `Origin` (a non-browser client), exactly the native app's
+   `jarvis-app://native`, or exactly the web listener's origin while browser
+   access is on. Anything else, the bridge's own origin above all, is
+   destroyed before `ws` sees it. The comparison is exact, and a repeated
+   header never passes. The class is checked again when the upgrade
+   completes, in case the web listener closed in between.
+
+See [Remote access](../guide/remote-access.md#owner-login) for the user
+side, and [the browser client](../guide/remote-access.md#the-browser-client).
+
 ## How a feature crosses the layers
 
 Taking the API tab's *send* as the example:
@@ -145,15 +347,17 @@ Taking the API tab's *send* as the example:
 1. **renderer** (`api.ts`) collects the request and the environment's variables
    and calls `window.jarvis.sendApiRequest(project, request, variables)`.
 2. **preload** forwards it over one named channel. It adds nothing.
-3. **main** validates every argument at the boundary, resolves the project name
-   to a path, and refuses a path outside it.
+3. **main** hands it to its `CoreClient` unchanged, and the core's dispatch
+   table (`dispatch.ts`) — in-process or in `jarvisd` — validates every
+   argument at the boundary, resolves the project name to a path, and
+   refuses a path outside it.
 4. **platform** (`http-runner.ts`) interpolates, builds and issues the request
    through an injected `fetch`.
 5. The result comes back up with everything the pane needs — response,
    assertions, script output, history, cookies — in one round trip, because a
    second call for any of it would mean shipping the body back to be re-read.
 
-The renderer names things; main resolves them. Where the renderer must see a
+The renderer names things; the core resolves them. Where the renderer must see a
 real path — the API collection tree is a view of the filesystem — containment
 replaces concealment: a path may be *shown*, but only a path inside the named
 project is ever *acted on*.
@@ -232,6 +436,42 @@ comment and send parity with the desktop panel, never a reduced view of it.
 |---|---|
 | `plans:list`, `plans:read`, `plans:writeBlock`, `plans:comments`, `plans:addComment`, `plans:updateComment`, `plans:deleteComment`, `plans:send` | remote — the same content parity this table gives sessions/git/bookmarks; each path is re-checked against `PlanFiles.isAllowed` in the handler regardless of origin, so this only decides whether a phone may call the channel at all |
 | `plans:openLink` | desktop-only — runs Electron's `shell.openExternal` on the laptop; a paired phone opens a plan's links with its own OS |
+## Phone and wide layouts
+
+The same `apps/mobile` code serves a phone, a tablet and a desktop browser
+(the web export the laptop's web listener serves). One pure function picks
+the shell:
+
+- **`layoutClassFor({ width, height })`** (`src/lib/layout-class.ts`)
+  answers `wide` when **width ≥ 744 and the shortest side ≥ 600**, and
+  `phone` otherwise. 744 is the iPad mini's portrait width; the short-side
+  rule keeps a landscape phone (e.g. 915×412) on the phone layout. A wide
+  window under 900 is `compact`, which drops the top bar's metrics readout,
+  as the desktop's own top bar does. `useLayoutClass()` feeds it the live
+  window size, so rotation and resize re-evaluate without a reload.
+- **`WideShell`** (`src/components/WideShell.tsx`) wraps the one `Tabs`
+  navigator in `app/(tabs)/_layout.tsx` on both classes. On a wide screen it
+  draws a desktop-style top bar (brand, nav, metrics, "N running", the
+  connection pill, a clock) and the navigator's bottom bar is hidden. The
+  wrapper tree is the same either way, so crossing the breakpoint keeps the
+  route and never remounts the screens — an open terminal keeps its pty.
+  The bar's logic (nav order, which section a route belongs to, the pill
+  counts) is `src/lib/wide-shell-model.ts`, unit tested with no renderer.
+- **Content components live in `src/screens/`** (`SessionDetail`,
+  `TerminalPane`, `WorkspaceTools`, `SettingsSections`, `DashboardPanels`,
+  `ApiScreen`, `DockerScreen`, `ChangesScreen`). Each owns its data and UI;
+  the routes under `app/` are thin wrappers that render it full screen on a
+  phone or inline in a panel on a wide screen. Selection lives in URL search
+  params (`/sessions?id=<id>`, `/workspace?tab=<tabId>`), so no route
+  changes between layouts, and `/session/<id>` on a wide screen redirects
+  to the split view.
+- **RTL uses `direction`, never `row-reverse`.** The top bar and the split
+  panes set `direction: "rtl"` in Arabic, and a `flexDirection: "row"`
+  container then puts its first child on the reading-start side on native
+  and web alike (`session-nav.ts`'s `splitLayout`). A reversed row would
+  flip twice on native, where `I18nManager` has already forced RTL for
+  Arabic; on web, where react-native-web ignores `forceRTL`, `direction` is
+  the only thing doing the mirroring.
 
 ## Third-party components
 

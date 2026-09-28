@@ -7,3 +7,9 @@ export { listenTls } from "./server.js";
 export { loadCertificate, type CertificateDeps } from "./certificate.js";
 export { nodeFs, nodeTimers } from "./node-io.js";
 export { createSidecarProxy } from "./proxy.js";
+export {
+  buildWebManifest,
+  createWebRequestHandler,
+  listenWeb,
+  webHeaders,
+} from "./web-server.js";

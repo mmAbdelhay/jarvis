@@ -1,15 +1,17 @@
 import { copyFile, readFile } from "node:fs/promises";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { writeAtomically } from "@jarvis/platform";
 import type { JarvisConfig, RemoteConfig } from "./config.js";
 import {
   DEFAULT_BROWSER,
+  DEFAULT_DAEMON,
   DEFAULT_PERFORMANCE,
   DEFAULT_PRAYER,
   DEFAULT_REMOTE,
   DEFAULT_SESSIONS,
   DEFAULT_TERMINAL,
   parseConfig,
+  parseDaemon,
 } from "./config.js";
 
 export type SettingsWriteResult = { ok: true } | { ok: false; detail: string };
@@ -152,6 +154,9 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // saving must not grow one. Absent parses to "off, on loopback", so
     // nothing is lost by leaving it out.
     ...(isDefault(config.remote, DEFAULT_REMOTE) ? {} : { remote: rawRemote(config.remote) }),
+    // Never written at its default, by the rule `remote:` follows: a fresh
+    // jarvis.yaml has no `daemon:` section.
+    ...(isDefault(config.daemon, DEFAULT_DAEMON) ? {} : { daemon: config.daemon }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,
@@ -175,8 +180,9 @@ export async function writeSettingsFile(
   const validated = validateDraft(draft);
   if (!validated.ok) return validated;
 
+  let current: string | undefined;
   try {
-    await readFile(path, "utf8");
+    current = await readFile(path, "utf8");
     // A file exists — keep it, timestamped, before it is overwritten.
     await copyFile(path, `${path}.bak-${Date.now()}`);
   } catch {
@@ -185,6 +191,24 @@ export async function writeSettingsFile(
     // way, there is nothing to preserve).
   }
 
-  await writeAtomically(path, stringify(toRawConfig(validated.value)));
+  // `daemon:` is the desktop app's own toggle (daemon/config-file.ts), never
+  // a draft's: a draft read before the toggle changed — or one from a phone
+  // or an older renderer that never carried the key — must not turn the
+  // background service off or on by saving something else.
+  const daemon = daemonInFile(current);
+  await writeAtomically(path, stringify(toRawConfig({ ...validated.value, daemon })));
   return { ok: true };
+}
+
+/** The `daemon:` section of the file as it is now; the default when there
+ *  is no file or it does not parse. */
+function daemonInFile(text: string | undefined): JarvisConfig["daemon"] {
+  if (text === undefined) return { ...DEFAULT_DAEMON };
+  try {
+    const root: unknown = parse(text);
+    if (typeof root !== "object" || root === null) return { ...DEFAULT_DAEMON };
+    return parseDaemon((root as Record<string, unknown>)["daemon"]);
+  } catch {
+    return { ...DEFAULT_DAEMON };
+  }
 }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { languageFromLocale } from "./i18n";
-import { type Prefs, type PrefsStore, loadPrefs, savePrefs } from "./prefs";
+import {
+  type Prefs,
+  type PrefsStore,
+  createRefreshStoredFlag,
+  loadPrefs,
+  savePrefs,
+  setKeepSignedIn,
+} from "./prefs";
 
 class FakeStore implements PrefsStore {
   private text: string | undefined;
@@ -30,6 +37,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
   });
 
@@ -43,6 +53,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
   });
 
@@ -56,6 +69,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
   });
 
@@ -68,6 +84,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
     const prefs = await loadPrefs(store, "en-US");
     expect(prefs).toEqual<Prefs>({
@@ -77,6 +96,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
   });
 
@@ -89,6 +111,9 @@ describe("loadPrefs", () => {
       pushRegistered: false,
       sidecarDesktopSite: true,
       sidecarZoom: {},
+      idleLockMinutes: 15,
+      refreshTokenStored: false,
+      keepSignedIn: false,
     });
   });
 
@@ -103,6 +128,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -116,6 +144,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -128,6 +159,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -137,6 +171,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -150,6 +187,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
   });
@@ -184,6 +224,9 @@ describe("loadPrefs", () => {
         pushRegistered: true,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -193,6 +236,9 @@ describe("loadPrefs", () => {
         pushRegistered: true,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -206,6 +252,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
   });
@@ -242,6 +291,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -251,6 +303,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -264,6 +319,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: false,
         sidecarZoom: {},
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
   });
@@ -306,6 +364,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -315,6 +376,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { editor: 120, database: 80, cluster: 150 },
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -327,6 +391,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { database: 110 },
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({ database: 110 });
@@ -370,6 +437,9 @@ describe("loadPrefs", () => {
         pushRegistered: false,
         sidecarDesktopSite: true,
         sidecarZoom: { cluster: 200 },
+        idleLockMinutes: 15,
+        refreshTokenStored: false,
+        keepSignedIn: false,
       });
     });
 
@@ -383,6 +453,94 @@ describe("loadPrefs", () => {
       const store = new FakeStore(JSON.stringify({ sidecarZoom: { editor: 49, database: 201 } }));
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({});
+    });
+  });
+
+  describe("idleLockMinutes", () => {
+    it("defaults to 15 when missing", async () => {
+      const prefs = await loadPrefs(new FakeStore(JSON.stringify({})), "en-US");
+      expect(prefs.idleLockMinutes).toBe(15);
+    });
+
+    it("keeps each allowed value", async () => {
+      for (const minutes of [5, 15, 30, 60]) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ idleLockMinutes: minutes })),
+          "en-US",
+        );
+        expect(prefs.idleLockMinutes).toBe(minutes);
+      }
+    });
+
+    it("falls back to 15 for any other value", async () => {
+      for (const bad of [0, 10, 61, "15", null, -5]) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ idleLockMinutes: bad })),
+          "en-US",
+        );
+        expect(prefs.idleLockMinutes).toBe(15);
+      }
+    });
+  });
+
+  describe("keepSignedIn (the browser's Keep me signed in)", () => {
+    it("defaults off and is true only for a stored true", async () => {
+      expect((await loadPrefs(new FakeStore(undefined), "en-US")).keepSignedIn).toBe(false);
+      for (const [value, expected] of [
+        [true, true],
+        [false, false],
+        ["true", false],
+        [1, false],
+      ] as const) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ keepSignedIn: value })),
+          "en-US",
+        );
+        expect(prefs.keepSignedIn).toBe(expected);
+      }
+    });
+  });
+
+  it("setKeepSignedIn changes only its own key", async () => {
+    const store = new FakeStore(JSON.stringify({ language: "ar", refreshTokenStored: true }));
+    await setKeepSignedIn(store, "en-US", true);
+    expect(await loadPrefs(store, "en-US")).toMatchObject({
+      language: "ar",
+      refreshTokenStored: true,
+      keepSignedIn: true,
+    });
+    await setKeepSignedIn(store, "en-US", false);
+    expect((await loadPrefs(store, "en-US")).keepSignedIn).toBe(false);
+  });
+
+  describe("refreshTokenStored", () => {
+    it("is true only for a stored true", async () => {
+      for (const [value, expected] of [
+        [true, true],
+        [false, false],
+        ["true", false],
+        [1, false],
+      ] as const) {
+        const prefs = await loadPrefs(
+          new FakeStore(JSON.stringify({ refreshTokenStored: value })),
+          "en-US",
+        );
+        expect(prefs.refreshTokenStored).toBe(expected);
+      }
+    });
+
+    it("the flag adapter changes only its own key", async () => {
+      const store = new FakeStore(JSON.stringify({ language: "ar", idleLockMinutes: 30 }));
+      const flag = createRefreshStoredFlag(store, "en-US");
+      expect(await flag.read()).toBe(false);
+      await flag.write(true);
+      expect(await flag.read()).toBe(true);
+      const prefs = await loadPrefs(store, "en-US");
+      expect(prefs).toMatchObject({
+        language: "ar",
+        idleLockMinutes: 30,
+        refreshTokenStored: true,
+      });
     });
   });
 });

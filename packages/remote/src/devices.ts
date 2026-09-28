@@ -42,11 +42,29 @@ export function sanitizeDeviceName(raw: string): string {
   return truncated.endsWith(" ") ? truncated.slice(0, -1) : truncated;
 }
 
+/**
+ * Phase 1: which kind of client paired — the browser build or the app.
+ * Stored on the device record at pairing; a record written before this
+ * field existed has none, which means "app".
+ */
+export type DeviceClient = "web" | "app";
+
+/** The `client` string a `pair` frame carries, classified. The browser
+ *  build sends exactly `"web"` (apps/mobile/src/lib/client-platform.ts);
+ *  the app sends `jarvis-mobile/<version>/<os>`. Anything but the exact
+ *  string `"web"` is an app, so an unknown client is never labelled a
+ *  browser. */
+export function deviceClientKind(client: string): DeviceClient {
+  return client === "web" ? "web" : "app";
+}
+
 export type DeviceSummary = {
   id: string;
   name: string;
   pairedAt: number;
   lastSeenAt: number | undefined;
+  /** Present only for a browser; absent means the app (the push pattern). */
+  client?: "web";
   /** Platform only — the token itself never leaves the store (M10 rule 1). */
   push?: "ios" | "android";
 };
@@ -66,6 +84,7 @@ type DeviceRecord = {
   hash: string;
   pairedAt: number;
   lastSeenAt: number | undefined;
+  client: DeviceClient;
   push?: DevicePush;
 };
 
@@ -73,7 +92,8 @@ export type DeviceStore = {
   load(): Promise<void>;
   list(): DeviceSummary[];
   count(): number;
-  add(name: string): Promise<{ deviceId: string; token: string }>;
+  /** `client` defaults to "app" (every caller before Phase 1). */
+  add(name: string, client?: DeviceClient): Promise<{ deviceId: string; token: string }>;
   authenticate(deviceId: string, token: string): DeviceSummary | undefined;
   touch(deviceId: string): Promise<void>;
   revoke(deviceId: string): Promise<boolean>;
@@ -110,6 +130,7 @@ function toSummary(record: DeviceRecord): DeviceSummary {
     name: record.name,
     pairedAt: record.pairedAt,
     lastSeenAt: record.lastSeenAt,
+    ...(record.client === "web" ? { client: "web" as const } : {}),
     ...(record.push !== undefined ? { push: record.push.platform } : {}),
   };
 }
@@ -182,6 +203,7 @@ function parseDevicesFile(text: string): DeviceRecord[] {
       hash,
       pairedAt,
       lastSeenAt,
+      client,
       push: pushRaw,
     } = entry as Record<string, unknown>;
     if (typeof id !== "string" || !DEVICE_ID_PATTERN.test(id)) throw invalidDevicesFile();
@@ -190,6 +212,8 @@ function parseDevicesFile(text: string): DeviceRecord[] {
     if (typeof hash !== "string" || !HASH_HEX_PATTERN.test(hash)) throw invalidDevicesFile();
     if (typeof pairedAt !== "number") throw invalidDevicesFile();
     if (lastSeenAt !== undefined && typeof lastSeenAt !== "number") throw invalidDevicesFile();
+    // Phase 1: absent (a file from before `client` existed) means "app".
+    if (client !== undefined && client !== "web" && client !== "app") throw invalidDevicesFile();
     if (seenIds.has(id)) throw invalidDevicesFile();
     seenIds.add(id);
 
@@ -217,17 +241,19 @@ function parseDevicesFile(text: string): DeviceRecord[] {
       hash,
       pairedAt,
       lastSeenAt,
+      client: client === "web" ? "web" : "app",
       ...(push !== undefined ? { push } : {}),
     });
   }
   return records;
 }
 
-/** Pretty JSON plus a trailing newline; `lastSeenAt`/`push` are omitted when undefined (ruling 3; M10 rule 1). */
+/** Pretty JSON plus a trailing newline; `lastSeenAt`/`push` are omitted when undefined (ruling 3; M10 rule 1), and `client` is written only for a browser, so an app's record stays byte-identical to the pre-Phase-1 shape. */
 function serializeDevicesFile(records: readonly DeviceRecord[]): string {
-  const devices = records.map(({ id, name, salt, hash, pairedAt, lastSeenAt, push }) => {
+  const devices = records.map(({ id, name, salt, hash, pairedAt, lastSeenAt, client, push }) => {
     const device: Record<string, unknown> = { id, name, salt, hash, pairedAt };
     if (lastSeenAt !== undefined) device.lastSeenAt = lastSeenAt;
+    if (client === "web") device.client = "web";
     if (push !== undefined) {
       device.push = {
         token: push.token,
@@ -309,7 +335,7 @@ export function createDeviceStore(deps: {
       return devices.size;
     },
 
-    async add(name) {
+    async add(name, client = "app") {
       const sanitized = sanitizeDeviceName(name);
       if (sanitized === "") throw new Error("a device needs a name");
 
@@ -321,6 +347,7 @@ export function createDeviceStore(deps: {
         hash: credential.hash,
         pairedAt: now(),
         lastSeenAt: undefined,
+        client,
       };
       devices.set(record.id, record);
       revision += 1;

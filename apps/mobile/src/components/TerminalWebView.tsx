@@ -8,6 +8,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import { realClock } from "@/lib/clock";
+import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
 import type { NativeMessage } from "@/lib/terminal-protocol";
 import { encodeNativeMessage, parsePageMessage } from "@/lib/terminal-protocol";
 import { ATTACH_BUFFER_MAX_CHARS } from "@/lib/session-stream";
@@ -39,6 +40,11 @@ export type TerminalWebViewProps = {
   // while some program has mouse tracking on — the caller turns this into
   // an SGR wheel escape sent the same way a keystroke is (sendText).
   onWheel(direction: "up" | "down"): void;
+  // Wide layout (Review Focus 4): set, a hardware keyboard types into the
+  // terminal. The page stays display-only: keys are read by the app from
+  // its own focus target, never by the page. The browser build honours
+  // this; the native WebView ignores it (the compose bar takes typing).
+  onHardwareInput?: (input: TerminalKeyInput) => void;
 };
 
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebViewProps>(

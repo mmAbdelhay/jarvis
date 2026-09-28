@@ -131,6 +131,7 @@ describe("push scenario over the real client and controller", () => {
 
       const client = createRpcClient({
         transport,
+        lockedAtWelcome: false,
         clock,
         random: () => 0.5,
         client: CLIENT_STRING,

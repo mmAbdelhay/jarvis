@@ -21,8 +21,9 @@
 // detected utterance — an Arabic sentence still gets an Arabic reply, and
 // Arabic session/project text still renders RTL via detectLanguage().
 import type { PrerequisiteId } from "@jarvis/platform";
-import type { BindKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
-import type { PushKind } from "@jarvis/wire";
+import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
+import type { AuthChannel, PushKind } from "@jarvis/wire";
+import type { RemoteWebState } from "./remote-web.js";
 
 export const PRIMARY_LANGUAGE = "en";
 
@@ -683,6 +684,120 @@ export const MESSAGES = {
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   settingsSavedLive: (language: "ar" | "en"): string =>
     language === "ar" ? "تم الحفظ. التغييرات مفعّلة الآن." : "Saved. Changes are active now.",
+  // Task 23: Settings → General, "Keep Jarvis running in the background".
+  daemonTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "إبقاء جارفيس يعمل في الخلفية" : "Keep Jarvis running in the background",
+  daemonGeneral: (language: "ar" | "en"): string => (language === "ar" ? "عام" : "General"),
+  daemonDescription: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تبقى الطرفيات وتشغيلات الوكلاء تعمل بعد إغلاق التطبيق، ويبقى الوصول من الهاتف متاحًا."
+      : "Terminals and agent runs keep going after you quit the app, and your phone can still reach this machine.",
+  daemonConfirmEnableTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تشغيل جارفيس في الخلفية؟" : "Run Jarvis in the background?",
+  daemonConfirmEnable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ستُغلق الطرفيات المفتوحة في هذه النافذة، وكذلك تشغيلات الوكلاء الجارية. بعد ذلك تبقى الطرفيات الجديدة تعمل حتى بعد إغلاق التطبيق."
+      : "Open terminals in this window will close, and so will running agents. After that, new terminals keep running even when you quit the app.",
+  daemonConfirmDisableTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "إيقاف التشغيل في الخلفية؟" : "Stop running in the background?",
+  daemonConfirmDisable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ستُغلق الطرفيات التي تعمل في الخلفية، ثم يُعاد تشغيل جارفيس داخل التطبيق."
+      : "Terminals running in the background will close, and Jarvis restarts inside the app.",
+  daemonContinue: (language: "ar" | "en"): string => (language === "ar" ? "متابعة" : "Continue"),
+  daemonCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  daemonStateOff: (language: "ar" | "en"): string =>
+    language === "ar" ? "متوقف. يعمل جارفيس داخل التطبيق." : "Off. Jarvis runs inside the app.",
+  daemonStateOffSession: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "متوقف لهذه الجلسة فقط. يعمل جارفيس داخل التطبيق حتى يُعاد تشغيله."
+      : "Stopped for this session. Jarvis runs inside the app until it restarts.",
+  daemonStateStarting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التشغيل…" : "Starting…",
+  daemonStateRunning: (pid: number, uptime: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `يعمل (العملية ${pid}، منذ ${uptime}).`
+      : `Running (pid ${pid}, up ${uptime}).`,
+  daemonStateFailed: (reason: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تعذّر التشغيل: ${reason}` : `Not running: ${reason}`,
+  daemonLastLogLine: (line: string, language: "ar" | "en"): string =>
+    language === "ar" ? `آخر سطر في السجل: ${line}` : `Last log line: ${line}`,
+  daemonUptime: (ms: number, language: "ar" | "en"): string => {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    const [d, h, m] = [
+      Math.floor(seconds / 86_400),
+      Math.floor((seconds % 86_400) / 3_600),
+      Math.floor((seconds % 3_600) / 60),
+    ];
+    const unit = (value: number, en: string, ar: string) =>
+      language === "ar" ? `${value} ${ar}` : `${value}${en}`;
+    if (d > 0) return `${unit(d, "d", "ي")} ${unit(h, "h", "س")}`;
+    if (h > 0) return `${unit(h, "h", "س")} ${unit(m, "m", "د")}`;
+    if (m > 0) return unit(m, "m", "د");
+    return unit(seconds, "s", "ث");
+  },
+  daemonRestart: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادة تشغيل الخدمة" : "Restart daemon",
+  daemonStopNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "إيقاف الآن (لهذه الجلسة)" : "Stop now (this session only)",
+  daemonChangeFailed: (detail: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تعذّر التغيير: ${detail}` : `Couldn't change it: ${detail}`,
+  daemonBusy: (language: "ar" | "en"): string =>
+    language === "ar" ? "ما زال تغيير آخر قيد التنفيذ." : "Another change is still running.",
+  daemonFallbackTitle: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر الوصول إلى خدمة جارفيس في الخلفية"
+      : "Jarvis couldn't reach its background service",
+  daemonFallback: (
+    reason: string,
+    lastLogLine: string | undefined,
+    language: "ar" | "en",
+  ): string =>
+    [
+      language === "ar"
+        ? `لم تستجب الخدمة في الخلفية (${reason}).`
+        : `The background service didn't answer (${reason}).`,
+      ...(lastLogLine === undefined
+        ? []
+        : [
+            language === "ar"
+              ? `آخر سطر في السجل: ${lastLogLine}`
+              : `Last log line: ${lastLogLine}`,
+          ]),
+    ].join("\n"),
+  daemonStuckTitle: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "خدمة جارفيس في الخلفية لا تتوقف"
+      : "Jarvis's background service won't stop",
+  daemonStuck: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بدأت خدمة jarvisd ولم تتوقف، فلن يشغّل جارفيس نسخة ثانية داخل التطبيق. أغلق جارفيس، وأوقف jarvisd (أو أعد تشغيل الجهاز)، ثم افتحه من جديد."
+      : "jarvisd started and won't stop, so Jarvis won't run a second copy inside the app. Quit Jarvis, stop jarvisd (or restart the computer), then open Jarvis again.",
+  daemonNotAttached: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يعمل جارفيس في الخلفية الآن."
+      : "Jarvis isn't running in the background right now.",
+  daemonMoveToApplications: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يعمل جارفيس من نسخة مؤقتة وضعها macOS. انقل جارفيس إلى مجلد التطبيقات ثم افتحه من هناك، لتبقى الخدمة في الخلفية مرتبطة بمكان ثابت."
+      : "Jarvis is running from a temporary copy macOS made. Move Jarvis to the Applications folder and open it from there, so the background service points at a fixed place.",
+  daemonNotService: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم تبدأ خدمة الخلفية هذه النسخة من jarvisd، فلا يستطيع جارفيس إعادة تشغيلها. أعد تشغيلها حيث تعمل."
+      : "This jarvisd wasn't started by the background service, so Jarvis can't restart it. Restart it where it runs.",
+  daemonStateAttached: (pid: number, uptime: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `متصل بخدمة jarvisd كانت تعمل مسبقًا (العملية ${pid}، منذ ${uptime}). الإعداد متوقف، فلن تبدأ عند تسجيل الدخول.`
+      : `Attached to a jarvisd that was already running (pid ${pid}, up ${uptime}). The setting is off, so it won't start at login.`,
+  daemonRunInApp: (language: "ar" | "en"): string =>
+    language === "ar" ? "التشغيل داخل التطبيق هذه المرة" : "Run inside the app this time",
+  daemonQuit: (language: "ar" | "en"): string => (language === "ar" ? "إنهاء" : "Quit"),
+  daemonRestartManualTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "أعد تشغيل خدمة جارفيس" : "Restart the Jarvis daemon",
+  daemonRestartManual: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعمل خدمة jarvisd بدون مدير خدمات، فلا يمكنها إعادة تشغيل نفسها. أوقفها ثم شغّلها يدويًا لتطبيق الإعدادات."
+      : "jarvisd runs without a service manager, so it can't restart itself. Stop it and start it again to apply the settings.",
   settingsSavedRestart: (language: "ar" | "en"): string =>
     language === "ar"
       ? "تم الحفظ. أعد التشغيل لتطبيق تغييرات خدمات البدء."
@@ -1198,7 +1313,58 @@ export const MESSAGES = {
     return platform === "ios" ? "Notifications on (iPhone)" : "Notifications on (Android)";
   },
   remoteRevoke: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء الإقران" : "Revoke"),
-  // The five RemoteProblem values the bridge's own gate can land on
+  // Phase 1: browser access — its switch, what it does, and its state line,
+  // which (like remoteCertificateReal) comes from the bridge's own status,
+  // never the draft. A closed table: a web state added without a
+  // translation here is a compile error.
+  remoteWebLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "الوصول من المتصفح" : "browser access",
+  remoteWebNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يفتح منفذًا ثانيًا ليعمل Jarvis في متصفح على جهاز مقترن. يحتاج إلى شهادة Tailscale وكلمة مرور المالك."
+      : "Opens a second port so Jarvis runs in a browser on a paired device. Needs a Tailscale certificate and the owner password.",
+  remoteWebState: (state: RemoteWebState, language: "ar" | "en"): string => {
+    const ar: Record<RemoteWebState, string> = {
+      off: "متوقف",
+      "port-conflict": "متوقف: منفذ المتصفح هو نفسه منفذ الوصول عن بُعد.",
+      "listen-failed": "متوقف: تعذّر فتح منفذ المتصفح. قد يكون برنامج آخر يستخدمه.",
+      "needs-certificate": "يحتاج إلى شهادة حقيقية (Tailscale) قبل أن يعمل.",
+      "needs-owner-password": "يحتاج إلى كلمة مرور المالك قبل أن يعمل.",
+      "not-built": "نسخة المتصفح غير مضمّنة في هذا الإصدار.",
+      on: "مفعّل",
+    };
+    const en: Record<RemoteWebState, string> = {
+      off: "Off",
+      "port-conflict": "Off: the browser port is the same as the remote access port.",
+      "listen-failed":
+        "Off: the browser port could not be opened. Another program may be using it.",
+      "needs-certificate": "Needs a real (Tailscale) certificate before it can run.",
+      "needs-owner-password": "Needs the owner password before it can run.",
+      "not-built": "The browser version is not included in this build.",
+      on: "On",
+    };
+    return (language === "ar" ? ar : en)[state];
+  },
+  remoteWebOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح في المتصفح" : "Open in browser",
+  // Under the QR: while a pairing window is open it carries the pairing
+  // link, otherwise just the address.
+  remoteWebQrNote: (pairing: boolean, language: "ar" | "en"): string => {
+    if (language === "ar") {
+      return pairing
+        ? "امسح الرمز بكاميرا الهاتف لإقران متصفحه."
+        : "امسح الرمز لفتح Jarvis في متصفح جهاز مقترن.";
+    }
+    return pairing
+      ? "Scan with a phone's camera to pair its browser."
+      : "Scan to open Jarvis in a paired device's browser.";
+  },
+  // Paired devices: which client paired (RemoteDeviceStatus.client).
+  remoteWebDeviceClient: (client: "web" | "app", language: "ar" | "en"): string => {
+    if (language === "ar") return client === "web" ? "متصفح" : "تطبيق";
+    return client === "web" ? "Browser" : "App";
+  },
+  // The seven RemoteProblem values the bridge's own gate can land on
   // (bridge.ts). Closed table for the same reason remoteErrorText is: a
   // problem added to the protocol without a translation here is a compile
   // error, not a silent English-only gap.
@@ -1224,9 +1390,161 @@ export const MESSAGES = {
         ar: "تعذّر حفظ التغيير على الأجهزة المقترنة.",
         en: "Could not save that change to the paired devices.",
       },
+      "no-owner-password": {
+        ar: "الوصول عن بُعد متوقف حتى تعيّن كلمة مرور المالك أدناه.",
+        en: "Remote access stays off until you set an owner password below.",
+      },
+      "owner-unreadable": {
+        ar: "تعذّرت قراءة ملف حساب المالك، فبقي الوصول عن بُعد متوقفًا.",
+        en: "The owner account file could not be read, so remote access stays off.",
+      },
+      "sessions-unreadable": {
+        ar: "تعذّرت قراءة ملف جلسات الدخول، فبقي الوصول عن بُعد متوقفًا.",
+        en: "The sign-in sessions file could not be read, so remote access stays off.",
+      },
     };
     return text[problem][language];
   },
+  // Phase 0: the desktop OS notification for a remote-login security event
+  // (remote-access.ts → main.ts's Electron Notification). Only a
+  // device-lockout notice names a device (its paired name); never an
+  // address, a password or a token.
+  remoteSecurityNotice: (
+    kind: DesktopNoticeKind,
+    language: "ar" | "en",
+    deviceName?: string,
+  ): { title: string; body: string } => {
+    const device =
+      deviceName !== undefined && deviceName !== ""
+        ? { ar: `«${deviceName}»`, en: `"${deviceName}"` }
+        : { ar: "جهاز مقترن", en: "a paired device" };
+    const text: Record<DesktopNoticeKind, Record<"ar" | "en", { title: string; body: string }>> = {
+      "locked-out-global": {
+        ar: {
+          title: "تم إيقاف تسجيل الدخول عن بُعد مؤقتًا",
+          body: "فشلت محاولات دخول كثيرة خلال الساعة الأخيرة، فرُفضت كل محاولات الدخول لمدة 15 دقيقة.",
+        },
+        en: {
+          title: "Remote sign-in paused",
+          body: "Too many failed sign-in attempts in the last hour, so every sign-in is refused for 15 minutes.",
+        },
+      },
+      "locked-out-device": {
+        ar: {
+          title: "تم إيقاف تسجيل الدخول من جهاز",
+          body: `أُدخلت كلمة مرور خاطئة عدة مرات من ${device.ar}، فرُفضت محاولات الدخول منه مؤقتًا.`,
+        },
+        en: {
+          title: "Remote sign-in paused for a device",
+          body: `A wrong password was entered several times from ${device.en}, so sign-ins from it are refused for a while.`,
+        },
+      },
+      "refresh-reuse": {
+        ar: {
+          title: "أُعيد استخدام جلسة دخول قديمة",
+          body: "استُخدمت جلسة دخول سبق تجديدها، فأُلغيت تلك الجلسة. سجّل الدخول من جديد على جهازك.",
+        },
+        en: {
+          title: "An old sign-in session was reused",
+          body: "A sign-in session that had already been renewed was presented again, so that session was ended. Sign in again on your device.",
+        },
+      },
+    };
+    return text[kind][language];
+  },
+  // Phase 0, owner login: Settings → Remote access → Owner account. The
+  // password itself never appears in any of these strings.
+  remoteOwnerTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "حساب المالك" : "Owner account",
+  remoteOwnerNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بعد الإقران، يجب على كل هاتف أو متصفح تسجيل الدخول بهذه الكلمة أو بمفتاح مرور. لا يمكن تعيينها أو تغييرها إلا من هنا."
+      : "After pairing, every phone or browser must sign in with this password or a passkey. It can only be set or changed here.",
+  remoteOwnerHasPassword: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة مرور المالك معيّنة." : "An owner password is set.",
+  remoteOwnerNoPassword: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد كلمة مرور للمالك بعد. عيّن واحدة لتشغيل الوصول عن بُعد."
+      : "No owner password yet. Set one to turn on remote access.",
+  remoteOwnerCurrentLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة المرور الحالية" : "Current password",
+  remoteOwnerNewLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "كلمة المرور الجديدة" : "New password",
+  remoteOwnerConfirmLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "تأكيد كلمة المرور" : "Confirm password",
+  remoteOwnerLengthNote: (language: "ar" | "en"): string =>
+    language === "ar" ? "12 حرفًا على الأقل." : "At least 12 characters.",
+  remoteOwnerSetButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعيين كلمة المرور" : "Set password",
+  remoteOwnerChangeButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "تغيير كلمة المرور" : "Change password",
+  remoteOwnerCancelButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  remoteOwnerSaved: (language: "ar" | "en"): string =>
+    language === "ar" ? "حُفظت كلمة المرور." : "Password saved.",
+  remoteOwnerError: (
+    code:
+      | "mismatch"
+      | "too-short"
+      | "too-long"
+      | "current-required"
+      | "current-wrong"
+      | "unavailable"
+      | "write-failed",
+    language: "ar" | "en",
+  ): string => {
+    const text = {
+      mismatch: { ar: "كلمتا المرور غير متطابقتين.", en: "The passwords do not match." },
+      "too-short": {
+        ar: "يجب أن تتكون كلمة المرور من 12 حرفًا على الأقل.",
+        en: "The password must be at least 12 characters.",
+      },
+      "too-long": { ar: "كلمة المرور طويلة جدًا.", en: "The password is too long." },
+      "current-required": {
+        ar: "أدخل كلمة المرور الحالية أولًا.",
+        en: "Enter the current password first.",
+      },
+      "current-wrong": {
+        ar: "كلمة المرور الحالية غير صحيحة.",
+        en: "The current password is not correct.",
+      },
+      unavailable: {
+        ar: "تعذّر الوصول إلى حساب المالك الآن.",
+        en: "The owner account is not available right now.",
+      },
+      "write-failed": {
+        ar: "تعذّر حفظ كلمة المرور.",
+        en: "Could not save the password.",
+      },
+    };
+    return text[code][language];
+  },
+  remoteOwnerPasskeysTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفاتيح المرور" : "Passkeys",
+  remoteOwnerNoPasskeys: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا توجد مفاتيح مرور. يمكن لمتصفح مسجَّل الدخول إضافة واحد."
+      : "No passkeys. A signed-in browser can add one.",
+  remoteOwnerPasskeyAdded: (at: number, language: "ar" | "en"): string => {
+    const formatted = new Date(at).toLocaleString(language === "ar" ? "ar" : "en");
+    return language === "ar" ? `أضيف في ${formatted}` : `added ${formatted}`;
+  },
+  remoteOwnerPasskeyDelete: (language: "ar" | "en"): string =>
+    language === "ar" ? "حذف" : "Delete",
+  remoteOwnerPasskeyDeleteFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر حذف مفتاح المرور هذا." : "Could not delete that passkey.",
+  remoteOwnerSignOutEverywhere: (language: "ar" | "en"): string =>
+    language === "ar" ? "تسجيل الخروج من كل مكان" : "Sign out everywhere",
+  remoteOwnerSignOutNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يجب على كل هاتف ومتصفح تسجيل الدخول من جديد."
+      : "Every phone and browser will have to sign in again.",
+  remoteOwnerSignedOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "سُجِّل الخروج من كل مكان." : "Signed out everywhere.",
+  remoteOwnerEnableBlocked: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "عيّن كلمة مرور المالك أولًا — يبقى الوصول عن بُعد متوقفًا حتى توجد واحدة."
+      : "Set an owner password first — remote access stays off until one exists.",
   // The topbar's listening indicator (#remote-pill). "pairing open" mirrors
   // Settings' own pair-area note — the same fact, said briefly. Always
   // carries a short state word (never bare host:port), so `ar` and `en`
@@ -1322,8 +1640,52 @@ export const MESSAGES = {
         ar: "هذا النوع من الطلبات غير مدعوم.",
         en: "That kind of request is not supported.",
       },
+      locked: {
+        ar: "سجّل الدخول إلى جارفيس أولًا.",
+        en: "Log in to Jarvis first.",
+      },
     };
     return text[code][language];
+  },
+  // D9: an auth channel's own refusal, worded for what actually happened —
+  // never the generic "not allowed from a remote device", and never saying
+  // whether an owner password exists at all. `undefined` means the plain
+  // remoteErrorText above fits (locked, bad-request, internal...).
+  remoteAuthErrorText: (
+    channel: AuthChannel,
+    code: RemoteErrorCode,
+    language: "ar" | "en",
+  ): string | undefined => {
+    const pick = (ar: string, en: string): string => (language === "ar" ? ar : en);
+    if (code === "rate-limited") {
+      return pick(
+        "محاولات تسجيل دخول كثيرة جدًا، فتوقّف تسجيل الدخول مؤقتًا. حاول لاحقًا.",
+        "Too many sign-in attempts, so sign-in is paused. Try again later.",
+      );
+    }
+    if (code !== "forbidden") return undefined;
+    switch (channel) {
+      case "auth:login":
+      case "auth:passkeyRegisterBegin":
+        return pick("كلمة المرور غير صحيحة.", "Wrong password.");
+      case "auth:passkeyBegin":
+      case "auth:passkeyFinish":
+        return pick(
+          "لم يُسجّل مفتاح المرور هذا دخولك. حاول مجددًا أو استخدم كلمة المرور.",
+          "That passkey didn't sign you in. Try again or use your password.",
+        );
+      case "auth:passkeyRegisterFinish":
+        return pick(
+          "تعذّرت إضافة مفتاح المرور هذا. حاول مجددًا.",
+          "Couldn't add that passkey. Try again.",
+        );
+      case "auth:resume":
+        return pick("انتهت صلاحية جلستك. سجّل الدخول مجددًا.", "Your session expired. Log in again.");
+      case "auth:refresh":
+      case "auth:status":
+      case "auth:logout":
+        return pick("تم تسجيل خروجك. سجّل الدخول مجددًا.", "You were signed out. Log in again.");
+    }
   },
   // remote:pair's three outcomes (dispatch.ts).
   remotePairingDisabled: (language: "ar" | "en"): string =>
@@ -1335,14 +1697,20 @@ export const MESSAGES = {
   remoteRevokeFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر إلغاء هذا الجهاز." : "Could not revoke that device.",
   // M11 Task 4: a remote editor:open/database:open/cluster:open whose
-  // sidecar publish was refused (dispatch.ts). Three of the five reasons
-  // collapse into one generic sentence — not-listening, unknown-device and
-  // bad-target are never something the user on the phone can act on, only
+  // sidecar publish was refused (dispatch.ts). Four of the six reasons
+  // collapse into one generic sentence — not-listening, unknown-device,
+  // locked (Phase 0: the phone is answered `locked` anyway) and bad-target are never something the user on the phone can act on, only
   // something dispatch.ts's own console log (`sidecar publish refused:
   // <reason>`) is for — so the specific value never has to be translated
-  // five ways for what is really only two user-facing meanings.
+  // six ways for what is really only two user-facing meanings.
   sidecarProxyUnavailable: (
-    reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target",
+    reason:
+      | "off"
+      | "needs-certificate"
+      | "not-listening"
+      | "unknown-device"
+      | "locked"
+      | "bad-target",
     language: "ar" | "en",
   ): string => {
     if (reason === "off") {

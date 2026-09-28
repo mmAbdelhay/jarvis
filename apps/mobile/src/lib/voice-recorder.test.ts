@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { FALLBACK_RECORDING_OPTIONS, RECORDING_OPTIONS, toMicPermission } from "./voice-recorder";
+import {
+  FALLBACK_RECORDING_OPTIONS,
+  RECORDING_OPTIONS,
+  toMicPermission,
+  webMicPermission,
+  webRecordingCandidates,
+} from "./voice-recorder";
 
 describe("toMicPermission", () => {
   test("granted", () => {
@@ -49,5 +55,42 @@ describe("RECORDING_OPTIONS", () => {
   test("both objects are frozen", () => {
     expect(Object.isFrozen(RECORDING_OPTIONS)).toBe(true);
     expect(Object.isFrozen(FALLBACK_RECORDING_OPTIONS)).toBe(true);
+  });
+});
+
+describe("webRecordingCandidates (MediaRecorder, Task 13)", () => {
+  test("prefers audio/mp4 (m4a), then webm/opus, when both are supported", () => {
+    expect(webRecordingCandidates(() => true)).toEqual([
+      { mimeType: "audio/mp4", format: "m4a" },
+      { mimeType: "audio/webm;codecs=opus", format: "webm" },
+    ]);
+  });
+
+  test("falls back to webm/opus alone when mp4 is unsupported (Firefox)", () => {
+    expect(webRecordingCandidates((mime) => mime.startsWith("audio/webm"))).toEqual([
+      { mimeType: "audio/webm;codecs=opus", format: "webm" },
+    ]);
+  });
+
+  test("answers an empty list when neither is supported", () => {
+    expect(webRecordingCandidates(() => false)).toEqual([]);
+  });
+
+  test("a throwing isTypeSupported counts as unsupported", () => {
+    expect(
+      webRecordingCandidates(() => {
+        throw new Error("no");
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("webMicPermission (Permissions API state)", () => {
+  test("maps granted/prompt/denied and an unknown state", () => {
+    expect(webMicPermission("granted")).toBe("granted");
+    expect(webMicPermission("prompt")).toBe("undetermined");
+    // A browser remembers a denial; only its own site settings undo it.
+    expect(webMicPermission("denied")).toBe("blocked");
+    expect(webMicPermission(undefined)).toBe("undetermined");
   });
 });

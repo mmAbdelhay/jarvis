@@ -135,7 +135,7 @@ describe("buildVoiceRecorder: stop()", () => {
 
     const result = await voiceRecorder.stop();
 
-    expect(result).toEqual({ uri: "file:///rec.m4a", durationMs: 5000 });
+    expect(result).toEqual({ uri: "file:///rec.m4a", durationMs: 5000, format: "m4a" });
     // The native stop() really did zero it afterwards — proves the fix
     // reads the value at the right time, not that the fake never zeroes it.
     expect(recorder.getStatus().durationMillis).toBe(0);

@@ -24,7 +24,7 @@ import {
 } from "@jarvis/core";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
-import type { BindChoice, RemoteStatus } from "@jarvis/remote";
+import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
 import {
   checkPrerequisites,
@@ -81,6 +81,7 @@ import { MAX_PINNED } from "@jarvis/platform";
 import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
+import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
@@ -785,6 +786,19 @@ export type RendererApi = {
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
   testAgent(agent: AgentConfig): Promise<AgentHealth>;
   restartApp(): Promise<void>;
+  /** Task 23, "Keep Jarvis running in the background": where the core
+   *  runs and how the daemon is doing. Desktop-only, and answered by the
+   *  Electron host itself (desktop-only.ts), never by a core: these start,
+   *  stop and replace the core. */
+  backgroundStatus(): Promise<DaemonStatus>;
+  /** The toggle, committed on change. Turning it on asks first (open
+   *  terminals in this window close); off relaunches the app. */
+  setBackgroundEnabled(enabled: boolean): Promise<ChangeResult>;
+  /** Restarts the daemon through its service manager. */
+  restartBackground(): Promise<ChangeResult>;
+  /** Stops the daemon for this session; the app relaunches with the core
+   *  inside it. */
+  stopBackgroundNow(): Promise<ChangeResult>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;
@@ -807,9 +821,19 @@ export type RendererApi = {
   openRemotePairing(): Promise<GitViewResult<undefined>>;
   cancelRemotePairing(): Promise<void>;
   /** The laptop's second human step (spec): names the requesting device
-   *  before a token is ever minted. */
-  decideRemotePairing(requestId: string, approve: boolean): Promise<void>;
+   *  before a token is ever minted. Resolves true when the decision
+   *  reached the request, false when that request was already gone
+   *  (expired, cancelled, or another decision won). */
+  decideRemotePairing(requestId: string, approve: boolean): Promise<boolean>;
   revokeRemoteDevice(deviceId: string): Promise<GitViewResult<undefined>>;
+  /** Phase 0: whether an owner password exists, and the stored passkeys
+   *  (id, label, createdAt only). Desktop-only by policy. */
+  ownerStatus(): Promise<OwnerStatus>;
+  /** Sets the first owner password, or changes it (`current` then
+   *  required). The password is never echoed back in any result. */
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  deletePasskey(credentialId: string): Promise<GitViewResult<undefined>>;
+  signOutEverywhere(): Promise<void>;
   /** Pushed on every bridge state change (remote-access.ts's `onStatus`),
    *  local to this window only. */
   onRemoteStatus(cb: (status: RemoteStatus) => void): void;
@@ -828,6 +852,11 @@ export type RendererApi = {
    *  click calls this exact same channel — `tailscale cert` renews an
    *  existing name in place. */
   tailscaleCert(): Promise<TailscaleCertResult>;
+  /** Phase 1: opens the browser client in the system browser (never inside
+   *  Jarvis) — the pairing link while a pairing window is open, otherwise
+   *  the root. Takes no URL: main reads it from the bridge's own status.
+   *  False when browser access is not on. Desktop-only by policy. */
+  openWebClient(): Promise<boolean>;
   /** A slow terminal block's own duration and exit status, for main's
    *  notifier to weigh a push against — desktop-only, and never the
    *  command that ran. */
@@ -1935,7 +1964,7 @@ export type TerminalChips = {
 
 export type TerminalHandlerDeps = {
   shells: ShellManager;
-  /** Opens the tab itself and returns its id — BrowserHost.openTerminal,
+  /** Opens the tab itself and returns its id — TabHost.openTerminal,
    *  injected so these handlers stay testable without a window. `label`
    *  replaces the project's name in the tab's title, for a terminal whose
    *  shell is rooted somewhere other than its project. */
@@ -2118,9 +2147,9 @@ function withOpenFilePayload(baseUrl: string, filePath: string): string {
 /**
  * The id of `project`'s existing Editor tab already rooted at `detail`, if
  * one is open. What lets clicking around the file sidebar reuse a tab
- * instead of opening a new one on every click: `BrowserHost` caps hosted
+ * instead of opening a new one on every click: `TabHost` caps hosted
  * views at `MAX_TABS` and evicts the least-recently-active one once full
- * (see browser-host.ts's `#evictIfFull`), so with no reuse, browsing a file
+ * (see core/tab-host.ts's `#evictIfFull`), so with no reuse, browsing a file
  * tree would silently close a user's *other* open tabs — a DbGate tab with
  * an unsaved query, say — as a side effect of clicking around. Reusing a
  * tab still costs something: the `payload` query is only honoured by the
@@ -2148,7 +2177,7 @@ export function findEditorTab(
   )?.id;
 }
 
-/** The little of a `BrowserHost` that showing an editor tab needs. Named
+/** The little of a `TabHost` that showing an editor tab needs. Named
  *  as its own type so the composition below can be tested without one. */
 export type EditorTabHost = {
   tabs: () => readonly Pick<WorkspaceTab, "id" | "kind" | "project" | "detail">[];

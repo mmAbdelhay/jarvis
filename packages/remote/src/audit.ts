@@ -11,6 +11,9 @@ import type { SidecarKind } from "./sidecar-registry.js";
 export type AuditEvent =
   | { kind: "listening"; host: string; port: number; fingerprintTail: string }
   | { kind: "stopped" }
+  /** Phase 1: the browser listener came up on `port` (a bind failure is an
+   *  `error` line instead). */
+  | { kind: "web-listening"; port: number }
   | { kind: "pairing-opened"; expiresAt: number }
   | { kind: "pairing-closed"; reason: "expired" | "cancelled" }
   | { kind: "pairing-requested"; source: string; deviceName: string }
@@ -79,7 +82,51 @@ export type AuditEvent =
   // the title, the body or the project name (notify.ts's own audit() call
   // never hands this file any of those; only a device id and the push's
   // generic kind word).
-  | { kind: "push-queued"; deviceId: string; pushKind: string };
+  | { kind: "push-queued"; deviceId: string; pushKind: string }
+  // Phase 0: owner-account changes made from desktop Settings. Never the
+  // password, a hash or a key — a passkey is named by its credential id's
+  // last four characters only.
+  | { kind: "owner-password-set" }
+  | { kind: "owner-password-changed" }
+  | { kind: "passkey-deleted"; credentialTail: string }
+  | { kind: "signed-out-everywhere" }
+  // Phase 0: remote owner logins over auth:login (or auth:passkeyFinish,
+  // `method: "passkey"`), and a rotated refresh
+  // token presented again (its whole family is revoked). The device id and
+  // source only — never the password or any token.
+  | { kind: "login-succeeded"; deviceId: string; source: string; method?: "passkey" }
+  | { kind: "login-failed"; deviceId: string; source: string; method?: "passkey" }
+  // A passkey registered over auth:passkeyRegisterFinish: the device that
+  // added it and the credential id's first eight characters — never a key.
+  | { kind: "passkey-added"; deviceId: string; source: string; credentialPrefix: string }
+  | { kind: "refresh-reuse"; deviceId: string; source: string }
+  // The rotated refresh token presented again while its successor was
+  // never used (a lost auth:refresh reply): within the grace window it is
+  // re-rotated (`refresh-retry`); past it the family is revoked without a
+  // desktop alarm (`refresh-stale`).
+  | { kind: "refresh-retry"; deviceId: string; source: string }
+  | { kind: "refresh-stale"; deviceId: string; source: string }
+  // Phase 0: a login lockout starting — one device's (`device`) after
+  // repeated failures, or every login bridge-wide (`global`), tripped by
+  // this device's failure. Recorded once per lockout start.
+  | { kind: "locked-out"; deviceId: string; source: string; scope: "device" | "global" }
+  // Phase 0: login attempts a lockout refused (or, `capacity`, the full
+  // password-check queue refused), coalesced to at most one line per
+  // (device, scope) per 60 s window with the window's count
+  // (login-limits.ts), so a flood cannot rotate older lines away.
+  | {
+      kind: "login-refused";
+      deviceId: string;
+      source: string;
+      scope: "device" | "global" | "capacity";
+      count: number;
+    }
+  // Phase 0: every remote owner session was revoked at once (Sign out
+  // everywhere, a password change, a passkey delete).
+  | {
+      kind: "signed-out-all";
+      reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere";
+    };
 
 export type AuditLog = { record(event: AuditEvent): void; flushed(): Promise<void> };
 

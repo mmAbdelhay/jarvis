@@ -242,6 +242,25 @@ describe("createShellManager", () => {
     expect(instance.has("tab-2")).toBe(false);
   });
 
+  it("resolves stopAll only once every live shell it killed has exited", async () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/a");
+    instance.start("tab-2", "/p/b");
+    instance.start("tab-3", "/p/c");
+    shells[2]?.emitExit(0);
+
+    let settled = false;
+    const stopped = instance.stopAll().then(() => {
+      settled = true;
+    });
+    shells[0]?.emitExit(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    shells[1]?.emitExit(0);
+    await stopped;
+    expect(settled).toBe(true);
+  });
+
   it("lists fresh pane records without cwd or process handles, including retained exited panes", () => {
     const { instance, shells } = manager();
     instance.start("tab-1", "/private/path");

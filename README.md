@@ -56,8 +56,18 @@ agent's stdin.
 **Comes with you.** A companion phone app pairs with the desktop over your
 local network or a [Tailscale](https://tailscale.com/) tailnet: sessions,
 terminals, changes, and the Editor / Database / Cluster tabs, from the
-phone, over one authenticated TLS connection that is off by default. See
-[Remote access](docs/guide/remote-access.md).
+phone, over one authenticated TLS connection that is off by default. Every
+device signs in with an [owner login](docs/guide/remote-access.md#owner-login)
+(a password set on the laptop, or a passkey in a browser) before it can see
+anything. The same app also runs in [a browser](docs/guide/remote-access.md#the-browser-client)
+on another computer, served by the laptop itself, and on a tablet or a wide
+browser window it switches to a desktop-style layout with a top bar and
+split views. See [Remote access](docs/guide/remote-access.md).
+
+**Keeps running in the background.** Turn it on and the terminals, agent
+runs and remote access live in `jarvisd`, a background daemon installed as
+a login item, so they survive quitting the app and a phone can still reach
+them. See [Background daemon](docs/guide/background-daemon.md).
 
 **Keeps the work in one window.** The Workspace opens a project's files in an
 editor, its tables in a database client, its endpoints in an API client, its
@@ -186,6 +196,7 @@ files, rendered — so the links below work whether you read them here or there.
 - [Workspace tabs](docs/guide/workspace-tabs.md) — browser, Editor, Database, Terminal, API
 - [The API client](docs/guide/api-client.md) — collections, environments, scripts, auth, cookies
 - [Remote access](docs/guide/remote-access.md) — pairing the phone app, Tailscale, certificates, the audit log
+- [Background daemon](docs/guide/background-daemon.md) — keep Jarvis running after the app quits, the `jarvisd` command
 - [Troubleshooting](docs/guide/troubleshooting.md) — what breaks, and what it means
 
 **Working on it**
@@ -241,7 +252,7 @@ and read by a fresh reviewer before the next begins.
 ## What it exposes
 
 Jarvis is built for one person on one machine, and most of it touches no
-network at all. Five things are worth knowing before you run it somewhere
+network at all. Seven things are worth knowing before you run it somewhere
 shared.
 
 **The Database tab is reachable from your network while it is open.**
@@ -273,8 +284,14 @@ unless you explicitly configure that. When it does listen, it speaks TLS 1.3
 to a certificate the phone pins, or, with a named certificate, trusts by
 name on first pairing, and pairing itself needs a second step on this
 machine: a confirmation dialog naming the requesting device, which you
-approve or deny. Once paired, that phone can run commands on this machine
-as you, exactly like an agent session — see "Agents run as you" above — so
+approve or deny. Pairing alone opens nothing: every connection starts
+locked until the device signs in with the owner password (or, in a
+browser, a passkey registered while signed in); the password is set only
+on this machine, and without it the bridge does not start. Sign-ins are
+short-lived tokens with brute-force limits, and changing the password or
+clicking **Sign out everywhere** ends them all (see [Remote
+access](docs/guide/remote-access.md#owner-login)). Once paired and signed in,
+that phone can run commands on this machine as you, exactly like an agent session — see "Agents run as you" above — so
 treat a paired phone the way you would treat a second person with your
 terminal. With the laptop's self-signed default certificate, or a
 configured certificate with no DNS name, the phone pins that exact
@@ -314,6 +331,38 @@ stream) is destroyed the moment that device is revoked. See [Remote
 access](docs/guide/remote-access.md) for the three ways a pairing can be
 reached and the `tailscale cert` walkthrough, and [Security](SECURITY.md)
 for what is in scope.
+
+**Browser access is a second listener, off by default, on its own port.**
+With `remote.web.enabled` on, a configured certificate with a DNS name and
+an owner password, the laptop also serves the phone app as a web app, so a
+browser on another paired device can use Jarvis. It listens only while the
+bridge does, on the same address with the same certificate and TLS 1.3, on
+`remote.web.port` (the bridge's port plus one by default). It serves only
+the app's own static files: `GET` and `HEAD` with the exact expected `Host`,
+under a strict Content-Security-Policy, and every other request gets a
+closed connection with no reply. It has its own port because a browser
+treats each port as a separate origin. The sidecar pages run on the
+bridge's origin, so they cannot read the web app's storage, and the bridge
+accepts `/rpc` and `/pair` connections only from the web app's origin, from
+the phone app (`Origin: jarvis-app://native`), or with no `Origin` at all.
+A browser pairs and signs in like a phone, and can also use a passkey. On a
+tablet or a wide browser window the app switches to a desktop-style layout;
+that changes only how it is drawn, not what it can reach or the checks it
+passes. See [the browser client](docs/guide/remote-access.md#the-browser-client).
+
+**The background daemon's control socket is local only, and it is owner-level
+access.** With **Keep Jarvis running in the background** on (off by default),
+the terminals, agent runs and remote access live in `jarvisd`, which keeps
+running after the app quits. The app and the `jarvisd` command drive it
+through a control socket (a named pipe on Windows) that listens on no
+network, only in `~/.config/jarvis/run`. That directory is 0700 and the socket
+and secret 0600 on macOS and Linux; on Windows they sit in your user
+profile and the pipe name is random at every start. A client has to prove it
+knows the secret in that directory through a mutual HMAC challenge, and the
+secret itself is never sent. Once in, it can do what Settings does: set the owner
+password, approve pairings, revoke devices, open terminals. It is not asked
+for the owner password, so anything running as you can administer Jarvis.
+See [Background daemon](docs/guide/background-daemon.md).
 
 ## Licence
 

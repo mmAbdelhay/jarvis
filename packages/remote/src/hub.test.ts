@@ -11,6 +11,7 @@ import type {
 import { createHub, MAX_CLIENTS, MAX_PENDING } from "./hub.js";
 import type { HubDeps } from "./hub.js";
 import type { SessionHandlers, SocketLike } from "./io.js";
+import { TEST_FAMILY_ID, unlockedOwnerAuth } from "./owner-auth-double.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
 import { CLOSE, PROTOCOL_VERSION } from "./protocol.js";
 import { FakeSocket } from "./socket-double.js";
@@ -83,6 +84,7 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
   const touch = vi.fn();
   const onConnectionsChanged = vi.fn();
   const onDeviceDisconnected = vi.fn();
+  const onLock = vi.fn<(deviceId: string) => void>();
   const pairSession = overrides.pairSession ?? vi.fn();
   const authorizeKey: AuthorizeKey = overrides.authorizeKey ?? (() => true);
   const deps: HubDeps = {
@@ -97,6 +99,8 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
     log,
     audit,
     auditPolicy: overrides.auditPolicy ?? (() => "never"),
+    ownerAuth: unlockedOwnerAuth(),
+    onLock,
     touch,
     onConnectionsChanged,
     onDeviceDisconnected,
@@ -112,6 +116,7 @@ function makeHarness(overrides: Partial<HubDeps> = {}) {
     touch,
     onConnectionsChanged,
     onDeviceDisconnected,
+    onLock,
     pairSession,
     deps,
   };
@@ -527,6 +532,52 @@ describe("createHub: closeAll and disconnection", () => {
   });
 });
 
+describe("createHub: closeWebOrigin (Phase 1 final review I1)", () => {
+  it("closes open and pending web-origin sockets only, leaving no-Origin and native ones open", () => {
+    const pairOnClose = vi.fn();
+    const pairSession = vi.fn(
+      (): SessionHandlers => ({ onText: vi.fn(), onBinary: vi.fn(), onClose: pairOnClose }),
+    );
+    const { hub, clock } = makeHarness({ pairSession });
+    const web = new FakeSocket();
+    hub.accept("rpc", web, "10.0.0.1:1", "web").onText(helloFrame(1));
+    const native = new FakeSocket();
+    hub.accept("rpc", native, "10.0.0.2:1", "native").onText(helloFrame(2));
+    const plain = new FakeSocket();
+    hub.accept("rpc", plain, "10.0.0.3:1").onText(helloFrame(3));
+    const webPending = new FakeSocket();
+    hub.accept("rpc", webPending, "10.0.4.1:1", "web");
+    const webPair = new FakeSocket();
+    hub.accept("pair", webPair, "10.0.4.2:1", "web");
+    const nativePair = new FakeSocket();
+    hub.accept("pair", nativePair, "10.0.4.3:1", "native");
+
+    expect(hub.closeWebOrigin(1001)).toEqual(new Set([deviceId(1)]));
+
+    expect(web.closed).toEqual({ code: 1001, reason: "" });
+    expect(webPending.closed).toEqual({ code: 1001, reason: "" });
+    expect(webPair.closed).toEqual({ code: 1001, reason: "" });
+    expect(pairOnClose).toHaveBeenCalledTimes(1);
+    expect(native.closed).toBeUndefined();
+    expect(plain.closed).toBeUndefined();
+    expect(nativePair.closed).toBeUndefined();
+    // Only the two open non-web connections' heartbeats stay armed: the web
+    // pending connection's handshake timer went with it.
+    expect(clock.pending()).toBe(2);
+  });
+
+  it("a web socket that already closed is not closed again", () => {
+    const { hub } = makeHarness();
+    const web = new FakeSocket();
+    const handlers = hub.accept("rpc", web, "10.0.0.1:1", "web");
+    handlers.onText(helloFrame(1));
+    handlers.onClose(1006);
+
+    expect(hub.closeWebOrigin(1001)).toEqual(new Set());
+    expect(web.closed).toBeUndefined();
+  });
+});
+
 // M12 Task 3: HubDeps.auditPolicy is a pure pass-through to the connection
 // it creates — proven with a spy policy that only this test's own channel
 // resolves to "always".
@@ -554,5 +605,46 @@ describe("createHub: auditPolicy pass-through", () => {
       channel: "spy:channel",
       outcome: "ok",
     });
+  });
+});
+
+describe("createHub: owner-login locks (Phase 0)", () => {
+  function lockPushes(socket: FakeSocket) {
+    return socket.sent.filter((frame) => frame.ch === "auth:state");
+  }
+
+  it("lockAll locks every open connection without closing any, and drops their subscriptions", () => {
+    const { hub, onLock } = makeHarness();
+    const one = openDevice(hub, 1);
+    const two = openDevice(hub, 2);
+    one.handlers.onText(subFrame(["metrics:update"]));
+    two.handlers.onText(subFrame(["metrics:update"]));
+
+    expect(hub.lockAll("signed-out")).toBe(2);
+
+    expect(hub.hasSubscriber("metrics:update")).toBe(false);
+    expect(one.socket.closed).toBeUndefined();
+    expect(two.socket.closed).toBeUndefined();
+    expect(lockPushes(one.socket)).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "signed-out" }, seq: 1 },
+    ]);
+    expect(onLock.mock.calls).toEqual([[deviceId(1)], [deviceId(2)]]);
+    expect(hub.lockAll("signed-out")).toBe(0);
+  });
+
+  it("lockDevice locks only that device's connections", () => {
+    const { hub } = makeHarness();
+    const one = openDevice(hub, 1);
+    const two = openDevice(hub, 2);
+    expect(hub.lockDevice(deviceId(1), "signed-out")).toBe(1);
+    expect(lockPushes(one.socket)).toHaveLength(1);
+    expect(lockPushes(two.socket)).toHaveLength(0);
+  });
+
+  it("lockFamily locks only connections unlocked by that family", () => {
+    const { hub } = makeHarness();
+    openDevice(hub, 1);
+    expect(hub.lockFamily("0".repeat(32), "logout")).toBe(0);
+    expect(hub.lockFamily(TEST_FAMILY_ID, "logout")).toBe(1);
   });
 });

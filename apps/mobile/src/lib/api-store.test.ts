@@ -39,6 +39,8 @@ function createHarness() {
     subscriptions: () => [],
     lastFrameAt: () => undefined,
     setAppActive: () => {},
+    unlock: () => {},
+    lock: () => {},
   };
 
   return {

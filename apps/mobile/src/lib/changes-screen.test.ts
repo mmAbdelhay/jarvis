@@ -124,7 +124,11 @@ describe(
     '`writingDirection: "ltr"` style entries and this fails]',
   () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const screenSource = readFileSync(resolve(here, "../../app/changes.tsx"), "utf8");
+    // The route is a thin wrapper; the content moved to
+    // src/screens/ChangesScreen.tsx (wide layout, Task 4).
+    const screenSource =
+      readFileSync(resolve(here, "../../app/changes.tsx"), "utf8") +
+      readFileSync(resolve(here, "../screens/ChangesScreen.tsx"), "utf8");
 
     it("forces the horizontally-scrolled diff container to ltr layout", () => {
       expect(screenSource).toMatch(/diffContent:\s*\{[^}]*direction:\s*"ltr"/);

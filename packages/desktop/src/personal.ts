@@ -17,7 +17,7 @@
  * from all of them without any of them being told about it. config.ts
  * reserves the name so a jarvis.yaml can never smuggle it back in.
  *
- * Session isolation: BrowserHost derives a partition from the project name,
+ * Session isolation: the ViewReconciler derives a partition from the project name,
  * so this gets `persist:project-__personal__` — its own cookie jar, its own
  * logins, shared with nothing. That is the deliberate choice: a personal
  * browser holds the user's own signed-in accounts, and a page opened by a

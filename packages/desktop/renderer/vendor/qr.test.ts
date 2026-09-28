@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { encodeQr, qrToCanvas, type QrCode } from "./qr.js";
-import { PAIRING_LINK_V10_FIXTURE, SHORT_V1_FIXTURE, type QrFixture } from "./qr.fixtures.js";
+import {
+  LEVEL_L_V18_FIXTURE,
+  PAIRING_LINK_V10_FIXTURE,
+  SHORT_V1_FIXTURE,
+  WEB_PAIRING_LINK_V11_FIXTURE,
+  type QrFixture,
+} from "./qr.fixtures.js";
 
 // This file intentionally re-derives the ISO/IEC 18004 BCH formulas and
 // cell positions independently of qr.ts (rather than importing its
@@ -21,8 +27,8 @@ import { PAIRING_LINK_V10_FIXTURE, SHORT_V1_FIXTURE, type QrFixture } from "./qr
 /** BCH(15,5): 5 data bits (2-bit EC level, 0 for level M, + 3-bit mask)
  *  plus 10 error-correction bits, generator 0x537, XORed with the fixed
  *  mask 0x5412 (ISO/IEC 18004 Annex C). */
-function referenceFormatBits(mask: number): number {
-  const data = mask; // EC level M's indicator bits are 00
+function referenceFormatBits(mask: number, levelBits = 0b00): number {
+  const data = (levelBits << 3) | mask; // level indicator: M = 00, L = 01
   let rem = data;
   for (let i = 0; i < 10; i += 1) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
   return ((data << 10) | rem) ^ 0x5412;
@@ -90,13 +96,29 @@ describe("encodeQr — version selection by capacity (level M)", () => {
     [15, 2],
     [100, 6],
     [213, 10],
+    [214, 11],
+    [229, 11],
+    [251, 11],
+    [252, 12],
+    [666, 20],
   ])("a %i-byte link selects version %i", (byteLength, expectedVersion) => {
     const qr = encodeQr("A".repeat(byteLength));
     expect(qr.size).toBe(17 + 4 * expectedVersion);
+    expect(qr.level).toBe("M");
   });
 
-  it("throws for 214 bytes — one past version 10-M's capacity", () => {
-    expect(() => encodeQr("A".repeat(214))).toThrow();
+  it("falls back to level L past version 20-M's 666 bytes", () => {
+    const qr = encodeQr("A".repeat(667));
+    expect(qr.level).toBe("L");
+    expect(qr.size).toBe(17 + 4 * 18);
+    const data5 = (readFormatBits(qr) ^ 0x5412) >>> 10;
+    expect(data5 >>> 3).toBe(0b01); // EC level L
+    expect(readFormatBits(qr)).toBe(referenceFormatBits(data5 & 0b111, 0b01));
+  });
+
+  it("fits 858 bytes at 20-L and throws for 859", () => {
+    expect(encodeQr("A".repeat(858)).size).toBe(17 + 4 * 20);
+    expect(() => encodeQr("A".repeat(859))).toThrow();
   });
 });
 
@@ -179,10 +201,14 @@ describe("encodeQr — format and version information", () => {
     }
   });
 
-  it("draws version information for version 10 matching the standard BCH(18,6) code", () => {
-    const qr = encodeQr("A".repeat(200));
-    expect(qr.size).toBe(57);
-    expect(readVersionBits(qr)).toBe(referenceVersionBits(10));
+  it.each([
+    [10, 200],
+    [11, 229],
+    [20, 650],
+  ])("draws version information for version %i matching the standard BCH(18,6) code", (version, byteLength) => {
+    const qr = encodeQr("A".repeat(byteLength));
+    expect(qr.size).toBe(17 + 4 * version);
+    expect(readVersionBits(qr)).toBe(referenceVersionBits(version));
   });
 });
 
@@ -196,9 +222,12 @@ describe("encodeQr — matches an independent encoder bit-for-bit", () => {
   it.each<[string, QrFixture]>([
     ["a 10-byte input at version 1", SHORT_V1_FIXTURE],
     ["a 208-byte pairing-link-shaped input at version 10", PAIRING_LINK_V10_FIXTURE],
+    ["a 229-byte web-pairing-link-sized input at version 11", WEB_PAIRING_LINK_V11_FIXTURE],
+    ["a 700-byte input at version 18, level L", LEVEL_L_V18_FIXTURE],
   ])("%s", (_label, fixture) => {
     const qr = encodeQr(fixture.text);
     expect(qr.size).toBe(17 + 4 * fixture.version);
+    expect(qr.level).toBe(fixture.level ?? "M");
     expect(rowsOf(qr)).toEqual([...fixture.rows]);
   });
 });

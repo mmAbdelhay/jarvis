@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fakeClock } from "./clock-double.js";
 import type { DevicePush } from "./devices.js";
-import { createDeviceStore, MAX_DEVICE_NAME_LENGTH, sanitizeDeviceName } from "./devices.js";
+import {
+  createDeviceStore,
+  deviceClientKind,
+  MAX_DEVICE_NAME_LENGTH,
+  sanitizeDeviceName,
+} from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import type { RandomBytes } from "./io.js";
 
@@ -501,5 +506,86 @@ describe("sanitizeDeviceName", () => {
     const result = sanitizeDeviceName("\u{1f600}".repeat(70));
     expect([...result]).toHaveLength(MAX_DEVICE_NAME_LENGTH);
     expect(result).toBe("\u{1f600}".repeat(MAX_DEVICE_NAME_LENGTH));
+  });
+});
+
+describe("deviceClientKind", () => {
+  it('is "web" only for the browser build\'s exact client string', () => {
+    expect(deviceClientKind("web")).toBe("web");
+  });
+
+  it.each(["jarvis-mobile/1.2.3/ios", "jarvis-mobile/1.2.3/android", "", "Web", "web/1", "webx"])(
+    '%j is "app"',
+    (client) => {
+      expect(deviceClientKind(client)).toBe("app");
+    },
+  );
+});
+
+describe("createDeviceStore: client", () => {
+  const legacyFile = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: 1,
+      devices: [
+        {
+          id: "a".repeat(32),
+          name: "Phone",
+          salt: "a".repeat(32),
+          hash: "a".repeat(128),
+          pairedAt: 1,
+          ...extra,
+        },
+      ],
+    });
+
+  it("a record written before `client` existed loads as an app (no client key in the summary)", async () => {
+    const fs = memoryFs();
+    fs.files.set(PATH, { data: legacyFile(), mode: 0o600 });
+    const { store } = makeStore({ fs });
+    await store.load();
+    expect(store.list()[0]?.client).toBeUndefined();
+  });
+
+  it('a stored client "web" loads and shows in the summary', async () => {
+    const fs = memoryFs();
+    fs.files.set(PATH, { data: legacyFile({ client: "web" }), mode: 0o600 });
+    const { store } = makeStore({ fs });
+    await store.load();
+    expect(store.list()[0]?.client).toBe("web");
+  });
+
+  it('a stored client "app" loads as an app', async () => {
+    const fs = memoryFs();
+    fs.files.set(PATH, { data: legacyFile({ client: "app" }), mode: 0o600 });
+    const { store } = makeStore({ fs });
+    await store.load();
+    expect(store.list()[0]?.client).toBeUndefined();
+  });
+
+  it.each([["browser"], [1], [null]])(
+    "a stored client %j refuses the whole file",
+    async (client) => {
+      const fs = memoryFs();
+      fs.files.set(PATH, { data: legacyFile({ client }), mode: 0o600 });
+      const { store } = makeStore({ fs });
+      await expect(store.load()).rejects.toThrow("devices.json");
+    },
+  );
+
+  it('add(name, "web") persists client "web" and survives a reload; authenticate reports it', async () => {
+    const { fs, store } = makeStore();
+    const { deviceId, token } = await store.add("Chrome · macOS", "web");
+    expect(JSON.parse(fs.files.get(PATH)?.data ?? "{}").devices[0].client).toBe("web");
+    expect(store.authenticate(deviceId, token)?.client).toBe("web");
+
+    const { store: reloaded } = makeStore({ fs });
+    await reloaded.load();
+    expect(reloaded.list()[0]?.client).toBe("web");
+  });
+
+  it("add(name) with no client writes no client key (an app, byte-identical to before)", async () => {
+    const { fs, store } = makeStore();
+    await store.add("Phone");
+    expect(JSON.parse(fs.files.get(PATH)?.data ?? "{}").devices[0]).not.toHaveProperty("client");
   });
 });

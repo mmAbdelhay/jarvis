@@ -30,12 +30,15 @@ import { createDispatchTable } from "./dispatch.js";
 import { fakeDeps } from "./dispatch.test.js";
 import { createFileUploadHandler, createFileUploadStore, type UploadStore } from "./file-upload.js";
 import type { ApiHandlerDeps } from "./ipc.js";
-import { createApiHandlers } from "./ipc.js";
+import { buildWiring, createApiHandlers } from "./ipc.js";
 import { MESSAGES } from "./messages.js";
 import { REMOTE_TIMEOUT_CAP_MS } from "./remote-api.js";
 import { remoteRequestHandler } from "./remote-access.js";
 import { createBlobTable } from "./remote-blob.js";
 import { REMOTE_PUSH_POLICY, remoteKeyAuthorizer } from "./remote-push-policy.js";
+import type { HostedView } from "./browser-host.js";
+import { TabHost } from "./core/tab-host.js";
+import { ViewReconciler } from "./view-reconciler.js";
 
 const DEVICE_A: AuthenticatedDevice = { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "Phone A" };
 const DEVICE_B: AuthenticatedDevice = { id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", name: "Phone B" };
@@ -240,14 +243,6 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       rename: vi.fn(),
       move: vi.fn(),
       navigate: vi.fn(),
-      back: vi.fn(),
-      forward: vi.fn(),
-      reload: vi.fn(),
-      setDevTools: vi.fn(),
-      setDevToolsDock: vi.fn(),
-      setVisible: vi.fn(),
-      hideAll: vi.fn(),
-      requestPictureInPicture: vi.fn(),
       openDocker: vi.fn(),
       openApi: vi.fn(),
     };
@@ -678,5 +673,116 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     // to take one over.
     const resumeOutcome = (await handle("session:resume", ["s1", PROJECT], DEVICE_A)) as Outcome;
     expect(resumeOutcome).toEqual({ kind: "forbidden" });
+  });
+});
+
+// Task 18: the tab state lives in the core (TabHost) and the desktop's pages
+// follow it (ViewReconciler). A terminal a phone opens goes through the real
+// dispatch table behind the real policy gate into that same state — so it
+// reaches the desktop's tab strip on workspace:update, and is readable back
+// through workspace:snapshot, without ever getting a hosted view.
+describe("remote-workspace.integration: a phone-opened terminal", () => {
+  it("shows up in the desktop tab strip via workspace:update and the snapshot, with no view", async () => {
+    const tabs = new TabHost();
+    tabs.open(PROJECT, "https://example.com");
+
+    const created: HostedView[] = [];
+    const views = new ViewReconciler(() => {
+      const view: HostedView = {
+        loadURL: vi.fn(),
+        setBounds: vi.fn(),
+        setVisible: vi.fn(),
+        goBack: vi.fn(),
+        goForward: vi.fn(),
+        reload: vi.fn(),
+        destroy: vi.fn(),
+        onEvent: vi.fn(),
+        setDevTools: vi.fn(),
+        setDevToolsBounds: vi.fn(),
+        setDevToolsDock: vi.fn(),
+        hasPlayingVideo: vi.fn(async () => false),
+        requestPictureInPicture: vi.fn(),
+      };
+      created.push(view);
+      return view;
+    }, tabs);
+    views.follow(tabs);
+    views.setVisible(true);
+    expect(created).toHaveLength(1);
+
+    // compose.ts's wiring: TabHost changes become workspace:update.
+    const sent: { channel: string; payload: unknown }[] = [];
+    const wiring = buildWiring({
+      send: (channel, payload) => {
+        sent.push({ channel, payload });
+      },
+      readMetrics: async () => {
+        throw new Error("not under test");
+      },
+      intervalMs: 3_600_000,
+      onSessionsChange: () => () => {},
+      onTurn: () => () => {},
+      onChangeCounts: () => () => {},
+      onSessionOutput: () => () => {},
+      refreshChanges: async () => {},
+      changesIntervalMs: 3_600_000,
+      onProvidersChange: () => () => {},
+      onWorkspaceChange: (cb) => tabs.onChange(cb),
+      refreshHealth: async () => {},
+      healthIntervalMs: 3_600_000,
+    });
+    wiring.start();
+
+    // compose.ts's terminal handlers open the tab through openTerminalTab,
+    // which is TabHost.openTerminal; the pty itself is not under test.
+    const deps = fakeDeps({
+      workspace: tabs,
+      projects: { [PROJECT]: "/p/acme" },
+      terminal: {
+        ...fakeDeps().terminal,
+        open: vi.fn((project: string) => ({
+          ok: true as const,
+          value: tabs.openTerminal(project),
+        })),
+      },
+      language: "en",
+    });
+    const handle = remoteRequestHandler(
+      () => createDispatchTable(deps),
+      () =>
+        createBlobTable({
+          uploadAudio: vi.fn(async () => ({
+            kind: "invalid" as const,
+            text: "x",
+            language: "en" as const,
+          })),
+          uploadFile: vi.fn(),
+        }),
+    );
+
+    const opened = outcomeValue(
+      (await handle("terminal:open", [PROJECT], DEVICE_A)) as Outcome,
+    ) as {
+      ok: true;
+      value: string;
+    };
+    expect(opened.ok).toBe(true);
+
+    const updates = sent.filter((entry) => entry.channel === "workspace:update");
+    const last = updates.at(-1)?.payload as ReturnType<TabHost["state"]>;
+    expect(last.tabs.map((tab) => [tab.kind, tab.title])).toEqual([
+      ["web", ""],
+      ["terminal", `${PROJECT} — Terminal`],
+    ]);
+    expect(last.activeTabId).toBe(opened.value);
+
+    const snapshot = outcomeValue((await handle("workspace:snapshot", [], DEVICE_A)) as Outcome);
+    expect(snapshot).toEqual(last);
+
+    // The terminal is drawn by each client's own xterm: no hosted view, and
+    // the web page it covers is hidden rather than floating over it.
+    expect(created).toHaveLength(1);
+    expect(created[0]?.setVisible).toHaveBeenLastCalledWith(false);
+    wiring.stop();
   });
 });

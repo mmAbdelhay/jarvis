@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
-import type { BindChoice } from "@jarvis/remote";
+import type { BindChoice, RemoteStatus } from "@jarvis/remote";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 
@@ -88,8 +88,10 @@ function sample(): JarvisConfig {
       sidecarProxy: false,
       tls: {},
       push: { enabled: false, includeProjectNames: false },
+      web: { enabled: false },
       idleDisableMinutes: 0,
     },
+    daemon: { enabled: false },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };
 }
@@ -142,9 +144,11 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-whisper-binary" />
     <input id="settings-whisper-model" />
     <div id="settings-remote-title"></div>
+    <div id="settings-remote-owner"></div>
     <label id="settings-remote-enabled-label"></label>
     <input id="settings-remote-enabled" type="checkbox" />
     <span id="settings-remote-state"></span>
+    <div id="settings-remote-enable-blocked" hidden></div>
     <label id="settings-remote-idle-label"></label>
     <input id="settings-remote-idle" />
     <div id="settings-remote-idle-note"></div>
@@ -169,6 +173,16 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <label id="settings-remote-push-projects-label"></label>
     <input id="settings-remote-push-projects" type="checkbox" />
     <div id="settings-remote-push-projects-note"></div>
+    <label id="settings-remote-web-label"></label>
+    <input id="settings-remote-web" type="checkbox" />
+    <div id="settings-remote-web-note"></div>
+    <div id="settings-remote-web-state"></div>
+    <div id="settings-remote-web-access" hidden>
+      <div id="settings-remote-web-url"></div>
+      <button id="settings-remote-web-open"></button>
+      <canvas id="settings-remote-web-qr"></canvas>
+      <div id="settings-remote-web-qr-note"></div>
+    </div>
     <div id="settings-remote-problem" hidden></div>
     <div id="settings-remote-pair-title"></div>
     <button id="settings-remote-new-code"></button>
@@ -229,9 +243,29 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
       }),
     openRemotePairing: () => Promise.resolve({ ok: true, value: undefined }),
     cancelRemotePairing: () => Promise.resolve(),
-    decideRemotePairing: () => Promise.resolve(),
+    decideRemotePairing: () => Promise.resolve(true),
     revokeRemoteDevice: () => Promise.resolve({ ok: true, value: undefined }),
+    // Phase 0: every harness starts with an owner password already set, so
+    // the Enable switch behaves as it did before the gate existed; the
+    // owner-account tests override this.
+    ownerStatus: () => Promise.resolve({ hasPassword: true, passkeys: [] }),
+    setOwnerPassword: (...args: unknown[]) => {
+      calls.push({ call: "setOwnerPassword", args });
+      return Promise.resolve({ ok: true });
+    },
+    deletePasskey: (...args: unknown[]) => {
+      calls.push({ call: "deletePasskey", args });
+      return Promise.resolve({ ok: true, value: undefined });
+    },
+    signOutEverywhere: () => {
+      calls.push({ call: "signOutEverywhere", args: [] });
+      return Promise.resolve();
+    },
     onRemoteStatus: () => {},
+    openWebClient: () => {
+      calls.push({ call: "openWebClient", args: [] });
+      return Promise.resolve(true);
+    },
     tailscaleCert: () => {
       calls.push({ call: "tailscaleCert", args: [] });
       return Promise.resolve({
@@ -1888,7 +1922,7 @@ describe("remote access section", () => {
       | "devices-write-failed";
     pairing?:
       | { kind: "closed" }
-      | { kind: "open"; uri: string; expiresAt: number }
+      | { kind: "open"; uri: string; expiresAt: number; webUri?: string }
       | {
           kind: "confirming";
           requestId: string;
@@ -1902,6 +1936,7 @@ describe("remote access section", () => {
       pairedAt: number;
       lastSeenAt: number | undefined;
       connected: boolean;
+      client?: "web";
       push?: "ios" | "android";
     }[];
     listening?: {
@@ -1914,6 +1949,7 @@ describe("remote access section", () => {
     idle?:
       | { kind: "armed"; disableAt: number }
       | { kind: "disabled"; at: number; afterMinutes: number };
+    web?: RemoteStatus["web"];
   }) {
     return {
       enabled: patch.enabled ?? true,
@@ -1923,6 +1959,7 @@ describe("remote access section", () => {
       problem: patch.problem,
       sidecarProxy: patch.sidecarProxy ?? ("off" as const),
       idle: patch.idle,
+      ...(patch.web !== undefined ? { web: patch.web } : {}),
     };
   }
 
@@ -2140,7 +2177,7 @@ describe("remote access section", () => {
       onRemoteStatus: (cb: (status: ReturnType<typeof statusOf>) => void) => {
         pushed = cb;
       },
-      decideRemotePairing: () => Promise.resolve(),
+      decideRemotePairing: () => Promise.resolve(true),
     });
     await settle();
 
@@ -2240,6 +2277,95 @@ describe("remote access section", () => {
     expect(document.querySelector("#settings-remote-devices .settings-row")?.textContent).toContain(
       "T",
     );
+  });
+
+  describe("browser access (Phase 1)", () => {
+    const ORIGIN = "https://laptop.tail1234.ts.net:7718";
+    const WEB_ON = { kind: "on" as const, port: 7718, origin: ORIGIN };
+
+    it("the switch shows the draft, and a change is what Save carries", async () => {
+      const calls = await open();
+      const toggle = document.getElementById("settings-remote-web") as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      expect(text("settings-remote-web-label")).toBe(MESSAGES.remoteWebLabel(PRIMARY_LANGUAGE));
+
+      toggle.checked = true;
+      change(toggle);
+
+      expect((await save(calls)).remote.web.enabled).toBe(true);
+    });
+
+    it("the state line comes from the bridge's status, and nothing else shows while it is not on", async () => {
+      await openWithStatus(statusOf({ web: { kind: "needs-certificate" } }));
+      expect(text("settings-remote-web-state")).toBe(
+        MESSAGES.remoteWebState("needs-certificate", PRIMARY_LANGUAGE),
+      );
+      expect((document.getElementById("settings-remote-web-access") as HTMLElement).hidden).toBe(
+        true,
+      );
+      expect(text("settings-remote-web-url")).toBe("");
+    });
+
+    it("while on, shows the root URL, draws it as a QR, and Open asks main to open it", async () => {
+      vi.mocked(encodeQr).mockClear();
+      const calls = await openWithStatus(statusOf({ web: WEB_ON }));
+
+      expect(text("settings-remote-web-state")).toBe(
+        MESSAGES.remoteWebState("on", PRIMARY_LANGUAGE),
+      );
+      expect((document.getElementById("settings-remote-web-access") as HTMLElement).hidden).toBe(
+        false,
+      );
+      expect(text("settings-remote-web-url")).toBe(`${ORIGIN}/`);
+      expect(encodeQr).toHaveBeenCalledWith(`${ORIGIN}/`);
+      expect(text("settings-remote-web-qr-note")).toBe(
+        MESSAGES.remoteWebQrNote(false, PRIMARY_LANGUAGE),
+      );
+
+      (document.getElementById("settings-remote-web-open") as HTMLButtonElement).click();
+      expect(calls.filter((entry) => entry.call === "openWebClient")).toHaveLength(1);
+    });
+
+    it("while a pairing window is open, the link and QR are the browser pairing link", async () => {
+      vi.mocked(encodeQr).mockClear();
+      const webUri = `${ORIGIN}/pair#v=2&host=100.64.0.1`;
+      await openWithStatus(
+        statusOf({
+          web: WEB_ON,
+          pairing: {
+            kind: "open",
+            uri: "jarvis://pair?v=2",
+            expiresAt: Date.now() + 60_000,
+            webUri,
+          },
+        }),
+      );
+
+      expect(text("settings-remote-web-url")).toBe(webUri);
+      expect(encodeQr).toHaveBeenCalledWith(webUri);
+      expect(text("settings-remote-web-qr-note")).toBe(
+        MESSAGES.remoteWebQrNote(true, PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("labels each paired device as a browser or the app", async () => {
+      const device = { pairedAt: 1, lastSeenAt: undefined, connected: false };
+      await openWithStatus(
+        statusOf({
+          devices: [
+            { id: "a", name: "Chrome", client: "web", ...device },
+            { id: "b", name: "Pixel", ...device },
+          ],
+        }),
+      );
+      const rows = [...document.querySelectorAll("#settings-remote-devices .settings-row")];
+      expect(rows[0]?.textContent).toContain(
+        MESSAGES.remoteWebDeviceClient("web", PRIMARY_LANGUAGE),
+      );
+      expect(rows[1]?.textContent).toContain(
+        MESSAGES.remoteWebDeviceClient("app", PRIMARY_LANGUAGE),
+      );
+    });
   });
 
   it("shows a problem note, hidden when there is none", async () => {
@@ -2781,9 +2907,9 @@ describe("remote access section", () => {
       await settle();
 
       const row = document.querySelector("#settings-remote-devices .settings-row");
-      // name, state, revoke, failure — the same count as before this task,
-      // not the 5 a push-registered device's row has.
-      expect(row?.children).toHaveLength(4);
+      // name, state, client (Phase 1), revoke, failure — not the 6 a
+      // push-registered device's row has.
+      expect(row?.children).toHaveLength(5);
     });
   });
 
@@ -2857,5 +2983,239 @@ describe("remote access section", () => {
     change(cwd);
 
     expect((await save(calls)).remote.port).toBe(8443);
+  });
+});
+
+describe("Settings: owner account (Phase 0)", () => {
+  const jarvis = () => (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement | null;
+  const button = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
+  const PASSWORD = "a long owner password";
+
+  function withOwner(status: { hasPassword: boolean; passkeys?: unknown[] }): void {
+    jarvis()["ownerStatus"] = () =>
+      Promise.resolve({ hasPassword: status.hasPassword, passkeys: status.passkeys ?? [] });
+  }
+
+  it("without a password: the Enable switch is disabled with an explanation, and the set form has only new + confirm password fields", async () => {
+    harness();
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    expect(input("settings-remote-enabled")?.disabled).toBe(true);
+    const blocked = document.getElementById("settings-remote-enable-blocked");
+    expect(blocked?.hidden).toBe(false);
+    expect(blocked?.textContent).toBe(MESSAGES.remoteOwnerEnableBlocked(PRIMARY_LANGUAGE));
+
+    expect(input("settings-remote-owner-current")).toBeNull();
+    for (const id of ["settings-remote-owner-new", "settings-remote-owner-confirm"]) {
+      expect(input(id)?.type).toBe("password");
+      expect(input(id)?.autocomplete).toBe("new-password");
+    }
+    expect(button("settings-remote-owner-submit")?.textContent).toBe(
+      MESSAGES.remoteOwnerSetButton(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("settings-remote-owner-passkeys")).toBeNull();
+  });
+
+  it("a mismatched confirm never calls setOwnerPassword, says so, and clears both fields", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = `${PASSWORD}x`;
+    button("settings-remote-owner-submit")?.click();
+
+    expect(calls.some((entry) => entry.call === "setOwnerPassword")).toBe(false);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerError("mismatch", PRIMARY_LANGUAGE),
+    );
+    expect(input("settings-remote-owner-new")?.value).toBe("");
+    expect(input("settings-remote-owner-confirm")?.value).toBe("");
+  });
+
+  it("setting the first password calls setOwnerPassword(undefined, pw), clears the fields, and unlocks the Enable switch", async () => {
+    const { calls } = harness();
+    let hasPassword = false;
+    jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword, passkeys: [] });
+    jarvis()["setOwnerPassword"] = (...args: unknown[]) => {
+      calls.push({ call: "setOwnerPassword", args });
+      hasPassword = true;
+      return Promise.resolve({ ok: true });
+    };
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = PASSWORD;
+    button("settings-remote-owner-submit")?.click();
+    expect(input("settings-remote-owner-new")?.value ?? "").toBe("");
+    await flush();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "setOwnerPassword")?.args).toEqual([
+      undefined,
+      PASSWORD,
+    ]);
+    expect(input("settings-remote-enabled")?.disabled).toBe(false);
+    expect(document.getElementById("settings-remote-enable-blocked")?.hidden).toBe(true);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerSaved(PRIMARY_LANGUAGE),
+    );
+    expect(document.getElementById("settings-remote-owner")?.textContent).not.toContain(PASSWORD);
+  });
+
+  it("shows the bridge's error code as bilingual text", async () => {
+    harness();
+    withOwner({ hasPassword: false });
+    jarvis()["setOwnerPassword"] = () => Promise.resolve({ ok: false, code: "too-short" });
+    initSettings();
+    await openSettings();
+
+    (input("settings-remote-owner-new") as HTMLInputElement).value = "short";
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = "short";
+    button("settings-remote-owner-submit")?.click();
+    await flush();
+    await flush();
+
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerError("too-short", PRIMARY_LANGUAGE),
+    );
+    expect(input("settings-remote-enabled")?.disabled).toBe(true);
+  });
+
+  it("with a password: Change password opens a form with the current field, and submit sends (current, next)", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: true });
+    initSettings();
+    await openSettings();
+
+    expect(input("settings-remote-owner-new")).toBeNull();
+    button("settings-remote-owner-change")?.click();
+    expect(input("settings-remote-owner-current")?.type).toBe("password");
+
+    (input("settings-remote-owner-current") as HTMLInputElement).value = "the old password";
+    (input("settings-remote-owner-new") as HTMLInputElement).value = PASSWORD;
+    (input("settings-remote-owner-confirm") as HTMLInputElement).value = PASSWORD;
+    button("settings-remote-owner-submit")?.click();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "setOwnerPassword")?.args).toEqual([
+      "the old password",
+      PASSWORD,
+    ]);
+  });
+
+  it("lists passkeys as rows (label never parsed as markup) and Delete calls deletePasskey with its id", async () => {
+    const { calls } = harness();
+    withOwner({
+      hasPassword: true,
+      passkeys: [
+        { id: "cred-1", label: "<b>Chrome</b>", createdAt: 0 },
+        { id: "cred-2", label: "Safari", createdAt: 1000 },
+      ],
+    });
+    initSettings();
+    await openSettings();
+
+    const rows = document.querySelectorAll("#settings-remote-owner-passkeys .settings-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.querySelector("b")).toBeNull();
+    expect(rows[0]?.textContent).toContain("<b>Chrome</b>");
+
+    button("settings-remote-owner-passkey-delete-cred-2")?.click();
+    await flush();
+    expect(calls.find((entry) => entry.call === "deletePasskey")?.args).toEqual(["cred-2"]);
+  });
+
+  it("a remote:update push with a new ownerVersion redraws the passkey list without wiping an open password form", async () => {
+    harness();
+    let passkeys: unknown[] = [];
+    jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword: true, passkeys });
+    // initRemoteStatus also draws the topbar pill and the confirm dialog.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<button id="remote-pill" hidden><span id="remote-pill-text"></span></button>
+       <div id="remote-confirm" hidden>
+         <div id="remote-confirm-title"></div>
+         <div id="remote-confirm-body"></div>
+         <div id="remote-confirm-from"></div>
+         <button id="remote-confirm-approve"></button>
+         <button id="remote-confirm-deny"></button>
+       </div>`,
+    );
+    initSettings();
+    await openSettings();
+    const { initRemoteStatus } = await import("./remote-status.js");
+    type Pushed = Parameters<
+      Parameters<Parameters<typeof initRemoteStatus>[0]["onRemoteStatus"]>[0]
+    >[0];
+    let push: ((status: Pushed) => void) | undefined;
+    initRemoteStatus({
+      remoteStatus: () => new Promise(() => {}),
+      onRemoteStatus: (cb) => {
+        push = cb;
+      },
+      decideRemotePairing: () => Promise.resolve(true),
+    });
+    const status = (ownerVersion: number): Pushed => ({
+      enabled: true,
+      listening: undefined,
+      pairing: { kind: "closed" },
+      devices: [],
+      problem: undefined,
+      sidecarProxy: "off",
+      ownerVersion,
+    });
+    push?.(status(101));
+    await flush();
+    button("settings-remote-owner-change")?.click();
+    (input("settings-remote-owner-current") as HTMLInputElement).value = "typed so far";
+
+    passkeys = [{ id: "cred-new", label: "Phone passkey", createdAt: 0 }];
+    push?.(status(102));
+    await flush();
+
+    const rows = document.querySelectorAll("#settings-remote-owner-passkeys .settings-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("Phone passkey");
+    expect(input("settings-remote-owner-current")?.value).toBe("typed so far");
+  });
+
+  it("Sign out everywhere calls signOutEverywhere", async () => {
+    const { calls } = harness();
+    withOwner({ hasPassword: true });
+    initSettings();
+    await openSettings();
+
+    button("settings-remote-owner-signout")?.click();
+    await flush();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "signOutEverywhere")).toBe(true);
+    expect(document.getElementById("settings-remote-owner-message")?.textContent).toBe(
+      MESSAGES.remoteOwnerSignedOut(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("upgrade case: enabled in config with no password leaves the switch able to turn off, then locks it", async () => {
+    const config = sample();
+    config.remote.enabled = true;
+    harness(config);
+    withOwner({ hasPassword: false });
+    initSettings();
+    await openSettings();
+
+    const toggle = input("settings-remote-enabled") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
+    expect(document.getElementById("settings-remote-enable-blocked")?.hidden).toBe(false);
+
+    toggle.checked = false;
+    change(toggle);
+    expect(toggle.disabled).toBe(true);
   });
 });

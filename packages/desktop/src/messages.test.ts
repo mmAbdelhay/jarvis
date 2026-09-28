@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREREQUISITES } from "@jarvis/platform";
-import { REMOTE_ERROR_CODES } from "@jarvis/remote";
-import { PUSH_KINDS } from "@jarvis/wire";
+import { REMOTE_ERROR_CODES, type RemoteErrorCode } from "@jarvis/remote";
+import { AUTH_CHANNELS, type AuthChannel, PUSH_KINDS } from "@jarvis/wire";
 import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
@@ -211,6 +211,35 @@ describe("remoteErrorText", () => {
       expect(en.length).toBeGreaterThan(0);
       expect(ar.length).toBeGreaterThan(0);
       expect(en).not.toBe(ar);
+    }
+  });
+});
+
+describe("remoteAuthErrorText (D9)", () => {
+  it("words each auth refusal for what happened, in both languages", () => {
+    const en = (channel: AuthChannel, code: RemoteErrorCode) =>
+      MESSAGES.remoteAuthErrorText(channel, code, "en");
+    expect(en("auth:login", "forbidden")).toBe("Wrong password.");
+    expect(en("auth:passkeyRegisterBegin", "forbidden")).toBe("Wrong password.");
+    expect(en("auth:refresh", "forbidden")).toBe("You were signed out. Log in again.");
+    expect(en("auth:resume", "forbidden")).toBe("Your session expired. Log in again.");
+    expect(en("auth:passkeyFinish", "forbidden")).toContain("passkey");
+    expect(en("auth:login", "rate-limited")).toContain("Try again later");
+    for (const channel of AUTH_CHANNELS) {
+      for (const code of ["forbidden", "rate-limited"] as const) {
+        const english = MESSAGES.remoteAuthErrorText(channel, code, "en");
+        const arabic = MESSAGES.remoteAuthErrorText(channel, code, "ar");
+        expect(english).toBeDefined();
+        expect(arabic).toBeDefined();
+        expect(english).not.toBe(arabic);
+        expect(english).not.toBe(MESSAGES.remoteErrorText(code, "en"));
+      }
+    }
+  });
+
+  it("leaves the codes whose plain text already fits to remoteErrorText", () => {
+    for (const code of ["locked", "bad-request", "internal", "unsupported"] as const) {
+      expect(MESSAGES.remoteAuthErrorText("auth:login", code, "en")).toBeUndefined();
     }
   });
 });
@@ -630,13 +659,43 @@ describe("the remote access panel", () => {
     expect(parts.before + parts.after).not.toContain("{name}");
   });
 
-  it("covers all five RemoteProblem values, bilingually and distinctly", () => {
+  it("remoteSecurityNotice has a bilingual, distinct title and body for each notice kind", () => {
+    for (const kind of ["locked-out-global", "locked-out-device", "refresh-reuse"] as const) {
+      const en = MESSAGES.remoteSecurityNotice(kind, "en");
+      const ar = MESSAGES.remoteSecurityNotice(kind, "ar");
+      expect(en.title.trim()).not.toBe("");
+      expect(en.body.trim()).not.toBe("");
+      expect(ar.title).toMatch(/[؀-ۿ]/);
+      expect(ar.body).toMatch(/[؀-ۿ]/);
+    }
+    expect(MESSAGES.remoteSecurityNotice("locked-out-global", "en")).not.toEqual(
+      MESSAGES.remoteSecurityNotice("refresh-reuse", "en"),
+    );
+  });
+
+  it("remoteSecurityNotice names the locked-out device, or falls back to a generic one", () => {
+    for (const language of ["en", "ar"] as const) {
+      const named = MESSAGES.remoteSecurityNotice("locked-out-device", language, "Pixel 8");
+      expect(named.body).toContain("Pixel 8");
+      const unnamed = MESSAGES.remoteSecurityNotice("locked-out-device", language);
+      expect(unnamed.body).not.toContain("{name}");
+      expect(unnamed.body).not.toContain("undefined");
+    }
+    expect(MESSAGES.remoteSecurityNotice("locked-out-device", "en").title).not.toEqual(
+      MESSAGES.remoteSecurityNotice("locked-out-global", "en").title,
+    );
+  });
+
+  it("covers all eight RemoteProblem values, bilingually and distinctly", () => {
     const problems = [
       "bad-address",
       "listen-failed",
       "certificate-failed",
       "devices-unreadable",
       "devices-write-failed",
+      "no-owner-password",
+      "owner-unreadable",
+      "sessions-unreadable",
     ] as const;
     for (const problem of problems) {
       const en = MESSAGES.remoteProblem(problem, "en");
@@ -717,6 +776,42 @@ describe("the remote access panel", () => {
     [11, "11 دقيقة"],
   ])("uses the Arabic minute grammar for %s", (minutes, phrase) => {
     expect(MESSAGES.remoteIdleDisabled(Date.UTC(2026, 0, 1, 12), minutes, "ar")).toContain(phrase);
+  });
+
+  it("has a bilingual line for every browser-access state, and the rest of remoteWeb*", () => {
+    const states = [
+      "off",
+      "port-conflict",
+      "listen-failed",
+      "needs-certificate",
+      "needs-owner-password",
+      "not-built",
+      "on",
+    ] as const;
+    const english = new Set<string>();
+    for (const state of states) {
+      const en = MESSAGES.remoteWebState(state, "en");
+      expect(MESSAGES.remoteWebState(state, "ar")).not.toBe(en);
+      english.add(en);
+    }
+    expect(english.size).toBe(states.length);
+    for (const message of [
+      MESSAGES.remoteWebLabel,
+      MESSAGES.remoteWebNote,
+      MESSAGES.remoteWebOpen,
+    ]) {
+      expect(message("ar")).not.toBe(message("en"));
+    }
+    for (const pairing of [true, false]) {
+      expect(MESSAGES.remoteWebQrNote(pairing, "ar")).not.toBe(
+        MESSAGES.remoteWebQrNote(pairing, "en"),
+      );
+    }
+    expect(MESSAGES.remoteWebDeviceClient("web", "en")).toBe("Browser");
+    expect(MESSAGES.remoteWebDeviceClient("app", "en")).toBe("App");
+    expect(MESSAGES.remoteWebDeviceClient("web", "ar")).not.toBe(
+      MESSAGES.remoteWebDeviceClient("app", "ar"),
+    );
   });
 
   it("names the platform in remoteDevicePush, bilingually (ruling h)", () => {
@@ -821,5 +916,69 @@ describe("push notification catalogue", () => {
   it("declares exactly these three push* builders", () => {
     const pushKeys = Object.keys(MESSAGES).filter((key) => key.startsWith("push"));
     expect(pushKeys.sort()).toEqual(["pushBody", "pushRegisterInvalid", "pushTitle"]);
+  });
+});
+
+// Task 23: the background-service strings, in both languages.
+describe("MESSAGES: daemon", () => {
+  it("localises every daemon string", () => {
+    const unary = [
+      MESSAGES.daemonTitle,
+      MESSAGES.daemonGeneral,
+      MESSAGES.daemonDescription,
+      MESSAGES.daemonConfirmEnableTitle,
+      MESSAGES.daemonConfirmEnable,
+      MESSAGES.daemonConfirmDisableTitle,
+      MESSAGES.daemonConfirmDisable,
+      MESSAGES.daemonContinue,
+      MESSAGES.daemonCancel,
+      MESSAGES.daemonStateOff,
+      MESSAGES.daemonStateOffSession,
+      MESSAGES.daemonStateStarting,
+      MESSAGES.daemonRestart,
+      MESSAGES.daemonStopNow,
+      MESSAGES.daemonBusy,
+      MESSAGES.daemonFallbackTitle,
+      MESSAGES.daemonRunInApp,
+      MESSAGES.daemonQuit,
+      MESSAGES.daemonStuckTitle,
+      MESSAGES.daemonStuck,
+      MESSAGES.daemonNotAttached,
+    ];
+    for (const message of unary) expect(message("ar")).not.toBe(message("en"));
+    expect(MESSAGES.daemonStateRunning(12, "3m", "ar")).not.toBe(
+      MESSAGES.daemonStateRunning(12, "3m", "en"),
+    );
+    expect(MESSAGES.daemonStateFailed("x", "ar")).not.toBe(MESSAGES.daemonStateFailed("x", "en"));
+    expect(MESSAGES.daemonLastLogLine("x", "ar")).not.toBe(MESSAGES.daemonLastLogLine("x", "en"));
+    expect(MESSAGES.daemonChangeFailed("x", "ar")).not.toBe(MESSAGES.daemonChangeFailed("x", "en"));
+    expect(MESSAGES.daemonFallback("x", "y", "ar")).not.toBe(
+      MESSAGES.daemonFallback("x", "y", "en"),
+    );
+  });
+
+  it("says what the confirm promised: open terminals in this window close", () => {
+    expect(MESSAGES.daemonConfirmEnable("en")).toContain(
+      "Open terminals in this window will close",
+    );
+    expect(MESSAGES.daemonRunInApp("en")).toBe("Run inside the app this time");
+  });
+
+  it("formats uptime by its largest units", () => {
+    expect(MESSAGES.daemonUptime(42_000, "en")).toBe("42s");
+    expect(MESSAGES.daemonUptime(5 * 60_000 + 3_000, "en")).toBe("5m");
+    expect(MESSAGES.daemonUptime(2 * 3_600_000 + 5 * 60_000, "en")).toBe("2h 5m");
+    expect(MESSAGES.daemonUptime(3 * 86_400_000 + 4 * 3_600_000, "en")).toBe("3d 4h");
+    expect(MESSAGES.daemonUptime(-5, "en")).toBe("0s");
+    expect(MESSAGES.daemonUptime(2 * 3_600_000, "ar")).toBe("2 س 0 د");
+  });
+
+  it("puts the log line under the fallback's reason only when there is one", () => {
+    expect(MESSAGES.daemonFallback("timed out", undefined, "en")).toBe(
+      "The background service didn't answer (timed out).",
+    );
+    expect(MESSAGES.daemonFallback("timed out", "boom", "en")).toBe(
+      "The background service didn't answer (timed out).\nLast log line: boom",
+    );
   });
 });

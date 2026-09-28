@@ -53,6 +53,7 @@ describe("session scenario over the real client and stores", () => {
     const token = "T".repeat(43);
     const client = createRpcClient({
       transport,
+      lockedAtWelcome: false,
       clock,
       random: () => 0.5,
       client: "session-test",

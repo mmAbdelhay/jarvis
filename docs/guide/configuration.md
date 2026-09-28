@@ -151,6 +151,9 @@ prayer:                         # optional; defaults to disabled
     beforeMinutes: 10            # 1-60
     atTime: true                 # desktop notification right at each prayer's own time
 
+daemon:                         # optional; absent means off
+  enabled: false                # Settings → General → Keep Jarvis running in the background
+
 remote:                         # optional; absent means the bridge does not exist
   enabled: false                # nothing can reach this machine until this is true
   bindAddress: 127.0.0.1        # an IP address, never a hostname; Settings lists yours
@@ -163,6 +166,9 @@ remote:                         # optional; absent means the bridge does not exi
     enabled: false              # the one part involving a third party
     includeProjectNames: false  # project names in a notification's text
   idleDisableMinutes: 0         # 0 = never; otherwise turn off after this long idle
+  web:
+    enabled: false              # the app in a browser, on a second port; needs a real certificate
+    # port: 7718                # leave it out for remote.port + 1
 ```
 
 **prayer**: The “Use my location” button asks CoreLocation on macOS. On Linux
@@ -193,6 +199,23 @@ The suspend and stop timers are checked once a minute, so anything can outlive
 its timeout by up to a minute. `terminalScrollback` is read when a pane is
 built, so a change reaches new terminals rather than open ones.
 
+## `daemon:` — the background daemon
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `false` | Runs the terminals, agent runs and remote access in `jarvisd`, a background process that keeps going after the app quits. The app becomes a window onto it. |
+
+Turn it on and off from **Settings → General → Keep Jarvis running in the
+background**, not by editing the file. The toggle installs and removes the
+service with the operating system (a LaunchAgent, a systemd user unit or a
+Windows Run value) and moves the open window over. Editing the key by hand
+only changes what the next launch tries. Saving other settings, from this
+machine or from a phone, never changes this key. When it is off, the
+section is left out of the file.
+
+See [Background daemon](background-daemon.md) for what it creates, the
+`jarvisd` command, and its security model.
+
 ## `remote:` — reaching this machine from your phone
 
 **Nothing listens unless it is enabled and either a device is already paired
@@ -221,6 +244,8 @@ default.
 | `tls.certPath`, `tls.keyPath` | absent | Both or neither, and file paths only — there is no Settings-panel equivalent. Neither means a self-signed certificate, made once and pinned when you pair. A real one comes from `tailscale cert <machine>.<tailnet>.ts.net`; see [Remote access](remote-access.md) for the full walkthrough, including renewal. `~/` is expanded. The pairing link's name, and the sidecar proxy's gate, come from the first DNS name on that certificate that is a plain hostname — not a wildcard; a certificate whose only names are wildcards is treated the same as one with no DNS name at all. |
 | `push.enabled` | `false` | Turns laptop push delivery on when the phone has also enabled notifications and registered a token. A notification carries only a generic bilingual title and body plus `{kind, sessionId?}` in its data — never agent output, a file, a command, a path or a transcript. Pushes keep flowing while `remote.enabled` is false as long as `push.enabled` is true and a registered token exists. See [Remote access](remote-access.md) for what each kind says and when nothing is sent at all. |
 | `push.includeProjectNames` | `false` | Adds the project name to eligible notification text and data. It is controlled by the **include project names** checkbox in Settings. |
+| `web.enabled` | `false` | Serves the app to a browser from a second listener beside the bridge — the **Browser access** switch in Settings. It runs only while the bridge is listening, and only with a configured certificate that has a DNS name and an owner password; Settings says which is missing. See [the browser client](remote-access.md#the-browser-client) for pairing a browser, signing in and the security rules. |
+| `web.port` | `port` + 1 | A whole number from 1 to 65535, the browser listener's own port (7718 with the default bridge port). It is a separate port so the app has a different origin from the sidecar pages on the bridge's port. While `web.enabled` is `true` it must differ from `port`, and it must be set explicitly when `port` is `0` or `65535`, which have no usable "+1"; either mistake refuses the config with a message naming it. While `web.enabled` is `false` only its shape is checked. To use the default, leave the key out; `~` is refused. There is no Settings field for it; edit `jarvis.yaml`. |
 | `idleDisableMinutes` | `0` | A whole number from 0 to 10080 (one week). The Settings idle field turns the bridge off after this many minutes with no connected paired phone and no open pairing code; when it fires, the bridge closes the listener and main only writes `remote.enabled: false` to `jarvis.yaml`. `0` never auto-disables. |
 
 **Settings lists your addresses for you.** "Reachable on" offers two radios:
@@ -239,11 +264,33 @@ Link-local addresses (`fe80::…`, `169.254.x.x`) are not offered.
 account at the OS level, restart Jarvis, and its `100.x.y.z` address appears
 in the list. Jarvis needs nothing else from it: no account, API key or auth key.
 
-**While it is on, a paired device can run commands on this machine as you.**
-There is no lower-privilege version of this feature.
+**While it is on, a paired device that has signed in with the owner password
+can run commands on this machine as you.** There is no lower-privilege
+version of this feature.
 
 See [Remote access](remote-access.md) for the phone side of pairing: the
-confirm step, what the phone can see, and what happens on revocation.
+confirm step, owner login, what the phone can see, and what happens on
+revocation, and for the browser client.
+
+### Owner login files
+
+Owner login adds no `jarvis.yaml` keys. The owner password is set in
+**Settings → Remote access → Owner account**, and the bridge stays off until
+one exists. Two files hold its state, in `~/.config/jarvis/remote/` beside
+the pairing and audit files. Both are written atomically with mode 0600, and
+the mode is tightened again on every load:
+
+| File | What it holds |
+|---|---|
+| `owner.json` | The owner password's scrypt hash, its salt and its scrypt parameters. Each passkey's credential id, public key, signature counter, label and date added. A random owner handle used for passkeys, and a counter that goes up on every password change and passkey delete. Never the password itself. |
+| `sessions.json` | One record per refresh token: the device it belongs to, its sign-in family, and when it was created and last used. Each record stores only a SHA-256 hash of the token, never the token itself. Retired tokens are kept until their family's 30 days are up, so that reuse of one can be detected. Access tokens are never written. |
+
+A missing file is not an error: no `owner.json` means no password yet, and
+no `sessions.json` means no one is signed in. An `owner.json` that cannot be
+read or parsed keeps the bridge off, and Settings says so ("The owner account
+file could not be read"), rather than treating it as missing. A `sessions.json` that cannot be read keeps the bridge off the same way.
+One that reads but does not parse is treated as empty, which only means every
+device signs in again.
 
 ## Notes that are easy to get wrong
 

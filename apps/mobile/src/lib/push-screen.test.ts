@@ -9,7 +9,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { STRINGS } from "./i18n";
 import type { PushPhase, PushView } from "./push-registration";
-import { notificationsStatusKey, notificationsSwitchValue } from "./push-screen";
+import {
+  notificationsStatusKey,
+  notificationsSwitchValue,
+  showsNotificationsSetting,
+} from "./push-screen";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOBILE_ROOT = resolve(HERE, "../..");
@@ -145,3 +149,10 @@ describe("source scan: taps navigate only through planNavigation over a fresh se
 // `git show HEAD:...` here. The M7 rows already living in
 // native-intent.test.ts are required to still pass (the full suite proves
 // that), and the reviewer checks `git diff --stat` for the two files.
+
+describe("showsNotificationsSetting (D8)", () => {
+  it("shows the switch in the app and hides it in the browser", () => {
+    expect(showsNotificationsSetting("native")).toBe(true);
+    expect(showsNotificationsSetting("web")).toBe(false);
+  });
+});

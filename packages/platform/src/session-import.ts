@@ -464,6 +464,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function createSessionImporter(deps: SessionImporterDeps): SessionImporter {
   const dirs = transcriptDirs(deps.agents, deps.home);
   const watchers: ImportWatcher[] = [];
+  // Set by stop(). start() watches only after its backfill, so a stop that
+  // lands mid-backfill must keep start() from opening watches nobody closes.
+  let stopped = false;
 
   async function importFile(
     agentId: string,
@@ -560,6 +563,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
 
     async start() {
       const imported = await backfill();
+      if (stopped) return imported;
 
       for (const { agentId, dir, format } of dirs) {
         try {
@@ -585,6 +589,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     },
 
     stop() {
+      stopped = true;
       for (const watcher of watchers) watcher.close();
       watchers.length = 0;
     },

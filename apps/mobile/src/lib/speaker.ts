@@ -85,3 +85,13 @@ export function voiceMatches(voiceLanguage: string, language: Language): boolean
   const tag = voiceLanguage.toLowerCase();
   return tag === language || tag.startsWith(`${language}-`) || tag.startsWith(`${language}_`);
 }
+
+/** The web speaker's `hasVoice` (Task 13): strictly "some installed voice
+ * speaks this language". Unlike the native speaker, an empty list answers
+ * `false` — a browser with no voice for the language shows the text. */
+export function hasVoiceAmong(
+  voices: ReadonlyArray<{ language: string }>,
+  language: Language,
+): boolean {
+  return voices.some((voice) => voiceMatches(voice.language, language));
+}

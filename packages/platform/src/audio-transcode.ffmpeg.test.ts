@@ -41,7 +41,7 @@ describe.skipIf(!ffmpegOnPath)("transcodeToWhisperWavCommand (ffmpeg integration
     ]);
     expect(gen.status).toBe(0);
 
-    const { command, args } = transcodeToWhisperWavCommand(input, output);
+    const { command, args } = transcodeToWhisperWavCommand(input, output, "mov");
     const result = await runCommandWithLimits(command, args, {
       timeoutMs: 30_000,
       maxOutputBytes: 65_536,
@@ -94,7 +94,7 @@ describe.skipIf(!ffmpegOnPath)("transcodeToWhisperWavCommand (ffmpeg integration
     expect(gen.status).toBe(0);
     await copyFile(realWav, input);
 
-    const { command, args } = transcodeToWhisperWavCommand(input, output);
+    const { command, args } = transcodeToWhisperWavCommand(input, output, "mov");
     const result = await runCommandWithLimits(command, args, {
       timeoutMs: 30_000,
       maxOutputBytes: 65_536,
@@ -126,7 +126,7 @@ describe.skipIf(!ffmpegOnPath)("transcodeToWhisperWavCommand (ffmpeg integration
     ]);
     expect(gen.status).toBe(0);
 
-    const { command, args } = transcodeToWhisperWavCommand(input, output);
+    const { command, args } = transcodeToWhisperWavCommand(input, output, "mov");
     const result = await runCommandWithLimits(command, args, {
       timeoutMs: 60_000,
       maxOutputBytes: 65_536,

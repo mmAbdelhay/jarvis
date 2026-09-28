@@ -34,7 +34,7 @@ import type { RecordingFiles } from "./recording-files";
 import type { RpcClient, RpcResult } from "./rpc-client";
 import type { Speaker } from "./speaker";
 import { type TurnView, mergeTurns, parseTurn, parseTurnList } from "./turns";
-import type { MicPermission, Recording, VoiceRecorder } from "./voice-recorder";
+import type { MicPermission, Recording, RecordingFormat, VoiceRecorder } from "./voice-recorder";
 
 export const REPLY_WAIT_MS = 180_000;
 export const VOICE_UPLOAD_TIMEOUT_MS = 100_000;
@@ -636,7 +636,16 @@ export function createVoiceController(deps: VoiceControllerDeps): VoiceControlle
     if (disposed || pending === undefined) return;
 
     const durationMs = Math.min(Math.round(pending.recording.durationMs), MAX_VOICE_DURATION_MS);
-    const meta: VoiceUploadMeta = { turnId, format: "m4a", durationMs };
+    // The recording's own container (Task 13: the browser build may record
+    // webm/opus). Typed wider than this branch's `VoiceUploadMeta.format`
+    // ("m4a" only) until the voice branch's wire change — which accepts
+    // "webm" and sniffs the container server-side — lands; a native
+    // recording always sends "m4a", exactly as before.
+    const meta: Omit<VoiceUploadMeta, "format"> & { format: RecordingFormat } = {
+      turnId,
+      format: pending.recording.format,
+      durationMs,
+    };
     if (target.kind === "session") {
       meta.targetSessionId = target.sessionId;
     }

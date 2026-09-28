@@ -33,6 +33,39 @@ describe("electron-builder.yml", () => {
     expect(c.files.join(" ")).not.toContain("claude-agent-sdk");
   });
 
+  it("keeps the shared includes and exclusions in every platform's own files list", async () => {
+    // A platform's `files:` replaces the shared list for that platform: the
+    // task-25 mac package shipped renderer .ts sources, tests and
+    // tsconfig.tsbuildinfo in app.asar because mac.files held only the
+    // SDK exclusions (phase 2 fix-wave ruling).
+    const c = (await config()) as unknown as {
+      files: string[];
+      mac: { files: string[] };
+      win: { files: string[] };
+      linux: { files: string[] };
+    };
+    for (const platform of [c.mac, c.win, c.linux]) {
+      expect(platform.files.slice(0, c.files.length)).toEqual(c.files);
+    }
+    for (const exclusion of [
+      "!dist/**/*.test.js",
+      "!**/*.tsbuildinfo",
+      "!dist/**/*.d.ts",
+      "!renderer/**/*.ts",
+      "!dist/renderer/**/*.ts",
+    ]) {
+      expect(c.mac.files).toContain(exclusion);
+    }
+    // Only what is listed is shipped: no renderer/*.ts, no scripts/.
+    expect(c.mac.files.filter((glob) => !glob.startsWith("!"))).toEqual([
+      "dist/**/*",
+      "renderer/index.html",
+      "renderer/styles.css",
+      "renderer/vendor/**/*",
+      "package.json",
+    ]);
+  });
+
   it("excludes the probe client from the bundle", async () => {
     // scripts/remote-probe.mjs is a manual-pass CLI tool, never imported by
     // main.ts — shipping it would be dead weight with no runtime path that
@@ -123,5 +156,46 @@ describe("electron-builder.yml", () => {
     // development-signed client with E100.
     const c = (await config()) as unknown as { afterPack: string };
     expect(c.afterPack).toBe("scripts/vmp-sign.cjs");
+  });
+
+  it("ships the browser client's export beside the archive, at resources/web", async () => {
+    // main.ts reads `<process.resourcesPath>/web` when packaged
+    // (web-export.ts webExportDir); anywhere else and Settings says "not built".
+    const c = (await config()) as unknown as { extraResources: unknown };
+    expect(c.extraResources).toContainEqual({ from: "web", to: "web" });
+  });
+
+  it("ships the jarvisd launchers beside the archive, at resources/bin", async () => {
+    // bin/jarvisd and bin/jarvisd.cmd find the app binary relative to
+    // resources/bin (jarvisd-launcher.test.ts); anywhere else they cannot.
+    const c = (await config()) as unknown as { extraResources: unknown };
+    expect(c.extraResources).toContainEqual({ from: "bin", to: "bin" });
+  });
+
+  it("keeps the daemon and its CLI inside app.asar, where script-path.ts looks", async () => {
+    // Packaged, the daemon runs as <resources>/app.asar/dist/src/daemon-main.js
+    // and the CLI as .../dist/src/daemon/cli/jarvisd.js. Both come in through
+    // dist/**; an exclusion that caught either would ship an app whose
+    // background toggle starts nothing.
+    const c = (await config()) as unknown as { files: string[] };
+    expect(c.files).toContain("dist/**/*");
+    for (const glob of c.files.filter((f) => f.startsWith("!"))) {
+      expect(glob).not.toMatch(/daemon|dist\/\*\*\/\*\.js$/);
+    }
+  });
+
+  it("builds the web export after packages/wire/dist exists, then copies it in", async () => {
+    // `expo export` resolves @jarvis/wire through its dist/, which `tsc -b`
+    // emits; the copy is what electron-builder's `from: web` picks up.
+    const pkg = JSON.parse(await readFile("packages/desktop/package.json", "utf8")) as {
+      scripts: { build: string };
+    };
+    const steps = pkg.scripts.build.split(" && ");
+    const tsc = steps.indexOf("tsc -b ../../tsconfig.json");
+    const exportWeb = steps.indexOf("pnpm --dir ../../apps/mobile export:web");
+    const copyWeb = steps.indexOf("node scripts/copy-web.mjs");
+    expect(tsc).toBeGreaterThanOrEqual(0);
+    expect(exportWeb).toBeGreaterThan(tsc);
+    expect(copyWeb).toBe(exportWeb + 1);
   });
 });

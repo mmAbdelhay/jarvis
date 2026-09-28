@@ -90,7 +90,10 @@ export type FileUploadStoreDeps = {
   /** `~/.config/jarvis/remote/uploads` in production. */
   baseDir: string;
   language: "ar" | "en";
+  /** Routine outcomes (staged, revoked, read). */
   log(line: string): void;
+  /** Failures (`failed:*`); defaults to `log`. */
+  logFailure?(line: string): void;
   /** M12 Task 7 test seam only — never set in production. A real caller
    *  interleaves `resolve`/`readJson`/`sweep` with `revoke`/`stop`/`put`
    *  purely through real timing; a test that needs a *deterministic*
@@ -155,12 +158,13 @@ function fail(language: "ar" | "en", text: string): GitViewResult<never> {
  *  voice-upload.ts's logOutcome). Never allowed to break the call that
  *  triggered it. */
 function logLine(
-  log: (line: string) => void,
+  deps: Pick<FileUploadStoreDeps, "log" | "logFailure">,
   kind: string,
   deviceId: string,
   bytes?: number,
 ): void {
   try {
+    const log = kind.startsWith("failed:") ? (deps.logFailure ?? deps.log) : deps.log;
     log(`file-upload: ${kind} device=${deviceId}${bytes === undefined ? "" : ` bytes=${bytes}`}`);
   } catch {
     // Diagnostics can't break an upload.
@@ -401,11 +405,11 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     bytes: Uint8Array,
   ): Promise<GitViewResult<UploadedFile>> {
     if (stopped) {
-      logLine(deps.log, "failed:stopped", deviceId, bytes.length);
+      logLine(deps, "failed:stopped", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadFailed(deps.language));
     }
     if (bytes.length < 1 || bytes.length > MAX_FILE_BYTES) {
-      logLine(deps.log, "invalid", deviceId, bytes.length);
+      logLine(deps, "invalid", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadInvalid(deps.language));
     }
 
@@ -418,7 +422,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       totals.count + 1 > MAX_DEVICE_UPLOAD_FILES ||
       totals.bytes + bytes.length > MAX_DEVICE_UPLOAD_BYTES
     ) {
-      logLine(deps.log, "quota", deviceId, bytes.length);
+      logLine(deps, "quota", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadQuotaExceeded(deps.language));
     }
 
@@ -443,7 +447,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     const dir = await ensureDeviceDir(deps.baseDir, deviceId);
     if (dir === undefined || !(await isSafeDeviceDir(deps.baseDir, dir))) {
       state.entries.delete(fileId);
-      logLine(deps.log, "failed:mkdir", deviceId, bytes.length);
+      logLine(deps, "failed:mkdir", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadFailed(deps.language));
     }
 
@@ -452,7 +456,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       await writeFileExclusive(path, bytes);
     } catch {
       state.entries.delete(fileId);
-      logLine(deps.log, "failed:write", deviceId, bytes.length);
+      logLine(deps, "failed:write", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadFailed(deps.language));
     }
 
@@ -463,7 +467,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     if (stopped || state.generation !== generation) {
       await removeFile(path);
       state.entries.delete(fileId);
-      logLine(deps.log, "discarded:generation", deviceId, bytes.length);
+      logLine(deps, "discarded:generation", deviceId, bytes.length);
       return fail(deps.language, MESSAGES.fileUploadFailed(deps.language));
     }
 
@@ -478,7 +482,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       generation,
     });
 
-    logLine(deps.log, "staged", deviceId, bytes.length);
+    logLine(deps, "staged", deviceId, bytes.length);
     return {
       ok: true,
       value: {
@@ -525,14 +529,14 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     const generation = state?.generation;
     const entry = liveEntry(deviceId, fileId, deps.now());
     if (entry === undefined) {
-      logLine(deps.log, "readJson:notfound", deviceId);
+      logLine(deps, "readJson:notfound", deviceId);
       return fail(deps.language, MESSAGES.fileUploadNotFound(deps.language));
     }
     // The size check runs against the record's own tracked byte count —
     // known since `put()` — before a single byte is read off disk, let
     // alone decoded or parsed.
     if (entry.bytes > MAX_JSON_UPLOAD_BYTES) {
-      logLine(deps.log, "readJson:toolarge", deviceId, entry.bytes);
+      logLine(deps, "readJson:toolarge", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.remoteImportRejected(deps.language));
     }
 
@@ -541,7 +545,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       generation === undefined ||
       !(await isSafeDeviceDir(deps.baseDir, dirname(entry.path)))
     ) {
-      logLine(deps.log, "readJson:notfound", deviceId, entry.bytes);
+      logLine(deps, "readJson:notfound", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.fileUploadNotFound(deps.language));
     }
     const raw = await readRegularFile(entry.path, entry.bytes);
@@ -555,7 +559,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       state.entries.get(fileId) !== entry ||
       deps.now() > entry.expiresAt
     ) {
-      logLine(deps.log, "readJson:notfound", deviceId, entry.bytes);
+      logLine(deps, "readJson:notfound", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.fileUploadNotFound(deps.language));
     }
 
@@ -563,7 +567,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
     } catch {
-      logLine(deps.log, "readJson:invalid", deviceId, entry.bytes);
+      logLine(deps, "readJson:invalid", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.remoteImportRejected(deps.language));
     }
 
@@ -571,16 +575,16 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     try {
       parsed = JSON.parse(text);
     } catch {
-      logLine(deps.log, "readJson:invalid", deviceId, entry.bytes);
+      logLine(deps, "readJson:invalid", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.remoteImportRejected(deps.language));
     }
 
     if (!validateRemoteImport(parsed)) {
-      logLine(deps.log, "readJson:rejected", deviceId, entry.bytes);
+      logLine(deps, "readJson:rejected", deviceId, entry.bytes);
       return fail(deps.language, MESSAGES.remoteImportRejected(deps.language));
     }
 
-    logLine(deps.log, "readJson:ok", deviceId, entry.bytes);
+    logLine(deps, "readJson:ok", deviceId, entry.bytes);
     return { ok: true, value: parsed };
   }
 
@@ -600,7 +604,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
       devices.delete(deviceId);
     }
     await removeDeviceDir(deps.baseDir, deviceId);
-    logLine(deps.log, "revoked", deviceId);
+    logLine(deps, "revoked", deviceId);
   }
 
   async function sweep(): Promise<void> {

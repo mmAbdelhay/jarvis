@@ -39,6 +39,13 @@ describe("connectionPillModel", () => {
     });
   });
 
+  it("shows conn.locked/warning when locked", () => {
+    expect(connectionPillModel(view({ state: "locked" }))).toEqual({
+      key: "conn.locked",
+      tone: "warning",
+    });
+  });
+
   it("shows conn.offline/danger for closed, idle, unpaired and incompatible", () => {
     for (const state of ["closed", "idle", "unpaired", "incompatible"] as const) {
       expect(connectionPillModel(view({ state }))).toEqual({

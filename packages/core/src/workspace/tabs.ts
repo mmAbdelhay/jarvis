@@ -2,9 +2,10 @@ import type { TabId, TabKind, TabPatch, WorkspaceState, WorkspaceTab } from "./t
 
 /**
  * The tab model, pure. Which tabs exist, which is active, and what each one
- * currently shows — no Chromium, no processes. BrowserHost (desktop) is the
- * only thing that owns real views, and it drives this store rather than
- * keeping a second copy of the same state.
+ * currently shows — no Chromium, no processes. The desktop's TabHost
+ * (packages/desktop/src/core/tab-host.ts) drives this store, and its
+ * ViewReconciler owns the real views, following the store's snapshots
+ * rather than keeping a second copy of the same state.
  *
  * Activity order is tracked here rather than in the host because eviction
  * ("close the tab nobody has looked at in longest") is a decision about tab

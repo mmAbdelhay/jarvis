@@ -11,11 +11,10 @@
     "android": "expo run:android",
     "prebuild": "expo prebuild",
     "build:terminal-html": "node scripts/build-terminal-html.mjs",
+    "export:web": "expo export --platform web --output-dir dist-web && node scripts/emit-terminal-web.mjs dist-web",
     "eas-build-post-install": "cd ../.. && npx tsc -b packages/wire"
   },
   "dependencies": {
-    "@expo-google-fonts/jetbrains-mono": "0.4.1",
-    "@expo-google-fonts/manrope": "0.4.2",
     "@expo/metro-runtime": "57.0.15",
     "@jarvis/wire": "workspace:*",
     "expo": "57.0.23",
@@ -28,6 +27,7 @@
     "expo-file-system": "57.0.7",
     "expo-font": "57.0.4",
     "expo-linking": "57.0.10",
+    "expo-local-authentication": "57.0.3",
     "expo-modules-core": "57.0.18",
     "expo-notifications": "57.0.20",
     "expo-router": "57.0.21",
@@ -36,9 +36,11 @@
     "expo-speech": "57.0.3",
     "expo-status-bar": "57.0.1",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "5.7.0",
     "react-native-screens": "4.26.2",
+    "react-native-web": "0.21.3",
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {

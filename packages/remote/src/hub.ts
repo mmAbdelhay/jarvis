@@ -16,10 +16,13 @@ import type {
 } from "./connection.js";
 import { createConnection } from "./connection.js";
 import { describeError } from "./io.js";
+import type { OriginClass } from "./origin.js";
 import type { SessionHandlers, SocketLike } from "./io.js";
 import { type AuthBackoff, createAuthBackoff } from "./limits.js";
+import type { OwnerAuth } from "./owner-auth.js";
 import type { ChannelPolicies, ChannelPolicy } from "./policy.js";
 import { isKeyedPolicy, isSubscriptionKey } from "./policy.js";
+import type { AuthLockReason } from "./protocol.js";
 import { CLOSE } from "./protocol.js";
 
 export const MAX_CLIENTS = 8;
@@ -40,6 +43,10 @@ export type HubDeps = {
    *  never classifies a channel itself, it only forwards. */
   auditPolicy(channel: string): AuditPolicy;
   backoff?: AuthBackoff;
+  /** Phase 0: pass-through to `ConnectionDeps.ownerAuth`. */
+  ownerAuth: OwnerAuth;
+  /** Phase 0: pass-through to `ConnectionDeps.onLock`. */
+  onLock(deviceId: string): void;
   touch(deviceId: string): void;
   onConnectionsChanged(): void;
   onDeviceDisconnected(deviceId: string): void;
@@ -47,7 +54,13 @@ export type HubDeps = {
 };
 
 export type Hub = {
-  accept(kind: "rpc" | "pair", socket: SocketLike, source: string): SessionHandlers;
+  /** `origin` is the upgrade's Origin class (origin.ts); omitted means no Origin at all. */
+  accept(
+    kind: "rpc" | "pair",
+    socket: SocketLike,
+    source: string,
+    origin?: OriginClass,
+  ): SessionHandlers;
   push(channel: string, payload: unknown): void;
   hasSubscriber(channel: string): boolean;
   /** M10: "who is watching" — every device id with at least one open
@@ -56,6 +69,18 @@ export type Hub = {
   watchingDevices(channel: string, key?: string): ReadonlySet<string>;
   closeDevice(deviceId: string, code: number): number;
   closeAll(code: number): void;
+  /** Phase 1 final review I1: closes every still-live socket (rpc or pair,
+   *  pending or open) whose upgrade carried the web client's Origin, and
+   *  returns the device ids of the authenticated ones among them. Native and
+   *  no-Origin sockets stay open. */
+  closeWebOrigin(code: number): ReadonlySet<string>;
+  /** Phase 0: locks every open connection (sockets stay open); returns how many were unlocked. */
+  lockAll(reason: AuthLockReason): number;
+  lockDevice(deviceId: string, reason: AuthLockReason): number;
+  /** Locks every open connection unlocked by `familyId` (logout, refresh-token reuse). */
+  lockFamily(familyId: string, reason: AuthLockReason): number;
+  /** Whether any of this device's open connections is logged in right now. */
+  hasUnlockedConnection(deviceId: string): boolean;
   connectedDeviceIds(): ReadonlySet<string>;
 };
 
@@ -87,7 +112,18 @@ export function createHub(deps: HubDeps): Hub {
   const open = new Set<Connection>();
   const byDevice = new Map<string, Set<Connection>>();
 
-  function accept(kind: "rpc" | "pair", socket: SocketLike, source: string): SessionHandlers {
+  // Every live socket whose upgrade carried the web client's Origin, with
+  // how to close it — the web Origin is only allowed while the web listener
+  // is up, so `closeWebOrigin` cuts these off the moment it goes down. An
+  // entry leaves on the socket's own close.
+  const webSockets = new Map<SocketLike, { close(code: number): void; connection?: Connection }>();
+
+  function accept(
+    kind: "rpc" | "pair",
+    socket: SocketLike,
+    source: string,
+    origin: OriginClass = "none",
+  ): SessionHandlers {
     if (backoff.isBlocked(source)) {
       // I4: a source hammering a blocked window would otherwise get one
       // `auth-failed backoff` audit line per attempt. `shouldLogBlocked`
@@ -120,15 +156,18 @@ export function createHub(deps: HubDeps): Hub {
       // session's own `onClose` so it disarms its handshake timer and
       // settles — exactly what happens when the real socket's close event
       // eventually arrives, just driven synchronously instead of waited on.
-      pending.set(socket, (code) => {
+      const abortPair = (code: number): void => {
         socket.close(code, "");
         inner.onClose(code);
-      });
+      };
+      pending.set(socket, abortPair);
+      if (origin === "web") webSockets.set(socket, { close: abortPair });
       return {
         onText: inner.onText,
         onBinary: inner.onBinary,
         onClose(code) {
           freeSlot();
+          webSockets.delete(socket);
           inner.onClose(code);
         },
       };
@@ -147,6 +186,8 @@ export function createHub(deps: HubDeps): Hub {
       log: deps.log,
       audit: deps.audit,
       auditPolicy: deps.auditPolicy,
+      ownerAuth: deps.ownerAuth,
+      onLock: deps.onLock,
 
       onOpen(c) {
         freeSlot();
@@ -194,12 +235,16 @@ export function createHub(deps: HubDeps): Hub {
     // heartbeat once open — so aborting it is safe regardless of how far
     // the handshake got.
     pending.set(socket, (code) => connection.close(code, ""));
+    if (origin === "web") {
+      webSockets.set(socket, { close: (code) => connection.close(code, ""), connection });
+    }
 
     return {
       onText: connection.onText,
       onBinary: connection.onBinary,
       onClose(code) {
         freeSlot();
+        webSockets.delete(socket);
         connection.onSocketClosed(code);
       },
     };
@@ -219,6 +264,18 @@ export function createHub(deps: HubDeps): Hub {
     if (set === undefined) return;
     set.delete(c);
     if (set.size === 0) byDevice.delete(deviceId);
+  }
+
+  /** Locks over a snapshot: a lock's `onLock` may run code that changes the live sets. */
+  function lockEach(
+    connections: Iterable<Connection>,
+    lockOne: (connection: Connection) => boolean,
+  ): number {
+    let locked = 0;
+    for (const connection of [...connections]) {
+      if (lockOne(connection)) locked += 1;
+    }
+    return locked;
   }
 
   /** Rule 7: fires at most once per transition, a throw logged rather than left to escape into caller code. */
@@ -292,6 +349,36 @@ export function createHub(deps: HubDeps): Hub {
       // `auth-failed` timeout after the wire is already gone.
       for (const abort of pending.values()) abort(code);
       for (const connection of open) connection.close(code, "");
+    },
+
+    closeWebOrigin(code) {
+      // Over a snapshot, each entry removed before its close runs: a pair
+      // session's abort runs its own `onClose` synchronously.
+      const entries = [...webSockets.values()];
+      webSockets.clear();
+      const deviceIds = new Set<string>();
+      for (const entry of entries) {
+        const deviceId = entry.connection?.device?.id;
+        if (deviceId !== undefined) deviceIds.add(deviceId);
+        entry.close(code);
+      }
+      return deviceIds;
+    },
+
+    lockAll(reason) {
+      return lockEach(open, (connection) => connection.lock(reason));
+    },
+
+    lockDevice(deviceId, reason) {
+      return lockEach(byDevice.get(deviceId) ?? [], (connection) => connection.lock(reason));
+    },
+
+    lockFamily(familyId, reason) {
+      return lockEach(open, (connection) => connection.lock(reason, familyId));
+    },
+
+    hasUnlockedConnection(deviceId) {
+      return [...(byDevice.get(deviceId) ?? [])].some((connection) => connection.isUnlocked());
     },
 
     connectedDeviceIds() {

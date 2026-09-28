@@ -12,7 +12,8 @@
 // a scriptable fake — the mobile test suite runs with no RN renderer and
 // no real network (global-constraints.md).
 
-import { isHostname } from "@jarvis/wire";
+import { isHostname, NATIVE_ORIGIN } from "@jarvis/wire";
+import type { ClientPlatform } from "./client-platform";
 import type { Transport, TransportSocket, Trust } from "./transport";
 
 export type WebSocketLike = {
@@ -28,7 +29,11 @@ export type WebSocketLike = {
   onerror: ((event: { message?: string }) => void) | null;
 };
 
-export type WebSocketFactory = (url: string) => WebSocketLike;
+export type WebSocketFactory = (
+  url: string,
+  protocols?: string | string[],
+  options?: { headers: { Origin: string } },
+) => WebSocketLike;
 
 // The W3C/RFC 6455 `readyState` for an open socket — the only state `send`
 // is allowed to actually forward data in.
@@ -90,7 +95,16 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
-export function createSystemTransport(factory: WebSocketFactory): Transport {
+/**
+ * `platform` decides how the socket is constructed: React Native takes an
+ * explicit `Origin` header in a third `options` argument; a browser sets
+ * Origin itself and gets `factory(url)` alone — Chrome 153+ reads a third
+ * argument as WebSocket options and throws on this shape (D1).
+ */
+export function createSystemTransport(
+  factory: WebSocketFactory,
+  platform: ClientPlatform = "native",
+): Transport {
   return {
     open(url, trust, onEvent): TransportSocket {
       if (!isSystemTarget(url, trust)) {
@@ -114,7 +128,13 @@ export function createSystemTransport(factory: WebSocketFactory): Transport {
         };
       }
 
-      const ws = factory(url);
+      // RN's WebSocket otherwise sends an Origin derived from the URL on
+      // both platforms (the bridge's own origin), which the bridge refuses;
+      // an explicit `Origin` header replaces it (task-10 report).
+      const ws =
+        platform === "web"
+          ? factory(url)
+          : factory(url, undefined, { headers: { Origin: NATIVE_ORIGIN } });
       let closed = false;
       let droppedNonStringFrames = 0;
 
@@ -182,8 +202,17 @@ export function createSystemTransport(factory: WebSocketFactory): Transport {
   };
 }
 
-// The real transport: React Native's own global `WebSocket` (the OS trust
-// store) — no pin, no native module, no per-socket bypass.
-export const systemTransport: Transport = createSystemTransport(
-  (url) => new globalThis.WebSocket(url) as unknown as WebSocketLike,
-);
+// React Native's WebSocket constructor takes a third `options` argument
+// (Libraries/WebSocket/WebSocket.js) that the DOM lib typing lacks.
+type ReactNativeWebSocketConstructor = new (...args: Parameters<WebSocketFactory>) => WebSocketLike;
+
+// The real transport: the platform's own global `WebSocket` (the OS trust
+// store) — no pin, no native module, no per-socket bypass. The factory
+// forwards exactly the arguments it was given, so the browser's
+// `new WebSocket(url)` never sees a trailing `undefined`.
+export function systemTransportFor(platform: ClientPlatform): Transport {
+  return createSystemTransport((...args) => {
+    const PlatformWebSocket = globalThis.WebSocket as unknown as ReactNativeWebSocketConstructor;
+    return new PlatformWebSocket(...args);
+  }, platform);
+}

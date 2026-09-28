@@ -11,7 +11,7 @@ import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
 // The Workspace's Terminal tabs.
 //
-// A terminal tab has no hosted view (see BrowserHost.openTerminal): its
+// A terminal tab has no hosted view (see TabHost.openTerminal): its
 // shell runs under a pty in the main process and its screen is drawn right
 // here, in the renderer's own DOM, over the same slot a hosted page would
 // occupy. One tree of panes per tab, kept alive for as long as the tab is —

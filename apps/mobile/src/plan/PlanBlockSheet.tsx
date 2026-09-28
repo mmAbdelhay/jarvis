@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { dialogs } from "../lib/dialog";
 import { t, type Language } from "../lib/i18n";
 import type { PlansStore } from "../lib/plans-store";
 import { theme } from "../lib/theme";
@@ -58,7 +59,7 @@ export function PlanBlockSheet(props: {
       setNotice(outcome.notice);
       return;
     }
-    Alert.alert(planErrorText(props.language, props.store.state.error?.code ?? "saveFailed"));
+    dialogs.notice(planErrorText(props.language, props.store.state.error?.code ?? "saveFailed"));
   }
 
   return (

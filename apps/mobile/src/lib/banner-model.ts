@@ -35,6 +35,9 @@ export function bannerModel(view: ConnectionView): BannerModel | undefined {
       return { key: "conn.unpaired", pairAgain: false };
     case "incompatible":
       return { key: "conn.incompatible", pairAgain: false };
+    // The unlock screen covers the whole app while locked: nothing to add.
+    case "locked":
+      return undefined;
     case "open":
       return view.stale ? { key: "conn.stale", pairAgain: false } : undefined;
   }

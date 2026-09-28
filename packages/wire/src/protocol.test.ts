@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTH_CHANNELS,
+  AUTH_TOKEN_PATTERN,
   CLOSE,
   DEVICE_ID_PATTERN,
   encodeMessage,
   FINGERPRINT_PATTERN,
   isSubscriptionKey,
   isValidBlobShape,
+  LOCKED_ALLOWED,
+  PROTOCOL_VERSION,
   REMOTE_ERROR_CODES,
   SECRET_PATTERN,
   SUBSCRIPTION_KEY_PATTERN,
@@ -41,9 +45,53 @@ describe("CLOSE", () => {
 });
 
 describe("REMOTE_ERROR_CODES", () => {
-  it("has six distinct codes including forbidden", () => {
+  it("has seven distinct codes including forbidden and locked", () => {
+    expect(REMOTE_ERROR_CODES).toHaveLength(7);
     expect(new Set(REMOTE_ERROR_CODES).size).toBe(REMOTE_ERROR_CODES.length);
     expect(REMOTE_ERROR_CODES).toContain("forbidden");
+    expect(REMOTE_ERROR_CODES).toContain("locked");
+  });
+});
+
+describe("PROTOCOL_VERSION", () => {
+  it("is 2 (owner login: an old app must get a version mismatch, not a silently locked connection)", () => {
+    expect(PROTOCOL_VERSION).toBe(2);
+  });
+});
+
+describe("AUTH_CHANNELS / LOCKED_ALLOWED", () => {
+  it("lists the nine auth channels", () => {
+    expect([...AUTH_CHANNELS]).toEqual([
+      "auth:status",
+      "auth:login",
+      "auth:passkeyBegin",
+      "auth:passkeyFinish",
+      "auth:passkeyRegisterBegin",
+      "auth:passkeyRegisterFinish",
+      "auth:refresh",
+      "auth:resume",
+      "auth:logout",
+    ]);
+  });
+
+  it("allows every auth channel while locked except the passkey-register pair", () => {
+    expect([...LOCKED_ALLOWED].sort()).toEqual(
+      AUTH_CHANNELS.filter(
+        (ch) => ch !== "auth:passkeyRegisterBegin" && ch !== "auth:passkeyRegisterFinish",
+      ).sort(),
+    );
+  });
+});
+
+describe("AUTH_TOKEN_PATTERN", () => {
+  it.each<[string, boolean]>([
+    ["0123456789abcdef".repeat(4), true],
+    ["0123456789ABCDEF".repeat(4), false],
+    ["a".repeat(63), false],
+    ["a".repeat(65), false],
+    ["g".repeat(64), false],
+  ])("AUTH_TOKEN_PATTERN.test(%j) is %s", (value, expected) => {
+    expect(AUTH_TOKEN_PATTERN.test(value)).toBe(expected);
   });
 });
 

@@ -211,6 +211,7 @@ describe("proxy.integration", () => {
       cert: material.cert,
       key: material.key,
       proxy,
+      webOrigin: () => undefined,
       onSocket: () => ({ onText() {}, onBinary() {}, onClose() {} }),
       log: () => {},
     });

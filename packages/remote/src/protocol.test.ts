@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AUTH_CHANNELS } from "@jarvis/wire";
 import {
   CLOSE,
   type ClientMessage,
@@ -6,6 +7,7 @@ import {
   formatPairingUri,
   type PairingLink,
   parseClientMessage,
+  parseAuthArgs,
   parsePairingUri,
   parsePairMessage,
 } from "./protocol.js";
@@ -193,7 +195,7 @@ describe("pairing URI", () => {
     expect(parsePairingUri(formatPairingUri(link))).toEqual(link);
   });
 
-  const validFields = { v: "1", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
+  const validFields = { v: "2", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
   const uriWith = (scheme: string, overrides: Partial<typeof validFields> = {}) => {
     const params = new URLSearchParams({ ...validFields, ...overrides });
     return `${scheme}pair?${params.toString()}`;
@@ -201,7 +203,7 @@ describe("pairing URI", () => {
 
   it.each<[string, string]>([
     ["the https:// scheme", uriWith("https://")],
-    ["v=2", uriWith("jarvis://", { v: "2" })],
+    ["v=1", uriWith("jarvis://", { v: "1" })],
     ["a hostname", uriWith("jarvis://", { host: "example.com" })],
     ["::ffff:127.0.0.1 (not canonical)", uriWith("jarvis://", { host: "::ffff:127.0.0.1" })],
     ["port 0", uriWith("jarvis://", { port: "0" })],
@@ -231,5 +233,135 @@ describe("CLOSE", () => {
       expect(code).toBeGreaterThanOrEqual(4000);
     }
     expect(new Set(applicationCodes).size).toBe(applicationCodes.length);
+  });
+});
+
+describe("auth channels pass the frame parser's channel check", () => {
+  it.each([...AUTH_CHANNELS])("a req on %s parses as a req", (ch) => {
+    const text = JSON.stringify({ t: "req", id: 1, ch, a: [] });
+    expect(parseClientMessage(text)).toEqual({ t: "req", id: 1, ch, a: [] });
+  });
+
+  it("auth:passkeyBegin passes isChannel", () => {
+    const text = JSON.stringify({ t: "req", id: 2, ch: "auth:passkeyBegin", a: [] });
+    expect(parseClientMessage(text)).toMatchObject({ t: "req", ch: "auth:passkeyBegin" });
+  });
+});
+
+describe("parseAuthArgs", () => {
+  const HEX64 = "0123456789abcdef".repeat(4);
+  const B64 = "AbC-_9";
+  const finish = {
+    credentialId: B64,
+    clientDataJSON: B64,
+    authenticatorData: B64,
+    signature: B64,
+  };
+  const registerFinish = {
+    credentialId: B64,
+    clientDataJSON: B64,
+    attestationObject: B64,
+    label: "My laptop",
+  };
+
+  it.each<[string, unknown[], unknown]>([
+    ["auth:status", [], {}],
+    ["auth:status", [{}], {}],
+    ["auth:passkeyBegin", [], {}],
+    ["auth:logout", [{ extra: 1 }], {}],
+    ["auth:login", [{ password: "p" }], { password: "p" }],
+    ["auth:login", [{ password: "x".repeat(1024) }], { password: "x".repeat(1024) }],
+    ["auth:refresh", [{ refreshToken: HEX64 }], { refreshToken: HEX64 }],
+    ["auth:resume", [{ accessToken: HEX64 }], { accessToken: HEX64 }],
+    ["auth:passkeyFinish", [finish], finish],
+    ["auth:passkeyFinish", [{ ...finish, userHandle: B64 }], { ...finish, userHandle: B64 }],
+    ["auth:passkeyRegisterBegin", [{ password: "p" }], { password: "p" }],
+    ["auth:passkeyRegisterFinish", [registerFinish], registerFinish],
+    [
+      "auth:passkeyRegisterFinish",
+      [{ ...registerFinish, attestationObject: "A".repeat(65_536), label: "l".repeat(64) }],
+      { ...registerFinish, attestationObject: "A".repeat(65_536), label: "l".repeat(64) },
+    ],
+  ])("%s accepts %j", (ch, args, expected) => {
+    expect(parseAuthArgs(ch, args)).toEqual(expected);
+  });
+
+  it("an oversized password is bad-request (undefined)", () => {
+    expect(parseAuthArgs("auth:login", [{ password: "x".repeat(1025) }])).toBeUndefined();
+    expect(
+      parseAuthArgs("auth:passkeyRegisterBegin", [{ password: "x".repeat(1025) }]),
+    ).toBeUndefined();
+  });
+
+  it.each<[string, string, unknown[]]>([
+    ["unknown channel", "auth:nope", []],
+    ["non-auth channel", "remote:decidePair", [{}]],
+    ["prototype key as channel", "__proto__", []],
+    ["two args", "auth:status", [{}, {}]],
+    ["non-object arg", "auth:status", ["x"]],
+    ["array arg", "auth:status", [[]]],
+    ["null arg", "auth:status", [null]],
+    ["login with no args", "auth:login", []],
+    ["empty password", "auth:login", [{ password: "" }]],
+    ["numeric password", "auth:login", [{ password: 1234 }]],
+    ["short refresh token", "auth:refresh", [{ refreshToken: "a".repeat(63) }]],
+    ["upper-case refresh token", "auth:refresh", [{ refreshToken: HEX64.toUpperCase() }]],
+    ["access token given as refresh key", "auth:resume", [{ refreshToken: HEX64 }]],
+    ["non-hex access token", "auth:resume", [{ accessToken: "g".repeat(64) }]],
+    [
+      "passkey finish missing signature",
+      "auth:passkeyFinish",
+      [{ ...finish, signature: undefined }],
+    ],
+    ["passkey finish with padding", "auth:passkeyFinish", [{ ...finish, signature: "AA==" }]],
+    ["passkey finish with + char", "auth:passkeyFinish", [{ ...finish, clientDataJSON: "a+b" }]],
+    ["passkey finish with empty field", "auth:passkeyFinish", [{ ...finish, credentialId: "" }]],
+    [
+      "passkey finish field over 16384",
+      "auth:passkeyFinish",
+      [{ ...finish, authenticatorData: "A".repeat(16_385) }],
+    ],
+    [
+      "passkey finish with null userHandle",
+      "auth:passkeyFinish",
+      [{ ...finish, userHandle: null }],
+    ],
+    [
+      "attestationObject over 65536",
+      "auth:passkeyRegisterFinish",
+      [{ ...registerFinish, attestationObject: "A".repeat(65_537) }],
+    ],
+    [
+      "register clientDataJSON over 16384",
+      "auth:passkeyRegisterFinish",
+      [{ ...registerFinish, clientDataJSON: "A".repeat(16_385) }],
+    ],
+    ["empty label", "auth:passkeyRegisterFinish", [{ ...registerFinish, label: "" }]],
+    ["65-char label", "auth:passkeyRegisterFinish", [{ ...registerFinish, label: "l".repeat(65) }]],
+    ["label with a newline", "auth:passkeyRegisterFinish", [{ ...registerFinish, label: "a\nb" }]],
+    [
+      "label with a bidi override",
+      "auth:passkeyRegisterFinish",
+      [{ ...registerFinish, label: "a\u202Eb" }],
+    ],
+    ["non-string label", "auth:passkeyRegisterFinish", [{ ...registerFinish, label: 5 }]],
+  ])("%s is bad-request (undefined)", (_label, ch, args) => {
+    expect(parseAuthArgs(ch, args)).toBeUndefined();
+  });
+
+  it("rebuilds the args field by field, so extra keys and an own __proto__ go nowhere [bite-proof]", () => {
+    const parsed = JSON.parse(
+      `{"password":"p","extra":1,"__proto__":{"polluted":true}}`,
+    ) as unknown;
+    const result = parseAuthArgs("auth:login", [parsed]);
+    expect(result).toEqual({ password: "p" });
+    expect(Object.keys(result as object)).toEqual(["password"]);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("omits an absent userHandle rather than setting it to undefined", () => {
+    const result = parseAuthArgs("auth:passkeyFinish", [finish]);
+    expect(Object.keys(result as object)).not.toContain("userHandle");
   });
 });

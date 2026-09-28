@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFakeTransport } from "./fake-transport";
-import { createTrustRoutingTransport } from "./trust-routing-transport";
+import { createAppTransport, createTrustRoutingTransport } from "./trust-routing-transport";
 
 describe("createTrustRoutingTransport", () => {
   it("routes a pin-trust open to the pin transport, with the same url/trust/onEvent", () => {
@@ -44,5 +44,39 @@ describe("createTrustRoutingTransport", () => {
 
     expect(system.sockets[0]?.sent).toEqual(["hi"]);
     expect(system.sockets[0]?.closedWith).toEqual({ code: 1000, reason: "done" });
+  });
+});
+
+describe("createAppTransport (Task 13: web always uses system transport)", () => {
+  it("on web, sends even a pin-trust open to the system transport, never the pin one", () => {
+    const pin = createFakeTransport();
+    const system = createFakeTransport();
+    const transport = createAppTransport("web", { pin, system });
+
+    transport.open(
+      "wss://192.168.1.5:4317/rpc",
+      { kind: "pin", fingerprint: "a".repeat(64) },
+      () => {},
+    );
+    transport.open("wss://mac.tail.ts.net:4317/rpc", { kind: "system" }, () => {});
+
+    expect(pin.sockets).toHaveLength(0);
+    expect(system.sockets).toHaveLength(2);
+  });
+
+  it("on native, routes by trust kind exactly as createTrustRoutingTransport does", () => {
+    const pin = createFakeTransport();
+    const system = createFakeTransport();
+    const transport = createAppTransport("native", { pin, system });
+
+    transport.open(
+      "wss://192.168.1.5:4317/rpc",
+      { kind: "pin", fingerprint: "a".repeat(64) },
+      () => {},
+    );
+    transport.open("wss://mac.tail.ts.net:4317/rpc", { kind: "system" }, () => {});
+
+    expect(pin.sockets).toHaveLength(1);
+    expect(system.sockets).toHaveLength(1);
   });
 });

@@ -853,6 +853,16 @@ describe("createSessionImporter", () => {
     expect(setup.closed).toBe(1);
   });
 
+  it("opens no watch when stopped while its backfill is still running", async () => {
+    const setup = world({});
+    const importer = createSessionImporter(setup.deps);
+    const started = importer.start();
+    importer.stop();
+    await started;
+
+    expect(setup.watched).toEqual([]);
+  });
+
   describe("latestTranscriptFor", () => {
     // process-scan.ts's own use: a running process was found by pid, and
     // this is the only way to attach a summary to it — by the exact
