@@ -30,7 +30,10 @@
 // textarea in the app's own document: a click on the terminal moves focus
 // into the frame, and this takes it straight back. Every key it reads
 // stops there, so nothing typed into the terminal reaches the shell's own
-// handlers (terminal-keyboard.ts has the routing rules).
+// handlers (terminal-keyboard.ts has the routing rules). A copy chord
+// copies the page's last reported selection (its one content-bearing
+// message, which only ever goes to the clipboard); a paste chord is left
+// to the browser, whose paste event sends the clipboard.
 import {
   forwardRef,
   useCallback,
@@ -39,6 +42,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type CompositionEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -46,7 +50,7 @@ import { StyleSheet, View } from "react-native";
 import { realClock } from "@/lib/clock";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { pasteInput, routeTerminalKey } from "@/lib/terminal-keyboard";
+import { composedInput, pasteInput, routeTerminalKey, strayInput } from "@/lib/terminal-keyboard";
 import { ATTACH_BUFFER_MAX_CHARS } from "@/lib/session-stream";
 import type { NativeMessage } from "@/lib/terminal-protocol";
 import { encodeNativeMessage, parseFrameMessage } from "@/lib/terminal-protocol";
@@ -69,6 +73,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     hardwareInputRef.current = onHardwareInput;
     const keysEnabled = onHardwareInput !== undefined;
     const [keysFocused, setKeysFocused] = useState(false);
+    // The page's current mouse selection ("" for none).
+    const selectionRef = useRef("");
     const readyRef = useRef(false);
     const attachBufferRef = useRef("");
     const attachOverflowedRef = useRef(false);
@@ -124,6 +130,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     );
 
     const reset = useCallback(() => {
+      selectionRef.current = "";
       getBatcher().clear();
       attachBufferRef.current = "";
       attachOverflowedRef.current = false;
@@ -192,6 +199,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
           case "wheel":
             onWheel(message.direction);
             return;
+          case "selection":
+            selectionRef.current = message.text;
+            return;
         }
       }
       window.addEventListener("message", handleMessage);
@@ -222,12 +232,28 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       };
     }, [keysEnabled]);
 
-    const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
-      const route = routeTerminalKey(event.nativeEvent);
-      if (route.stopPropagation) event.stopPropagation();
-      if (route.preventDefault) event.preventDefault();
-      if (route.input !== undefined) hardwareInputRef.current?.(route.input);
-    }, []);
+    const handleKeyDown = useCallback(
+      (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        const route = routeTerminalKey(event.nativeEvent, {
+          hasSelection: selectionRef.current !== "",
+        });
+        if (route.stopPropagation) event.stopPropagation();
+        if (route.preventDefault) event.preventDefault();
+        if (route.copy) {
+          // Inside the key gesture, so the browser allows the write. The
+          // selection is then dropped, so the next Ctrl+C interrupts.
+          const text = selectionRef.current;
+          void navigator.clipboard?.writeText(text).catch(() => {
+            console.log("[terminal] copy to the clipboard was refused");
+          });
+          selectionRef.current = "";
+          postToPage({ t: "clearSelection" });
+          return;
+        }
+        if (route.input !== undefined) hardwareInputRef.current?.(route.input);
+      },
+      [postToPage],
+    );
 
     const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
       event.preventDefault();
@@ -236,14 +262,19 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       if (input !== undefined) hardwareInputRef.current?.(input);
     }, []);
 
-    // Text the keydown handler left alone (an IME or dead-key composition)
-    // lands in the textarea once composed: send it and clear.
+    // An IME or dead-key composition, sent once when committed (Chrome
+    // commits with a composing input event and then compositionend;
+    // Safari fires compositionend and then a plain input event).
+    const handleCompositionEnd = useCallback((event: CompositionEvent<HTMLTextAreaElement>) => {
+      const input = composedInput(event.currentTarget, event.data);
+      if (input !== undefined) hardwareInputRef.current?.(input);
+    }, []);
+
+    // Any other text the keydown handler left alone: send it and clear.
     const handleInput = useCallback((event: FormEvent<HTMLTextAreaElement>) => {
-      const target = event.currentTarget;
-      if ((event.nativeEvent as InputEvent).isComposing || target.value === "") return;
-      const text = target.value;
-      target.value = "";
-      hardwareInputRef.current?.({ kind: "text", text });
+      const composing = (event.nativeEvent as InputEvent).isComposing;
+      const input = strayInput(event.currentTarget, composing);
+      if (input !== undefined) hardwareInputRef.current?.(input);
     }, []);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on fixedSize's own cols/rows, deliberately not the object itself — a new object with the same values must not re-post.
@@ -273,6 +304,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onInput={handleInput}
+            onCompositionEnd={handleCompositionEnd}
             onFocus={() => setKeysFocused(true)}
             onBlur={() => setKeysFocused(false)}
             style={CAPTURE_STYLE}

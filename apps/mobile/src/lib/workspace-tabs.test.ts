@@ -10,6 +10,7 @@ import {
   terminalPaneFor,
   toolTabId,
   withoutTool,
+  workspaceHostKey,
   workspaceLayout,
   workspaceRedirectFor,
   workspaceTabsFrom,
@@ -45,17 +46,37 @@ const SNAPSHOT = {
 };
 
 describe("workspaceTabsFrom", () => {
-  it("keeps the snapshot's own order for the inline kinds, then the open tools", () => {
+  it("keeps the snapshot's own order, then the open tools", () => {
     const tabs = workspaceTabsFrom(SNAPSHOT, ["changes", "docker"], "en");
-    expect(tabs.map((t) => t.id)).toEqual(["t2", "d1", "t1", "a1", "tool:changes", "tool:docker"]);
+    expect(tabs.map((t) => t.id)).toEqual([
+      "t2",
+      "w1",
+      "d1",
+      "e1",
+      "t1",
+      "a1",
+      "tool:changes",
+      "tool:docker",
+    ]);
     expect(tabs.map((t) => t.kind)).toEqual([
       "terminal",
+      "web",
       "docker",
+      "editor",
       "terminal",
       "api",
       "changes",
       "docker",
     ]);
+  });
+
+  it("lists every laptop tab the phone lists; only terminal/docker/api and tools are inline", () => {
+    const all = (
+      ["web", "editor", "database", "terminal", "api", "cluster", "docker", "chat"] as const
+    ).map((kind, i) => tab(`x${i}`, kind, kind));
+    const tabs = workspaceTabsFrom({ tabs: all }, [], "en");
+    expect(tabs.map((t) => t.id)).toEqual(all.map((t) => t.id));
+    expect(tabs.filter((t) => t.inline).map((t) => t.kind)).toEqual(["terminal", "api", "docker"]);
   });
 
   it("titles laptop tabs verbatim and tools from the strings table", () => {
@@ -100,6 +121,11 @@ describe("activeTab", () => {
   });
   it("falls back to the first tab for an unknown param", () => {
     expect(activeTab(tabs, "nope")).toBe("t2");
+  });
+  it("never selects a tab that opens elsewhere (web, chat, sidecars)", () => {
+    expect(activeTab(tabs, "w1")).toBe("t2");
+    const external = workspaceTabsFrom({ tabs: [tab("w1", "web", "Docs")] }, [], "en");
+    expect(activeTab(external, undefined)).toBeUndefined();
   });
   it("is undefined with no tabs", () => {
     expect(activeTab([], "t1")).toBeUndefined();
@@ -199,9 +225,24 @@ describe("workspaceLayout", () => {
   });
 });
 
+describe("workspaceHostKey", () => {
+  const tabs = workspaceTabsFrom(SNAPSHOT, ["docker"], "en");
+  const find = (id: string) => tabs.find((t) => t.id === id);
+  it("is the pane for a terminal, a placeholder until its inventory is read", () => {
+    expect(workspaceHostKey(find("t1"), "t1:p2", "acme")).toBe("t1:p2");
+    expect(workspaceHostKey(find("t1"), undefined, "acme")).toBe("loading:t1");
+  });
+  it("is the tab and project for a tool, and nothing for no tab or an external one", () => {
+    expect(workspaceHostKey(find("tool:docker"), undefined, "acme")).toBe("tool:docker@acme");
+    expect(workspaceHostKey(find("w1"), undefined, "acme")).toBeUndefined();
+    expect(workspaceHostKey(undefined, undefined, "acme")).toBeUndefined();
+  });
+});
+
 // Review Focus 2: crossing the breakpoint keeps the same pty. The screen
 // mounts the active pane under a host whose React key is
-// `workspaceLayout(...).paneKey`, and the pane attaches on mount. This
+// `workspaceLayout(kind, workspaceHostKey(...)).paneKey`, and the pane
+// attaches on mount. This
 // drives that rule with the real terminal stream over a fake rpc: the
 // host re-attaches only when the key changes, as React does.
 describe("RF2: attach count across the breakpoint", () => {
@@ -245,10 +286,13 @@ describe("RF2: attach count across the breakpoint", () => {
     const tabs = workspaceTabsFrom(SNAPSHOT, [], "en");
     const panes = [{ paneKey: "t1", exited: false }];
     for (const kind of ["wide", "phone", "wide"] as const) {
-      const active = activeTab(tabs, "t1");
+      const activeId = activeTab(tabs, "t1");
+      const active = tabs.find((t) => t.id === activeId);
       const paneKey = terminalPaneFor({ tabId: "t1", panes, panesTabId: "t1" });
-      expect(active).toBe("t1");
-      render(workspaceLayout(kind, paneKey).paneKey);
+      expect(activeId).toBe("t1");
+      const key = workspaceLayout(kind, workspaceHostKey(active, paneKey, "acme")).paneKey;
+      // The loading placeholder never attaches; only a pane key does.
+      render(key?.startsWith("loading:") ? undefined : key);
     }
     expect(attaches).toEqual(["t1"]);
   });

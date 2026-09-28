@@ -14,7 +14,11 @@ export type PageMessage =
   // direction, never anything read from the terminal's own content. The
   // native side turns this into a `terminal:input`/`session:input` SGR
   // mouse-wheel escape sequence.
-  | { t: "wheel"; direction: "up" | "down" };
+  | { t: "wheel"; direction: "up" | "down" }
+  // Wide layout (Task 4 fix round 1): the browser build's current mouse
+  // selection ("" once cleared). Written to the clipboard on the user's
+  // copy chord only; never sent to the pty or any RPC.
+  | { t: "selection"; text: string };
 
 export type NativeMessage =
   | { t: "write"; data: string }
@@ -24,16 +28,23 @@ export type NativeMessage =
   // terminal to exactly this rather than fitting to the WebView's own
   // dimensions, so a phone attaching to a pane the desktop already sized
   // renders it correctly instead of garbling wrapped lines.
-  | { t: "size"; cols: number; rows: number };
+  | { t: "size"; cols: number; rows: number }
+  // After a copy: drop the selection, so the next Ctrl+C interrupts again.
+  | { t: "clearSelection" };
 
 const MAX_TEXT_LENGTH = 256;
+/** The longest selection the page posts (it cuts longer ones). */
+export const MAX_SELECTION_CHARS = 100_000;
+// A selection message's own envelope: {"t":"selection","text":""} plus
+// JSON escaping headroom (a control character escapes to 6 chars).
+const MAX_SELECTION_MESSAGE_LENGTH = MAX_SELECTION_CHARS * 6 + 64;
 
 function isDimension(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 1000;
 }
 
 export function parsePageMessage(text: unknown): PageMessage | undefined {
-  if (typeof text !== "string" || text.length > MAX_TEXT_LENGTH) {
+  if (typeof text !== "string" || text.length > MAX_SELECTION_MESSAGE_LENGTH) {
     return undefined;
   }
   let parsed: unknown;
@@ -46,6 +57,8 @@ export function parsePageMessage(text: unknown): PageMessage | undefined {
     return undefined;
   }
   const obj = parsed as Record<string, unknown>;
+  // Only a selection may be long; every other message stays tiny.
+  if (obj.t !== "selection" && text.length > MAX_TEXT_LENGTH) return undefined;
   switch (obj.t) {
     case "ready":
     case "resize":
@@ -56,6 +69,11 @@ export function parsePageMessage(text: unknown): PageMessage | undefined {
     case "modes":
       if (typeof obj.applicationCursor === "boolean") {
         return { t: "modes", applicationCursor: obj.applicationCursor };
+      }
+      return undefined;
+    case "selection":
+      if (typeof obj.text === "string" && obj.text.length <= MAX_SELECTION_CHARS) {
+        return { t: "selection", text: obj.text };
       }
       return undefined;
     case "wheel":

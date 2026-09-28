@@ -1,7 +1,8 @@
 // Wide layout (2026-09-28 spec §3): the desktop-style Workspace. A tab
-// strip of the laptop's open terminal/Docker/API tabs for the selected
-// project, then the tools the user opened here (Docker, API, Changes),
-// with the active one rendered inline. The selection is the `?tab=`
+// strip of every laptop tab the selected project has open, then the tools
+// the user opened here (Docker, API, Changes). Terminal, Docker and API
+// tabs render inline, the active one below the strip; the rest (web pages,
+// chats, sidecars) do on a press exactly what the phone's list does. The selection is the `?tab=`
 // search param (and `?pane=` for a terminal tab's pane). A phone keeps
 // pushing each view's own full-screen route. Pure so the rules are unit
 // tested.
@@ -13,14 +14,24 @@ import type { LayoutClass } from "./layout-class";
 export type WorkspaceTabKind = "terminal" | "docker" | "api" | "changes";
 export type WorkspaceToolKind = "docker" | "api" | "changes";
 
+/** Laptop tabs a wide screen cannot show inline. */
+export type LaptopOnlyKind = "web" | "chat" | "editor" | "database" | "cluster";
+
 export type WorkspaceTabItem = {
   id: string;
-  kind: WorkspaceTabKind;
   title: string;
   /** Tools opened here can be closed; the laptop's own tabs cannot (a
    *  phone never rearranges the laptop's window). */
   closable: boolean;
-};
+} & (
+  | { inline: true; kind: WorkspaceTabKind }
+  | {
+      /** Never selected: a press opens it the phone's way (a browser tab,
+       *  or the sidecars screen). */
+      inline: false;
+      kind: LaptopOnlyKind;
+    }
+);
 
 const TOOL_PREFIX = "tool:";
 const TOOL_KINDS: readonly WorkspaceToolKind[] = ["docker", "api", "changes"];
@@ -30,8 +41,7 @@ const TOOL_TITLE_KEYS = {
   changes: "dashboard.changes",
 } as const;
 
-/** The laptop tab kinds a wide screen renders inline. Sidecars, web pages
- *  and chats keep their own routes (a new browser tab on web). */
+/** The laptop tab kinds a wide screen renders inline. */
 function inlineKind(kind: MobileWorkspaceTab["kind"]): kind is "terminal" | "docker" | "api" {
   return kind === "terminal" || kind === "docker" || kind === "api";
 }
@@ -46,8 +56,8 @@ function toolFromTabId(id: string | undefined): WorkspaceToolKind | undefined {
   return TOOL_KINDS.find((tool) => tool === kind);
 }
 
-/** The strip: the snapshot's inline tabs in its own order, then the open
- *  tools in the order they were opened. */
+/** The strip: the snapshot's tabs in its own order, then the open tools in
+ *  the order they were opened. */
 export function workspaceTabsFrom(
   snapshot: { tabs: readonly MobileWorkspaceTab[] },
   openTools: readonly WorkspaceToolKind[],
@@ -55,14 +65,18 @@ export function workspaceTabsFrom(
 ): WorkspaceTabItem[] {
   const tabs: WorkspaceTabItem[] = [];
   for (const tab of snapshot.tabs) {
-    if (!inlineKind(tab.kind)) continue;
     // Server-originated text: shown verbatim.
-    tabs.push({ id: tab.id, kind: tab.kind, title: tab.title, closable: false });
+    if (inlineKind(tab.kind)) {
+      tabs.push({ id: tab.id, kind: tab.kind, inline: true, title: tab.title, closable: false });
+    } else {
+      tabs.push({ id: tab.id, kind: tab.kind, inline: false, title: tab.title, closable: false });
+    }
   }
   for (const tool of new Set(openTools)) {
     tabs.push({
       id: toolTabId(tool),
       kind: tool,
+      inline: true,
       title: t(language, TOOL_TITLE_KEYS[tool]),
       closable: true,
     });
@@ -89,10 +103,26 @@ export function withoutTool(
   return openTools.filter((open) => open !== tool);
 }
 
-/** The selected tab: the param when it names one, otherwise the first. */
+/** The selected tab: the param when it names an inline tab, otherwise the
+ *  first inline tab. */
 export function activeTab(tabs: readonly WorkspaceTabItem[], param?: string): string | undefined {
-  if (param !== undefined && tabs.some((tab) => tab.id === param)) return param;
-  return tabs[0]?.id;
+  const inline = tabs.filter((tab) => tab.inline);
+  if (param !== undefined && inline.some((tab) => tab.id === param)) return param;
+  return inline[0]?.id;
+}
+
+/** The React key of the active tab's inline content: the pane for a
+ *  terminal (a placeholder key until its inventory is read), else the tab
+ *  and project. Never the layout, so crossing the breakpoint keeps the
+ *  same mounted content (Review Focus 2). */
+export function workspaceHostKey(
+  active: WorkspaceTabItem | undefined,
+  paneKey: string | undefined,
+  project: string,
+): string | undefined {
+  if (active === undefined || !active.inline) return undefined;
+  if (active.kind === "terminal") return paneKey ?? `loading:${active.id}`;
+  return `${active.id}@${project}`;
 }
 
 export type WorkspaceTargetTab = {

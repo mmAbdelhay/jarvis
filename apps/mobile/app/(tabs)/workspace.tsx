@@ -44,6 +44,7 @@ import {
   terminalPaneFor,
   toolTabId,
   withoutTool,
+  workspaceHostKey,
   workspaceLayout,
   workspaceTabsFrom,
   workspaceTarget,
@@ -209,7 +210,7 @@ export default function WorkspaceScreen() {
   const tabs = workspaceTabsFrom({ tabs: selected?.tabs ?? [] }, tools, language);
   const activeId = wide
     ? activeTab(tabs, tabParam)
-    : tabs.some((tab) => tab.id === tabParam)
+    : tabs.some((tab) => tab.inline && tab.id === tabParam)
       ? tabParam
       : undefined;
   const active = tabs.find((tab) => tab.id === activeId);
@@ -226,13 +227,7 @@ export default function WorkspaceScreen() {
   const project = view.selectedProject ?? "";
   // The inline content's React key: the pane, or the tab and project,
   // never the layout, so crossing the breakpoint keeps it mounted.
-  const hostKey =
-    active === undefined
-      ? undefined
-      : active.kind === "terminal"
-        ? (paneKey ?? `loading:${active.id}`)
-        : `${active.id}@${project}`;
-  const layout = workspaceLayout(kind, hostKey);
+  const layout = workspaceLayout(kind, workspaceHostKey(active, paneKey, project));
 
   // A tab param from another project (a redirected deep link) selects
   // that project.
@@ -258,6 +253,12 @@ export default function WorkspaceScreen() {
   }, [focused, activeTerminal, store]);
 
   function selectTab(tab: WorkspaceTabItem): void {
+    if (!tab.inline) {
+      // A web page, chat or sidecar: exactly what the phone's row does.
+      const laptopTab = selected?.tabs.find((candidate) => candidate.id === tab.id);
+      if (selected !== undefined && laptopTab !== undefined) openTab(selected.name, laptopTab);
+      return;
+    }
     openWorkspaceTab(router, workspaceTarget(kind, { id: tab.id, kind: tab.kind, project }));
   }
 
@@ -272,6 +273,10 @@ export default function WorkspaceScreen() {
       void handleNewTerminal(selected.name);
       return;
     }
+    if (tool === "chat") {
+      void loadChatNames(selected.name);
+      return;
+    }
     if (tool === "editor" || tool === "database" || tool === "cluster") {
       // Sidecars keep their own screen: a new browser tab on web, the
       // sidecar view on native.
@@ -279,7 +284,7 @@ export default function WorkspaceScreen() {
       return;
     }
     setOpenTools(openToolsWith(tools, toolTabId(tool)));
-    selectTab({ id: toolTabId(tool), kind: tool, title: "", closable: true });
+    selectTab({ id: toolTabId(tool), kind: tool, inline: true, title: "", closable: true });
   }
 
   const errorText =
@@ -382,6 +387,11 @@ export default function WorkspaceScreen() {
               onSelectProject={selectProject}
               terminalBusy={terminalBusy}
               onTool={pickTool}
+              chatNames={chatNames}
+              chatBusy={chatBusy}
+              onOpenChat={(name) => {
+                if (selected !== undefined) void openChat(selected.name, name);
+              }}
               tabs={tabs}
               activeId={activeId}
               onSelectTab={selectTab}

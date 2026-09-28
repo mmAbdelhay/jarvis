@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { encodeNativeMessage, parseFrameMessage, parsePageMessage } from "./terminal-protocol";
+import {
+  encodeNativeMessage,
+  MAX_SELECTION_CHARS,
+  parseFrameMessage,
+  parsePageMessage,
+} from "./terminal-protocol";
 
 describe("parsePageMessage", () => {
   it("parses a valid ready message to exactly its fields", () => {
@@ -140,5 +145,39 @@ describe("parseFrameMessage (web iframe, Task 13)", () => {
     expect(
       parseFrameMessage({ source: frameWindow, data: { t: "ready" } }, frameWindow),
     ).toBeUndefined();
+  });
+});
+
+describe("parsePageMessage: selection (wide layout, fix round 1)", () => {
+  it("accepts a selection's text, including a long one up to the limit", () => {
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: "ls -la" }))).toEqual({
+      t: "selection",
+      text: "ls -la",
+    });
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: "" }))).toEqual({
+      t: "selection",
+      text: "",
+    });
+    const long = "z".repeat(MAX_SELECTION_CHARS);
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: long }))).toEqual({
+      t: "selection",
+      text: long,
+    });
+  });
+
+  it("rejects a selection over the limit, or without string text", () => {
+    const over = "z".repeat(MAX_SELECTION_CHARS + 1);
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: over }))).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: 5 }))).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "selection" }))).toBeUndefined();
+  });
+
+  it("keeps every other message type under 256 chars", () => {
+    const text = JSON.stringify({ t: "wheel", direction: "up", pad: "x".repeat(300) });
+    expect(parsePageMessage(text)).toBeUndefined();
+  });
+
+  it("encodes clearSelection for the page", () => {
+    expect(encodeNativeMessage({ t: "clearSelection" })).toBe('{"t":"clearSelection"}');
   });
 });

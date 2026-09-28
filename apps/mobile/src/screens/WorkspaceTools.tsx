@@ -40,7 +40,8 @@ export type WorkspaceTool =
   | "editor"
   | "database"
   | "cluster"
-  | "changes";
+  | "changes"
+  | "chat";
 
 // The desktop's order.
 const TOOLS: readonly { tool: WorkspaceTool; label: MessageKey }[] = [
@@ -51,6 +52,9 @@ const TOOLS: readonly { tool: WorkspaceTool; label: MessageKey }[] = [
   { tool: "database", label: "sidecars.database" },
   { tool: "cluster", label: "sidecars.cluster" },
   { tool: "changes", label: "dashboard.changes" },
+  // The phone's Chat action: lists the project's chats, each opening in
+  // the browser.
+  { tool: "chat", label: "workspace.chat" },
 ];
 
 /** Wide: the project picker, the tool buttons, the tab strip and, for a
@@ -62,6 +66,10 @@ export function WorkspaceTools(props: {
   onSelectProject(name: string): void;
   terminalBusy: boolean;
   onTool(tool: WorkspaceTool): void;
+  /** Chat names once the Chat tool has listed them. */
+  chatNames: readonly string[] | undefined;
+  chatBusy: boolean;
+  onOpenChat(name: string): void;
   tabs: readonly WorkspaceTabItem[];
   activeId: string | undefined;
   onSelectTab(tab: WorkspaceTabItem): void;
@@ -81,7 +89,8 @@ export function WorkspaceTools(props: {
       />
       <View style={styles.toolRow}>
         {TOOLS.map(({ tool, label }) => {
-          const busy = tool === "terminal" && props.terminalBusy;
+          const busy =
+            (tool === "terminal" && props.terminalBusy) || (tool === "chat" && props.chatBusy);
           return (
             <TouchableOpacity
               key={tool}
@@ -91,12 +100,34 @@ export function WorkspaceTools(props: {
               accessibilityRole="button"
             >
               <Text style={styles.toolText}>
-                {busy ? t(language, "workspace.openingTerminal") : t(language, label)}
+                {tool === "terminal" && busy
+                  ? t(language, "workspace.openingTerminal")
+                  : t(language, label)}
               </Text>
             </TouchableOpacity>
           );
         })}
       </View>
+      {props.chatNames !== undefined && (
+        <View style={styles.toolRow}>
+          {props.chatNames.length === 0 ? (
+            <Text style={styles.empty}>{t(language, "workspace.chatUnavailable")}</Text>
+          ) : (
+            props.chatNames.map((name) => (
+              <TouchableOpacity
+                key={name}
+                style={styles.tool}
+                disabled={props.chatBusy}
+                onPress={() => props.onOpenChat(name)}
+                accessibilityRole="button"
+              >
+                {/* Server-originated text: shown verbatim. */}
+                <Text style={styles.toolText}>↗ {name}</Text>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      )}
       {props.tabs.length > 0 && (
         <View style={styles.strip} accessibilityRole="tablist">
           {props.tabs.map((tab) => {
@@ -106,10 +137,13 @@ export function WorkspaceTools(props: {
                 <TouchableOpacity
                   style={styles.tabButton}
                   onPress={() => props.onSelectTab(tab)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
+                  // A tab that opens elsewhere is an action, not a selection.
+                  accessibilityRole={tab.inline ? "tab" : "button"}
+                  accessibilityState={tab.inline ? { selected: active } : undefined}
                 >
-                  <Text style={styles.tabKind}>{tab.kind === "terminal" ? ">_" : "▣"}</Text>
+                  <Text style={styles.tabKind}>
+                    {tab.kind === "terminal" ? ">_" : tab.inline ? "▣" : "↗"}
+                  </Text>
                   <Text
                     style={[styles.tabTitle, active && styles.tabTitleActive]}
                     numberOfLines={1}
@@ -221,6 +255,7 @@ const styles = StyleSheet.create({
   tabClose: { height: 32, justifyContent: "center", paddingHorizontal: 8 },
   tabCloseText: { color: theme.colors.textDim, fontSize: 14 },
   paneRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  empty: { color: theme.colors.textMuted, fontSize: theme.font.size.sm },
   pane: {
     paddingHorizontal: 10,
     paddingVertical: 4,

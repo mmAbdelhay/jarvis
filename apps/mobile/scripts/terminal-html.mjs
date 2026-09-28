@@ -202,6 +202,13 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'document.getElementById("t").addEventListener("touchcancel",function(){' +
     "controller.touchEnd();" +
     "},{passive:true});" +
+    // Wide layout: the browser build tells its parent what is selected,
+    // so a copy chord in the app can copy it (the app's capture element
+    // holds the keyboard focus, not this frame). Never on native.
+    "term.onSelectionChange(function(){" +
+    "if(window.ReactNativeWebView)return;" +
+    "controller.selectionChanged();" +
+    "});" +
     "controller.start();" +
     "})();"
   );

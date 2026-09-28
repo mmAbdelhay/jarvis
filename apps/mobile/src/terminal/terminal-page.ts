@@ -13,6 +13,12 @@
 // page compromised by attacker-controlled terminal output still can't say
 // anything back except its own size, mode bits and touch gestures
 // (global-constraints.md, "the WebView never produces pty bytes").
+//
+// Wide layout (Task 4 fix round 1): the one exception is `selection`, the
+// text the user has selected with the mouse, posted only by the browser
+// build (the boot code wires it only without a ReactNativeWebView bridge).
+// The app only ever writes it to the clipboard on the user's own copy
+// chord; it never reaches the pty or any RPC.
 
 export type MouseTrackingMode = "none" | "x10" | "vt200" | "drag" | "any";
 
@@ -40,7 +46,14 @@ export type PageTerminal = {
    *  (toward the newest line), negative scrolls up (toward scrollback),
    *  matching xterm's own `Terminal.scrollLines`. */
   scrollLines(amount: number): void;
+  /** The mouse selection's text ("" for none), as xterm's own. */
+  getSelection(): string;
+  clearSelection(): void;
 };
+
+// terminal-protocol.ts's MAX_SELECTION_CHARS: a longer selection is
+// posted cut to this length (this file cannot import it).
+const MAX_SELECTION_CHARS = 100000;
 
 export type PageDeps = {
   term: PageTerminal;
@@ -71,6 +84,8 @@ export function createPageController(deps: PageDeps): {
   touchStart(): void;
   touchMove(dy: number): void;
   touchEnd(): void;
+  // Wired to xterm's onSelectionChange in the browser build only.
+  selectionChanged(): void;
 } {
   let lastCols = -1;
   let lastRows = -1;
@@ -81,6 +96,7 @@ export function createPageController(deps: PageDeps): {
   // Bug 9: the running, not-yet-consumed touch-drag distance (device px)
   // since the last touchStart/whole line-height step.
   let touchAccumulator = 0;
+  let lastSelection = "";
 
   function postModesIfChanged(): void {
     const current = deps.term.modes.applicationCursorKeysMode;
@@ -147,6 +163,10 @@ export function createPageController(deps: PageDeps): {
       postModesIfChanged();
       return;
     }
+    if (obj.t === "clearSelection") {
+      deps.term.clearSelection();
+      return;
+    }
     if (obj.t === "fit") {
       layoutChanged();
       return;
@@ -200,5 +220,12 @@ export function createPageController(deps: PageDeps): {
     touchAccumulator = 0;
   }
 
-  return { receive, start, layoutChanged, touchStart, touchMove, touchEnd };
+  function selectionChanged(): void {
+    const text = deps.term.getSelection().slice(0, MAX_SELECTION_CHARS);
+    if (text === lastSelection) return;
+    lastSelection = text;
+    deps.post(JSON.stringify({ t: "selection", text }));
+  }
+
+  return { receive, start, layoutChanged, touchStart, touchMove, touchEnd, selectionChanged };
 }
