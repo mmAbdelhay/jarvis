@@ -361,8 +361,20 @@ export async function createControlServer(
       if (!listener.listening) return resolve();
       listener.close(() => resolve());
     });
+  // A clean stop takes its secret (and, on Windows, the published pipe name)
+  // with it, while it still holds the lock — the next start writes fresh ones.
+  const removePublished = async () => {
+    for (const path of unix ? [paths.secretPath] : [paths.secretPath, paths.endpointPath]) {
+      await deps.fs.unlink(path).catch(() => {});
+    }
+  };
   const close = async () => {
     await stopListening();
+    await lock.release();
+  };
+  const closeClean = async () => {
+    await stopListening();
+    await removePublished();
     await lock.release();
   };
 
@@ -436,7 +448,7 @@ export async function createControlServer(
       get connectionCount() {
         return clients.size;
       },
-      close,
+      close: closeClean,
     },
   };
 }

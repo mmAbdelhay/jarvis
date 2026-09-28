@@ -73,4 +73,17 @@ describe("threadPaths", () => {
     const starts = paths.map((path) => path.split(" C ")[0]);
     expect(new Set(starts).size).toBe(2);
   });
+
+  it("draws nothing while the orb has no size (hidden, or the window closing) — never a NaN path", () => {
+    // A zero radius made the lean 0/0 = NaN: "M NaN NaN C …" in the console.
+    for (const radius of [0, Number.NaN]) {
+      const paths = threadPaths({ centre: { x: 0, y: 0 }, radius }, [{ ...CARD, left: -40 }], 400);
+      expect(paths).toEqual([]);
+    }
+  });
+
+  it("never emits NaN for laid-out geometry", () => {
+    const paths = threadPaths({ centre: { x: 120, y: 200 }, radius: 100 }, [CARD], 400);
+    for (const path of paths) expect(path).not.toContain("NaN");
+  });
 });

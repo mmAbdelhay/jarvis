@@ -1307,7 +1307,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     randomId: () => randomBytes(16).toString("hex"),
     baseDir: join(remoteDir, "uploads"),
     language: PRIMARY_LANGUAGE,
-    log: (line) => console.error(line),
+    // A revoke or a staged file is routine (info); only failures are errors.
+    log: (line) => console.log(line),
+    logFailure: (line) => console.error(line),
   });
 
   // Declared before remoteAccess itself: both createSettingsHandlers

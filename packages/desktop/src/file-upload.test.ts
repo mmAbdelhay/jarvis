@@ -948,6 +948,23 @@ describe("createFileUploadStore", () => {
       }
     });
 
+    it("logs a revoke as routine and only a failure through logFailure", async () => {
+      const failures: string[] = [];
+      const split = harness({ baseDir, logFailure: (line) => failures.push(line) });
+      const splitStore = createFileUploadStore(split.deps);
+      split.setNextId(hexId(80));
+      await splitStore.put(DEVICE_A, { name: "n", contentType: "x" }, new Uint8Array([1]));
+      await writeFile(join(baseDir, DEVICE_A, hexId(81)), "already here");
+      split.setNextId(hexId(81));
+      await splitStore.put(DEVICE_A, { name: "collide", contentType: "x" }, new Uint8Array([2]));
+      await splitStore.revoke(DEVICE_A);
+
+      expect(split.logs.some((line) => line.startsWith("file-upload: revoked"))).toBe(true);
+      expect(split.logs.some((line) => line.startsWith("file-upload: failed:"))).toBe(false);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toContain("file-upload: failed:write");
+    });
+
     it("logs a category line for a failed write and a readJson outcome — never a path", async () => {
       h.setNextId(hexId(70));
       const dirPut = await store.put(

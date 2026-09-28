@@ -56,6 +56,11 @@ export function threadPaths(
   cards: readonly Rect[],
   gridTop: number,
 ): string[] {
+  // An orb with no size (hidden, or the window closing mid-layout) has no
+  // arc to leave from: its lean would be 0/0 and every path "M NaN NaN …".
+  if (!(orb.radius > 0) || !Number.isFinite(orb.centre.x) || !Number.isFinite(orb.centre.y)) {
+    return [];
+  }
   return firstRowTargets(cards, gridTop).map((target) =>
     threadPath(threadOrigin(orb.centre, orb.radius, target), target),
   );

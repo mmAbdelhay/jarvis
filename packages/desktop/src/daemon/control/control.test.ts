@@ -308,6 +308,17 @@ describe("the control transport", () => {
     await expect(answersWithProof(server.endpoint, secretPath, deps)).resolves.toBe(false);
   });
 
+  it("removes the control secret and the published endpoint on a clean close", async () => {
+    const { runDirectory } = await fixture();
+    const server = await start(runDirectory);
+    const paths = controlPaths(PLATFORM, runDirectory);
+    await expect(stat(paths.secretPath)).resolves.toBeDefined();
+    await server.close();
+    for (const path of [paths.secretPath, paths.endpointPath, paths.pidPath]) {
+      await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  });
+
   it("closes a wrong client proof without replying past the challenge", async () => {
     const { runDirectory } = await fixture();
     const server = await start(runDirectory);
