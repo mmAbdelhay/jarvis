@@ -39,6 +39,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  // Closes and awaits every handle the core opened under the scratch HOME.
   await core?.shutdown();
   vi.restoreAllMocks();
   for (const name of HOME_VARS) {
@@ -46,7 +47,10 @@ afterAll(async () => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
-  await rm(home, { recursive: true, force: true });
+  // shutdown() has awaited the shells' exits and closed the session store,
+  // the handles that kept this directory locked on Windows; the retries
+  // cover what Windows releases a moment after (antivirus, the indexer).
+  await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("the real dispatch table's results are JSON values", () => {

@@ -1990,7 +1990,7 @@ describe("terminal handlers", () => {
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
         kill: (tabId) => killed.push(tabId),
-        stopAll: () => {},
+        stopAll: async () => {},
       },
     };
   }

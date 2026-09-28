@@ -213,6 +213,8 @@ const MINUTE_MS = 60_000;
  *  bounds how far past its timeout anything can live: a tab set to suspend
  *  after fifteen minutes goes at fifteen, plus up to one. */
 const SWEEP_INTERVAL_MS = 60_000;
+/** How long shutdown() waits for killed Terminal shells to exit. */
+const SHELL_EXIT_WAIT_MS = 3_000;
 
 /** How long the chip row's runtime probe waits for `node -v` before giving
  *  up on it. A hung shim (a broken version manager, a stalled
@@ -332,7 +334,9 @@ export type Core = {
    *  is stopped and awaited first, so no remote client acts on a sidecar or
    *  a terminal mid-teardown; then stop() releases the sidecars and, after
    *  them, the ptys, in releaseChildren's order; then the bridge's and the
-   *  uploads' own stops are awaited. Idempotent, like stop(). */
+   *  uploads' own stops are awaited, and the Terminal shells' exits (for at
+   *  most SHELL_EXIT_WAIT_MS); last, the session store is closed.
+   *  Idempotent, like stop(). */
   shutdown(): Promise<void>;
 };
 
@@ -1691,6 +1695,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     return remoteStopped;
   };
   let uploadsStopped: Promise<void> = Promise.resolve();
+  let shellsStopped: Promise<void> = Promise.resolve();
   const releaseChildren = (): void => {
     if (released) return;
     released = true;
@@ -1749,7 +1754,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // And each open Cluster tab is a live headlamp-server child process.
     safely("headlamp-server", () => headlamp.stopAll());
     // And each open Terminal tab is a live shell.
-    safely("shells", () => shells.stopAll());
+    // shutdown() awaits their exits: a live shell holds its cwd.
+    safely("shells", () => {
+      shellsStopped = shells.stopAll();
+    });
     // And the importer holds an fs watch per transcript directory.
     safely("session importer", () => sessionImporter.stop());
     // A recording started but never stopped holds ffmpeg — and the
@@ -2284,6 +2292,19 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       await stopRemote();
       releaseChildren();
       await uploadsStopped;
+      // Bounded: a shell that ignores its kill must not hold the daemon's
+      // exit. Until they exit, their cwds stay open (on Windows, locked).
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, SHELL_EXIT_WAIT_MS);
+        timer.unref();
+        void shellsStopped.then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      // Last: sessions killed above still persist their ended rows first.
+      // The store ignores any write that lands after this.
+      sessionStore.close?.();
     },
   };
 }
