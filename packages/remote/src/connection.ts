@@ -144,7 +144,13 @@ export type RequestHandler = (
   blob?: Uint8Array,
 ) => Promise<RequestOutcome>;
 
-export type ErrorText = (code: RemoteErrorCode) => { text: string; language: "ar" | "en" };
+/** The human text for an `err` frame. `channel` is set only for an auth
+ *  channel's own refusal, so "forbidden" on `auth:login` can read as a wrong
+ *  password rather than the generic remote-device refusal (D9). */
+export type ErrorText = (
+  code: RemoteErrorCode,
+  channel?: AuthChannel,
+) => { text: string; language: "ar" | "en" };
 
 export type AuthFailure = "bad-frame" | "bad-credentials" | "timeout";
 
@@ -585,8 +591,8 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
     outbox?.reply(text);
   }
 
-  function sendErr(id: number, code: RemoteErrorCode): void {
-    const { text, language } = deps.errorText(code);
+  function sendErr(id: number, code: RemoteErrorCode, authChannel?: AuthChannel): void {
+    const { text, language } = deps.errorText(code, authChannel);
     reply({ t: "err", id, code, text, language });
   }
 
@@ -700,7 +706,7 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
         (outcome) => {
           if (state.phase !== "open") return;
           if (outcome.kind === "error") {
-            sendErr(id, outcome.code);
+            sendErr(id, outcome.code, channel);
             return;
           }
           const { effect } = outcome;

@@ -955,8 +955,8 @@ export const STRINGS = {
   },
   "auth.wrongPassword": { en: "Wrong password.", ar: "كلمة المرور غير صحيحة." },
   "auth.rateLimited": {
-    en: "Too many attempts. Wait a moment and try again.",
-    ar: "محاولات كثيرة جدًا. انتظر قليلًا ثم حاول مجددًا.",
+    en: "Too many sign-in attempts, so sign-in is paused. Try again later.",
+    ar: "محاولات تسجيل دخول كثيرة جدًا، فتوقّف تسجيل الدخول مؤقتًا. حاول لاحقًا.",
   },
   "auth.offline": {
     en: "Can't reach your computer. Check the connection and try again.",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREREQUISITES } from "@jarvis/platform";
-import { REMOTE_ERROR_CODES } from "@jarvis/remote";
-import { PUSH_KINDS } from "@jarvis/wire";
+import { REMOTE_ERROR_CODES, type RemoteErrorCode } from "@jarvis/remote";
+import { AUTH_CHANNELS, type AuthChannel, PUSH_KINDS } from "@jarvis/wire";
 import { errorMessage, isWayland, MESSAGES } from "./messages.js";
 
 // Important 9: main.ts must not carry an English-only lane of user-facing
@@ -209,6 +209,35 @@ describe("remoteErrorText", () => {
       expect(en.length).toBeGreaterThan(0);
       expect(ar.length).toBeGreaterThan(0);
       expect(en).not.toBe(ar);
+    }
+  });
+});
+
+describe("remoteAuthErrorText (D9)", () => {
+  it("words each auth refusal for what happened, in both languages", () => {
+    const en = (channel: AuthChannel, code: RemoteErrorCode) =>
+      MESSAGES.remoteAuthErrorText(channel, code, "en");
+    expect(en("auth:login", "forbidden")).toBe("Wrong password.");
+    expect(en("auth:passkeyRegisterBegin", "forbidden")).toBe("Wrong password.");
+    expect(en("auth:refresh", "forbidden")).toBe("You were signed out. Log in again.");
+    expect(en("auth:resume", "forbidden")).toBe("Your session expired. Log in again.");
+    expect(en("auth:passkeyFinish", "forbidden")).toContain("passkey");
+    expect(en("auth:login", "rate-limited")).toContain("Try again later");
+    for (const channel of AUTH_CHANNELS) {
+      for (const code of ["forbidden", "rate-limited"] as const) {
+        const english = MESSAGES.remoteAuthErrorText(channel, code, "en");
+        const arabic = MESSAGES.remoteAuthErrorText(channel, code, "ar");
+        expect(english).toBeDefined();
+        expect(arabic).toBeDefined();
+        expect(english).not.toBe(arabic);
+        expect(english).not.toBe(MESSAGES.remoteErrorText(code, "en"));
+      }
+    }
+  });
+
+  it("leaves the codes whose plain text already fits to remoteErrorText", () => {
+    for (const code of ["locked", "bad-request", "internal", "unsupported"] as const) {
+      expect(MESSAGES.remoteAuthErrorText("auth:login", code, "en")).toBeUndefined();
     }
   });
 });

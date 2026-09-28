@@ -22,7 +22,7 @@
 // Arabic session/project text still renders RTL via detectLanguage().
 import type { PrerequisiteId } from "@jarvis/platform";
 import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
-import type { PushKind } from "@jarvis/wire";
+import type { AuthChannel, PushKind } from "@jarvis/wire";
 import type { RemoteWebState } from "./remote-web.js";
 
 export const PRIMARY_LANGUAGE = "en";
@@ -1487,6 +1487,46 @@ export const MESSAGES = {
       },
     };
     return text[code][language];
+  },
+  // D9: an auth channel's own refusal, worded for what actually happened —
+  // never the generic "not allowed from a remote device", and never saying
+  // whether an owner password exists at all. `undefined` means the plain
+  // remoteErrorText above fits (locked, bad-request, internal...).
+  remoteAuthErrorText: (
+    channel: AuthChannel,
+    code: RemoteErrorCode,
+    language: "ar" | "en",
+  ): string | undefined => {
+    const pick = (ar: string, en: string): string => (language === "ar" ? ar : en);
+    if (code === "rate-limited") {
+      return pick(
+        "محاولات تسجيل دخول كثيرة جدًا، فتوقّف تسجيل الدخول مؤقتًا. حاول لاحقًا.",
+        "Too many sign-in attempts, so sign-in is paused. Try again later.",
+      );
+    }
+    if (code !== "forbidden") return undefined;
+    switch (channel) {
+      case "auth:login":
+      case "auth:passkeyRegisterBegin":
+        return pick("كلمة المرور غير صحيحة.", "Wrong password.");
+      case "auth:passkeyBegin":
+      case "auth:passkeyFinish":
+        return pick(
+          "لم يُسجّل مفتاح المرور هذا دخولك. حاول مجددًا أو استخدم كلمة المرور.",
+          "That passkey didn't sign you in. Try again or use your password.",
+        );
+      case "auth:passkeyRegisterFinish":
+        return pick(
+          "تعذّرت إضافة مفتاح المرور هذا. حاول مجددًا.",
+          "Couldn't add that passkey. Try again.",
+        );
+      case "auth:resume":
+        return pick("انتهت صلاحية جلستك. سجّل الدخول مجددًا.", "Your session expired. Log in again.");
+      case "auth:refresh":
+      case "auth:status":
+      case "auth:logout":
+        return pick("تم تسجيل خروجك. سجّل الدخول مجددًا.", "You were signed out. Log in again.");
+    }
   },
   // remote:pair's three outcomes (dispatch.ts).
   remotePairingDisabled: (language: "ar" | "en"): string =>

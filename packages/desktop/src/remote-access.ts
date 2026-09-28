@@ -274,8 +274,12 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           policies: remotePushPolicies(),
           authorizeKey: remoteKeyAuthorizer(deps.streams),
           blobLimit: (channel) => blobLimitOf(deps.blobs(), channel),
-          errorText: (code) => ({
-            text: MESSAGES.remoteErrorText(code, deps.language),
+          errorText: (code, authChannel) => ({
+            text:
+              (authChannel === undefined
+                ? undefined
+                : MESSAGES.remoteAuthErrorText(authChannel, code, deps.language)) ??
+              MESSAGES.remoteErrorText(code, deps.language),
             language: deps.language,
           }),
           // M12 Task 3, rule 9: the desktop's own classifier, over the

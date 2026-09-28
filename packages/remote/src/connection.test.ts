@@ -121,6 +121,7 @@ function makeHarness(
     audit: { record: ReturnType<typeof vi.fn<(event: AuditEvent) => void>> };
     auditPolicy: (channel: string) => AuditPolicy;
     ownerAuth: OwnerAuth;
+    errorText: ConnectionDeps["errorText"];
   }> = {},
 ) {
   const clock = fakeClock(0);
@@ -148,7 +149,7 @@ function makeHarness(
     policies: overrides.policies ?? POLICIES,
     authorizeKey,
     blobLimit,
-    errorText,
+    errorText: overrides.errorText ?? errorText,
     log,
     onOpen,
     onAuthFailed,
@@ -1553,6 +1554,30 @@ describe("createConnection: owner login (Phase 0)", () => {
     );
     expect(harness.socket.sent).toEqual([
       { t: "err", id: 3, code: "locked", text: "err:locked", language: "en" },
+    ]);
+  });
+
+  it("an auth refusal's text is chosen for its channel (D9), other refusals keep the plain text", async () => {
+    const ownerAuth = scriptedOwnerAuth((channel) =>
+      channel === "auth:login"
+        ? { kind: "error", code: "forbidden" }
+        : { kind: "error", code: "rate-limited" },
+    );
+    const channelText: ConnectionDeps["errorText"] = (code, channel) => ({
+      text: `${channel ?? "-"}:${code}`,
+      language: "en",
+    });
+    const harness = makeHarness({ ownerAuth, errorText: channelText });
+    openConnection(harness);
+    harness.connection.onText(reqFrame(1, "auth:login", [{ password: "x".repeat(12) }]));
+    harness.connection.onText(reqFrame(2, "auth:refresh", [{ refreshToken: "a".repeat(64) }]));
+    harness.connection.onText(reqFrame(3, "projects:list"));
+    await flush();
+    // The locked refusal is synchronous; the auth replies arrive after ownerAuth's await.
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 3, code: "locked", text: "-:locked", language: "en" },
+      { t: "err", id: 1, code: "forbidden", text: "auth:login:forbidden", language: "en" },
+      { t: "err", id: 2, code: "rate-limited", text: "auth:refresh:rate-limited", language: "en" },
     ]);
   });
 
