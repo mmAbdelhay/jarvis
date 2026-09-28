@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   BrowserWindow,
@@ -29,6 +31,40 @@ import { isAllowedNavigation } from "./navigation.js";
 import { decidePermission } from "./permissions.js";
 import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
+import { daemonScriptPath } from "./daemon/script-path.js";
+
+/**
+ * `<Jarvis binary> --jarvis-daemon`: start jarvisd and get out of the way.
+ *
+ * Windows' autostart (the HKCU Run value, service-win32.ts) and its start
+ * button launch the app binary with this flag, since there is no separate
+ * Node to run the daemon with. The binary runs itself again as plain Node
+ * (ELECTRON_RUN_AS_NODE) on the daemon's script, detached and without a
+ * console window, and this process exits before it is ready — no window,
+ * no core, no second anything. The daemon takes its own single-instance
+ * lock, so a second launch exits there with code 3.
+ */
+const launchingDaemon = process.argv.includes("--jarvis-daemon");
+if (launchingDaemon) {
+  const script = daemonScriptPath({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    distSrcDir: dirname(fileURLToPath(import.meta.url)),
+  });
+  try {
+    spawn(process.execPath, [script, "run"], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    })
+      .on("error", (error) => console.error(`jarvisd failed to start: ${errorMessage(error)}`))
+      .unref();
+  } catch (error) {
+    console.error(`jarvisd failed to start: ${errorMessage(error)}`);
+  }
+  app.exit(0);
+}
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -268,6 +304,8 @@ function createDesktopHost(client: CoreClient) {
 export let widevineReady: Promise<void> | undefined;
 
 app.whenReady().then(async () => {
+  // Launching the daemon only: no window, no core (see launchingDaemon).
+  if (launchingDaemon) return;
   setDockIcon();
 
   // Electron's default menu is the standard Mac menu bar on darwin — which is
