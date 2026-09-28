@@ -525,7 +525,8 @@ describe("writeBlock", () => {
     expect(await readFile(path, "utf8")).toBe(source);
   });
 
-  it("preserves the file's mode across a write", async () => {
+  // Windows has no POSIX permission bits: fs.stat reports 0o666 for any writable file.
+  it.skipIf(process.platform === "win32")("preserves the file's mode across a write", async () => {
     const { path, source, mtimeMs, planFiles } = await planWithFile("write-mode");
     // 0o664 (not 0o640): the group/other write bits it sets fall inside a
     // default umask of 022, so a `mode` option passed only to the
