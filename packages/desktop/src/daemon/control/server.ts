@@ -1,22 +1,29 @@
 // The daemon's end of the local control transport (Phase 2, task 2.4): the
 // desktop app and the jarvisd CLI reach the core through here, and
 // desktop-only channels are reachable only through here, never through the
-// remote bridge. Access is proven by reading a secret the daemon rewrites at
-// every start into a file only its user can read (0600 in a 0700 directory;
-// the user-profile ACL on Windows). The secret is never logged.
+// remote bridge. Access is proven with a secret the daemon rewrites at every
+// start into a file only its user can read (0600 in a 0700 directory; the
+// user-profile ACL on Windows) — proven, never sent: see handshake.ts. The
+// secret is never logged.
 //
-// Per connection: the first frame must be a hello within HANDSHAKE_TIMEOUT_MS
-// and no bigger than MAX_HELLO_FRAME_BYTES. A wrong secret — or any other
-// first frame — closes the connection without a reply, so an unauthenticated
-// peer learns nothing, not even the build. A right secret with a different
-// build or protocol version is told restart-required, so an updated app can
-// restart an old daemon. After the welcome, frames are @jarvis/wire req/blob
-// in and res/err/psh out; the handlers apply the desktop origin themselves.
-import { timingSafeEqual } from "node:crypto";
-import { posix, win32 } from "node:path";
+// Start-up order (review I2/I3 rulings): run-dir check → pid lock → the new
+// secret (and Windows pipe name) published atomically → listen → connect to
+// ourselves to confirm the endpoint reaches this server. A client that dials
+// the moment the endpoint appears therefore always reads the right secret.
+//
+// Per connection: the handshake must finish within HANDSHAKE_TIMEOUT_MS, with
+// frames no bigger than MAX_HELLO_FRAME_BYTES and at most
+// MAX_PENDING_HANDSHAKES connections mid-handshake at once. A bad frame or a
+// wrong proof closes the connection without a reply, so an unauthenticated
+// peer learns nothing, not even the build. A client that proves itself but
+// runs another build or protocol version is told restart-required, so an
+// updated app can restart an old daemon. After the welcome, frames are
+// @jarvis/wire req/blob in and res/err/psh out; the handlers apply the desktop
+// origin themselves.
 import type { Server, Socket } from "node:net";
 import { HANDSHAKE_TIMEOUT_MS, isValidBlobShape, MAX_BLOB_CHUNK_BYTES } from "@jarvis/wire";
 import type { ControlDeps } from "./deps.js";
+import { controlPaths } from "./endpoint.js";
 import {
   CONTROL_PROTOCOL_VERSION,
   encodeJsonFrame,
@@ -26,19 +33,23 @@ import {
   MAX_CONTROL_FRAME_BYTES,
   MAX_HELLO_FRAME_BYTES,
 } from "./frames.js";
+import { clientProof, NONCE_BYTES, proofMatches, serverProof } from "./handshake.js";
 import { acquireDaemonLock } from "./lock.js";
 import {
-  CONTROL_SECRET_PATTERN,
   ControlRequestError,
   type ControlServerMessage,
+  parseAuth,
   parseClientMessage,
-  parseHello,
+  parseOpening,
 } from "./messages.js";
+import { ensureRunDirectory, tempName, writePrivateFile } from "./run-dir.js";
 
 const SECRET_BYTES = 32;
 /** A client that stops reading is dropped rather than buffered for without bound. */
 const MAX_OUTBOUND_BYTES = 4 * MAX_CONTROL_FRAME_BYTES;
 const MAX_INFLIGHT_REQUESTS = 256;
+/** Unauthenticated connections held at once; on Windows any local user can open one. */
+export const MAX_PENDING_HANDSHAKES = 16;
 
 export interface ControlHandlers {
   invoke(channel: string, args: unknown[]): Promise<unknown>;
@@ -46,6 +57,8 @@ export interface ControlHandlers {
 }
 
 export interface ControlServer {
+  /** The socket path (Unix) or the pipe name chosen at this start (Windows). */
+  readonly endpoint: string;
   /** Sends a push to every authenticated client, in call order. */
   push(channel: string, payload: unknown): void;
   /** Called after each client's welcome, e.g. to flush pushes queued while none was connected. */
@@ -55,9 +68,8 @@ export interface ControlServer {
 }
 
 export interface CreateControlServerOptions {
-  endpoint: string;
   platform: NodeJS.Platform;
-  secretPath: string;
+  runDirectory: string;
   build: string;
   handlers: ControlHandlers;
   deps: ControlDeps;
@@ -67,38 +79,39 @@ export type ControlServerStart = { kind: "started"; server: ControlServer } | { 
 
 type Client = { send(message: ControlServerMessage): void; seq: number };
 
-function errorCode(error: unknown): string | undefined {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : undefined;
-}
-
 export async function createControlServer(
   options: CreateControlServerOptions,
 ): Promise<ControlServerStart> {
   const { deps, platform, build, handlers } = options;
   const unix = platform !== "win32";
-  const path = unix ? posix : win32;
+  const paths = controlPaths(platform, options.runDirectory);
   const secret = Buffer.from(deps.randomBytes(SECRET_BYTES));
   const sockets = new Set<Socket>();
   const clients = new Set<Client>();
   const connectListeners = new Set<() => void>();
+  let pendingHandshakes = 0;
+  const selfCheck = {
+    token: Buffer.from(deps.randomBytes(32)),
+    arrived: undefined as (() => void) | undefined,
+  };
 
-  const directories = new Set([path.dirname(options.secretPath)]);
-  if (unix) directories.add(path.dirname(options.endpoint));
-  for (const directory of directories) {
-    await deps.fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    // mkdir's mode applies only to a directory it creates.
-    if (unix) await deps.fs.chmod(directory, 0o700);
-  }
-
-  function secretMatches(given: string): boolean {
-    if (!CONTROL_SECRET_PATTERN.test(given)) return false;
-    return timingSafeEqual(Buffer.from(given, "hex"), secret);
-  }
+  await ensureRunDirectory(platform, options.runDirectory, deps);
 
   function attach(socket: Socket): void {
+    socket.on("error", () => {
+      // "close" follows; nothing about a local peer's socket error is worth logging.
+    });
+    if (pendingHandshakes >= MAX_PENDING_HANDSHAKES) {
+      socket.destroy();
+      return;
+    }
+    pendingHandshakes++;
     sockets.add(socket);
-    let phase: "hello" | "open" | "closing" = "hello";
+    let phase: "hello" | "auth" | "open" | "closing" = "hello";
+    let nonces: { client: Buffer; server: Buffer } | undefined;
+    const leaveHandshake = () => {
+      if (phase === "hello" || phase === "auth") pendingHandshakes--;
+    };
     let inflight = 0;
     let blob:
       | {
@@ -112,12 +125,12 @@ export async function createControlServer(
         }
       | undefined;
     const decoder = new FrameDecoder(MAX_HELLO_FRAME_BYTES);
-    const timer = deps.clock.setTimeout(() => socket.destroy(), HANDSHAKE_TIMEOUT_MS);
-
     const fail = () => {
+      leaveHandshake();
       phase = "closing";
       socket.destroy();
     };
+    const timer = deps.clock.setTimeout(fail, HANDSHAKE_TIMEOUT_MS);
 
     const send = (message: ControlServerMessage) => {
       if (socket.destroyed || !socket.writable) return;
@@ -158,24 +171,56 @@ export async function createControlServer(
         });
     };
 
-    const onHello = (frame: Frame) => {
-      const hello = frame.kind === "json" ? parseHello(frame.value) : undefined;
-      if (hello === undefined || !secretMatches(hello.secret)) return fail();
-      deps.clock.clearTimeout(timer);
-      if (hello.v !== CONTROL_PROTOCOL_VERSION || hello.build !== build) {
-        phase = "closing";
-        socket.end(encodeJsonFrame({ t: "restart-required", build }));
-        return;
+    const onOpening = (frame: Frame) => {
+      const opening = frame.kind === "json" ? parseOpening(frame.value) : undefined;
+      if (opening === undefined) return fail();
+      if (opening.t === "probe") {
+        if (selfCheck.arrived !== undefined && proofMatches(selfCheck.token, opening.token)) {
+          selfCheck.arrived();
+        }
+        return fail();
       }
-      phase = "open";
-      decoder.maxBytes = MAX_CONTROL_FRAME_BYTES;
-      send({ t: "welcome", v: CONTROL_PROTOCOL_VERSION, capabilities: [] });
-      clients.add(client);
-      for (const listener of connectListeners) listener();
+      nonces = {
+        client: Buffer.from(opening.nonceC, "hex"),
+        server: Buffer.from(deps.randomBytes(NONCE_BYTES)),
+      };
+      const hello = opening;
+      phase = "auth";
+      send({
+        t: "challenge",
+        nonceS: nonces.server.toString("hex"),
+        proof: serverProof(secret, nonces.client, nonces.server).toString("hex"),
+      });
+      // Kept for the version/build check once the client has proven itself.
+      onAuthenticated = () => {
+        deps.clock.clearTimeout(timer);
+        leaveHandshake();
+        if (hello.v !== CONTROL_PROTOCOL_VERSION || hello.build !== build) {
+          phase = "closing";
+          socket.end(encodeJsonFrame({ t: "restart-required", build }));
+          return;
+        }
+        phase = "open";
+        decoder.maxBytes = MAX_CONTROL_FRAME_BYTES;
+        send({ t: "welcome", v: CONTROL_PROTOCOL_VERSION, capabilities: [] });
+        clients.add(client);
+        for (const listener of connectListeners) listener();
+      };
+    };
+    let onAuthenticated: () => void = fail;
+
+    const onAuth = (frame: Frame) => {
+      const auth = frame.kind === "json" ? parseAuth(frame.value) : undefined;
+      if (auth === undefined || nonces === undefined) return fail();
+      if (!proofMatches(clientProof(secret, nonces.server, nonces.client), auth.proof)) {
+        return fail();
+      }
+      onAuthenticated();
     };
 
     const onFrame = (frame: Frame) => {
-      if (phase === "hello") return onHello(frame);
+      if (phase === "hello") return onOpening(frame);
+      if (phase === "auth") return onAuth(frame);
       if (blob !== undefined) {
         if (frame.kind !== "binary") return fail();
         const size = frame.bytes.byteLength;
@@ -200,11 +245,10 @@ export async function createControlServer(
       blob = { ...message, parts: [], received: 0 };
     };
 
-    socket.on("error", () => {
-      // "close" follows; nothing about a local peer's socket error is worth logging.
-    });
     socket.on("close", () => {
       deps.clock.clearTimeout(timer);
+      leaveHandshake();
+      phase = "closing";
       sockets.delete(socket);
       clients.delete(client);
     });
@@ -223,42 +267,79 @@ export async function createControlServer(
   }
 
   const lock = await acquireDaemonLock({
-    endpoint: options.endpoint,
     platform,
+    runDirectory: options.runDirectory,
     deps,
     onConnection: attach,
+    async publish(endpoint) {
+      // The secret first: once a client can see a new pipe name, the secret
+      // beside it is already the one this daemon holds.
+      await writePrivateFile(paths.secretPath, secret.toString("hex"), deps);
+      if (!unix) await writePrivateFile(paths.endpointPath, endpoint, deps);
+    },
   });
   if (lock.kind === "busy") return { kind: "busy" };
   const listener: Server = lock.server;
+  const endpoint = lock.endpoint;
 
-  const close = () =>
+  const stopListening = () =>
     new Promise<void>((resolve) => {
       for (const socket of sockets) socket.destroy();
       if (!listener.listening) return resolve();
       listener.close(() => resolve());
     });
+  const close = async () => {
+    await stopListening();
+    await lock.release();
+  };
 
+  let owned: boolean;
   try {
-    if (unix) await deps.fs.chmod(options.endpoint, 0o600);
-    // Unlink first: writeFile's mode applies only to a file it creates, and
-    // "wx" refuses to write through anything left at the path.
-    try {
-      await deps.fs.unlink(options.secretPath);
-    } catch (error) {
-      if (errorCode(error) !== "ENOENT") throw error;
-    }
-    await deps.fs.writeFile(options.secretPath, secret.toString("hex"), {
-      mode: 0o600,
-      flag: "wx",
-    });
+    if (unix) await deps.fs.chmod(endpoint, 0o600);
+    owned = await reachesThisServer(endpoint);
   } catch (error) {
     await close();
     throw error;
+  }
+  if (!owned) {
+    // Another process bound the path after we did. Closing unlinks the path
+    // (libuv does, for a Unix socket), which would take the winner's socket
+    // with it — so keep a second name for it across the close.
+    if (unix) {
+      const keep = tempName(endpoint, deps, "keep");
+      await deps.fs.link(endpoint, keep);
+      await stopListening();
+      await deps.fs.rename(keep, endpoint);
+    } else {
+      await stopListening();
+    }
+    await lock.release();
+    return { kind: "busy" };
+  }
+
+  /** Connects once and waits for the probe to arrive at this server's own attach(). */
+  function reachesThisServer(target: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const probe = deps.net.connect(target);
+      const done = (result: boolean) => {
+        selfCheck.arrived = undefined;
+        deps.clock.clearTimeout(timeout);
+        probe.destroy();
+        resolve(result);
+      };
+      const timeout = deps.clock.setTimeout(() => done(false), HANDSHAKE_TIMEOUT_MS);
+      selfCheck.arrived = () => done(true);
+      probe.on("error", () => done(false));
+      probe.on("connect", () => {
+        probe.write(encodeJsonFrame({ t: "probe", token: selfCheck.token.toString("hex") }));
+      });
+    });
   }
 
   return {
     kind: "started",
     server: {
+      endpoint,
       push(channel, payload) {
         for (const client of clients) {
           client.seq += 1;

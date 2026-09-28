@@ -5,6 +5,10 @@
 // chunk. The decoder checks the declared length against its current limit
 // from the header alone, before buffering the payload, so a peer can never
 // make it hold more than one frame's worth of bytes.
+//
+// Frozen contract: this 5-byte header, like the handshake frames in
+// messages.ts, cannot change with CONTROL_PROTOCOL_VERSION — a version
+// mismatch is reported through it.
 export const CONTROL_PROTOCOL_VERSION = 1;
 export const MAX_CONTROL_FRAME_BYTES = 16 * 1024 * 1024;
 /** Until the hello is accepted, nothing bigger than a hello is buffered. */

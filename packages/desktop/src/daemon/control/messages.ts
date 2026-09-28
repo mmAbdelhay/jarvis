@@ -1,11 +1,21 @@
 // The control transport's message shapes, parsed field by field (conventions:
-// "Parse wire values field by field"). After the hello, frames are the
-// @jarvis/wire req/blob/res/err/psh/welcome shapes; only the hello (a local
-// secret plus a build id instead of a device token) and restart-required are
-// the control socket's own.
+// "Parse wire values field by field"). After the handshake, frames are the
+// @jarvis/wire req/blob/res/err/psh/welcome shapes; the handshake frames
+// (hello, challenge, auth — see handshake.ts), restart-required and the
+// daemon's own start-up probe are the control socket's own.
+//
+// Frozen contract: hello, challenge, auth and restart-required must keep
+// these shapes across every CONTROL_PROTOCOL_VERSION. A version mismatch is
+// itself reported through them — an app meeting a daemon of another version
+// has to be able to authenticate and read restart-required to recover.
 import { REMOTE_ERROR_CODES, type RemoteErrorCode, type ServerMessage } from "@jarvis/wire";
+import { HEX32_PATTERN } from "./handshake.js";
 
-export type ControlHello = { t: "hello"; v: number; secret: string; build: string };
+export type ControlHello = { t: "hello"; v: number; build: string; nonceC: string };
+export type ControlChallenge = { t: "challenge"; nonceS: string; proof: string };
+export type ControlAuth = { t: "auth"; proof: string };
+/** Sent by a starting daemon to itself, to confirm the endpoint reaches it. */
+export type ControlProbe = { t: "probe"; token: string };
 
 export type ControlClientMessage =
   | { t: "req"; id: number; ch: string; a: unknown[] }
@@ -13,6 +23,7 @@ export type ControlClientMessage =
 
 export type ControlServerMessage =
   | Exclude<ServerMessage, { t: "ping" }>
+  | ControlChallenge
   | { t: "restart-required"; build: string };
 
 /** A handler's typed refusal; anything else a handler throws is sent as "internal". */
@@ -25,8 +36,6 @@ export class ControlRequestError extends Error {
   }
 }
 
-/** 32 random bytes as lowercase hex, exactly as the daemon writes it. */
-export const CONTROL_SECRET_PATTERN = /^[0-9a-f]{64}$/;
 const MAX_CHANNEL_LENGTH = 128;
 const MAX_BUILD_LENGTH = 256;
 
@@ -48,11 +57,24 @@ function isBuild(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_BUILD_LENGTH;
 }
 
-export function parseHello(value: unknown): ControlHello | undefined {
-  if (!isFields(value) || value.t !== "hello") return undefined;
-  const { v, secret, build } = value;
-  if (!isId(v) || typeof secret !== "string" || !isBuild(build)) return undefined;
-  return { t: "hello", v, secret, build };
+function isHex32(value: unknown): value is string {
+  return typeof value === "string" && HEX32_PATTERN.test(value);
+}
+
+/** The first frame on a connection: a client's hello, or the daemon's own probe. */
+export function parseOpening(value: unknown): ControlHello | ControlProbe | undefined {
+  if (!isFields(value)) return undefined;
+  if (value.t === "probe")
+    return isHex32(value.token) ? { t: "probe", token: value.token } : undefined;
+  if (value.t !== "hello") return undefined;
+  const { v, build, nonceC } = value;
+  if (!isId(v) || !isBuild(build) || !isHex32(nonceC)) return undefined;
+  return { t: "hello", v, build, nonceC };
+}
+
+export function parseAuth(value: unknown): ControlAuth | undefined {
+  if (!isFields(value) || value.t !== "auth" || !isHex32(value.proof)) return undefined;
+  return { t: "auth", proof: value.proof };
 }
 
 export function parseClientMessage(value: unknown): ControlClientMessage | undefined {
@@ -78,6 +100,10 @@ export function parseServerMessage(value: unknown): ControlServerMessage | undef
       if (!isId(v) || !Array.isArray(capabilities)) return undefined;
       if (!capabilities.every((c) => typeof c === "string")) return undefined;
       return { t: "welcome", v, capabilities };
+    }
+    case "challenge": {
+      const { nonceS, proof } = value;
+      return isHex32(nonceS) && isHex32(proof) ? { t: "challenge", nonceS, proof } : undefined;
     }
     case "restart-required":
       return isBuild(value.build) ? { t: "restart-required", build: value.build } : undefined;

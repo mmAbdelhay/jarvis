@@ -2,9 +2,12 @@
 // will back the CoreClient socket adapter, so its surface is the generic
 // channel + args → result shape: invoke, upload (the blob lane), onPush.
 // The secret is read from the daemon's 0600 file at connect time and never
-// logged or put in an error message.
+// sent, logged or put in an error message: the client proves it knows it only
+// after the server has proven the same (handshake.ts), so whatever answers on
+// the endpoint without being the daemon gets nothing but a nonce.
 import { MAX_BLOB_BYTES, MAX_BLOB_CHUNK_BYTES, HANDSHAKE_TIMEOUT_MS } from "@jarvis/wire";
 import type { ControlDeps } from "./deps.js";
+import { controlPaths, endpointFor } from "./endpoint.js";
 import {
   CONTROL_PROTOCOL_VERSION,
   encodeBinaryFrame,
@@ -13,7 +16,9 @@ import {
   FrameDecoder,
   MAX_CONTROL_FRAME_BYTES,
 } from "./frames.js";
+import { clientProof, HEX32_PATTERN, NONCE_BYTES, proofMatches, serverProof } from "./handshake.js";
 import {
+  type ControlAuth,
   type ControlClientMessage,
   type ControlHello,
   ControlRequestError,
@@ -38,21 +43,31 @@ export interface ControlClient {
 }
 
 export interface ConnectControlOptions {
-  endpoint: string;
-  secretPath: string;
+  platform: NodeJS.Platform;
+  runDirectory: string;
   build: string;
-  deps: Pick<ControlDeps, "fs" | "net" | "clock">;
+  deps: Pick<ControlDeps, "fs" | "net" | "clock" | "randomBytes">;
 }
 
 class ProtocolError extends Error {}
 
 export async function connectControl(options: ConnectControlOptions): Promise<ControlClient> {
   const { deps } = options;
-  const secret = (await deps.fs.readFile(options.secretPath, "utf8")).trim();
-  const socket = deps.net.connect(options.endpoint);
+  const endpoint = await endpointFor({
+    platform: options.platform,
+    runDirectory: options.runDirectory,
+    fs: deps.fs,
+  });
+  const secretText = (
+    await deps.fs.readFile(controlPaths(options.platform, options.runDirectory).secretPath, "utf8")
+  ).trim();
+  if (!HEX32_PATTERN.test(secretText)) throw new Error("The control secret file is malformed");
+  const secret = Buffer.from(secretText, "hex");
+  const nonceC = Buffer.from(deps.randomBytes(NONCE_BYTES));
+  const socket = deps.net.connect(endpoint);
 
   return new Promise<ControlClient>((resolve, reject) => {
-    let phase: "hello" | "open" | "closed" = "hello";
+    let phase: "hello" | "auth" | "open" | "closed" = "hello";
     let failure: Error | undefined;
     let nextId = 1;
     const pending = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>();
@@ -112,6 +127,22 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
       const message = frame.kind === "json" ? parseServerMessage(frame.value) : undefined;
       if (message === undefined) throw new ProtocolError("Malformed control frame");
       if (phase === "hello") {
+        if (message.t !== "challenge") throw new ProtocolError("Expected a control challenge");
+        const nonceS = Buffer.from(message.nonceS, "hex");
+        if (!proofMatches(serverProof(secret, nonceC, nonceS), message.proof)) {
+          // Not the daemon (or not this start of it): leave without proving anything.
+          failure = new Error("The control endpoint did not prove it is the Jarvis daemon");
+          return socket.destroy();
+        }
+        phase = "auth";
+        const auth: ControlAuth = {
+          t: "auth",
+          proof: clientProof(secret, nonceS, nonceC).toString("hex"),
+        };
+        socket.write(encodeJsonFrame(auth));
+        return;
+      }
+      if (phase === "auth") {
         if (message.t === "welcome") {
           deps.clock.clearTimeout(timer);
           phase = "open";
@@ -141,8 +172,8 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
       const hello: ControlHello = {
         t: "hello",
         v: CONTROL_PROTOCOL_VERSION,
-        secret,
         build: options.build,
+        nonceC: nonceC.toString("hex"),
       };
       socket.write(encodeJsonFrame(hello));
     });

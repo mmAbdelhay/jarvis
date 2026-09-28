@@ -1,37 +1,62 @@
 // Where the daemon's local control transport lives (Phase 2, task 2.4).
-// Unix: a socket in a 0700 directory beside the config. Windows: a named pipe
-// in the machine-wide pipe namespace, so its name carries a per-user suffix;
-// the secret file sits under the user profile, which the profile's ACL
-// already restricts to its owner.
-import { createHash } from "node:crypto";
+// Everything sits in one per-user run dir, `~/.config/jarvis/run`: on Unix a
+// 0700 directory owned by the user, on Windows under the user profile, whose
+// ACL already restricts it to its owner.
+//
+// Unix: a fixed socket path in that dir; the dir's mode is the access check.
+// Windows: named pipes live in one machine-wide namespace any user can create
+// names in, so the name is `jarvisd-` plus 16 random hex chosen at every
+// daemon start and published in `control.endpoint` beside the secret. A name
+// derived from the user (the first design) let another local user create the
+// pipe first and pose as the daemon (task 20 review, C1).
 import { posix, win32 } from "node:path";
-
-export interface EndpointOptions {
-  platform: NodeJS.Platform;
-  home: string;
-  username: string;
-}
+import type { ControlFs } from "./deps.js";
 
 export interface ControlPaths {
   runDirectory: string;
-  endpoint: string;
+  socketPath: string;
   secretPath: string;
+  endpointPath: string;
+  pidPath: string;
 }
 
-export function controlPaths(options: EndpointOptions): ControlPaths {
-  const path = options.platform === "win32" ? win32 : posix;
-  const runDirectory = path.join(options.home, ".config", "jarvis", "run");
+export const WINDOWS_PIPE_PATTERN = /^\\\\\.\\pipe\\jarvisd-[0-9a-f]{16}$/;
+
+function pathFor(platform: NodeJS.Platform) {
+  return platform === "win32" ? win32 : posix;
+}
+
+export function runDirectoryFor(options: { platform: NodeJS.Platform; home: string }): string {
+  return pathFor(options.platform).join(options.home, ".config", "jarvis", "run");
+}
+
+export function controlPaths(platform: NodeJS.Platform, runDirectory: string): ControlPaths {
+  const path = pathFor(platform);
   return {
     runDirectory,
-    endpoint: endpointFor(options),
+    socketPath: path.join(runDirectory, "jarvisd.sock"),
     secretPath: path.join(runDirectory, "control.secret"),
+    endpointPath: path.join(runDirectory, "control.endpoint"),
+    pidPath: path.join(runDirectory, "jarvisd.pid"),
   };
 }
 
-export function endpointFor(options: EndpointOptions): string {
-  if (options.platform === "win32") {
-    const suffix = createHash("sha256").update(options.username).digest("hex").slice(0, 16);
-    return `\\\\.\\pipe\\jarvisd-${suffix}`;
+/** `random` must be 8 bytes from a CSPRNG. */
+export function windowsPipeName(random: Uint8Array): string {
+  return `\\\\.\\pipe\\jarvisd-${Buffer.from(random).toString("hex")}`;
+}
+
+/** The endpoint a client dials: the fixed socket on Unix, the published pipe name on Windows. */
+export async function endpointFor(options: {
+  platform: NodeJS.Platform;
+  runDirectory: string;
+  fs: Pick<ControlFs, "readFile">;
+}): Promise<string> {
+  const paths = controlPaths(options.platform, options.runDirectory);
+  if (options.platform !== "win32") return paths.socketPath;
+  const name = (await options.fs.readFile(paths.endpointPath, "utf8")).trim();
+  if (!WINDOWS_PIPE_PATTERN.test(name)) {
+    throw new Error("The published control endpoint is not a jarvisd pipe name");
   }
-  return posix.join(options.home, ".config", "jarvis", "run", "jarvisd.sock");
+  return name;
 }
