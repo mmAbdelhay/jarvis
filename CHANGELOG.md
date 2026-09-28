@@ -8,6 +8,20 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.5] — 2026-09-28
+
+- Plan panel in every terminal tab: the plan Claude Code writes in plan
+  mode opens beside the terminal on its own (without taking focus), and
+  any `docs/superpowers/specs` or `plans` file in the project can be
+  picked. Click a section to edit it in place (⌘S saves just that
+  section; if the file changed on disk, a notice keeps your text), pin
+  comments to a selection or a section, and **Send to Claude** pastes
+  them into the tab as one message. Toggle it from the palette (⌘P →
+  Toggle plan panel) or the tab's right-click menu. The phone's terminal
+  screen gains a **Plan** sheet with the same comments and per-section
+  editing. Plan files are only read or written inside plan folders;
+  remote images in plans never load, and links open only if they are
+  http, https or mailto.
 - Tablet and desktop layout for the browser client and the iPad and
   Android tablet app: a window at least 744 wide (an iPad mini in
   portrait) whose shorter side is at least 600 gets a desktop-style top bar (sections, the laptop's metrics,
