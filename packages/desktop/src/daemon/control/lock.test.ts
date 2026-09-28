@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ControlClock, type ControlDeps, nodeControlDeps } from "./deps.js";
-import { acquirePidLock, STALE_LOCK_GRACE_MS } from "./lock.js";
+import { acquirePidLock, type PidLockOptions, STALE_LOCK_GRACE_MS } from "./lock.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -49,17 +49,44 @@ function starter(
 const silent = { holderAnswers: async () => false };
 
 describe("the pid lock", () => {
+  // A winner answers on its endpoint (the grace covers its start-up), so the
+  // oracle says a daemon answers while the pid file names a live starter.
+  // A `silent` oracle would be wrong here: a starter slow enough to read the
+  // winner's fresh pid file would then, rightly, judge it stale — a live pid
+  // silent past the grace — and take it over, giving two "acquired".
+  function winnerAnswers(pidPath: string, starters: ReadonlySet<number>): PidLockOptions {
+    return {
+      holderAnswers: async () => {
+        const text = await readFile(pidPath, "utf8").catch(() => "");
+        return starters.has(Number(text.split(":")[0]));
+      },
+    };
+  }
+
   it("lets exactly one of three racing starters take over a stale lock", async () => {
     for (let round = 0; round < 30; round++) {
       const pidPath = await pidPathFixture();
       await writeFile(pidPath, "999999:dead");
       const alive = new Set([101, 102, 103]);
       const results = await Promise.all(
-        [101, 102, 103].map((pid) => acquirePidLock(pidPath, starter(pid, alive), silent)),
+        [101, 102, 103].map((pid) =>
+          acquirePidLock(pidPath, starter(pid, alive), winnerAnswers(pidPath, alive)),
+        ),
       );
       expect(results.filter((r) => r.kind === "acquired")).toHaveLength(1);
       for (const result of results) if (result.kind === "acquired") await result.release();
     }
+  });
+
+  it("leaves a starter that reads the winner's fresh lock busy", async () => {
+    const pidPath = await pidPathFixture();
+    await writeFile(pidPath, "999999:dead");
+    const alive = new Set([101, 102]);
+    const first = await acquirePidLock(pidPath, starter(101, alive), winnerAnswers(pidPath, alive));
+    expect(first.kind).toBe("acquired");
+    const late = await acquirePidLock(pidPath, starter(102, alive), winnerAnswers(pidPath, alive));
+    expect(late).toEqual({ kind: "busy" });
+    expect(await readFile(pidPath, "utf8")).toMatch(/^101:/);
   });
 
   it("takes over a live but unrelated pid whose endpoint stays silent past the grace", async () => {

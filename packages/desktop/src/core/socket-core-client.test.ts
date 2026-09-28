@@ -439,27 +439,36 @@ describe("socket CoreClient: the desktop host", () => {
     expect(seen.some(([kind]) => kind === "restart")).toBe(false);
   });
 
-  it("under a service manager, the apps see the daemon restarting and reconnect", async () => {
-    const run = await runDirectory();
-    const fake = fakeCore();
-    fake.answers.set("settings:restart", () => fake.link.host.restart());
-    let daemon: Daemon | undefined;
-    daemon = await startDaemon(run, fake.core, BUILD, async () => {
-      // What launchd/systemd does after exit 75: start it again.
-      await daemon?.stop();
-      daemon = await startDaemon(run, fake.core);
-    });
-    const client = await connect(run);
-    const states: string[] = [];
-    client.onConnectionChange((state) => states.push(state.kind));
-    await client.invoke("settings:restart", []);
-    await until(() => states.includes("restarting"), "the restarting notice");
-    await until(
-      () => states.at(-1) === "connected" && states.includes("reconnecting"),
-      "the reconnect",
-      8_000,
-    );
-  });
+  // Not on Windows: no service manager restarts jarvisd there (only launchd
+  // and systemd set JARVISD_SUPERVISOR, so daemon-main.ts never passes
+  // requestRestart on Windows and Restart takes the manual-restart path
+  // tested above). The stand-in stop here also destroys the connection a
+  // tick after the reply is written: a Unix socket hands a small frame to the kernel at once,
+  // but a Windows named pipe writes asynchronously and may still drop it.
+  it.skipIf(WINDOWS)(
+    "under a service manager, the apps see the daemon restarting and reconnect",
+    async () => {
+      const run = await runDirectory();
+      const fake = fakeCore();
+      fake.answers.set("settings:restart", () => fake.link.host.restart());
+      let daemon: Daemon | undefined;
+      daemon = await startDaemon(run, fake.core, BUILD, async () => {
+        // What launchd/systemd does after exit 75: start it again.
+        await daemon?.stop();
+        daemon = await startDaemon(run, fake.core);
+      });
+      const client = await connect(run);
+      const states: string[] = [];
+      client.onConnectionChange((state) => states.push(state.kind));
+      await client.invoke("settings:restart", []);
+      await until(() => states.includes("restarting"), "the restarting notice");
+      await until(
+        () => states.at(-1) === "connected" && states.includes("reconnecting"),
+        "the reconnect",
+        8_000,
+      );
+    },
+  );
 
   it("attaches the window, reports its focus changes, and runs the core's hooks against it", async () => {
     const run = await runDirectory();

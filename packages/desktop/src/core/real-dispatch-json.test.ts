@@ -11,7 +11,9 @@ import { type CoreClient, inProcessCoreClient } from "./core-client.js";
 // is checked against the JSON-only contract — what jarvisd's control socket
 // will carry — and fails here, with the offending path, if it isn't.
 
-const originalHome = process.env.HOME;
+// os.homedir() reads HOME on Unix and USERPROFILE on Windows: swap both.
+const HOME_VARS = ["HOME", "USERPROFILE"] as const;
+const originalHome = Object.fromEntries(HOME_VARS.map((name) => [name, process.env[name]]));
 let home: string;
 let core: Core;
 let client: CoreClient;
@@ -19,7 +21,7 @@ let client: CoreClient;
 beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), "jarvis-json-"));
   // Before compose.ts (and config.ts's module-level homedir() paths) load.
-  process.env.HOME = home;
+  for (const name of HOME_VARS) process.env[name] = home;
   // The default config, plus one project for the terminal to open in.
   const { DEFAULT_CONFIG_PATH, ensureConfigFile } = await import("../config.js");
   // Never the user's own config: config.ts must have loaded after the swap.
@@ -39,7 +41,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await core?.shutdown();
   vi.restoreAllMocks();
-  process.env.HOME = originalHome;
+  for (const name of HOME_VARS) {
+    const value = originalHome[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   await rm(home, { recursive: true, force: true });
 });
 

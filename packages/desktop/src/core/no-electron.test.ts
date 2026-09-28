@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, type PlatformPath, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -80,11 +80,14 @@ function isElectron(specifier: string): boolean {
 /**
  * Every (file, specifier) pair, reachable from `entries` through relative
  * value imports, that loads electron. `read` answers a file's source, or
- * undefined when there is no such file.
+ * undefined when there is no such file. `paths` resolves the relative
+ * specifiers: the host's own for the real tree, posix or win32 for fixtures,
+ * so a fixture reads the same on every OS.
  */
 function electronImports(
   entries: readonly string[],
   read: (path: string) => string | undefined,
+  paths: Pick<PlatformPath, "dirname" | "resolve">,
 ): { file: string; specifier: string }[] {
   const violations: { file: string; specifier: string }[] = [];
   const visited = new Set<string>();
@@ -98,11 +101,14 @@ function electronImports(
     for (const specifier of valueSpecifiers(source)) {
       if (isElectron(specifier)) violations.push({ file, specifier });
       if (!specifier.startsWith(".")) continue;
-      queue.push(resolve(dirname(file), specifier).replace(/\.js$/, ".ts"));
+      queue.push(paths.resolve(paths.dirname(file), specifier).replace(/\.js$/, ".ts"));
     }
   }
   return violations;
 }
+
+/** The host's own path rules, for walking the real source tree. */
+const NATIVE = { dirname, resolve };
 
 function readSource(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, "utf8") : undefined;
@@ -148,8 +154,19 @@ describe("electronImports", () => {
       "/src/b.ts": 'import { c } from "./c.js";',
       "/src/c.ts": 'import { Menu } from "electron";',
     };
-    expect(electronImports(["/src/core/a.ts"], (path) => files[path])).toEqual([
+    expect(electronImports(["/src/core/a.ts"], (path) => files[path], posix)).toEqual([
       { file: "/src/c.ts", specifier: "electron" },
+    ]);
+  });
+
+  it("resolves Windows paths with Windows rules", () => {
+    const files: Record<string, string> = {
+      "C:\\src\\core\\a.ts": 'import { b } from "../b.js";',
+      "C:\\src\\b.ts": 'import { c } from "./c.js";',
+      "C:\\src\\c.ts": 'import { Menu } from "electron";',
+    };
+    expect(electronImports(["C:\\src\\core\\a.ts"], (path) => files[path], win32)).toEqual([
+      { file: "C:\\src\\c.ts", specifier: "electron" },
     ]);
   });
 
@@ -158,12 +175,12 @@ describe("electronImports", () => {
       "/src/core/a.ts": 'import type { B } from "../b.js";',
       "/src/b.ts": 'import { Menu } from "electron";',
     };
-    expect(electronImports(["/src/core/a.ts"], (path) => files[path])).toEqual([]);
+    expect(electronImports(["/src/core/a.ts"], (path) => files[path], posix)).toEqual([]);
   });
 
   it("catches electron subpaths", () => {
     const files: Record<string, string> = { "/src/core/a.ts": 'import x from "electron/main";' };
-    expect(electronImports(["/src/core/a.ts"], (path) => files[path])).toEqual([
+    expect(electronImports(["/src/core/a.ts"], (path) => files[path], posix)).toEqual([
       { file: "/src/core/a.ts", specifier: "electron/main" },
     ]);
   });
@@ -171,7 +188,7 @@ describe("electronImports", () => {
 
 describe("the core never loads electron", () => {
   it("would catch main.ts, which is Electron's side of the seam", () => {
-    expect(electronImports([resolve(SRC, "main.ts")], readSource)).not.toEqual([]);
+    expect(electronImports([resolve(SRC, "main.ts")], readSource, NATIVE)).not.toEqual([]);
   });
 
   it("walks the core's composition root", () => {
@@ -183,10 +200,10 @@ describe("the core never loads electron", () => {
   // host follows it with must be the kind of file the walk would flag.
   it("walks the core's tab state, and would catch the Electron view factory", () => {
     expect(entryFiles()).toContain(resolve(SRC, "core/tab-host.ts"));
-    expect(electronImports([resolve(SRC, "electron-view.ts")], readSource)).not.toEqual([]);
+    expect(electronImports([resolve(SRC, "electron-view.ts")], readSource, NATIVE)).not.toEqual([]);
   });
 
   it("finds no electron import under src/core/, src/daemon/ or daemon-*.ts, directly or transitively", () => {
-    expect(electronImports(entryFiles(), readSource)).toEqual([]);
+    expect(electronImports(entryFiles(), readSource, NATIVE)).toEqual([]);
   });
 });

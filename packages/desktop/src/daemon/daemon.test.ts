@@ -504,12 +504,41 @@ describe("build id", () => {
 
 describe("daemon script path", () => {
   it("is inside app.asar when packaged and beside main.js in development", () => {
-    expect(daemonScriptPath({ packaged: true, resourcesPath: "/R", distSrcDir: "/ignored" })).toBe(
-      "/R/app.asar/dist/src/daemon-main.js",
-    );
     expect(
-      daemonScriptPath({ packaged: false, resourcesPath: "", distSrcDir: "/repo/dist/src" }),
+      daemonScriptPath({
+        platform: "darwin",
+        packaged: true,
+        resourcesPath: "/R",
+        distSrcDir: "/ignored",
+      }),
+    ).toBe("/R/app.asar/dist/src/daemon-main.js");
+    expect(
+      daemonScriptPath({
+        platform: "linux",
+        packaged: false,
+        resourcesPath: "",
+        distSrcDir: "/repo/dist/src",
+      }),
     ).toBe("/repo/dist/src/daemon-main.js");
+  });
+
+  it("joins with Windows separators on Windows, whatever the host", () => {
+    expect(
+      daemonScriptPath({
+        platform: "win32",
+        packaged: true,
+        resourcesPath: "C:\\Program Files\\Jarvis\\resources",
+        distSrcDir: "C:\\ignored",
+      }),
+    ).toBe("C:\\Program Files\\Jarvis\\resources\\app.asar\\dist\\src\\daemon-main.js");
+    expect(
+      daemonScriptPath({
+        platform: "win32",
+        packaged: false,
+        resourcesPath: "",
+        distSrcDir: "C:\\repo\\dist\\src",
+      }),
+    ).toBe("C:\\repo\\dist\\src\\daemon-main.js");
   });
 });
 

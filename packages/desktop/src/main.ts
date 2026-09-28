@@ -68,6 +68,7 @@ if (launchingDaemon) {
   launchDaemonFromApp({
     execPath: process.execPath,
     script: daemonScriptPath({
+      platform: process.platform,
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       distSrcDir: dirname(fileURLToPath(import.meta.url)),
@@ -402,6 +403,7 @@ app.whenReady().then(async () => {
       // An AppImage's own file: execPath is inside its temporary mount.
       ...(appImage === undefined ? {} : { appImage }),
       daemonScript: daemonScriptPath({
+        platform,
         packaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
         distSrcDir,

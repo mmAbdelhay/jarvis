@@ -7,16 +7,21 @@
 // the script is too — Electron's asar support stays on under
 // ELECTRON_RUN_AS_NODE, and node-pty is already unpacked (asarUnpack).
 //
+// The joins use the path rules of `platform`, never the host's, so the
+// Windows answer can be checked anywhere (path.win32).
+//
 // No electron here (core/no-electron.test.ts).
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 
 export function daemonScriptPath(options: {
+  platform: NodeJS.Platform;
   packaged: boolean;
   /** process.resourcesPath, when packaged. */
   resourcesPath: string;
   /** The compiled dist/src directory, from the caller's import.meta.url. */
   distSrcDir: string;
 }): string {
+  const { join } = options.platform === "win32" ? win32 : posix;
   return options.packaged
     ? join(options.resourcesPath, "app.asar", "dist", "src", "daemon-main.js")
     : join(options.distSrcDir, "daemon-main.js");
