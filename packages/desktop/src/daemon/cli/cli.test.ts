@@ -501,22 +501,24 @@ describe("pair", () => {
     }
   });
 
-  it("prints the browser link while browser access is on", async () => {
+  it("prints the browser link and its own QR while browser access is on", async () => {
     const io = fakeIo({ lines: ["n"] });
+    // As long as a real web pairing link (229 bytes over a Tailscale name):
+    // past what a version-10 code holds.
+    const webUri = `https://e1089167.tailfee19e.ts.net:17718/pair#v=2&name=e1089167.tailfee19e.ts.net&host=100.79.83.16&port=17717&secret=${"s".repeat(43)}&fp=${"ab".repeat(32)}`;
     const withWeb = remoteStatus({
-      web: { kind: "on", port: 7718, origin: "https://mac.tail.ts.net:7718" },
-      pairing: {
-        kind: "open",
-        uri: URI,
-        expiresAt: 1_120_000,
-        webUri: "https://mac.tail.ts.net:7718/pair#secret",
-      },
+      web: { kind: "on", port: 17718, origin: "https://e1089167.tailfee19e.ts.net:17718" },
+      pairing: { kind: "open", uri: URI, expiresAt: 1_120_000, webUri },
     });
     const client = pairingClient([withWeb, confirming]);
     const d = deps(io, client);
     const done = runCli(["pair"], d);
     await flush();
-    expect(io.outLines).toContain("https://mac.tail.ts.net:7718/pair#secret");
+    expect(io.outLines).toContain(webUri);
+    const label = io.outLines.findIndex((line) => line.startsWith(CLI_MESSAGES.pairWebLink("en")));
+    const webQr = qrToBlocks(encodeQr(webUri));
+    expect(io.outLines.slice(label + 1, label + 1 + webQr.length)).toEqual(webQr);
+    expect(io.outLines[label + 1 + webQr.length]).toBe(webUri);
     d.tick();
     await done;
   });

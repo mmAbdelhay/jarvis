@@ -303,6 +303,7 @@ function printPairing(status: RemoteStatus, deps: CliDeps): void {
   if (web !== undefined && pairing.webUri !== undefined) {
     io.out("");
     io.out(`${CLI_MESSAGES.pairWebLink(language)} ${MESSAGES.remoteWebQrNote(true, language)}`);
+    for (const line of qrToBlocks(deps.encodeQr(web))) io.out(line);
     io.out(web);
   }
   io.out("");
