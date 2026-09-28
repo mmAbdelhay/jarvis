@@ -12,7 +12,7 @@ export type LayoutInfo = { kind: LayoutClass; compact: boolean };
 // layout. The width floor is the narrowest iPad in portrait (iPad mini,
 // 744pt), which the spec requires to be wide.
 const WIDE_MIN_SHORT_SIDE = 600;
-const WIDE_MIN_WIDTH = 744;
+export const WIDE_MIN_WIDTH = 744;
 // The desktop's `@container topbar (max-width: 899px)` rule: below this the
 // top bar drops its metrics readout.
 const COMPACT_BELOW_WIDTH = 900;
