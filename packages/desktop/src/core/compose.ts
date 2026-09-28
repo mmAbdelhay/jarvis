@@ -6,7 +6,8 @@
 // (core/no-electron.test.ts) and reads no process.platform
 // (platform-convention.test.ts). Whatever needs either — the window, its
 // hosted views, OS notifications, the system browser, relaunching the app —
-// is built in main.ts and handed in through CoreDeps.
+// is the desktop app's, which attaches it as a DesktopHost (core/host-link.ts)
+// through CoreClient (core/core-client.ts) once its window exists.
 //
 // The body is main.ts's old app.whenReady() composition, moved verbatim and
 // in the same order: what started there at a given point still starts at
@@ -31,6 +32,7 @@ import {
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
+import { createHostLink, type DesktopHost } from "./host-link.js";
 import { createDispatchTable, type DispatchTable } from "../dispatch.js";
 import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
@@ -201,7 +203,7 @@ import { capacityReport, startupReport } from "../startup.js";
 /** The `performance:` section states its timeouts in minutes, because that is
  *  the unit anybody reasons about "leave a tab alone for a while" in. Every
  *  consumer wants milliseconds. */
-export const MINUTE_MS = 60_000;
+const MINUTE_MS = 60_000;
 
 /** How often the idle sweeps run. Both are cheap — one walks the tab list,
  *  the other a map of at most a handful of child processes — so a minute is
@@ -278,63 +280,33 @@ const VOICE_SAMPLE = {
   ar: "مساء الخير يا سيدي، كيف أقدر أساعدك اليوم؟",
 };
 
-/** Handed to CoreDeps.attachHost at the point main.ts always built its
- *  window: config loaded, orchestrator built, no sidecar wired yet. */
-export type HostContext = {
-  /** Whether this launch created jarvis.yaml — the first-run setup screen. */
-  firstRun: boolean;
-  config: JarvisConfig;
-  /** The favicon cache bookmarks read and hosted pages fill. */
-  favicons: FaviconStore;
-  /** The Workspace's tab state, owned by the core. A host with a window
-   *  follows it with a ViewReconciler; a headless one ignores it. */
-  tabs: TabHost;
-};
-
-/** The host's side of the seam: the window and the pages in it. */
-export type CoreHost = {
-  /** The hosted pages, if this host has any. */
-  views: {
-    /** Asks the core to suspend pages that sat hidden too long. Run on the
-     *  sweep tick, before the sidecar reapers read which tabs still need
-     *  their sidecar. */
-    sweepIdle(): void;
-    /** Destroys every page: each is a live Chromium process. */
-    destroy(): void;
-  };
-  /** Where every push reaches this host's own renderer. */
-  toRenderer: PushSink;
-  /** notify.ts holds back a phone push the user is already looking at. */
-  isFocused(): boolean;
-  /** On screen: visible and not minimised. wiring.ts's awake gate. */
-  isAwake(): boolean;
-  /** Fetches a site's /favicon.ico through its project's own session
-   *  partition — for a bookmark never opened in Jarvis. */
-  requestFavicon(project: string, url: string): void;
-};
-
-export type CoreDeps<H extends CoreHost> = {
+export type CoreDeps = {
   /** process.platform, read once at the edge (platform-convention.test.ts). */
   platform: NodeJS.Platform;
-  /** Builds the host. Called once, synchronously, from inside createCore. */
-  attachHost(context: HostContext): H;
-  /** An OS notification — a global login lockout or a reused refresh token. */
-  showNotification(title: string, body: string): void;
-  /** The system browser — remote:openWebClient. */
-  openExternal(url: string): Promise<void>;
-  /** Settings' Restart button: relaunch the app. */
-  restart(): void;
   /** Where the browser client's web export lives. Read lazily, once. */
   webExportDir(): string;
 };
 
-export type Core<H extends CoreHost> = {
-  /** Whatever attachHost built. */
-  host: H;
+/** What createCore builds. The Electron host never holds this directly: it
+ *  is wrapped by inProcessCoreClient (core-client.ts), the same CoreClient a
+ *  socket adapter implements. */
+export type Core = {
+  /** Whether this launch created jarvis.yaml — the first-run setup screen. */
+  firstRun: boolean;
+  /** The settings the desktop app's own Electron objects read, live. */
+  hostConfig(): { allowPopups: boolean; suspendTabsAfterMs: number };
   /** Every request handler, keyed by channel. */
   dispatch: DispatchTable;
   broadcast: Broadcaster;
-  remote: RemoteAccess;
+  /** The Workspace's tab state. */
+  tabs: TabHost;
+  /** The favicon cache bookmarks read and hosted pages fill. */
+  favicons: FaviconStore;
+  /** Hands the core a desktop app's window, pages and OS services. Returns
+   *  the detach. */
+  attachHost(host: DesktopHost): () => void;
+  /** Every push for the attached app's renderer, in order. */
+  onPush(listener: PushSink): () => void;
   /** Push-to-talk: the hotkeys and the mic button drive the same pair. */
   voiceControl: { start(): void; stop(): void };
   /** DbGate's BASIC_AUTH answer, for Electron's login challenge. */
@@ -348,7 +320,7 @@ export type Core<H extends CoreHost> = {
   stop(): void;
 };
 
-export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise<Core<H>> {
+export async function createCore(deps: CoreDeps): Promise<Core> {
   const { platform } = deps;
   // First run on a machine writes the file it is about to read. Without
   // this, loadConfig throws ENOENT and main.ts's startup handler turns it
@@ -677,10 +649,12 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
       resumeHostedApp === undefined ? Promise.resolve(undefined) : resumeHostedApp(tab),
   });
 
-  // The window and the pages that follow those tabs, built by the host here
-  // — where main.ts always built them: after the orchestrator, before any
-  // sidecar.
-  const host = deps.attachHost({ firstRun, config, favicons, tabs: workspace });
+  // The desktop app's end: its window's state, its pages and its OS
+  // services. The app attaches itself through CoreClient once its window
+  // exists; until then — and for good, in a headless daemon — `host`
+  // answers for an app that is not there (host-link.ts).
+  const hostLink = createHostLink();
+  const host = hostLink.host;
 
   // Asked once, at startup: every sidecar below is a binary resolved on
   // PATH — `code-server`, `dbgate-serve`, `docker`, and the exec
@@ -1157,7 +1131,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   // isDestroyed(), so every other push would throw on a window that had
   // gone away. The guard now lives in one place and applies to all of them.
   const broadcast = createBroadcaster({
-    toRenderer: host.toRenderer,
+    toRenderer: hostLink.toClients,
   });
 
   // Sessions the process scan (process-scan.ts) found running outside
@@ -1468,7 +1442,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     // existing — never `@jarvis/platform`'s apiFetch or undici directly.
     fetch: (url, init) => fetch(url, init),
     // Phase 0: a global login lockout or a reused refresh token.
-    showNotification: (title, body) => deps.showNotification(title, body),
+    showNotification: (title, body) => host.showNotification(title, body),
   });
 
   // M10 Task 4: built right after remoteAccess and before wiring.start(),
@@ -1517,7 +1491,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
     // click, after a save has already succeeded.
-    restart: () => deps.restart(),
+    restart: () => host.restart(),
     language: PRIMARY_LANGUAGE,
   });
 
@@ -1648,7 +1622,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   // sidecar starts its own grace period from here rather than a minute
   // later.
   const sweepTimer = setInterval(() => {
-    host.views.sweepIdle();
+    host.sweepIdleViews();
     editorReaper.sweep(neededEditorKeys());
     databaseReaper.sweep(neededProjects("database"));
     clusterReaper.sweep(neededProjects("cluster"));
@@ -1719,7 +1693,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     safely("idle sweeps", () => clearInterval(sweepTimer));
     // Each hosted view is a live Chromium process; they do not go away
     // with the window on their own.
-    safely("hosted views", () => host.views.destroy());
+    safely("hosted views", () => host.destroyViews());
     // Each open editor is a live code-server child process, same reasoning.
     safely("code-server", () => codeServer.stopAll());
     // And each open Database tab is a live dbgate-serve child process.
@@ -2008,7 +1982,7 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
     tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
     writeConfig,
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
-    openExternal: (url) => deps.openExternal(url),
+    openExternal: (url) => host.openExternal(url),
   });
 
   // The desktop side of handleUtterance's UtteranceDeps: everything after
@@ -2227,10 +2201,17 @@ export async function createCore<H extends CoreHost>(deps: CoreDeps<H>): Promise
   }
 
   return {
-    host,
+    firstRun,
+    hostConfig: () => ({
+      allowPopups: config.browser.allowPopups,
+      suspendTabsAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
+    }),
     dispatch,
     broadcast,
-    remote: remoteAccess,
+    tabs: workspace,
+    favicons,
+    attachHost: (desktop) => hostLink.attach(desktop),
+    onPush: (listener) => hostLink.onPush(listener),
     voiceControl: { start: startVoice, stop: stopVoice },
     dbgateCredentialFor: (port) => dbgate.credentialFor(port),
     // Nothing listens until the bridge's own gate (rule 3) says so — this

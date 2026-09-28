@@ -99,6 +99,27 @@ describe("TabHost", () => {
     expect(requests).toEqual([{ kind: "reveal" }, { kind: "reveal" }, { kind: "reveal" }]);
   });
 
+  it("asks for the reveal only once the new tab is in state, so nothing old is shown first", () => {
+    // Over the daemon's socket a request and a state change are separate
+    // frames: a reveal that arrived before the tab existed would show the
+    // previously active page of another project for a frame.
+    const host = new TabHost();
+    let seen: string[] = [];
+    host.onChange((state) => seen.push(`state:${state.tabs.length}`));
+    host.onViewRequest((request) => seen.push(request.kind));
+    const opens = [
+      () => host.open("acme", "github.com"),
+      () => host.openTerminal("acme"),
+      () => void host.openForResult("acme", "https://auth.example/authorize"),
+    ];
+    for (const [index, open] of opens.entries()) {
+      seen = [];
+      open();
+      expect(seen[0], `open #${index + 1}`).toBe(`state:${index + 1}`);
+      expect(seen.at(-1), `open #${index + 1}`).toBe("reveal");
+    }
+  });
+
   describe("navigate", () => {
     it("records the new URL as loading and asks the view to load it", () => {
       const host = new TabHost();
@@ -234,6 +255,7 @@ describe("TabHost", () => {
         canGoBack: true,
         canGoForward: true,
       });
+      host.openTerminal("acme");
       host.suspend(id);
       expect(host.state().tabs[0]).toMatchObject({
         suspended: true,
@@ -241,6 +263,24 @@ describe("TabHost", () => {
         canGoBack: false,
         canGoForward: false,
       });
+    });
+
+    it("refuses to suspend the active tab — the user may have switched to it while the ask was in flight", () => {
+      const host = new TabHost();
+      host.open("acme", "a.com");
+      const id = host.state().tabs[0]!.id;
+      host.suspend(id);
+      expect(host.state().tabs[0]?.suspended).toBe(false);
+    });
+
+    it("refuses to suspend a tab whose page is playing video", () => {
+      const host = new TabHost();
+      host.open("acme", "a.com");
+      const id = host.state().tabs[0]!.id;
+      host.reportPage(id, { kind: "video", playing: true });
+      host.openTerminal("acme");
+      host.suspend(id);
+      expect(host.state().tabs[0]?.suspended).toBe(false);
     });
 
     it("never suspends a terminal", () => {

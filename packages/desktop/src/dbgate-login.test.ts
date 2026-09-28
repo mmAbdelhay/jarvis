@@ -2,7 +2,7 @@
 // disqualify a challenge, one at a time, plus the one combination that must
 // pass. See the "bite-proof" case below for why the host compare is exact.
 import { describe, expect, it } from "vitest";
-import { dbGateLoginAnswer, type LoginAuthInfo } from "./dbgate-login.js";
+import { answerDbGateChallenge, dbGateLoginAnswer, type LoginAuthInfo } from "./dbgate-login.js";
 
 const authInfo = (overrides: Partial<LoginAuthInfo> = {}): LoginAuthInfo => ({
   isProxy: false,
@@ -65,5 +65,70 @@ describe("dbGateLoginAnswer", () => {
     expect(dbGateLoginAnswer(authInfo({ realm: "unexpected realm" }), credentialFor)).toEqual(
       CREDENTIAL,
     );
+  });
+});
+
+// main.ts's wiring, now that the credential comes from the core through
+// CoreClient and so arrives asynchronously: Electron has to be told
+// synchronously whether the challenge is taken, and answered later.
+describe("answerDbGateChallenge", () => {
+  const asyncCredentialFor = (port: number) => Promise.resolve(credentialFor(port));
+
+  it("takes a DbGate-shaped challenge and answers it with the running instance's credential", async () => {
+    const answers: unknown[][] = [];
+    const taken = answerDbGateChallenge(authInfo(), asyncCredentialFor, (...args) => {
+      answers.push(args);
+    });
+    expect(taken).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(answers).toEqual([["jarvis", "pw"]]);
+  });
+
+  it("cancels a DbGate-shaped challenge for a port no instance holds — what Electron's default did", async () => {
+    const answers: unknown[][] = [];
+    expect(
+      answerDbGateChallenge(authInfo({ port: 9999 }), asyncCredentialFor, (...args) => {
+        answers.push(args);
+      }),
+    ).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(answers).toEqual([[]]);
+  });
+
+  it("cancels when the credential lookup fails", async () => {
+    const answers: unknown[][] = [];
+    answerDbGateChallenge(
+      authInfo(),
+      () => Promise.reject(new Error("gone")),
+      (...args) => {
+        answers.push(args);
+      },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(answers).toEqual([[]]);
+  });
+
+  it("leaves every other challenge to Electron, without asking for a credential", () => {
+    let asked = false;
+    for (const info of [
+      authInfo({ isProxy: true }),
+      authInfo({ scheme: "digest" }),
+      authInfo({ host: "localhost" }),
+    ]) {
+      expect(
+        answerDbGateChallenge(
+          info,
+          () => {
+            asked = true;
+            return Promise.resolve(CREDENTIAL);
+          },
+          () => undefined,
+        ),
+      ).toBe(false);
+    }
+    expect(asked).toBe(false);
   });
 });

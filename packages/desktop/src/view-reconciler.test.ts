@@ -1,5 +1,5 @@
 import type { Session } from "electron";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import {
   isDevToolsDock,
@@ -345,6 +345,31 @@ describe("ViewReconciler against a snapshot sequence", () => {
 
     reconciler.apply(snapshot([tab("a", { suspended: true }), tab("b")]));
     expect(created[0]?.view.destroyed).toBe(true);
+  });
+
+  it("logs a page it could not build and still builds and shows the rest", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const views: FakeView[] = [];
+      const failing = new ViewReconciler((partition) => {
+        if (partition === "persist:project-broken") throw new Error("no renderer");
+        const view = new FakeView();
+        views.push(view);
+        return view;
+      }, recordingReports().reports);
+      failing.setVisible(true);
+      failing.apply(snapshot([tab("x", { project: "broken" }), tab("b")]));
+      expect(views.map((view) => view.loaded)).toEqual([["https://b.example/"]]);
+      expect(views[0]?.visible).toBe(true);
+      expect(errors).toHaveBeenCalledTimes(1);
+      const line = String(errors.mock.calls[0]?.[0]);
+      expect(line).toContain("tab x");
+      expect(line).toContain("no renderer");
+      // The URL can carry a token (an OAuth callback), so it stays out.
+      expect(line).not.toContain("x.example");
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("creates nothing once destroyed", () => {

@@ -16,11 +16,11 @@ import type { Session } from "electron";
 import { appMenuTemplate } from "./app-menu.js";
 import { windowChrome } from "./window-chrome.js";
 import { rendererSink } from "./broadcast.js";
-import { preloadChannelArgs } from "./channels.js";
-import { createCore, MINUTE_MS, type HostContext } from "./core/compose.js";
-import { dbGateLoginAnswer } from "./dbgate-login.js";
-import { DESKTOP_ORIGIN } from "./dispatch.js";
-import { registerDesktopOnly } from "./desktop-only.js";
+import { INVOKE_CHANNELS, preloadChannelArgs, type PushChannels } from "./channels.js";
+import { createCore } from "./core/compose.js";
+import { inProcessCoreClient, type CoreChannel, type CoreClient } from "./core/core-client.js";
+import { answerDbGateChallenge } from "./dbgate-login.js";
+import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -55,16 +55,27 @@ function setDockIcon(): void {
 }
 
 /**
- * The desktop host: the window and the Workspace's pages, built at the
- * point in createCore where main.ts always built them.
+ * The request channels the core answers — every invoke channel but the
+ * Electron-bound ones registerDesktopOnly serves here, in the host.
+ */
+function coreChannels(): CoreChannel[] {
+  const local: ReadonlySet<string> = new Set(ELECTRON_BOUND_CHANNELS);
+  return [...new Set(Object.values(INVOKE_CHANNELS))].filter(
+    (channel): channel is CoreChannel => !local.has(channel),
+  );
+}
+
+/**
+ * The desktop host: the window and the Workspace's pages, attached to the
+ * core as its DesktopHost.
  *
  * Everything here is Electron — the BrowserWindow, its permission and
  * navigation guards, the ViewReconciler that keeps one WebContentsView per
- * page tab in the core's TabHost, and the per-project session partitions
- * favicons are fetched through. The core reaches it only through the
- * CoreHost it returns.
+ * page tab in the core's tab state, and the per-project session partitions
+ * favicons are fetched through. It reaches the core only through `client`,
+ * which is the same whether the core runs in this process or in jarvisd.
  */
-function createDesktopHost({ firstRun, config, favicons, tabs }: HostContext) {
+function createDesktopHost(client: CoreClient) {
   const window = new BrowserWindow({
     // Jarvis is the surface you work from, not a panel beside something
     // else: it opens at the full working area — maximized, NOT macOS
@@ -97,7 +108,10 @@ function createDesktopHost({ firstRun, config, favicons, tabs }: HostContext) {
       // below) and can't require("./channels.js"), so this is the only
       // path left to hand it the 118 channel names without pasting them
       // into preload.cts by hand.
-      additionalArguments: [...(firstRun ? ["--jarvis-first-run"] : []), ...preloadChannelArgs()],
+      additionalArguments: [
+        ...(client.firstRun ? ["--jarvis-first-run"] : []),
+        ...preloadChannelArgs(),
+      ],
       // This renderer displays untrusted agent output and holds
       // `window.jarvis.send`. These already match Electron 44's implicit
       // defaults; stated explicitly so a future edit that weakens them
@@ -121,21 +135,21 @@ function createDesktopHost({ firstRun, config, favicons, tabs }: HostContext) {
   // reconciler follows it.
   const views = new ViewReconciler(
     createElectronViewFactory(window, {
-      allowPopups: () => config.browser.allowPopups,
+      allowPopups: () => client.hostConfig().allowPopups,
     }),
-    tabs,
+    client.workspace,
     {
       cacheFavicon,
-      suspendAfterMs: config.performance.suspendTabsAfterMinutes * MINUTE_MS,
+      suspendAfterMs: client.hostConfig().suspendTabsAfterMs,
     },
   );
-  views.follow(tabs);
+  views.follow(client.workspace);
 
   /** The size cap, the image-type check and the miss-on-failure rule all
    *  live in favicon-fetch.ts, where they are testable without Electron.
    *  This is only the binding of the store to it. */
   async function cacheFavicon(pageUrl: string, iconUrl: string, from: Session): Promise<void> {
-    await fetchFavicon(favicons, pageUrl, iconUrl, from);
+    await fetchFavicon(client.favicons, pageUrl, iconUrl, from);
   }
 
   /** The fallback path, for a bookmark never opened in Jarvis — which is
@@ -177,14 +191,38 @@ function createDesktopHost({ firstRun, config, favicons, tabs }: HostContext) {
     }
   });
 
-  return {
-    window,
-    views,
-    toRenderer: rendererSink(window),
+  // Every push the core sends this app, into this window's renderer.
+  const toWindow = rendererSink(window);
+  client.onPush(toWindow);
+
+  client.attachHost({
     isFocused: () => window.isFocused(),
     isAwake: () => window.isVisible() && !window.isMinimized(),
     requestFavicon,
-  };
+    sweepIdleViews: () => views.sweepIdle(),
+    destroyViews: () => views.destroy(),
+    // Phase 0: a global login lockout or a reused refresh token.
+    showNotification: (title, body) => {
+      if (Notification.isSupported()) new Notification({ title, body }).show();
+    },
+    // Phase 1: remote:openWebClient's system browser (dispatch.ts).
+    openExternal: (url) => electronShell.openExternal(url),
+    // A restart the user did not ask for is the wrong kind of "helpful"
+    // — this only ever fires from the renderer's own Restart button
+    // click, after a save has already succeeded.
+    restart: () => {
+      app.relaunch();
+      app.exit(0);
+    },
+  });
+
+  /** A push about this window alone — its DevTools, its tab chips — which
+   *  no other client has a panel for, so it never goes through the core. */
+  function local<C extends keyof PushChannels>(channel: C, payload: PushChannels[C]): void {
+    toWindow(channel, payload);
+  }
+
+  return { window, views, local };
 }
 
 /**
@@ -233,47 +271,35 @@ app.whenReady().then(async () => {
       console.error(`Widevine component install failed: ${errorMessage(error)}`);
     });
   try {
-    const core = await createCore({
-      platform: process.platform,
-      attachHost: createDesktopHost,
-      // Phase 0: a global login lockout or a reused refresh token.
-      showNotification: (title, body) => {
-        if (Notification.isSupported()) new Notification({ title, body }).show();
-      },
-      // Phase 1: remote:openWebClient's system browser (dispatch.ts).
-      openExternal: (url) => electronShell.openExternal(url),
-      // A restart the user did not ask for is the wrong kind of "helpful"
-      // — this only ever fires from the renderer's own Restart button
-      // click, after a save has already succeeded.
-      restart: () => {
-        app.relaunch();
-        app.exit(0);
-      },
-      // Phase 1: the browser client's own listener, behind the bridge's
-      // web gate. The export is read once, lazily (web-export.ts).
-      webExportDir: () =>
-        webExportDir({
-          packaged: app.isPackaged,
-          resourcesPath: process.resourcesPath,
-          // From dist/src/main.js: packages/desktop/web, where `pnpm build`
-          // copies the mobile app's web export (scripts/copy-web.mjs) —
-          // the same directory electron-builder ships.
-          devDir: fileURLToPath(new URL("../../web", import.meta.url)),
-        }),
-    });
-    const { window, views } = core.host;
-    const { dispatch, broadcast } = core;
-    const releaseChildren = core.stop;
+    // The core, in this process. Everything below reaches it through
+    // `client` alone (main-core-seam.test.ts), so a core running in jarvisd
+    // is a different adapter here and no other change.
+    const client = inProcessCoreClient(
+      await createCore({
+        platform: process.platform,
+        // Phase 1: the browser client's own listener, behind the bridge's
+        // web gate. The export is read once, lazily (web-export.ts).
+        webExportDir: () =>
+          webExportDir({
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            // From dist/src/main.js: packages/desktop/web, where `pnpm build`
+            // copies the mobile app's web export (scripts/copy-web.mjs) —
+            // the same directory electron-builder ships.
+            devDir: fileURLToPath(new URL("../../web", import.meta.url)),
+          }),
+      }),
+    );
+    const { window, views, local } = createDesktopHost(client);
+    const releaseChildren = (): void => client.stop();
 
     // DbGate is spawned with BASIC_AUTH=1 (dbgate.ts) and answers with
     // Electron's own login challenge rather than showing its JWT form —
-    // dbGateLoginAnswer is the pure decision of when it is safe to answer;
-    // this only wires it (ruling 15).
+    // answerDbGateChallenge is the pure decision of when it is safe to
+    // answer; this only wires it (ruling 15).
     app.on("login", (event, _webContents, _details, authInfo, callback) => {
-      const answer = dbGateLoginAnswer(authInfo, core.dbgateCredentialFor);
-      if (answer !== undefined) {
+      if (answerDbGateChallenge(authInfo, (port) => client.dbgateCredentialFor(port), callback)) {
         event.preventDefault();
-        callback(answer.login, answer.password);
       }
     });
 
@@ -296,11 +322,11 @@ app.whenReady().then(async () => {
       });
     }
 
-    // Every request handler, in one table (dispatch.ts). Registered in a
-    // loop so a second transport can call the same table with a different
-    // Origin.
-    for (const [channel, handler] of Object.entries(dispatch)) {
-      ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(args, DESKTOP_ORIGIN));
+    // Every request the core answers (dispatch.ts's table), forwarded
+    // through the client in a loop — the renderer's arguments as they
+    // came, the origin always the desktop's.
+    for (const channel of coreChannels()) {
+      ipcMain.handle(channel, (_event, ...args: unknown[]) => client.invoke(channel, args));
     }
 
     registerDesktopOnly({
@@ -310,21 +336,27 @@ app.whenReady().then(async () => {
       dialog,
       buildMenu: (template) => Menu.buildFromTemplate(template),
       views,
-      chooseDock: (dock) => broadcast.local("workspace:devtoolsDockChosen", dock),
+      chooseDock: (dock) => local("workspace:devtoolsDockChosen", dock),
       // Bug 2: the tab menu's Reload is workspace:reload's own view call,
       // and Close runs the dispatch table's workspace:close (terminal
       // close, follower unfollow, desktopSizedPanes cleanup) — called
       // directly rather than duplicated here.
       reloadTab: (tabId) => views.reload(tabId),
-      closeTab: (tabId) => void dispatch["workspace:close"]([tabId], DESKTOP_ORIGIN),
-      startTabRename: (tabId) => broadcast.local("workspace:tabRename", tabId),
+      closeTab: (tabId) => {
+        client
+          .invoke("workspace:close", [tabId])
+          .catch((error: unknown) =>
+            console.error(`tab menu: close failed: ${errorMessage(error)}`),
+          );
+      },
+      startTabRename: (tabId) => local("workspace:tabRename", tabId),
       language: PRIMARY_LANGUAGE,
     });
-    views.onDevToolsClosed((tabId) => broadcast.local("workspace:devtoolsClosed", tabId));
+    views.onDevToolsClosed((tabId) => local("workspace:devtoolsClosed", tabId));
 
     // The bridge's lifecycle, started where it always was: after every
-    // request handler is registered. See core.startRemote.
-    core.startRemote();
+    // request handler is registered. See CoreClient.startRemote.
+    client.startRemote();
 
     // Alt+Space, or on Windows a fallback pair when another app holds it —
     // see hotkeys.ts. Which pair is live is reported to the renderer below,
@@ -333,8 +365,8 @@ app.whenReady().then(async () => {
       {
         register: (accelerator, handler) => globalShortcut.register(accelerator, handler),
         unregister: (accelerator) => globalShortcut.unregister(accelerator),
-        onStart: core.voiceControl.start,
-        onStop: core.voiceControl.stop,
+        onStart: () => client.voice.start(),
+        onStop: () => client.voice.stop(),
       },
       process.platform,
     );
@@ -383,7 +415,7 @@ app.whenReady().then(async () => {
     if (hotkeys.fellBack && hotkeys.active !== undefined) {
       // Taken, and answered rather than merely reported: the keys that do
       // work are named, and the renderer is told so its hints agree.
-      broadcast.send("turn:new", {
+      client.broadcast("turn:new", {
         role: "assistant",
         text: MESSAGES.hotkeyFallback(
           PRIMARY_HOTKEYS.start,
@@ -400,7 +432,7 @@ app.whenReady().then(async () => {
         // means no application can hold one at all, and saying "another app
         // is probably using it" would send them looking for something that
         // does not exist.
-        broadcast.send("turn:new", {
+        client.broadcast("turn:new", {
           role: "assistant",
           text: isWayland(process.env)
             ? MESSAGES.hotkeyUnavailableWayland(combo, PRIMARY_LANGUAGE)
@@ -411,10 +443,10 @@ app.whenReady().then(async () => {
       }
     }
     if (hotkeys.active !== undefined && hotkeys.active !== PRIMARY_HOTKEYS) {
-      broadcast.send("voice:hotkeys", hotkeys.active);
+      client.broadcast("voice:hotkeys", hotkeys.active);
     }
 
-    await core.announceStartup();
+    await client.announceStartup();
   } catch (error) {
     dialog.showErrorBox("Jarvis failed to start", errorMessage(error));
     app.quit();

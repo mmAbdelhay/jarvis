@@ -7,15 +7,9 @@ import type {
   Rect,
   ViewFactory,
 } from "./browser-host.js";
-import { hasView, type TabHost, type ViewRequest } from "./core/tab-host.js";
+import { hasView, type TabReports, type TabSource, type ViewRequest } from "./core/tab-host.js";
 
-/** What the reconciler tells the tab state. Every call is small and
- *  serialisable, so it can cross the daemon's control socket later; today
- *  it is the in-process TabHost itself. */
-export type TabReports = Pick<TabHost, "open" | "suspend" | "reportPage">;
-
-/** What the reconciler follows. */
-export type TabSource = Pick<TabHost, "state" | "onChange" | "onViewRequest">;
+export type { TabReports, TabSource };
 
 type Held = { view: HostedView; project: string };
 
@@ -262,7 +256,21 @@ export class ViewReconciler {
 
     for (const tab of wanted.values()) {
       if (this.#views.has(tab.id)) continue;
-      this.#attach(tab.id, tab.project, tab.kind, tab.url);
+      // One page that cannot be built must not stop the rest of the pass —
+      // the other pages and the visibility sync below. Logged rather than
+      // thrown: this runs inside the tab state's change listener, which
+      // would swallow it, and a tab with no page and nothing said about it
+      // is a bug nobody can find. The next change retries it. The URL stays
+      // out of the line: an OAuth callback carries its code in it.
+      try {
+        this.#attach(tab.id, tab.project, tab.kind, tab.url);
+      } catch (error) {
+        console.error(
+          `workspace: could not build the page for tab ${tab.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
 
     this.#syncVisibility();

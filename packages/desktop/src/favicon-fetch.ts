@@ -40,7 +40,7 @@ function mediaType(contentType: string): string {
  * on.
  */
 export async function cacheFavicon(
-  favicons: FaviconStore,
+  favicons: Pick<FaviconStore, "put" | "putMiss">,
   pageUrl: string,
   iconUrl: string,
   from: FaviconFetcher,

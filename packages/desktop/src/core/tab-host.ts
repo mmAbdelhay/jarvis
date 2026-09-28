@@ -75,6 +75,14 @@ export type PageFact =
   | { kind: "video"; playing: boolean }
   | { kind: "fullscreen"; fullscreen: boolean };
 
+/** What a host's pages tell the tab state. Every call is small and
+ *  serialisable, so it can cross the daemon's control socket; in-process it
+ *  is the TabHost itself, through CoreClient.workspace. */
+export type TabReports = Pick<TabHost, "open" | "suspend" | "reportPage">;
+
+/** What a host's pages follow. */
+export type TabSource = Pick<TabHost, "state" | "onChange" | "onViewRequest">;
+
 type PendingResult = { redirectPrefix: string; resolve(url: string): void };
 
 export class TabHost {
@@ -122,7 +130,6 @@ export class TabHost {
     if (target.kind === "rejected") return;
 
     this.#evictIfFull();
-    this.#request({ kind: "reveal" });
 
     const tab = this.#store.open(project, target.url, kind);
     if (kind !== "web") {
@@ -136,6 +143,10 @@ export class TabHost {
       // the renderer can match on it.
       this.#label(tab.id, project, kind, detail);
     }
+    // After the tab is in state, never before: over the daemon's socket the
+    // two are separate frames, and a reveal ahead of the new tab would show
+    // the previously active page for a frame.
+    this.#request({ kind: "reveal" });
   }
 
   /**
@@ -190,10 +201,10 @@ export class TabHost {
       }
 
       this.#evictIfFull();
-      this.#request({ kind: "reveal" });
       const tab = this.#store.open(project, target.url, "web");
       this.#pending.set(tab.id, { redirectPrefix, resolve });
       this.#store.update(tab.id, { title: `${project} — Authorize` });
+      this.#request({ kind: "reveal" });
     });
   }
 
@@ -239,10 +250,17 @@ export class TabHost {
    * sat hidden long enough (ViewReconciler.sweepIdle). The tab stays: its
    * row, URL and place in the strip are untouched, and activating it
    * rebuilds the page at the same address.
+   *
+   * The host's sweep already skips the active tab and one playing video,
+   * but it asks from its own copy of the state. Over the daemon's socket
+   * the user can switch to a tab while its suspend is in flight, and
+   * suspending the page they are looking at would destroy it under them —
+   * so the core, which holds the current state, refuses both again here.
    */
   suspend(id: TabId): void {
     const tab = this.#store.get(id);
     if (tab === undefined || !hasView(tab)) return;
+    if (id === this.#store.snapshot().activeTabId || tab.hasPlayingVideo) return;
     this.#store.update(id, {
       suspended: true,
       // A suspended tab can go nowhere: there is no session history left to
@@ -320,9 +338,9 @@ export class TabHost {
    */
   #openViewless(project: string, kind: "terminal" | "api" | "docker", detail?: string): TabId {
     this.#evictIfFull();
-    this.#request({ kind: "reveal" });
     const tab = this.#store.open(project, "", kind);
     this.#label(tab.id, project, kind, detail);
+    this.#request({ kind: "reveal" });
     return tab.id;
   }
 
@@ -380,9 +398,16 @@ export class TabHost {
     for (const listener of [...this.#viewRequestListeners]) {
       try {
         listener(request);
-      } catch {
+      } catch (error) {
         // Same rule as TabStore's own listeners: one host's failure to
         // follow a request must not undo the tab change that caused it.
+        // Logged, though: a page that never loads with nothing said about
+        // it is a bug nobody can find.
+        console.error(
+          `workspace: a host failed to follow a ${request.kind} request: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       }
     }
   }
