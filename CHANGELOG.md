@@ -9,8 +9,8 @@ version and the downloads. This file is the index.
 ## Unreleased
 
 - Tablet and desktop layout for the browser client and the iPad and
-  Android tablet app: a window at least 768 wide whose shorter side is at
-  least 600 gets a desktop-style top bar (sections, the laptop's metrics,
+  Android tablet app: a window at least 744 wide (an iPad mini in
+  portrait) whose shorter side is at least 600 gets a desktop-style top bar (sections, the laptop's metrics,
   connection and name, running count, clock), a three-panel Dashboard,
   Sessions as a list beside the selected session (`/sessions?id=`),
   terminals and tools inline in the Workspace, and a section list in

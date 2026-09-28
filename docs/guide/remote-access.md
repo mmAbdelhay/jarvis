@@ -541,12 +541,13 @@ an iPad or Android tablet, chooses its layout from the window size. The
 layout changes on resize or rotation, and nothing reloads.
 
 - **Phone layout.** It is used when the window's shorter side is under
-  600 points or its width is under 768. This is the phone app as it is:
+  600 points or its width is under 744. This is the phone app as it is:
   a bottom tab bar, full-screen pages, and a session or terminal that
   opens on its own screen.
 - **Tablet/desktop layout.** It is used when the shorter side is at least
-  600 and the width at least 768. For example, a laptop browser window,
-  an iPad either way round, or an Android tablet. It has a top bar like
+  600 and the width at least 744. For example, a laptop browser window,
+  an iPad either way round (744 is the iPad mini's width in portrait), or
+  an Android tablet. It has a top bar like
   the desktop app's, with the brand, **Dashboard**, **Sessions**,
   **Workspace**, **Voice** and **Settings**. The bar also shows the
   laptop's CPU, RAM, disk and network, the connection state and the
