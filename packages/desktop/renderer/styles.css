@@ -3662,6 +3662,8 @@
 
 .settings-voice-pick { display: flex; align-items: center; gap: var(--s2); flex-grow: 1; }
 .settings-voice-pick select { flex-grow: 1; }
+/* Settings → General's Restart daemon / Stop now (Task 23). */
+.settings-daemon-actions { display: flex; gap: var(--s2); margin-top: var(--s2); }
 
 
 /* ── The Dashboard's core stage ──────────────────────────────────────────

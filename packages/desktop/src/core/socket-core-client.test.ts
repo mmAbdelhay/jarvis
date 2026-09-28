@@ -72,6 +72,9 @@ function fakeCore() {
     dbgateCredentialFor: (port) =>
       port === 5000 ? { login: "jarvis", password: "pw" } : undefined,
     startRemote: () => lifecycle.push("startRemote"),
+    reapplyRemote: async () => {
+      lifecycle.push("reapplyRemote");
+    },
     announceStartup: async () => {
       lifecycle.push("announceStartup");
     },
@@ -278,6 +281,24 @@ describe("socket CoreClient: requests", () => {
     await expect(client.favicons.put("https://x.test/", "AAAA", "image/png")).resolves.toEqual({
       ok: true,
     });
+  });
+});
+
+describe("socket CoreClient: the daemon itself (Task 23)", () => {
+  it("answers daemon:info with the daemon's pid and start time, and forwards reapplyRemote", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    const before = Date.now();
+    await startDaemon(run, fake.core);
+    const client = await connect(run);
+
+    const info = await client.info();
+    expect(info.pid).toBe(process.pid);
+    expect(info.startedAt).toBeGreaterThanOrEqual(before);
+    expect(info.startedAt).toBeLessThanOrEqual(Date.now());
+
+    await client.reapplyRemote();
+    expect(fake.lifecycle).toEqual(["reapplyRemote"]);
   });
 });
 

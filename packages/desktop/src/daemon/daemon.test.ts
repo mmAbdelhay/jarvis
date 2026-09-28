@@ -55,6 +55,9 @@ function fakeCore() {
     voiceControl: { start: () => lifecycle.push("voice:start"), stop: () => {} },
     dbgateCredentialFor: () => undefined,
     startRemote: () => lifecycle.push("startRemote"),
+    reapplyRemote: async () => {
+      lifecycle.push("reapplyRemote");
+    },
     announceStartup: async () => {},
     stop: () => lifecycle.push("stop"),
     shutdown: async () => {

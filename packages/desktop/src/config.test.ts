@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import {
   DEFAULT_BROWSER,
+  DEFAULT_DAEMON,
   DEFAULT_PERFORMANCE,
   DEFAULT_PRAYER,
   DEFAULT_REMOTE,
@@ -20,6 +21,7 @@ import {
   mergeConfigInPlace,
   providerAgentListsEqual,
   parseConfig,
+  parseDaemon,
 } from "./config.js";
 
 const valid = {
@@ -1581,5 +1583,36 @@ describe("remote", () => {
     expect(
       parseConfig({ ...base, remote: { idleDisableMinutes: 10080 } }).remote.idleDisableMinutes,
     ).toBe(10080);
+  });
+});
+
+// Task 23: `daemon.enabled`, parsed in the style of remote.push.
+describe("daemon", () => {
+  const base = { agents: { claude: { command: "claude" } }, brain: { cwd: "/tmp/brain" } };
+
+  it("parses an absent, empty or null section to off", () => {
+    expect(parseConfig(base).daemon).toEqual({ enabled: false });
+    expect(parseConfig({ ...base, daemon: null }).daemon).toEqual({ enabled: false });
+    expect(parseConfig({ ...base, daemon: {} }).daemon).toEqual({ enabled: false });
+    expect(DEFAULT_DAEMON).toEqual({ enabled: false });
+  });
+
+  it("reads enabled true and false", () => {
+    expect(parseConfig({ ...base, daemon: { enabled: true } }).daemon).toEqual({ enabled: true });
+    expect(parseDaemon({ enabled: false })).toEqual({ enabled: false });
+  });
+
+  it.each([
+    [true, "Config `daemon` must be an object"],
+    [[], "Config `daemon` must be an object"],
+    ["on", "Config `daemon` must be an object"],
+    [{ enabled: "yes" }, "Config `daemon.enabled` must be true or false"],
+    [{ enabled: 1 }, "Config `daemon.enabled` must be true or false"],
+  ])("refuses %j", (daemon, message) => {
+    expect(() => parseConfig({ ...base, daemon })).toThrow(message);
+  });
+
+  it("returns a fresh object, never the shared default", () => {
+    expect(parseDaemon(undefined)).not.toBe(DEFAULT_DAEMON);
   });
 });

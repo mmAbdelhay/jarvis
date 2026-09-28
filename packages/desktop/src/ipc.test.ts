@@ -1458,6 +1458,7 @@ const sampleConfig: JarvisConfig = {
     web: { enabled: false },
     idleDisableMinutes: 0,
   },
+  daemon: { enabled: false },
   sessionsDbPath: "/tmp/sessions.db",
 };
 

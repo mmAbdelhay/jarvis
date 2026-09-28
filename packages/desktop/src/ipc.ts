@@ -76,6 +76,7 @@ import { MAX_PINNED } from "@jarvis/platform";
 import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
+import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
@@ -776,6 +777,19 @@ export type RendererApi = {
   saveSettings(draft: JarvisConfig): Promise<SettingsSaveResult>;
   testAgent(agent: AgentConfig): Promise<AgentHealth>;
   restartApp(): Promise<void>;
+  /** Task 23, "Keep Jarvis running in the background": where the core
+   *  runs and how the daemon is doing. Desktop-only, and answered by the
+   *  Electron host itself (desktop-only.ts), never by a core: these start,
+   *  stop and replace the core. */
+  backgroundStatus(): Promise<DaemonStatus>;
+  /** The toggle, committed on change. Turning it on asks first (open
+   *  terminals in this window close); off relaunches the app. */
+  setBackgroundEnabled(enabled: boolean): Promise<ChangeResult>;
+  /** Restarts the daemon through its service manager. */
+  restartBackground(): Promise<ChangeResult>;
+  /** Stops the daemon for this session; the app relaunches with the core
+   *  inside it. */
+  stopBackgroundNow(): Promise<ChangeResult>;
   /** The configured project names, for the Workspace's project selector.
    *  Names only — the renderer never receives a filesystem path. */
   getProjects(): Promise<string[]>;

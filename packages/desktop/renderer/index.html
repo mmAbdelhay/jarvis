@@ -602,6 +602,7 @@
            last clicked; :target alone can't carry that (it only ever
            matches the section, never the link that pointed at it). -->
       <nav class="settings-nav" aria-label="Settings sections">
+        <a id="settings-nav-general" class="settings-nav-link" href="#settings-section-general">General</a>
         <a class="settings-nav-link settings-nav-link--on" href="#settings-section-agents">Agents</a>
         <a class="settings-nav-link" href="#settings-section-routing">Routing</a>
         <a class="settings-nav-link" href="#settings-section-projects">Projects</a>
@@ -629,6 +630,27 @@
       <!-- The measured column: a row is read in one glance rather than swept
            across the whole window. -->
       <div class="settings-inner">
+
+      <!-- Task 23: Settings → General. Every string is set by
+           daemon-settings.ts, in the app's language. -->
+      <section class="settings-section" id="settings-section-general">
+        <div id="settings-general-title" class="lbl"></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by daemon-settings.ts, not baked into markup -->
+          <label id="settings-daemon-label" for="settings-daemon-enabled"></label>
+          <span class="settings-switch">
+            <input id="settings-daemon-enabled" type="checkbox" disabled />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+          <span id="settings-daemon-state" class="settings-note"></span>
+        </div>
+        <div id="settings-daemon-note" class="settings-note"></div>
+        <div id="settings-daemon-log" class="settings-note settings-note--warning mono" hidden></div>
+        <div class="settings-daemon-actions">
+          <button id="settings-daemon-restart" class="settings-add" type="button" hidden></button>
+          <button id="settings-daemon-stop" class="settings-add" type="button" hidden></button>
+        </div>
+      </section>
 
       <section class="settings-section" id="settings-section-agents">
         <div class="settings-section-head">

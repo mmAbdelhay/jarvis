@@ -172,7 +172,13 @@ export type ElectronBoundChannel =
   | "workspace:visible"
   | "workspace:hideAll"
   | "workspace:pip"
-  | "dialog:pickFiles";
+  | "dialog:pickFiles"
+  // Task 23: where the core runs is the host's to decide — these start,
+  // stop and replace the core itself (daemon/mode.ts).
+  | "background:status"
+  | "background:setEnabled"
+  | "background:restart"
+  | "background:stopNow";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 

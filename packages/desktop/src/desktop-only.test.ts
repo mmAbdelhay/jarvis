@@ -22,6 +22,48 @@ describe("desktop-only registrations", () => {
     }
   });
 
+  // Task 23: the background service's channels are the host's own.
+  it("routes the background channels to the host, refusing a non-boolean toggle", async () => {
+    const deps = fakeDesktopDeps();
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    const listener = (channel: string) =>
+      handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => Promise<unknown>;
+
+    expect(await listener("background:status")({})).toEqual({
+      enabled: false,
+      inApp: true,
+      state: { kind: "off" },
+    });
+    expect(await listener("background:setEnabled")({}, "yes")).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: "enabled must be true or false",
+    });
+    expect(deps.background.setEnabled).not.toHaveBeenCalled();
+    await listener("background:setEnabled")({}, true);
+    expect(deps.background.setEnabled).toHaveBeenCalledWith(true);
+    await listener("background:restart")({});
+    await listener("background:stopNow")({});
+    expect(deps.background.restart).toHaveBeenCalledOnce();
+    expect(deps.background.stopNow).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the background channels desktop-only and out of every core", () => {
+    for (const channel of [
+      "background:status",
+      "background:setEnabled",
+      "background:restart",
+      "background:stopNow",
+    ] as const) {
+      expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
+      expect(ELECTRON_BOUND_CHANNELS).toContain(channel);
+    }
+  });
+
   it("dialog:pickFiles returns [] on cancel and the paths otherwise", async () => {
     const handle = vi.fn();
     const dialog = {
@@ -198,6 +240,12 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     reloadTab: vi.fn(),
     closeTab: vi.fn(),
     startTabRename: vi.fn(),
+    background: {
+      status: vi.fn(async () => ({ enabled: false, inApp: true, state: { kind: "off" as const } })),
+      setEnabled: vi.fn(async () => ({ ok: true as const })),
+      restart: vi.fn(async () => ({ ok: true as const })),
+      stopNow: vi.fn(async () => ({ ok: true as const })),
+    },
     language: "en" as const,
   };
 }

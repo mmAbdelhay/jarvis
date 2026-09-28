@@ -35,6 +35,12 @@ export const DAEMON_REQUESTS = {
   announceStartup: "daemon:announceStartup",
   /** A push the app itself originates for every client (the hotkey notices). */
   broadcast: "daemon:broadcast",
+  /** Which daemon this is, for Settings' status line. Answers DaemonInfo. */
+  info: "daemon:info",
+  /** Applies the file's `remote:` to the bridge again: sent after the app's
+   *  in-process core has stopped and let go of the bridge's ports (Task 23's
+   *  switch to the daemon). */
+  reapplyRemote: "daemon:reapplyRemote",
   /** Graceful stop — the Windows stop path, where there is no service
    *  manager to send a signal. Answered before the stop begins. */
   stop: "daemon:stop",
@@ -80,6 +86,21 @@ export type DaemonSnapshot = {
   hostConfig: HostConfig;
   tabs: VersionedTabs;
 };
+
+/** The running daemon: its pid and when it started (epoch ms). */
+export type DaemonInfo = { pid: number; startedAt: number };
+
+export function isDaemonInfo(value: unknown): value is DaemonInfo {
+  if (typeof value !== "object" || value === null) return false;
+  const { pid, startedAt } = value as Record<string, unknown>;
+  return (
+    typeof pid === "number" &&
+    Number.isInteger(pid) &&
+    pid > 0 &&
+    typeof startedAt === "number" &&
+    Number.isFinite(startedAt)
+  );
+}
 
 export type SecurityAlert = { title: string; body: string; at: number };
 

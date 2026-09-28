@@ -314,6 +314,10 @@ export type Core = {
   dbgateCredentialFor: DbGateManager["credentialFor"];
   /** Starts the remote bridge's lifecycle. Fired and forgotten. */
   startRemote(): void;
+  /** Applies the file's `remote:` section to the bridge again — after the
+   *  app's own in-process core let go of the ports jarvisd's bridge could
+   *  not take at its start (Task 23's switch to the daemon). */
+  reapplyRemote(): Promise<void>;
   /** The greeting, the startup health line and the capacity report —
    *  once the window has loaded. */
   announceStartup(): Promise<void>;
@@ -2241,6 +2245,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           console.error(`remote bridge: start failed: ${errorMessage(error)}`),
         );
     },
+    reapplyRemote: () => applyFromDisk(),
     announceStartup,
     stop: releaseChildren,
     async shutdown() {

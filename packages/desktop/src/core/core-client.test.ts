@@ -70,6 +70,9 @@ function fakeCore() {
     dbgateCredentialFor: (port) =>
       port === 5000 ? { login: "jarvis", password: "pw" } : undefined,
     startRemote: () => lifecycle.push("startRemote"),
+    reapplyRemote: async () => {
+      lifecycle.push("reapplyRemote");
+    },
     announceStartup: async () => {
       lifecycle.push("announceStartup");
     },

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   BrowserWindow,
@@ -21,6 +22,18 @@ import { rendererSink } from "./broadcast.js";
 import { INVOKE_CHANNELS, preloadChannelArgs, type PushChannels } from "./channels.js";
 import { createCore } from "./core/compose.js";
 import { inProcessCoreClient, type CoreChannel, type CoreClient } from "./core/core-client.js";
+import type { SocketCoreClient } from "./core/socket-core-client.js";
+import { switchableCoreClient } from "./core/switchable-core-client.js";
+import { DEFAULT_CONFIG_PATH } from "./config.js";
+import { readBuildId } from "./daemon/build-id.js";
+import {
+  createDaemonMode,
+  IN_APP_FLAG,
+  relaunchArgs,
+  type ChangeResult,
+  type DaemonMode,
+} from "./daemon/mode.js";
+import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
 import { webExportDir } from "./web-export.js";
@@ -341,12 +354,88 @@ app.whenReady().then(async () => {
       console.error(`Widevine component install failed: ${errorMessage(error)}`);
     });
   try {
-    // The core, in this process. Everything below reaches it through
-    // `client` alone (main-core-seam.test.ts), so a core running in jarvisd
-    // is a different adapter here and no other change.
-    const client = inProcessCoreClient(
-      await createCore({
-        platform: process.platform,
+    // Where the core runs (Task 23): in this process, or in jarvisd when
+    // "Keep Jarvis running in the background" is on. daemon/mode.ts decides
+    // and moves it; this only wires the real dependencies.
+    const platform = process.platform;
+    const distSrcDir = dirname(fileURLToPath(import.meta.url));
+    let inProcessCore: Awaited<ReturnType<typeof createCore>> | undefined;
+    let appWindow: BrowserWindow | undefined;
+    const language = PRIMARY_LANGUAGE;
+    const mode: DaemonMode<SocketCoreClient> = createDaemonMode<SocketCoreClient>({
+      ...nodeDaemonModeDeps({
+        platform,
+        home: homedir(),
+        uid: process.getuid?.() ?? 0,
+        execPath: process.execPath,
+        daemonScript: daemonScriptPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          distSrcDir,
+        }),
+        build: readBuildId(join(distSrcDir, "..", "build-stamp.json")),
+        configPath: DEFAULT_CONFIG_PATH,
+        restartDaemon: (): Promise<void> => mode.restartDaemon(),
+        log: (line) => console.error(`[jarvisd link] ${line}`),
+      }),
+      async confirm(change) {
+        const options = {
+          type: "question" as const,
+          buttons: [MESSAGES.daemonContinue(language), MESSAGES.daemonCancel(language)],
+          defaultId: 1,
+          cancelId: 1,
+          message:
+            change === "enable"
+              ? MESSAGES.daemonConfirmEnableTitle(language)
+              : MESSAGES.daemonConfirmDisableTitle(language),
+          detail:
+            change === "enable"
+              ? MESSAGES.daemonConfirmEnable(language)
+              : MESSAGES.daemonConfirmDisable(language),
+        };
+        const answer =
+          appWindow === undefined
+            ? await dialog.showMessageBox(options)
+            : await dialog.showMessageBox(appWindow, options);
+        return answer.response === 0;
+      },
+      async chooseFallback(failure) {
+        const answer = await dialog.showMessageBox({
+          type: "error",
+          buttons: [MESSAGES.daemonRunInApp(language), MESSAGES.daemonQuit(language)],
+          defaultId: 0,
+          cancelId: 1,
+          message: MESSAGES.daemonFallbackTitle(language),
+          detail: MESSAGES.daemonFallback(failure.reason, failure.lastLogLine, language),
+        });
+        return answer.response === 0 ? "in-app" : "quit";
+      },
+      async stopInProcess() {
+        const core = inProcessCore;
+        inProcessCore = undefined;
+        await core?.shutdown();
+      },
+      useDaemon(link) {
+        client.switchTo(link);
+        // Everything the renderer drew came from the old core: it starts
+        // over against the new one, in the same window.
+        appWindow?.webContents.reload();
+      },
+      relaunch({ inApp }) {
+        app.relaunch({ args: relaunchArgs(process.argv.slice(1), inApp) });
+        app.exit(0);
+      },
+      log: (line) => console.error(`[background] ${line}`),
+    });
+
+    const launch = await mode.launch({ inAppThisSession: process.argv.includes(IN_APP_FLAG) });
+    if (launch.kind === "quit") {
+      app.quit();
+      return;
+    }
+    if (launch.kind === "in-process") {
+      inProcessCore = await createCore({
+        platform,
         // Phase 1: the browser client's own listener, behind the bridge's
         // web gate. The export is read once, lazily (web-export.ts).
         webExportDir: () =>
@@ -358,9 +447,26 @@ app.whenReady().then(async () => {
             // the same directory electron-builder ships.
             devDir: fileURLToPath(new URL("../../web", import.meta.url)),
           }),
-      }),
+      });
+    }
+    // Everything below reaches the core through `client` alone
+    // (main-core-seam.test.ts): the in-process adapter or jarvisd's socket,
+    // and after a switch the other one, with no other change here.
+    const client = switchableCoreClient(
+      launch.kind === "daemon"
+        ? launch.link
+        : inProcessCoreClient(inProcessCore as Awaited<ReturnType<typeof createCore>>),
+      (line) => console.error(line),
     );
     const { window, views, local } = createDesktopHost(client);
+    appWindow = window;
+    /** A thrown mode call becomes the renderer's failed result. */
+    const settle = (run: () => Promise<ChangeResult>): Promise<ChangeResult> =>
+      run().catch((error: unknown) => ({
+        ok: false as const,
+        reason: "failed" as const,
+        detail: errorMessage(error),
+      }));
     const releaseChildren = (): void => client.stop();
 
     // DbGate is spawned with BASIC_AUTH=1 (dbgate.ts) and answers with
@@ -421,6 +527,16 @@ app.whenReady().then(async () => {
       },
       startTabRename: (tabId) => local("workspace:tabRename", tabId),
       language: PRIMARY_LANGUAGE,
+      background: {
+        status: () => mode.status(),
+        setEnabled: (enabled) => settle(() => mode.setEnabled(enabled)),
+        restart: () =>
+          settle(async () => {
+            await mode.restartDaemon();
+            return { ok: true };
+          }),
+        stopNow: () => settle(() => mode.stopNow()),
+      },
     });
     views.onDevToolsClosed((tabId) => local("workspace:devtoolsClosed", tabId));
 

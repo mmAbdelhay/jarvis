@@ -204,6 +204,14 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       kind: "failed" as const,
       detail: "not stubbed in this test",
     })),
+    backgroundStatus: vi.fn(async () => ({
+      enabled: false,
+      inApp: true,
+      state: { kind: "off" as const },
+    })),
+    setBackgroundEnabled: vi.fn(async () => ({ ok: true as const })),
+    restartBackground: vi.fn(async () => ({ ok: true as const })),
+    stopBackgroundNow: vi.fn(async () => ({ ok: true as const })),
   };
   const jarvis: RendererApi = { ...defaults, ...overrides };
   window.jarvis = jarvis;

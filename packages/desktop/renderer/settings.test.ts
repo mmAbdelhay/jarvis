@@ -91,6 +91,7 @@ function sample(): JarvisConfig {
       web: { enabled: false },
       idleDisableMinutes: 0,
     },
+    daemon: { enabled: false },
     sessionsDbPath: "/x/.config/jarvis/sessions.db",
   };
 }

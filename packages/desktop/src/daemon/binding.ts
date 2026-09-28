@@ -32,6 +32,7 @@ import { createDaemonHost, type DaemonHost } from "./daemon-host.js";
 import {
   DAEMON_PUSHES,
   DAEMON_REQUESTS,
+  type DaemonInfo,
   type DaemonSnapshot,
   HOST_BROADCAST_CHANNELS,
   isHostWindowState,
@@ -73,6 +74,8 @@ export type DaemonBindingDeps = {
   };
   /** Marks this daemon run in VersionedTabs. Random by default. */
   instance?: string;
+  /** This daemon's pid, for daemon:info. Defaults to process.pid. */
+  pid?: number;
 };
 
 const refuse = (text: string): never => {
@@ -91,6 +94,7 @@ function isPageFact(value: unknown): value is PageFact {
 
 export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
   const instance = deps.instance ?? randomBytes(8).toString("hex");
+  const info: DaemonInfo = { pid: deps.pid ?? process.pid, startedAt: deps.now() };
   let version = 0;
   let push: (channel: string, payload: unknown) => void = () => {};
   let pushTo: (id: number, channel: string, payload: unknown) => void = () => {};
@@ -207,6 +211,11 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
         );
         return null;
       }
+      case DAEMON_REQUESTS.info:
+        return info;
+      case DAEMON_REQUESTS.reapplyRemote:
+        await core.reapplyRemote();
+        return null;
       case DAEMON_REQUESTS.stop:
         deps.log("stop requested over the control socket");
         deps.timers.defer(deps.requestStop);

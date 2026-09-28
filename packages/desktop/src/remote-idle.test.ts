@@ -55,6 +55,7 @@ const CONFIG: JarvisConfig = {
     web: { enabled: false },
     idleDisableMinutes: 30,
   },
+  daemon: { enabled: false },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
 

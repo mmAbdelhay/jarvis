@@ -6,6 +6,7 @@
 import type { BrowserWindow, Dialog, MenuItemConstructorOptions, Screen } from "electron";
 import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import type { ElectronBoundChannel } from "./dispatch.js";
+import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import type { ReportedRect } from "./ipc.js";
 import { MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
@@ -33,6 +34,10 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "workspace:hideAll",
   "workspace:pip",
   "dialog:pickFiles",
+  "background:status",
+  "background:setEnabled",
+  "background:restart",
+  "background:stopNow",
 ];
 
 export type DesktopOnlyDeps = {
@@ -70,6 +75,13 @@ export type DesktopOnlyDeps = {
   closeTab: (tabId: string) => void;
   startTabRename: (tabId: string) => void; // broadcast.local("workspace:tabRename", tabId)
   language: "ar" | "en";
+  /** Task 23: the background service (daemon/mode.ts, wired in main.ts). */
+  background: {
+    status(): Promise<DaemonStatus>;
+    setEnabled(enabled: boolean): Promise<ChangeResult>;
+    restart(): Promise<ChangeResult>;
+    stopNow(): Promise<ChangeResult>;
+  };
 };
 
 export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
@@ -168,4 +180,15 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
     });
     return result.canceled ? [] : result.filePaths;
   });
+  // Task 23: "Keep Jarvis running in the background". The toggle's value
+  // crosses an untyped boundary, so anything but a real boolean is refused.
+  deps.handle("background:status", () => deps.background.status());
+  deps.handle("background:setEnabled", async (_event, enabled): Promise<ChangeResult> => {
+    if (typeof enabled !== "boolean") {
+      return { ok: false, reason: "failed", detail: "enabled must be true or false" };
+    }
+    return deps.background.setEnabled(enabled);
+  });
+  deps.handle("background:restart", () => deps.background.restart());
+  deps.handle("background:stopNow", () => deps.background.stopNow());
 }

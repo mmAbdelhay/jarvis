@@ -887,3 +887,64 @@ describe("push notification catalogue", () => {
     expect(pushKeys.sort()).toEqual(["pushBody", "pushRegisterInvalid", "pushTitle"]);
   });
 });
+
+// Task 23: the background-service strings, in both languages.
+describe("MESSAGES: daemon", () => {
+  it("localises every daemon string", () => {
+    const unary = [
+      MESSAGES.daemonTitle,
+      MESSAGES.daemonGeneral,
+      MESSAGES.daemonDescription,
+      MESSAGES.daemonConfirmEnableTitle,
+      MESSAGES.daemonConfirmEnable,
+      MESSAGES.daemonConfirmDisableTitle,
+      MESSAGES.daemonConfirmDisable,
+      MESSAGES.daemonContinue,
+      MESSAGES.daemonCancel,
+      MESSAGES.daemonStateOff,
+      MESSAGES.daemonStateOffSession,
+      MESSAGES.daemonStateStarting,
+      MESSAGES.daemonRestart,
+      MESSAGES.daemonStopNow,
+      MESSAGES.daemonBusy,
+      MESSAGES.daemonFallbackTitle,
+      MESSAGES.daemonRunInApp,
+      MESSAGES.daemonQuit,
+    ];
+    for (const message of unary) expect(message("ar")).not.toBe(message("en"));
+    expect(MESSAGES.daemonStateRunning(12, "3m", "ar")).not.toBe(
+      MESSAGES.daemonStateRunning(12, "3m", "en"),
+    );
+    expect(MESSAGES.daemonStateFailed("x", "ar")).not.toBe(MESSAGES.daemonStateFailed("x", "en"));
+    expect(MESSAGES.daemonLastLogLine("x", "ar")).not.toBe(MESSAGES.daemonLastLogLine("x", "en"));
+    expect(MESSAGES.daemonChangeFailed("x", "ar")).not.toBe(MESSAGES.daemonChangeFailed("x", "en"));
+    expect(MESSAGES.daemonFallback("x", "y", "ar")).not.toBe(
+      MESSAGES.daemonFallback("x", "y", "en"),
+    );
+  });
+
+  it("says what the confirm promised: open terminals in this window close", () => {
+    expect(MESSAGES.daemonConfirmEnable("en")).toContain(
+      "Open terminals in this window will close",
+    );
+    expect(MESSAGES.daemonRunInApp("en")).toBe("Run inside the app this time");
+  });
+
+  it("formats uptime by its largest units", () => {
+    expect(MESSAGES.daemonUptime(42_000, "en")).toBe("42s");
+    expect(MESSAGES.daemonUptime(5 * 60_000 + 3_000, "en")).toBe("5m");
+    expect(MESSAGES.daemonUptime(2 * 3_600_000 + 5 * 60_000, "en")).toBe("2h 5m");
+    expect(MESSAGES.daemonUptime(3 * 86_400_000 + 4 * 3_600_000, "en")).toBe("3d 4h");
+    expect(MESSAGES.daemonUptime(-5, "en")).toBe("0s");
+    expect(MESSAGES.daemonUptime(2 * 3_600_000, "ar")).toBe("2 س 0 د");
+  });
+
+  it("puts the log line under the fallback's reason only when there is one", () => {
+    expect(MESSAGES.daemonFallback("timed out", undefined, "en")).toBe(
+      "The service didn't start within 10 seconds (timed out).",
+    );
+    expect(MESSAGES.daemonFallback("timed out", "boom", "en")).toBe(
+      "The service didn't start within 10 seconds (timed out).\nLast log line: boom",
+    );
+  });
+});

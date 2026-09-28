@@ -21,6 +21,7 @@ import {
   setBrowserSnapshot,
 } from "./workspace.js";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { initDaemonSettings, refreshDaemonSettings } from "./daemon-settings.js";
 import {
   checkPrayerNotifications,
   initPrayerSettings,
@@ -381,7 +382,15 @@ function wireNav(): void {
     releaseVoice();
     showView("settings");
     void openSettings();
+    void refreshDaemonSettings();
   });
+  try {
+    // Settings → General's background-service section (Task 23). Its own
+    // guard, for the reason the one below gives.
+    initDaemonSettings();
+  } catch (error) {
+    console.error(`background settings did not initialise: ${String(error)}`);
+  }
   try {
     // A minimal test harness (app.test.ts) is allowed to lay down only the
     // routes it actually exercises — initSettings throwing on the Settings

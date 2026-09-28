@@ -51,12 +51,21 @@ function coreImports(source: string): CoreImport[] {
   return found.filter(({ specifier }) => /^\.\/core\//.test(specifier));
 }
 
-/** What the rule allows: createCore from compose.ts, anything from
- *  core-client.ts. Everything else under ./core/ is a violation. */
+/** The CoreClient adapters themselves: core-client.ts (the type and the
+ *  in-process one), and Task 23's socket adapter and the switchable client
+ *  over both. Each is a CoreClient, not a core internal. */
+const ADAPTERS: ReadonlySet<string> = new Set([
+  "./core/core-client.js",
+  "./core/socket-core-client.js",
+  "./core/switchable-core-client.js",
+]);
+
+/** What the rule allows: createCore from compose.ts, anything from the
+ *  adapters. Everything else under ./core/ is a violation. */
 function reachThrough(source: string): string[] {
   const violations: string[] = [];
   for (const { specifier, names } of coreImports(source)) {
-    if (specifier === "./core/core-client.js") continue;
+    if (ADAPTERS.has(specifier)) continue;
     if (specifier === "./core/compose.js") {
       for (const name of names) if (name !== "createCore") violations.push(`${specifier}:${name}`);
       continue;
@@ -69,12 +78,17 @@ function reachThrough(source: string): string[] {
 describe("main.ts reaches the core only through CoreClient", () => {
   const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
-  it("imports from core/ only createCore and core-client", () => {
+  it("imports from core/ only createCore and the CoreClient adapters", () => {
     expect(
       coreImports(main)
         .map(({ specifier }) => specifier)
         .sort(),
-    ).toEqual(["./core/compose.js", "./core/core-client.js"]);
+    ).toEqual([
+      "./core/compose.js",
+      "./core/core-client.js",
+      "./core/socket-core-client.js",
+      "./core/switchable-core-client.js",
+    ]);
     expect(reachThrough(main)).toEqual([]);
   });
 

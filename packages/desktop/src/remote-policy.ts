@@ -190,6 +190,13 @@ export const CHANNEL_POLICY = {
   // the laptop by name. Revisit when a phone Settings UI ships.
   "settings:testAgent": "desktop-only",
   "settings:restart": "desktop-only",
+  // Desktop-only, all four (Task 23): they install, start, stop and remove
+  // the background service and replace the app's core. The Electron host
+  // answers them (desktop-only.ts); no core, and so no phone, ever sees them.
+  "background:status": "desktop-only",
+  "background:setEnabled": "desktop-only",
+  "background:restart": "desktop-only",
+  "background:stopNow": "desktop-only",
   "projects:list": "remote",
   // Desktop-only: the laptop's interface list is reconnaissance to anyone
   // who is not already sitting at it, and a phone only ever needs the one

@@ -527,6 +527,90 @@ export const MESSAGES = {
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   settingsSavedLive: (language: "ar" | "en"): string =>
     language === "ar" ? "تم الحفظ. التغييرات مفعّلة الآن." : "Saved. Changes are active now.",
+  // Task 23: Settings → General, "Keep Jarvis running in the background".
+  daemonTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "إبقاء جارفيس يعمل في الخلفية" : "Keep Jarvis running in the background",
+  daemonGeneral: (language: "ar" | "en"): string => (language === "ar" ? "عام" : "General"),
+  daemonDescription: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تبقى الطرفيات وتشغيلات الوكلاء تعمل بعد إغلاق التطبيق، ويبقى الوصول من الهاتف متاحًا."
+      : "Terminals and agent runs keep going after you quit the app, and your phone can still reach this machine.",
+  daemonConfirmEnableTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تشغيل جارفيس في الخلفية؟" : "Run Jarvis in the background?",
+  daemonConfirmEnable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ستُغلق الطرفيات المفتوحة في هذه النافذة. بعد ذلك تبقى الطرفيات الجديدة تعمل حتى بعد إغلاق التطبيق."
+      : "Open terminals in this window will close. After that, new terminals keep running even when you quit the app.",
+  daemonConfirmDisableTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "إيقاف التشغيل في الخلفية؟" : "Stop running in the background?",
+  daemonConfirmDisable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ستُغلق الطرفيات التي تعمل في الخلفية، ثم يُعاد تشغيل جارفيس داخل التطبيق."
+      : "Terminals running in the background will close, and Jarvis restarts inside the app.",
+  daemonContinue: (language: "ar" | "en"): string => (language === "ar" ? "متابعة" : "Continue"),
+  daemonCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  daemonStateOff: (language: "ar" | "en"): string =>
+    language === "ar" ? "متوقف. يعمل جارفيس داخل التطبيق." : "Off. Jarvis runs inside the app.",
+  daemonStateOffSession: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "متوقف لهذه الجلسة فقط. يعمل جارفيس داخل التطبيق حتى يُعاد تشغيله."
+      : "Stopped for this session. Jarvis runs inside the app until it restarts.",
+  daemonStateStarting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التشغيل…" : "Starting…",
+  daemonStateRunning: (pid: number, uptime: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `يعمل (العملية ${pid}، منذ ${uptime}).`
+      : `Running (pid ${pid}, up ${uptime}).`,
+  daemonStateFailed: (reason: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تعذّر التشغيل: ${reason}` : `Not running: ${reason}`,
+  daemonLastLogLine: (line: string, language: "ar" | "en"): string =>
+    language === "ar" ? `آخر سطر في السجل: ${line}` : `Last log line: ${line}`,
+  daemonUptime: (ms: number, language: "ar" | "en"): string => {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    const [d, h, m] = [
+      Math.floor(seconds / 86_400),
+      Math.floor((seconds % 86_400) / 3_600),
+      Math.floor((seconds % 3_600) / 60),
+    ];
+    const unit = (value: number, en: string, ar: string) =>
+      language === "ar" ? `${value} ${ar}` : `${value}${en}`;
+    if (d > 0) return `${unit(d, "d", "ي")} ${unit(h, "h", "س")}`;
+    if (h > 0) return `${unit(h, "h", "س")} ${unit(m, "m", "د")}`;
+    if (m > 0) return unit(m, "m", "د");
+    return unit(seconds, "s", "ث");
+  },
+  daemonRestart: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادة تشغيل الخدمة" : "Restart daemon",
+  daemonStopNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "إيقاف الآن (لهذه الجلسة)" : "Stop now (this session only)",
+  daemonChangeFailed: (detail: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تعذّر التغيير: ${detail}` : `Couldn't change it: ${detail}`,
+  daemonBusy: (language: "ar" | "en"): string =>
+    language === "ar" ? "ما زال تغيير آخر قيد التنفيذ." : "Another change is still running.",
+  daemonFallbackTitle: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر الوصول إلى خدمة جارفيس في الخلفية"
+      : "Jarvis couldn't reach its background service",
+  daemonFallback: (
+    reason: string,
+    lastLogLine: string | undefined,
+    language: "ar" | "en",
+  ): string =>
+    [
+      language === "ar"
+        ? `لم تبدأ الخدمة خلال 10 ثوانٍ (${reason}).`
+        : `The service didn't start within 10 seconds (${reason}).`,
+      ...(lastLogLine === undefined
+        ? []
+        : [
+            language === "ar"
+              ? `آخر سطر في السجل: ${lastLogLine}`
+              : `Last log line: ${lastLogLine}`,
+          ]),
+    ].join("\n"),
+  daemonRunInApp: (language: "ar" | "en"): string =>
+    language === "ar" ? "التشغيل داخل التطبيق هذه المرة" : "Run inside the app this time",
+  daemonQuit: (language: "ar" | "en"): string => (language === "ar" ? "إنهاء" : "Quit"),
   daemonRestartManualTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "أعد تشغيل خدمة جارفيس" : "Restart the Jarvis daemon",
   daemonRestartManual: (language: "ar" | "en"): string =>

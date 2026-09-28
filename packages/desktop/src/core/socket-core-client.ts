@@ -39,8 +39,10 @@ import { type ControlClient, ControlRestartRequired } from "../daemon/control/cl
 import {
   DAEMON_PUSHES,
   DAEMON_REQUESTS,
+  type DaemonInfo,
   type DaemonSnapshot,
   type HostWindowState,
+  isDaemonInfo,
   type SecurityAlert,
   type VersionedTabs,
 } from "../daemon/protocol.js";
@@ -65,6 +67,10 @@ export type ConnectionState =
   | { kind: "stopped" };
 
 export type SocketCoreClient = CoreClient & {
+  /** The daemon's pid and start time (daemon:info), for Settings. */
+  info(): Promise<DaemonInfo>;
+  /** Asks the daemon to apply the file's `remote:` to its bridge again. */
+  reapplyRemote(): Promise<void>;
   connection(): ConnectionState;
   onConnectionChange(listener: (state: ConnectionState) => void): () => void;
 };
@@ -446,6 +452,13 @@ export async function connectSocketCoreClient(
     // This app's connection only. The daemon, its terminals and its agent
     // runs keep going — that is what it is for.
     stop,
+
+    async info() {
+      const answer = await request(DAEMON_REQUESTS.info, []);
+      if (!isDaemonInfo(answer)) throw new Error("The Jarvis daemon answered daemon:info oddly");
+      return answer;
+    },
+    reapplyRemote: () => request(DAEMON_REQUESTS.reapplyRemote, []).then(() => undefined),
 
     connection: () => state,
     onConnectionChange(listener) {

@@ -152,6 +152,14 @@ export type PrayerConfig = {
 };
 
 /**
+ * Phase 2's `daemon:` section: whether the core runs in jarvisd, the
+ * background service, rather than inside the app. Absent is off — the app
+ * as it always was. Only the desktop app's own Settings toggle changes it
+ * (daemon/config-file.ts); settings:save keeps whatever the file says.
+ */
+export type DaemonConfig = { enabled: boolean };
+
+/**
  * The `remote:` section: whether a paired phone may reach this machine, and
  * on which address.
  *
@@ -237,6 +245,8 @@ export type JarvisConfig = {
   /** The `remote:` section. Absent from jarvis.yaml for everyone who has
    *  never turned it on — see RemoteConfig. */
   remote: RemoteConfig;
+  /** The `daemon:` section — see DaemonConfig. */
+  daemon: DaemonConfig;
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
   sessionsDbPath: string;
@@ -350,6 +360,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
   const whisper = parseWhisper(root["whisper"]);
   const sessions = parseSessions(root["sessions"]);
   const remote = parseRemote(root["remote"]);
+  const daemon = parseDaemon(root["daemon"]);
   const voice = parseVoice(root["voice"]);
 
   const accountId = brainConfig.accountId;
@@ -405,6 +416,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     whisper,
     sessions,
     remote,
+    daemon,
     sessionsDbPath: defaultSessionsDbPath(),
   };
 }
@@ -871,6 +883,24 @@ function parseRemoteTls(rawTls: unknown): RemoteConfig["tls"] {
     return {};
   }
   return { certPath, keyPath };
+}
+
+/** The `daemon:` section as it stands with nothing in jarvis.yaml. */
+export const DEFAULT_DAEMON: DaemonConfig = { enabled: false };
+
+/** In the style of parseRemotePush: absent or null is the default, anything
+ *  but an object is refused, and `enabled` must be a real boolean. */
+export function parseDaemon(rawDaemon: unknown): DaemonConfig {
+  if (rawDaemon === undefined || rawDaemon === null) return { ...DEFAULT_DAEMON };
+  if (typeof rawDaemon !== "object" || Array.isArray(rawDaemon)) {
+    throw new Error("Config `daemon` must be an object");
+  }
+  const enabled = (rawDaemon as Record<string, unknown>)["enabled"];
+  if (enabled === undefined) return { ...DEFAULT_DAEMON };
+  if (typeof enabled !== "boolean") {
+    throw new Error("Config `daemon.enabled` must be true or false");
+  }
+  return { enabled };
 }
 
 function parseRemotePush(rawPush: unknown): RemoteConfig["push"] {
