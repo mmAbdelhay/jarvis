@@ -232,6 +232,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
         update: vi.fn(async () => undefined),
         remove: vi.fn(async () => false),
         markSent: vi.fn(async () => undefined),
+        updateBlockIds: vi.fn(async () => 0),
       },
       isDirectory: vi.fn(async () => false),
       projectRoots: vi.fn(() => []),

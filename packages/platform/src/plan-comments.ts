@@ -12,6 +12,10 @@ export type PlanCommentStore = {
   update(id: string, body: string): Promise<PlanComment | undefined>;
   remove(id: string): Promise<boolean>;
   markSent(ids: readonly string[]): Promise<void>;
+  /** Re-points every comment on `path` anchored to block `from` onto block
+   *  `to` (a block's id is a content hash, so an in-place edit changes it).
+   *  Resolves to how many comments moved; nothing matching writes nothing. */
+  updateBlockIds(path: string, from: string, to: string): Promise<number>;
 };
 
 type FileShape = { v: 1; comments: PlanComment[] };
@@ -202,6 +206,20 @@ export function createPlanCommentStore(
         await writeAll(
           all.map((comment) => (wanted.has(comment.id) ? { ...comment, sentAt } : comment)),
         );
+      });
+    },
+
+    updateBlockIds(path, from, to) {
+      return enqueue(async () => {
+        const all = await readAll();
+        const matches = (comment: PlanComment): boolean =>
+          comment.path === path && comment.blockId === from;
+        const count = all.filter(matches).length;
+        if (count === 0 || from === to) return 0;
+        await writeAll(
+          all.map((comment) => (matches(comment) ? { ...comment, blockId: to } : comment)),
+        );
+        return count;
       });
     },
   };

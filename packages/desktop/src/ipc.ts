@@ -856,8 +856,10 @@ export type RendererApi = {
   ): Promise<PlanResult<PlanDoc>>;
   /** Every comment on `path`, anchored against a fresh read of the plan —
    *  a comment whose block moved or was removed comes back `orphaned`
-   *  rather than dropped. A path this process cannot currently read
-   *  (forbidden or missing) still returns whatever comments are on record
+   *  rather than dropped. A forbidden path (outside the allowed plan
+   *  directories) returns `[]` — nothing stored under it is ever shown.
+   *  An allowed path whose file cannot currently be read (missing, too
+   *  large, an IO error) still returns whatever comments are on record
    *  for it, all orphaned, never an error — the terminal chip row's own
    *  "absent, never wrong" posture, applied to comments instead of git
    *  status. */

@@ -123,6 +123,37 @@ describe("createPlanCommentStore", () => {
     expect(result).toEqual([{ ...first, sentAt: 1002 }, second]);
   });
 
+  it("updateBlockIds re-points only that path's comments on the old block id, keeping everything else", async () => {
+    const file = await tempFile();
+    const store = createPlanCommentStore(file, clock().now, ids("c1", "c2", "c3"));
+    const moved = await store.add({ path: "plans/a.md", blockId: "old", quote: "", body: "one" });
+    const other = await store.add({ path: "plans/a.md", blockId: "keep", quote: "", body: "two" });
+    const elsewhere = await store.add({
+      path: "plans/b.md",
+      blockId: "old",
+      quote: "",
+      body: "three",
+    });
+    await store.markSent([moved.id]);
+    const [sentMoved] = await store.list("plans/a.md");
+
+    const count = await store.updateBlockIds("plans/a.md", "old", "new");
+
+    expect(count).toBe(1);
+    expect(await store.list("plans/a.md")).toEqual([{ ...sentMoved!, blockId: "new" }, other]);
+    expect(await store.list("plans/b.md")).toEqual([elsewhere]);
+  });
+
+  it("updateBlockIds does not touch the file when nothing matches", async () => {
+    const file = await tempFile();
+    const store = createPlanCommentStore(file, clock().now, ids("c1"));
+    await store.add({ path: "plans/a.md", blockId: "b1", quote: "", body: "one" });
+    const before = (await stat(file)).mtimeMs;
+
+    expect(await store.updateBlockIds("plans/a.md", "missing", "new")).toBe(0);
+    expect((await stat(file)).mtimeMs).toBe(before);
+  });
+
   it("recovers from a corrupt file, renaming it aside", async () => {
     const file = await tempFile();
     await writeFile(file, "{ not json", "utf8");

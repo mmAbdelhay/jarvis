@@ -1176,7 +1176,38 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         return { ok: false, reason: "forbidden" };
       }
       if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
-      return deps.plans.files.writeBlock(pathArg, blockIdArg, sourceArg, baseMtimeArg);
+      // A block's id is a hash of its own content, so every successful edit
+      // gives it a new id — without this, every comment filed against the
+      // block would come back orphaned (or re-anchored only by its quote)
+      // right after its author's own save. The replaced block's start line
+      // is read before the write (writeBlock itself refuses unless the file
+      // still has `baseMtimeMs`, so this read describes the same content
+      // whenever its mtime matches), and the comments move to whichever new
+      // block starts on that same line.
+      const before = await deps.plans.files.read(pathArg);
+      const replaced =
+        before.ok && before.value.mtimeMs === baseMtimeArg
+          ? before.value.blocks.find((block) => block.id === blockIdArg)
+          : undefined;
+      const result = await deps.plans.files.writeBlock(
+        pathArg,
+        blockIdArg,
+        sourceArg,
+        baseMtimeArg,
+      );
+      if (result.ok && replaced !== undefined) {
+        const successor = result.value.blocks.find((block) => block.start === replaced.start);
+        if (successor !== undefined && successor.id !== replaced.id) {
+          try {
+            await deps.plans.comments.updateBlockIds(pathArg, replaced.id, successor.id);
+          } catch (error) {
+            // The write itself landed; failing to re-point comments only
+            // leaves them to the quote fallback, never a failed save.
+            console.error(`plans:writeBlock: re-pointing comments failed: ${errorMessage(error)}`);
+          }
+        }
+      }
+      return result;
     },
 
     // Computed fresh every call, never cached: `anchorComments` needs the
@@ -1316,7 +1347,10 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
 
       const read = await deps.plans.files.read(pathArg);
       const blocks = read.ok ? read.value.blocks : [];
-      const anchored = anchorComments(selected, blocks);
+      // Anchored (and so numbered) against every comment on the plan, the
+      // same list plans:comments numbers the user's own pins from — then
+      // narrowed to the selection, so "3." in the message is pin 3.
+      const anchored = anchorComments(stored, blocks).filter((comment) => wanted.has(comment.id));
       // Never throws here: `selected` (and so `anchored`) is already
       // proven non-empty above, and formatFeedback only ever throws on an
       // empty comment list.

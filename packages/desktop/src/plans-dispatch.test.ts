@@ -137,6 +137,96 @@ describe("plans:* dispatch: routing", () => {
     expect(result).toEqual({ ok: true, value: PLAN_DOC });
   });
 
+  // Final fix wave I6: a block's id is a hash of its content, so a
+  // successful own write re-points the comments filed against the old id
+  // onto the new block starting at the same line, instead of orphaning them.
+  it("plans:writeBlock re-points the replaced block's comments onto the new block at the same line", async () => {
+    const heading: PlanBlock = { ...BLOCK, id: "h1", kind: "heading", start: 0, end: 1 };
+    const before = { ...BLOCK, id: "b1", start: 2, end: 3 };
+    const after = { ...BLOCK, id: "b1-new", start: 2, end: 3, source: "New text." };
+    const read = vi.fn(async () => ({
+      ok: true as const,
+      value: { ...PLAN_DOC, blocks: [heading, before] },
+    }));
+    const writeBlock = vi.fn(async () => ({
+      ok: true as const,
+      value: { ...PLAN_DOC, mtimeMs: 200, blocks: [heading, after] },
+    }));
+    const updateBlockIds = vi.fn(async () => 1);
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, read, writeBlock },
+        comments: { ...fakeDeps().plans.comments, updateBlockIds },
+      },
+    });
+    const table = createDispatchTable(deps);
+
+    const result = await call(table, "plans:writeBlock", "/plans/x.md", "b1", "New text.", 100);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(updateBlockIds).toHaveBeenCalledWith("/plans/x.md", "b1", "b1-new");
+  });
+
+  it("plans:writeBlock leaves comments alone when the write fails or nothing starts at that line", async () => {
+    const read = vi.fn(async () => ({ ok: true as const, value: PLAN_DOC }));
+    const updateBlockIds = vi.fn(async () => 0);
+    const failing = vi.fn(async () => ({ ok: false as const, reason: "conflict" as const }));
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, read, writeBlock: failing },
+        comments: { ...fakeDeps().plans.comments, updateBlockIds },
+      },
+    });
+    await call(createDispatchTable(deps), "plans:writeBlock", "/plans/x.md", "b1", "New.", 100);
+    expect(updateBlockIds).not.toHaveBeenCalled();
+
+    const shifted = vi.fn(async () => ({
+      ok: true as const,
+      value: { ...PLAN_DOC, blocks: [{ ...BLOCK, id: "b1-new", start: 1, end: 2 }] },
+    }));
+    const deps2 = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, read, writeBlock: shifted },
+        comments: { ...fakeDeps().plans.comments, updateBlockIds },
+      },
+    });
+    await call(createDispatchTable(deps2), "plans:writeBlock", "/plans/x.md", "b1", "New.", 100);
+    expect(updateBlockIds).not.toHaveBeenCalled();
+  });
+
+  it("plans:writeBlock still returns the ok result when re-pointing comments fails", async () => {
+    const read = vi.fn(async () => ({ ok: true as const, value: PLAN_DOC }));
+    const value = { ...PLAN_DOC, mtimeMs: 200, blocks: [{ ...BLOCK, id: "b1-new" }] };
+    const writeBlock = vi.fn(async () => ({ ok: true as const, value }));
+    const updateBlockIds = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, read, writeBlock },
+        comments: { ...fakeDeps().plans.comments, updateBlockIds },
+      },
+    });
+
+    const result = await call(
+      createDispatchTable(deps),
+      "plans:writeBlock",
+      "/plans/x.md",
+      "b1",
+      "New.",
+      100,
+    );
+
+    expect(result).toEqual({ ok: true, value });
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it("plans:writeBlock rejects an oversized source before ever reaching PlanFiles", async () => {
     const writeBlock = vi.fn(async () => ({ ok: true as const, value: PLAN_DOC }));
     const deps = fakeDeps({
@@ -547,6 +637,21 @@ describe("plans:send", () => {
       `\u001b[200~Comments on /plans/x.md:\n\n1. On the section "Do the thing.": looks good\n\nPlease update the plan to address these.\u001b[201~\r`,
     );
     expect(markSent).toHaveBeenCalledWith(["c1"]);
+  });
+
+  // Final fix wave M2: the message numbers each comment the way the user's
+  // own pins do — against every comment on the plan — not 1..n over the
+  // subset being sent.
+  it("numbers sent comments against the full anchored list, matching the user's pins", async () => {
+    const first = { ...comment, id: "c0", body: "already sent", createdAt: 0, sentAt: 5 };
+    const { deps, write } = sendDeps({ list: [first, comment] });
+    const table = createDispatchTable(deps);
+
+    await call(table, "plans:send", "pane-1", "/plans/x.md", ["c1"]);
+
+    const [, bytes] = write.mock.calls[0] as [string, string];
+    expect(bytes).toContain('2. On the section "Do the thing.": looks good');
+    expect(bytes).not.toContain("1. ");
   });
 
   it("returns no-comments and never touches the pane when no ids match", async () => {
