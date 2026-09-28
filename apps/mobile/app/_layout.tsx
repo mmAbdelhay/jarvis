@@ -36,6 +36,7 @@ import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
 import { createUnpairedHandler } from "@/lib/unpaired-handler";
 import { shouldShowUnlock } from "@/lib/unlock-screen";
+import { useLayoutClass } from "@/lib/use-layout-class";
 import { VoiceProvider } from "@/lib/voice-context";
 
 const CLIENT_STRING = clientStringFor(Platform.OS, Constants.expoConfig?.version ?? "0.0.0");
@@ -68,6 +69,7 @@ export default function RootLayout() {
   const [language, setLanguage] = useState<Language | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const layout = useLayoutClass();
 
   // Built exactly once, for the app's whole lifetime — this is "the one
   // RpcClient" every screen shares through RpcContext.
@@ -346,6 +348,12 @@ export default function RootLayout() {
               />
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="(tabs)" />
+                {/* Wide layout: Settings draws the same shell as the tabs,
+                    so it swaps in place rather than sliding over them. */}
+                <Stack.Screen
+                  name="settings"
+                  options={{ animation: layout.kind === "wide" ? "none" : "default" }}
+                />
                 <Stack.Screen
                   name="session/[id]"
                   options={{

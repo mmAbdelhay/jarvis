@@ -26,6 +26,8 @@ export const STRINGS = {
   },
   "nav.voice": { en: "Voice", ar: "الصوت" },
   "nav.workspace": { en: "Workspace", ar: "مساحة العمل" },
+  // The wide shell's top bar (desktop renderer's "N running" pill).
+  "shell.running": { en: "{count} running", ar: "{count} قيد التشغيل" },
   "conn.connected": { en: "Connected", ar: "متصل" },
   "sessions.today": { en: "TODAY", ar: "اليوم" },
   "sessions.yesterday": { en: "YESTERDAY", ar: "أمس" },

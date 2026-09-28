@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
+import { WideShell } from "@/components/WideShell";
 import { dialogs } from "@/lib/dialog";
 import { passkeys } from "@/lib/passkey";
 import { connectFromStoredPairing } from "@/lib/connect-stored";
@@ -46,7 +47,17 @@ const PLATFORM = clientPlatformFor(Platform.OS);
 const LRI = "\u2066";
 const PDI = "\u2069";
 
-export default function SettingsScreen() {
+// Wide layout: Settings is a root stack screen, so it draws the WideShell
+// itself to open inside the shell (on a phone the shell adds nothing).
+export default function SettingsRoute() {
+  return (
+    <WideShell>
+      <SettingsScreen />
+    </WideShell>
+  );
+}
+
+function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
