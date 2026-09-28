@@ -1,7 +1,8 @@
-// jarvisd's command line. Today it has one command, `run` — the daemon in
-// the foreground, which is also what a bare `jarvisd` does and what every
-// service definition starts (service.ts). The admin commands that talk to
-// a running daemon arrive with the CLI (Task 24).
+// daemon-main.js's command line: one command, `run` — the daemon in the
+// foreground, which is also what a bare daemon-main.js does and what every
+// service definition starts (service.ts). The `jarvisd` command a person
+// types, with the admin commands that talk to a running daemon, is
+// cli/jarvisd.js; its `run` loads this same entry.
 //
 // No electron here (core/no-electron.test.ts).
 
