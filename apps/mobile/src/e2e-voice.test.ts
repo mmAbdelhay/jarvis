@@ -129,7 +129,7 @@ function createFakeRecorder(clock: ReturnType<typeof createFakeClock>): VoiceRec
       recording = false;
       const durationMs = clock.now() - startedAt;
       nextUri += 1;
-      return { uri: `file:///rec-${nextUri}.m4a`, durationMs };
+      return { uri: `file:///rec-${nextUri}.m4a`, durationMs, format: "m4a" as const };
     },
     elapsedMs() {
       return recording ? clock.now() - startedAt : 0;
@@ -184,6 +184,7 @@ describe("voice scenario over the real client and controller", () => {
 
       const client = createRpcClient({
         transport,
+        lockedAtWelcome: false,
         clock,
         random: () => 0.5,
         client: CLIENT_STRING,

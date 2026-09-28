@@ -17,3 +17,18 @@ export function dashboardEntryAction(check: LoadPairingCheck): "connect" | "rout
   if (!check.ok) return "routeToPair";
   return check.found ? "connect" : "routeToPair";
 }
+
+/**
+ * D3: whether a route change should connect the shared client from the
+ * stored pairing. Once at launch, on whatever route the app (or a browser
+ * reload) started on — /unlock after a lock, a bookmarked /voice — and
+ * again whenever the route reaches /dashboard (right after /pair saves a
+ * fresh pairing). Never from /pair itself: that screen runs its own flow,
+ * and a missing pairing would only route it back to itself. Calling
+ * `connect()` twice is harmless (rpc-client.ts rule 8), so the rule only
+ * has to never miss a launch.
+ */
+export function shouldConnectOnRoute(pathname: string, launchHandled: boolean): boolean {
+  if (pathname === "/pair") return false;
+  return pathname === "/dashboard" || !launchHandled;
+}

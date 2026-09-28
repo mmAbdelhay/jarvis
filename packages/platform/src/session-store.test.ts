@@ -55,6 +55,20 @@ describe("createSqliteSessionStore", () => {
     ]);
   });
 
+  it("ignores every call after close, rather than throwing from a closed database", () => {
+    const store = createSqliteSessionStore(":memory:");
+    store.upsert(agentSession());
+    store.close?.();
+    store.close?.();
+    expect(() => {
+      store.upsert(agentSession({ state: "dead" }));
+      store.upsertImported(agentSession(), { owned: false });
+      store.updateGit("s1", { branch: "b", insertions: 1, deletions: 0, changedFiles: 1 });
+      store.edit("s1", { summary: "late" });
+    }).not.toThrow();
+    expect(store.history()).toEqual([]);
+  });
+
   it("updates the same row in place on a later transition, not a second row", () => {
     const store = createSqliteSessionStore(":memory:");
     store.upsert(agentSession());

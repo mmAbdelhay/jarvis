@@ -40,6 +40,14 @@ describe("parseVoiceUploadMeta", () => {
     });
   });
 
+  it('accepts format:"webm"', () => {
+    expect(parseVoiceUploadMeta(validMeta({ format: "webm" }))).toEqual({
+      turnId: TURN_ID_32,
+      format: "webm",
+      durationMs: 1000,
+    });
+  });
+
   it("rejects an array", () => {
     expect(parseVoiceUploadMeta([validMeta()])).toBeUndefined();
   });

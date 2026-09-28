@@ -163,8 +163,14 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       updatedAt = excluded.updatedAt
   `);
 
+  // Set by close(). A session can still end after the core's shutdown has
+  // closed the store (an agent killed on quit exits a moment later), so
+  // every call after that is a no-op rather than a throw from a closed db.
+  let closed = false;
+
   return {
     upsert(session: Session): void {
+      if (closed) return;
       upsertStmt.run(
         session.id,
         session.project,
@@ -180,6 +186,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       );
     },
     upsertImported(session: Session, options: { owned: boolean }): void {
+      if (closed) return;
       if (options.owned) {
         importOwnedStmt.run(
           session.project,
@@ -211,6 +218,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       );
     },
     history(): Session[] {
+      if (closed) return [];
       return historyStmt.all().map(rowToSession);
     },
     updateGit(
@@ -221,6 +229,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       // matches zero rows (node:sqlite does not throw for that), which is
       // exactly the "do nothing, don't throw" behaviour a race between the
       // tracker and a row's removal needs — see the interface doc comment.
+      if (closed) return;
       updateGitStmt.run(git.branch, git.insertions, git.deletions, git.changedFiles, sessionId);
     },
     edit(id: string, patch: SessionEditPatch): void {
@@ -229,6 +238,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       // first edit), which needs the existing row read back first — a
       // plain INSERT ... ON CONFLICT can only replace a column, not leave
       // it "whatever it already was" without also naming that value.
+      if (closed) return;
       const existing = selectOverrideStmt.get(id) as
         | {
             summary: string | null;
@@ -267,6 +277,7 @@ export function createSqliteSessionStore(dbPath: string): SessionStore {
       );
     },
     close(): void {
+      closed = true;
       // node:sqlite throws on a second close; a store closed twice (a signal
       // handler racing a clean quit) is not worth a crash.
       try {

@@ -207,7 +207,7 @@ async function loadApp(
     })),
     openRemotePairing: vi.fn(async () => ({ ok: true, value: undefined })),
     cancelRemotePairing: vi.fn(async () => {}),
-    decideRemotePairing: vi.fn(async () => {}),
+    decideRemotePairing: vi.fn(async () => true),
     revokeRemoteDevice: vi.fn(async () => ({ ok: true, value: undefined })),
     onRemoteStatus: vi.fn(),
   };

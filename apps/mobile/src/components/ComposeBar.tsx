@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { clientPlatformFor } from "@/lib/client-platform";
 import { isRtl, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import type { SendResult } from "@/lib/session-input";
@@ -39,7 +40,7 @@ export function ComposeBar(props: {
         setValue((current) => (current === sentValue ? "" : current));
         setNotice("");
       } else {
-        setNotice(sendResultText(result, language));
+        setNotice(sendResultText(result, language, clientPlatformFor(Platform.OS)));
         clearTimeout(timer.current);
         timer.current = setTimeout(() => setNotice(""), 4000);
       }

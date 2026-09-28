@@ -190,6 +190,13 @@ export const CHANNEL_POLICY = {
   // the laptop by name. Revisit when a phone Settings UI ships.
   "settings:testAgent": "desktop-only",
   "settings:restart": "desktop-only",
+  // Desktop-only, all four (Task 23): they install, start, stop and remove
+  // the background service and replace the app's core. The Electron host
+  // answers them (desktop-only.ts); no core, and so no phone, ever sees them.
+  "background:status": "desktop-only",
+  "background:setEnabled": "desktop-only",
+  "background:restart": "desktop-only",
+  "background:stopNow": "desktop-only",
   "projects:list": "remote",
   // Desktop-only: the laptop's interface list is reconnaissance to anyone
   // who is not already sitting at it, and a phone only ever needs the one
@@ -206,6 +213,14 @@ export const CHANNEL_POLICY = {
   "remote:cancelPair": "desktop-only",
   "remote:decidePair": "desktop-only",
   "remote:revoke": "desktop-only",
+  // Desktop-only, all four (Phase 0): the owner account can never be
+  // created, reset or changed remotely — a paired device changing the
+  // password that is meant to prove the person behind it would defeat the
+  // whole second layer.
+  "remote:ownerStatus": "desktop-only",
+  "remote:setOwnerPassword": "desktop-only",
+  "remote:deletePasskey": "desktop-only",
+  "remote:signOutEverywhere": "desktop-only",
   // Remote (M10 Task 4): a phone registers and clears only its own Expo
   // push token — dispatch.ts's handlers act on `origin.deviceId` alone,
   // never a device id carried in the arguments, so this being remote-legal
@@ -217,6 +232,9 @@ export const CHANNEL_POLICY = {
   // exactly the class of persistent, laptop-controlled-tool config change
   // settings:save and settings:testAgent are already desktop-only for.
   "remote:tailscaleCert": "desktop-only",
+  // Desktop-only (Phase 1): opens a browser on the laptop itself; a phone
+  // has no business launching programs here.
+  "remote:openWebClient": "desktop-only",
 } as const satisfies Record<InvokeChannel, ChannelAccess>;
 
 type PolicyEntries = typeof CHANNEL_POLICY;

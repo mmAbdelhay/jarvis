@@ -67,6 +67,8 @@ function createFakeClient() {
     subscriptions: () => [],
     lastFrameAt: () => undefined,
     setAppActive: () => {},
+    unlock: () => {},
+    lock: () => {},
   };
 
   return {

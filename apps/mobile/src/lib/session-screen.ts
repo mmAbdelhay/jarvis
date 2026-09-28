@@ -1,6 +1,7 @@
 import type { SessionState } from "@jarvis/core";
 import { isSubscriptionKey } from "@jarvis/wire";
-import { t, type Language, type MessageKey } from "./i18n";
+import type { ClientPlatform } from "./client-platform";
+import { platformKey, t, type Language, type MessageKey } from "./i18n";
 import type { RpcError } from "./rpc-client";
 import type { SendResult } from "./session-input";
 import type { SessionStreamView } from "./session-stream";
@@ -35,10 +36,14 @@ export function sendResultKey(result: SendResult): MessageKey | undefined {
 // `SendResult` into displayed text the same way (server text verbatim for
 // `failed`, else the mapped key or nothing) — one testable expression
 // instead of two copies of the same `? :` chain.
-export function sendResultText(result: SendResult, language: Language): string {
+export function sendResultText(
+  result: SendResult,
+  language: Language,
+  platform: ClientPlatform = "native",
+): string {
   if (result.kind === "failed") return result.text;
   const key = sendResultKey(result);
-  return key ? t(language, key) : "";
+  return key ? t(language, platformKey(key, platform)) : "";
 }
 
 export function streamStatusKey(view: SessionStreamView): MessageKey | undefined {

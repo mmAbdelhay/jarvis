@@ -57,3 +57,23 @@ export function parsePairingUri(uri: string): PairingLink | undefined {
     ? { host, port, secret, fingerprint }
     : { host, port, secret, fingerprint, name };
 }
+
+/**
+ * Phase 1: the browser's pairing link, `https://<name>:<webPort>/pair#<query>`.
+ * `<query>` is exactly the query string `formatPairingUri` builds, so the
+ * browser side (apps/mobile/src/lib/web-pairing.ts `pairingLinkFromHash`)
+ * rebuilds the `jarvis://` form and validates it with `parsePairingUri`.
+ * The pairing data rides in the fragment, which a browser never sends to a
+ * server or puts in a Referer. Port 443 is left out of the URL, matching
+ * the origin a browser reports for it.
+ *
+ * `undefined` when the link has no certificate name (a browser needs a
+ * real certificate for that name) or the port is not 1-65535.
+ */
+export function webPairingUrl(link: PairingLink, webPort: number): string | undefined {
+  if (link.name === undefined || !HOSTNAME_PATTERN.test(link.name)) return undefined;
+  if (!Number.isInteger(webPort) || webPort < 1 || webPort > 65535) return undefined;
+  const query = formatPairingUri(link).slice(PAIRING_URI_PREFIX.length);
+  const authority = webPort === 443 ? link.name : `${link.name}:${webPort}`;
+  return `https://${authority}/pair#${query}`;
+}

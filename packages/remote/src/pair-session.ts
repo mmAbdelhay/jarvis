@@ -5,8 +5,8 @@
 // the single `paired` frame; closing a socket is not a banner.
 
 import type { AuditLog } from "./audit.js";
-import type { DeviceStore } from "./devices.js";
-import { sanitizeDeviceName } from "./devices.js";
+import type { DeviceClient, DeviceStore } from "./devices.js";
+import { deviceClientKind, sanitizeDeviceName } from "./devices.js";
 import { describeError } from "./io.js";
 import type { SessionHandlers, SocketLike, Timers } from "./io.js";
 import type { Pairing, PairingOutcome } from "./pairing.js";
@@ -101,6 +101,9 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
       return;
     }
 
+    // Phase 1: stored on the device record so Settings can label a browser.
+    const client = deviceClientKind(message.client);
+
     const outcome = pairing.begin(message.secret, deviceName, source);
     if (!outcome.ok) {
       // Ruling 15: every refusal reason closes 4401, whichever one it was.
@@ -113,7 +116,7 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
     audit.record({ kind: "pairing-requested", source, deviceName });
     outcome.decision.then((decision) => {
       decided = true;
-      handleDecision(decision, deviceName).catch((error: unknown) => {
+      handleDecision(decision, deviceName, client).catch((error: unknown) => {
         // A backstop, not the primary path: every branch inside
         // `handleDecision` already catches its own failures and settles.
         // This only fires if something inside it throws in a way none of
@@ -157,7 +160,11 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
     settle();
   }
 
-  async function handleDecision(outcome: PairingOutcome, deviceName: string): Promise<void> {
+  async function handleDecision(
+    outcome: PairingOutcome,
+    deviceName: string,
+    client: DeviceClient,
+  ): Promise<void> {
     if (outcome !== "approved") {
       audit.record({ kind: "pairing-denied", source, deviceName, reason: outcome });
       // I1: same reasoning as refuse() — "mismatch" vs. "closed" vs. "busy"
@@ -171,7 +178,7 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
 
     let minted: { deviceId: string; token: string };
     try {
-      minted = await devices.add(deviceName);
+      minted = await devices.add(deviceName, client);
     } catch (error) {
       log(`pair-session: devices.add failed: ${describeError(error)}`);
       audit.record({ kind: "error", detail: describeError(error) });

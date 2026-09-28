@@ -15,13 +15,51 @@ export type {
   Listen,
   ListenOptions,
   Listener,
+  ListenWeb,
+  OwnerPasswordError,
+  OwnerStatus,
   PairingResult,
   RemoteDeviceStatus,
   RemoteIdleStatus,
   RemotePairingStatus,
   RemoteProblem,
   RemoteStatus,
+  RemoteWebStatus,
+  SetOwnerPasswordResult,
+  WebListenOptions,
 } from "./bridge.js";
+export type { OwnerHashParams, PasskeyRecord } from "./owner.js";
+// Type-only: web-server.ts (node:https) is value-reachable only through
+// `@jarvis/remote/listen`, like server.ts.
+export type { ListenWebOptions, WebAsset, WebManifest } from "./web-server.js";
+export {
+  createOwnerAuth,
+  isAuthChannel,
+  MAX_CONCURRENT_PASSWORD_CHECKS,
+  MAX_QUEUED_PASSWORD_CHECKS,
+  NO_LOGIN_LIMITS,
+} from "./owner-auth.js";
+export {
+  createLoginLimits,
+  DEVICE_FAILURES_BEFORE_LOCKOUT,
+  DEVICE_LOCKOUT_BASE_MS,
+  DEVICE_LOCKOUT_MAX_MS,
+  GLOBAL_FAILURE_LIMIT,
+  GLOBAL_FAILURE_WINDOW_MS,
+  GLOBAL_LOCKOUT_MS,
+} from "./login-limits.js";
+export type { LoginLimitsDeps } from "./login-limits.js";
+export type {
+  AuthContext,
+  AuthEffect,
+  AuthOutcome,
+  AuthSession,
+  BridgeOwnerAuth,
+  DesktopNoticeKind,
+  LoginLimits,
+  OwnerAuth,
+  OwnerAuthDeps,
+} from "./owner-auth.js";
 // `createConnection` itself was previously reachable only transitively
 // (bridge.ts -> hub.ts -> connection.ts, already inside this file's own
 // reachability graph below) but never re-exported directly — every other
@@ -109,6 +147,13 @@ export type { Headers } from "./proxy-rewrite.js";
 // this is what lets BridgeDeps.createProxy be typed here without pulling a
 // listener in (same rule server.ts/listen.ts already follow).
 export type { SidecarProxy, SidecarProxyDeps } from "./proxy.js";
+export {
+  ACCESS_TTL_MS,
+  createSessionStore,
+  REFRESH_ABSOLUTE_TTL_MS,
+  REFRESH_IDLE_TTL_MS,
+} from "./sessions.js";
+export type { IssuedSession, RefreshResult, SessionStore } from "./sessions.js";
 export {
   COOKIE_PATTERN,
   createSidecarRegistry,

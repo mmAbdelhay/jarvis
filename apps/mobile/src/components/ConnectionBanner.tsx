@@ -6,12 +6,14 @@
 // again" button. `bannerModel` (banner-model.ts) is the pure, tested
 // decision of which key and whether that button shows — this file stays
 // layout: it only renders the model and confirms the tap with a native
-// `Alert` before calling `onPairAgain`.
+// dialog (lib/dialog) before calling `onPairAgain`.
 import { useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { dialogs } from "@/lib/dialog";
 import { bannerModel } from "@/lib/banner-model";
 import type { ConnectionStore, ConnectionView } from "@/lib/connection-store";
-import { t } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
+import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { theme } from "@/lib/theme";
 
@@ -35,19 +37,21 @@ export function ConnectionBanner({
   }
 
   function confirmPairAgain(): void {
-    Alert.alert(
-      t(language, "conn.pairAgainConfirmTitle"),
-      t(language, "conn.pairAgainConfirmBody"),
-      [
-        { text: t(language, "common.cancel"), style: "cancel" },
-        { text: t(language, "common.ok"), style: "destructive", onPress: onPairAgain },
-      ],
-    );
+    dialogs.confirm({
+      title: t(language, "conn.pairAgainConfirmTitle"),
+      message: t(language, "conn.pairAgainConfirmBody"),
+      cancelText: t(language, "common.cancel"),
+      confirmText: t(language, "common.ok"),
+      destructive: true,
+      onConfirm: onPairAgain,
+    });
   }
 
   const content = (
     <>
-      <Text style={styles.text}>{t(language, model.key)}</Text>
+      <Text style={styles.text}>
+        {t(language, platformKey(model.key, clientPlatformFor(Platform.OS)))}
+      </Text>
       {view.state === "closed" && <Text style={styles.retry}>{t(language, "common.retry")}</Text>}
       {model.pairAgain && (
         <TouchableOpacity onPress={confirmPairAgain}>

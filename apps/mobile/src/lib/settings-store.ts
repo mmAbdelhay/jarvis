@@ -30,8 +30,14 @@ import type { Language, MessageKey } from "./i18n";
 import { fingerprintTail as computeFingerprintTail } from "./pair-flow";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
-import type { PrefsStore } from "./prefs";
-import { loadPrefs, savePrefs } from "./prefs";
+import type { AuthSession } from "./auth-session";
+import type { IdleLockMinutes, PrefsStore } from "./prefs";
+import {
+  DEFAULT_IDLE_LOCK_MINUTES,
+  loadPrefs,
+  savePrefs,
+  setKeepSignedIn as saveKeepSignedIn,
+} from "./prefs";
 import { PUSH_REGISTER_TIMEOUT_MS } from "./push-registration";
 import type { PushRegistration, PushView } from "./push-registration";
 import type { RpcClient } from "./rpc-client";
@@ -54,6 +60,11 @@ export type SettingsView = {
   // loadPrefs's own missing/invalid fallback (rule 16) — never a flash of
   // "off" before the saved value is known.
   speakReplies: boolean;
+  // Phase 0 owner login: the idle-lock window; 15 until prefs load.
+  idleLockMinutes: IdleLockMinutes;
+  // Task 13 (browser build only): "Keep me signed in on this browser";
+  // off until prefs load, as loadPrefs's own default.
+  keepSignedIn: boolean;
   laptop?: SettingsLaptop;
   fingerprintTail?: string;
   // M10 Task 5, rule 10: mirrors `deps.push.get()` — the push controller
@@ -98,6 +109,8 @@ export function connectionStateKey(view: ConnectionView): MessageKey {
       return "conn.unpaired";
     case "incompatible":
       return "conn.incompatible";
+    case "locked":
+      return "conn.locked";
     case "open":
       return view.stale ? "conn.stale" : "settings.connected";
   }
@@ -109,6 +122,9 @@ export type SettingsStore = {
   setLanguage(language: Language): Promise<void>;
   setSpeakReplies(on: boolean): Promise<void>;
   setNotifications(on: boolean): Promise<void>;
+  setIdleLockMinutes(minutes: IdleLockMinutes): Promise<void>;
+  setKeepSignedIn(on: boolean): Promise<void>;
+  logout(): Promise<void>;
   unpair(): Promise<void>;
   reconnect(): void;
 };
@@ -144,6 +160,8 @@ export type SettingsStoreDeps = {
   // flow, token handling and registration retries all live in
   // push-registration.ts, not here.
   push: Pick<PushRegistration, "get" | "subscribe" | "setEnabled">;
+  // Phase 0 owner login: the app's one auth session (built in _layout.tsx).
+  auth: Pick<AuthSession, "logout" | "setIdleMs" | "storagePolicyChanged">;
 };
 
 const TICK_MS = 1_000;
@@ -155,6 +173,8 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     language: undefined,
     restartRequired: false,
     speakReplies: true,
+    idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
+    keepSignedIn: false,
     notifications: deps.push.get(),
     connection: deps.connection.get(),
     appVersion: deps.appVersion,
@@ -247,7 +267,12 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 
   async function loadLanguage(): Promise<void> {
     const prefs = await loadPrefs(deps.prefs, deps.localeTag);
-    setView({ language: prefs.language, speakReplies: prefs.speakReplies });
+    setView({
+      language: prefs.language,
+      speakReplies: prefs.speakReplies,
+      idleLockMinutes: prefs.idleLockMinutes,
+      keepSignedIn: prefs.keepSignedIn,
+    });
   }
 
   async function loadLaptop(): Promise<void> {
@@ -302,6 +327,25 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 
   async function setNotifications(on: boolean): Promise<void> {
     await deps.push.setEnabled(on);
+  }
+
+  // Same re-read-then-write discipline as setLanguage: never clobbers a
+  // field another writer owns.
+  async function setIdleLockMinutes(minutes: IdleLockMinutes): Promise<void> {
+    const current = await loadPrefs(deps.prefs, deps.localeTag);
+    await savePrefs(deps.prefs, { ...current, idleLockMinutes: minutes });
+    deps.auth.setIdleMs(minutes * 60_000);
+    setView({ idleLockMinutes: minutes });
+  }
+
+  async function setKeepSignedIn(on: boolean): Promise<void> {
+    await saveKeepSignedIn(deps.prefs, deps.localeTag, on);
+    setView({ keepSignedIn: on });
+    await deps.auth.storagePolicyChanged();
+  }
+
+  async function logout(): Promise<void> {
+    await deps.auth.logout();
   }
 
   // R-M4 (deferred from M6): a throwing `disconnect()` used to leave
@@ -442,6 +486,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     setLanguage,
     setSpeakReplies,
     setNotifications,
+    setIdleLockMinutes,
+    setKeepSignedIn,
+    logout,
     unpair,
     reconnect,
   };

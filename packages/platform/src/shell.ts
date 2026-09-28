@@ -71,8 +71,10 @@ export type ShellManager = {
   /** Kills a tab's shell and forgets it — for a closed tab. */
   kill(tabId: string): void;
   /** Kills every shell; called on quit. Each one is a live child process
-   *  and does not go away with the window on its own. */
-  stopAll(): void;
+   *  and does not go away with the window on its own. Resolves once every
+   *  shell it killed has exited: until then the process still holds its
+   *  cwd, which on Windows keeps that directory from being removed. */
+  stopAll(): Promise<void>;
 };
 
 export type ShellManagerDeps = {
@@ -113,6 +115,8 @@ type Session = {
    *  uses it to render at the pty's real size instead of guessing from its
    *  own screen. */
   termSize?: { cols: number; rows: number };
+  /** Settles when this session's process exits. */
+  gone: Promise<void>;
 };
 
 /** Appends `chunk` to `session`, trimming from the front (SessionManager's
@@ -177,9 +181,13 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
       if (existing !== undefined && !existing.exited) return;
 
       const process = deps.spawn({ cwd, cols, rows });
+      let markGone!: () => void;
+      const gone = new Promise<void>((resolve) => {
+        markGone = resolve;
+      });
       const session: Session =
         existing === undefined
-          ? { process, chunks: [], size: 0, emitted: 0, exited: false }
+          ? { process, chunks: [], size: 0, emitted: 0, exited: false, gone }
           : {
               process,
               // Copied, not aliased: a stale onData from the dead process
@@ -190,6 +198,7 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
               size: existing.size,
               emitted: existing.emitted,
               exited: false,
+              gone,
               ...(existing.termSize === undefined ? {} : { termSize: existing.termSize }),
             };
       sessions.set(tabId, session);
@@ -206,6 +215,7 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
       });
 
       process.onExit((code) => {
+        markGone();
         // Only retain this entry as "exited" if the map still holds this
         // exact session object — a stale exit from a process that was
         // already killed (kill() deleted the entry) or superseded (a
@@ -273,8 +283,14 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
     },
 
     stopAll() {
-      for (const session of sessions.values()) session.process.kill();
+      const exits: Promise<void>[] = [];
+      for (const session of sessions.values()) {
+        if (session.exited) continue;
+        exits.push(session.gone);
+        session.process.kill();
+      }
       sessions.clear();
+      return Promise.all(exits).then(() => {});
     },
   };
 }

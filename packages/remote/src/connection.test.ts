@@ -16,6 +16,7 @@ import {
   AUDIT_PROBE_LINES_PER_CONNECTION,
   CONGESTION_TERMINATE_MS,
   createConnection,
+  LOCKED_SUB_ERROR_ID,
 } from "./connection.js";
 import type { Clock, Timers } from "./io.js";
 import {
@@ -35,6 +36,8 @@ import {
   MAX_BLOB_CHUNKS,
   PROTOCOL_VERSION,
 } from "./protocol.js";
+import type { OwnerAuth } from "./owner-auth.js";
+import { scriptedOwnerAuth, unlockedOwnerAuth } from "./owner-auth-double.js";
 import { FakeSocket } from "./socket-double.js";
 
 const SOURCE = "127.0.0.1:5555";
@@ -117,6 +120,8 @@ function makeHarness(
     onOpen: ConnectionDeps["onOpen"];
     audit: { record: ReturnType<typeof vi.fn<(event: AuditEvent) => void>> };
     auditPolicy: (channel: string) => AuditPolicy;
+    ownerAuth: OwnerAuth;
+    errorText: ConnectionDeps["errorText"];
   }> = {},
 ) {
   const clock = fakeClock(0);
@@ -130,6 +135,7 @@ function makeHarness(
   const onOpen = overrides.onOpen ?? vi.fn();
   const onAuthFailed = vi.fn();
   const onClosed = vi.fn();
+  const onLock = vi.fn<(deviceId: string) => void>();
   const authorizeKey: AuthorizeKey = overrides.authorizeKey ?? (() => true);
   const blobLimit: ConnectionDeps["blobLimit"] = overrides.blobLimit ?? (() => undefined);
   const audit = overrides.audit ?? { record: vi.fn<(event: AuditEvent) => void>() };
@@ -143,16 +149,30 @@ function makeHarness(
     policies: overrides.policies ?? POLICIES,
     authorizeKey,
     blobLimit,
-    errorText,
+    errorText: overrides.errorText ?? errorText,
     log,
     onOpen,
     onAuthFailed,
     onClosed,
     audit,
     auditPolicy,
+    ownerAuth: overrides.ownerAuth ?? unlockedOwnerAuth(),
+    onLock,
   };
   const connection = createConnection(socket, deps);
-  return { clock, socket, connection, handle, log, onOpen, onAuthFailed, onClosed, audit, deps };
+  return {
+    clock,
+    socket,
+    connection,
+    handle,
+    log,
+    onOpen,
+    onAuthFailed,
+    onClosed,
+    onLock,
+    audit,
+    deps,
+  };
 }
 
 function openConnection(harness: ReturnType<typeof makeHarness>) {
@@ -215,17 +235,17 @@ describe("createConnection: before hello", () => {
     expect(clock.pending()).toBe(0);
   });
 
-  it("wrong token with v2 closes 4401 (credentials checked first)", () => {
+  it("wrong token with v1 closes 4401 (credentials checked first)", () => {
     const { clock, socket, connection, onAuthFailed } = makeHarness();
-    connection.onText(helloFrame({ token: WRONG_TOKEN, v: 2 }));
+    connection.onText(helloFrame({ token: WRONG_TOKEN, v: 1 }));
     expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
     expect(onAuthFailed).toHaveBeenCalledWith("bad-credentials");
     expect(clock.pending()).toBe(0);
   });
 
-  it("right token with v2 closes 4426 with no onAuthFailed", () => {
+  it("a v1 hello (right token) closes CLOSE.versionMismatch (4426) with no onAuthFailed", () => {
     const { clock, socket, connection, onAuthFailed } = makeHarness();
-    connection.onText(helloFrame({ v: 2 }));
+    connection.onText(helloFrame({ v: 1 }));
     expect(socket.closed).toEqual({ code: CLOSE.versionMismatch, reason: "" });
     expect(onAuthFailed).not.toHaveBeenCalled();
     expect(clock.pending()).toBe(0);
@@ -1417,5 +1437,295 @@ describe("createConnection: audit (M12 Task 3)", () => {
     await flush();
 
     expect(harness.socket.sent).toEqual([{ t: "res", id: 7, v: 42 }]);
+  });
+});
+
+describe("createConnection: owner login (Phase 0)", () => {
+  const FAMILY = "a".repeat(32);
+  // Shorter than the 15 s heartbeat, so no ping lands in the frames below.
+  const LIFETIME = 10_000;
+
+  /** A locked connection whose auth:login/auth:refresh unlock until `now + LIFETIME`, and auth:status reports the session. */
+  function lockedHarness(overrides: Parameters<typeof makeHarness>[0] = {}) {
+    let now = () => 0;
+    const ownerAuth = scriptedOwnerAuth((channel, _args, session) => {
+      if (channel === "auth:status") {
+        return { kind: "value", value: { locked: session === undefined, hasPasskeys: false } };
+      }
+      if (channel === "auth:login" || channel === "auth:refresh") {
+        const until = now() + LIFETIME;
+        return {
+          kind: "value",
+          value: { accessExpiresAt: until },
+          effect: { unlock: { until, familyId: FAMILY } },
+        };
+      }
+      if (channel === "auth:logout")
+        return { kind: "value", value: null, effect: { lock: "logout" } };
+      return { kind: "error", code: "unsupported" };
+    });
+    const harness = makeHarness({ ownerAuth, ...overrides });
+    now = harness.clock.now;
+    openConnection(harness);
+    return harness;
+  }
+
+  async function login(harness: ReturnType<typeof makeHarness>, id = 900) {
+    harness.connection.onText(reqFrame(id, "auth:login", [{ password: "x".repeat(12) }]));
+    await flush();
+    harness.socket.sent = [];
+  }
+
+  it("hands ownerAuth a per-connection id and reports that id once the socket closes", async () => {
+    const contexts: string[] = [];
+    const closed: string[] = [];
+    const recording = (): OwnerAuth => ({
+      sessionAtHello: () => undefined,
+      handle: async (_channel, _args, context) => {
+        contexts.push(context.connectionId);
+        return { kind: "value", value: null };
+      },
+      connectionClosed: (connectionId) => {
+        closed.push(connectionId);
+      },
+    });
+    const one = makeHarness({ ownerAuth: recording() });
+    const two = makeHarness({ ownerAuth: recording() });
+    openConnection(one);
+    openConnection(two);
+    one.connection.onText(reqFrame(1, "auth:passkeyBegin"));
+    one.connection.onText(reqFrame(2, "auth:passkeyBegin"));
+    two.connection.onText(reqFrame(1, "auth:passkeyBegin"));
+    await flush();
+    const [first, again, other] = contexts;
+    expect(first).toBe(again);
+    expect(other).not.toBe(first);
+
+    one.connection.onSocketClosed(1000);
+    expect(closed).toEqual([first]);
+  });
+
+  it("a locked req gets err locked and never reaches handle", () => {
+    const handle = vi.fn<RequestHandler>();
+    const harness = lockedHarness({ handle });
+    harness.connection.onText(reqFrame(1, "projects:list"));
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 1, code: "locked", text: "err:locked", language: "en" },
+    ]);
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("a locked sub gets err locked (id 0) and subscribes nothing", () => {
+    const harness = lockedHarness();
+    harness.connection.onText(subFrame(["metrics:update"]));
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: LOCKED_SUB_ERROR_ID, code: "locked", text: "err:locked", language: "en" },
+    ]);
+    expect(harness.connection.subscribes("metrics:update")).toBe(false);
+  });
+
+  it("a locked blob gets err locked, its frames are discarded and the socket stays open", async () => {
+    const handle = vi.fn<RequestHandler>();
+    const harness = lockedHarness({ handle, blobLimit: () => 1_000_000 });
+    harness.connection.onText(blobFrame(5, "voice:upload", 4, 2));
+    harness.connection.onBinary(new Uint8Array([1, 2]));
+    harness.connection.onBinary(new Uint8Array([3, 4]));
+    await flush();
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 5, code: "locked", text: "err:locked", language: "en" },
+    ]);
+    expect(handle).not.toHaveBeenCalled();
+    expect(harness.socket.closed).toBeUndefined();
+  });
+
+  it("a locked auth:status is answered", async () => {
+    const harness = lockedHarness();
+    harness.connection.onText(reqFrame(2, "auth:status"));
+    await flush();
+    expect(harness.socket.sent).toEqual([
+      { t: "res", id: 2, v: { locked: true, hasPasskeys: false } },
+    ]);
+  });
+
+  it("passkey registration is refused locked while locked", () => {
+    const harness = lockedHarness();
+    harness.connection.onText(
+      reqFrame(3, "auth:passkeyRegisterBegin", [{ password: "x".repeat(12) }]),
+    );
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 3, code: "locked", text: "err:locked", language: "en" },
+    ]);
+  });
+
+  it("an auth refusal's text is chosen for its channel (D9), other refusals keep the plain text", async () => {
+    const ownerAuth = scriptedOwnerAuth((channel) =>
+      channel === "auth:login"
+        ? { kind: "error", code: "forbidden" }
+        : { kind: "error", code: "rate-limited" },
+    );
+    const channelText: ConnectionDeps["errorText"] = (code, channel) => ({
+      text: `${channel ?? "-"}:${code}`,
+      language: "en",
+    });
+    const harness = makeHarness({ ownerAuth, errorText: channelText });
+    openConnection(harness);
+    harness.connection.onText(reqFrame(1, "auth:login", [{ password: "x".repeat(12) }]));
+    harness.connection.onText(reqFrame(2, "auth:refresh", [{ refreshToken: "a".repeat(64) }]));
+    harness.connection.onText(reqFrame(3, "projects:list"));
+    await flush();
+    // The locked refusal is synchronous; the auth replies arrive after ownerAuth's await.
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 3, code: "locked", text: "-:locked", language: "en" },
+      { t: "err", id: 1, code: "forbidden", text: "auth:login:forbidden", language: "en" },
+      { t: "err", id: 2, code: "rate-limited", text: "auth:refresh:rate-limited", language: "en" },
+    ]);
+  });
+
+  it("malformed auth arguments are a bad-request", () => {
+    const harness = lockedHarness();
+    harness.connection.onText(reqFrame(4, "auth:login", [{ password: 7 }]));
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 4, code: "bad-request", text: "err:bad-request", language: "en" },
+    ]);
+  });
+
+  it("after login a req passes and a sub is held", async () => {
+    const handle = vi.fn<RequestHandler>(async () => ({ kind: "value", value: 42 }));
+    const harness = lockedHarness({ handle });
+    await login(harness);
+    harness.connection.onText(reqFrame(6, "projects:list"));
+    harness.connection.onText(subFrame(["metrics:update"]));
+    await flush();
+    expect(harness.socket.sent).toEqual([{ t: "res", id: 6, v: 42 }]);
+    expect(harness.connection.subscribes("metrics:update")).toBe(true);
+  });
+
+  it("at expiry it relocks: subscriptions are gone, auth:state is pushed, onLock fires, the socket stays open", async () => {
+    const handle = vi.fn<RequestHandler>(async () => ({ kind: "value", value: 1 }));
+    const harness = lockedHarness({ handle });
+    await login(harness);
+    harness.connection.onText(subFrame(["metrics:update", { ch: "t:stream", key: "k1" }]));
+
+    harness.clock.advance(LIFETIME - 1);
+    expect(harness.onLock).not.toHaveBeenCalled();
+    harness.clock.advance(1);
+
+    expect(harness.connection.subscribes("metrics:update")).toBe(false);
+    expect(harness.connection.subscribes("t:stream", "k1")).toBe(false);
+    expect(harness.onLock).toHaveBeenCalledWith(DEVICE.id);
+    expect(harness.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "expired" }, seq: 1 },
+    ]);
+    expect(harness.socket.closed).toBeUndefined();
+
+    harness.connection.push("metrics:update", { cpu: 1 }, undefined);
+    harness.connection.onText(reqFrame(7, "projects:list"));
+    expect(harness.socket.sent.slice(1)).toEqual([
+      { t: "err", id: 7, code: "locked", text: "err:locked", language: "en" },
+    ]);
+  });
+
+  it("an unlock past its expiry admits nothing even before the expiry timer fires", async () => {
+    let wall = 0;
+    const handle = vi.fn<RequestHandler>(async () => ({ kind: "value", value: 1 }));
+    // `now` moves on its own while the clock's timers stay put.
+    const harness = lockedHarness({ handle, now: () => wall });
+    await login(harness);
+    expect(harness.connection.isUnlocked()).toBe(true);
+    wall = LIFETIME;
+    harness.connection.onText(reqFrame(10, "projects:list"));
+    expect(handle).not.toHaveBeenCalled();
+    expect(harness.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "expired" }, seq: 1 },
+      { t: "err", id: 10, code: "locked", text: "err:locked", language: "en" },
+    ]);
+    expect(harness.connection.isUnlocked()).toBe(false);
+    expect(harness.onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a refresh before expiry moves the expiry forward", async () => {
+    const harness = lockedHarness();
+    await login(harness);
+    harness.clock.advance(LIFETIME - 1_000);
+    harness.connection.onText(reqFrame(8, "auth:refresh", [{ refreshToken: "b".repeat(64) }]));
+    await flush();
+    harness.clock.advance(1_000);
+    expect(harness.onLock).not.toHaveBeenCalled();
+    harness.clock.advance(LIFETIME - 1_000);
+    expect(harness.onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a request admitted while unlocked but settling after a lock is answered locked", async () => {
+    let settle: (outcome: RequestOutcome) => void = () => {};
+    const handle = vi.fn<RequestHandler>(
+      () =>
+        new Promise<RequestOutcome>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const harness = lockedHarness({ handle });
+    await login(harness);
+    harness.connection.onText(reqFrame(9, "projects:list"));
+    expect(harness.connection.lock("signed-out")).toBe(true);
+    settle({ kind: "value", value: "secret" });
+    await flush();
+    expect(harness.socket.sent).toContainEqual({
+      t: "err",
+      id: 9,
+      code: "locked",
+      text: "err:locked",
+      language: "en",
+    });
+    expect(JSON.stringify(harness.socket.sent)).not.toContain("secret");
+  });
+
+  it("logout locks the connection and pushes auth:state logout", async () => {
+    const harness = lockedHarness();
+    await login(harness);
+    harness.connection.onText(reqFrame(10, "auth:logout"));
+    await flush();
+    expect(harness.socket.sent).toEqual([
+      { t: "psh", ch: "auth:state", p: { locked: true, reason: "logout" }, seq: 1 },
+      { t: "res", id: 10, v: null },
+    ]);
+    expect(harness.onLock).toHaveBeenCalledTimes(1);
+    expect(harness.clock.pending()).toBe(1); // the heartbeat only: no expiry timer left
+  });
+
+  it("lock(reason, family) only locks a connection unlocked by that family, and never twice", async () => {
+    const harness = lockedHarness();
+    expect(harness.connection.lock("signed-out")).toBe(false);
+    await login(harness);
+    expect(harness.connection.lock("signed-out", "b".repeat(32))).toBe(false);
+    expect(harness.connection.lock("signed-out", FAMILY)).toBe(true);
+    expect(harness.connection.lock("signed-out")).toBe(false);
+    expect(harness.onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a lock mid-upload refuses the blob and discards its remaining frames", async () => {
+    const handle = vi.fn<RequestHandler>();
+    const harness = lockedHarness({ handle, blobLimit: () => 1_000_000 });
+    await login(harness);
+    harness.connection.onText(blobFrame(11, "voice:upload", 4, 2));
+    harness.connection.onBinary(new Uint8Array([1, 2]));
+    harness.connection.lock("signed-out");
+    harness.connection.onBinary(new Uint8Array([3, 4]));
+    await flush();
+    expect(handle).not.toHaveBeenCalled();
+    expect(harness.socket.sent).toContainEqual({
+      t: "err",
+      id: 11,
+      code: "locked",
+      text: "err:locked",
+      language: "en",
+    });
+    expect(harness.socket.closed).toBeUndefined();
+  });
+
+  it("closing an unlocked connection clears its expiry timer", async () => {
+    const harness = lockedHarness();
+    await login(harness);
+    harness.connection.close(CLOSE.normal, "");
+    expect(harness.clock.pending()).toBe(0);
   });
 });

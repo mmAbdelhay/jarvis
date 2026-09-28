@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_SELECTION_CHARS, parsePageMessage } from "../lib/terminal-protocol";
 import { createPageController, type PageDeps, type PageTerminal } from "./terminal-page";
 
 function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
@@ -9,6 +10,8 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
   setApplicationCursor(value: boolean): void;
   setBufferType(value: "normal" | "alternate"): void;
   setMouseTrackingMode(value: PageTerminal["modes"]["mouseTrackingMode"]): void;
+  setSelection(value: string): void;
+  readonly clearedSelections: number;
 } {
   let cols = 80;
   let rows = 24;
@@ -18,6 +21,8 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
   const written: string[] = [];
   const scrolls: number[] = [];
   let resetCount = 0;
+  let selection = "";
+  let clearedSelections = 0;
 
   return {
     get cols() {
@@ -41,6 +46,19 @@ function makeFakeTerminal(overrides?: Partial<PageTerminal>): PageTerminal & {
     },
     scrollLines(amount: number) {
       scrolls.push(amount);
+    },
+    getSelection() {
+      return selection;
+    },
+    clearSelection() {
+      selection = "";
+      clearedSelections += 1;
+    },
+    setSelection(value: string) {
+      selection = value;
+    },
+    get clearedSelections() {
+      return clearedSelections;
     },
     written,
     scrolls,
@@ -440,4 +458,47 @@ describe("createPageController", () => {
       }
     },
   );
+});
+
+describe("selection (wide layout, fix round 1)", () => {
+  it("posts the selection's text when it changes, once per change", () => {
+    const term = makeFakeTerminal();
+    const deps = makeDeps(term);
+    const controller = createPageController(deps);
+    controller.start();
+    deps.posted.length = 0;
+
+    term.setSelection("hello");
+    controller.selectionChanged();
+    controller.selectionChanged();
+    term.setSelection("");
+    controller.selectionChanged();
+
+    expect(deps.posted).toEqual([
+      { t: "selection", text: "hello" },
+      { t: "selection", text: "" },
+    ]);
+  });
+
+  it("cuts a selection to the protocol's limit, so the app accepts it", () => {
+    const term = makeFakeTerminal();
+    term.setSelection("y".repeat(MAX_SELECTION_CHARS + 50));
+    const raw: string[] = [];
+    const deps = { ...makeDeps(term), post: (text: string) => raw.push(text) };
+    createPageController(deps).selectionChanged();
+    expect(raw).toHaveLength(1);
+    expect(parsePageMessage(raw[0])).toEqual({
+      t: "selection",
+      text: "y".repeat(MAX_SELECTION_CHARS),
+    });
+  });
+
+  it('receive({"t":"clearSelection"}) clears the terminal\'s selection', () => {
+    const term = makeFakeTerminal();
+    const controller = createPageController(makeDeps(term));
+    term.setSelection("abc");
+    controller.receive(JSON.stringify({ t: "clearSelection" }));
+    expect(term.clearedSelections).toBe(1);
+    expect(term.getSelection()).toBe("");
+  });
 });

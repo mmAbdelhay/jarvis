@@ -6,10 +6,19 @@
 // programmer error — every screen is a descendant of RootLayout, which
 // always provides a value before rendering the `Stack`.
 import { createContext, useContext } from "react";
+import type { AuthSession } from "./auth-session";
 import type { ConnectionStore } from "./connection-store";
 import type { RpcClient } from "./rpc-client";
 
-export type RpcContextValue = { client: RpcClient; connectionStore: ConnectionStore };
+export type RpcContextValue = {
+  client: RpcClient;
+  connectionStore: ConnectionStore;
+  // Phase 0 owner login: the app's one auth session (unlock, idle lock).
+  authSession: AuthSession;
+  /** Connects again from the stored pairing (the banner's "Tap to retry"),
+   *  routing to /pair when there is none. */
+  reconnect(): Promise<void>;
+};
 
 export const RpcContext = createContext<RpcContextValue | undefined>(undefined);
 
@@ -27,4 +36,20 @@ export function useConnectionStore(): ConnectionStore {
     throw new Error("useConnectionStore() called outside RpcContext.Provider");
   }
   return value.connectionStore;
+}
+
+export function useAuthSession(): AuthSession {
+  const value = useContext(RpcContext);
+  if (value === undefined) {
+    throw new Error("useAuthSession() called outside RpcContext.Provider");
+  }
+  return value.authSession;
+}
+
+export function useReconnect(): () => Promise<void> {
+  const value = useContext(RpcContext);
+  if (value === undefined) {
+    throw new Error("useReconnect() called outside RpcContext.Provider");
+  }
+  return value.reconnect;
 }

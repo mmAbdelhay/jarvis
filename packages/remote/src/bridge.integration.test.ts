@@ -14,11 +14,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { setImmediate as yieldToLoop, setTimeout as delay } from "node:timers/promises";
+import { NATIVE_ORIGIN } from "@jarvis/wire";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Bridge, RemoteStatus } from "./bridge.js";
 import { createBridge } from "./bridge.js";
 import { loadCertificate } from "./certificate.js";
 import { nodeFs, nodeTimers } from "./node-io.js";
+import { OWNER_TEST_PASSWORD, ownerFileWithPassword } from "./owner-double.js";
 import { OUTBOX_TICK_MS } from "./outbox.js";
 import { STREAM_MAX_BYTES, utf8Bytes } from "./policy.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
@@ -32,6 +34,7 @@ import {
   PROTOCOL_VERSION,
 } from "./protocol.js";
 import { listenTls } from "./server.js";
+import { buildWebManifest, listenWeb } from "./web-server.js";
 
 type StreamPayload = { key?: string; chunk: string; offset?: number };
 
@@ -132,6 +135,8 @@ describe("bridge.integration", () => {
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "jarvis-remote-"));
     const random = (size: number) => randomBytes(size);
+    // Phase 0: the bridge never listens without an owner password.
+    await nodeFs.writeFile(join(dir, "owner.json"), ownerFileWithPassword(), 0o600);
 
     bridge = await createBridge({
       dir,
@@ -196,6 +201,7 @@ describe("bridge.integration", () => {
       port: 0,
       sidecarProxy: false,
       tls: {},
+      web: { enabled: false, port: 7718 },
     });
   });
 
@@ -248,6 +254,11 @@ describe("bridge.integration", () => {
     const request =
       "GET /rpc HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\nContent-Length: 0\r\n\r\n";
     const result = await probeUnauthenticated(link.host, link.port, request);
+    expect(result).toEqual({ received: 0, closed: true });
+  });
+
+  it("a request with no Host header gets zero bytes back, not Node's own 400, and closes", async () => {
+    const result = await probeUnauthenticated(link.host, link.port, "GET / HTTP/1.1\r\n\r\n");
     expect(result).toEqual({ received: 0, closed: true });
   });
 
@@ -307,6 +318,11 @@ describe("bridge.integration", () => {
   it("connectDevice welcomes with the subscribable capabilities and calls/pushes round-trip", async () => {
     session = await connectDevice(link, credential);
     expect(session.welcome.capabilities).toEqual(["metrics:update", "test:stream"]);
+    // Phase 0: every connection opens locked until the owner logs in.
+    expect(await session.call("projects:list")).toMatchObject({ t: "err", code: "locked" });
+    expect(await session.call("auth:login", { password: OWNER_TEST_PASSWORD })).toMatchObject({
+      t: "res",
+    });
 
     const res = await session.call("projects:list");
     expect(res).toMatchObject({ t: "res", v: ["alpha", "beta"] });
@@ -490,5 +506,173 @@ describe("bridge.integration", () => {
     await expect(
       openPinned(socketUrl(link, "/rpc"), link.fingerprint, { timeoutMs: 2_000 }),
     ).rejects.toBeInstanceOf(Error);
+  });
+});
+
+// Phase 1: the web listener's origin is the only browser Origin the real
+// `/pair` and `/rpc` upgrade check accepts, and only while it is up. The
+// certificate is the real self-signed one relabelled "configured" with a
+// DNS name: TLS here pins nothing by name, and the gate needs one.
+describe("bridge.integration: the web origin drives the real Origin check", () => {
+  const NAME = "jarvis.test";
+  let dir: string;
+  let bridge: Bridge;
+  const config = (webEnabled: boolean) => ({
+    enabled: true,
+    bindAddress: "127.0.0.1",
+    port: 0,
+    sidecarProxy: false,
+    tls: {},
+    web: { enabled: webEnabled, port: 0 },
+  });
+
+  /** A well-formed `/pair` upgrade carrying `origin`; resolves with the first reply bytes ("" when the socket just closes). */
+  async function upgradeReply(port: number, origin: string): Promise<string> {
+    const socket = await rawConnect("127.0.0.1", port);
+    const request = [
+      "GET /pair HTTP/1.1",
+      `Host: 127.0.0.1:${port}`,
+      "Connection: Upgrade",
+      "Upgrade: websocket",
+      "Sec-WebSocket-Version: 13",
+      `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+      `Origin: ${origin}`,
+      "\r\n",
+    ].join("\r\n");
+    const reply = new Promise<string>((resolve) => {
+      socket.once("data", (chunk: Buffer) => resolve(chunk.toString("latin1")));
+      socket.once("close", () => resolve(""));
+      setTimeout(() => resolve("timeout"), 2_000).unref();
+    });
+    socket.write(request);
+    const text = await reply;
+    socket.destroy();
+    return text;
+  }
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "jarvis-remote-web-"));
+    const random = (size: number) => randomBytes(size);
+    await nodeFs.writeFile(join(dir, "owner.json"), ownerFileWithPassword(), 0o600);
+    bridge = await createBridge({
+      dir,
+      fs: nodeFs,
+      random,
+      now: Date.now,
+      timers: nodeTimers,
+      listen: listenTls,
+      loadCertificate: async (certConfig) => ({
+        ...(await loadCertificate(certConfig, {
+          fs: nodeFs,
+          dir,
+          random,
+          now: Date.now,
+          enforceFileModes: ENFORCE_FILE_MODES,
+        })),
+        source: "configured",
+        dnsNames: [NAME],
+      }),
+      createProxy: () => undefined,
+      listenWeb,
+      loadWebManifest: async () =>
+        buildWebManifest([{ path: "/index.html", bytes: Buffer.from("<!doctype html>") }]),
+      handle: async () => ({ kind: "unknown-channel" }),
+      policies: TEST_POLICIES,
+      authorizeKey: () => false,
+      blobLimit: () => undefined,
+      errorText: (code) => ({ text: `err:${code}`, language: "en" }),
+      auditPolicy: () => "never",
+      enforceFileModes: ENFORCE_FILE_MODES,
+      log: () => {},
+      onDeviceDisconnected: () => {},
+      onStatus: () => {},
+    });
+    await bridge.apply(config(true));
+    expect(await bridge.openPairing()).toBe("opened");
+  });
+
+  afterAll(async () => {
+    await bridge.stop();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("accepts the browser Origin only while the web listener is on", async () => {
+    const web = bridge.status().web;
+    if (web?.kind !== "on") throw new Error(`expected web on, got ${JSON.stringify(web)}`);
+    const bridgePort = bridge.status().listening?.port ?? 0;
+    expect(web.origin).toBe(`https://${NAME}:${web.port}`);
+
+    expect(await upgradeReply(bridgePort, web.origin)).toMatch(/^HTTP\/1\.1 101 /);
+    expect(await upgradeReply(bridgePort, `https://${NAME}:${bridgePort}`)).toBe("");
+
+    await bridge.apply(config(false));
+    expect(bridge.status().web).toEqual({ kind: "off" });
+    // Same bridge listener (only the web toggle changed), same origin text.
+    expect(bridge.status().listening?.port).toBe(bridgePort);
+    expect(await upgradeReply(bridgePort, web.origin)).toBe("");
+  });
+  // Final review I1: an already-open browser socket must not outlive the
+  // web listener just because its Origin was only checked at upgrade.
+  it("turning web off closes an open browser-origin socket and leaves a native one open", async () => {
+    await bridge.apply(config(true));
+    await bridge.openPairing();
+    const web = bridge.status().web;
+    if (web?.kind !== "on") throw new Error(`expected web on, got ${JSON.stringify(web)}`);
+    const bridgePort = bridge.status().listening?.port ?? 0;
+
+    /** Opens a raw `/pair` upgrade; `closeFrame` settles on the server's first WebSocket close frame (opcode 0x8). */
+    async function openUpgrade(origin: string) {
+      const socket = await rawConnect("127.0.0.1", bridgePort);
+      let upgraded = false;
+      let sawClose = false;
+      let onUpgrade: (head: string) => void = () => {};
+      const upgrade = new Promise<string>((resolve) => {
+        onUpgrade = resolve;
+      });
+      let onClose: () => void = () => {};
+      const closeFrame = new Promise<void>((resolve) => {
+        onClose = resolve;
+      });
+      socket.on("data", (chunk: Buffer) => {
+        let frames = chunk;
+        if (!upgraded) {
+          upgraded = true;
+          const text = chunk.toString("latin1");
+          const end = text.indexOf("\r\n\r\n");
+          onUpgrade(text);
+          frames = chunk.subarray(end + 4);
+        }
+        if (frames.length > 0 && (frames[0] ?? 0) === 0x88) {
+          sawClose = true;
+          onClose();
+        }
+      });
+      socket.write(
+        [
+          "GET /pair HTTP/1.1",
+          `Host: 127.0.0.1:${bridgePort}`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+          `Origin: ${origin}`,
+          "\r\n",
+        ].join("\r\n"),
+      );
+      expect(await upgrade).toMatch(/^HTTP\/1\.1 101 /);
+      return { socket, closeFrame, sawClose: () => sawClose };
+    }
+
+    const browser = await openUpgrade(web.origin);
+    const native = await openUpgrade(NATIVE_ORIGIN);
+
+    await bridge.apply(config(false));
+    await browser.closeFrame;
+    await yieldToLoop();
+
+    expect(browser.sawClose()).toBe(true);
+    expect(native.sawClose()).toBe(false);
+    browser.socket.destroy();
+    native.socket.destroy();
   });
 });

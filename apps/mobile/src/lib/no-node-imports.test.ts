@@ -80,4 +80,9 @@ describe("no node: imports outside test files (M1)", () => {
       expect(NODE_IMPORT_PATTERN.test('import "react-native";')).toBe(false);
     },
   );
+  it("the scan includes the browser build's .web.ts/.web.tsx siblings (Task 13)", () => {
+    const scanned = collectSourceFiles(join(MOBILE_ROOT, "src"));
+    expect(scanned).toContain(join(MOBILE_ROOT, "src", "lib", "native-notifications.web.ts"));
+    expect(scanned).toContain(join(MOBILE_ROOT, "src", "components", "TerminalWebView.web.tsx"));
+  });
 });

@@ -153,11 +153,27 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "var controller=createPageController({" +
     "term:term," +
     "fit:function(){fitAddon.fit();}," +
-    "post:function(s){window.ReactNativeWebView.postMessage(s);}," +
+    // Task 13: the same script also runs in the browser build, as the
+    // static terminal.html in a sandboxed iframe (TerminalWebView.web.tsx)
+    // with no ReactNativeWebView bridge — there it posts to its parent.
+    // `"*"` is unavoidable: the sandboxed frame has an opaque origin and
+    // no referrer, so it cannot name its parent's origin; the parent
+    // filters on `event.source` instead, and only ready/resize/modes/wheel
+    // (never terminal content) is ever posted.
+    "post:function(s){" +
+    "if(window.ReactNativeWebView){window.ReactNativeWebView.postMessage(s);}" +
+    'else if(window.parent!==window){window.parent.postMessage(s,"*");}' +
+    "}," +
     "applyFixedSize:applyFixedSize," +
     'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;}' +
     "});" +
-    'window.addEventListener("message",function(e){controller.receive(e.data);});' +
+    // In the iframe, only the parent (the app) may drive the terminal; the
+    // native WebView's own injected events carry no source, and are
+    // accepted exactly as before.
+    'window.addEventListener("message",function(e){' +
+    "if(!window.ReactNativeWebView&&e.source!==window.parent)return;" +
+    "controller.receive(e.data);" +
+    "});" +
     'document.addEventListener("message",function(e){controller.receive(e.data);});' +
     'window.addEventListener("resize",function(){controller.layoutChanged();});' +
     // Bug 9: touch scrolling — xterm 6's own viewport is wheel-only, so
@@ -186,6 +202,13 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'document.getElementById("t").addEventListener("touchcancel",function(){' +
     "controller.touchEnd();" +
     "},{passive:true});" +
+    // Wide layout: the browser build tells its parent what is selected,
+    // so a copy chord in the app can copy it (the app's capture element
+    // holds the keyboard focus, not this frame). Never on native.
+    "term.onSelectionChange(function(){" +
+    "if(window.ReactNativeWebView)return;" +
+    "controller.selectionChanged();" +
+    "});" +
     "controller.start();" +
     "})();"
   );
@@ -213,7 +236,9 @@ const STYLE =
   "html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}" +
   "#t{width:100%;height:100%;touch-action:none;}";
 
-export function buildTerminalHtml(inputs) {
+/** The page's one script, exactly as both the native inline page and the
+ *  browser's external terminal.<hash>.js carry it. */
+function buildTerminalScript(inputs) {
   const { xtermJs, fitJs, unicode11Js, xtermCss, pageJs, theme, fontFamily, scrollback, fontSize } =
     inputs;
 
@@ -228,13 +253,18 @@ export function buildTerminalHtml(inputs) {
   const wrappedUnicode11 = wrapVendorModule(unicode11Js, "Unicode11Addon");
   const bootCode = buildBootCode(theme, fontFamily, scrollback, fontSize);
 
-  const scriptText =
+  return (
     "globalThis.__jarvisTerm={};" +
     wrappedTerminal +
     wrappedFit +
     wrappedUnicode11 +
     pageJs +
-    bootCode;
+    bootCode
+  );
+}
+
+export function buildTerminalHtml(inputs) {
+  const scriptText = buildTerminalScript(inputs);
 
   const scriptSha256 = sha256Base64(scriptText);
   const csp = CSP.replace("__SCRIPT_HASH__", scriptSha256);
@@ -246,7 +276,7 @@ export function buildTerminalHtml(inputs) {
     '<meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
-    `<style>${xtermCss}${STYLE}</style>` +
+    `<style>${inputs.xtermCss}${STYLE}</style>` +
     "</head>" +
     "<body>" +
     '<div id="t"></div>' +
@@ -255,4 +285,62 @@ export function buildTerminalHtml(inputs) {
     "</html>";
 
   return { html, scriptSha256 };
+}
+
+// Task 13 (controller ruling): the browser build loads the terminal as a
+// static page, `<iframe src="/terminal.html" sandbox="allow-scripts">`,
+// instead of an inline srcdoc — so the web app's own CSP never has to
+// allow an inline script. Same script, split out into external files.
+// 'self' is the server that served terminal.html: a sandboxed frame's
+// origin is opaque, but CSP matches 'self' against the page's URL. Styles
+// keep 'unsafe-inline' (xterm sets element styles at runtime), as the
+// native page does; scripts never do.
+const WEB_CSP =
+  "default-src 'none'; " +
+  "script-src 'self'; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "img-src 'none'; " +
+  "font-src 'none'; " +
+  "connect-src 'none'; " +
+  "frame-src 'none'; " +
+  "base-uri 'none'; " +
+  "form-action 'none'";
+
+function contentName(text, extension) {
+  return `terminal.${sha256Hex(text).slice(0, 16)}.${extension}`;
+}
+
+export function buildTerminalWebPage(inputs) {
+  const script = buildTerminalScript(inputs);
+  const style = inputs.xtermCss + STYLE;
+  const scriptName = contentName(script, "js");
+  const styleName = contentName(style, "css");
+  const html =
+    "<!doctype html>" +
+    '<html dir="ltr">' +
+    "<head>" +
+    '<meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
+    `<meta http-equiv="Content-Security-Policy" content="${WEB_CSP}">` +
+    '<meta name="referrer" content="no-referrer">' +
+    `<link rel="stylesheet" href="${styleName}">` +
+    "</head>" +
+    "<body>" +
+    '<div id="t"></div>' +
+    `<script src="${scriptName}"></script>` +
+    "</body>" +
+    "</html>";
+  return { html, script, style, scriptName, styleName };
+}
+
+const SCRIPT_ELEMENT_PATTERN = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+
+/** Every <script> element in `html` that is not a bodiless external one. */
+export function findInlineScripts(html) {
+  const offenders = [];
+  for (const match of html.matchAll(SCRIPT_ELEMENT_PATTERN)) {
+    const [element, attributes, body] = match;
+    if (!/(?:^|\s)src\s*=/i.test(attributes) || body.trim() !== "") offenders.push(element);
+  }
+  return offenders;
 }

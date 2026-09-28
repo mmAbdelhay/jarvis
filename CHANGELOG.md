@@ -8,7 +8,68 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
-Nothing yet.
+- Tablet and desktop layout for the browser client and the iPad and
+  Android tablet app: a window at least 744 wide (an iPad mini in
+  portrait) whose shorter side is at least 600 gets a desktop-style top bar (sections, the laptop's metrics,
+  connection and name, running count, clock), a three-panel Dashboard,
+  Sessions as a list beside the selected session (`/sessions?id=`),
+  terminals and tools inline in the Workspace, and a section list in
+  Settings. Other pages sit in a centred panel, and unlock and pairing in
+  a centred card. Resizing or rotating keeps the open session or terminal
+  without reconnecting it, Arabic mirrors the layout, and tablets are no
+  longer locked to portrait. Phones are unchanged. A hardware keyboard
+  does not type into the terminal in the native iPad app; use the key bar
+  and compose bar. See [Phone and tablet/desktop
+  layouts](docs/guide/remote-access.md#the-browser-client).
+- Background daemon: **Settings → General → Keep Jarvis running in the
+  background** (`daemon.enabled`, off by default) moves terminals, agent
+  runs, the remote bridge and the browser client into `jarvisd`, a
+  background process that keeps running after you quit the app. It is
+  registered as a LaunchAgent on macOS, a systemd user unit on Linux (use
+  `loginctl enable-linger` on a headless server) and an HKCU Run value on
+  Windows. Reopening the app shows the same tabs and terminals. Turning it
+  on or off closes the terminals that were open. The new `jarvisd` command
+  (`status`, `set-password`, `pair`, `devices`, `revoke`, `sign-out-all`,
+  `web on|off`, `stop`, `run`) administers it with no window, for example
+  over SSH. It uses a local control socket that only your user can open,
+  and a launcher ships in the app's `resources/bin`. See [Background
+  daemon](docs/guide/background-daemon.md).
+- Owner login for remote access: pairing now identifies a device, and
+  every connection stays locked until it signs in with an owner password
+  set in Settings → Remote access → Owner account (at least 12
+  characters). The bridge does not start without one, so a bridge that
+  was on before upgrading stays off until the password is set. Sign-ins
+  use 15-minute access tokens and rotating refresh tokens (7 days idle,
+  30 days at most); a reused refresh token ends that sign-in and raises a
+  desktop notification. Wrong passwords lock a device out from 1 minute
+  up to 1 hour, and 20 in an hour pause all sign-ins for 15 minutes.
+  Changing the password, deleting a passkey, Sign out everywhere or
+  revoking a device ends sessions and cuts sidecar tabs. The phone app
+  unlocks with Face ID, fingerprint or passcode after the first password
+  sign-in, and locks itself after 15 minutes idle (adjustable).
+- **Breaking:** the remote wire protocol is now version 2. Update the
+  phone app and Jarvis on the laptop together; either one alone refuses
+  to connect ("Update the Jarvis app"). Pairing codes made before the
+  upgrade are refused, so make a new one.
+- Browser client: the phone app now also runs in a web browser, served
+  by Jarvis itself from a second listener. It is off by default
+  (`remote.web.enabled`) and has its own port (`remote.web.port`, the
+  bridge's port plus one by default), and it needs a Tailscale certificate
+  with a DNS name and the owner password. Open or pair it from Settings →
+  Remote access → Browser access (address, Open in browser, QR code) or by
+  opening a `https://<name>:<port>/pair#…` link. A browser signs in with
+  the owner password or a passkey, and can optionally stay signed in. It
+  has no push notifications and no QR scanning, and Editor, Database and
+  Cluster open in a new tab. Settings labels each paired device Browser or
+  App.
+- Voice uploads accept WebM/Opus as well as MP4/AAC, so browsers that
+  cannot record MP4 can send voice. The laptop checks the recording's
+  actual container against the format it was sent as.
+- The bridge now checks `Origin` on `/rpc` and `/pair` connections. It
+  accepts no `Origin`, the phone app's `jarvis-app://native` (which the
+  updated app sends), or the browser client's own address while browser
+  access is on. Anything else, including the bridge's own address where
+  sidecar pages run, is closed without a reply.
 
 ## [0.1.4] — 2026-09-20
 

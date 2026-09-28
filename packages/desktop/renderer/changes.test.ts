@@ -188,17 +188,30 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     })),
     openRemotePairing: vi.fn(async () => ({ ok: true as const, value: undefined })),
     cancelRemotePairing: vi.fn(async () => {}),
-    decideRemotePairing: vi.fn(async () => {}),
+    decideRemotePairing: vi.fn(async () => true),
     revokeRemoteDevice: vi.fn(async () => ({ ok: true as const, value: undefined })),
+    ownerStatus: vi.fn(async () => ({ hasPassword: true, passkeys: [] })),
+    setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
+    deletePasskey: vi.fn(async () => ({ ok: true as const, value: undefined })),
+    signOutEverywhere: vi.fn(async () => {}),
     onRemoteStatus: vi.fn(),
     registerPush: vi.fn(async () => ({ registered: true as const, laptopEnabled: false })),
     unregisterPush: vi.fn(async () => {}),
     reportCommandFinished: vi.fn(async () => {}),
+    openWebClient: vi.fn(async () => false),
     tailscaleCert: vi.fn(async () => ({
       ok: false as const,
       kind: "failed" as const,
       detail: "not stubbed in this test",
     })),
+    backgroundStatus: vi.fn(async () => ({
+      enabled: false,
+      inApp: true,
+      state: { kind: "off" as const },
+    })),
+    setBackgroundEnabled: vi.fn(async () => ({ ok: true as const })),
+    restartBackground: vi.fn(async () => ({ ok: true as const })),
+    stopBackgroundNow: vi.fn(async () => ({ ok: true as const })),
   };
   const jarvis: RendererApi = { ...defaults, ...overrides };
   window.jarvis = jarvis;

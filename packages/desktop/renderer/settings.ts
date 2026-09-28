@@ -12,9 +12,10 @@ import type {
 import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
-import type { BindChoice, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
+import type { BindChoice, OwnerStatus, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
 import { isMeshAddress, primaryBindChoices } from "./remote-bind.js";
 import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remote-status.js";
+import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-web.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 import { syncPrayerSettings } from "./prayer.js";
 
@@ -48,6 +49,21 @@ const DEFAULT_REMOTE_STATUS: RemoteStatus = {
   sidecarProxy: "off",
 };
 let remoteStatusCache: RemoteStatus | undefined;
+
+/** Phase 0: the owner account as last read from `remote:ownerStatus` —
+ *  undefined until the first read lands (or when it failed), which the
+ *  Enable gate treats as "no password": closed until proven otherwise. */
+let ownerStatusCache: OwnerStatus | undefined;
+/** Whether the change-password form is showing (it always shows while no
+ *  password exists yet). */
+let ownerFormOpen = false;
+/** True while a set/change/delete/sign-out round trip is in flight. */
+let ownerBusy = false;
+/** The owner block's last outcome line — never carries a password. */
+let ownerMessage: { text: string; warning: boolean } | undefined;
+/** `RemoteStatus.ownerVersion` as last pushed: a change means the owner
+ *  account changed remotely (a passkey registered from a phone). */
+let lastOwnerVersion: number | undefined;
 
 // The pairing QR: rendered at a small internal resolution and scaled up to
 // its fixed 176px CSS box (styles.css, image-rendering: pixelated) rather
@@ -116,6 +132,10 @@ export function initSettings(): void {
     remoteStatusCache = status;
     renderRemotePairArea();
     renderPairedDevices();
+    if (status.ownerVersion !== undefined && status.ownerVersion !== lastOwnerVersion) {
+      lastOwnerVersion = status.ownerVersion;
+      void refreshOwnerPasskeys();
+    }
   });
 }
 
@@ -127,6 +147,12 @@ export async function openSettings(): Promise<void> {
   remoteStatusCache = latestRemoteStatus();
   draft = await window.jarvis.getSettings();
   savedBaseline = structuredClone(draft);
+  ownerFormOpen = false;
+  ownerBusy = false;
+  ownerMessage = undefined;
+  // Awaited before the first render so the Enable switch is never drawn
+  // enabled and then snapped shut a moment later.
+  await refreshOwnerStatus();
   renderSettings();
 
   void loadVoices();
@@ -1318,6 +1344,10 @@ function renderRemote(): void {
   $("settings-remote-idle-note").textContent = MESSAGES.remoteIdleNote(language);
   $("settings-remote-push-projects-label").textContent = MESSAGES.remotePushProjectsLabel(language);
   $("settings-remote-push-projects-note").textContent = MESSAGES.remotePushProjectsNote(language);
+  $("settings-remote-web-label").textContent = MESSAGES.remoteWebLabel(language);
+  $("settings-remote-web-note").textContent = MESSAGES.remoteWebNote(language);
+  ($("settings-remote-web-open") as HTMLButtonElement).textContent =
+    MESSAGES.remoteWebOpen(language);
   $("settings-remote-pair-title").textContent = MESSAGES.remotePairTitle(language);
   $("settings-remote-devices-title").textContent = MESSAGES.remoteDevicesTitle(language);
   $("settings-remote-warning").textContent = MESSAGES.remoteWarning(language);
@@ -1336,12 +1366,304 @@ function renderRemote(): void {
   ($("settings-remote-idle") as HTMLInputElement).value = String(remote.idleDisableMinutes);
   ($("settings-remote-push-projects") as HTMLInputElement).checked =
     remote.push.includeProjectNames;
+  ($("settings-remote-web") as HTMLInputElement).checked = remote.web.enabled;
 
   $("settings-remote-new-code").textContent = MESSAGES.remoteNewCode(language);
 
   renderBindChoices();
   renderRemotePairArea();
   renderPairedDevices();
+  renderOwnerAccount();
+  renderEnableGate();
+}
+
+// ---------------------------------------------------------- Owner account
+
+async function refreshOwnerStatus(): Promise<void> {
+  try {
+    ownerStatusCache = await window.jarvis.ownerStatus();
+  } catch {
+    ownerStatusCache = undefined;
+  }
+}
+
+function ownerHasPassword(): boolean {
+  return ownerStatusCache?.hasPassword ?? false;
+}
+
+/** The Enable switch can't be turned on until an owner password exists
+ *  (Phase 0). It can still be turned *off* — the upgrade case, where the
+ *  config already says enabled but no password exists yet, must not leave
+ *  the user unable to switch it off. */
+function renderEnableGate(): void {
+  const toggle = $("settings-remote-enabled") as HTMLInputElement;
+  const blocked = !ownerHasPassword();
+  toggle.disabled = blocked && !toggle.checked;
+  const note = $("settings-remote-enable-blocked");
+  note.hidden = !blocked;
+  note.textContent = blocked ? MESSAGES.remoteOwnerEnableBlocked(PRIMARY_LANGUAGE) : "";
+}
+
+function ownerPasswordField(
+  id: string,
+  label: string,
+  autocomplete: "new-password" | "current-password",
+): { field: HTMLElement; input: HTMLInputElement } {
+  const field = document.createElement("div");
+  field.className = "settings-field";
+  const labelEl = document.createElement("label");
+  labelEl.htmlFor = id;
+  labelEl.textContent = label;
+  const input = document.createElement("input");
+  input.id = id;
+  input.type = "password";
+  input.autocomplete = autocomplete;
+  input.spellcheck = false;
+  field.append(labelEl, input);
+  return { field, input };
+}
+
+function ownerButton(id: string, text: string, className = "settings-add"): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.id = id;
+  button.type = "button";
+  button.className = className;
+  button.textContent = text;
+  button.disabled = ownerBusy;
+  return button;
+}
+
+/** A remote owner-account change: re-reads the status and redraws only the
+ *  passkey list, so a password being typed in the same block survives. */
+async function refreshOwnerPasskeys(): Promise<void> {
+  await refreshOwnerStatus();
+  const list = document.getElementById("settings-remote-owner-passkeys");
+  if (list !== null) fillPasskeyList(list);
+}
+
+/** Re-reads the owner status and redraws the block and the Enable gate. */
+async function afterOwnerChange(): Promise<void> {
+  await refreshOwnerStatus();
+  ownerBusy = false;
+  renderOwnerAccount();
+  renderEnableGate();
+}
+
+/** Built from scratch on every call; only ever called after an owner
+ *  action or on open, never from a remote:update push, so a password being
+ *  typed is never wiped by an unrelated status change. Password values are
+ *  read only when the button is clicked, and every field is cleared the
+ *  moment they have been read. */
+function renderOwnerAccount(): void {
+  const language = PRIMARY_LANGUAGE;
+  const container = $("settings-remote-owner");
+  const hasPassword = ownerHasPassword();
+  const children: HTMLElement[] = [];
+
+  const title = document.createElement("div");
+  title.className = "lbl";
+  title.textContent = MESSAGES.remoteOwnerTitle(language);
+  const note = document.createElement("div");
+  note.className = "settings-note";
+  note.textContent = MESSAGES.remoteOwnerNote(language);
+  const state = document.createElement("div");
+  state.id = "settings-remote-owner-state";
+  state.className = hasPassword ? "settings-note" : "settings-note settings-note--warning";
+  state.textContent = hasPassword
+    ? MESSAGES.remoteOwnerHasPassword(language)
+    : MESSAGES.remoteOwnerNoPassword(language);
+  children.push(title, note, state);
+
+  if (hasPassword && !ownerFormOpen) {
+    const change = ownerButton(
+      "settings-remote-owner-change",
+      MESSAGES.remoteOwnerChangeButton(language),
+    );
+    change.addEventListener("click", () => {
+      ownerFormOpen = true;
+      ownerMessage = undefined;
+      renderOwnerAccount();
+    });
+    children.push(change);
+  } else {
+    const current = hasPassword
+      ? ownerPasswordField(
+          "settings-remote-owner-current",
+          MESSAGES.remoteOwnerCurrentLabel(language),
+          "current-password",
+        )
+      : undefined;
+    const next = ownerPasswordField(
+      "settings-remote-owner-new",
+      MESSAGES.remoteOwnerNewLabel(language),
+      "new-password",
+    );
+    const confirm = ownerPasswordField(
+      "settings-remote-owner-confirm",
+      MESSAGES.remoteOwnerConfirmLabel(language),
+      "new-password",
+    );
+    const lengthNote = document.createElement("div");
+    lengthNote.className = "settings-note";
+    lengthNote.textContent = MESSAGES.remoteOwnerLengthNote(language);
+    if (current !== undefined) children.push(current.field);
+    children.push(next.field, confirm.field, lengthNote);
+
+    const submit = ownerButton(
+      "settings-remote-owner-submit",
+      hasPassword
+        ? MESSAGES.remoteOwnerChangeButton(language)
+        : MESSAGES.remoteOwnerSetButton(language),
+      "settings-add settings-add--primary",
+    );
+    submit.addEventListener("click", () => {
+      const currentValue = current?.input.value;
+      const nextValue = next.input.value;
+      const confirmValue = confirm.input.value;
+      if (current !== undefined) current.input.value = "";
+      next.input.value = "";
+      confirm.input.value = "";
+      if (nextValue !== confirmValue) {
+        ownerMessage = { text: MESSAGES.remoteOwnerError("mismatch", language), warning: true };
+        renderOwnerAccount();
+        return;
+      }
+      ownerBusy = true;
+      renderOwnerAccount();
+      void window.jarvis
+        .setOwnerPassword(currentValue, nextValue)
+        .then((result) => {
+          if (result.ok) {
+            ownerFormOpen = false;
+            ownerMessage = { text: MESSAGES.remoteOwnerSaved(language), warning: false };
+          } else {
+            ownerMessage = {
+              text: MESSAGES.remoteOwnerError(result.code, language),
+              warning: true,
+            };
+          }
+        })
+        .catch(() => {
+          ownerMessage = {
+            text: MESSAGES.remoteOwnerError("unavailable", language),
+            warning: true,
+          };
+        })
+        .finally(() => {
+          void afterOwnerChange();
+        });
+    });
+    children.push(submit);
+
+    if (hasPassword) {
+      const cancel = ownerButton(
+        "settings-remote-owner-cancel",
+        MESSAGES.remoteOwnerCancelButton(language),
+      );
+      cancel.addEventListener("click", () => {
+        ownerFormOpen = false;
+        ownerMessage = undefined;
+        renderOwnerAccount();
+      });
+      children.push(cancel);
+    }
+  }
+
+  const message = document.createElement("div");
+  message.id = "settings-remote-owner-message";
+  message.className =
+    ownerMessage?.warning === true ? "settings-note settings-note--warning" : "settings-note";
+  message.hidden = ownerMessage === undefined;
+  message.textContent = ownerMessage?.text ?? "";
+  children.push(message);
+
+  if (hasPassword) {
+    const passkeysTitle = document.createElement("div");
+    passkeysTitle.className = "lbl";
+    passkeysTitle.textContent = MESSAGES.remoteOwnerPasskeysTitle(language);
+    const list = document.createElement("div");
+    list.id = "settings-remote-owner-passkeys";
+    list.className = "settings-rows";
+    fillPasskeyList(list);
+
+    const signOut = ownerButton(
+      "settings-remote-owner-signout",
+      MESSAGES.remoteOwnerSignOutEverywhere(language),
+      "settings-add settings-add--danger",
+    );
+    signOut.addEventListener("click", () => {
+      ownerBusy = true;
+      renderOwnerAccount();
+      void window.jarvis
+        .signOutEverywhere()
+        .then(() => {
+          ownerMessage = { text: MESSAGES.remoteOwnerSignedOut(language), warning: false };
+        })
+        .catch(() => {
+          ownerMessage = {
+            text: MESSAGES.remoteOwnerError("unavailable", language),
+            warning: true,
+          };
+        })
+        .finally(() => {
+          void afterOwnerChange();
+        });
+    });
+    const signOutNote = document.createElement("div");
+    signOutNote.className = "settings-note";
+    signOutNote.textContent = MESSAGES.remoteOwnerSignOutNote(language);
+    children.push(passkeysTitle, list, signOut, signOutNote);
+  }
+
+  container.replaceChildren(...children);
+}
+
+function fillPasskeyList(list: HTMLElement): void {
+  const passkeys = ownerStatusCache?.passkeys ?? [];
+  if (passkeys.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "settings-note";
+    empty.textContent = MESSAGES.remoteOwnerNoPasskeys(PRIMARY_LANGUAGE);
+    list.replaceChildren(empty);
+  } else {
+    list.replaceChildren(...passkeys.map((passkey) => passkeyRow(passkey)));
+  }
+}
+
+function passkeyRow(passkey: OwnerStatus["passkeys"][number]): HTMLElement {
+  const language = PRIMARY_LANGUAGE;
+  const row = document.createElement("div");
+  row.className = "settings-row";
+  const label = document.createElement("bdi");
+  label.textContent = passkey.label;
+  const added = document.createElement("span");
+  added.className = "settings-note";
+  added.textContent = MESSAGES.remoteOwnerPasskeyAdded(passkey.createdAt, language);
+  const remove = ownerButton(
+    `settings-remote-owner-passkey-delete-${passkey.id}`,
+    MESSAGES.remoteOwnerPasskeyDelete(language),
+    "settings-add settings-add--danger",
+  );
+  remove.addEventListener("click", () => {
+    ownerBusy = true;
+    renderOwnerAccount();
+    void window.jarvis
+      .deletePasskey(passkey.id)
+      .then((result) => {
+        ownerMessage = result.ok ? undefined : { text: result.text, warning: true };
+      })
+      .catch(() => {
+        ownerMessage = {
+          text: MESSAGES.remoteOwnerPasskeyDeleteFailed(language),
+          warning: true,
+        };
+      })
+      .finally(() => {
+        void afterOwnerChange();
+      });
+  });
+  row.append(label, added, remove);
+  return row;
 }
 
 /** The 1s countdown on an open pairing window's expiry — at most one timer
@@ -1375,6 +1697,9 @@ function renderRemotePairArea(): void {
   newCode.disabled = !(
     status.enabled &&
     status.problem !== "devices-unreadable" &&
+    status.problem !== "no-owner-password" &&
+    status.problem !== "owner-unreadable" &&
+    status.problem !== "sessions-unreadable" &&
     status.pairing.kind === "closed"
   );
 
@@ -1395,7 +1720,7 @@ function renderRemotePairArea(): void {
     // above — drawn only here, only from this remote:update-fed status, and
     // never toDataURL'd, saved or logged (M4 ruling 34's fallback stays the
     // link text, for a QR the phone's camera can't read).
-    qrToCanvas(qrCanvas, encodeQr(status.pairing.uri), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+    drawQrOrClear(qrCanvas, status.pairing.uri);
     qrCanvas.hidden = false;
     // Only the tail, never the fingerprint or the secret — see
     // fingerprintTailFromUri's own comment for why it doesn't import the
@@ -1428,6 +1753,52 @@ function renderRemotePairArea(): void {
 
   renderRemoteCertificateNote(status);
   renderRemoteIdleState(status);
+  renderRemoteWeb(status);
+}
+
+/** Phase 1: browser access's state line, and — only while the web
+ *  listener is on — its address as text, the Open button and a QR.
+ *  Rendered from `status` only (remote-web.ts), never from the draft: the
+ *  switch says what Save will ask for, this says what is running. While a
+ *  pairing window is open the address is the browser pairing link, which
+ *  carries the pairing secret — same handling as the pairing QR above:
+ *  drawn only here, never saved or logged, cleared when the window closes. */
+function renderRemoteWeb(status: RemoteStatus): void {
+  const language = PRIMARY_LANGUAGE;
+  $("settings-remote-web-state").textContent = MESSAGES.remoteWebState(
+    remoteWebState(status),
+    language,
+  );
+
+  const access = $("settings-remote-web-access");
+  const urlEl = $("settings-remote-web-url");
+  const qr = $("settings-remote-web-qr") as HTMLCanvasElement;
+  const qrNote = $("settings-remote-web-qr-note");
+  const url = remoteWebUrl(status);
+  if (url === undefined) {
+    access.hidden = true;
+    urlEl.textContent = "";
+    qr.getContext("2d")?.clearRect(0, 0, qr.width, qr.height);
+    qrNote.textContent = "";
+    return;
+  }
+  access.hidden = false;
+  urlEl.textContent = url;
+  drawQrOrClear(qr, url);
+  qrNote.textContent = MESSAGES.remoteWebQrNote(status.pairing.kind === "open", language);
+}
+
+/** Draws `text` as a QR code, or clears the canvas when it cannot be
+ *  encoded — never a stale code from an earlier status, and never a throw
+ *  out of a status render (the text link beside it still works). Logs only
+ *  the failure, never the secret-bearing text. */
+function drawQrOrClear(canvas: HTMLCanvasElement, text: string): void {
+  try {
+    qrToCanvas(canvas, encodeQr(text), QR_MODULE_PX, QR_QUIET_ZONE_MODULES);
+  } catch {
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    console.error("settings: the QR code could not be drawn");
+  }
 }
 
 /** Task 4 rule 4: the bridge's own idle-timer status (RemoteStatus.idle,
@@ -1469,6 +1840,7 @@ function renderRemoteIdleState(status: RemoteStatus): void {
     draft.remote.enabled = false;
     ($("settings-remote-enabled") as HTMLInputElement).checked = false;
     $("settings-remote-state").textContent = MESSAGES.remoteState(false, language);
+    renderEnableGate();
   }
 }
 
@@ -1909,6 +2281,12 @@ function deviceRow(device: RemoteDeviceStatus): HTMLElement {
       : MESSAGES.remoteDeviceNeverSeen(language);
   row.append(state);
 
+  // Phase 1: which client paired — the browser build or the app.
+  const client = document.createElement("span");
+  client.className = "settings-note";
+  client.textContent = MESSAGES.remoteWebDeviceClient(remoteDeviceClient(device), language);
+  row.append(client);
+
   // Ruling h: a third note, only when this device has actually registered
   // for push — never an empty node for one that hasn't (platform-only,
   // mirroring RemoteDeviceStatus.push; the token itself never reaches here).
@@ -2184,7 +2562,12 @@ function wireStaticFields(): void {
 
   $("settings-remote-enabled").addEventListener("change", () => {
     if (draft === undefined) return;
-    draft.remote.enabled = ($("settings-remote-enabled") as HTMLInputElement).checked;
+    const toggle = $("settings-remote-enabled") as HTMLInputElement;
+    // Belt and braces behind the disabled switch: never turned on without
+    // an owner password (Phase 0) — the bridge refuses to listen anyway.
+    if (toggle.checked && !ownerHasPassword()) toggle.checked = false;
+    draft.remote.enabled = toggle.checked;
+    renderEnableGate();
     $("settings-remote-state").textContent = MESSAGES.remoteState(
       draft.remote.enabled,
       PRIMARY_LANGUAGE,
@@ -2245,6 +2628,19 @@ function wireStaticFields(): void {
     if (draft === undefined) return;
     draft.remote.push.enabled = ($("settings-remote-push") as HTMLInputElement).checked;
     clearSaveStatus();
+  });
+  $("settings-remote-web").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.remote.web.enabled = ($("settings-remote-web") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
+  // Opens the system browser, never a window inside Jarvis: main builds
+  // the URL from the bridge's own status (dispatch.ts remote:openWebClient),
+  // so nothing the renderer holds can pick what gets opened.
+  $("settings-remote-web-open").addEventListener("click", () => {
+    void window.jarvis.openWebClient().catch((error: unknown) => {
+      console.error(`settings: openWebClient failed: ${String(error)}`);
+    });
   });
   $("settings-remote-idle").addEventListener("change", () => {
     if (draft === undefined) return;

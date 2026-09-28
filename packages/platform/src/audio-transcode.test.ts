@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { MP4_AUDIO_BRANDS, isMp4Audio, transcodeToWhisperWavCommand } from "./audio-transcode.js";
+import {
+  MP4_AUDIO_BRANDS,
+  isMp4Audio,
+  sniffAudioContainer,
+  transcodeToWhisperWavCommand,
+} from "./audio-transcode.js";
 
 describe("transcodeToWhisperWavCommand", () => {
   it("returns the exact pinned argv", () => {
-    const { command, args } = transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "/tmp/a/audio.wav");
+    const { command, args } = transcodeToWhisperWavCommand(
+      "/tmp/a/audio.m4a",
+      "/tmp/a/audio.wav",
+      "mov",
+    );
 
     expect(command).toBe("ffmpeg");
     expect(args).toEqual([
@@ -39,8 +48,22 @@ describe("transcodeToWhisperWavCommand", () => {
     ]);
   });
 
+  it("pins the webm demuxer without changing the other ffmpeg flags", () => {
+    const { args } = transcodeToWhisperWavCommand("/tmp/a/audio.webm", "/tmp/a/audio.wav", "webm");
+
+    expect(args.slice(args.indexOf("-protocol_whitelist"), args.indexOf("-i") + 2)).toEqual([
+      "-protocol_whitelist",
+      "file",
+      "-f",
+      "webm",
+      "-i",
+      "/tmp/a/audio.webm",
+    ]);
+    expect(args).not.toContain("-enable_drefs");
+  });
+
   it("puts -protocol_whitelist file and -enable_drefs 0 before -i", () => {
-    const { args } = transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "/tmp/a/audio.wav");
+    const { args } = transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "/tmp/a/audio.wav", "mov");
 
     const iIndex = args.indexOf("-i");
     const whitelistIndex = args.indexOf("-protocol_whitelist");
@@ -53,20 +76,39 @@ describe("transcodeToWhisperWavCommand", () => {
   });
 
   it("throws for a relative input path", () => {
-    expect(() => transcodeToWhisperWavCommand("audio.m4a", "/tmp/a/audio.wav")).toThrow();
+    expect(() => transcodeToWhisperWavCommand("audio.m4a", "/tmp/a/audio.wav", "mov")).toThrow();
   });
 
   it("throws for a relative output path", () => {
-    expect(() => transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "audio.wav")).toThrow();
+    expect(() => transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "audio.wav", "mov")).toThrow();
   });
 
   it("throws when a path starts with -", () => {
-    expect(() => transcodeToWhisperWavCommand("-i", "/tmp/a/audio.wav")).toThrow();
-    expect(() => transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "-i")).toThrow();
+    expect(() => transcodeToWhisperWavCommand("-i", "/tmp/a/audio.wav", "mov")).toThrow();
+    expect(() => transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "-i", "mov")).toThrow();
   });
 
   it("throws when input and output are equal", () => {
-    expect(() => transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "/tmp/a/audio.m4a")).toThrow();
+    expect(() =>
+      transcodeToWhisperWavCommand("/tmp/a/audio.m4a", "/tmp/a/audio.m4a", "mov"),
+    ).toThrow();
+  });
+});
+
+describe("sniffAudioContainer", () => {
+  it("detects ISO-BMFF from ftyp at offset 4", () => {
+    expect(sniffAudioContainer(new Uint8Array(Buffer.from("....ftyp????", "latin1")))).toBe("mov");
+  });
+
+  it("detects WebM from the EBML magic", () => {
+    expect(sniffAudioContainer(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toBe("webm");
+  });
+
+  it("rejects unknown and truncated containers", () => {
+    expect(
+      sniffAudioContainer(new Uint8Array(Buffer.from("RIFF....WAVE", "latin1"))),
+    ).toBeUndefined();
+    expect(sniffAudioContainer(new Uint8Array([0x1a, 0x45, 0xdf]))).toBeUndefined();
   });
 });
 

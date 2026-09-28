@@ -3,6 +3,7 @@ import { VOICE_UPLOAD_CHANNEL, type PushRegistration } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
 import { createBroadcaster } from "./broadcast.js";
 import { createDispatchTable, type DispatchTable } from "./dispatch.js";
+import { MESSAGES } from "./messages.js";
 import { fakeDeps } from "./dispatch.test.js";
 import {
   createRemoteAccess,
@@ -196,6 +197,10 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     push,
     hasSubscriber: vi.fn(() => false),
     status: vi.fn(() => CLOSED_STATUS),
+    ownerStatus: vi.fn(() => ({ hasPassword: true, passkeys: [] })),
+    setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
+    deletePasskey: vi.fn(async () => true),
+    signOutEverywhere: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
   };
   return { bridge, push };
@@ -243,6 +248,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
     onDeviceDisconnected: vi.fn(),
     onDeviceRevoked: vi.fn(),
     onIdleDisabled: vi.fn(),
+    showNotification: vi.fn(),
     fetch: vi.fn(async () => ({ status: 200, json: async () => ({ data: [] }) })),
     ...overrides,
   };
@@ -266,6 +272,13 @@ describe("createRemoteAccess: before start", () => {
     expect(await remoteAccess.revoke("d1")).toBe(false);
     expect(remoteAccess.decidePairing("r1", true)).toBe(false);
     remoteAccess.cancelPairing();
+    expect(remoteAccess.ownerStatus()).toEqual({ hasPassword: false, passkeys: [] });
+    expect(await remoteAccess.setOwnerPassword(undefined, "a long new password")).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(await remoteAccess.deletePasskey("cred")).toBe(false);
+    await remoteAccess.signOutEverywhere();
     expect(createBridge).not.toHaveBeenCalled();
   });
 
@@ -282,8 +295,30 @@ const REMOTE_CONFIG = {
   sidecarProxy: false,
   tls: {},
   push: { enabled: false, includeProjectNames: false },
+  web: { enabled: false },
   idleDisableMinutes: 0,
 };
+
+describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
+  it("shows the bridge's security notices as bilingual OS notifications in the configured language", async () => {
+    const showNotification = vi.fn<(title: string, body: string) => void>();
+    const { remoteAccess, createBridge } = harness({ showNotification, language: "ar" });
+    await remoteAccess.start(REMOTE_CONFIG);
+    const notifyDesktop = createBridge.mock.calls[0]?.[0].notifyDesktop;
+    notifyDesktop?.("locked-out-global");
+    notifyDesktop?.("refresh-reuse");
+    notifyDesktop?.("locked-out-device", "Pixel 8");
+    const global = MESSAGES.remoteSecurityNotice("locked-out-global", "ar");
+    const reuse = MESSAGES.remoteSecurityNotice("refresh-reuse", "ar");
+    const device = MESSAGES.remoteSecurityNotice("locked-out-device", "ar", "Pixel 8");
+    expect(device.body).toContain("Pixel 8");
+    expect(showNotification.mock.calls).toEqual([
+      [global.title, global.body],
+      [reuse.title, reuse.body],
+      [device.title, device.body],
+    ]);
+  });
+});
 
 describe("createRemoteAccess: bridge creation", () => {
   it("start() creates the bridge once, then applies the config", async () => {
@@ -296,8 +331,27 @@ describe("createRemoteAccess: bridge creation", () => {
       port: 0,
       sidecarProxy: false,
       idleDisableMinutes: 0,
+      web: { enabled: false, port: 1 },
       tls: {},
     });
+  });
+
+  it("passes remote.web through: the flag, and the explicit port or the bridge port + 1", async () => {
+    const explicit = harness();
+    await explicit.remoteAccess.start({
+      ...REMOTE_CONFIG,
+      port: 7717,
+      web: { enabled: true, port: 8443 },
+    });
+    expect(explicit.bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ web: { enabled: true, port: 8443 } }),
+    );
+
+    const derived = harness();
+    await derived.remoteAccess.start({ ...REMOTE_CONFIG, port: 7717, web: { enabled: true } });
+    expect(derived.bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ web: { enabled: true, port: 7718 } }),
+    );
   });
 
   it("concurrent start calls create the bridge exactly once", async () => {
@@ -333,6 +387,7 @@ describe("createRemoteAccess: bridge creation", () => {
       port: 4200,
       sidecarProxy: false,
       idleDisableMinutes: 0,
+      web: { enabled: false, port: 4201 },
       tls: {},
     });
   });
@@ -599,6 +654,23 @@ describe("createRemoteAccess: revoke", () => {
 
     expect(ok).toBe(false);
     expect(onDeviceRevoked).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRemoteAccess: owner account", () => {
+  it("passes ownerStatus/setOwnerPassword/deletePasskey/signOutEverywhere straight to the bridge", async () => {
+    const { remoteAccess, bridge } = harness();
+    await remoteAccess.start(REMOTE_CONFIG);
+
+    expect(remoteAccess.ownerStatus()).toEqual({ hasPassword: true, passkeys: [] });
+    expect(await remoteAccess.setOwnerPassword("old password!", "a long new password")).toEqual({
+      ok: true,
+    });
+    expect(bridge.setOwnerPassword).toHaveBeenCalledWith("old password!", "a long new password");
+    expect(await remoteAccess.deletePasskey("cred")).toBe(true);
+    expect(bridge.deletePasskey).toHaveBeenCalledWith("cred");
+    await remoteAccess.signOutEverywhere();
+    expect(bridge.signOutEverywhere).toHaveBeenCalledTimes(1);
   });
 });
 

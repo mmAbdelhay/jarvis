@@ -34,12 +34,18 @@ function turnId(n: number): string {
   return n.toString(16).padStart(32, "0");
 }
 
-// A real 12-byte ftyp/M4A header followed by filler — isMp4Audio only ever
-// reads bytes 4-11, so the rest can be anything.
-function m4aBytes(length = 64): Uint8Array {
+// A real 12-byte ftyp header followed by filler — sniffAudioContainer and
+// isMp4Audio only ever read bytes 4-11, so the rest can be anything.
+function m4aBytes(length = 64, brand = "M4A "): Uint8Array {
   const bytes = new Uint8Array(length);
   bytes.set(Buffer.from("ftyp", "latin1"), 4);
-  bytes.set(Buffer.from("M4A ", "latin1"), 8);
+  bytes.set(Buffer.from(brand, "latin1"), 8);
+  return bytes;
+}
+
+function webmBytes(length = 64): Uint8Array {
+  const bytes = new Uint8Array(length);
+  bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
   return bytes;
 }
 
@@ -87,7 +93,7 @@ function harness(overrides: Partial<VoiceUploadDeps> = {}) {
   let dirCounter = 0;
   let makeTempDirCalls = 0;
   const writes: { path: string; bytes: Uint8Array }[] = [];
-  const transcodes: { input: string; output: string }[] = [];
+  const transcodes: { input: string; output: string; demuxer: "mov" | "webm" }[] = [];
   const utteranceCalls: UtteranceRequest[] = [];
   const removeDirs: string[] = [];
   const logs: string[] = [];
@@ -105,8 +111,8 @@ function harness(overrides: Partial<VoiceUploadDeps> = {}) {
     removeDir: vi.fn(async (path: string) => {
       removeDirs.push(path);
     }),
-    transcode: vi.fn(async (input: string, output: string) => {
-      transcodes.push({ input, output });
+    transcode: vi.fn(async (input: string, output: string, demuxer: "mov" | "webm") => {
+      transcodes.push({ input, output, demuxer });
       return { ok: true as const };
     }),
     utterance: vi.fn(async (request: UtteranceRequest) => {
@@ -160,13 +166,34 @@ describe("createVoiceUploadHandler", () => {
       expect(h.writes[0]?.path).toBe(voiceFile(0, "audio.m4a"));
       expect(h.writes[0]?.bytes).toBe(bytes);
       expect(h.transcodes).toEqual([
-        { input: voiceFile(0, "audio.m4a"), output: voiceFile(0, "audio.wav") },
+        {
+          input: voiceFile(0, "audio.m4a"),
+          output: voiceFile(0, "audio.wav"),
+          demuxer: "mov",
+        },
       ]);
       expect(h.utteranceCalls).toEqual([
         {
           wavPath: voiceFile(0, "audio.wav"),
           targetSessionId: "s1",
           origin: { kind: "remote", replyTo: turnId(1) },
+        },
+      ]);
+    });
+
+    it("writes WebM bytes with a .webm extension and transcodes with the webm demuxer", async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+
+      const result = await handler([meta({ format: "webm" })], webmBytes(), DEVICE_1);
+
+      expect(result.kind).toBe("heard");
+      expect(h.writes[0]?.path).toBe(voiceFile(0, "audio.webm"));
+      expect(h.transcodes).toEqual([
+        {
+          input: voiceFile(0, "audio.webm"),
+          output: voiceFile(0, "audio.wav"),
+          demuxer: "webm",
         },
       ]);
     });
@@ -267,11 +294,39 @@ describe("createVoiceUploadHandler", () => {
       expect(h.utteranceCalls).toHaveLength(0);
     });
 
-    // [bite-proof: skipping isMp4Audio would let this reach transcode.]
+    // [bite-proof: skipping sniffAudioContainer would let this reach transcode.]
     it("a RIFF header", async () => {
       const h = harness();
       const handler = typedHandler(h.deps);
       const result = await handler([meta()], riffBytes(), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    // [bite-proof: skipping isMp4Audio on the mov branch would let this reach transcode.]
+    it("an ftyp header with a brand outside the MP4 audio list (QuickTime)", async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta()], m4aBytes(64, "qt  "), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    it('format:"webm" with m4a bytes', async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta({ format: "webm" })], m4aBytes(), DEVICE_1);
+      expect(result.kind).toBe("invalid");
+      expect(h.makeTempDirCalls()).toBe(0);
+      expect(h.transcodes).toHaveLength(0);
+    });
+
+    it('format:"m4a" with webm bytes', async () => {
+      const h = harness();
+      const handler = typedHandler(h.deps);
+      const result = await handler([meta({ format: "m4a" })], webmBytes(), DEVICE_1);
       expect(result.kind).toBe("invalid");
       expect(h.makeTempDirCalls()).toBe(0);
       expect(h.transcodes).toHaveLength(0);

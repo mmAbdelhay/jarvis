@@ -1,15 +1,18 @@
-// The five handlers that hold a BrowserWindow, the screen, a native dialog
-// or a native menu. They can never run for a phone, so they are registered
-// here rather than entering the transport-agnostic table, and
-// `ElectronBoundChannel` in dispatch.ts keeps the table from accepting them.
+// The handlers that hold a BrowserWindow, the screen, a native dialog, a
+// native menu or a hosted page's view. They can never run for a phone, nor
+// in a headless core, so they are registered here rather than entering the
+// transport-agnostic table, and `ElectronBoundChannel` in dispatch.ts keeps
+// the table from accepting them.
 import type { BrowserWindow, Dialog, MenuItemConstructorOptions, Screen } from "electron";
-import type { BrowserHost, DevToolsDock } from "./browser-host.js";
+import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import type { ElectronBoundChannel } from "./dispatch.js";
+import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import type { ReportedRect } from "./ipc.js";
 import { MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
 import { toDeviceIndependent } from "./view-bounds.js";
+import type { ViewReconciler } from "./view-reconciler.js";
 
 // Only the one field displayScale() reads — the real Display carries 18
 // more, none of which a test double should have to fabricate.
@@ -22,7 +25,19 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "workspace:devtoolsBounds",
   "workspace:devtoolsDockMenu",
   "workspace:tabMenu",
+  "workspace:back",
+  "workspace:forward",
+  "workspace:reload",
+  "workspace:devtools",
+  "workspace:devtoolsDock",
+  "workspace:visible",
+  "workspace:hideAll",
+  "workspace:pip",
   "dialog:pickFiles",
+  "background:status",
+  "background:setEnabled",
+  "background:restart",
+  "background:stopNow",
 ];
 
 export type DesktopOnlyDeps = {
@@ -36,17 +51,37 @@ export type DesktopOnlyDeps = {
   buildMenu: (template: MenuItemConstructorOptions[]) => {
     popup(options: { window: BrowserWindow; x?: number; y?: number }): void;
   }; // Menu.buildFromTemplate
-  workspace: Pick<BrowserHost, "setBounds" | "setDevToolsBounds">;
+  /** The hosted pages. Tab state is the core's; these act on a page's view
+   *  alone and change no tab. */
+  views: Pick<
+    ViewReconciler,
+    | "setBounds"
+    | "setDevToolsBounds"
+    | "back"
+    | "forward"
+    | "reload"
+    | "setDevTools"
+    | "setDevToolsDock"
+    | "setVisible"
+    | "hideAll"
+    | "requestPictureInPicture"
+  >;
   chooseDock: (dock: DevToolsDock) => void; // broadcast.local("workspace:devtoolsDockChosen", dock)
-  // Bug 2: the tab menu's own three items. Reload and Close run the exact
-  // dispatch.ts handlers workspace:reload/workspace:close already use
-  // (main.ts calls the dispatch table's own entries) — this file duplicates
-  // none of that logic. Rename has nothing to run here at all: it only
+  // Bug 2: the tab menu's own three items. Reload is workspace:reload's own
+  // view call, and Close runs the dispatch table's workspace:close (main.ts
+  // wires both) — this file duplicates none of that logic. Rename has nothing to run here at all: it only
   // tells the renderer which chip should start its own inline rename.
   reloadTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   startTabRename: (tabId: string) => void; // broadcast.local("workspace:tabRename", tabId)
   language: "ar" | "en";
+  /** Task 23: the background service (daemon/mode.ts, wired in main.ts). */
+  background: {
+    status(): Promise<DaemonStatus>;
+    setEnabled(enabled: boolean): Promise<ChangeResult>;
+    restart(): Promise<ChangeResult>;
+    stopNow(): Promise<ChangeResult>;
+  };
 };
 
 export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
@@ -64,13 +99,11 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // they do not. See view-bounds.ts.
   deps.handle("workspace:bounds", (_event, bounds) => {
     const rect = bounds as ReportedRect;
-    return deps.workspace.setBounds(
-      toDeviceIndependent(rect, rect.devicePixelRatio, displayScale()),
-    );
+    return deps.views.setBounds(toDeviceIndependent(rect, rect.devicePixelRatio, displayScale()));
   });
   deps.handle("workspace:devtoolsBounds", (_event, bounds) => {
     const rect = bounds as ReportedRect;
-    return deps.workspace.setDevToolsBounds(
+    return deps.views.setDevToolsBounds(
       toDeviceIndependent(rect, rect.devicePixelRatio, displayScale()),
     );
   });
@@ -115,6 +148,29 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
     );
     deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
   });
+  // What only a hosted page's own view can do. Every argument crosses an
+  // untyped IPC boundary, so each is checked before it reaches a view.
+  deps.handle("workspace:back", (_event, id) => {
+    if (typeof id === "string") deps.views.back(id);
+  });
+  deps.handle("workspace:forward", (_event, id) => {
+    if (typeof id === "string") deps.views.forward(id);
+  });
+  deps.handle("workspace:reload", (_event, id) => {
+    if (typeof id === "string") deps.views.reload(id);
+  });
+  deps.handle("workspace:devtools", (_event, tabId, open) => {
+    if (typeof tabId !== "string" || typeof open !== "boolean") return;
+    deps.views.setDevTools(tabId, open);
+  });
+  deps.handle("workspace:devtoolsDock", (_event, dock) => {
+    if (isDevToolsDock(dock)) deps.views.setDevToolsDock(dock);
+  });
+  deps.handle("workspace:visible", (_event, visible) => deps.views.setVisible(visible === true));
+  deps.handle("workspace:hideAll", () => deps.views.hideAll());
+  deps.handle("workspace:pip", (_event, tabId) => {
+    if (typeof tabId === "string") deps.views.requestPictureInPicture(tabId);
+  });
   // A native picker, for a multipart file field and for importing a
   // collection. Cancelling returns [] — it is not a failure.
   deps.handle("dialog:pickFiles", async (_event, options) => {
@@ -124,4 +180,15 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
     });
     return result.canceled ? [] : result.filePaths;
   });
+  // Task 23: "Keep Jarvis running in the background". The toggle's value
+  // crosses an untyped boundary, so anything but a real boolean is refused.
+  deps.handle("background:status", () => deps.background.status());
+  deps.handle("background:setEnabled", async (_event, enabled): Promise<ChangeResult> => {
+    if (typeof enabled !== "boolean") {
+      return { ok: false, reason: "failed", detail: "enabled must be true or false" };
+    }
+    return deps.background.setEnabled(enabled);
+  });
+  deps.handle("background:restart", () => deps.background.restart());
+  deps.handle("background:stopNow", () => deps.background.stopNow());
 }

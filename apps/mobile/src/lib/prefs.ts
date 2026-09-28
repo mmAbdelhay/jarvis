@@ -32,7 +32,29 @@ export type Prefs = {
   // are dropped per-kind rather than resetting the whole object, so one
   // bad value can't wipe every sidecar's remembered zoom.
   sidecarZoom: SidecarZoomPrefs;
+  // Phase 0 owner login: minutes of no touch before the app locks itself
+  // (Settings offers IDLE_LOCK_MINUTES). Anything else falls back to 15.
+  idleLockMinutes: IdleLockMinutes;
+  // Phase 0 owner login: whether a refresh token sits in the keychain, so
+  // the unlock screen never raises the device-owner prompt over nothing.
+  // Not a secret (the token itself is only in refresh-store.ts). Defaults
+  // false: a missing value costs one password entry, never a prompt.
+  refreshTokenStored: boolean;
+  // Task 13, the browser build only: "Keep me signed in on this browser".
+  // Off (the default, and for any value but a stored `true`) means no
+  // refresh token is ever written to this browser's storage, so every
+  // page load needs a passkey or the password (web-device-auth.ts).
+  // The native app ignores it.
+  keepSignedIn: boolean;
 };
+
+export const IDLE_LOCK_MINUTES = [5, 15, 30, 60] as const;
+export type IdleLockMinutes = (typeof IDLE_LOCK_MINUTES)[number];
+export const DEFAULT_IDLE_LOCK_MINUTES: IdleLockMinutes = 15;
+
+function isIdleLockMinutes(value: unknown): value is IdleLockMinutes {
+  return (IDLE_LOCK_MINUTES as readonly unknown[]).includes(value);
+}
 
 // Injected so the app's real `expo-file-system` implementation (prefs-file.ts)
 // and this module's tests never touch the filesystem directly.
@@ -89,6 +111,9 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     pushRegistered: DEFAULT_PUSH_REGISTERED,
     sidecarDesktopSite: DEFAULT_SIDECAR_DESKTOP_SITE,
     sidecarZoom: { ...DEFAULT_SIDECAR_ZOOM },
+    idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
+    refreshTokenStored: false,
+    keepSignedIn: false,
   };
 
   let text: string | undefined;
@@ -125,6 +150,11 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
       ? raw.sidecarDesktopSite
       : DEFAULT_SIDECAR_DESKTOP_SITE;
   const sidecarZoom = parseSidecarZoom(raw.sidecarZoom);
+  const idleLockMinutes = isIdleLockMinutes(raw.idleLockMinutes)
+    ? raw.idleLockMinutes
+    : DEFAULT_IDLE_LOCK_MINUTES;
+  const refreshTokenStored = raw.refreshTokenStored === true;
+  const keepSignedIn = raw.keepSignedIn === true;
 
   return {
     language,
@@ -133,9 +163,40 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     pushRegistered,
     sidecarDesktopSite,
     sidecarZoom,
+    idleLockMinutes,
+    refreshTokenStored,
+    keepSignedIn,
   };
 }
 
 export async function savePrefs(store: PrefsStore, prefs: Prefs): Promise<void> {
   await store.write(JSON.stringify(prefs));
+}
+
+/** auth-session.ts's RefreshStoredFlag over prefs.json (load, change one
+ *  key, save — the same pattern as every other prefs writer). */
+export function createRefreshStoredFlag(
+  store: PrefsStore,
+  localeTag: string,
+): { read(): Promise<boolean>; write(stored: boolean): Promise<void> } {
+  return {
+    async read() {
+      return (await loadPrefs(store, localeTag)).refreshTokenStored;
+    },
+    async write(stored) {
+      const current = await loadPrefs(store, localeTag);
+      await savePrefs(store, { ...current, refreshTokenStored: stored });
+    },
+  };
+}
+
+/** Saves the browser's "Keep me signed in" choice (load, change one key,
+ *  save). The caller then tells the auth session (`storagePolicyChanged`). */
+export async function setKeepSignedIn(
+  store: PrefsStore,
+  localeTag: string,
+  keepSignedIn: boolean,
+): Promise<void> {
+  const current = await loadPrefs(store, localeTag);
+  await savePrefs(store, { ...current, keepSignedIn });
 }

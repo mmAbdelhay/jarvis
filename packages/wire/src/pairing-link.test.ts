@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPairingUri, parsePairingUri } from "./pairing-link.js";
+import { formatPairingUri, parsePairingUri, webPairingUrl } from "./pairing-link.js";
 import { HOSTNAME_PATTERN, type PairingLink } from "./protocol.js";
 
 const TOKEN = "A".repeat(43);
@@ -16,7 +16,7 @@ describe("pairing URI", () => {
     expect(parsePairingUri(formatPairingUri(link))).toEqual(link);
   });
 
-  const validFields = { v: "1", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
+  const validFields = { v: "2", host: "127.0.0.1", port: "8443", secret: TOKEN, fp: FINGERPRINT };
   const uriWith = (scheme: string, overrides: Partial<typeof validFields> = {}) => {
     const params = new URLSearchParams({ ...validFields, ...overrides });
     return `${scheme}pair?${params.toString()}`;
@@ -28,7 +28,7 @@ describe("pairing URI", () => {
     ["port 65536", uriWith("jarvis://", { port: "65536" })],
     ["a 42-char secret", uriWith("jarvis://", { secret: "A".repeat(42) })],
     ["an upper-case fingerprint", uriWith("jarvis://", { fp: "A".repeat(64) })],
-    ["a wrong v", uriWith("jarvis://", { v: "2" })],
+    ["a wrong v", uriWith("jarvis://", { v: "1" })],
   ])("refuses %s", (_label, uri) => {
     expect(parsePairingUri(uri)).toBeUndefined();
   });
@@ -80,9 +80,9 @@ describe("pairing URI name (rule 2)", () => {
     expect(formatPairingUri(withName)).toBe(`${formatPairingUri(link)}&name=mac.tail.ts.net`);
   });
 
-  it("formatPairingUri without name is byte-identical to M6's output", () => {
+  it("formatPairingUri without name keeps M6's field order (at protocol v2)", () => {
     expect(formatPairingUri(link)).toBe(
-      `jarvis://pair?v=1&host=127.0.0.1&port=8443&secret=${TOKEN}&fp=${FINGERPRINT}`,
+      `jarvis://pair?v=2&host=127.0.0.1&port=8443&secret=${TOKEN}&fp=${FINGERPRINT}`,
     );
   });
 
@@ -97,5 +97,33 @@ describe("pairing URI name (rule 2)", () => {
   ])("refuses a name of %s", (_label, name) => {
     const uri = `${formatPairingUri(link)}&name=${name}`;
     expect(parsePairingUri(uri)).toBeUndefined();
+  });
+});
+
+describe("webPairingUrl", () => {
+  const link: PairingLink = {
+    host: "100.64.0.1",
+    port: 7717,
+    secret: TOKEN,
+    fingerprint: FINGERPRINT,
+    name: "mac.tail1234.ts.net",
+  };
+
+  it("puts the jarvis:// query in the fragment of the web origin's /pair", () => {
+    const query = formatPairingUri(link).slice("jarvis://pair?".length);
+    expect(webPairingUrl(link, 7718)).toBe(`https://mac.tail1234.ts.net:7718/pair#${query}`);
+  });
+
+  it("leaves port 443 out, as a browser's own origin does", () => {
+    expect(webPairingUrl(link, 443)).toMatch(/^https:\/\/mac\.tail1234\.ts\.net\/pair#v=/);
+  });
+
+  it("refuses a link with no certificate name", () => {
+    const { name: _name, ...unnamed } = link;
+    expect(webPairingUrl(unnamed, 7718)).toBeUndefined();
+  });
+
+  it.each([0, 65536, 1.5, Number.NaN])("refuses web port %s", (port) => {
+    expect(webPairingUrl(link, port)).toBeUndefined();
   });
 });

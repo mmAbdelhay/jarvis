@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { createSystemTransport } from "./system-transport";
+import { NATIVE_ORIGIN } from "@jarvis/wire";
+import { describe, expect, it, vi } from "vitest";
+import { createSystemTransport, systemTransportFor } from "./system-transport";
 import type { WebSocketFactory, WebSocketLike } from "./system-transport";
 import type { TransportEvent } from "./transport";
 
@@ -44,6 +45,44 @@ function setup() {
 }
 
 describe("createSystemTransport: accepted target", () => {
+  it("passes the native Origin in React Native's WebSocket options", () => {
+    const factory = vi.fn<WebSocketFactory>(() => new FakeWebSocket());
+    createSystemTransport(factory, "native").open(SYSTEM_URL, { kind: "system" }, () => {});
+
+    expect(factory.mock.calls).toEqual([
+      [SYSTEM_URL, undefined, { headers: { Origin: NATIVE_ORIGIN } }],
+    ]);
+  });
+
+  it("calls the factory with the url alone in the browser (D1: Chrome 153+ throws on a 3rd argument)", () => {
+    const factory = vi.fn<WebSocketFactory>(() => new FakeWebSocket());
+    createSystemTransport(factory, "web").open(SYSTEM_URL, { kind: "system" }, () => {});
+
+    expect(factory.mock.calls).toEqual([[SYSTEM_URL]]);
+    expect(factory.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("the real transport constructs the global WebSocket with exactly (url) on web and (url, undefined, {headers}) natively", () => {
+    const constructed: unknown[][] = [];
+    class RecordingWebSocket extends FakeWebSocket {
+      constructor(...args: unknown[]) {
+        super();
+        constructed.push(args);
+      }
+    }
+    vi.stubGlobal("WebSocket", RecordingWebSocket);
+    try {
+      systemTransportFor("web").open(SYSTEM_URL, { kind: "system" }, () => {});
+      systemTransportFor("native").open(SYSTEM_URL, { kind: "system" }, () => {});
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(constructed).toEqual([
+      [SYSTEM_URL],
+      [SYSTEM_URL, undefined, { headers: { Origin: NATIVE_ORIGIN } }],
+    ]);
+    expect(constructed[0]).toHaveLength(1);
+  });
   it("routes onopen/onmessage(string)/onclose to onEvent, and constructs exactly one real socket", () => {
     const { transport, sockets } = setup();
     const events: TransportEvent[] = [];

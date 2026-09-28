@@ -2555,15 +2555,17 @@
 
   /* The pairing link carries the secret, so it is a one-motion copy: the
      whole thing selects on a single click/tap rather than a careful drag. */
-  .settings-remote-pair-code { user-select: all; }
+  .settings-remote-pair-code { user-select: all; overflow-wrap: anywhere; }
 
   /* Drawn at a small internal resolution (settings.ts QR_MODULE_PX) and
      scaled up to this fixed box — pixelated keeps the module edges crisp
-     instead of blurring them like the browser's default smoothing. */
+     instead of blurring them like the browser's default smoothing. The box
+     is never smaller than the canvas itself (a version-11 web pairing link
+     is 69 modules × 3px = 207px), so scaling never drops a module row. */
   .settings-remote-pair-qr {
     display: block;
-    width: 176px;
-    height: 176px;
+    width: 244px;
+    height: 244px;
     margin: var(--s2) 0;
     image-rendering: pixelated;
   }
@@ -2692,6 +2694,21 @@
     max-width: 480px;
     /* Prayer latitude/longitude/notify-minutes are type="number" — without
        this their spin buttons render in the light UA style. */
+    color-scheme: dark;
+  }
+  /* Phase 0's owner-account password fields: the same look as a text
+     field (kept as its own rule so the text/number rule above stays the
+     exact shape settings-number-input-css.test.ts pins). */
+  .settings-field input[type="password"] {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    flex-grow: 1;
+    max-width: 480px;
     color-scheme: dark;
   }
   /* The first switch in Settings. Built from a real checkbox so it keeps
@@ -3647,6 +3664,8 @@
 
 .settings-voice-pick { display: flex; align-items: center; gap: var(--s2); flex-grow: 1; }
 .settings-voice-pick select { flex-grow: 1; }
+/* Settings → General's Restart daemon / Stop now (Task 23). */
+.settings-daemon-actions { display: flex; gap: var(--s2); margin-top: var(--s2); }
 
 
 /* ── The Dashboard's core stage ──────────────────────────────────────────

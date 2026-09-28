@@ -27,3 +27,15 @@ export function wrapVendorModule(
 ): string;
 
 export function sha256Hex(text: string): string;
+
+export type TerminalWebPage = {
+  html: string;
+  script: string;
+  style: string;
+  scriptName: string;
+  styleName: string;
+};
+
+export function buildTerminalWebPage(inputs: TerminalHtmlInputs): TerminalWebPage;
+
+export function findInlineScripts(html: string): string[];

@@ -55,8 +55,10 @@ const draft: JarvisConfig = {
     sidecarProxy: false,
     tls: {},
     push: { enabled: false, includeProjectNames: false },
+    web: { enabled: false },
     idleDisableMinutes: 0,
   },
+  daemon: { enabled: false },
   sessionsDbPath: "/Users/x/.config/jarvis/sessions.db",
 };
 
@@ -94,8 +96,10 @@ const fullDraft: JarvisConfig = {
     sidecarProxy: true,
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
+    web: { enabled: false },
     idleDisableMinutes: 30,
   },
+  daemon: { enabled: true },
 };
 
 /**
@@ -130,6 +134,7 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   whisper: ["whisper"],
   sessions: ["sessions"],
   remote: ["remote"],
+  daemon: ["daemon"],
   // Computed by parseConfig from the config directory, never a source of
   // truth. See toRawConfig's own note.
   sessionsDbPath: null,
@@ -167,6 +172,7 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.chat).toEqual(fullDraft.chat);
     expect(reparsed.remote).toEqual(fullDraft.remote);
     expect(reparsed.prayer).toEqual(fullDraft.prayer);
+    expect(reparsed.daemon).toEqual(fullDraft.daemon);
   });
 
   it("round-trips prayer.notify, and omits it from the file when unset (defaults apply)", () => {
@@ -303,6 +309,31 @@ describe("toRawConfig", () => {
 });
 
 describe("writeSettingsFile", () => {
+  // Task 23: `daemon:` is the Settings toggle's alone (daemon/config-file.ts).
+  // A save keeps what the file says, whatever the draft carries.
+  it("keeps the file's daemon section, whatever the draft says", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "placeholder: true\ndaemon:\n  enabled: true\n");
+
+    await writeSettingsFile(path, { ...draft, daemon: { enabled: false } });
+    expect(parse(await readFile(path, "utf8")).daemon).toEqual({ enabled: true });
+
+    // A draft from a phone or an older renderer that never carried the key.
+    const { daemon: _dropped, ...withoutDaemon } = draft;
+    await writeSettingsFile(path, withoutDaemon as JarvisConfig);
+    expect(parse(await readFile(path, "utf8")).daemon).toEqual({ enabled: true });
+  });
+
+  it("does not turn the daemon on from a draft when the file has it off", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "jarvis.yaml");
+    await writeFile(path, "placeholder: true");
+
+    await writeSettingsFile(path, { ...draft, daemon: { enabled: true } });
+    expect(parse(await readFile(path, "utf8"))).not.toHaveProperty("daemon");
+  });
+
   it("writes a file parseConfig can load back", async () => {
     const dir = await tempDir();
     const path = join(dir, "jarvis.yaml");
@@ -656,8 +687,18 @@ describe("remote round-trip", () => {
       port: 8443,
       sidecarProxy: false,
       push: { enabled: false, includeProjectNames: false },
+      web: { enabled: false },
       idleDisableMinutes: 0,
     });
+  });
+
+  it("writes remote.web (Phase 1) and parses it back unchanged", () => {
+    const web = { enabled: true, port: 8443 };
+    const raw = toRawConfig({ ...draft, remote: { ...draft.remote, web } }) as {
+      remote: Record<string, unknown>;
+    };
+    expect(raw.remote["web"]).toEqual(web);
+    expect(parseConfig(raw).remote.web).toEqual(web);
   });
 
   // `tls: {}` is the self-signed default spelled as noise.

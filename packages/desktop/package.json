@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/src/main.js",
   "scripts": {
-    "build": "tsc -b ../../tsconfig.json && node scripts/copy-vendor.mjs",
+    "build": "tsc -b ../../tsconfig.json && node scripts/build-stamp.mjs && node scripts/copy-vendor.mjs && pnpm --dir ../../apps/mobile export:web && node scripts/copy-web.mjs",
     "start": "pnpm run build && node scripts/start.mjs",
     "package": "node scripts/package.mjs",
     "package:mac": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml",

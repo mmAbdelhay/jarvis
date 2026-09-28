@@ -19,7 +19,7 @@ import {
  *
  * A hosted view is a native child of the window's contentView: it is
  * positioned in window pixels and painted above the renderer, which is why
- * BrowserHost has to be told about bounds and visibility explicitly.
+ * ViewReconciler has to be told about bounds and visibility explicitly.
  *
  * Each view gets the same hardening the main renderer has, plus its own
  * persistent partition. Web pages here are fully untrusted; they are in

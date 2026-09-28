@@ -26,7 +26,7 @@ export type VoiceLanguage = "ar" | "en";
 
 export type VoiceUploadMeta = {
   turnId: string;
-  format: "m4a";
+  format: "m4a" | "webm";
   durationMs: number;
   targetSessionId?: string;
 };
@@ -64,7 +64,8 @@ export function parseVoiceUploadMeta(value: unknown): VoiceUploadMeta | undefine
   const turnId = raw["turnId"];
   if (typeof turnId !== "string" || !TURN_ID_PATTERN.test(turnId)) return undefined;
 
-  if (raw["format"] !== "m4a") return undefined;
+  const format = raw["format"];
+  if (format !== "m4a" && format !== "webm") return undefined;
 
   const durationMs = raw["durationMs"];
   if (
@@ -81,7 +82,7 @@ export function parseVoiceUploadMeta(value: unknown): VoiceUploadMeta | undefine
 
   return {
     turnId,
-    format: "m4a",
+    format,
     durationMs,
     ...(targetSessionId !== undefined ? { targetSessionId } : {}),
   };

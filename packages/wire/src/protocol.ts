@@ -6,7 +6,11 @@
 // them so every name it exported before this package existed is still
 // importable from there.
 
-export const PROTOCOL_VERSION = 1;
+// 2 (owner login, Phase 0): a v2 connection is device-authenticated but
+// locked until the owner logs in over the auth:* channels below. A v1 app
+// gets the version-mismatch close instead of a silently locked connection.
+export const PROTOCOL_VERSION = 2;
+export const NATIVE_ORIGIN = "jarvis-app://native";
 
 export const MAX_TEXT_FRAME_BYTES = 1_048_576;
 export const MAX_PAIR_FRAME_BYTES = 4_096;
@@ -91,8 +95,120 @@ export const REMOTE_ERROR_CODES = [
   "internal",
   "rate-limited",
   "unsupported",
+  "locked",
 ] as const;
 export type RemoteErrorCode = (typeof REMOTE_ERROR_CODES)[number];
+
+// Owner login (Phase 0). camelCase verbs because the frame parser's channel
+// pattern rejects hyphens. The bridge handles these itself, per connection,
+// before the channel-policy router.
+export const AUTH_CHANNELS = [
+  "auth:status",
+  "auth:login",
+  "auth:passkeyBegin",
+  "auth:passkeyFinish",
+  "auth:passkeyRegisterBegin",
+  "auth:passkeyRegisterFinish",
+  "auth:refresh",
+  "auth:resume",
+  "auth:logout",
+] as const;
+export type AuthChannel = (typeof AUTH_CHANNELS)[number];
+
+/** The only channels a locked connection accepts: registering a passkey needs an unlocked one. */
+export const LOCKED_ALLOWED: readonly AuthChannel[] = [
+  "auth:status",
+  "auth:login",
+  "auth:passkeyBegin",
+  "auth:passkeyFinish",
+  "auth:refresh",
+  "auth:resume",
+  "auth:logout",
+];
+
+/**
+ * The one push a connection receives without subscribing: sent the moment
+ * an unlocked connection locks (access expiry, logout, a revoked token
+ * family, or an owner-credential invalidation), as
+ * `{t:"psh", ch:"auth:state", p:{locked:true, reason}, seq}`. Its `seq`
+ * is the connection's ordinary push sequence. The /rpc socket stays open;
+ * the client shows its unlock screen and logs in again on the same socket.
+ * A `sub` frame refused while locked (it carries no id) is answered with
+ * `err` id 0 code "locked" — clients number their requests from 1.
+ */
+export const AUTH_STATE_CHANNEL = "auth:state";
+/** `signed-out`: the owner password changed, a passkey was deleted, the
+ *  owner signed out everywhere, or this login's token family was revoked. */
+export type AuthLockReason = "expired" | "logout" | "signed-out";
+export type AuthStatePush = { locked: true; reason: AuthLockReason };
+
+/** Access and refresh tokens: 32 random bytes as lowercase hex. */
+export const AUTH_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+export const MAX_PASSWORD_LENGTH = 1_024;
+/** Every base64url WebAuthn field except the attestation object. */
+export const MAX_PASSKEY_FIELD_LENGTH = 16_384;
+export const MAX_ATTESTATION_OBJECT_LENGTH = 65_536;
+export const MAX_PASSKEY_LABEL_LENGTH = 64;
+
+/** Each auth channel's single argument object (sent as `a: [args]`; the empty ones may send `a: []`). */
+export type AuthArgs = {
+  "auth:status": Record<string, never>;
+  "auth:login": { password: string };
+  "auth:passkeyBegin": Record<string, never>;
+  "auth:passkeyFinish": {
+    credentialId: string;
+    clientDataJSON: string;
+    authenticatorData: string;
+    signature: string;
+    userHandle?: string;
+  };
+  "auth:passkeyRegisterBegin": { password: string };
+  "auth:passkeyRegisterFinish": {
+    credentialId: string;
+    clientDataJSON: string;
+    attestationObject: string;
+    label: string;
+  };
+  "auth:refresh": { refreshToken: string };
+  "auth:resume": { accessToken: string };
+  "auth:logout": Record<string, never>;
+};
+
+/** Issued by login, passkeyFinish and refresh. `accessExpiresAt` is epoch milliseconds. */
+export type AuthTokens = { accessToken: string; refreshToken: string; accessExpiresAt: number };
+export type AuthStatus = { locked: boolean; hasPasskeys: boolean; accessExpiresAt?: number };
+/** WebAuthn get() options; every binary value is base64url. `timeout` is milliseconds. */
+export type PasskeyLoginOptions = {
+  challenge: string;
+  rpId: string;
+  allowCredentials?: string[];
+  userVerification?: "required";
+  timeout?: number;
+};
+/** WebAuthn create() options; every binary value is base64url. `timeout` is milliseconds. */
+export type PasskeyRegisterOptions = {
+  challenge: string;
+  rpId: string;
+  user: { id: string; name: string; displayName: string };
+  excludeCredentials?: string[];
+  /** ES256 (-7) then RS256 (-257). */
+  pubKeyCredParams?: Array<{ type: "public-key"; alg: -7 | -257 }>;
+  authenticatorSelection?: { userVerification: "required"; residentKey: "preferred" };
+  attestation?: "none";
+  timeout?: number;
+};
+
+export type AuthResults = {
+  "auth:status": AuthStatus;
+  "auth:login": AuthTokens;
+  "auth:passkeyBegin": PasskeyLoginOptions;
+  "auth:passkeyFinish": AuthTokens;
+  "auth:passkeyRegisterBegin": PasskeyRegisterOptions;
+  "auth:passkeyRegisterFinish": null;
+  "auth:refresh": AuthTokens;
+  "auth:resume": AuthStatus;
+  "auth:logout": null;
+};
 
 export type SubTarget = string | { ch: string; key: string };
 

@@ -22,6 +22,7 @@ import {
   encodeMessage,
   isUnspecifiedAddress,
 } from "@jarvis/wire";
+import type { ClientPlatform } from "./client-platform";
 import type { Clock } from "./clock";
 import type { PairingRecord } from "./pairing-record";
 import type { Credential } from "./rpc-client";
@@ -41,13 +42,15 @@ export type PairOutcome =
         | "expired"
         | "busy"
         | "timeout"
-        | "protocol";
+        | "protocol"
+        | "web-needs-certificate";
     };
 
 export type PairDeps = {
   transport: Transport;
   clock: Clock;
   client: string;
+  platform: ClientPlatform;
 };
 
 // The laptop's own confirmation dialog times out at 60s (M4); this gives
@@ -77,6 +80,16 @@ export function withHost(link: PairingLink, host: string): PairingLink | undefin
   if (canonical === undefined) return undefined;
   if (isUnspecifiedAddress(canonical)) return undefined;
   return { ...link, host: canonical };
+}
+
+/**
+ * Task 13: the browser build cannot pin a certificate — a browser
+ * WebSocket only trusts the OS store — so a fingerprint-only link (no DNS
+ * `name`, the pinned-by-IP path) is refused on web. Browser access needs
+ * Tailscale with a real certificate.
+ */
+export function linkRefusedOn(link: PairingLink, platform: ClientPlatform): boolean {
+  return platform === "web" && link.name === undefined;
 }
 
 function closeReason(code: number): "denied" | "expired" | "timeout" | "protocol" {
@@ -110,6 +123,9 @@ function parsePairedFrame(text: string): { deviceId: string; token: string } | u
 }
 
 export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Promise<PairOutcome> {
+  if (linkRefusedOn(link, deps.platform)) {
+    return Promise.resolve({ ok: false, reason: "web-needs-certificate" });
+  }
   // Copied out of `link` up front: everything past this point (including
   // every closure below) reads from these locals, never from `link` or
   // `link.secret` again — `secret` itself is blanked the moment the one

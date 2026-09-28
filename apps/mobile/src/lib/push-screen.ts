@@ -2,6 +2,7 @@
 // (M10 Task 6, "Interfaces"/"Behaviour" rules 3-4). `app/settings.tsx` is
 // layout only — every decision here is a plain function over PushView,
 // unit tested without a simulator, same split as voice-screen.ts.
+import type { ClientPlatform } from "./client-platform";
 import type { MessageKey } from "./i18n";
 import type { PushView } from "./push-registration";
 
@@ -37,4 +38,11 @@ export function notificationsStatusKey(view: PushView): MessageKey | undefined {
  */
 export function notificationsSwitchValue(view: PushView): boolean {
   return view.phase === "on";
+}
+
+/** D8: the Notifications switch exists only in the app. A browser has no
+ *  push registration (it reports notifications as unavailable), so Settings
+ *  shows no switch there rather than one that can never turn on. */
+export function showsNotificationsSetting(platform: ClientPlatform): boolean {
+  return platform !== "web";
 }

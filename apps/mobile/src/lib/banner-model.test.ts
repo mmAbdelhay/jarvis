@@ -65,6 +65,10 @@ describe("bannerModel", () => {
     });
   });
 
+  it("shows nothing when locked (the unlock screen covers the app)", () => {
+    expect(bannerModel(view({ state: "locked" }))).toBeUndefined();
+  });
+
   it("shows conn.stale when open and stale; nothing when open and fresh", () => {
     expect(bannerModel(view({ state: "open", stale: true }))).toEqual({
       key: "conn.stale",

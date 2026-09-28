@@ -226,7 +226,7 @@ describe("renderPairingConfirmation", () => {
     const api = {
       remoteStatus: vi.fn(async () => closedStatus()),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api);
     renderPairingConfirmation({
@@ -253,7 +253,7 @@ describe("renderPairingConfirmation", () => {
     const api = {
       remoteStatus: vi.fn(async () => closedStatus()),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api);
     renderPairingConfirmation({
@@ -276,7 +276,7 @@ describe("renderPairingConfirmation", () => {
     const api = {
       remoteStatus: vi.fn(async () => closedStatus()),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api);
     renderPairingConfirmation({
@@ -316,7 +316,7 @@ describe("renderPairingConfirmation — decided requests and re-pushes", () => {
     const api = {
       remoteStatus: vi.fn(async () => closedStatus()),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api);
     const confirming: RemoteStatus = {
@@ -372,7 +372,7 @@ describe("renderPairingConfirmation — decided requests and re-pushes", () => {
     const api = {
       remoteStatus: vi.fn(async () => closedStatus()),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api); // wires the Deny button's click listener
     const trigger = document.createElement("button");
@@ -520,7 +520,7 @@ describe("initRemoteStatus", () => {
       onRemoteStatus: vi.fn((cb: (status: RemoteStatus) => void) => {
         pushed = cb;
       }),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     const heard: RemoteStatus[] = [];
     onRemoteStatusChange((s) => heard.push(s));
@@ -544,7 +544,7 @@ describe("initRemoteStatus", () => {
         throw new Error("boom");
       }),
       onRemoteStatus: vi.fn(),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     expect(() => initRemoteStatus(api)).not.toThrow();
     await Promise.resolve();
@@ -563,7 +563,7 @@ describe("initRemoteStatus", () => {
       onRemoteStatus: vi.fn((cb: (status: RemoteStatus) => void) => {
         pushed = cb;
       }),
-      decideRemotePairing: vi.fn(async () => undefined),
+      decideRemotePairing: vi.fn(async () => true),
     };
     initRemoteStatus(api);
 

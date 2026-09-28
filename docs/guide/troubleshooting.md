@@ -228,8 +228,10 @@ does not run and `shopt login_shell` is off.
 
 ## Settings saved, nothing changed
 
-Nothing is applied live. Use **Restart Jarvis** after saving — the button
-appears once a save succeeds.
+Most settings are not applied live. Use **Restart Jarvis** after saving — the
+button appears once a save succeeds. The Remote access section is the
+exception: a save re-reads `jarvis.yaml` and applies it to the bridge at
+once.
 
 ## Comments disappeared from jarvis.yaml
 
@@ -249,6 +251,62 @@ pnpm --filter @jarvis/desktop build
 
 Only hosted pages are capped (eight, each a Chromium process). Terminal and API
 tabs are exempt from eviction — if one disappeared, it was closed, not evicted.
+
+## Browser/phone can't connect: "unexpectedly closed the connection"
+
+The browser says `<name> unexpectedly closed the connection`
+(`ERR_CONNECTION_CLOSED`), or the phone app never gets past connecting, even
+though Settings shows the bridge and **Browser access** as **On**.
+
+On macOS this is usually the **application firewall**. It allows incoming
+connections per app, by the app's code signature. A build that is unsigned,
+ad-hoc signed or freshly rebuilt is a new app to the firewall, so it resets
+every connection to Jarvis's ports on the Tailscale IP (7717 for the bridge,
+7718 for the browser listener) before a byte reaches Jarvis. Nothing shows
+in Jarvis's audit log. Connections to `127.0.0.1` are not filtered, which is
+why everything still works from the laptop itself. To confirm, open
+**System Settings → Network → Firewall**: if it is on, the rebuilt Jarvis
+is missing from **Options…** or is set to block.
+
+**If you can change the firewall**, allow Jarvis in **Firewall → Options…**
+(or add it again after each rebuild), and try again.
+
+**On a managed Mac where the firewall can't be changed**, keep Jarvis off
+the tailnet address and let Tailscale forward to it. `tailscaled` is signed
+by Tailscale, so the firewall lets its connections through:
+
+1. In **Settings → Remote access → Reachable on**, open **Advanced…** and
+   pick **This machine only** (`127.0.0.1`), then save. Set this in
+   Settings, not by hand-editing `jarvis.yaml` while Settings is open:
+   Settings keeps its own copy of the file, and its next save writes that
+   copy back over your edit. A hand edit is also not applied until Jarvis
+   restarts, while a Settings save applies the Remote access section at
+   once.
+2. Forward both ports from the tailnet to loopback:
+
+   ```sh
+   tailscale serve --bg --tcp 7717 tcp://127.0.0.1:7717
+   tailscale serve --bg --tcp 7718 tcp://127.0.0.1:7718
+   ```
+
+   Use your own `remote.port` and `remote.web.port` if you changed them.
+   This forwards raw TCP, so TLS still ends at Jarvis and the certificate
+   the phone or browser checks is still Jarvis's own.
+3. Connect as before, by the certificate's name
+   (`https://<machine>.<tailnet>.ts.net:7718/` in a browser). This needs a
+   pairing that carries that name — [path 1](remote-access.md#three-paths-to-a-pairing).
+   A pinned pairing dials the IP address in its link, which is now
+   `127.0.0.1`, so it cannot connect this way.
+
+Every connection now reaches Jarvis from `127.0.0.1`, so that is the source
+the audit log shows. `tailscale serve status` lists what is forwarded. To
+undo it, turn each forward off and pick the Tailscale address in Settings
+again:
+
+```sh
+tailscale serve --tcp=7717 off
+tailscale serve --tcp=7718 off
+```
 
 ## On Windows, `claude` is not recognised in a terminal
 

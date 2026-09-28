@@ -63,6 +63,7 @@ function createHarness() {
   const rpcLogs: string[] = [];
   const client = createRpcClient({
     transport,
+    lockedAtWelcome: false,
     clock,
     random: () => 0.5,
     client: CLIENT_STRING,
@@ -358,6 +359,8 @@ describe("session-input: sendText", () => {
       subscriptions: () => [],
       lastFrameAt: () => undefined,
       setAppActive: () => {},
+      unlock: () => {},
+      lock: () => {},
     };
     const clock = createFakeClock();
     const input = createSessionInput({

@@ -127,6 +127,13 @@ describe("remote policy", () => {
     "remote:cancelPair",
     "remote:decidePair",
     "remote:revoke",
+    // Phase 0: the owner account is created and changed only on the laptop.
+    "remote:ownerStatus",
+    "remote:setOwnerPassword",
+    "remote:deletePasskey",
+    "remote:signOutEverywhere",
+    // Phase 1: opens the system browser on the laptop.
+    "remote:openWebClient",
   ])("keeps %s desktop-only", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);

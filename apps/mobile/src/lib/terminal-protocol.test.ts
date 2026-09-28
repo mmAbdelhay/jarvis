@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { encodeNativeMessage, parsePageMessage } from "./terminal-protocol";
+import {
+  encodeNativeMessage,
+  MAX_SELECTION_CHARS,
+  parseFrameMessage,
+  parsePageMessage,
+} from "./terminal-protocol";
 
 describe("parsePageMessage", () => {
   it("parses a valid ready message to exactly its fields", () => {
@@ -106,5 +111,73 @@ describe("encodeNativeMessage", () => {
   it("round-trips a size message through JSON.parse", () => {
     const encoded = encodeNativeMessage({ t: "size", cols: 80, rows: 24 });
     expect(JSON.parse(encoded)).toEqual({ t: "size", cols: 80, rows: 24 });
+  });
+});
+
+describe("parseFrameMessage (web iframe, Task 13)", () => {
+  const frameWindow = { name: "terminal-frame" };
+  const ready = JSON.stringify({ t: "ready", cols: 80, rows: 24 });
+
+  it("parses a message whose source is the terminal iframe's own window", () => {
+    expect(parseFrameMessage({ source: frameWindow, data: ready }, frameWindow)).toEqual({
+      t: "ready",
+      cols: 80,
+      rows: 24,
+    });
+  });
+
+  it("drops a well-formed message from any other source", () => {
+    expect(
+      parseFrameMessage({ source: { name: "other" }, data: ready }, frameWindow),
+    ).toBeUndefined();
+    expect(parseFrameMessage({ source: null, data: ready }, frameWindow)).toBeUndefined();
+  });
+
+  it("drops everything while the iframe has no window yet (null/undefined never match)", () => {
+    expect(parseFrameMessage({ source: null, data: ready }, null)).toBeUndefined();
+    expect(parseFrameMessage({ source: undefined, data: ready }, undefined)).toBeUndefined();
+  });
+
+  it("still runs the field-by-field parse on a message from the iframe", () => {
+    expect(
+      parseFrameMessage({ source: frameWindow, data: JSON.stringify({ t: "evil" }) }, frameWindow),
+    ).toBeUndefined();
+    expect(
+      parseFrameMessage({ source: frameWindow, data: { t: "ready" } }, frameWindow),
+    ).toBeUndefined();
+  });
+});
+
+describe("parsePageMessage: selection (wide layout, fix round 1)", () => {
+  it("accepts a selection's text, including a long one up to the limit", () => {
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: "ls -la" }))).toEqual({
+      t: "selection",
+      text: "ls -la",
+    });
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: "" }))).toEqual({
+      t: "selection",
+      text: "",
+    });
+    const long = "z".repeat(MAX_SELECTION_CHARS);
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: long }))).toEqual({
+      t: "selection",
+      text: long,
+    });
+  });
+
+  it("rejects a selection over the limit, or without string text", () => {
+    const over = "z".repeat(MAX_SELECTION_CHARS + 1);
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: over }))).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "selection", text: 5 }))).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "selection" }))).toBeUndefined();
+  });
+
+  it("keeps every other message type under 256 chars", () => {
+    const text = JSON.stringify({ t: "wheel", direction: "up", pad: "x".repeat(300) });
+    expect(parsePageMessage(text)).toBeUndefined();
+  });
+
+  it("encodes clearSelection for the page", () => {
+    expect(encodeNativeMessage({ t: "clearSelection" })).toBe('{"t":"clearSelection"}');
   });
 });

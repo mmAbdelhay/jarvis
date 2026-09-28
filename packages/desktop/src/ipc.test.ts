@@ -1455,8 +1455,10 @@ const sampleConfig: JarvisConfig = {
     sidecarProxy: false,
     tls: {},
     push: { enabled: false, includeProjectNames: false },
+    web: { enabled: false },
     idleDisableMinutes: 0,
   },
+  daemon: { enabled: false },
   sessionsDbPath: "/tmp/sessions.db",
 };
 
@@ -1988,7 +1990,7 @@ describe("terminal handlers", () => {
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
         kill: (tabId) => killed.push(tabId),
-        stopAll: () => {},
+        stopAll: async () => {},
       },
     };
   }

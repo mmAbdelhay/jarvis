@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { GitProvider, Session, WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { RemoteStatus } from "@jarvis/remote";
 import { describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNELS } from "./channels.js";
 import { ELECTRON_BOUND_CHANNELS } from "./desktop-only.js";
@@ -58,14 +59,6 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       rename: vi.fn(),
       move: vi.fn(),
       navigate: vi.fn(),
-      back: vi.fn(),
-      forward: vi.fn(),
-      reload: vi.fn(),
-      setDevTools: vi.fn(),
-      setDevToolsDock: vi.fn(),
-      setVisible: vi.fn(),
-      hideAll: vi.fn(),
-      requestPictureInPicture: vi.fn(),
       openDocker: vi.fn(),
       openApi: vi.fn(),
     },
@@ -193,6 +186,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       cancelPairing: vi.fn(),
       decidePairing: vi.fn(() => true),
       revoke: vi.fn(async () => true),
+      ownerStatus: vi.fn(() => ({ hasPassword: false, passkeys: [] })),
+      setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
+      deletePasskey: vi.fn(async () => true),
+      signOutEverywhere: vi.fn(async () => {}),
       registerPush: vi.fn(async () => ({ registered: true as const, laptopEnabled: false })),
       unregisterPush: vi.fn(async () => undefined),
     },
@@ -209,6 +206,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    openExternal: vi.fn(async () => {}),
     ...overrides,
   } as DispatchDeps;
 }
@@ -643,14 +641,6 @@ describe("dispatch table: workspace and docker", () => {
     expect(order).toEqual(["terminal", "unfollow", "workspace"]);
     await call(table, "workspace:close", 5);
     expect(order).toHaveLength(3);
-  });
-
-  it("workspace:devtools requires a string tab and a boolean flag", async () => {
-    const deps = fakeDeps();
-    const table = createDispatchTable(deps);
-    await call(table, "workspace:devtools", "t1", "yes");
-    await call(table, "workspace:devtools", "t1", true);
-    expect(deps.workspace.setDevTools).toHaveBeenCalledTimes(1);
   });
 
   it("cluster:open reads background only as the literal true", async () => {
@@ -1234,10 +1224,18 @@ describe("dispatch table: remote controls", () => {
   it('remote:decidePair("id","yes") is ignored: decidePairing is only called for a real boolean', async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    await call(table, "remote:decidePair", "id", "yes");
+    expect(await call(table, "remote:decidePair", "id", "yes")).toBe(false);
     expect(deps.remote.decidePairing).not.toHaveBeenCalled();
     await call(table, "remote:decidePair", "id", true);
     expect(deps.remote.decidePairing).toHaveBeenCalledWith("id", true);
+  });
+
+  it("remote:decidePair returns whether the decision reached a live request", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    vi.mocked(deps.remote.decidePairing).mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect(await call(table, "remote:decidePair", "live", true)).toBe(true);
+    expect(await call(table, "remote:decidePair", "gone", true)).toBe(false);
   });
 
   it("remote:revoke refuses a non-string id with invalidArgument", async () => {
@@ -1266,6 +1264,131 @@ describe("dispatch table: remote controls", () => {
     const table = createDispatchTable(deps);
     expect(await call(table, "remote:revoke", "d1")).toEqual({ ok: true, value: undefined });
     expect(deps.remote.revoke).toHaveBeenCalledWith("d1");
+  });
+});
+
+describe("dispatch table: owner account (Phase 0)", () => {
+  it("remote:ownerStatus reads the controls' owner status", async () => {
+    const deps = fakeDeps();
+    expect(await call(createDispatchTable(deps), "remote:ownerStatus")).toEqual({
+      hasPassword: false,
+      passkeys: [],
+    });
+  });
+
+  it("remote:setOwnerPassword forwards (current, next), treating a null current as none", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:setOwnerPassword", null, "a long new password")).toEqual({
+      ok: true,
+    });
+    expect(deps.remote.setOwnerPassword).toHaveBeenLastCalledWith(undefined, "a long new password");
+    await call(table, "remote:setOwnerPassword", "old password!", "a long new password");
+    expect(deps.remote.setOwnerPassword).toHaveBeenLastCalledWith(
+      "old password!",
+      "a long new password",
+    );
+  });
+
+  it("remote:setOwnerPassword refuses non-string arguments and a remote origin without forwarding", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:setOwnerPassword", undefined, 7)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(await call(table, "remote:setOwnerPassword", 7, "a long new password")).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(
+      await callAs(table, REMOTE_ORIGIN, "remote:setOwnerPassword", undefined, "a long password"),
+    ).toEqual({ ok: false, code: "unavailable" });
+    expect(deps.remote.setOwnerPassword).not.toHaveBeenCalled();
+  });
+
+  it("remote:deletePasskey forwards a string id, reports a failure bilingually, and refuses a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:deletePasskey", "cred")).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(deps.remote.deletePasskey).toHaveBeenCalledWith("cred");
+    expect(await call(table, "remote:deletePasskey", 7)).toEqual(invalidArgument("en"));
+    expect(await callAs(table, REMOTE_ORIGIN, "remote:deletePasskey", "cred")).toEqual(
+      invalidArgument("en"),
+    );
+    expect(deps.remote.deletePasskey).toHaveBeenCalledTimes(1);
+
+    vi.mocked(deps.remote.deletePasskey).mockResolvedValueOnce(false);
+    expect(await call(table, "remote:deletePasskey", "cred")).toEqual({
+      ok: false,
+      text: MESSAGES.remoteOwnerPasskeyDeleteFailed("en"),
+      language: "en",
+    });
+  });
+
+  it("remote:signOutEverywhere forwards from the desktop and does nothing from a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    await callAs(table, REMOTE_ORIGIN, "remote:signOutEverywhere");
+    expect(deps.remote.signOutEverywhere).not.toHaveBeenCalled();
+    await call(table, "remote:signOutEverywhere");
+    expect(deps.remote.signOutEverywhere).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("dispatch table: remote:openWebClient (Phase 1)", () => {
+  const ORIGIN = "https://laptop.tail1234.ts.net:7718";
+  const webOn = (pairing: RemoteStatus["pairing"] = { kind: "closed" }): RemoteStatus => ({
+    enabled: true,
+    listening: undefined,
+    pairing,
+    devices: [],
+    problem: undefined,
+    sidecarProxy: "off",
+    web: { kind: "on", port: 7718, origin: ORIGIN },
+  });
+
+  it("opens the web client's root URL in the system browser", async () => {
+    const deps = fakeDeps();
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "remote:openWebClient")).toBe(true);
+    expect(deps.openExternal).toHaveBeenCalledWith(`${ORIGIN}/`);
+  });
+
+  it("opens the browser pairing link while a pairing window is open", async () => {
+    const deps = fakeDeps();
+    const webUri = `${ORIGIN}/pair#v=2`;
+    vi.mocked(deps.remote.status).mockReturnValue(
+      webOn({ kind: "open", uri: "jarvis://pair?v=2", expiresAt: 1, webUri }),
+    );
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "remote:openWebClient")).toBe(true);
+    expect(deps.openExternal).toHaveBeenCalledWith(webUri);
+  });
+
+  it("opens nothing while web is not on, and nothing for a remote origin", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "remote:openWebClient")).toBe(false);
+
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    expect(await callAs(table, REMOTE_ORIGIN, "remote:openWebClient")).toBe(false);
+    expect(deps.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("ignores any URL passed as an argument", async () => {
+    const deps = fakeDeps();
+    vi.mocked(deps.remote.status).mockReturnValue(webOn());
+    const table = createDispatchTable(deps);
+
+    await call(table, "remote:openWebClient", "file:///etc/passwd");
+    expect(deps.openExternal).toHaveBeenCalledWith(`${ORIGIN}/`);
   });
 });
 

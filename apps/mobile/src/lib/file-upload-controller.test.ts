@@ -28,6 +28,8 @@ function fakeClient(overrides: Partial<RpcClient> = {}): RpcClient {
     subscriptions: vi.fn(() => []),
     lastFrameAt: vi.fn(() => undefined),
     setAppActive: vi.fn(),
+    unlock: vi.fn(),
+    lock: vi.fn(),
   };
   return { ...base, ...overrides };
 }

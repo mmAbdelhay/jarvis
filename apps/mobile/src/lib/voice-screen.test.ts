@@ -208,7 +208,12 @@ function collectSourceFiles(dir: string): string[] {
 
 describe("source scan: only voice-controller.ts calls RpcClient.upload", () => {
   it("no file under app/ or src/components/, and not voice-context.tsx, contains .upload(", () => {
-    const targets = [join(MOBILE_ROOT, "app"), join(MOBILE_ROOT, "src", "components")];
+    // src/screens holds screen content moved out of app/ (wide layout).
+    const targets = [
+      join(MOBILE_ROOT, "app"),
+      join(MOBILE_ROOT, "src", "components"),
+      join(MOBILE_ROOT, "src", "screens"),
+    ];
     const files = targets.flatMap(collectSourceFiles);
     files.push(join(MOBILE_ROOT, "src", "lib", "voice-context.tsx"));
 
@@ -246,7 +251,11 @@ describe("source scan: VoiceProvider rebuilds a disposed controller (fix round 1
 
 describe("source scan: the session-screen mic passes the route's own validated id", () => {
   it("app/session/[id].tsx passes sessionId: id and reads useLocalSearchParams only once", () => {
-    const source = readFileSync(join(MOBILE_ROOT, "app", "session", "[id].tsx"), "utf8");
+    // The route is a thin wrapper since the wide layout; the body it
+    // renders lives in SessionDetail.tsx, so the scan reads both.
+    const source =
+      readFileSync(join(MOBILE_ROOT, "app", "session", "[id].tsx"), "utf8") +
+      readFileSync(join(MOBILE_ROOT, "src", "screens", "SessionDetail.tsx"), "utf8");
     expect(source).toMatch(/sessionId:\s*id\b/);
     const searchParamReads = source.match(/useLocalSearchParams\(/g) ?? [];
     expect(searchParamReads).toHaveLength(1);

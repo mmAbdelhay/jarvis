@@ -22,6 +22,48 @@ describe("desktop-only registrations", () => {
     }
   });
 
+  // Task 23: the background service's channels are the host's own.
+  it("routes the background channels to the host, refusing a non-boolean toggle", async () => {
+    const deps = fakeDesktopDeps();
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    const listener = (channel: string) =>
+      handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => Promise<unknown>;
+
+    expect(await listener("background:status")({})).toEqual({
+      enabled: false,
+      inApp: true,
+      state: { kind: "off" },
+    });
+    expect(await listener("background:setEnabled")({}, "yes")).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: "enabled must be true or false",
+    });
+    expect(deps.background.setEnabled).not.toHaveBeenCalled();
+    await listener("background:setEnabled")({}, true);
+    expect(deps.background.setEnabled).toHaveBeenCalledWith(true);
+    await listener("background:restart")({});
+    await listener("background:stopNow")({});
+    expect(deps.background.restart).toHaveBeenCalledOnce();
+    expect(deps.background.stopNow).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the background channels desktop-only and out of every core", () => {
+    for (const channel of [
+      "background:status",
+      "background:setEnabled",
+      "background:restart",
+      "background:stopNow",
+    ] as const) {
+      expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
+      expect(ELECTRON_BOUND_CHANNELS).toContain(channel);
+    }
+  });
+
   it("dialog:pickFiles returns [] on cancel and the paths otherwise", async () => {
     const handle = vi.fn();
     const dialog = {
@@ -35,6 +77,64 @@ describe("desktop-only registrations", () => {
     expect(await listener({}, { multiple: true })).toEqual([]);
     expect(dialog.showOpenDialog.mock.calls[0]![1]).toEqual({
       properties: ["openFile", "multiSelections"],
+    });
+  });
+
+  // The page controls moved here from the dispatch table when the tab state
+  // moved into the core (Task 18): they act on a view, which only the
+  // Electron host has.
+  describe("hosted-page controls", () => {
+    function listenerFor(deps: DesktopOnlyDeps, channel: string) {
+      const handle = vi.fn();
+      registerDesktopOnly({ ...deps, handle });
+      return handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => unknown;
+    }
+
+    it("routes back, forward, reload and picture-in-picture by tab id, dropping a non-string id", () => {
+      const deps = fakeDesktopDeps();
+      for (const [channel, method] of [
+        ["workspace:back", "back"],
+        ["workspace:forward", "forward"],
+        ["workspace:reload", "reload"],
+        ["workspace:pip", "requestPictureInPicture"],
+      ] as const) {
+        const listener = listenerFor(deps, channel);
+        listener({}, 7);
+        listener({}, "tab-1");
+        expect(deps.views[method], channel).toHaveBeenCalledTimes(1);
+        expect(deps.views[method], channel).toHaveBeenCalledWith("tab-1");
+      }
+    });
+
+    it("workspace:devtools requires a string tab and a boolean flag", () => {
+      const deps = fakeDesktopDeps();
+      const listener = listenerFor(deps, "workspace:devtools");
+      listener({}, "t1", "yes");
+      listener({}, "t1", true);
+      expect(deps.views.setDevTools).toHaveBeenCalledTimes(1);
+      expect(deps.views.setDevTools).toHaveBeenCalledWith("t1", true);
+    });
+
+    it("workspace:devtoolsDock takes only a real dock side", () => {
+      const deps = fakeDesktopDeps();
+      const listener = listenerFor(deps, "workspace:devtoolsDock");
+      listener({}, "sideways");
+      listener({}, "left");
+      expect(deps.views.setDevToolsDock).toHaveBeenCalledTimes(1);
+      expect(deps.views.setDevToolsDock).toHaveBeenCalledWith("left");
+    });
+
+    it("workspace:visible reads only the literal true, and hideAll hides", () => {
+      const deps = fakeDesktopDeps();
+      listenerFor(deps, "workspace:visible")({}, "true");
+      listenerFor(deps, "workspace:visible")({}, true);
+      listenerFor(deps, "workspace:hideAll")({});
+      expect(deps.views.setVisible).toHaveBeenNthCalledWith(1, false);
+      expect(deps.views.setVisible).toHaveBeenNthCalledWith(2, true);
+      expect(deps.views.hideAll).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -124,11 +224,28 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     screen: { getDisplayMatching: () => ({ scaleFactor: 2 }) },
     dialog: { showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: [] })) },
     buildMenu: () => ({ popup: vi.fn() }),
-    workspace: { setBounds: vi.fn(), setDevToolsBounds: vi.fn() },
+    views: {
+      setBounds: vi.fn(),
+      setDevToolsBounds: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      reload: vi.fn(),
+      setDevTools: vi.fn(),
+      setDevToolsDock: vi.fn(),
+      setVisible: vi.fn(),
+      hideAll: vi.fn(),
+      requestPictureInPicture: vi.fn(),
+    },
     chooseDock: vi.fn(),
     reloadTab: vi.fn(),
     closeTab: vi.fn(),
     startTabRename: vi.fn(),
+    background: {
+      status: vi.fn(async () => ({ enabled: false, inApp: true, state: { kind: "off" as const } })),
+      setEnabled: vi.fn(async () => ({ ok: true as const })),
+      restart: vi.fn(async () => ({ ok: true as const })),
+      stopNow: vi.fn(async () => ({ ok: true as const })),
+    },
     language: "en" as const,
   };
 }

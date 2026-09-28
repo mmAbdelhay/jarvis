@@ -3,6 +3,8 @@
 // text (err.text, project names, session titles) is never routed through
 // this table: it is displayed verbatim.
 
+import type { ClientPlatform } from "./client-platform";
+
 export type Language = "ar" | "en";
 
 export const STRINGS = {
@@ -24,6 +26,8 @@ export const STRINGS = {
   },
   "nav.voice": { en: "Voice", ar: "الصوت" },
   "nav.workspace": { en: "Workspace", ar: "مساحة العمل" },
+  // The wide shell's top bar (desktop renderer's "N running" pill).
+  "shell.running": { en: "{count} running", ar: "{count} قيد التشغيل" },
   "conn.connected": { en: "Connected", ar: "متصل" },
   "sessions.today": { en: "TODAY", ar: "اليوم" },
   "sessions.yesterday": { en: "YESTERDAY", ar: "أمس" },
@@ -40,6 +44,22 @@ export const STRINGS = {
   "settings.title": {
     en: "Settings",
     ar: "الإعدادات",
+  },
+  "settings.sectionNav": {
+    en: "Settings sections",
+    ar: "أقسام الإعدادات",
+  },
+  "settings.section.general": {
+    en: "General",
+    ar: "عام",
+  },
+  "settings.section.addPasskey": {
+    en: "Add a passkey",
+    ar: "إضافة مفتاح مرور",
+  },
+  "settings.section.remoteAccess": {
+    en: "Remote access",
+    ar: "الوصول عن بُعد",
   },
   "settings.language": {
     en: "Language",
@@ -286,6 +306,10 @@ export const STRINGS = {
     en: "Pair",
     ar: "اقتران",
   },
+  "pair.webNeedsCertificate": {
+    en: "Browser access needs Tailscale with a real certificate.",
+    ar: "الوصول من المتصفح يحتاج إلى Tailscale بشهادة حقيقية.",
+  },
   "pair.clearFailed": {
     en: "Couldn't remove the old pairing from this phone.",
     ar: "تعذّرت إزالة الاقتران القديم من هذا الهاتف.",
@@ -311,8 +335,12 @@ export const STRINGS = {
     ar: "تم إلغاء اقتران هذا الهاتف.",
   },
   "conn.incompatible": {
-    en: "Update Jarvis on this phone and your computer to keep them in sync.",
-    ar: "حدّث Jarvis على هذا الهاتف وجهاز الكمبيوتر لإبقائهما متزامنين.",
+    en: "Update the Jarvis app. If it's already up to date, update Jarvis on your computer.",
+    ar: "حدّث تطبيق Jarvis. إذا كان محدّثًا بالفعل، فحدّث Jarvis على جهاز الكمبيوتر.",
+  },
+  "conn.locked": {
+    en: "Locked. Unlock to continue.",
+    ar: "مقفل. افتح القفل للمتابعة.",
   },
   "conn.pinMismatch": {
     en: "The computer's certificate doesn't match the one this phone paired with. If you didn't change the computer, someone may be intercepting the connection. Tap \"Pair again\" if this continues.",
@@ -397,6 +425,14 @@ export const STRINGS = {
   "sessions.none": {
     en: "No sessions.",
     ar: "لا توجد جلسات.",
+  },
+  "sessions.pick": {
+    en: "Select a session to see it here.",
+    ar: "اختر جلسة لعرضها هنا.",
+  },
+  "sessions.back": {
+    en: "All sessions",
+    ar: "كل الجلسات",
   },
   "sessions.state.starting": {
     en: "Starting",
@@ -634,6 +670,10 @@ export const STRINGS = {
     en: "Open again",
     ar: "افتح مرة أخرى",
   },
+  "sidecars.openedInTab": {
+    en: "Opened in a new tab.",
+    ar: "فُتح في علامة تبويب جديدة.",
+  },
   "sidecars.loadFailed": {
     en: "Couldn't load. Try again.",
     ar: "تعذّر التحميل. حاول مرة أخرى.",
@@ -781,6 +821,12 @@ export const STRINGS = {
     en: "That address isn't safe to open.",
     ar: "هذا العنوان غير آمن للفتح.",
   },
+  "workspace.back": { en: "All tabs", ar: "كل التبويبات" },
+  "workspace.pickTab": {
+    en: "Open a tool, or open a terminal on the laptop.",
+    ar: "افتح أداة، أو افتح طرفية على الحاسوب.",
+  },
+  "workspace.closeTab": { en: "Close {title}", ar: "إغلاق {title}" },
   "workspace.panes.title": { en: "Terminal panes", ar: "أجزاء الطرفية" },
   "workspace.panes.empty": { en: "No panes.", ar: "لا توجد أجزاء." },
   "workspace.panes.exited": { en: "Exited", ar: "منتهية" },
@@ -789,6 +835,7 @@ export const STRINGS = {
     en: "This terminal pane is no longer available.",
     ar: "لم تعد هذه اللوحة الطرفية متاحة.",
   },
+  "terminal.keyboardInput": { en: "Terminal keyboard input", ar: "إدخال لوحة المفاتيح للطرفية" },
   "terminal.exited": {
     en: "This terminal has exited. You can still read its output.",
     ar: "خرجت هذه الطرفية. يمكنك الاستمرار في قراءة مخرجاتها.",
@@ -926,6 +973,163 @@ export const STRINGS = {
     ar: "حذف “{name}”؟ لا يمكن التراجع عن هذا.",
   },
   "api.rename.title": { en: "Rename", ar: "إعادة تسمية" },
+  "auth.title": { en: "Unlock Jarvis", ar: "فتح قفل Jarvis" },
+  "auth.passwordHint": {
+    en: "Enter the owner password you set on your computer.",
+    ar: "أدخل كلمة مرور المالك التي عيّنتها على جهاز الكمبيوتر.",
+  },
+  "auth.password": { en: "Password", ar: "كلمة المرور" },
+  "auth.unlock": { en: "Unlock", ar: "فتح القفل" },
+  "auth.useBiometric": {
+    en: "Unlock with Face ID, fingerprint or passcode",
+    ar: "الفتح بالوجه أو البصمة أو رمز المرور",
+  },
+  "auth.biometricPrompt": {
+    en: "Confirm it's you to unlock Jarvis",
+    ar: "أكّد هويتك لفتح قفل Jarvis",
+  },
+  "auth.wrongPassword": { en: "Wrong password.", ar: "كلمة المرور غير صحيحة." },
+  "auth.rateLimited": {
+    en: "Too many sign-in attempts, so sign-in is paused. Try again later.",
+    ar: "محاولات تسجيل دخول كثيرة جدًا، فتوقّف تسجيل الدخول مؤقتًا. حاول لاحقًا.",
+  },
+  "auth.offline": {
+    en: "Can't reach your computer. Check the connection and try again.",
+    ar: "تعذّر الوصول إلى جهاز الكمبيوتر. تحقّق من الاتصال وحاول مجددًا.",
+  },
+  "auth.failed": { en: "Couldn't unlock. Try again.", ar: "تعذّر فتح القفل. حاول مجددًا." },
+  "auth.noBiometric": {
+    en: "Quick unlock is off because this phone has no screen lock (passcode) set up, so you'll enter your password each time.",
+    ar: "الفتح السريع متوقف لأن هذا الهاتف ليس عليه قفل شاشة (رمز مرور) مُعدّ، لذا ستُدخل كلمة المرور في كل مرة.",
+  },
+  "auth.reason.idle": { en: "Locked after inactivity.", ar: "تم القفل بعد فترة من عدم النشاط." },
+  "auth.reason.expired": { en: "Your session expired.", ar: "انتهت صلاحية جلستك." },
+  "auth.reason.logout": { en: "You logged out.", ar: "لقد سجّلت الخروج." },
+  "auth.reason.signedOut": {
+    en: "You were signed out from your computer.",
+    ar: "تم تسجيل خروجك من جهاز الكمبيوتر.",
+  },
+  "auth.usePasskey": { en: "Sign in with a passkey", ar: "تسجيل الدخول بمفتاح مرور" },
+  "auth.passkeyUnsupported": {
+    en: "Passkeys need your computer's Tailscale web address with a real certificate. Use the password.",
+    ar: "مفاتيح المرور تحتاج إلى عنوان الويب لجهاز الكمبيوتر عبر Tailscale بشهادة حقيقية. استخدم كلمة المرور.",
+  },
+  "auth.passkeyRefused": {
+    en: "That passkey wasn't accepted. Try again or use the password.",
+    ar: "لم يُقبل مفتاح المرور هذا. حاول مجددًا أو استخدم كلمة المرور.",
+  },
+  "auth.keepSignedIn": {
+    en: "Keep me signed in on this browser",
+    ar: "إبقائي مسجّل الدخول على هذا المتصفح",
+  },
+  "auth.keepSignedInHint": {
+    en: "Off: every visit needs a passkey or the password. On: opening Jarvis in this browser signs you in automatically (the sign-in stops working after 7 days without use); after locking for inactivity you still need a passkey or the password.",
+    ar: "عند الإيقاف: كل زيارة تحتاج إلى مفتاح مرور أو كلمة المرور. عند التشغيل: فتح Jarvis في هذا المتصفح يسجّل دخولك تلقائيًا (يتوقف تسجيل الدخول بعد 7 أيام دون استخدام)؛ وبعد القفل بسبب عدم النشاط ستحتاج إلى مفتاح مرور أو كلمة المرور.",
+  },
+
+  "passkey.offerTitle": {
+    en: "Add a passkey for this browser?",
+    ar: "إضافة مفتاح مرور لهذا المتصفح؟",
+  },
+  "passkey.offerHint": {
+    en: "Next time, sign in with Face ID, Touch ID, Windows Hello or your phone instead of the password. Enter the password once more to confirm.",
+    ar: "في المرة القادمة، سجّل الدخول بالوجه أو البصمة أو Windows Hello أو هاتفك بدلًا من كلمة المرور. أدخل كلمة المرور مرة أخرى للتأكيد.",
+  },
+  "passkey.label": { en: "Passkey name", ar: "اسم مفتاح المرور" },
+  "passkey.add": { en: "Add passkey", ar: "إضافة مفتاح المرور" },
+  "passkey.skip": { en: "Not now", ar: "ليس الآن" },
+  "passkey.added": { en: "Passkey added.", ar: "تمت إضافة مفتاح المرور." },
+  "passkey.exists": {
+    en: "This device already has a Jarvis passkey.",
+    ar: "هذا الجهاز لديه مفتاح مرور لـ Jarvis بالفعل.",
+  },
+  "passkey.failed": {
+    en: "Couldn't add the passkey. Try again.",
+    ar: "تعذّرت إضافة مفتاح المرور. حاول مجددًا.",
+  },
+  "settings.passkeys": { en: "Passkeys", ar: "مفاتيح المرور" },
+  "settings.passkeysHint": {
+    en: "Add a passkey for this browser: sign in with Face ID, Touch ID, Windows Hello or your phone instead of the password. Enter the password to confirm.",
+    ar: "أضف مفتاح مرور لهذا المتصفح: سجّل الدخول بالوجه أو البصمة أو Windows Hello أو هاتفك بدلًا من كلمة المرور. أدخل كلمة المرور للتأكيد.",
+  },
+  "settings.security": { en: "Security", ar: "الأمان" },
+  "settings.idleLock": { en: "Lock after inactivity", ar: "القفل بعد عدم النشاط" },
+  "settings.idleLock.minutes": { en: "{minutes} min", ar: "{minutes} د" },
+  "settings.logout": { en: "Log out", ar: "تسجيل الخروج" },
+  "settings.logoutConfirm": {
+    en: "Log out of Jarvis on this phone? You'll need your password to unlock it again.",
+    ar: "تسجيل الخروج من Jarvis على هذا الهاتف؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
+  },
+  // D8: the browser build's own wording where a string says "this phone"
+  // (platformKey picks the ".web" key on web).
+  "pair.trustSystem.web": {
+    en: "Trusts the certificate through this browser's own trust store (Tailscale)",
+    ar: "يثق بالشهادة عبر مخزن الثقة الخاص بهذا المتصفح (Tailscale)",
+  },
+  "settings.unpair.web": {
+    en: "Unpair this browser",
+    ar: "إلغاء اقتران هذا المتصفح",
+  },
+  "settings.unpairConfirm.web": {
+    en: "Remove this pairing from this browser? You'll need a new pairing link to pair again. To fully revoke access, also remove this device in the computer's Settings.",
+    ar: "هل تريد إزالة هذا الاقتران من هذا المتصفح؟ ستحتاج إلى رابط اقتران جديد للاقتران مرة أخرى. لإلغاء الوصول بالكامل، احذف هذا الجهاز أيضًا من إعدادات الكمبيوتر.",
+  },
+  "settings.unpairFailed.web": {
+    en: "Couldn't unpair this browser. Try again.",
+    ar: "تعذّر إلغاء اقتران هذا المتصفح. حاول مرة أخرى.",
+  },
+  "pair.alreadyPaired.web": {
+    en: "This browser is already paired. Unpair in Settings first.",
+    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
+  },
+  "pair.saveFailed.web": {
+    en: "Couldn't save the pairing in this browser. Try again.",
+    ar: "تعذّر حفظ الاقتران في هذا المتصفح. حاول مرة أخرى.",
+  },
+  "pair.checkFailed.web": {
+    en: "Couldn't check whether this browser is already paired. Try again.",
+    ar: "تعذّر التحقق مما إذا كان هذا المتصفح مقترنًا بالفعل. حاول مرة أخرى.",
+  },
+  "pair.clearFailed.web": {
+    en: "Couldn't remove the old pairing from this browser.",
+    ar: "تعذّرت إزالة الاقتران القديم من هذا المتصفح.",
+  },
+  "conn.unpaired.web": {
+    en: "This browser was unpaired.",
+    ar: "تم إلغاء اقتران هذا المتصفح.",
+  },
+  "session.offline.web": {
+    en: "Not sent: this browser is disconnected.",
+    ar: "لم يُرسل: هذا المتصفح غير متصل.",
+  },
+  "voice.notice.notSentOffline.web": {
+    en: "Not sent: this browser is disconnected.",
+    ar: "لم يُرسل: هذا المتصفح غير متصل.",
+  },
+  "voice.notice.noVoiceAr.web": {
+    en: "This browser has no Arabic voice installed.",
+    ar: "لا يوجد صوت عربي مثبّت في هذا المتصفح.",
+  },
+  "voice.notice.noVoiceEn.web": {
+    en: "This browser has no English voice installed.",
+    ar: "لا يوجد صوت إنجليزي مثبّت في هذا المتصفح.",
+  },
+  "settings.speakRepliesHint.web": {
+    en: "Read Jarvis's replies aloud in this browser.",
+    ar: "قراءة ردود جارفيس بصوت عالٍ في هذا المتصفح.",
+  },
+  "api.warning.hooksSend.web": {
+    en: "Pre-request/post-response scripts and tests are skipped when sent from a browser.",
+    ar: "تُتخطّى سكربتات ما قبل الطلب وما بعد الاستجابة والاختبارات عند الإرسال من متصفح.",
+  },
+  "api.warning.hooksSave.web": {
+    en: "Saving from a browser removes any scripts and tests this request had.",
+    ar: "الحفظ من متصفح يزيل أي سكربتات واختبارات كانت في هذا الطلب.",
+  },
+  "settings.logoutConfirm.web": {
+    en: "Log out of Jarvis in this browser? You'll need your password to unlock it again.",
+    ar: "تسجيل الخروج من Jarvis في هذا المتصفح؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;
@@ -953,4 +1157,12 @@ export function languageFromLocale(localeTag: string): Language {
 
 export function isRtl(language: Language): boolean {
   return language === "ar";
+}
+
+/** D8: the browser build's variant of `key` (`<key>.web`) when one exists,
+ *  so browser copy says "this browser" where the app says "this phone". */
+export function platformKey(key: MessageKey, platform: ClientPlatform): MessageKey {
+  if (platform !== "web") return key;
+  const web = `${key}.web`;
+  return Object.hasOwn(STRINGS, web) ? (web as MessageKey) : key;
 }

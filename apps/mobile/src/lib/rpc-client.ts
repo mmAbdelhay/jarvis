@@ -11,6 +11,8 @@
 // message text.
 
 import {
+  AUTH_CHANNELS,
+  AUTH_STATE_CHANNEL,
   BLOB_IDLE_TIMEOUT_MS,
   CLOSE,
   HANDSHAKE_TIMEOUT_MS,
@@ -34,6 +36,10 @@ export type ClientState =
   | "connecting"
   | "authenticating"
   | "open"
+  // Phase 0 owner login: the socket is up and welcomed, but the laptop
+  // refuses everything except `auth:*` until the owner unlocks it (see
+  // `unlock()`/`lock()` below).
+  | "locked"
   | "reconnecting"
   | "unpaired"
   | "incompatible"
@@ -88,6 +94,11 @@ export type RpcClientDeps = {
   random(): number;
   client: string;
   log(line: string): void;
+  /** Phase 0: a protocol-v2 `welcome` leaves the connection "locked" until
+   *  `unlock()`. Defaults to true — production never sets it. Tests of
+   *  post-unlock behaviour pass `false` so a welcome goes straight to
+   *  "open" (the same seam the laptop's `OwnerAuth.sessionAtHello` is). */
+  lockedAtWelcome?: boolean;
 };
 
 export type RpcClient = {
@@ -134,6 +145,15 @@ export type RpcClient = {
   // touches the socket itself — the connection stays open (or keeps
   // reconnecting) the whole time.
   setAppActive(active: boolean): void;
+  /** Phase 0: locked -> open once an `auth:*` call unlocked the laptop side:
+   *  re-sends every subscription (the laptop dropped them on lock) and
+   *  flushes the queued requests, exactly as a welcome used to. A no-op in
+   *  any other state. */
+  unlock(): void;
+  /** Phase 0 idle lock (client-side only): open -> locked, dropping every
+   *  subscription on the wire. Requests made while locked queue until the
+   *  next `unlock()`. A no-op unless open. */
+  lock(): void;
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -155,6 +175,7 @@ const DEAD_SOCKET_MS = PING_INTERVAL_MS * (MAX_MISSED_PONGS + 1);
 // locally to route a transport-level `error` event through the same
 // close-code table as every other drop.
 const ABNORMAL_CLOSE = 1006;
+const AUTH_CHANNEL_SET: ReadonlySet<string> = new Set(AUTH_CHANNELS);
 
 type QueuedRequest = {
   channel: string;
@@ -274,6 +295,7 @@ function frameKind(text: string): string {
 
 export function createRpcClient(deps: RpcClientDeps): RpcClient {
   const backoff = createBackoff(deps.random);
+  const lockedAtWelcome = deps.lockedAtWelcome ?? true;
 
   let currentState: ClientState = "idle";
   let session: { endpoint: Endpoint; credential: Credential } | undefined;
@@ -662,7 +684,7 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
 
   function handleMessage(text: string): void {
     lastFrameAtValue = deps.clock.now();
-    if (currentState === "authenticating" || currentState === "open") {
+    if (currentState === "authenticating" || currentState === "open" || currentState === "locked") {
       armWatchdog();
     }
     const msg = parseServerMessage(text);
@@ -689,7 +711,7 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
       selfClose(CLOSE.normal, "protocol violation");
       return;
     }
-    if (msg.t === "welcome" && currentState === "open") {
+    if (msg.t === "welcome" && (currentState === "open" || currentState === "locked")) {
       // A repeated welcome is ignored: no re-subscribe, no capabilities
       // swap, no extra backoff-reset timer.
       deps.log("rpc: duplicate welcome ignored");
@@ -792,13 +814,48 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
     // map still holds every remaining target for `setAppActive(true)` to
     // send later.
     pruneUnsupportedSubscriptions();
+    if (lockedAtWelcome) {
+      // Phase 0: the laptop refuses every `sub` and non-auth `req` until
+      // the owner unlocks — the map and the queue wait for `unlock()`.
+      setState("locked");
+      return;
+    }
+    becomeOpen();
+  }
+
+  /** The tail of every transition into "open": re-subscribe (unless
+   *  suspended), flush the queue, then notify. */
+  function becomeOpen(): void {
     if (!suspended && subscriptionMap.size > 0) {
       sendSubAddAll();
     }
-
     flushQueue();
-
     setState("open");
+  }
+
+  function unlock(): void {
+    if (currentState !== "locked") return;
+    pruneUnsupportedSubscriptions();
+    becomeOpen();
+  }
+
+  function lock(): void {
+    if (currentState !== "open") return;
+    if (!suspended && subscriptionMap.size > 0) {
+      sendSubFrames(
+        "drop",
+        [...subscriptionMap.values()].map((entry) => entry.target),
+      );
+    }
+    setState("locked");
+  }
+
+  /** The laptop locked this connection (an `auth:state` push or an `err
+   *  locked`): it has already dropped every subscription itself. */
+  function lockedByServer(): void {
+    if (currentState !== "open") return;
+    deps.log("rpc: locked by laptop");
+    setState("locked");
   }
 
   function handleRes(id: number, value: unknown): void {
@@ -823,23 +880,35 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
     if (entry === undefined) {
       if (blobDrain?.id === id) clearBlobDrain();
       deps.log(`rpc: stray reply id=${id}`);
+      // A refused `sub` frame is answered id 0 (it carries no id).
+      if (code === "locked") lockedByServer();
       return;
     }
     inFlight.delete(id);
     deps.clock.clearTimeout(entry.timer);
     settleUploadEntry(id, entry);
     entry.resolve({ ok: false, error: { kind: "remote", code, text, language } });
+    if (code === "locked") lockedByServer();
   }
 
   function handlePush(channel: string, payload: unknown, dropped: number | undefined): void {
     const handlers = pushHandlers.get(channel);
-    if (handlers === undefined) return;
-    for (const handler of handlers) {
+    for (const handler of handlers ?? []) {
       try {
         handler(payload, dropped);
       } catch {
         deps.log(`rpc: push handler threw ch=${channel}`);
       }
+    }
+    // After the handlers, so a listener learns the lock's reason before
+    // the "locked" state notification it causes.
+    if (
+      channel === AUTH_STATE_CHANNEL &&
+      typeof payload === "object" &&
+      payload !== null &&
+      (payload as { locked?: unknown }).locked === true
+    ) {
+      lockedByServer();
     }
   }
 
@@ -868,7 +937,11 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
       // M4: `bye` is only meaningful once the server has (or is about to
       // have) a session for us — never on a socket that hasn't finished
       // opening yet.
-      if (currentState === "authenticating" || currentState === "open") {
+      if (
+        currentState === "authenticating" ||
+        currentState === "open" ||
+        currentState === "locked"
+      ) {
         const bye: ClientMessage = { t: "bye" };
         socket.send(encodeMessage(bye));
       }
@@ -888,6 +961,17 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
     return new Promise((resolve) => {
       if (currentState === "open") {
         sendRequest(channel, args, resolve, options?.timeoutMs);
+        return;
+      }
+      // Phase 0: `auth:*` is the one lane a locked connection accepts, and
+      // it is never queued — an unlock attempt made offline must fail now,
+      // not replay later under a different socket.
+      if (AUTH_CHANNEL_SET.has(channel)) {
+        if (currentState === "locked") {
+          sendRequest(channel, args, resolve, options?.timeoutMs);
+        } else {
+          resolve({ ok: false, error: { kind: "offline" } });
+        }
         return;
       }
       // Task 3 / ruling 6: a non-queued call (raw input) must never sit
@@ -1212,5 +1296,7 @@ export function createRpcClient(deps: RpcClientDeps): RpcClient {
     subscriptions: () => [...subscriptionMap.values()].map((entry) => entry.target),
     lastFrameAt: () => lastFrameAtValue,
     setAppActive,
+    unlock,
+    lock,
   };
 }

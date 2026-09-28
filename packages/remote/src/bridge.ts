@@ -6,8 +6,8 @@
 // pull `@peculiar/x509` into `@jarvis/remote`'s main entry).
 //
 // The gate (rule 3): a listener is "wanted" only while the bridge is
-// enabled, not stopped, its devices file is readable, its configured
-// address is a real IP literal, and — the "off by default" rule — either a
+// enabled, not stopped, its devices and owner files are readable, an owner
+// password exists (Phase 0), its configured address is a real IP literal, and — the "off by default" rule — either a
 // device is already paired, a pairing window (or its confirmation, or a
 // pair socket already in flight) is open. Every public method that can
 // change any of those inputs awaits `reconcile()`, the only place the gate
@@ -16,7 +16,7 @@
 // each other opening or closing the listener.
 
 import { join } from "node:path";
-import { isHostname } from "@jarvis/wire";
+import { isHostname, type PairingLink, webPairingUrl } from "@jarvis/wire";
 import { canonicalAddress } from "./address.js";
 import { createAuditLog } from "./audit.js";
 import type { CertificateConfig, CertificateMaterial } from "./certificate.js";
@@ -30,6 +30,12 @@ import type {
 import type { DevicePush, DeviceStore } from "./devices.js";
 import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
+import type { OriginClass } from "./origin.js";
+import type { OwnerHashParams } from "./owner.js";
+import { createOwnerStore } from "./owner.js";
+import { createLoginLimits } from "./login-limits.js";
+import { createOwnerAuth, type DesktopNoticeKind } from "./owner-auth.js";
+import { createSessionStore } from "./sessions.js";
 import { describeError } from "./io.js";
 import type { Clock, RandomBytes, RemoteFs, SessionHandlers, SocketLike, Timers } from "./io.js";
 import type { ChannelPolicies } from "./policy.js";
@@ -44,6 +50,9 @@ import type { SidecarProxy } from "./proxy.js";
 import { CLOSE, formatPairingUri } from "./protocol.js";
 import { createSidecarRegistry } from "./sidecar-registry.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
+// Type-only, like proxy.ts above: web-server.ts (node:https) stays
+// unreachable from this file's value imports.
+import type { WebManifest } from "./web-server.js";
 
 export type BridgeConfig = {
   enabled: boolean;
@@ -58,6 +67,12 @@ export type BridgeConfig = {
    * value through `apply()`. Absent is treated exactly like `0`.
    */
   idleDisableMinutes?: number;
+  /**
+   * Phase 1: the static web client listener beside the bridge. `port` is
+   * the effective port (the desktop computes it; it must differ from
+   * `port`). The listener runs only while the web gate is "on".
+   */
+  web: { enabled: boolean; port: number };
 };
 
 /**
@@ -81,7 +96,18 @@ export type ListenOptions = {
   // config (rule 5) — `listenTls` routes `/s/...` requests/upgrades to it
   // and destroys everything else under that path when it is `undefined`.
   proxy: SidecarProxy | undefined;
-  onSocket(kind: "rpc" | "pair", socket: SocketLike, remoteAddress: string): SessionHandlers;
+  // The web client's origin while the web listener is up, read per
+  // upgrade; `undefined` means only no-Origin and the native Origin pass
+  // the `/rpc` and `/pair` check (origin.ts).
+  webOrigin: () => string | undefined;
+  // `origin` is the upgrade's Origin class (origin.ts); omitted means no
+  // Origin. Web-origin sockets are closed when the web listener closes.
+  onSocket(
+    kind: "rpc" | "pair",
+    socket: SocketLike,
+    remoteAddress: string,
+    origin?: OriginClass,
+  ): SessionHandlers;
   log(line: string): void;
 };
 
@@ -89,12 +115,66 @@ export type Listener = { port: number; close(): Promise<void> };
 
 export type Listen = (options: ListenOptions) => Promise<Listener>;
 
+/** What the bridge hands `listenWeb` (web-server.ts's `listenWeb` accepts it). */
+export type WebListenOptions = {
+  host: string;
+  port: number;
+  cert: string;
+  key: string;
+  /** The certificate's DNS name: the only Host the listener answers. */
+  name: string;
+  manifest: WebManifest;
+  /** The bridge's bound port, for the CSP's `connect-src`. */
+  bridgePort: number;
+};
+
+export type ListenWeb = (options: WebListenOptions) => Promise<Listener>;
+
+/**
+ * Phase 1's web gate. `off` covers a disabled toggle, a bridge that isn't
+ * listening, and the two failures `reason` names: the web port equal to
+ * the bridge's own, or the web port failing to bind (the bridge stays up).
+ */
+export type RemoteWebStatus =
+  | { kind: "off"; reason?: "port-conflict" | "listen-failed" }
+  | { kind: "needs-certificate" | "needs-owner-password" | "not-built" }
+  | { kind: "on"; port: number; origin: string };
+
 export type RemoteProblem =
   | "bad-address"
   | "listen-failed"
   | "certificate-failed"
   | "devices-unreadable"
-  | "devices-write-failed";
+  | "devices-write-failed"
+  /** Enabled in config, but no owner password exists yet (Phase 0): the
+   *  bridge never listens without one. Config is left as it is, so setting
+   *  a password is all it takes to come up. */
+  | "no-owner-password"
+  /** owner.json exists but could not be read or parsed — sticky, like
+   *  devices-unreadable. */
+  | "owner-unreadable"
+  /** sessions.json exists but could not be read — sticky; the bridge never
+   *  listens rather than overwrite the refresh tokens it holds. */
+  | "sessions-unreadable";
+
+/** What desktop Settings shows of the owner account — never a hash, a
+ *  salt or a passkey's public key. */
+export type OwnerStatus = {
+  hasPassword: boolean;
+  passkeys: { id: string; label: string; createdAt: number }[];
+};
+
+/** `mismatch` (the confirm field) never reaches here — it is the
+ *  renderer's own check. */
+export type OwnerPasswordError =
+  | "too-short"
+  | "too-long"
+  | "current-required"
+  | "current-wrong"
+  | "unavailable"
+  | "write-failed";
+
+export type SetOwnerPasswordResult = { ok: true } | { ok: false; code: OwnerPasswordError };
 
 export type RemoteDeviceStatus = {
   id: string;
@@ -102,13 +182,23 @@ export type RemoteDeviceStatus = {
   pairedAt: number;
   lastSeenAt: number | undefined;
   connected: boolean;
+  /** Phase 1: present only for a device paired from the browser build,
+   *  mirroring DeviceSummary.client; absent means the app. */
+  client?: "web";
   /** Platform only, mirroring DeviceSummary.push — never the token (M10). */
   push?: "ios" | "android";
 };
 
 export type RemotePairingStatus =
   | { kind: "closed" }
-  | { kind: "open"; uri: string; expiresAt: number }
+  | {
+      kind: "open";
+      uri: string;
+      expiresAt: number;
+      /** Phase 1: the same pairing data as a browser link
+       *  (`webPairingUrl`), present only while the web listener is on. */
+      webUri?: string;
+    }
   | {
       kind: "confirming";
       requestId: string;
@@ -149,6 +239,18 @@ export type RemoteStatus = {
    * `RemoteStatus` consumers. `status()` (below) always sets it regardless.
    */
   idle?: RemoteIdleStatus;
+  /**
+   * Phase 0: bumped whenever the owner account changes from the remote
+   * side (a passkey registered from a phone or browser), so desktop
+   * Settings re-reads `ownerStatus()` without being reopened.
+   */
+  ownerVersion?: number;
+  /**
+   * Phase 1: the web client listener's gate. Optional in the type for the
+   * same reason as `idle` (Task 9 wires the desktop's consumers);
+   * `status()` always sets it.
+   */
+  web?: RemoteWebStatus;
 };
 
 /** The non-`undefined` half of `RemoteStatus.listening` — the shape this module's own `listening` variable holds. */
@@ -174,6 +276,8 @@ export type BridgeDeps = {
    *  names a channel, it only asks. */
   auditPolicy(channel: string): AuditPolicy;
   enforceFileModes: boolean;
+  /** Test-only: a lower scrypt cost for owner.json. Production omits it. */
+  ownerHashParams?: OwnerHashParams;
   log(line: string): void;
   onStatus(status: RemoteStatus): void;
   onDeviceDisconnected(deviceId: string): void;
@@ -185,6 +289,22 @@ export type BridgeDeps = {
    * from `stop()` (rule 7).
    */
   onIdleDisabled?(): void;
+  /** Phase 0: a desktop OS notification — a login lockout (global, or one
+   *  device's, with that device's name), or a refresh token presented
+   *  again. Optional; defaults to a no-op. */
+  notifyDesktop?(kind: DesktopNoticeKind, deviceName?: string): void;
+  /**
+   * Phase 1: starts the static web listener (listen.ts's `listenWeb`).
+   * Optional until the desktop wires it (Task 9); absent reads as
+   * "not-built".
+   */
+  listenWeb?: ListenWeb;
+  /**
+   * Phase 1: the built web export, or `undefined` when there is none
+   * ("not-built"). A rejection is treated the same, never thrown into the
+   * lifecycle. Optional until the desktop wires it (Task 9).
+   */
+  loadWebManifest?(): Promise<WebManifest | undefined>;
 };
 
 export type Bridge = {
@@ -198,7 +318,9 @@ export type Bridge = {
     target: SidecarTarget,
   ):
     | { url: string }
-    | { unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" };
+    | {
+        unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "locked";
+      };
   push(channel: string, payload: unknown): void;
   hasSubscriber(channel: string): boolean;
   /** Stores this device's Expo push registration beside its record. Answers
@@ -223,6 +345,16 @@ export type Bridge = {
    *  listener is actually up (M10 rule 6). */
   watchingDevices(channel: string, key?: string): ReadonlySet<string>;
   status(): RemoteStatus;
+  /** Phase 0: the owner account, for desktop Settings only. */
+  ownerStatus(): OwnerStatus;
+  /** Sets the first owner password (`current` ignored) or changes it
+   *  (`current` required and verified). The password is never logged,
+   *  audited, echoed in an error or returned. */
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  /** False for an unknown id or a failed write (the passkey is gone from
+   *  memory either way once it existed). */
+  deletePasskey(credentialId: string): Promise<boolean>;
+  signOutEverywhere(): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -238,6 +370,8 @@ function isStickyProblem(problem: RemoteProblem | undefined): boolean {
   return (
     problem === "devices-unreadable" ||
     problem === "devices-write-failed" ||
+    problem === "owner-unreadable" ||
+    problem === "sessions-unreadable" ||
     problem === "listen-failed" ||
     problem === "certificate-failed"
   );
@@ -261,6 +395,11 @@ function computeSidecarGate(
     return "needs-certificate";
   }
   return "on";
+}
+
+/** A browser's Origin for `https://name:port` leaves out the default port. */
+function webOriginFor(name: string, port: number): string {
+  return port === 443 ? `https://${name}` : `https://${name}:${port}`;
 }
 
 /**
@@ -296,6 +435,15 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     log: deps.log,
   });
 
+  const owner = createOwnerStore({
+    fs: deps.fs,
+    path: join(deps.dir, "owner.json"),
+    random: deps.random,
+    now: deps.now,
+    enforceFileModes: deps.enforceFileModes,
+    ...(deps.ownerHashParams !== undefined ? { hashParams: deps.ownerHashParams } : {}),
+  });
+
   // Rule 5: one registry for this bridge's whole lifetime, emptied (never
   // recreated) on every device revoke, listener teardown/restart and stop —
   // see the `sidecarRegistry.clear()`/`revokeDevice()` calls below.
@@ -317,6 +465,74 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     auditLog.record({ kind: "error", detail: describeError(error) });
   }
 
+  let ownerReadable = true;
+  try {
+    await owner.load();
+  } catch (error) {
+    ownerReadable = false;
+    problem ??= "owner-unreadable";
+    deps.log(`bridge: owner.load failed: ${describeError(error)}`);
+    auditLog.record({ kind: "error", detail: describeError(error) });
+  }
+  const sessions = createSessionStore({
+    fs: deps.fs,
+    path: join(deps.dir, "sessions.json"),
+    random: deps.random,
+    now: deps.now,
+    enforceFileModes: deps.enforceFileModes,
+  });
+  // Loaded before anything can issue or refresh a token: the first write
+  // would otherwise replace sessions.json with only the new records.
+  let sessionsReadable = true;
+  try {
+    await sessions.load();
+  } catch (error) {
+    sessionsReadable = false;
+    problem ??= "sessions-unreadable";
+    deps.log(`bridge: sessions.load failed: ${describeError(error)}`);
+    auditLog.record({ kind: "error", detail: describeError(error) });
+  }
+
+  const notifyDesktop = (...notice: [kind: DesktopNoticeKind, deviceName?: string]): void =>
+    deps.notifyDesktop?.(...notice);
+  // Bumped on every remote owner-account change; carried in RemoteStatus.
+  let ownerVersion = 0;
+  const ownerAuth = createOwnerAuth({
+    owner,
+    sessions,
+    random: deps.random,
+    now: deps.now,
+    // The relying party is the configured certificate's DNS name — never a
+    // self-signed one's, which no browser would accept for WebAuthn.
+    rpId: () =>
+      listening?.certificate.source === "configured" ? listening.certificate.hostname : undefined,
+    webOrigin: () => webListening?.origin,
+    onPasskeyAdded() {
+      ownerVersion += 1;
+      emit();
+    },
+    removePasskey: (credentialId) => deletePasskey(credentialId),
+    audit: auditLog,
+    log: deps.log,
+    lockFamily(familyId, reason) {
+      hub.lockFamily(familyId, reason);
+    },
+    // In memory only: a restart forgets every failure count and lockout.
+    limits: createLoginLimits({
+      now: deps.now,
+      audit: auditLog,
+      notifyDesktop,
+      deviceName: (deviceId) => devices.list().find((device) => device.id === deviceId)?.name,
+      log: deps.log,
+    }),
+    notifyDesktop,
+  });
+
+  // Owner-account changes (set/change password, passkey delete) run one at
+  // a time: a change verifies the current password and then replaces it,
+  // and two of those interleaving could both pass the check.
+  let ownerQueue: Promise<unknown> = Promise.resolve();
+
   // No default: "the bind address comes only from config" — until the first
   // `apply()`, there is no config at all, so nothing here ever holds a
   // literal address of its own to fall back on.
@@ -332,6 +548,17 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   // response) — `undefined` whenever nothing is listening or the gate
   // wasn't "on" for it, exactly mirroring `listening`.
   let currentProxy: SidecarProxy | undefined;
+  // Phase 1: the web listener. `webKey` is the gate key last *attempted*
+  // (success, not-built or bind failure alike), so a failed attempt is not
+  // retried on every unrelated reconcile — only when the key changes or
+  // the next `apply()` clears it. `webOutcome` is that attempt's failure.
+  let webListener: Listener | undefined;
+  let webListening: { port: number; origin: string } | undefined;
+  let webKey: string | undefined;
+  let webOutcome: "not-built" | "listen-failed" | undefined;
+  // The certificate the current bridge listener serves — the web listener
+  // serves the same one.
+  let listenerMaterial: { cert: string; key: string } | undefined;
   let queue: Promise<void> = Promise.resolve();
 
   // M12 Task 1: the bridge's own idle timer. `idleSince` is set the moment
@@ -472,8 +699,14 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // listen/certificate failure from below) are left exactly as their own
     // caller set them — this baseline must never clobber one of those.
     if (!isStickyProblem(problem)) {
-      problem =
-        (config?.enabled ?? false) && !stopped && host === undefined ? "bad-address" : undefined;
+      const active = (config?.enabled ?? false) && !stopped;
+      problem = !active
+        ? undefined
+        : !owner.hasPassword()
+          ? "no-owner-password"
+          : host === undefined
+            ? "bad-address"
+            : undefined;
     }
 
     const wanted =
@@ -482,6 +715,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       config.enabled &&
       !idleDisabled &&
       devicesReadable &&
+      ownerReadable &&
+      sessionsReadable &&
+      owner.hasPassword() &&
       host !== undefined &&
       (devices.count() > 0 || pairing.status().kind !== "closed" || pairSessions > 0);
 
@@ -497,10 +733,15 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         : undefined;
 
     if (desiredKey !== listenerKey) {
+      // The web listener goes first: it never outlives (or briefly
+      // outlasts) the bridge listener its page talks to.
+      await closeWeb();
+      webKey = undefined;
       const oldListener = listener;
       listener = undefined;
       listening = undefined;
       listenerKey = undefined;
+      listenerMaterial = undefined;
       currentProxy = undefined;
       if (oldListener !== undefined) {
         hub.closeAll(CLOSE.goingAway);
@@ -564,6 +805,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             cert: material.cert,
             key: material.key,
             proxy,
+            webOrigin: () => webListening?.origin,
             onSocket,
             log: deps.log,
           });
@@ -578,6 +820,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
 
         listener = newListener;
         listenerKey = desiredKey;
+        listenerMaterial = { cert: material.cert, key: material.key };
         currentProxy = proxy;
         listening = {
           host,
@@ -600,17 +843,126 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       }
     }
 
+    await reconcileWeb();
     checkIdle();
     emit();
+  }
+
+  /** The configured certificate's DNS name the web gate needs, if the live listener has one. */
+  function webHostname(): string | undefined {
+    return listening?.certificate.source === "configured"
+      ? listening.certificate.hostname
+      : undefined;
+  }
+
+  async function closeWeb(): Promise<void> {
+    const old = webListener;
+    webListener = undefined;
+    webListening = undefined;
+    // Final review I1: the web Origin is checked once per upgrade, so every
+    // socket it admitted (rpc or pair, logged in or not) goes with the
+    // listener, and so do those browsers' sidecar handles. Run even with no
+    // listener up: it is a no-op then.
+    for (const deviceId of hub.closeWebOrigin(CLOSE.goingAway)) {
+      teardownDeviceSidecars(deviceId);
+    }
+    if (old === undefined) return;
+    try {
+      await old.close();
+    } catch (error) {
+      deps.log(`bridge: web listener close failed: ${describeError(error)}`);
+    }
+  }
+
+  /**
+   * Phase 1's web gate, run at the end of every `step()`: the web listener
+   * runs only beside a live bridge listener, with the toggle on, a web port
+   * other than the bridge's, a configured certificate carrying a DNS name,
+   * an owner password, and a built export. A bind failure here is the web
+   * listener's alone — the bridge stays up.
+   */
+  async function reconcileWeb(): Promise<void> {
+    const hostname = webHostname();
+    const wantedKey =
+      config !== undefined &&
+      listener !== undefined &&
+      listening !== undefined &&
+      listenerMaterial !== undefined &&
+      config.web.enabled &&
+      config.web.port !== listening.port &&
+      hostname !== undefined &&
+      owner.hasPassword()
+        ? JSON.stringify([listenerKey, config.web.port])
+        : undefined;
+    if (wantedKey === webKey) return;
+
+    await closeWeb();
+    webKey = wantedKey;
+    webOutcome = undefined;
+    if (
+      wantedKey === undefined ||
+      config === undefined ||
+      listening === undefined ||
+      listenerMaterial === undefined ||
+      hostname === undefined
+    ) {
+      return;
+    }
+
+    let manifest: WebManifest | undefined;
+    try {
+      manifest = await deps.loadWebManifest?.();
+    } catch (error) {
+      deps.log(`bridge: loadWebManifest failed: ${describeError(error)}`);
+      manifest = undefined;
+    }
+    if (manifest === undefined || deps.listenWeb === undefined) {
+      webOutcome = "not-built";
+      return;
+    }
+
+    try {
+      const started = await deps.listenWeb({
+        host: listening.host,
+        port: config.web.port,
+        cert: listenerMaterial.cert,
+        key: listenerMaterial.key,
+        name: hostname,
+        manifest,
+        bridgePort: listening.port,
+      });
+      webListener = started;
+      webListening = { port: started.port, origin: webOriginFor(hostname, started.port) };
+      auditLog.record({ kind: "web-listening", port: started.port });
+    } catch (error) {
+      webOutcome = "listen-failed";
+      deps.log(`bridge: web listen failed: ${describeError(error)}`);
+      auditLog.record({ kind: "error", detail: `web listen failed: ${describeError(error)}` });
+    }
+  }
+
+  function webStatus(): RemoteWebStatus {
+    if (webListening !== undefined) return { kind: "on", ...webListening };
+    if (config === undefined || !config.enabled || stopped || idleDisabled || !config.web.enabled) {
+      return { kind: "off" };
+    }
+    if (!owner.hasPassword()) return { kind: "needs-owner-password" };
+    if (listening === undefined) return { kind: "off" };
+    if (config.web.port === listening.port) return { kind: "off", reason: "port-conflict" };
+    if (webHostname() === undefined) return { kind: "needs-certificate" };
+    if (webOutcome === "not-built") return { kind: "not-built" };
+    if (webOutcome === "listen-failed") return { kind: "off", reason: "listen-failed" };
+    return { kind: "off" };
   }
 
   function onSocket(
     kind: "rpc" | "pair",
     socket: SocketLike,
     remoteAddress: string,
+    origin?: OriginClass,
   ): SessionHandlers {
     const source = canonicalAddress(remoteAddress) ?? remoteAddress;
-    return hub.accept(kind, socket, source);
+    return hub.accept(kind, socket, source, origin);
   }
 
   const pairing = createPairing({
@@ -644,6 +996,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     log: deps.log,
     audit: auditLog,
     auditPolicy: deps.auditPolicy,
+    ownerAuth,
+    onLock(deviceId) {
+      teardownDeviceSidecars(deviceId);
+    },
     touch(id) {
       devices
         .touch(id)
@@ -718,21 +1074,30 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (pairingStatus.kind === "confirming") {
       remotePairing = pairingStatus;
     } else if (pairingStatus.kind === "open" && listening !== undefined) {
+      const link: PairingLink = {
+        host: listening.host,
+        port: listening.port,
+        secret: pairingStatus.secret,
+        fingerprint: listening.fingerprint,
+        // Ruling 1/rule 7: `name` rides along only when the served
+        // certificate is a configured one carrying a DNS SAN — the same
+        // condition that makes the sidecar gate anything but "off".
+        ...(listening.certificate.hostname !== undefined
+          ? { name: listening.certificate.hostname }
+          : {}),
+      };
+      // Phase 1: the browser link carries the web listener's certificate
+      // name, which is the one the web origin is built from.
+      const webName = webHostname();
+      const webUri =
+        webListening !== undefined && webName !== undefined
+          ? webPairingUrl({ ...link, name: webName }, webListening.port)
+          : undefined;
       remotePairing = {
         kind: "open",
-        uri: formatPairingUri({
-          host: listening.host,
-          port: listening.port,
-          secret: pairingStatus.secret,
-          fingerprint: listening.fingerprint,
-          // Ruling 1/rule 7: `name` rides along only when the served
-          // certificate is a configured one carrying a DNS SAN — the same
-          // condition that makes the sidecar gate anything but "off".
-          ...(listening.certificate.hostname !== undefined
-            ? { name: listening.certificate.hostname }
-            : {}),
-        }),
+        uri: formatPairingUri(link),
         expiresAt: pairingStatus.expiresAt,
+        ...(webUri !== undefined ? { webUri } : {}),
       };
     } else {
       // Rule 10: pairing reads as "open" only while a listener is actually
@@ -749,6 +1114,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       pairedAt: device.pairedAt,
       lastSeenAt: device.lastSeenAt,
       connected: connected.has(device.id),
+      ...(device.client !== undefined ? { client: device.client } : {}),
       ...(device.push !== undefined ? { push: device.push } : {}),
     }));
 
@@ -760,6 +1126,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       problem,
       sidecarProxy: sidecarProxyStatus(),
       idle: idleStatusValue(),
+      ownerVersion,
+      web: webStatus(),
     };
   }
 
@@ -778,6 +1146,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // (rule 5's next sentence): it survives an `enabled: false` apply and
     // is cleared only by one with `enabled: true`, or by `stop()`.
     idleDisabled = false;
+    // A web attempt that ended not-built or failed to bind is tried again
+    // on every apply (the export may have been built since, the port
+    // freed); a running web listener is left alone.
+    if (webListener === undefined) webKey = undefined;
     effectiveIdleMinutes = resolveIdleDisableMinutes(newConfig.idleDisableMinutes, deps.log);
     if (newConfig.enabled) idleDisabledRecord = undefined;
     config = {
@@ -785,6 +1157,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       bindAddress: newConfig.bindAddress,
       port: newConfig.port,
       sidecarProxy: newConfig.sidecarProxy,
+      web: { enabled: newConfig.web.enabled, port: newConfig.web.port },
       tls: {
         ...(newConfig.tls.certPath !== undefined ? { certPath: newConfig.tls.certPath } : {}),
         ...(newConfig.tls.keyPath !== undefined ? { keyPath: newConfig.tls.keyPath } : {}),
@@ -818,21 +1191,35 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     return pairing.decide(requestId, approve);
   }
 
-  async function revoke(deviceId: string): Promise<boolean> {
-    unsavedPushRegistrations.delete(deviceId);
-    const written = devices.revoke(deviceId);
-    // Rule 5: a revoked device's handles die before its sockets do.
+  /**
+   * Rule 5: a device's sidecar handles die before its live sidecar sockets
+   * do. Controller ruling (Task 2 fix round 1): an already-piped upgrade or
+   * a still-streaming response must die with its handle, not linger until
+   * the phone drops it or the listener restarts. Used by revoke (before
+   * `hub.closeDevice`, per the ruling's ordering) and by every lock (Phase
+   * 0: sidecars follow the session). Returns the sidecar sockets closed.
+   */
+  function teardownDeviceSidecars(deviceId: string): number {
     const clearedCount = sidecarRegistry.revokeDevice(deviceId);
     if (clearedCount > 0) {
       auditLog.record({ kind: "sidecars-cleared", count: clearedCount });
     }
-    // Controller ruling (Task 2 fix round 1): revocation must be total —
-    // an already-piped upgrade or a still-streaming response for this
-    // device must die with its handle, not linger until the phone drops it
-    // or the listener restarts. Right after `revokeDevice`, before
-    // `hub.closeDevice` (the `/rpc` session), per the ruling's ordering.
-    const closedSidecarSockets = currentProxy?.closeDevice(deviceId) ?? 0;
+    return currentProxy?.closeDevice(deviceId) ?? 0;
+  }
+
+  async function revoke(deviceId: string): Promise<boolean> {
+    unsavedPushRegistrations.delete(deviceId);
+    const written = devices.revoke(deviceId);
+    // Phase 0: the device's refresh tokens go with it (gone from memory now;
+    // the write is awaited below).
+    const sessionsRevoked = sessions.revokeDevice(deviceId);
+    const closedSidecarSockets = teardownDeviceSidecars(deviceId);
     const closed = hub.closeDevice(deviceId, CLOSE.revoked);
+    try {
+      await sessionsRevoked;
+    } catch (error) {
+      deps.log(`bridge: sessions.revokeDevice failed: ${describeError(error)}`);
+    }
     let ok: boolean;
     try {
       ok = await written;
@@ -960,7 +1347,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     target: SidecarTarget,
   ):
     | { url: string }
-    | { unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" } {
+    | {
+        unavailable: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "locked";
+      } {
     const sidecarProxyEnabled = config?.sidecarProxy ?? false;
     if (!sidecarProxyEnabled) return { unavailable: "off" };
     if (listening === undefined) return { unavailable: "not-listening" };
@@ -976,6 +1365,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (!devices.list().some((device) => device.id === deviceId)) {
       return { unavailable: "unknown-device" };
     }
+    // A handle is only ever minted for a logged-in device: a request that
+    // was admitted before its connection locked must not leave one behind.
+    if (!hub.hasUnlockedConnection(deviceId)) return { unavailable: "locked" };
 
     const { handle, key } = sidecarRegistry.publish(deviceId, target);
     auditLog.record({
@@ -994,6 +1386,103 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   /** False while not listening (rule 8) — a phone can hold no subscription without a live socket. */
   function hasSubscriber(channel: string): boolean {
     return listening !== undefined && hub.hasSubscriber(channel);
+  }
+
+  /**
+   * The one place every owner-credential invalidation (spec rule 8)
+   * converges: a password change, a passkey delete, "Sign out everywhere".
+   * Synchronously: a login or refresh still in flight is refused, every
+   * access token and refresh token is gone from memory, every open
+   * connection is locked (its socket left open), and every device's sidecar
+   * handles and live sidecar sockets are destroyed. Only the sessions.json
+   * write lands later.
+   */
+  function invalidateOwnerSessions(
+    reason: "password-changed" | "passkey-deleted" | "signed-out-everywhere",
+  ): void {
+    ownerAuth.invalidate();
+    auditLog.record({ kind: "signed-out-all", reason });
+    sessions.revokeAll().catch((error: unknown) => {
+      deps.log(`bridge: sessions.revokeAll failed: ${describeError(error)}`);
+    });
+    hub.lockAll("signed-out");
+    const clearedCount = sidecarRegistry.count();
+    sidecarRegistry.clear();
+    if (clearedCount > 0) {
+      auditLog.record({ kind: "sidecars-cleared", count: clearedCount });
+    }
+    for (const device of devices.list()) currentProxy?.closeDevice(device.id);
+  }
+
+  function ownerStatus(): OwnerStatus {
+    return {
+      hasPassword: owner.hasPassword(),
+      passkeys: owner.listPasskeys().map((record) => ({
+        id: record.credentialId,
+        label: record.label,
+        createdAt: record.createdAt,
+      })),
+    };
+  }
+
+  function queueOwnerChange<T>(change: () => Promise<T>): Promise<T> {
+    const task = ownerQueue.then(change, change);
+    ownerQueue = task.catch(() => undefined);
+    return task;
+  }
+
+  function setOwnerPassword(
+    current: string | undefined,
+    next: string,
+  ): Promise<SetOwnerPasswordResult> {
+    return queueOwnerChange(async (): Promise<SetOwnerPasswordResult> => {
+      if (stopped || !ownerReadable) return { ok: false, code: "unavailable" };
+      const hadPassword = owner.hasPassword();
+      if (hadPassword) {
+        if (current === undefined || current === "") {
+          return { ok: false, code: "current-required" };
+        }
+        if (!(await owner.verifyPassword(current))) return { ok: false, code: "current-wrong" };
+      }
+      let result: Awaited<ReturnType<typeof owner.setPassword>>;
+      try {
+        result = await owner.setPassword(next);
+      } catch {
+        // Fixed text only: nothing thrown from a call that held the
+        // password is ever interpolated into a log line.
+        deps.log("bridge: owner.setPassword failed");
+        return { ok: false, code: "write-failed" };
+      }
+      if (result !== "ok") return { ok: false, code: result };
+      auditLog.record({ kind: hadPassword ? "owner-password-changed" : "owner-password-set" });
+      if (hadPassword) invalidateOwnerSessions("password-changed");
+      // A first password is what lets an already-enabled bridge listen.
+      await reconcile();
+      return { ok: true };
+    });
+  }
+
+  function deletePasskey(credentialId: string): Promise<boolean> {
+    return queueOwnerChange(async () => {
+      if (!owner.listPasskeys().some((record) => record.credentialId === credentialId)) {
+        return false;
+      }
+      let ok = true;
+      try {
+        await owner.deletePasskey(credentialId);
+      } catch (error) {
+        deps.log(`bridge: owner.deletePasskey failed: ${describeError(error)}`);
+        ok = false;
+      }
+      auditLog.record({ kind: "passkey-deleted", credentialTail: credentialId.slice(-4) });
+      invalidateOwnerSessions("passkey-deleted");
+      return ok;
+    });
+  }
+
+  async function signOutEverywhere(): Promise<void> {
+    auditLog.record({ kind: "signed-out-everywhere" });
+    invalidateOwnerSessions("signed-out-everywhere");
   }
 
   async function stop(): Promise<void> {
@@ -1026,6 +1515,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // this is the fix for that carry-over.
     await auditLog.flushed();
     await devices.flushed();
+    await owner.flushed();
+    await sessions.flushed();
   }
 
   return {
@@ -1043,6 +1534,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     recordPushQueued,
     watchingDevices,
     status,
+    ownerStatus,
+    setOwnerPassword,
+    deletePasskey,
+    signOutEverywhere,
     stop,
   };
 }

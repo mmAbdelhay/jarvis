@@ -60,6 +60,16 @@ describe("app.config.ts", () => {
     expect(entry?.[1].enableBackgroundRecording).not.toBe(true);
   });
 
+  // Phase 0 owner login: the stored refresh token sits behind the
+  // device-owner check (device-auth.ts), which needs
+  // NSFaceIDUsageDescription — written by the expo-local-authentication
+  // plugin (English: one plist string per app).
+  test("the expo-local-authentication entry carries a faceIDPermission", () => {
+    const text = findPlugin("expo-local-authentication")?.[1].faceIDPermission;
+    expect(typeof text).toBe("string");
+    expect(LATIN_LETTER.test(text as string)).toBe(true);
+  });
+
   test("the existing plugins are still present", () => {
     const names = (config.plugins ?? []).map((plugin) =>
       Array.isArray(plugin) ? plugin[0] : plugin,
@@ -122,5 +132,31 @@ describe("app.config.ts: orientation (sidecar landscape fix)", () => {
       readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
     ) as { dependencies?: Record<string, string> };
     expect(packageJson.dependencies?.["expo-screen-orientation"]).toBeDefined();
+  });
+});
+
+// Wide layout final review I2: Expo's default is `supportsTablet: false`,
+// which ships an iPhone-only build that an iPad runs in an iPhone-sized
+// compatibility window — never wide, and portrait-locked as a phone.
+describe("app.config.ts: iPad (wide layout)", () => {
+  test("ios.supportsTablet is true [bite-proof: drop it and an iPad never gets the wide layout]", () => {
+    expect(config.ios?.supportsTablet).toBe(true);
+  });
+});
+
+describe("app.config.ts: web target (Task 12)", () => {
+  test("web is a single-page Metro export", () => {
+    expect(config.web).toMatchObject({ output: "single", bundler: "metro" });
+  });
+
+  test("export:web writes to dist-web then emits the static terminal page, and react-dom/react-native-web are exact pins", () => {
+    const packageJson = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
+    ) as { dependencies?: Record<string, string>; scripts?: Record<string, string> };
+    expect(packageJson.scripts?.["export:web"]).toBe(
+      "expo export --platform web --output-dir dist-web && node scripts/emit-terminal-web.mjs dist-web",
+    );
+    expect(packageJson.dependencies?.["react-dom"]).toBe("19.2.3");
+    expect(packageJson.dependencies?.["react-native-web"]).toBe("0.21.3");
   });
 });

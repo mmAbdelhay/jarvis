@@ -35,12 +35,14 @@ import {
 import {
   bindChoices,
   type InterfaceMap,
+  type OwnerStatus,
   type PairingResult,
   type RemoteStatus,
+  type SetOwnerPasswordResult,
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
-import { isDevToolsDock, type BrowserHost } from "./browser-host.js";
+import type { TabHost } from "./core/tab-host.js";
 import type { JarvisConfig } from "./config.js";
 import {
   DESKTOP_OWNER,
@@ -66,6 +68,7 @@ import {
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
+import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 
@@ -87,7 +90,13 @@ export function invalidArgument(language: "ar" | "en"): GitViewResult<never> {
  *  (the reason is developer detail; the phone only ever gets one of two
  *  bilingual sentences, MESSAGES.sidecarProxyUnavailable's own text). */
 function sidecarPublishRefused(
-  reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target",
+  reason:
+    | "off"
+    | "needs-certificate"
+    | "not-listening"
+    | "unknown-device"
+    | "locked"
+    | "bad-target",
   language: "ar" | "en",
 ): GitViewResult<never> {
   console.error(`sidecar publish refused: ${reason}`);
@@ -104,6 +113,11 @@ export type RemoteControls = {
   cancelPairing(): void;
   decidePairing(requestId: string, approve: boolean): boolean;
   revoke(deviceId: string): Promise<boolean>;
+  /** Phase 0: the owner account, desktop-only. */
+  ownerStatus(): OwnerStatus;
+  setOwnerPassword(current: string | undefined, next: string): Promise<SetOwnerPasswordResult>;
+  deletePasskey(credentialId: string): Promise<boolean>;
+  signOutEverywhere(): Promise<void>;
   /** M10 Task 4: stores this device's Expo push registration — always the
    *  authenticated origin's own `deviceId`, never one carried in `args`. */
   registerPush(deviceId: string, registration: PushRegistration): Promise<PushRegisterResult>;
@@ -131,19 +145,40 @@ export type SidecarPublisher = {
     | { ok: true; url: string }
     | {
         ok: false;
-        reason: "off" | "needs-certificate" | "not-listening" | "unknown-device" | "bad-target";
+        reason:
+          | "off"
+          | "needs-certificate"
+          | "not-listening"
+          | "unknown-device"
+          | "locked"
+          | "bad-target";
       };
 };
 
-/** The five handlers that hold a BrowserWindow, the screen, a native dialog
- *  or a native menu. They can never run for a phone, so they never enter the
- *  table — desktop-only.ts registers them. */
+/** The handlers that hold a BrowserWindow, the screen, a native dialog, a
+ *  native menu or a hosted page's WebContentsView (view-reconciler.ts).
+ *  They can never run for a phone, nor in a headless core, so they never
+ *  enter the table — desktop-only.ts registers them in the Electron host. */
 export type ElectronBoundChannel =
   | "workspace:bounds"
   | "workspace:devtoolsBounds"
   | "workspace:devtoolsDockMenu"
   | "workspace:tabMenu"
-  | "dialog:pickFiles";
+  | "workspace:back"
+  | "workspace:forward"
+  | "workspace:reload"
+  | "workspace:devtools"
+  | "workspace:devtoolsDock"
+  | "workspace:visible"
+  | "workspace:hideAll"
+  | "workspace:pip"
+  | "dialog:pickFiles"
+  // Task 23: where the core runs is the host's to decide — these start,
+  // stop and replace the core itself (daemon/mode.ts).
+  | "background:status"
+  | "background:setEnabled"
+  | "background:restart"
+  | "background:stopNow";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 
@@ -194,22 +229,17 @@ export type DispatchDeps = {
   sessionResume: ReturnType<typeof createResumeInTerminalHandler>;
   voice: { setTarget(sessionId: string | undefined): void };
   git: Pick<GitHandlers, "changes" | "fileDiff" | "setStaged" | "commit">;
+  /** The core's tab state (core/tab-host.ts). What only a hosted page's
+   *  view can do — back, reload, DevTools, visibility — is not here: those
+   *  channels are Electron-bound (desktop-only.ts). */
   workspace: Pick<
-    BrowserHost,
+    TabHost,
     | "open"
     | "close"
     | "activate"
     | "rename"
     | "move"
     | "navigate"
-    | "back"
-    | "forward"
-    | "reload"
-    | "setDevTools"
-    | "setDevToolsDock"
-    | "setVisible"
-    | "hideAll"
-    | "requestPictureInPicture"
     | "openDocker"
     | "openApi"
     | "state"
@@ -281,6 +311,10 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // Phase 1: Electron's shell.openExternal — the system browser, never a
+  // window inside Jarvis. Only remote:openWebClient calls it, with a URL
+  // built from the bridge's own status.
+  openExternal(url: string): Promise<void>;
 };
 
 /** A terminal/session pty resize dimension: a plain positive integer, no
@@ -521,27 +555,6 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "workspace:navigate": ([id, input]) => {
       if (typeof id === "string" && typeof input === "string") workspace.navigate(id, input);
     },
-    "workspace:back": ([id]) => {
-      if (typeof id === "string") workspace.back(id);
-    },
-    "workspace:forward": ([id]) => {
-      if (typeof id === "string") workspace.forward(id);
-    },
-    "workspace:reload": ([id]) => {
-      if (typeof id === "string") workspace.reload(id);
-    },
-    "workspace:devtools": ([tabId, open]) => {
-      if (typeof tabId !== "string" || typeof open !== "boolean") return;
-      workspace.setDevTools(tabId, open);
-    },
-    "workspace:devtoolsDock": ([dock]) => {
-      if (isDevToolsDock(dock)) workspace.setDevToolsDock(dock);
-    },
-    "workspace:visible": ([visible]) => workspace.setVisible(visible === true),
-    "workspace:hideAll": () => workspace.hideAll(),
-    "workspace:pip": ([tabId]) => {
-      if (typeof tabId === "string") workspace.requestPictureInPicture(tabId);
-    },
     "workspace:snapshot": () => workspace.state(),
     "terminal:panes": (args) => {
       if (args.length !== 1) return [];
@@ -698,7 +711,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       if (typeof tabId !== "string") return;
       deps.followers.unfollow(tabId, origin.kind === "remote" ? origin.deviceId : DESKTOP_OWNER);
     },
-    // Opening the tab is main's job (only it holds the BrowserHost); deciding
+    // Opening the tab is the core's job (its TabHost holds the tabs); deciding
     // whether one already exists is the renderer's, exactly as it is for the
     // Editor and Database buttons.
     "api:open": ([project]) => {
@@ -940,10 +953,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // Ignored unless both arguments are already the shape the confirmation
     // dialog can only ever produce — a phone cannot reach this channel at
     // all (desktop-only), but the coercion stays exactly as strict as every
-    // other boundary here.
+    // other boundary here. The result says whether the decision reached a
+    // live request: the jarvisd CLI reports "approved" only then (a y/N
+    // answered after the request expired lands on nothing).
     "remote:decidePair": ([requestId, approve]) => {
-      if (typeof requestId !== "string" || typeof approve !== "boolean") return;
-      deps.remote.decidePairing(requestId, approve);
+      if (typeof requestId !== "string" || typeof approve !== "boolean") return false;
+      return deps.remote.decidePairing(requestId, approve);
     },
     "remote:revoke": async ([deviceId]) => {
       if (typeof deviceId !== "string") return invalidArgument(deps.language);
@@ -956,6 +971,51 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         };
       }
       return { ok: true, value: undefined };
+    },
+    // Phase 0, owner login: desktop-only (remote-policy.ts), and each
+    // mutating one refuses a remote origin again here, belt and braces —
+    // the owner account is never changed from a paired device.
+    "remote:ownerStatus": () => deps.remote.ownerStatus(),
+    "remote:setOwnerPassword": ([current, next], origin) => {
+      const refused: SetOwnerPasswordResult = { ok: false, code: "unavailable" };
+      if (origin.kind === "remote") return refused;
+      // `undefined` may arrive as `null` across IPC; either means "none".
+      const currentValue = current === null || current === undefined ? undefined : current;
+      if (
+        (currentValue !== undefined && typeof currentValue !== "string") ||
+        typeof next !== "string"
+      ) {
+        return refused;
+      }
+      return deps.remote.setOwnerPassword(currentValue, next);
+    },
+    "remote:deletePasskey": async ([credentialId], origin) => {
+      if (origin.kind === "remote" || typeof credentialId !== "string") {
+        return invalidArgument(deps.language);
+      }
+      const ok = await deps.remote.deletePasskey(credentialId);
+      if (!ok) {
+        return {
+          ok: false,
+          text: MESSAGES.remoteOwnerPasskeyDeleteFailed(deps.language),
+          language: deps.language,
+        };
+      }
+      return { ok: true, value: undefined };
+    },
+    "remote:signOutEverywhere": async (_args, origin) => {
+      if (origin.kind === "remote") return;
+      await deps.remote.signOutEverywhere();
+    },
+    // Phase 1: desktop-only (remote-policy.ts), refused here again. Any
+    // argument is ignored: the URL comes only from the bridge's status, and
+    // remoteWebUrl only ever builds an https URL from the web origin.
+    "remote:openWebClient": async (_args, origin) => {
+      if (origin.kind === "remote") return false;
+      const url = remoteWebUrl(deps.remote.status());
+      if (url === undefined || !url.startsWith("https://")) return false;
+      await deps.openExternal(url);
+      return true;
     },
     // M10 Task 4: a phone's own Expo push registration. Remote only
     // (remote-policy.ts) — a desktop origin is refused outright, belt and

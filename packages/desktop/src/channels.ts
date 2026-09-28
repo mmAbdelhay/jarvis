@@ -207,6 +207,10 @@ export const INVOKE_CHANNELS = {
   saveSettings: "settings:save",
   testAgent: "settings:testAgent",
   restartApp: "settings:restart",
+  backgroundStatus: "background:status",
+  setBackgroundEnabled: "background:setEnabled",
+  restartBackground: "background:restart",
+  stopBackgroundNow: "background:stopNow",
   getProjects: "projects:list",
   remoteBindChoices: "remote:bindChoices",
   remoteStatus: "remote:status",
@@ -214,6 +218,12 @@ export const INVOKE_CHANNELS = {
   cancelRemotePairing: "remote:cancelPair",
   decideRemotePairing: "remote:decidePair",
   revokeRemoteDevice: "remote:revoke",
+  // Phase 0, owner login: the owner account is created and managed only
+  // from the laptop — all four are desktop-only (remote-policy.ts).
+  ownerStatus: "remote:ownerStatus",
+  setOwnerPassword: "remote:setOwnerPassword",
+  deletePasskey: "remote:deletePasskey",
+  signOutEverywhere: "remote:signOutEverywhere",
   // M10 Task 4: a phone's own Expo push registration — acts only on the
   // authenticated device, never a device id in the arguments.
   registerPush: "remote:registerPush",
@@ -223,6 +233,9 @@ export const INVOKE_CHANNELS = {
   // keyPath and turns remote.sidecarProxy on, through the same serialized
   // writeConfig queue Settings' own save uses. See tailscale-cert.ts.
   tailscaleCert: "remote:tailscaleCert",
+  // Desktop-only (Phase 1): opens the browser client in the system
+  // browser. Takes no URL — main builds it from the bridge's own status.
+  openWebClient: "remote:openWebClient",
 } as const satisfies Record<InvokeKey, string>;
 
 /** Method → channel, for every push. */

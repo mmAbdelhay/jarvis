@@ -44,7 +44,12 @@ function collectSourceFiles(dir: string): string[] {
 
 describe("no hard-coded left/right styles (ruling 6)", () => {
   it("app/ and src/components/ never use marginLeft/Right, paddingLeft/Right or left:/right:", () => {
-    const targets = [join(MOBILE_ROOT, "app"), join(MOBILE_ROOT, "src", "components")];
+    // src/screens holds screen content moved out of app/ (wide layout).
+    const targets = [
+      join(MOBILE_ROOT, "app"),
+      join(MOBILE_ROOT, "src", "components"),
+      join(MOBILE_ROOT, "src", "screens"),
+    ];
     const offenders: string[] = [];
 
     for (const dir of targets) {

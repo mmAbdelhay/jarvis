@@ -3,12 +3,41 @@ import { isAbsolute } from "node:path";
 /** ruling 4: the output is bounded to this many seconds whatever the input claims. */
 export const TRANSCODE_MAX_SECONDS = 120;
 
+export type AudioDemuxer = "mov" | "webm";
+
+/**
+ * Identifies only the two container families accepted for voice uploads:
+ * any ISO-BMFF `ftyp` file (the brand is checked separately by
+ * {@link isMp4Audio}) or an EBML (WebM/Matroska) file.
+ */
+export function sniffAudioContainer(header: Uint8Array): AudioDemuxer | undefined {
+  if (
+    header.length >= 8 &&
+    header[4] === 0x66 &&
+    header[5] === 0x74 &&
+    header[6] === 0x79 &&
+    header[7] === 0x70
+  ) {
+    return "mov";
+  }
+  if (
+    header.length >= 4 &&
+    header[0] === 0x1a &&
+    header[1] === 0x45 &&
+    header[2] === 0xdf &&
+    header[3] === 0xa3
+  ) {
+    return "webm";
+  }
+  return undefined;
+}
+
 /**
  * ISO-BMFF major brands the recorders this app ships (ruling 3: AAC in
  * MPEG-4 on both iOS and Android, with a 44.1 kHz fallback) can produce, or
  * that a compliant MP4/M4A muxer commonly writes. Anything else — including
  * a brand ffmpeg would happily demux, like `qt  ` (QuickTime) — is refused
- * by {@link isMp4Audio} before a phone-supplied file ever reaches ffmpeg.
+ * by {@link isMp4Audio} before an uploaded file ever reaches ffmpeg.
  */
 export const MP4_AUDIO_BRANDS: readonly string[] = [
   "M4A ",
@@ -28,9 +57,9 @@ export const MP4_AUDIO_BRANDS: readonly string[] = [
  * the box's major brand, read as latin1 like every other 4-byte FourCC in
  * this format — are one of {@link MP4_AUDIO_BRANDS}.
  *
- * This is the only gate between a phone-supplied file and
- * `transcodeToWhisperWavCommand`'s forced `-f mov` demuxer: it never reads
- * past the header it was given.
+ * Voice uploads (desktop voice-upload.ts) apply it to every upload that
+ * {@link sniffAudioContainer} reads as `mov`, before ffmpeg; WebM has its
+ * own sniff and no brand list.
  */
 export function isMp4Audio(header: Uint8Array): boolean {
   if (header.length < 12) return false;
@@ -43,9 +72,9 @@ export function isMp4Audio(header: Uint8Array): boolean {
 }
 
 /**
- * The exact, pinned ffmpeg invocation that turns a phone-recorded m4a into
- * a whisper-ready wav. There is no platform parameter and no caller-chosen
- * flag: every element here exists because ruling 4 requires it.
+ * The exact, pinned ffmpeg invocation that turns a sniffed voice container
+ * into a whisper-ready wav. The caller supplies only the demuxer selected by
+ * {@link sniffAudioContainer}; all other flags remain fixed.
  *
  * - `-nostdin`: a decoder given attacker-influenced bytes must never wait
  *   on, or read from, this process's stdin.
@@ -55,10 +84,10 @@ export function isMp4Audio(header: Uint8Array): boolean {
  * - `-protocol_whitelist file`: a crafted MOV can reference other
  *   locations by protocol (`http:`, `tcp:`, `concat:`, …); this stops the
  *   demuxer from ever opening anything but the local input file.
- * - `-enable_drefs 0`: keeps MOV external data references off (ffmpeg's
+ * - `-enable_drefs 0` (MOV only): keeps MOV external data references off (ffmpeg's
  *   default, stated explicitly so a future ffmpeg default change can't
- *   silently re-enable it).
- * - `-f mov`: forces the MOV/MP4 demuxer. Without this, ffmpeg probes the
+ *   silently re-enable it). WebM rejects this MOV-private option.
+ * - `-f <demuxer>`: forces the sniffed MOV/MP4 or WebM demuxer. Without this, ffmpeg probes the
  *   bytes and picks a demuxer itself — a file merely renamed to `.m4a`
  *   could steer it into a playlist, concat or image demuxer, several of
  *   which can themselves open other files or URLs.
@@ -75,6 +104,7 @@ export function isMp4Audio(header: Uint8Array): boolean {
 export function transcodeToWhisperWavCommand(
   input: string,
   output: string,
+  demuxer: AudioDemuxer,
 ): { command: string; args: string[] } {
   if (!isAbsolute(input) || !isAbsolute(output)) {
     throw new Error("transcodeToWhisperWavCommand: input and output must be absolute paths");
@@ -95,10 +125,9 @@ export function transcodeToWhisperWavCommand(
       "error",
       "-protocol_whitelist",
       "file",
-      "-enable_drefs",
-      "0",
+      ...(demuxer === "mov" ? ["-enable_drefs", "0"] : []),
       "-f",
-      "mov",
+      demuxer,
       "-i",
       input,
       "-map",

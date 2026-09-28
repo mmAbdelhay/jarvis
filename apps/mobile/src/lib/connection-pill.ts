@@ -30,6 +30,8 @@ export function connectionPillModel(view: ConnectionView): ConnectionPillModel {
       return { key: "conn.connecting", tone: "warning" };
     case "reconnecting":
       return { key: "conn.reconnecting", tone: "warning" };
+    case "locked":
+      return { key: "conn.locked", tone: "warning" };
     case "open":
       return view.stale
         ? { key: "conn.stale", tone: "warning" }
