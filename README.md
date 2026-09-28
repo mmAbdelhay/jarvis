@@ -56,8 +56,18 @@ agent's stdin.
 **Comes with you.** A companion phone app pairs with the desktop over your
 local network or a [Tailscale](https://tailscale.com/) tailnet: sessions,
 terminals, changes, and the Editor / Database / Cluster tabs, from the
-phone, over one authenticated TLS connection that is off by default. See
-[Remote access](docs/guide/remote-access.md).
+phone, over one authenticated TLS connection that is off by default. Every
+device signs in with an [owner login](docs/guide/remote-access.md#owner-login)
+(a password set on the laptop, or a passkey in a browser) before it can see
+anything. The same app also runs in [a browser](docs/guide/remote-access.md#the-browser-client)
+on another computer, served by the laptop itself, and on a tablet or a wide
+browser window it switches to a desktop-style layout with a top bar and
+split views. See [Remote access](docs/guide/remote-access.md).
+
+**Keeps running in the background.** Turn it on and the terminals, agent
+runs and remote access live in `jarvisd`, a background daemon installed as
+a login item, so they survive quitting the app and a phone can still reach
+them. See [Background daemon](docs/guide/background-daemon.md).
 
 **Keeps the work in one window.** The Workspace opens a project's files in an
 editor, its tables in a database client, its endpoints in an API client, its
@@ -275,8 +285,9 @@ to a certificate the phone pins, or, with a named certificate, trusts by
 name on first pairing, and pairing itself needs a second step on this
 machine: a confirmation dialog naming the requesting device, which you
 approve or deny. Pairing alone opens nothing: every connection starts
-locked until the device signs in with an owner password, which is set only
-on this machine and without which the bridge does not start. Sign-ins are
+locked until the device signs in with the owner password (or, in a
+browser, a passkey registered while signed in); the password is set only
+on this machine, and without it the bridge does not start. Sign-ins are
 short-lived tokens with brute-force limits, and changing the password or
 clicking **Sign out everywhere** ends them all (see [Remote
 access](docs/guide/remote-access.md#owner-login)). Once paired and signed in,
@@ -334,8 +345,10 @@ treats each port as a separate origin. The sidecar pages run on the
 bridge's origin, so they cannot read the web app's storage, and the bridge
 accepts `/rpc` and `/pair` connections only from the web app's origin, from
 the phone app (`Origin: jarvis-app://native`), or with no `Origin` at all.
-A browser pairs and signs in like a phone, and can also use a passkey. See
-[the browser client](docs/guide/remote-access.md#the-browser-client).
+A browser pairs and signs in like a phone, and can also use a passkey. On a
+tablet or a wide browser window the app switches to a desktop-style layout;
+that changes only how it is drawn, not what it can reach or the checks it
+passes. See [the browser client](docs/guide/remote-access.md#the-browser-client).
 
 **The background daemon's control socket is local only, and it is owner-level
 access.** With **Keep Jarvis running in the background** on (off by default),
