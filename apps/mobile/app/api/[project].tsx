@@ -10,6 +10,7 @@ import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -41,13 +42,16 @@ import type { FileUploadResult } from "@/lib/file-upload-controller";
 import { createFileUploadController } from "@/lib/file-upload-controller";
 import { nativeFilePicker } from "@/lib/file-picker";
 import { formatBytes } from "@/lib/format";
-import { t } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
+import { platformKey, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { nativeRecordingFiles } from "@/lib/native-recording-files";
 import { useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
 import { MALFORMED_REPLY_NOTICE, parseGitViewResult } from "@/lib/workspace-results";
+
+const PLATFORM = clientPlatformFor(Platform.OS);
 
 const NOTICE_KEYS: Readonly<Record<string, string>> = {
   [API_LOAD_FAILED]: "api.loadFailed",
@@ -886,8 +890,12 @@ export default function ApiScreen() {
                 </View>
               )}
 
-              <Text style={styles.warning}>{t(language, "api.warning.hooksSend")}</Text>
-              <Text style={styles.warning}>{t(language, "api.warning.hooksSave")}</Text>
+              <Text style={styles.warning}>
+                {t(language, platformKey("api.warning.hooksSend", PLATFORM))}
+              </Text>
+              <Text style={styles.warning}>
+                {t(language, platformKey("api.warning.hooksSave", PLATFORM))}
+              </Text>
               <Text style={styles.warning}>{t(language, "api.warning.attachmentsTemporary")}</Text>
 
               <Text style={styles.label}>{t(language, "api.environment.title")}</Text>

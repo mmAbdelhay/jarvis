@@ -16,13 +16,18 @@ import { dialogs } from "@/lib/dialog";
 import { passkeys } from "@/lib/passkey";
 import { connectFromStoredPairing } from "@/lib/connect-stored";
 import { realClock } from "@/lib/clock";
-import { t } from "@/lib/i18n";
+import { platformKey, t } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
 import { useLanguage } from "@/lib/language-context";
 import { clearPairing, loadPairing } from "@/lib/pairing-record";
 import { IDLE_LOCK_MINUTES } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
-import { notificationsStatusKey, notificationsSwitchValue } from "@/lib/push-screen";
+import {
+  notificationsStatusKey,
+  notificationsSwitchValue,
+  showsNotificationsSetting,
+} from "@/lib/push-screen";
 import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import type { SettingsView } from "@/lib/settings-store";
@@ -33,6 +38,7 @@ import { useVoiceController } from "@/lib/voice-context";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "0.0.0";
+const PLATFORM = clientPlatformFor(Platform.OS);
 // Wraps the fingerprint tail's Latin hex characters so they don't reorder
 // under Arabic bidi — U+2066 LEFT-TO-RIGHT ISOLATE and U+2069 POP
 // DIRECTIONAL ISOLATE, written as `\u` escapes (not the raw invisible
@@ -94,8 +100,8 @@ export default function SettingsScreen() {
 
   function handleUnpair(): void {
     dialogs.confirm({
-      title: t(language, "settings.unpair"),
-      message: t(language, "settings.unpairConfirm"),
+      title: t(language, platformKey("settings.unpair", PLATFORM)),
+      message: t(language, platformKey("settings.unpairConfirm", PLATFORM)),
       cancelText: t(language, "common.cancel"),
       confirmText: t(language, "common.ok"),
       destructive: true,
@@ -108,7 +114,7 @@ export default function SettingsScreen() {
   function handleLogout(): void {
     dialogs.confirm({
       title: t(language, "settings.logout"),
-      message: t(language, "settings.logoutConfirm"),
+      message: t(language, platformKey("settings.logoutConfirm", PLATFORM)),
       cancelText: t(language, "common.cancel"),
       confirmText: t(language, "common.ok"),
       destructive: true,
@@ -195,7 +201,9 @@ export default function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>{t(language, "settings.speakReplies")}</Text>
       <View style={styles.switchRow}>
-        <Text style={styles.switchHint}>{t(language, "settings.speakRepliesHint")}</Text>
+        <Text style={styles.switchHint}>
+          {t(language, platformKey("settings.speakRepliesHint", PLATFORM))}
+        </Text>
         <Switch
           value={view.speakReplies}
           accessibilityLabel={t(language, "settings.speakReplies")}
@@ -220,33 +228,37 @@ export default function SettingsScreen() {
         />
       </View>
 
-      <Text style={styles.sectionTitle}>{t(language, "settings.notifications")}</Text>
-      <View style={styles.switchRow}>
-        <Text style={styles.switchHint}>{t(language, "settings.notificationsHint")}</Text>
-        <Switch
-          value={notificationsSwitchValue(view.notifications)}
-          accessibilityLabel={t(language, "settings.notifications")}
-          onValueChange={(on) => void store.setNotifications(on)}
-        />
-      </View>
-      {notificationsText !== undefined && (
-        <Text
-          style={[
-            styles.cardLine,
-            notificationsWritingDirection !== undefined && {
-              writingDirection: notificationsWritingDirection,
-            },
-          ]}
-        >
-          {notificationsText}
-        </Text>
-      )}
-      {view.notifications.phase === "blocked" && (
-        <TouchableOpacity style={styles.button} onPress={() => void Linking.openSettings()}>
-          <Text style={styles.buttonText}>
-            {t(language, "settings.notifications.openSettings")}
-          </Text>
-        </TouchableOpacity>
+      {showsNotificationsSetting(PLATFORM) && (
+        <>
+          <Text style={styles.sectionTitle}>{t(language, "settings.notifications")}</Text>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchHint}>{t(language, "settings.notificationsHint")}</Text>
+            <Switch
+              value={notificationsSwitchValue(view.notifications)}
+              accessibilityLabel={t(language, "settings.notifications")}
+              onValueChange={(on) => void store.setNotifications(on)}
+            />
+          </View>
+          {notificationsText !== undefined && (
+            <Text
+              style={[
+                styles.cardLine,
+                notificationsWritingDirection !== undefined && {
+                  writingDirection: notificationsWritingDirection,
+                },
+              ]}
+            >
+              {notificationsText}
+            </Text>
+          )}
+          {view.notifications.phase === "blocked" && (
+            <TouchableOpacity style={styles.button} onPress={() => void Linking.openSettings()}>
+              <Text style={styles.buttonText}>
+                {t(language, "settings.notifications.openSettings")}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
       <Text style={styles.sectionTitle}>{t(language, "settings.pairedLaptop")}</Text>
@@ -277,7 +289,9 @@ export default function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>{t(language, "settings.connection")}</Text>
       <View style={styles.card}>
-        <Text style={styles.cardLine}>{t(language, connectionStateKey(view.connection))}</Text>
+        <Text style={styles.cardLine}>
+          {t(language, platformKey(connectionStateKey(view.connection), PLATFORM))}
+        </Text>
         {lastFrameSeconds !== undefined && (
           <Text style={styles.cardLine}>
             {t(language, "settings.lastFrame", { seconds: lastFrameSeconds })}
@@ -332,10 +346,14 @@ export default function SettingsScreen() {
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.dangerButton} onPress={handleUnpair}>
-        <Text style={styles.dangerButtonText}>{t(language, "settings.unpair")}</Text>
+        <Text style={styles.dangerButtonText}>
+          {t(language, platformKey("settings.unpair", PLATFORM))}
+        </Text>
       </TouchableOpacity>
       {view.unpairError && (
-        <Text style={styles.errorText}>{t(language, "settings.unpairFailed")}</Text>
+        <Text style={styles.errorText}>
+          {t(language, platformKey("settings.unpairFailed", PLATFORM))}
+        </Text>
       )}
 
       <Text style={styles.version}>

@@ -1,10 +1,11 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MicButton } from "@/components/MicButton";
 import { TurnList } from "@/components/TurnList";
-import { t } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
+import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { theme } from "@/lib/theme";
 import type { VoiceView } from "@/lib/voice-controller";
@@ -84,7 +85,9 @@ export default function VoiceScreen() {
             </Text>
           )}
           {notice.code !== "server" && key && (
-            <Text style={styles.noticeText}>{t(language, key)}</Text>
+            <Text style={styles.noticeText}>
+              {t(language, platformKey(key, clientPlatformFor(Platform.OS)))}
+            </Text>
           )}
           {notice.code === "sentToSession" && notice.server && (
             <Text

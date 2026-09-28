@@ -1,6 +1,12 @@
 import { formatPairingUri, type PairingLink, webPairingUrl } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
-import { deviceNameFromUserAgent, pairingLinkFromHash, pairingLinkFromText } from "./web-pairing";
+import {
+  CLEARED_HASH_PARAM,
+  deviceNameFromUserAgent,
+  fragmentArrivalAction,
+  pairingLinkFromHash,
+  pairingLinkFromText,
+} from "./web-pairing";
 
 const LINK: PairingLink = {
   host: "100.79.83.16",
@@ -110,5 +116,25 @@ describe("webPairingUrl round trip (desktop QR → browser)", () => {
     const url = webPairingUrl(LINK, 443);
     if (url === undefined) throw new Error("expected a web pairing URL");
     expect(pairingLinkFromText(url)).toEqual(LINK);
+  });
+});
+
+describe("fragmentArrivalAction (D6b)", () => {
+  it("takes a link entered while the entry step shows, holds it while checking, drops it elsewhere", () => {
+    expect(fragmentArrivalAction("scan")).toBe("intake");
+    expect(fragmentArrivalAction("checking")).toBe("hold");
+    for (const kind of ["alreadyPaired", "clearFailed", "confirm", "waiting", "error", "success"]) {
+      expect(fragmentArrivalAction(kind)).toBe("drop");
+    }
+  });
+});
+
+describe("CLEARED_HASH_PARAM (D6a)", () => {
+  it("never serialises to a visible hash the way undefined does", () => {
+    // Expo Router builds its href from URLSearchParams over the route params.
+    const cleared = new URLSearchParams([["#", CLEARED_HASH_PARAM]]).get("#") || undefined;
+    expect(cleared).toBeUndefined();
+    const withUndefined = new URLSearchParams([["#", undefined as unknown as string]]).get("#");
+    expect(withUndefined).toBe("undefined");
   });
 });

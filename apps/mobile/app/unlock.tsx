@@ -22,10 +22,10 @@ import type { UnlockOutcome } from "@/lib/auth-session";
 import { t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { useAuthSession, useConnectionStore } from "@/lib/rpc-context";
+import { useAuthSession, useConnectionStore, useReconnect } from "@/lib/rpc-context";
 import { connectionStateKey } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
-import { lockCauseKey, unlockMessageKey } from "@/lib/unlock-screen";
+import { lockCauseKey, unlockCanRetryConnection, unlockMessageKey } from "@/lib/unlock-screen";
 
 export default function UnlockScreen() {
   const insets = useSafeAreaInsets();
@@ -33,6 +33,7 @@ export default function UnlockScreen() {
   const router = useRouter();
   const auth = useAuthSession();
   const connection = useConnectionStore();
+  const reconnect = useReconnect();
 
   const [connectionView, setConnectionView] = useState(connection.get());
   const [authView, setAuthView] = useState(auth.get());
@@ -101,9 +102,14 @@ export default function UnlockScreen() {
       <View style={[styles.content, { paddingTop: insets.top + 48 }]}>
         <Text style={styles.title}>{t(language, "auth.title")}</Text>
         {causeKey !== undefined && <Text style={styles.cause}>{t(language, causeKey)}</Text>}
-        {!locked && (
-          <Text style={styles.status}>{t(language, connectionStateKey(connectionView))}</Text>
-        )}
+        {!locked &&
+          (unlockCanRetryConnection(connectionView.state) ? (
+            <TouchableOpacity accessibilityRole="button" onPress={() => void reconnect()}>
+              <Text style={styles.status}>{t(language, connectionStateKey(connectionView))}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.status}>{t(language, connectionStateKey(connectionView))}</Text>
+          ))}
 
         <Text style={styles.hint}>{t(language, "auth.passwordHint")}</Text>
         <TextInput

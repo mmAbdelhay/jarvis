@@ -69,3 +69,25 @@ export function deviceNameFromUserAgent(ua: string): string {
   if (browser === undefined || system === undefined) return FALLBACK_DEVICE_NAME;
   return `${browser} · ${system}`;
 }
+
+/**
+ * D6b: what the pairing screen does with a fragment that arrives while it
+ * is already showing (a `/pair#…` link entered in the address bar is only a
+ * hashchange, not a new page load). The entry step takes it at once; while
+ * the already-paired check is still running it is held for that step;
+ * anywhere else (already paired, a confirm or a pairing in flight) it is
+ * dropped. The fragment leaves the address bar in every case.
+ */
+export function fragmentArrivalAction(phaseKind: string): "intake" | "hold" | "drop" {
+  if (phaseKind === "scan") return "intake";
+  if (phaseKind === "checking") return "hold";
+  return "drop";
+}
+
+/**
+ * D6a: the value that clears Expo Router's `#` route param. `undefined`
+ * keeps the key, and the router's URLSearchParams turns it into the string
+ * "undefined" — every later URL ended in `#undefined`. An empty string is
+ * dropped by both of the router's hash writers.
+ */
+export const CLEARED_HASH_PARAM = "";

@@ -15,6 +15,9 @@ export type RpcContextValue = {
   connectionStore: ConnectionStore;
   // Phase 0 owner login: the app's one auth session (unlock, idle lock).
   authSession: AuthSession;
+  /** Connects again from the stored pairing (the banner's "Tap to retry"),
+   *  routing to /pair when there is none. */
+  reconnect(): Promise<void>;
 };
 
 export const RpcContext = createContext<RpcContextValue | undefined>(undefined);
@@ -41,4 +44,12 @@ export function useAuthSession(): AuthSession {
     throw new Error("useAuthSession() called outside RpcContext.Provider");
   }
   return value.authSession;
+}
+
+export function useReconnect(): () => Promise<void> {
+  const value = useContext(RpcContext);
+  if (value === undefined) {
+    throw new Error("useReconnect() called outside RpcContext.Provider");
+  }
+  return value.reconnect;
 }

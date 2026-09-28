@@ -98,3 +98,14 @@ describe("app fonts", () => {
     expect(layout).toContain("useFonts(APP_FONTS)");
   });
 });
+
+describe("favicon.ico (D7)", () => {
+  it("ships in public/, which the web export copies to its root", () => {
+    const icon = readFileSync(join(mobileDir, "public", "favicon.ico"), "latin1");
+    const u16 = (offset: number) => icon.charCodeAt(offset) | (icon.charCodeAt(offset + 1) << 8);
+    // ICONDIR: reserved 0, type 1 (icon), at least one image.
+    expect(u16(0)).toBe(0);
+    expect(u16(2)).toBe(1);
+    expect(u16(4)).toBeGreaterThan(0);
+  });
+});

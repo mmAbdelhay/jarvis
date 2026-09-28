@@ -33,7 +33,7 @@ import {
 import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
-import { t } from "@/lib/i18n";
+import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import {
   afterClearRetry,
@@ -53,16 +53,19 @@ import {
   savePairing,
 } from "@/lib/pairing-record";
 import { expoSecureStore } from "@/lib/secure-store";
-import { systemTransport } from "@/lib/system-transport";
+import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import {
+  CLEARED_HASH_PARAM,
   deviceNameFromUserAgent,
+  fragmentArrivalAction,
   pairingLinkFromHash,
   pairingLinkFromText,
 } from "@/lib/web-pairing";
 
 const CLIENT_STRING = clientStringFor(Platform.OS, Constants.expoConfig?.version ?? "0.0.0");
 const PLATFORM = clientPlatformFor(Platform.OS);
+const transport = systemTransportFor(PLATFORM);
 
 type PairFailureReason = Exclude<PairOutcome, { ok: true }>["reason"];
 type ScreenFailure = PairFailureReason | "save-failed" | "check-failed";
@@ -150,7 +153,7 @@ export default function PairWebScreen() {
     // first history sync (the root's effect, which runs after this one)
     // writes it back into the URL. So: drop the param from the router's
     // state, and clear the address bar on the next tick, after that sync.
-    router.setParams({ "#": undefined });
+    router.setParams({ "#": CLEARED_HASH_PARAM });
     const timer = setTimeout(clearLocationHash, 0);
     return () => {
       clearTimeout(timer);
@@ -244,13 +247,39 @@ export default function PairWebScreen() {
     if (hash.length > 1) intake(pairingLinkFromHash(hash));
   }, [phase, intake]);
 
+  // D6b: a `/pair#…` link entered while this screen is already open is a
+  // hashchange, not a load — read it, clear it from the address bar the
+  // same way, and act on it like a fresh load would.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHashChange = () => {
+      const hash = window.location.hash;
+      if (hash.length <= 1) return;
+      router.setParams({ "#": CLEARED_HASH_PARAM });
+      clearLocationHash();
+      setTimeout(clearLocationHash, 0);
+      switch (fragmentArrivalAction(phaseRef.current.kind)) {
+        case "intake":
+          intake(pairingLinkFromHash(hash));
+          break;
+        case "hold":
+          hashRef.current = hash;
+          break;
+        case "drop":
+          break;
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [router, intake]);
+
   const startPairing = useCallback(
     async (link: PairingLink): Promise<void> => {
       const name = deviceNameRef.current.trim() || deviceNameFromUserAgent(navigator.userAgent);
       pendingLinkRef.current = null;
       safeSetPhase({ kind: "waiting" });
       const outcome = await pair(
-        { transport: systemTransport, clock: realClock, client: CLIENT_STRING, platform: PLATFORM },
+        { transport, clock: realClock, client: CLIENT_STRING, platform: PLATFORM },
         link,
         name,
       );
@@ -305,7 +334,9 @@ export default function PairWebScreen() {
 
       {phase.kind === "alreadyPaired" && (
         <>
-          <Text style={styles.label}>{t(language, "pair.alreadyPaired")}</Text>
+          <Text style={styles.label}>
+            {t(language, platformKey("pair.alreadyPaired", PLATFORM))}
+          </Text>
           <TouchableOpacity style={styles.button} onPress={() => router.replace("/dashboard")}>
             <Text style={styles.buttonText}>{t(language, "nav.dashboard")}</Text>
           </TouchableOpacity>
@@ -314,7 +345,9 @@ export default function PairWebScreen() {
 
       {phase.kind === "clearFailed" && (
         <>
-          <Text style={styles.errorText}>{t(language, "pair.clearFailed")}</Text>
+          <Text style={styles.errorText}>
+            {t(language, platformKey("pair.clearFailed", PLATFORM))}
+          </Text>
           <TouchableOpacity style={styles.button} onPress={() => void retryClear()}>
             <Text style={styles.buttonText}>{t(language, "common.retry")}</Text>
           </TouchableOpacity>
@@ -388,7 +421,9 @@ export default function PairWebScreen() {
 
       {phase.kind === "error" && (
         <>
-          <Text style={styles.errorText}>{t(language, errorKey(phase.failure))}</Text>
+          <Text style={styles.errorText}>
+            {t(language, platformKey(errorKey(phase.failure), PLATFORM))}
+          </Text>
           <TouchableOpacity
             style={styles.button}
             onPress={

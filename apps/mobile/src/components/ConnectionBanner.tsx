@@ -8,11 +8,12 @@
 // layout: it only renders the model and confirms the tap with a native
 // dialog (lib/dialog) before calling `onPairAgain`.
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { dialogs } from "@/lib/dialog";
 import { bannerModel } from "@/lib/banner-model";
 import type { ConnectionStore, ConnectionView } from "@/lib/connection-store";
-import { t } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
+import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { theme } from "@/lib/theme";
 
@@ -48,7 +49,9 @@ export function ConnectionBanner({
 
   const content = (
     <>
-      <Text style={styles.text}>{t(language, model.key)}</Text>
+      <Text style={styles.text}>
+        {t(language, platformKey(model.key, clientPlatformFor(Platform.OS)))}
+      </Text>
       {view.state === "closed" && <Text style={styles.retry}>{t(language, "common.retry")}</Text>}
       {model.pairAgain && (
         <TouchableOpacity onPress={confirmPairAgain}>

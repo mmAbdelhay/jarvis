@@ -40,7 +40,7 @@ import {
   savePairing,
 } from "@/lib/pairing-record";
 import { expoSecureStore } from "@/lib/secure-store";
-import { systemTransport } from "@/lib/system-transport";
+import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
 
@@ -50,7 +50,10 @@ const PLATFORM = clientPlatformFor(Platform.OS);
 // through `systemTransport` (OS trust store), one without pins natively
 // through `nativeTransport`, exactly as before. Task 13: the browser build
 // always dials through `systemTransport` (createAppTransport).
-const transport = createAppTransport(PLATFORM, { pin: nativeTransport, system: systemTransport });
+const transport = createAppTransport(PLATFORM, {
+  pin: nativeTransport,
+  system: systemTransportFor(PLATFORM),
+});
 
 type PairFailureReason = Exclude<PairOutcome, { ok: true }>["reason"];
 // Screen-only conditions (I5, Important-1): `pair()` itself either

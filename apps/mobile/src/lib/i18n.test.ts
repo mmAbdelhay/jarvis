@@ -2,7 +2,15 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { type Language, type MessageKey, STRINGS, isRtl, languageFromLocale, t } from "./i18n";
+import {
+  type Language,
+  type MessageKey,
+  STRINGS,
+  isRtl,
+  languageFromLocale,
+  platformKey,
+  t,
+} from "./i18n";
 
 const LANGUAGES: Language[] = ["ar", "en"];
 
@@ -197,5 +205,30 @@ describe("REQUIRED_KEYS: every message key referenced by app/ or src/ source exi
       if (entry === undefined || !entry.en || !entry.ar) missing.push(key);
     }
     expect(missing, `referenced but missing/empty in STRINGS: ${missing.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("platformKey (D8)", () => {
+  it("says browser, not phone, on web in both languages", () => {
+    for (const key of ["settings.unpair", "conn.unpaired", "settings.speakRepliesHint"] as const) {
+      const web = platformKey(key, "web");
+      expect(web).toBe(`${key}.web`);
+      expect(t("en", web)).toContain("browser");
+      expect(t("ar", web)).toContain("المتصفح");
+      expect(platformKey(key, "native")).toBe(key);
+    }
+  });
+
+  it("falls back to the shared key when there is no web wording", () => {
+    expect(platformKey("settings.notifications", "web")).toBe("settings.notifications");
+  });
+
+  it("every .web key has a shared base key, and no web string says phone", () => {
+    for (const key of Object.keys(STRINGS)) {
+      if (!key.endsWith(".web")) continue;
+      expect(Object.hasOwn(STRINGS, key.slice(0, -".web".length)), key).toBe(true);
+      expect(STRINGS[key as MessageKey].en.toLowerCase()).not.toContain("phone");
+      expect(STRINGS[key as MessageKey].ar).not.toContain("الهاتف");
+    }
   });
 });

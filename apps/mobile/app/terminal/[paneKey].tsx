@@ -22,6 +22,7 @@ import { ComposeBar } from "@/components/ComposeBar";
 import { KeyBar } from "@/components/KeyBar";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { realClock } from "@/lib/clock";
+import { clientPlatformFor } from "@/lib/client-platform";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
@@ -219,7 +220,7 @@ function TerminalPaneBody({ paneKey, tabId }: { paneKey: string; tabId: string }
     }
     const result = await input.sendKey(key);
     if (inputRef.current !== input) return;
-    setKeyNotice(sendResultText(result, language));
+    setKeyNotice(sendResultText(result, language, clientPlatformFor(Platform.OS)));
     clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setKeyNotice(""), 4000);
   }

@@ -53,6 +53,14 @@ async function main() {
   }
   console.log("emit-terminal-web: no inline <script> in any exported .html");
 
+  // Browsers ask for /favicon.ico on every load; the web listener serves
+  // only what the export contains and drops anything else, which shows as a
+  // console error (D7). public/favicon.ico is copied in by the export.
+  if (!files.some((file) => relative(out, file) === "favicon.ico")) {
+    console.error("emit-terminal-web: favicon.ico is missing from the export (apps/mobile/public)");
+    process.exit(1);
+  }
+
   const { WEB_EXPORT_PATH_LIMIT, overlongPaths } = webExportPaths;
   const overlong = overlongPaths(files.map((file) => relative(out, file)));
   if (overlong.length > 0) {

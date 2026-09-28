@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuthView } from "./auth-session";
 import {
+  unlockCanRetryConnection,
   lockCauseKey,
   runWebAutoSignIn,
   registerMessageKey,
@@ -141,6 +142,22 @@ describe("runWebAutoSignIn (the browser's page-load sign-in)", () => {
         },
       });
       expect(outcome).toBe("failed");
+    }
+  });
+});
+
+describe("unlockCanRetryConnection (D3)", () => {
+  it("offers a retry only with no socket at all", () => {
+    expect(unlockCanRetryConnection("idle")).toBe(true);
+    expect(unlockCanRetryConnection("closed")).toBe(true);
+    for (const state of [
+      "connecting",
+      "authenticating",
+      "reconnecting",
+      "locked",
+      "open",
+    ] as const) {
+      expect(unlockCanRetryConnection(state)).toBe(false);
     }
   });
 });

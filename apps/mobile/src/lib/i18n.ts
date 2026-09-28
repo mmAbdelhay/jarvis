@@ -3,6 +3,8 @@
 // text (err.text, project names, session titles) is never routed through
 // this table: it is displayed verbatim.
 
+import type { ClientPlatform } from "./client-platform";
+
 export type Language = "ar" | "en";
 
 export const STRINGS = {
@@ -1025,6 +1027,72 @@ export const STRINGS = {
     en: "Log out of Jarvis on this phone? You'll need your password to unlock it again.",
     ar: "تسجيل الخروج من Jarvis على هذا الهاتف؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
   },
+  // D8: the browser build's own wording where a string says "this phone"
+  // (platformKey picks the ".web" key on web).
+  "settings.unpair.web": {
+    en: "Unpair this browser",
+    ar: "إلغاء اقتران هذا المتصفح",
+  },
+  "settings.unpairConfirm.web": {
+    en: "Remove this pairing from this browser? You'll need a new pairing link to pair again. To fully revoke access, also remove this device in the computer's Settings.",
+    ar: "هل تريد إزالة هذا الاقتران من هذا المتصفح؟ ستحتاج إلى رابط اقتران جديد للاقتران مرة أخرى. لإلغاء الوصول بالكامل، احذف هذا الجهاز أيضًا من إعدادات الكمبيوتر.",
+  },
+  "settings.unpairFailed.web": {
+    en: "Couldn't unpair this browser. Try again.",
+    ar: "تعذّر إلغاء اقتران هذا المتصفح. حاول مرة أخرى.",
+  },
+  "pair.alreadyPaired.web": {
+    en: "This browser is already paired. Unpair in Settings first.",
+    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
+  },
+  "pair.saveFailed.web": {
+    en: "Couldn't save the pairing in this browser. Try again.",
+    ar: "تعذّر حفظ الاقتران في هذا المتصفح. حاول مرة أخرى.",
+  },
+  "pair.checkFailed.web": {
+    en: "Couldn't check whether this browser is already paired. Try again.",
+    ar: "تعذّر التحقق مما إذا كان هذا المتصفح مقترنًا بالفعل. حاول مرة أخرى.",
+  },
+  "pair.clearFailed.web": {
+    en: "Couldn't remove the old pairing from this browser.",
+    ar: "تعذّرت إزالة الاقتران القديم من هذا المتصفح.",
+  },
+  "conn.unpaired.web": {
+    en: "This browser was unpaired.",
+    ar: "تم إلغاء اقتران هذا المتصفح.",
+  },
+  "session.offline.web": {
+    en: "Not sent: this browser is disconnected.",
+    ar: "لم يُرسل: هذا المتصفح غير متصل.",
+  },
+  "voice.notice.notSentOffline.web": {
+    en: "Not sent: this browser is disconnected.",
+    ar: "لم يُرسل: هذا المتصفح غير متصل.",
+  },
+  "voice.notice.noVoiceAr.web": {
+    en: "This browser has no Arabic voice installed.",
+    ar: "لا يوجد صوت عربي مثبّت في هذا المتصفح.",
+  },
+  "voice.notice.noVoiceEn.web": {
+    en: "This browser has no English voice installed.",
+    ar: "لا يوجد صوت إنجليزي مثبّت في هذا المتصفح.",
+  },
+  "settings.speakRepliesHint.web": {
+    en: "Read Jarvis's replies aloud in this browser.",
+    ar: "قراءة ردود جارفيس بصوت عالٍ في هذا المتصفح.",
+  },
+  "api.warning.hooksSend.web": {
+    en: "Pre-request/post-response scripts and tests are skipped when sent from a browser.",
+    ar: "تُتخطّى سكربتات ما قبل الطلب وما بعد الاستجابة والاختبارات عند الإرسال من متصفح.",
+  },
+  "api.warning.hooksSave.web": {
+    en: "Saving from a browser removes any scripts and tests this request had.",
+    ar: "الحفظ من متصفح يزيل أي سكربتات واختبارات كانت في هذا الطلب.",
+  },
+  "settings.logoutConfirm.web": {
+    en: "Log out of Jarvis in this browser? You'll need your password to unlock it again.",
+    ar: "تسجيل الخروج من Jarvis في هذا المتصفح؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;
@@ -1052,4 +1120,12 @@ export function languageFromLocale(localeTag: string): Language {
 
 export function isRtl(language: Language): boolean {
   return language === "ar";
+}
+
+/** D8: the browser build's variant of `key` (`<key>.web`) when one exists,
+ *  so browser copy says "this browser" where the app says "this phone". */
+export function platformKey(key: MessageKey, platform: ClientPlatform): MessageKey {
+  if (platform !== "web") return key;
+  const web = `${key}.web`;
+  return Object.hasOwn(STRINGS, web) ? (web as MessageKey) : key;
 }

@@ -14,6 +14,7 @@ import { createAuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
 import { connectFromStoredPairing as connectFromStored } from "@/lib/connect-stored";
+import { shouldConnectOnRoute } from "@/lib/dashboard-entry";
 import { createConnectionStore } from "@/lib/connection-store";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
@@ -30,7 +31,7 @@ import { refreshStore } from "@/lib/refresh-store";
 import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
-import { systemTransport } from "@/lib/system-transport";
+import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
 import { createUnpairedHandler } from "@/lib/unpaired-handler";
@@ -43,7 +44,10 @@ const PLATFORM = clientPlatformFor(Platform.OS);
 // routes through `systemTransport` (OS trust store), one without pins
 // natively through `nativeTransport`, exactly as before. Task 13: the
 // browser build always dials through `systemTransport` (createAppTransport).
-const transport = createAppTransport(PLATFORM, { pin: nativeTransport, system: systemTransport });
+const transport = createAppTransport(PLATFORM, {
+  pin: nativeTransport,
+  system: systemTransportFor(PLATFORM),
+});
 
 // Composes the app's two per-app controller providers into the one slot
 // `RootLayout`'s tree already had for `VoiceProvider` alone (fix round 1,
@@ -300,14 +304,17 @@ export default function RootLayout() {
     }
   }, [client, router]);
 
-  // Re-checked whenever the route reaches /dashboard, not just once at
-  // mount: `connect()` is a no-op unless the client is idle/closed/unpaired
-  // (rpc-client.ts rule 8), so calling it again here is always safe, and it
-  // is what activates the connection right after /pair saves a fresh
-  // pairing and navigates here — without requiring an app restart.
+  // Once at launch on whatever route loaded (D3: a browser reload on
+  // /unlock, /voice or /settings never connected), and again whenever the
+  // route reaches /dashboard: `connect()` is a no-op unless the client is
+  // idle/closed/unpaired (rpc-client.ts rule 8), so calling it again is
+  // always safe, and it is what activates the connection right after /pair
+  // saves a fresh pairing and navigates here — without an app restart.
+  const launchConnectHandled = useRef(false);
   useEffect(() => {
-    if (pathname !== "/dashboard") return;
-    void connectFromStoredPairing();
+    const connect = shouldConnectOnRoute(pathname, launchConnectHandled.current);
+    launchConnectHandled.current = true;
+    if (connect) void connectFromStoredPairing();
   }, [pathname, connectFromStoredPairing]);
 
   // `{ client, connectionStore }` is otherwise a
@@ -315,8 +322,8 @@ export default function RootLayout() {
   // (Dashboard, Settings) even when neither value actually changed —
   // both are already stable across renders (refs), so memoise on them.
   const rpcContextValue = useMemo(
-    () => ({ client, connectionStore, authSession }),
-    [client, connectionStore, authSession],
+    () => ({ client, connectionStore, authSession, reconnect: connectFromStoredPairing }),
+    [client, connectionStore, authSession, connectFromStoredPairing],
   );
 
   if (language === null || !fontsLoaded) {

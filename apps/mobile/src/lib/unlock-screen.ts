@@ -18,6 +18,13 @@ export function shouldShowUnlock(state: ClientState, auth: AuthView, pathname: s
   return state === "locked" || auth.lockedLocally;
 }
 
+/** D3: the unlock screen's connection line is a retry button while there
+ *  is no socket at all (never connected, or given up) — the password and
+ *  passkey need one first. */
+export function unlockCanRetryConnection(state: ClientState): boolean {
+  return state === "idle" || state === "closed";
+}
+
 export function unlockMessageKey(outcome: UnlockOutcome): MessageKey | undefined {
   switch (outcome) {
     case "unlocked":

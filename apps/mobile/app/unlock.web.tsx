@@ -28,17 +28,22 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { UnlockOutcome } from "@/lib/auth-session";
-import { t } from "@/lib/i18n";
+import { platformKey, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { passkeys } from "@/lib/passkey";
 import { setPasskeyOfferSignal, takePasskeyOfferSignal } from "@/lib/passkey-offer-signal";
 import { loadPrefs, setKeepSignedIn } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
-import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
+import { useAuthSession, useConnectionStore, useReconnect, useRpcClient } from "@/lib/rpc-context";
 import { connectionStateKey } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
-import { lockCauseKey, runWebAutoSignIn, unlockMessageKey } from "@/lib/unlock-screen";
+import {
+  lockCauseKey,
+  unlockCanRetryConnection,
+  runWebAutoSignIn,
+  unlockMessageKey,
+} from "@/lib/unlock-screen";
 import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
 
 const LOCALE = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -55,6 +60,7 @@ export default function UnlockScreen() {
   const auth = useAuthSession();
   const client = useRpcClient();
   const connection = useConnectionStore();
+  const reconnect = useReconnect();
 
   const [connectionView, setConnectionView] = useState(connection.get());
   const [authView, setAuthView] = useState(auth.get());
@@ -204,9 +210,18 @@ export default function UnlockScreen() {
     >
       <Text style={styles.title}>{t(language, "auth.title")}</Text>
       {causeKey !== undefined && <Text style={styles.cause}>{t(language, causeKey)}</Text>}
-      {!locked && (
-        <Text style={styles.status}>{t(language, connectionStateKey(connectionView))}</Text>
-      )}
+      {!locked &&
+        (unlockCanRetryConnection(connectionView.state) ? (
+          <TouchableOpacity accessibilityRole="button" onPress={() => void reconnect()}>
+            <Text style={styles.status}>
+              {t(language, platformKey(connectionStateKey(connectionView), "web"))}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.status}>
+            {t(language, platformKey(connectionStateKey(connectionView), "web"))}
+          </Text>
+        ))}
 
       {passkeySupported && (
         <TouchableOpacity
