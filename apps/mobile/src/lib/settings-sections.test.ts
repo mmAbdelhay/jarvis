@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest";
+import { settingsSections } from "./settings-sections";
+
+const nativeSections = [
+  { id: "general", labelKey: "settings.section.general" },
+  { id: "voice", labelKey: "settings.speakReplies" },
+  { id: "notifications", labelKey: "settings.notifications" },
+  { id: "paired-computer", labelKey: "settings.pairedLaptop" },
+  { id: "connection", labelKey: "settings.connection" },
+  { id: "security", labelKey: "settings.security" },
+  { id: "remote-access", labelKey: "settings.section.remoteAccess" },
+] as const;
+
+const webSections = [
+  ...nativeSections.slice(0, 2),
+  ...nativeSections.slice(3, -1),
+  { id: "keep-signed-in", labelKey: "auth.keepSignedIn" },
+  { id: "passkeys", labelKey: "settings.section.addPasskey" },
+  nativeSections.at(-1),
+] as const;
+
+describe("settingsSections", () => {
+  it("keeps native settings in their screen order", () => {
+    expect(settingsSections("native")).toEqual(nativeSections);
+  });
+
+  it("adds browser-only account sections in their screen order on web", () => {
+    expect(settingsSections("web")).toEqual(webSections);
+  });
+
+  it("includes Add a passkey only on web", () => {
+    expect(settingsSections("web").map(({ id }) => id)).toContain("passkeys");
+    expect(settingsSections("native").map(({ id }) => id)).not.toContain("passkeys");
+  });
+
+  it.each(["native", "web"] as const)("uses unique anchor ids on %s", (platform) => {
+    const ids = settingsSections(platform).map(({ id }) => id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

@@ -45,6 +45,22 @@ export const STRINGS = {
     en: "Settings",
     ar: "الإعدادات",
   },
+  "settings.sectionNav": {
+    en: "Settings sections",
+    ar: "أقسام الإعدادات",
+  },
+  "settings.section.general": {
+    en: "General",
+    ar: "عام",
+  },
+  "settings.section.addPasskey": {
+    en: "Add a passkey",
+    ar: "إضافة مفتاح مرور",
+  },
+  "settings.section.remoteAccess": {
+    en: "Remote access",
+    ar: "الوصول عن بُعد",
+  },
   "settings.language": {
     en: "Language",
     ar: "اللغة",
