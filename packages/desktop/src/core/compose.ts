@@ -156,6 +156,7 @@ import {
   transcribe,
   waitUntilReady,
   withLocalBin,
+  writeAtomically,
 } from "@jarvis/platform";
 import {
   buildWiring,
@@ -196,6 +197,7 @@ import { parseScan, serializeScan } from "../session-scan-cache.js";
 import { LOGIN_TERMINAL_DETAIL } from "../login-terminal.js";
 import { serialize } from "../serialize.js";
 import { writeSettingsFile } from "../settings-io.js";
+import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -318,6 +320,9 @@ export type Core = {
    *  app's own in-process core let go of the ports jarvisd's bridge could
    *  not take at its start (Task 23's switch to the daemon). */
   reapplyRemote(): Promise<void>;
+  /** Writes `daemon.enabled` through the core's own serialized config
+   *  writer — the Settings toggle's write, in whichever core is live. */
+  setDaemonEnabled(enabled: boolean): Promise<void>;
   /** The greeting, the startup health line and the capacity report —
    *  once the window has loaded. */
   announceStartup(): Promise<void>;
@@ -330,6 +335,17 @@ export type Core = {
    *  uploads' own stops are awaited. Idempotent, like stop(). */
   shutdown(): Promise<void>;
 };
+
+/** writeConfig's third input: the background toggle's one key. */
+type DaemonToggle = { daemonEnabled: boolean };
+
+function isDaemonToggle(input: unknown): input is DaemonToggle {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    typeof (input as { daemonEnabled?: unknown }).daemonEnabled === "boolean"
+  );
+}
 
 export async function createCore(deps: CoreDeps): Promise<Core> {
   const { platform } = deps;
@@ -1347,7 +1363,18 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // "already off" no-op — skips the disk write (and the re-apply below)
   // entirely.
   const writeConfig = serialize(
-    async (input: JarvisConfig | ((current: JarvisConfig) => JarvisConfig)) => {
+    async (input: JarvisConfig | ((current: JarvisConfig) => JarvisConfig) | DaemonToggle) => {
+      // Task 23: Settings' background toggle, in this same queue — the
+      // one key a settings save never writes (settings-io.ts keeps the
+      // file's own), edited in place in the file.
+      if (isDaemonToggle(input)) {
+        await writeDaemonEnabled(DEFAULT_CONFIG_PATH, input.daemonEnabled, {
+          readFile: (path) => readFile(path, "utf8"),
+          writeFile: (path, text) => writeAtomically(path, text),
+        });
+        config.daemon = { enabled: input.daemonEnabled };
+        return { ok: true as const };
+      }
       let draft: JarvisConfig;
       if (typeof input === "function") {
         const current = await loadConfig(DEFAULT_CONFIG_PATH);
@@ -2246,6 +2273,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         );
     },
     reapplyRemote: () => applyFromDisk(),
+    setDaemonEnabled: async (enabled) => {
+      await writeConfig({ daemonEnabled: enabled });
+    },
     announceStartup,
     stop: releaseChildren,
     async shutdown() {

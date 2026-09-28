@@ -75,6 +75,9 @@ function fakeCore() {
     reapplyRemote: async () => {
       lifecycle.push("reapplyRemote");
     },
+    setDaemonEnabled: async (enabled: boolean) => {
+      lifecycle.push(`setDaemonEnabled ${enabled}`);
+    },
     announceStartup: async () => {
       lifecycle.push("announceStartup");
     },
@@ -285,7 +288,7 @@ describe("socket CoreClient: requests", () => {
 });
 
 describe("socket CoreClient: the daemon itself (Task 23)", () => {
-  it("answers daemon:info with the daemon's pid and start time, and forwards reapplyRemote", async () => {
+  it("answers daemon:info with the daemon's pid and start time, and forwards reapplyRemote and setDaemonEnabled", async () => {
     const run = await runDirectory();
     const fake = fakeCore();
     const before = Date.now();
@@ -298,7 +301,11 @@ describe("socket CoreClient: the daemon itself (Task 23)", () => {
     expect(info.startedAt).toBeLessThanOrEqual(Date.now());
 
     await client.reapplyRemote();
-    expect(fake.lifecycle).toEqual(["reapplyRemote"]);
+    await client.setDaemonEnabled(false);
+    expect(fake.lifecycle).toEqual(["reapplyRemote", "setDaemonEnabled false"]);
+    await expect(client.invoke("daemon:setDaemonEnabled" as never, ["no"])).rejects.toThrow(
+      "enabled must be true or false",
+    );
   });
 });
 

@@ -106,6 +106,18 @@ async function setup(home: string) {
   const mode: DaemonMode<SocketCoreClient> = createDaemonMode<SocketCoreClient>({
     ...real,
     service: recordingService(serviceCalls),
+    // As main.ts does: through the attached daemon's own config writer.
+    config: {
+      read: real.config.read,
+      write: (enabled) => {
+        const link = links.at(-1);
+        if (link !== undefined && link.connection().kind === "connected") {
+          events.push(`daemon writes ${enabled}`);
+          return link.setDaemonEnabled(enabled);
+        }
+        return real.config.write(enabled);
+      },
+    },
     async connect(timeoutMs) {
       const link = await real.connect(timeoutMs);
       links.push(link);
@@ -124,6 +136,12 @@ async function setup(home: string) {
       events.push("stopInProcess");
     },
     useDaemon: () => events.push("useDaemon"),
+    useInProcess: async () => {
+      events.push("useInProcess");
+    },
+    showError: async () => {
+      events.push("showError");
+    },
     relaunch: ({ inApp }) => events.push(`relaunch inApp=${inApp}`),
     log: () => {},
   });
@@ -170,7 +188,7 @@ describe.skipIf(WINDOWS)("background mode against a real foreground jarvisd", ()
     expect(await mode.setEnabled(false)).toEqual({ ok: true });
     await expect(daemon.exited).resolves.toBe(0);
     expect(serviceCalls).toEqual(["stop", "uninstall"]);
-    expect(events).toEqual(["confirm disable", "relaunch inApp=false"]);
+    expect(events).toEqual(["confirm disable", "daemon writes false", "relaunch inApp=false"]);
     expect(await real.daemonAnswers()).toBe(false);
     expect(readFileSync(configPath, "utf8")).not.toContain("daemon");
   }, 90_000);

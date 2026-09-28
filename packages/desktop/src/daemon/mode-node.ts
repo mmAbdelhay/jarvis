@@ -14,7 +14,6 @@
 // No electron here (core/no-electron.test.ts).
 import { execFile, spawn } from "node:child_process";
 import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { writeAtomically } from "@jarvis/platform";
 import { connectSocketCoreClient, type SocketCoreClient } from "../core/socket-core-client.js";
 import { readDaemonEnabled, writeDaemonEnabled } from "./config-file.js";
@@ -22,6 +21,7 @@ import { connectControl } from "./control/client.js";
 import { nodeControlDeps } from "./control/deps.js";
 import { runDirectoryFor } from "./control/endpoint.js";
 import { daemonAnswers } from "./control/liveness.js";
+import { daemonLogPath } from "./log-file.js";
 import type { DaemonModeDeps } from "./mode.js";
 import { DAEMON_REQUESTS } from "./protocol.js";
 import {
@@ -54,7 +54,14 @@ export type NodeModeOptions = {
 
 export type NodeModeDeps = Omit<
   DaemonModeDeps<SocketCoreClient>,
-  "confirm" | "chooseFallback" | "stopInProcess" | "useDaemon" | "relaunch" | "log"
+  | "confirm"
+  | "chooseFallback"
+  | "stopInProcess"
+  | "useDaemon"
+  | "useInProcess"
+  | "showError"
+  | "relaunch"
+  | "log"
 >;
 
 export function servicePlatform(platform: NodeJS.Platform): ServicePlatform {
@@ -181,7 +188,7 @@ export function nodeDaemonModeDeps(options: NodeModeOptions): NodeModeDeps {
       read: () => readDaemonEnabled(options.configPath, configIo),
       write: (enabled) => writeDaemonEnabled(options.configPath, enabled, configIo),
     },
-    lastLogLine: () => lastLineOf(join(options.home, ".config", "jarvis", "logs", "jarvisd.log")),
+    lastLogLine: () => lastLineOf(daemonLogPath(options.home)),
     now: Date.now,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };

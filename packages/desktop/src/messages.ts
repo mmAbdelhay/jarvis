@@ -539,8 +539,8 @@ export const MESSAGES = {
     language === "ar" ? "تشغيل جارفيس في الخلفية؟" : "Run Jarvis in the background?",
   daemonConfirmEnable: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "ستُغلق الطرفيات المفتوحة في هذه النافذة. بعد ذلك تبقى الطرفيات الجديدة تعمل حتى بعد إغلاق التطبيق."
-      : "Open terminals in this window will close. After that, new terminals keep running even when you quit the app.",
+      ? "ستُغلق الطرفيات المفتوحة في هذه النافذة، وكذلك تشغيلات الوكلاء الجارية. بعد ذلك تبقى الطرفيات الجديدة تعمل حتى بعد إغلاق التطبيق."
+      : "Open terminals in this window will close, and so will running agents. After that, new terminals keep running even when you quit the app.",
   daemonConfirmDisableTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "إيقاف التشغيل في الخلفية؟" : "Stop running in the background?",
   daemonConfirmDisable: (language: "ar" | "en"): string =>
@@ -598,8 +598,8 @@ export const MESSAGES = {
   ): string =>
     [
       language === "ar"
-        ? `لم تبدأ الخدمة خلال 10 ثوانٍ (${reason}).`
-        : `The service didn't start within 10 seconds (${reason}).`,
+        ? `لم تستجب الخدمة في الخلفية (${reason}).`
+        : `The background service didn't answer (${reason}).`,
       ...(lastLogLine === undefined
         ? []
         : [
@@ -608,6 +608,18 @@ export const MESSAGES = {
               : `Last log line: ${lastLogLine}`,
           ]),
     ].join("\n"),
+  daemonStuckTitle: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "خدمة جارفيس في الخلفية لا تتوقف"
+      : "Jarvis's background service won't stop",
+  daemonStuck: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بدأت خدمة jarvisd ولم تتوقف، فلن يشغّل جارفيس نسخة ثانية داخل التطبيق. أغلق جارفيس، وأوقف jarvisd (أو أعد تشغيل الجهاز)، ثم افتحه من جديد."
+      : "jarvisd started and won't stop, so Jarvis won't run a second copy inside the app. Quit Jarvis, stop jarvisd (or restart the computer), then open Jarvis again.",
+  daemonNotAttached: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يعمل جارفيس في الخلفية الآن."
+      : "Jarvis isn't running in the background right now.",
   daemonRunInApp: (language: "ar" | "en"): string =>
     language === "ar" ? "التشغيل داخل التطبيق هذه المرة" : "Run inside the app this time",
   daemonQuit: (language: "ar" | "en"): string => (language === "ar" ? "إنهاء" : "Quit"),

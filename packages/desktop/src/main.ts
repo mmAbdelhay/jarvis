@@ -360,24 +360,56 @@ app.whenReady().then(async () => {
     const platform = process.platform;
     const distSrcDir = dirname(fileURLToPath(import.meta.url));
     let inProcessCore: Awaited<ReturnType<typeof createCore>> | undefined;
+    /** The daemon the app is attached to, when it is. */
+    let attached: SocketCoreClient | undefined;
+    const startCore = () =>
+      createCore({
+        platform,
+        // Phase 1: the browser client's own listener, behind the bridge's
+        // web gate. The export is read once, lazily (web-export.ts).
+        webExportDir: () =>
+          webExportDir({
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            // From dist/src/main.js: packages/desktop/web, where `pnpm build`
+            // copies the mobile app's web export (scripts/copy-web.mjs) —
+            // the same directory electron-builder ships.
+            devDir: fileURLToPath(new URL("../../web", import.meta.url)),
+          }),
+      });
     let appWindow: BrowserWindow | undefined;
     const language = PRIMARY_LANGUAGE;
-    const mode: DaemonMode<SocketCoreClient> = createDaemonMode<SocketCoreClient>({
-      ...nodeDaemonModeDeps({
-        platform,
-        home: homedir(),
-        uid: process.getuid?.() ?? 0,
-        execPath: process.execPath,
-        daemonScript: daemonScriptPath({
-          packaged: app.isPackaged,
-          resourcesPath: process.resourcesPath,
-          distSrcDir,
-        }),
-        build: readBuildId(join(distSrcDir, "..", "build-stamp.json")),
-        configPath: DEFAULT_CONFIG_PATH,
-        restartDaemon: (): Promise<void> => mode.restartDaemon(),
-        log: (line) => console.error(`[jarvisd link] ${line}`),
+    const nodeDeps = nodeDaemonModeDeps({
+      platform,
+      home: homedir(),
+      uid: process.getuid?.() ?? 0,
+      execPath: process.execPath,
+      daemonScript: daemonScriptPath({
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        distSrcDir,
       }),
+      build: readBuildId(join(distSrcDir, "..", "build-stamp.json")),
+      configPath: DEFAULT_CONFIG_PATH,
+      restartDaemon: (): Promise<void> => mode.restartDaemon(),
+      log: (line) => console.error(`[jarvisd link] ${line}`),
+    });
+    const mode: DaemonMode<SocketCoreClient> = createDaemonMode<SocketCoreClient>({
+      ...nodeDeps,
+      config: {
+        read: nodeDeps.config.read,
+        // Through the live core's own serialized config writer — the
+        // daemon's when attached — so the toggle never races a settings
+        // save or the bridge's idle auto-disable. With no core at all
+        // (between a daemon's stop and a relaunch) the file is written
+        // directly: nothing else is writing it then.
+        write: (enabled) =>
+          inProcessCore !== undefined
+            ? inProcessCore.setDaemonEnabled(enabled)
+            : attached !== undefined
+              ? attached.setDaemonEnabled(enabled)
+              : nodeDeps.config.write(enabled),
+      },
       async confirm(change) {
         const options = {
           type: "question" as const,
@@ -416,10 +448,21 @@ app.whenReady().then(async () => {
         await core?.shutdown();
       },
       useDaemon(link) {
+        attached = link;
         client.switchTo(link);
         // Everything the renderer drew came from the old core: it starts
         // over against the new one, in the same window.
         appWindow?.webContents.reload();
+      },
+      async useInProcess() {
+        attached = undefined;
+        inProcessCore = await startCore();
+        client.switchTo(inProcessCoreClient(inProcessCore));
+        inProcessCore.startRemote();
+        appWindow?.webContents.reload();
+      },
+      async showError(title, body) {
+        dialog.showErrorBox(title, body);
       },
       relaunch({ inApp }) {
         app.relaunch({ args: relaunchArgs(process.argv.slice(1), inApp) });
@@ -433,22 +476,8 @@ app.whenReady().then(async () => {
       app.quit();
       return;
     }
-    if (launch.kind === "in-process") {
-      inProcessCore = await createCore({
-        platform,
-        // Phase 1: the browser client's own listener, behind the bridge's
-        // web gate. The export is read once, lazily (web-export.ts).
-        webExportDir: () =>
-          webExportDir({
-            packaged: app.isPackaged,
-            resourcesPath: process.resourcesPath,
-            // From dist/src/main.js: packages/desktop/web, where `pnpm build`
-            // copies the mobile app's web export (scripts/copy-web.mjs) —
-            // the same directory electron-builder ships.
-            devDir: fileURLToPath(new URL("../../web", import.meta.url)),
-          }),
-      });
-    }
+    if (launch.kind === "in-process") inProcessCore = await startCore();
+    else attached = launch.link;
     // Everything below reaches the core through `client` alone
     // (main-core-seam.test.ts): the in-process adapter or jarvisd's socket,
     // and after a switch the other one, with no other change here.
@@ -530,11 +559,7 @@ app.whenReady().then(async () => {
       background: {
         status: () => mode.status(),
         setEnabled: (enabled) => settle(() => mode.setEnabled(enabled)),
-        restart: () =>
-          settle(async () => {
-            await mode.restartDaemon();
-            return { ok: true };
-          }),
+        restart: () => settle(() => mode.restart()),
         stopNow: () => settle(() => mode.stopNow()),
       },
     });

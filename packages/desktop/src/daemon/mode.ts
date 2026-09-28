@@ -32,6 +32,7 @@
 //
 // No electron here (core/no-electron.test.ts).
 import type { ConnectionState } from "../core/socket-core-client.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import type { DaemonInfo } from "./protocol.js";
 import type { ServiceManager } from "./service.js";
 
@@ -40,6 +41,9 @@ export const SOCKET_WAIT_MS = 10_000;
 /** How long a stop waits for the daemon to let go of its socket. */
 export const STOP_WAIT_MS = 10_000;
 export const STOP_POLL_MS = 200;
+/** How long a failure path waits for a daemon it started to go, before it
+ *  refuses to run a second core in the app. */
+export const STARTED_STOP_WAIT_MS = 5_000;
 
 export type DaemonState =
   | { kind: "off" }
@@ -87,6 +91,11 @@ export type DaemonModeDeps<L extends DaemonLink> = {
   stopInProcess(): Promise<void>;
   /** Switches the app's CoreClient to the daemon. */
   useDaemon(link: L): void;
+  /** Starts a core in the app and switches the CoreClient to it — for a
+   *  window whose daemon is gone (a turn-off that failed half way). */
+  useInProcess(): Promise<void>;
+  /** A native error box: title and body, already in the app's language. */
+  showError(title: string, body: string): Promise<void>;
   /** Relaunches the app; `inApp` runs the core inside it for that session. */
   relaunch(options: { inApp: boolean }): void;
   /** jarvisd.log's last line, already scrubbed of secrets when written. */
@@ -109,8 +118,12 @@ export type ChangeResult =
 export type DaemonMode<L extends DaemonLink> = {
   launch(options: { inAppThisSession: boolean }): Promise<LaunchResult<L>>;
   setEnabled(enabled: boolean): Promise<ChangeResult>;
-  /** Restarts the daemon through its service manager. */
+  /** Restarts the daemon through its service manager — the socket
+   *  adapter's answer to restart-required. */
   restartDaemon(): Promise<void>;
+  /** Settings' Restart daemon: refused unless the app is attached to it,
+   *  so it can never start a daemon beside the in-process core. */
+  restart(): Promise<ChangeResult>;
   /** Stops the daemon for this session and relaunches the app in-process. */
   stopNow(): Promise<ChangeResult>;
   status(): Promise<DaemonStatus>;
@@ -140,17 +153,48 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     }
   }
 
-  /** Until the daemon no longer answers, or STOP_WAIT_MS. */
-  async function waitGone(): Promise<void> {
-    const deadline = deps.now() + STOP_WAIT_MS;
+  /** Until the daemon no longer answers (true), or `limitMs` (false). */
+  async function waitGone(limitMs = STOP_WAIT_MS): Promise<boolean> {
+    const deadline = deps.now() + limitMs;
     while (await deps.daemonAnswers()) {
       if (deps.now() >= deadline) {
-        deps.log("the Jarvis daemon is still answering after the stop; going on");
-        return;
+        deps.log("the Jarvis daemon is still answering after the stop");
+        return false;
       }
       await deps.sleep(STOP_POLL_MS);
     }
+    return true;
   }
+
+  /**
+   * A failure path's undo of a start: whatever came up must go before the
+   * app runs a core of its own, or two cores share the ptys, jarvis.yaml
+   * and the bridge ports. The service manager's stop where there is one,
+   * then daemon:stop to whatever still answers (Windows, or a daemon that
+   * came up late), then up to STARTED_STOP_WAIT_MS for its endpoint to go.
+   * True when nothing answers any more.
+   */
+  async function stopStarted(): Promise<boolean> {
+    await deps.service.stop().catch((error: unknown) => {
+      deps.log(`stopping the service failed: ${describe(error)}`);
+    });
+    try {
+      if (await deps.daemonAnswers()) await deps.requestDaemonStop();
+    } catch (error) {
+      deps.log(`daemon:stop failed: ${describe(error)}`);
+    }
+    return waitGone(STARTED_STOP_WAIT_MS);
+  }
+
+  async function restartDaemon(): Promise<void> {
+    const outcome = await deps.service.restart();
+    if (outcome?.reason !== "use-control-socket") return;
+    if (await deps.daemonAnswers()) await deps.requestDaemonStop();
+    await waitGone();
+    await deps.service.start();
+  }
+
+  const stuck = (): string => MESSAGES.daemonStuck(PRIMARY_LANGUAGE);
 
   async function stopDaemonProcess(): Promise<void> {
     const outcome = await deps.service.stop();
@@ -187,6 +231,12 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     } catch (error) {
       failure = await failed(error);
       deps.log(`turning the background service on failed: ${failure.reason}`);
+      // A daemon that came up after the wait (or, on Windows, one the
+      // uninstall below would leave running) goes first.
+      if (installed && !(await stopStarted())) {
+        failure = { ...failure, reason: stuck() };
+        return { ok: false, reason: "failed", detail: stuck() };
+      }
       if (installed && !wasEnabled) {
         await deps.service.uninstall().catch((undo: unknown) => {
           deps.log(`undoing the service install failed: ${describe(undo)}`);
@@ -223,17 +273,43 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     if (link !== undefined && !(await deps.confirm("disable"))) {
       return { ok: false, reason: "cancelled" };
     }
+    // Written first, through the live core's own config writer (the
+    // daemon's, when attached): after the stop there may be no core left.
+    try {
+      await deps.config.write(false);
+    } catch (error) {
+      failure = await failed(error);
+      return { ok: false, reason: "failed", detail: failure.reason };
+    }
+    enabled = false;
     try {
       await stopDaemonProcess();
       await deps.service.uninstall();
       await waitGone();
-      await deps.config.write(false);
     } catch (error) {
       failure = await failed(error);
       deps.log(`turning the background service off failed: ${failure.reason}`);
+      // The service may still be installed: the setting says so again.
+      if (link !== undefined && (await deps.daemonAnswers().catch(() => false))) {
+        // Still attached to a live daemon: the app stays as it is.
+        await restoreEnabled();
+        return { ok: false, reason: "failed", detail: failure.reason };
+      }
+      if (link !== undefined) {
+        // The daemon is gone and the window has no core: one in the app,
+        // for this session.
+        link.stop();
+        link = undefined;
+        try {
+          await deps.useInProcess();
+        } catch (start) {
+          deps.log(`starting the core in the app failed: ${describe(start)}`);
+          deps.relaunch({ inApp: true });
+        }
+      }
+      await restoreEnabled();
       return { ok: false, reason: "failed", detail: failure.reason };
     }
-    enabled = false;
     failure = undefined;
     if (link !== undefined) {
       link.stop();
@@ -241,6 +317,13 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
       deps.relaunch({ inApp: false });
     }
     return { ok: true };
+  }
+
+  async function restoreEnabled(): Promise<void> {
+    await deps.config.write(true).catch((undo: unknown) => {
+      deps.log(`restoring daemon.enabled failed: ${describe(undo)}`);
+    });
+    enabled = true;
   }
 
   return {
@@ -262,18 +345,34 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
         deps.log(`the Jarvis daemon did not start: ${failure.reason}`);
       }
       const choice = await deps.chooseFallback(failure);
-      return choice === "in-app" ? { kind: "in-process" } : { kind: "quit" };
+      if (choice === "quit") return { kind: "quit" };
+      // In the app this time — once nothing started above still runs.
+      if (await stopStarted()) return { kind: "in-process" };
+      failure = { ...failure, reason: stuck() };
+      await deps.showError(MESSAGES.daemonStuckTitle(PRIMARY_LANGUAGE), stuck());
+      return { kind: "quit" };
     },
 
     setEnabled: (next) => exclusive(() => (next ? turnOn() : turnOff())),
 
-    async restartDaemon() {
-      const outcome = await deps.service.restart();
-      if (outcome?.reason !== "use-control-socket") return;
-      if (await deps.daemonAnswers()) await deps.requestDaemonStop();
-      await waitGone();
-      await deps.service.start();
-    },
+    restartDaemon,
+
+    restart: () =>
+      exclusive(async () => {
+        if (link === undefined) {
+          return {
+            ok: false,
+            reason: "failed",
+            detail: MESSAGES.daemonNotAttached(PRIMARY_LANGUAGE),
+          };
+        }
+        try {
+          await restartDaemon();
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, reason: "failed", detail: describe(error) };
+        }
+      }),
 
     stopNow: () =>
       exclusive(async () => {

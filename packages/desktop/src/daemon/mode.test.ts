@@ -7,8 +7,10 @@ import {
   IN_APP_FLAG,
   relaunchArgs,
   SOCKET_WAIT_MS,
+  STARTED_STOP_WAIT_MS,
   STOP_WAIT_MS,
 } from "./mode.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import type { ServiceStatus } from "./service.js";
 
 type FakeLink = DaemonLink & { state: ConnectionState; name: string };
@@ -105,6 +107,12 @@ function harness(options: Options = {}) {
     },
     stopInProcess: record("stopInProcess"),
     useDaemon: (link) => events.push(`useDaemon ${link.name}`),
+    useInProcess: async () => {
+      events.push("useInProcess");
+    },
+    showError: async (title) => {
+      events.push(`error ${title}`);
+    },
     relaunch: ({ inApp }) => events.push(`relaunch inApp=${inApp}`),
     lastLogLine: async () => "error: the core failed to start: EACCES",
     now: () => time,
@@ -190,6 +198,8 @@ describe("daemon mode: app launch", () => {
       "start",
       "connect(10000)",
       "fallback? timed out | error: the core failed to start: EACCES",
+      // Whatever the start set going is stopped before the app runs a core.
+      "stop",
     ]);
     // In-process for this session only: the setting stays on.
     expect(h.enabled()).toBe(true);
@@ -202,6 +212,38 @@ describe("daemon mode: app launch", () => {
         lastLogLine: "error: the core failed to start: EACCES",
       },
     });
+  });
+
+  it("on, in the app this time, but what it started won't stop: an error, and no second core", async () => {
+    const h = harness({
+      enabled: true,
+      connects: [new Error("ENOENT"), new Error("timed out")],
+      fallback: "in-app",
+      // It answers throughout: never goes.
+      answersFor: 10_000,
+      controlSocket: true,
+    });
+    expect(await h.mode.launch({ inAppThisSession: false })).toEqual({ kind: "quit" });
+    const events = noLogs(h.events);
+    expect(events.slice(-3)).toEqual([
+      "stop",
+      "daemon:stop",
+      "error Jarvis's background service won't stop",
+    ]);
+    expect(events).not.toContain("useInProcess");
+    expect(STARTED_STOP_WAIT_MS).toBe(5_000);
+  });
+
+  it("on, in the app this time, and a late daemon answers: daemon:stop, then in-process once it is gone", async () => {
+    const h = harness({
+      enabled: true,
+      connects: [new Error("ENOENT"), new Error("timed out")],
+      fallback: "in-app",
+      answersFor: 3,
+      controlSocket: true,
+    });
+    expect(await h.mode.launch({ inAppThisSession: false })).toEqual({ kind: "in-process" });
+    expect(noLogs(h.events).slice(-2)).toEqual(["stop", "daemon:stop"]);
   });
 
   it("on, still nothing, and the user quits", async () => {
@@ -277,6 +319,7 @@ describe("daemon mode: turning it on", () => {
       "config true",
       "install",
       "connect(10000)",
+      "stop",
       "uninstall",
       "config false",
     ]);
@@ -290,6 +333,45 @@ describe("daemon mode: turning it on", () => {
         lastLogLine: "error: the core failed to start: EACCES",
       },
     });
+  });
+
+  it("on a Windows timeout: a daemon the spawn brought up late gets daemon:stop before the uninstall", async () => {
+    const h = harness({
+      installStarts: false,
+      controlSocket: true,
+      connects: [new Error("timed out")],
+      answersFor: 2,
+    });
+    await h.mode.launch({ inAppThisSession: false });
+    expect((await h.mode.setEnabled(true)).ok).toBe(false);
+    expect(noLogs(h.events)).toEqual([
+      "confirm enable",
+      "config true",
+      "install",
+      "start",
+      "connect(10000)",
+      "stop",
+      "daemon:stop",
+      "uninstall",
+      "config false",
+    ]);
+  });
+
+  it("on a timeout whose daemon won't stop: says so, and leaves the service for the user to stop", async () => {
+    const h = harness({
+      connects: [new Error("timed out")],
+      answersFor: 10_000,
+      controlSocket: true,
+    });
+    await h.mode.launch({ inAppThisSession: false });
+    const result = await h.mode.setEnabled(true);
+    expect(result).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: MESSAGES.daemonStuck(PRIMARY_LANGUAGE),
+    });
+    expect(noLogs(h.events)).not.toContain("uninstall");
+    expect(noLogs(h.events)).not.toContain("useDaemon link1");
   });
 
   it("refuses a second change while one is running, and reports starting meanwhile", async () => {
@@ -310,9 +392,10 @@ describe("daemon mode: turning it off", () => {
     expect(noLogs(h.events)).toEqual([
       "connect(0)",
       "confirm disable",
+      // Through the daemon's own config writer, while it still runs.
+      "config false",
       "stop",
       "uninstall",
-      "config false",
       "link.stop",
       "relaunch inApp=false",
     ]);
@@ -326,10 +409,10 @@ describe("daemon mode: turning it off", () => {
     expect(noLogs(h.events)).toEqual([
       "connect(0)",
       "confirm disable",
+      "config false",
       "stop",
       "daemon:stop",
       "uninstall",
-      "config false",
       "link.stop",
       "relaunch inApp=false",
     ]);
@@ -339,7 +422,7 @@ describe("daemon mode: turning it off", () => {
     const h = harness({ enabled: true });
     await h.mode.launch({ inAppThisSession: true });
     expect(await h.mode.setEnabled(false)).toEqual({ ok: true });
-    expect(noLogs(h.events)).toEqual(["stop", "uninstall", "config false"]);
+    expect(noLogs(h.events)).toEqual(["config false", "stop", "uninstall"]);
     expect(await h.mode.status()).toEqual({
       enabled: false,
       inApp: true,
@@ -348,22 +431,49 @@ describe("daemon mode: turning it off", () => {
   });
 
   it("keeps the setting on, and the app as it is, when the uninstall fails", async () => {
-    const h = harness({ enabled: true, uninstallFails: true });
+    const h = harness({ enabled: true, uninstallFails: true, answersFor: 1 });
     await h.mode.launch({ inAppThisSession: false });
     expect(await h.mode.setEnabled(false)).toEqual({
       ok: false,
       reason: "failed",
       detail: "launchctl exited with code 5",
     });
-    expect(noLogs(h.events)).toEqual(["connect(0)", "confirm disable", "stop"]);
+    // The daemon still answers: the app stays attached, the setting on.
+    expect(noLogs(h.events)).toEqual([
+      "connect(0)",
+      "confirm disable",
+      "config false",
+      "stop",
+      "config true",
+    ]);
     expect(h.enabled()).toBe(true);
+  });
+
+  it("fails after the daemon has stopped: starts a core in the app, keeps the setting, says why", async () => {
+    const h = harness({ enabled: true, uninstallFails: true, answersFor: 0 });
+    await h.mode.launch({ inAppThisSession: false });
+    expect(await h.mode.setEnabled(false)).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: "launchctl exited with code 5",
+    });
+    expect(noLogs(h.events)).toEqual([
+      "connect(0)",
+      "confirm disable",
+      "config false",
+      "stop",
+      "link.stop",
+      "useInProcess",
+      "config true",
+    ]);
+    expect(await h.mode.status()).toMatchObject({ enabled: true, inApp: true });
   });
 
   it("gives up waiting after 10 s and goes on", async () => {
     const h = harness({ enabled: true, answersFor: 1_000 });
     await h.mode.launch({ inAppThisSession: false });
     await h.mode.setEnabled(false);
-    expect(h.events).toContain("log the Jarvis daemon is still answering after the stop; going on");
+    expect(h.events).toContain("log the Jarvis daemon is still answering after the stop");
     expect(h.events).toContain("relaunch inApp=false");
     expect(STOP_WAIT_MS).toBe(10_000);
   });
@@ -395,6 +505,22 @@ describe("daemon mode: restart and stop now", () => {
       "relaunch inApp=true",
     ]);
     expect(h.enabled()).toBe(true);
+  });
+
+  it("Settings' restart is refused when the core runs in the app: no daemon beside it", async () => {
+    const h = harness({ enabled: true });
+    await h.mode.launch({ inAppThisSession: true });
+    expect(await h.mode.restart()).toEqual({
+      ok: false,
+      reason: "failed",
+      detail: MESSAGES.daemonNotAttached(PRIMARY_LANGUAGE),
+    });
+    expect(h.events).toEqual([]);
+
+    const attached = harness({ enabled: true });
+    await attached.mode.launch({ inAppThisSession: false });
+    expect(await attached.mode.restart()).toEqual({ ok: true });
+    expect(noLogs(attached.events)).toEqual(["connect(0)", "restart"]);
   });
 
   it("stop now does nothing when the core already runs in the app", async () => {

@@ -41,6 +41,9 @@ export const DAEMON_REQUESTS = {
    *  in-process core has stopped and let go of the bridge's ports (Task 23's
    *  switch to the daemon). */
   reapplyRemote: "daemon:reapplyRemote",
+  /** Writes daemon.enabled through the daemon core's own serialized config
+   *  writer (Settings' background toggle). Args: [boolean]. */
+  setDaemonEnabled: "daemon:setDaemonEnabled",
   /** Graceful stop — the Windows stop path, where there is no service
    *  manager to send a signal. Answered before the stop begins. */
   stop: "daemon:stop",

@@ -213,6 +213,10 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
       }
       case DAEMON_REQUESTS.info:
         return info;
+      case DAEMON_REQUESTS.setDaemonEnabled:
+        if (typeof args[0] !== "boolean") refuse("enabled must be true or false");
+        await core.setDaemonEnabled(args[0] as boolean);
+        return null;
       case DAEMON_REQUESTS.reapplyRemote:
         await core.reapplyRemote();
         return null;

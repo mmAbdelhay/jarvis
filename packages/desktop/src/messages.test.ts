@@ -910,6 +910,9 @@ describe("MESSAGES: daemon", () => {
       MESSAGES.daemonFallbackTitle,
       MESSAGES.daemonRunInApp,
       MESSAGES.daemonQuit,
+      MESSAGES.daemonStuckTitle,
+      MESSAGES.daemonStuck,
+      MESSAGES.daemonNotAttached,
     ];
     for (const message of unary) expect(message("ar")).not.toBe(message("en"));
     expect(MESSAGES.daemonStateRunning(12, "3m", "ar")).not.toBe(
@@ -941,10 +944,10 @@ describe("MESSAGES: daemon", () => {
 
   it("puts the log line under the fallback's reason only when there is one", () => {
     expect(MESSAGES.daemonFallback("timed out", undefined, "en")).toBe(
-      "The service didn't start within 10 seconds (timed out).",
+      "The background service didn't answer (timed out).",
     );
     expect(MESSAGES.daemonFallback("timed out", "boom", "en")).toBe(
-      "The service didn't start within 10 seconds (timed out).\nLast log line: boom",
+      "The background service didn't answer (timed out).\nLast log line: boom",
     );
   });
 });

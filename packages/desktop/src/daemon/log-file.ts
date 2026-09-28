@@ -15,7 +15,7 @@
 //
 // No electron here (core/no-electron.test.ts).
 import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { format } from "node:util";
 
 export const MAX_LOG_BYTES = 5 * 1024 * 1024;
@@ -67,6 +67,10 @@ export type DaemonLog = {
   write(level: "info" | "error", message: string): void;
 };
 
+/** Where jarvisd logs: ~/.config/jarvis/logs/jarvisd.log. */
+export function daemonLogPath(home: string): string {
+  return join(home, ".config", "jarvis", "logs", "jarvisd.log");
+}
 export function createDaemonLog(deps: {
   path: string;
   now(): number;

@@ -29,6 +29,7 @@ import { createShutdown } from "./daemon/lifecycle.js";
 import {
   createDaemonLog,
   type DaemonLog,
+  daemonLogPath,
   redirectConsole,
   scrubSecrets,
 } from "./daemon/log-file.js";
@@ -55,7 +56,7 @@ async function main(argv: readonly string[]): Promise<void> {
   const home = homedir();
   const distSrc = dirname(fileURLToPath(import.meta.url));
   const fileLog = createDaemonLog({
-    path: join(home, ".config", "jarvis", "logs", "jarvisd.log"),
+    path: daemonLogPath(home),
     now: Date.now,
     fallback: (line) => process.stderr.write(line),
   });

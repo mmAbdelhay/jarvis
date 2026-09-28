@@ -73,6 +73,9 @@ function fakeCore() {
     reapplyRemote: async () => {
       lifecycle.push("reapplyRemote");
     },
+    setDaemonEnabled: async (enabled: boolean) => {
+      lifecycle.push(`setDaemonEnabled ${enabled}`);
+    },
     announceStartup: async () => {
       lifecycle.push("announceStartup");
     },

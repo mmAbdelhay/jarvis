@@ -71,6 +71,8 @@ export type SocketCoreClient = CoreClient & {
   info(): Promise<DaemonInfo>;
   /** Asks the daemon to apply the file's `remote:` to its bridge again. */
   reapplyRemote(): Promise<void>;
+  /** Writes daemon.enabled through the daemon core's config writer. */
+  setDaemonEnabled(enabled: boolean): Promise<void>;
   connection(): ConnectionState;
   onConnectionChange(listener: (state: ConnectionState) => void): () => void;
 };
@@ -459,6 +461,8 @@ export async function connectSocketCoreClient(
       return answer;
     },
     reapplyRemote: () => request(DAEMON_REQUESTS.reapplyRemote, []).then(() => undefined),
+    setDaemonEnabled: (enabled) =>
+      request(DAEMON_REQUESTS.setDaemonEnabled, [enabled]).then(() => undefined),
 
     connection: () => state,
     onConnectionChange(listener) {
