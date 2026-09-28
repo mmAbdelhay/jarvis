@@ -8,7 +8,8 @@
 //      last, so a new daemon can't start while this one's children still run;
 //   3. exit 0: a stop that was asked for is a success, so launchd's
 //      KeepAlive {SuccessfulExit: false} and systemd's Restart=on-failure
-//      leave it stopped.
+//      leave it stopped. A restart exits DAEMON_EXIT.restart instead, which
+//      they answer by starting it again.
 //
 // A step that throws or hangs is logged and the next one still runs: a
 // daemon asked to stop must stop. Idempotent — a second signal while
@@ -31,8 +32,9 @@ export type ShutdownSteps = {
 };
 
 export type Shutdown = {
-  /** Starts the stop (once) and resolves when it has exited. */
-  stop(reason: string): Promise<void>;
+  /** Starts the stop (once) and resolves when it has exited — with
+   *  `exitCode`, 0 unless this is a restart. */
+  stop(reason: string, exitCode?: number): Promise<void>;
   readonly stopping: boolean;
 };
 
@@ -62,13 +64,13 @@ export function createShutdown(steps: ShutdownSteps): Shutdown {
   }
 
   return {
-    stop(reason) {
+    stop(reason, exitCode = 0) {
       running ??= (async () => {
         steps.log(`stopping (${reason})`);
         await step("core", steps.stopCore, CORE_STOP_TIMEOUT_MS);
         await step("control socket", steps.closeControl);
         steps.log("stopped");
-        steps.exit(0);
+        steps.exit(exitCode);
       })();
       return running;
     },

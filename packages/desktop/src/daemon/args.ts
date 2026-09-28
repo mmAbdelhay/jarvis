@@ -12,7 +12,16 @@ export const DAEMON_USAGE = `Usage: jarvisd [run]
 `;
 
 /** Exit codes a service manager or a script can act on. */
-export const DAEMON_EXIT = { ok: 0, failed: 1, usage: 2, busy: 3 } as const;
+export const DAEMON_EXIT = {
+  ok: 0,
+  failed: 1,
+  usage: 2,
+  busy: 3,
+  /** A restart asked for (Settings' Restart): non-zero, so launchd's
+   *  KeepAlive {SuccessfulExit: false} and systemd's Restart=on-failure
+   *  start the daemon again. 75 is EX_TEMPFAIL. */
+  restart: 75,
+} as const;
 
 export type DaemonArgs = { kind: "run" } | { kind: "help" } | { kind: "error"; message: string };
 

@@ -76,6 +76,9 @@ export interface ControlServer {
   readonly endpoint: string;
   /** Sends a push to every authenticated client, in call order. */
   push(channel: string, payload: unknown): void;
+  /** Sends a push to one authenticated client (a ControlConnection id); a
+   *  client that has gone is skipped. */
+  pushTo(connectionId: number, channel: string, payload: unknown): void;
   /** Called after each client's welcome, e.g. to flush pushes queued while none was connected. */
   onConnect(listener: () => void): () => void;
   readonly connectionCount: number;
@@ -92,7 +95,7 @@ export interface CreateControlServerOptions {
 
 export type ControlServerStart = { kind: "started"; server: ControlServer } | { kind: "busy" };
 
-type Client = { send(message: ControlServerMessage): void; seq: number };
+type Client = { send(message: ControlServerMessage): void; seq: number; id: number };
 
 export async function createControlServer(
   options: CreateControlServerOptions,
@@ -153,10 +156,10 @@ export async function createControlServer(
       socket.write(encodeJsonFrame(message));
       if (socket.writableLength > MAX_OUTBOUND_BYTES) fail();
     };
-    const client: Client = { send, seq: 0 };
+    const client: Client = { send, seq: 0, id: nextConnectionId++ };
     const closeListeners: Array<() => void> = [];
     const connection: ControlConnection = {
-      id: nextConnectionId++,
+      id: client.id,
       onClose(listener) {
         if (phase === "closing") listener();
         else closeListeners.push(listener);
@@ -401,6 +404,13 @@ export async function createControlServer(
     kind: "started",
     server: {
       endpoint,
+      pushTo(connectionId, channel, payload) {
+        for (const client of clients) {
+          if (client.id !== connectionId) continue;
+          client.seq += 1;
+          client.send({ t: "psh", ch: channel, p: payload, seq: client.seq });
+        }
+      },
       push(channel, payload) {
         for (const client of clients) {
           client.seq += 1;

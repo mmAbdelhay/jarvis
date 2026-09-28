@@ -49,7 +49,16 @@ export const DAEMON_PUSHES = {
   requestFavicon: "daemon:requestFavicon",
   sweepIdleViews: "daemon:sweepIdleViews",
   openExternal: "daemon:openExternal",
+  /** To the one app whose request asked for a restart: relaunch yourself if
+   *  a setting only the app reads (hostConfig().suspendTabsAfterMs) changed. */
   restart: "daemon:restart",
+  /** To every client: the daemon is restarting on purpose (exit
+   *  DAEMON_EXIT.restart); the service manager brings it back and the
+   *  adapter reconnects. */
+  restarting: "daemon:restarting",
+  /** To the app that asked: no service manager runs this daemon, so it
+   *  can't restart itself — the user has to restart jarvisd. */
+  restartManual: "daemon:restartManual",
   /** notifyDesktop in daemon mode: the app shows it as an OS notification.
    *  Payload: SecurityAlert. */
   alert: "security:alert",

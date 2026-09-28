@@ -28,6 +28,8 @@ describe("buildDarwinService", () => {
   <dict>
     <key>ELECTRON_RUN_AS_NODE</key>
     <string>1</string>
+    <key>JARVISD_SUPERVISOR</key>
+    <string>launchd</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

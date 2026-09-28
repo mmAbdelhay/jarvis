@@ -17,8 +17,16 @@
 //     and flushed, in order, to the next app that attaches. The event itself
 //     is already in the bridge's audit log (locked-out / refresh-reuse); the
 //     daemon log gets the title only, never the body;
-//   - openExternal, restart: forwarded to an attached app. With none, they
-//     are unavailable: openExternal rejects, restart is logged as not done.
+//   - openExternal: forwarded to an attached app, which opens only the
+//     bridge's own web client (open-external-guard.ts). With none it rejects;
+//   - restart (Settings' Restart) restarts the daemon, since the settings it
+//     applies live here. Under a service manager every client is told
+//     `daemon:restarting` and the daemon exits DAEMON_EXIT.restart, to be
+//     started again; the apps reconnect. With none (a foreground `jarvisd
+//     run`, or Windows) it can't come back on its own, so the app that
+//     asked is told to have the user restart jarvisd. Either way, only that
+//     app — never every attached one — gets `daemon:restart`, which it
+//     answers by relaunching itself if an app-only setting changed.
 //
 // No electron here (core/no-electron.test.ts).
 import type { DesktopHost } from "../core/host-link.js";
@@ -42,6 +50,14 @@ export type DaemonHost = {
 export function createDaemonHost(deps: {
   /** Sends to every connected control client, in call order. */
   push(channel: string, payload: unknown): void;
+  /** Sends to one control client. */
+  pushTo(connectionId: number, channel: string, payload: unknown): void;
+  /** The connection whose request is running now, if the core is inside
+   *  one — who asked for a restart. */
+  initiator(): number | undefined;
+  /** Stops the daemon with the restart exit code; undefined when no
+   *  service manager would start it again. */
+  restartDaemon?: () => void;
   log(line: string): void;
   now(): number;
 }): DaemonHost {
@@ -81,11 +97,18 @@ export function createDaemonHost(deps: {
       return Promise.resolve();
     },
     restart() {
-      if (attached.size === 0) {
-        deps.log("restart not done: no desktop app is connected");
+      const asker = deps.initiator();
+      if (asker !== undefined) deps.pushTo(asker, DAEMON_PUSHES.restart, null);
+      if (deps.restartDaemon === undefined) {
+        deps.log(
+          "restart asked for, but no service manager runs jarvisd: restart jarvisd manually",
+        );
+        if (asker !== undefined) deps.pushTo(asker, DAEMON_PUSHES.restartManual, null);
         return;
       }
-      deps.push(DAEMON_PUSHES.restart, null);
+      deps.log("restarting jarvisd");
+      deps.push(DAEMON_PUSHES.restarting, null);
+      deps.restartDaemon();
     },
   };
 

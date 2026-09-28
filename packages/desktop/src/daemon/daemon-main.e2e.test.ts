@@ -1,12 +1,14 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectSocketCoreClient } from "../core/socket-core-client.js";
+import { ensureConfigFile } from "../config.js";
 import { readBuildId } from "./build-id.js";
+import { DAEMON_EXIT } from "./args.js";
 import { connectControl } from "./control/client.js";
 import { nodeControlDeps } from "./control/deps.js";
 import { runDirectoryFor } from "./control/endpoint.js";
@@ -33,16 +35,25 @@ async function scratchHome(): Promise<string> {
   return home;
 }
 
-function startDaemon(home: string): { child: ChildProcess; exited: Promise<number | null> } {
+function startDaemon(
+  home: string,
+  env: NodeJS.ProcessEnv = {},
+): { child: ChildProcess; exited: Promise<number | null> } {
   const child = spawn(process.execPath, [SCRIPT, "run"], {
-    env: { ...process.env, HOME: home, USERPROFILE: home },
+    env: { ...process.env, HOME: home, USERPROFILE: home, ...env },
     stdio: "ignore",
   });
   const exited = new Promise<number | null>((resolve) =>
     child.once("exit", (code) => resolve(code)),
   );
-  cleanups.push(() => {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  // Stopped, and waited for, before its scratch HOME is removed: a live
+  // shell still writing there would make the removal fail.
+  cleanups.push(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill("SIGTERM");
+    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+    await exited;
+    clearTimeout(timer);
   });
   return { child, exited };
 }
@@ -99,6 +110,50 @@ describe.skipIf(WINDOWS)("jarvisd, end to end", () => {
     expect(log).toContain("stopping (SIGTERM)");
     expect(log).toContain("stopped");
     expect(log).not.toContain(secret);
+  }, 60_000);
+
+  it("gives its terminals an environment without ELECTRON_RUN_AS_NODE", async () => {
+    const home = await scratchHome();
+    // A project for the terminal to open in, in the scratch config.
+    const config = join(home, ".config", "jarvis", "jarvis.yaml");
+    await ensureConfigFile(config);
+    await appendFile(config, `\nprojects:\n  scratch: ${JSON.stringify(home)}\n`);
+    // Started the way the packaged app and the service definitions start it.
+    startDaemon(home, { ELECTRON_RUN_AS_NODE: "1" });
+    const app = await client(home);
+    cleanups.push(() => app.stop());
+
+    await app.invoke("terminal:open", ["scratch"]);
+    const tab = app.workspace.state().tabs.find((candidate) => candidate.kind === "terminal");
+    expect(tab).toBeDefined();
+    const tabId = tab?.id as string;
+    const panes = (await app.invoke("terminal:panes", [tabId])) as Array<{ paneKey: string }>;
+    const paneKey = panes[0]?.paneKey as string;
+    // The shell expands this, not JavaScript.
+    const probe = ["echo ERAN=$", "{ELECTRON_RUN_AS_NODE:-unset}\r"].join("");
+    await app.invoke("terminal:input", [tabId, probe]);
+
+    const deadline = Date.now() + 15_000;
+    let text = "";
+    while (Date.now() < deadline) {
+      text = ((await app.invoke("terminal:snapshot", [paneKey])) as { text: string }).text;
+      if (/ERAN=(unset|1)\s/.test(text)) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(text).toMatch(/ERAN=unset\s/);
+    expect(text).not.toMatch(/ERAN=1\s/);
+  }, 60_000);
+
+  it("exits 75 on Settings' Restart under a service manager, for it to start again", async () => {
+    const home = await scratchHome();
+    const daemon = startDaemon(home, { JARVISD_SUPERVISOR: "launchd" });
+    const app = await client(home);
+    cleanups.push(() => app.stop());
+    await app.invoke("settings:restart", []);
+    await expect(daemon.exited).resolves.toBe(DAEMON_EXIT.restart);
+    const log = readFileSync(join(home, ".config", "jarvis", "logs", "jarvisd.log"), "utf8");
+    expect(log).toContain("run by launchd");
+    expect(log).toContain("stopping (restart)");
   }, 60_000);
 
   it("stops on daemon:stop, the Windows path, the same way", async () => {

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { createCore, type Core } from "./core/compose.js";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "./daemon/args.js";
 import { createDaemonBinding } from "./daemon/binding.js";
+import { takeDaemonEnv } from "./daemon/env.js";
 import { readBuildId } from "./daemon/build-id.js";
 import { nodeControlDeps } from "./daemon/control/deps.js";
 import { runDirectoryFor } from "./daemon/control/endpoint.js";
@@ -38,6 +39,8 @@ function describe(error: unknown): string {
 }
 
 async function main(argv: readonly string[]): Promise<void> {
+  // First, before anything can spawn a child: see daemon/env.ts.
+  const { supervisor } = takeDaemonEnv(process.env);
   const args = parseDaemonArgs(argv);
   if (args.kind === "help") {
     process.stdout.write(DAEMON_USAGE);
@@ -84,9 +87,14 @@ async function main(argv: readonly string[]): Promise<void> {
   });
 
   const build = readBuildId(join(distSrc, "..", "build-stamp.json"));
-  let requestStop: (reason: string) => void = () => {};
+  let requestStop: (reason: string, exitCode?: number) => void = () => {};
   const binding = createDaemonBinding({
     requestStop: () => requestStop("daemon:stop"),
+    // Only a service manager brings a daemon back after it exits; without
+    // one, Settings' Restart asks the user to restart jarvisd.
+    ...(supervisor === undefined
+      ? {}
+      : { requestRestart: () => requestStop("restart", DAEMON_EXIT.restart) }),
     log: error,
     now: Date.now,
     timers: {
@@ -129,12 +137,14 @@ async function main(argv: readonly string[]): Promise<void> {
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
     },
   });
-  requestStop = (reason) => void shutdown.stop(reason);
+  requestStop = (reason, exitCode) => void shutdown.stop(reason, exitCode);
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
     process.on(signal, () => requestStop(signal));
   }
 
-  info(`jarvisd starting: pid ${process.pid}, build ${build}`);
+  info(
+    `jarvisd starting: pid ${process.pid}, build ${build}, ${supervisor === undefined ? "no service manager" : `run by ${supervisor}`}`,
+  );
   try {
     // Packaged, this file is inside <resources>/app.asar (script-path.ts),
     // and the web export sits beside the archive in <resources>/web.

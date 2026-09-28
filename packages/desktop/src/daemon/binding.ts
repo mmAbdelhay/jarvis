@@ -47,12 +47,22 @@ export type DaemonBinding = {
   readonly daemonHost: DaemonHost;
   /** Connects `core` to `server`: its pushes, tab state and host hooks.
    *  Returns the unbind. */
-  bind(core: Core, server: { push(channel: string, payload: unknown): void }): () => void;
+  bind(
+    core: Core,
+    server: {
+      push(channel: string, payload: unknown): void;
+      pushTo(connectionId: number, channel: string, payload: unknown): void;
+    },
+  ): () => void;
 };
 
 export type DaemonBindingDeps = {
   /** Starts the graceful stop. Called after daemon:stop has been answered. */
   requestStop(): void;
+  /** Starts the graceful stop with DAEMON_EXIT.restart, for a service
+   *  manager to start the daemon again. Absent when none runs it. Called
+   *  after the request that asked for it has been answered. */
+  requestRestart?(): void;
   log(line: string): void;
   now(): number;
   timers: {
@@ -83,8 +93,17 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
   const instance = deps.instance ?? randomBytes(8).toString("hex");
   let version = 0;
   let push: (channel: string, payload: unknown) => void = () => {};
+  let pushTo: (id: number, channel: string, payload: unknown) => void = () => {};
+  /** The connection whose request the core is running synchronously now. */
+  let initiator: number | undefined;
+  const { requestRestart } = deps;
   const daemonHost = createDaemonHost({
     push: (channel, payload) => push(channel, payload),
+    pushTo: (id, channel, payload) => pushTo(id, channel, payload),
+    initiator: () => initiator,
+    ...(requestRestart === undefined
+      ? {}
+      : { restartDaemon: () => deps.timers.defer(requestRestart) }),
     log: deps.log,
     now: deps.now,
   });
@@ -206,7 +225,16 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
       }
       try {
-        return await core.dispatch[channel as TableChannel](args, DESKTOP_ORIGIN);
+        let pending: unknown;
+        // The handler's synchronous part runs with its caller known, so a
+        // host hook it calls (restart) can answer that one app.
+        initiator = connection.id;
+        try {
+          pending = core.dispatch[channel as TableChannel](args, DESKTOP_ORIGIN);
+        } finally {
+          initiator = undefined;
+        }
+        return await pending;
       } finally {
         checkHostConfig();
       }
@@ -221,6 +249,7 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
     daemonHost,
     bind(core, server) {
       push = (channel, payload) => server.push(channel, payload);
+      pushTo = (id, channel, payload) => server.pushTo(id, channel, payload);
       const detachHost = core.attachHost(daemonHost.host);
       const offPush = core.onPush((channel, payload) => server.push(channel, payload));
       const offTabs = core.tabs.onChange((state) => {
@@ -248,6 +277,7 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
         offPush();
         detachHost();
         push = () => {};
+        pushTo = () => {};
       };
     },
   };

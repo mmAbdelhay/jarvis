@@ -34,6 +34,7 @@ Description=Jarvis background daemon
 [Service]
 ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} ${systemdQuote("run")}
 Environment=ELECTRON_RUN_AS_NODE=1
+Environment=JARVISD_SUPERVISOR=systemd
 Restart=on-failure
 RestartSec=5
 

@@ -94,9 +94,15 @@ type Daemon = {
   stop(): Promise<void>;
 };
 
-async function startDaemon(run: string, core: Core, build = BUILD): Promise<Daemon> {
+async function startDaemon(
+  run: string,
+  core: Core,
+  build = BUILD,
+  restart?: () => Promise<void>,
+): Promise<Daemon> {
   const binding = createDaemonBinding({
     requestStop: () => {},
+    ...(restart === undefined ? {} : { requestRestart: () => void restart() }),
     log: () => {},
     now: Date.now,
     timers: {
@@ -242,9 +248,13 @@ describe("socket CoreClient: requests", () => {
     await until(() => events.filter((e) => e.startsWith("after")).length === 25, "late pushes");
 
     for (let i = 0; i < 25; i++) {
-      // Always before its own reply; a push made after the reply, after it.
+      // Always before its own reply. A push made after the reply follows
+      // the reply's frame, but it can reach a listener before the awaiting
+      // caller resumes (the promise settles a microtask later, and both
+      // frames may arrive in one chunk), so only its order against the
+      // push made during the handler is guaranteed.
       expect(events.indexOf(`during ${i}`)).toBeLessThan(events.indexOf(`reply ${i}`));
-      expect(events.indexOf(`reply ${i}`)).toBeLessThan(events.indexOf(`after ${i}`));
+      expect(events.indexOf(`during ${i}`)).toBeLessThan(events.indexOf(`after ${i}`));
     }
   });
 
@@ -312,7 +322,116 @@ describe("socket CoreClient: synchronous reads from the cache", () => {
   });
 });
 
+/** A bridge whose certificate names web.test: bridge on 7717, web on 7718. */
+function bridgeStatus() {
+  return {
+    enabled: true,
+    listening: {
+      host: "127.0.0.1",
+      port: 7717,
+      fingerprint: "ab",
+      certificate: { source: "configured", hostname: "web.test" },
+    },
+    pairing: { kind: "closed" },
+    devices: [],
+    sidecarProxy: "on",
+    web: { kind: "on", port: 7718, origin: "https://web.test:7718" },
+  };
+}
+
 describe("socket CoreClient: the desktop host", () => {
+  it("opens only the bridge's web client, and logs a refusal by scheme and host alone", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    fake.answers.set("remote:status", () => bridgeStatus());
+    await startDaemon(run, fake.core);
+    const logs: string[] = [];
+    const client = await connect(run, { log: (line) => logs.push(line) });
+    const { host, seen } = recordingHost();
+    client.attachHost(host);
+    await until(() => fake.link.host.isAwake(), "the attach");
+
+    for (const url of [
+      "file:///Users/me/.ssh/id_rsa",
+      "javascript:alert(1)",
+      "https://evil.test:7718/?token=SECRET",
+      "https://web.test:9999/",
+      "http://web.test:7718/",
+    ]) {
+      await fake.link.host.openExternal(url);
+    }
+    await fake.link.host.openExternal("https://web.test:7718/pair#k=SECRET");
+    await until(() => seen.length === 1, "the one good URL");
+    await until(() => logs.filter((line) => line.startsWith("refused")).length === 5, "refusals");
+
+    expect(seen).toEqual([["openExternal", "https://web.test:7718/pair#k=SECRET"]]);
+    expect(logs.join("\n")).not.toMatch(/SECRET|token|id_rsa|alert/);
+  });
+
+  it("delivers Settings' Restart to the app that asked, never to the other attached apps", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    // dispatch.ts: settings:restart → settings.restart() → host.restart().
+    fake.answers.set("settings:restart", () => fake.link.host.restart());
+    await startDaemon(run, fake.core);
+    const asker = await connect(run);
+    const other = await connect(run);
+    const a = recordingHost();
+    const b = recordingHost();
+    asker.attachHost(a.host);
+    other.attachHost(b.host);
+    await until(() => fake.link.host.isAwake(), "the attaches");
+
+    // An app-only setting changed: the asker relaunches itself.
+    fake.config.suspendTabsAfterMs = 0;
+    await asker.invoke("settings:save", [{}]);
+    await asker.invoke("settings:restart", []);
+    // No service manager runs this test daemon: the asker is told to have
+    // jarvisd restarted by hand.
+    await until(() => a.seen.length === 2, "the asker's restart");
+    expect(a.seen[0]).toEqual(["restart"]);
+    expect(a.seen[1]?.[0]).toBe("showNotification");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(b.seen).toEqual([]);
+  });
+
+  it("does not relaunch the app when only daemon-side settings changed", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    fake.answers.set("settings:restart", () => fake.link.host.restart());
+    await startDaemon(run, fake.core);
+    const client = await connect(run);
+    const { host, seen } = recordingHost();
+    client.attachHost(host);
+    await until(() => fake.link.host.isAwake(), "the attach");
+    await client.invoke("settings:restart", []);
+    await until(() => seen.length === 1, "the manual-restart notice");
+    expect(seen[0]?.[0]).toBe("showNotification");
+    expect(seen.some(([kind]) => kind === "restart")).toBe(false);
+  });
+
+  it("under a service manager, the apps see the daemon restarting and reconnect", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    fake.answers.set("settings:restart", () => fake.link.host.restart());
+    let daemon: Daemon | undefined;
+    daemon = await startDaemon(run, fake.core, BUILD, async () => {
+      // What launchd/systemd does after exit 75: start it again.
+      await daemon?.stop();
+      daemon = await startDaemon(run, fake.core);
+    });
+    const client = await connect(run);
+    const states: string[] = [];
+    client.onConnectionChange((state) => states.push(state.kind));
+    await client.invoke("settings:restart", []);
+    await until(() => states.includes("restarting"), "the restarting notice");
+    await until(
+      () => states.at(-1) === "connected" && states.includes("reconnecting"),
+      "the reconnect",
+      8_000,
+    );
+  });
+
   it("attaches the window, reports its focus changes, and runs the core's hooks against it", async () => {
     const run = await runDirectory();
     const fake = fakeCore();
@@ -327,17 +446,21 @@ describe("socket CoreClient: the desktop host", () => {
     state.focused = true;
     await until(() => fake.link.host.isFocused(), "the focus report");
 
+    fake.answers.set("remote:status", () => bridgeStatus());
     fake.link.host.requestFavicon("acme", "https://x.test");
     fake.link.host.sweepIdleViews();
-    await fake.link.host.openExternal("https://web.test");
+    await fake.link.host.openExternal("https://web.test:7718/");
     fake.link.host.showNotification("Locked out", "body");
     await until(() => seen.length === 4, "the host hooks");
-    expect(seen).toEqual([
-      ["requestFavicon", "acme", "https://x.test"],
-      ["sweepIdleViews"],
-      ["openExternal", "https://web.test"],
-      ["showNotification", "Locked out", "body"],
-    ]);
+    // openExternal waits for the bridge's status first, so it may land last.
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        ["requestFavicon", "acme", "https://x.test"],
+        ["sweepIdleViews"],
+        ["openExternal", "https://web.test:7718/"],
+        ["showNotification", "Locked out", "body"],
+      ]),
+    );
 
     detach();
     await until(() => daemon.binding.daemonHost.attachedCount === 0, "the detach");

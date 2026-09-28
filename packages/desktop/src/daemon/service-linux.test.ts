@@ -17,6 +17,7 @@ Description=Jarvis background daemon
 [Service]
 ExecStart="/opt/Jarvis %%App/bin/jarvis\\\\preview$$" "/home/Jarvis User/a \\"quoted\\" daemon.js" "run"
 Environment=ELECTRON_RUN_AS_NODE=1
+Environment=JARVISD_SUPERVISOR=systemd
 Restart=on-failure
 RestartSec=5
 

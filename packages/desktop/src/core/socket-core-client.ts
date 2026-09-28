@@ -31,7 +31,10 @@
 // says so in its connection state.
 //
 // No electron here (core/no-electron.test.ts).
+import type { RemoteStatus } from "@jarvis/remote";
 import type { PushSink } from "../broadcast.js";
+import { MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
+import { openBridgeWebUrl } from "../open-external-guard.js";
 import { type ControlClient, ControlRestartRequired } from "../daemon/control/client.js";
 import {
   DAEMON_PUSHES,
@@ -109,6 +112,8 @@ export async function connectSocketCoreClient(
   let stopped = false;
   let firstRun = false;
   let hostConfig: HostConfig = { allowPopups: false, suspendTabsAfterMs: 0 };
+  /** What the app's pages were built with (ViewReconciler reads it once). */
+  let startupSuspendTabsAfterMs = 0;
   let tabs: VersionedTabs | undefined;
   let host: DesktopHost | undefined;
   let hostPoll: unknown;
@@ -169,13 +174,31 @@ export async function connectSocketCoreClient(
       case DAEMON_PUSHES.sweepIdleViews:
         host?.sweepIdleViews();
         return;
-      case DAEMON_PUSHES.openExternal:
-        host
-          ?.openExternal(String(p.url))
-          .catch((error: unknown) => deps.log(`open in browser failed: ${describe(error)}`));
+      case DAEMON_PUSHES.openExternal: {
+        const target = host;
+        if (target === undefined) return;
+        openBridgeWebUrl(String(p.url), {
+          status: () => request("remote:status", []) as Promise<RemoteStatus>,
+          open: (url) => target.openExternal(url),
+          log: deps.log,
+        }).catch((error: unknown) => deps.log(`open in browser failed: ${describe(error)}`));
         return;
+      }
       case DAEMON_PUSHES.restart:
-        host?.restart();
+        // Sent only to the app that asked. The daemon restarts itself for
+        // the settings it reads; this app relaunches only if a setting it
+        // alone reads, once, at startup, changed.
+        if (hostConfig.suspendTabsAfterMs !== startupSuspendTabsAfterMs) host?.restart();
+        return;
+      case DAEMON_PUSHES.restarting:
+        deps.log("the Jarvis daemon is restarting");
+        setState({ kind: "restarting" });
+        return;
+      case DAEMON_PUSHES.restartManual:
+        host?.showNotification(
+          MESSAGES.daemonRestartManualTitle(PRIMARY_LANGUAGE),
+          MESSAGES.daemonRestartManual(PRIMARY_LANGUAGE),
+        );
         return;
       case DAEMON_PUSHES.alert: {
         const alert = payload as SecurityAlert;
@@ -245,7 +268,10 @@ export async function connectSocketCoreClient(
       opened.close();
       throw error;
     }
-    if (first) firstRun = snapshot.firstRun;
+    if (first) {
+      firstRun = snapshot.firstRun;
+      startupSuspendTabsAfterMs = snapshot.hostConfig.suspendTabsAfterMs;
+    }
     hostConfig = snapshot.hostConfig;
     connection = opened;
     applyTabs(snapshot.tabs);

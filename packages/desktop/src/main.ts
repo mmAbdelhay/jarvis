@@ -32,6 +32,8 @@ import { decidePermission } from "./permissions.js";
 import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { daemonScriptPath } from "./daemon/script-path.js";
+import { openBridgeWebUrl } from "./open-external-guard.js";
+import type { RemoteStatus } from "@jarvis/remote";
 
 /**
  * `<Jarvis binary> --jarvis-daemon`: start jarvisd and get out of the way.
@@ -252,7 +254,14 @@ function createDesktopHost(client: CoreClient) {
       if (Notification.isSupported()) new Notification({ title, body }).show();
     },
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
-    openExternal: (url) => electronShell.openExternal(url),
+    // Only the bridge's own web client, checked against its live status
+    // (open-external-guard.ts) — the same rule as the socket adapter's.
+    openExternal: (url) =>
+      openBridgeWebUrl(url, {
+        status: () => client.invoke("remote:status", []) as Promise<RemoteStatus>,
+        open: (checked) => electronShell.openExternal(checked),
+        log: (line) => console.error(line),
+      }),
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
     // click, after a save has already succeeded.

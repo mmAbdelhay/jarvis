@@ -14,6 +14,7 @@ import { createDaemonBinding, HOST_CONFIG_POLL_MS } from "./binding.js";
 import { formatBuildId, readBuildId } from "./build-id.js";
 import type { ControlConnection } from "./control/server.js";
 import { createDaemonHost, MAX_QUEUED_ALERTS } from "./daemon-host.js";
+import { takeDaemonEnv } from "./env.js";
 import { CORE_STOP_TIMEOUT_MS, createShutdown } from "./lifecycle.js";
 import { createDaemonLog, type LogFs, scrubSecrets } from "./log-file.js";
 import { DAEMON_PUSHES, DAEMON_REQUESTS } from "./protocol.js";
@@ -74,14 +75,17 @@ function connectionDouble(id = 1) {
   };
 }
 
-function bindingDouble() {
+function bindingDouble(options: { supervised?: boolean } = {}) {
   const pushes: Array<[string, unknown]> = [];
+  const direct: Array<[number, string, unknown]> = [];
   const deferred: Array<() => void> = [];
   const intervals: Array<() => void> = [];
   const requestStop = vi.fn();
+  const requestRestart = vi.fn();
   const logs: string[] = [];
   const binding = createDaemonBinding({
     requestStop,
+    ...(options.supervised === true ? { requestRestart } : {}),
     log: (line) => logs.push(line),
     now: () => 1000,
     instance: "run-1",
@@ -92,8 +96,23 @@ function bindingDouble() {
     },
   });
   const fake = fakeCore();
-  binding.bind(fake.core, { push: (channel, payload) => pushes.push([channel, payload]) });
-  return { binding, pushes, deferred, intervals, requestStop, logs, ...fake };
+  binding.bind(fake.core, {
+    push: (channel, payload) => pushes.push([channel, payload]),
+    pushTo: (id, channel, payload) => direct.push([id, channel, payload]),
+  });
+  // Settings' Restart, as dispatch.ts wires it: settings.restart → host.restart.
+  fake.answers.set("settings:restart", () => fake.link.host.restart());
+  return {
+    binding,
+    pushes,
+    direct,
+    deferred,
+    intervals,
+    requestStop,
+    requestRestart,
+    logs,
+    ...fake,
+  };
 }
 
 describe("daemon channels", () => {
@@ -150,7 +169,7 @@ describe("daemon binding: dispatch", () => {
     const { core, answers } = fakeCore();
     answers.set("settings:read", () => "late");
     const early = binding.handlers.invoke("settings:read", [], connectionDouble().connection);
-    binding.bind(core, { push: () => {} });
+    binding.bind(core, { push: () => {}, pushTo: () => {} });
     await expect(early).resolves.toBe("late");
   });
 
@@ -242,6 +261,8 @@ describe("daemon host: security alerts", () => {
     let clock = 0;
     const daemonHost = createDaemonHost({
       push: (channel, payload) => pushes.push([channel, payload]),
+      pushTo: () => {},
+      initiator: () => undefined,
       log: (line) => logs.push(line),
       now: () => ++clock,
     });
@@ -288,22 +309,19 @@ describe("daemon host: security alerts", () => {
   it("forwards host hooks to an attached app and refuses what needs one when none is", async () => {
     const { daemonHost, pushes, logs } = hostDouble();
     await expect(daemonHost.host.openExternal("https://x.test")).rejects.toThrow(/No desktop app/);
-    daemonHost.host.restart();
     daemonHost.host.requestFavicon("p", "https://x.test");
     daemonHost.host.sweepIdleViews();
     daemonHost.host.destroyViews();
     expect(pushes).toEqual([]);
-    expect(logs.some((line) => line.includes("restart not done"))).toBe(true);
+    expect(logs).toEqual([]);
 
     daemonHost.attach(1, { focused: false, awake: false });
     await daemonHost.host.openExternal("https://x.test");
-    daemonHost.host.restart();
     daemonHost.host.requestFavicon("p", "https://x.test");
     daemonHost.host.sweepIdleViews();
     daemonHost.host.destroyViews();
     expect(pushes.map(([channel]) => channel)).toEqual([
       DAEMON_PUSHES.openExternal,
-      DAEMON_PUSHES.restart,
       DAEMON_PUSHES.requestFavicon,
       DAEMON_PUSHES.sweepIdleViews,
     ]);
@@ -349,6 +367,12 @@ describe("graceful stop", () => {
     const { shutdown, order } = steps();
     await shutdown.stop("SIGTERM");
     expect(order.filter((step) => !step.startsWith("log"))).toEqual(["core", "control", "exit 0"]);
+  });
+
+  it("exits with the restart code when the stop is a restart", async () => {
+    const { shutdown, order } = steps();
+    await shutdown.stop("restart", DAEMON_EXIT.restart);
+    expect(order.filter((step) => !step.startsWith("log"))).toEqual(["core", "control", "exit 75"]);
   });
 
   it("is idempotent: a second signal changes nothing", async () => {
@@ -507,5 +531,70 @@ describe("daemon log", () => {
     const line = "remote bridge: listening on 127.0.0.1:7717 for project acme-web (tab-12)";
     expect(scrubSecrets(line)).toBe(line);
     expect(scrubSecrets("x".repeat(60))).toBe("x".repeat(60));
+  });
+});
+
+describe("daemon restart (Settings' Restart in daemon mode)", () => {
+  it("under a service manager: tells every client it is restarting, then exits for a restart", async () => {
+    const { binding, pushes, direct, deferred, requestRestart, requestStop } = bindingDouble({
+      supervised: true,
+    });
+    const asker = connectionDouble(5);
+    await binding.handlers.invoke(
+      DAEMON_REQUESTS.attachHost,
+      [{ focused: true, awake: true }],
+      asker.connection,
+    );
+    await binding.handlers.invoke(
+      DAEMON_REQUESTS.attachHost,
+      [{ focused: false, awake: true }],
+      connectionDouble(6).connection,
+    );
+
+    await binding.handlers.invoke("settings:restart", [], asker.connection);
+
+    expect(pushes.filter(([channel]) => channel === DAEMON_PUSHES.restarting)).toHaveLength(1);
+    // Only the app that asked may relaunch; never a broadcast.
+    expect(pushes.filter(([channel]) => channel === DAEMON_PUSHES.restart)).toEqual([]);
+    expect(direct).toEqual([[5, DAEMON_PUSHES.restart, null]]);
+    // After the reply: the restart is deferred.
+    expect(requestRestart).not.toHaveBeenCalled();
+    for (const run of deferred) run();
+    expect(requestRestart).toHaveBeenCalledOnce();
+    expect(requestStop).not.toHaveBeenCalled();
+  });
+
+  it("without one: asks the app that asked to have jarvisd restarted by hand, and doesn't exit", async () => {
+    const { binding, pushes, direct, deferred, requestRestart, requestStop, logs } =
+      bindingDouble();
+    await binding.handlers.invoke("settings:restart", [], connectionDouble(9).connection);
+
+    expect(pushes.filter(([channel]) => channel === DAEMON_PUSHES.restarting)).toEqual([]);
+    expect(direct).toEqual([
+      [9, DAEMON_PUSHES.restart, null],
+      [9, DAEMON_PUSHES.restartManual, null],
+    ]);
+    for (const run of deferred) run();
+    expect(requestRestart).not.toHaveBeenCalled();
+    expect(requestStop).not.toHaveBeenCalled();
+    expect(logs.some((line) => line.includes("restart jarvisd manually"))).toBe(true);
+  });
+
+  it("uses exit code 75", () => {
+    expect(DAEMON_EXIT.restart).toBe(75);
+  });
+});
+
+describe("daemon environment", () => {
+  it("takes ELECTRON_RUN_AS_NODE and the supervisor marker out, so no child inherits them", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "/bin",
+      ELECTRON_RUN_AS_NODE: "1",
+      JARVISD_SUPERVISOR: "launchd",
+    };
+    expect(takeDaemonEnv(env)).toEqual({ supervisor: "launchd" });
+    expect(env).toEqual({ PATH: "/bin" });
+    expect(takeDaemonEnv({ JARVISD_SUPERVISOR: "cron" })).toEqual({});
+    expect(takeDaemonEnv({ JARVISD_SUPERVISOR: "systemd" })).toEqual({ supervisor: "systemd" });
   });
 });

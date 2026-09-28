@@ -527,6 +527,12 @@ export const MESSAGES = {
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   settingsSavedLive: (language: "ar" | "en"): string =>
     language === "ar" ? "تم الحفظ. التغييرات مفعّلة الآن." : "Saved. Changes are active now.",
+  daemonRestartManualTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "أعد تشغيل خدمة جارفيس" : "Restart the Jarvis daemon",
+  daemonRestartManual: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعمل خدمة jarvisd بدون مدير خدمات، فلا يمكنها إعادة تشغيل نفسها. أوقفها ثم شغّلها يدويًا لتطبيق الإعدادات."
+      : "jarvisd runs without a service manager, so it can't restart itself. Stop it and start it again to apply the settings.",
   settingsSavedRestart: (language: "ar" | "en"): string =>
     language === "ar"
       ? "تم الحفظ. أعد التشغيل لتطبيق تغييرات خدمات البدء."
