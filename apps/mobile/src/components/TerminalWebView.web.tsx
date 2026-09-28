@@ -23,21 +23,52 @@
 // overflow asks for a replay), then flushed through the same write
 // batcher. The iframe's document is never reloaded (no navigation is
 // possible inside the sandbox), so the ready gate is armed exactly once.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+//
+// Wide layout (Review Focus 4): with `onHardwareInput` set, a hardware
+// keyboard types into the terminal. The page stays display-only (it never
+// produces pty bytes), so the keys are read here instead, by a hidden
+// textarea in the app's own document: a click on the terminal moves focus
+// into the frame, and this takes it straight back. Every key it reads
+// stops there, so nothing typed into the terminal reaches the shell's own
+// handlers (terminal-keyboard.ts has the routing rules).
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { StyleSheet, View } from "react-native";
 import { realClock } from "@/lib/clock";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/lib/language-context";
+import { pasteInput, routeTerminalKey } from "@/lib/terminal-keyboard";
 import { ATTACH_BUFFER_MAX_CHARS } from "@/lib/session-stream";
 import type { NativeMessage } from "@/lib/terminal-protocol";
 import { encodeNativeMessage, parseFrameMessage } from "@/lib/terminal-protocol";
 import { createTerminalReadyGate } from "@/lib/terminal-ready";
+import { theme } from "@/lib/theme";
 import { createWriteBatcher } from "@/lib/write-batcher";
 import type { TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
 
 export type { TerminalModes, TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
 
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebViewProps>(
-  function TerminalWebView({ onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize }, ref) {
+  function TerminalWebView(
+    { onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize, onHardwareInput },
+    ref,
+  ) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
+    const language = useLanguage();
+    const captureRef = useRef<HTMLTextAreaElement>(null);
+    const hardwareInputRef = useRef(onHardwareInput);
+    hardwareInputRef.current = onHardwareInput;
+    const keysEnabled = onHardwareInput !== undefined;
+    const [keysFocused, setKeysFocused] = useState(false);
     const readyRef = useRef(false);
     const attachBufferRef = useRef("");
     const attachOverflowedRef = useRef(false);
@@ -169,6 +200,52 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       };
     }, [onReady, onResize, onModes, onNeedsReplay, onWheel, postToPage, getBatcher]);
 
+    // A click on the terminal focuses the frame (the window blurs with the
+    // frame as its active element); the capture textarea takes the focus
+    // back so the keys reach this document. Wheel scrolling and selection
+    // still happen in the frame.
+    useEffect(() => {
+      if (!keysEnabled) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      function handleBlur(): void {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (document.activeElement === iframeRef.current) {
+            captureRef.current?.focus({ preventScroll: true });
+          }
+        }, 0);
+      }
+      window.addEventListener("blur", handleBlur);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener("blur", handleBlur);
+      };
+    }, [keysEnabled]);
+
+    const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+      const route = routeTerminalKey(event.nativeEvent);
+      if (route.stopPropagation) event.stopPropagation();
+      if (route.preventDefault) event.preventDefault();
+      if (route.input !== undefined) hardwareInputRef.current?.(route.input);
+    }, []);
+
+    const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const input = pasteInput(event.clipboardData.getData("text/plain"));
+      if (input !== undefined) hardwareInputRef.current?.(input);
+    }, []);
+
+    // Text the keydown handler left alone (an IME or dead-key composition)
+    // lands in the textarea once composed: send it and clear.
+    const handleInput = useCallback((event: FormEvent<HTMLTextAreaElement>) => {
+      const target = event.currentTarget;
+      if ((event.nativeEvent as InputEvent).isComposing || target.value === "") return;
+      const text = target.value;
+      target.value = "";
+      hardwareInputRef.current?.({ kind: "text", text });
+    }, []);
+
     // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on fixedSize's own cols/rows, deliberately not the object itself — a new object with the same values must not re-post.
     useEffect(() => {
       if (!readyRef.current || fixedSize === undefined) return;
@@ -176,7 +253,31 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     }, [fixedSize?.cols, fixedSize?.rows, postToPage]);
 
     return (
-      <View style={styles.container} onLayout={postFit}>
+      <View
+        style={[
+          styles.container,
+          keysEnabled && styles.keysFrame,
+          keysEnabled && keysFocused && styles.keysFocused,
+        ]}
+        onLayout={postFit}
+      >
+        {keysEnabled && (
+          <textarea
+            ref={captureRef}
+            aria-label={t(language, "terminal.keyboardInput")}
+            inputMode="none"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onInput={handleInput}
+            onFocus={() => setKeysFocused(true)}
+            onBlur={() => setKeysFocused(false)}
+            style={CAPTURE_STYLE}
+          />
+        )}
         <iframe
           ref={iframeRef}
           title="terminal"
@@ -195,10 +296,29 @@ const TERMINAL_PAGE_URL = "/terminal.html";
 
 const IFRAME_STYLE = { border: "none", width: "100%", height: "100%", display: "block" } as const;
 
+// Present and focusable but invisible: a 1px transparent box at the
+// terminal's top corner, out of the pointer's way.
+const CAPTURE_STYLE = {
+  position: "absolute",
+  top: 0,
+  width: 1,
+  height: 1,
+  opacity: 0,
+  border: "none",
+  padding: 0,
+  resize: "none",
+  overflow: "hidden",
+  pointerEvents: "none",
+} as const;
+
 const styles = StyleSheet.create({
   // ruling 12: the terminal container is always LTR, in both app languages.
   container: {
     flex: 1,
     direction: "ltr",
   },
+  // A hairline that turns accent while the keyboard types into the
+  // terminal: the focus the click moved here is visible.
+  keysFrame: { borderWidth: 1, borderColor: "transparent" },
+  keysFocused: { borderColor: theme.colors.accent },
 });

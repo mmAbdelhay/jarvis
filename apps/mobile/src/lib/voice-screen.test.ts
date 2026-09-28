@@ -208,7 +208,12 @@ function collectSourceFiles(dir: string): string[] {
 
 describe("source scan: only voice-controller.ts calls RpcClient.upload", () => {
   it("no file under app/ or src/components/, and not voice-context.tsx, contains .upload(", () => {
-    const targets = [join(MOBILE_ROOT, "app"), join(MOBILE_ROOT, "src", "components")];
+    // src/screens holds screen content moved out of app/ (wide layout).
+    const targets = [
+      join(MOBILE_ROOT, "app"),
+      join(MOBILE_ROOT, "src", "components"),
+      join(MOBILE_ROOT, "src", "screens"),
+    ];
     const files = targets.flatMap(collectSourceFiles);
     files.push(join(MOBILE_ROOT, "src", "lib", "voice-context.tsx"));
 

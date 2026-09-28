@@ -393,10 +393,11 @@ describe("watchTerminalExit: wiring (Fix round 1, Important 1)", () => {
 // cleanup bite-proof above stands in for one (vitest only collects
 // `src/**/*.test.ts`).
 describe("source scan: app/terminal/[paneKey].tsx (task-7-brief.md's test list)", () => {
-  const screenSource = readFileSync(
-    join(HERE, "..", "..", "app", "terminal", "[paneKey].tsx"),
-    "utf8",
-  );
+  // The route is a thin wrapper; the pane's content moved to
+  // src/screens/TerminalPane.tsx (wide layout, Task 4).
+  const screenSource =
+    readFileSync(join(HERE, "..", "..", "app", "terminal", "[paneKey].tsx"), "utf8") +
+    readFileSync(join(HERE, "..", "screens", "TerminalPane.tsx"), "utf8");
 
   describe(
     "Arabic labels with LTR terminal content " +

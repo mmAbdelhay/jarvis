@@ -436,7 +436,10 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="terminal/[paneKey]"
                   options={{
-                    headerShown: true,
+                    // Wide: this screen only redirects to the Workspace
+                    // tab, so it draws no header while it does.
+                    headerShown: layout.kind !== "wide",
+                    animation: layout.kind === "wide" ? "none" : "default",
                     // The screen's own `<Stack.Screen options={{ title }} />`
                     // sets the pane key once mounted (docker/[project].tsx's
                     // same convention) — this is only the default shown first.

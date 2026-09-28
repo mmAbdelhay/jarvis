@@ -805,6 +805,12 @@ export const STRINGS = {
     en: "That address isn't safe to open.",
     ar: "هذا العنوان غير آمن للفتح.",
   },
+  "workspace.back": { en: "All tabs", ar: "كل التبويبات" },
+  "workspace.pickTab": {
+    en: "Open a tool, or open a terminal on the laptop.",
+    ar: "افتح أداة، أو افتح طرفية على الحاسوب.",
+  },
+  "workspace.closeTab": { en: "Close {title}", ar: "إغلاق {title}" },
   "workspace.panes.title": { en: "Terminal panes", ar: "أجزاء الطرفية" },
   "workspace.panes.empty": { en: "No panes.", ar: "لا توجد أجزاء." },
   "workspace.panes.exited": { en: "Exited", ar: "منتهية" },
@@ -813,6 +819,7 @@ export const STRINGS = {
     en: "This terminal pane is no longer available.",
     ar: "لم تعد هذه اللوحة الطرفية متاحة.",
   },
+  "terminal.keyboardInput": { en: "Terminal keyboard input", ar: "إدخال لوحة المفاتيح للطرفية" },
   "terminal.exited": {
     en: "This terminal has exited. You can still read its output.",
     ar: "خرجت هذه الطرفية. يمكنك الاستمرار في قراءة مخرجاتها.",

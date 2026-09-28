@@ -201,10 +201,11 @@ describe("session route input boundary", () => {
 describe("app/session/[id].tsx and app/terminal/[paneKey].tsx source scan: landscape orientation", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const sessionScreenSource = sessionScreenFiles(here);
-  const terminalScreenSource = readFileSync(
-    resolve(here, "../../app/terminal/[paneKey].tsx"),
-    "utf8",
-  );
+  // The route is a thin wrapper; the pane's content moved to
+  // src/screens/TerminalPane.tsx (wide layout, Task 4).
+  const terminalScreenSource =
+    readFileSync(resolve(here, "../../app/terminal/[paneKey].tsx"), "utf8") +
+    readFileSync(resolve(here, "../screens/TerminalPane.tsx"), "utf8");
 
   for (const [name, source] of [
     ["session/[id].tsx", sessionScreenSource],
