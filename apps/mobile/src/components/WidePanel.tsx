@@ -7,7 +7,9 @@
 
 import { useRouter } from "expo-router";
 import type React from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import {
+  ScrollView,
   type StyleProp,
   StyleSheet,
   Text,
@@ -20,7 +22,11 @@ import { useLanguage } from "@/lib/language-context";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { textDirection } from "@/lib/voice-screen";
-import { authCardFrame, widePanelFrame } from "@/lib/wide-panel";
+import { authCardContentTop, authCardFrame, panelTitle, widePanelFrame } from "@/lib/wide-panel";
+
+/** Lets the page inside a WidePanel replace the header title (see
+ *  `useWidePanelTitle`). */
+const PanelTitleContext = createContext<(title: string | undefined) => void>(() => {});
 
 /** A secondary page: full screen on a phone; on a wide screen a centred,
  *  bordered panel (max 1180) under the shell's top bar. The native stack
@@ -29,16 +35,32 @@ import { authCardFrame, widePanelFrame } from "@/lib/wide-panel";
 export function WidePanel(props: { title?: string; children: React.ReactNode }) {
   const layout = useLayoutClass();
   const frame = widePanelFrame(layout.kind);
+  const [pageTitle, setPageTitle] = useState<string | undefined>(undefined);
   return (
     <View style={[styles.root, frame.framed && styles.rootFramed]}>
       <View
         style={[styles.panel, frame.framed && styles.panelFramed, { maxWidth: frame.maxWidth }]}
       >
-        {frame.framed && props.title !== undefined && <PanelHeader title={props.title} />}
-        {props.children}
+        {frame.framed && props.title !== undefined && (
+          <PanelHeader title={panelTitle(props.title, pageTitle)} />
+        )}
+        <PanelTitleContext.Provider value={setPageTitle}>
+          {props.children}
+        </PanelTitleContext.Provider>
       </View>
     </View>
   );
+}
+
+/** The page's own title for the panel header on a wide screen, as the
+ *  native stack header shows it on a phone (a transcript's session
+ *  summary). `undefined` keeps the route's title. */
+export function useWidePanelTitle(title: string | undefined): void {
+  const setTitle = useContext(PanelTitleContext);
+  useEffect(() => {
+    setTitle(title);
+    return () => setTitle(undefined);
+  }, [setTitle, title]);
 }
 
 function PanelHeader(props: { title: string }) {
@@ -64,23 +86,42 @@ function PanelHeader(props: { title: string }) {
 }
 
 /** Unlock and pair: full screen on a phone; on a wide screen a centred card
- *  (max 480) as tall as its content. The page's root adds
+ *  (max 480) as tall as its content, scrolling when the window is shorter
+ *  (an iPad in landscape with the pair scanner). The page's root adds
  *  `useAuthCardRootStyle()`, since its phone `flex: 1` would collapse to
- *  nothing inside a card that sizes to its content. */
+ *  nothing inside a card that sizes to its content.
+ *
+ *  The ScrollView is there on a phone too, not scrolling and stretching its
+ *  content to the screen, so crossing the breakpoint keeps the same tree
+ *  (no remount mid-pairing). Taps always reach the page, as with a View. */
 export function AuthCard(props: { children: React.ReactNode }) {
   const layout = useLayoutClass();
   const frame = authCardFrame(layout.kind);
   return (
     <View style={[styles.root, frame.framed && styles.cardRoot]}>
       <View style={[styles.panel, frame.framed && styles.card, { maxWidth: frame.maxWidth }]}>
-        {props.children}
+        <ScrollView
+          style={frame.scrolls ? styles.cardScroll : styles.root}
+          contentContainerStyle={frame.scrolls ? undefined : styles.fillContent}
+          scrollEnabled={frame.scrolls}
+          keyboardShouldPersistTaps="always"
+          showsVerticalScrollIndicator={frame.scrolls}
+        >
+          {props.children}
+        </ScrollView>
       </View>
     </View>
   );
 }
 
+/** An auth page's content top padding: `phoneTop` (safe area included) on
+ *  a phone, one theme step inside a wide card. */
+export function useAuthCardContentTop(phoneTop: number): number {
+  return authCardContentTop(useLayoutClass().kind, phoneTop);
+}
+
 /** The auth page root's override on a wide screen: size to the content
- *  (shrinking, and so scrolling, when the window is shorter). */
+ *  (the card's ScrollView scrolls it when the window is shorter). */
 export function useAuthCardRootStyle(): StyleProp<ViewStyle> {
   const layout = useLayoutClass();
   return authCardFrame(layout.kind).framed ? styles.cardContent : undefined;
@@ -91,7 +132,7 @@ const styles = StyleSheet.create({
   rootFramed: {
     backgroundColor: theme.colors.ground,
     paddingHorizontal: theme.spacing.gutter,
-    paddingVertical: 16,
+    paddingVertical: theme.spacing.md,
   },
   panel: { flex: 1, width: "100%" },
   panelFramed: {
@@ -105,15 +146,17 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 14,
+    gap: theme.spacing.sm,
+    // The back button's height plus its padding, with or without it.
+    minHeight: theme.spacing.xl + 2 * theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.hairline,
   },
   back: {
-    width: 32,
-    height: 32,
+    width: theme.spacing.xl,
+    height: theme.spacing.xl,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -121,12 +164,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.tiny,
     backgroundColor: theme.colors.surface,
   },
-  backText: { color: theme.colors.textSecondary, fontSize: 18 },
+  backText: { color: theme.colors.textSecondary, fontSize: theme.font.size.lg },
   title: {
     flexShrink: 1,
     color: theme.colors.text,
     fontFamily: theme.font.semibold,
-    fontSize: 15,
+    fontSize: theme.font.size.md,
   },
   cardRoot: {
     backgroundColor: theme.colors.ground,
@@ -136,7 +179,12 @@ const styles = StyleSheet.create({
   },
   // The phone pages have no bottom padding of their own worth keeping in
   // a card (the screen edge was their end).
-  cardContent: { flexGrow: 0, flexShrink: 1, flexBasis: "auto", paddingBottom: 24 },
+  cardContent: { flexGrow: 0, flexShrink: 1, flexBasis: "auto", paddingBottom: theme.spacing.lg },
+  // The card's body: as tall as the content, shrinking to the card (and so
+  // scrolling) when the window is shorter.
+  cardScroll: { flexGrow: 0, flexShrink: 1 },
+  // A phone: the page's own `flex: 1` root fills the screen as before.
+  fillContent: { flexGrow: 1 },
   card: {
     flexGrow: 0,
     flexShrink: 1,

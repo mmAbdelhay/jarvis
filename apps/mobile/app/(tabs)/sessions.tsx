@@ -28,6 +28,7 @@ import {
   splitLayout,
 } from "@/lib/session-nav";
 import { sessionRouteId } from "@/lib/session-screen";
+import { usePhoneBack } from "@/lib/use-phone-back";
 import type { SessionRowView, SessionsView } from "@/lib/sessions-store";
 import { createSessionsStore } from "@/lib/sessions-store";
 import { theme } from "@/lib/theme";
@@ -103,6 +104,10 @@ export default function SessionsScreen() {
   const split = sessionsSplit(kind, selectedId, presence);
   const layout = splitLayout({ language, platformRtl: I18nManager.getConstants().isRTL });
   const paneDirection = { direction: layout.paneDirection };
+  const clearSelection = useCallback(() => router.setParams({ id: undefined }), [router]);
+  // Android's hardware Back on an inherited selection returns to the list,
+  // like the back chip, instead of leaving the tab.
+  usePhoneBack(split.showBack, clearSelection);
 
   useFocusEffect(
     useCallback(() => {
@@ -233,7 +238,7 @@ export default function SessionsScreen() {
           {split.showBack && (
             <TouchableOpacity
               style={styles.back}
-              onPress={() => router.setParams({ id: undefined })}
+              onPress={clearSelection}
               accessibilityRole="button"
             >
               <Text style={styles.backText}>

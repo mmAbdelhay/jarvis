@@ -34,6 +34,7 @@ import { splitLayout } from "@/lib/session-nav";
 import { sessionRouteId } from "@/lib/session-screen";
 import { openTerminal } from "@/lib/terminal-open";
 import { theme } from "@/lib/theme";
+import { usePhoneBack } from "@/lib/use-phone-back";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import type { WorkspaceProjectView, WorkspaceView } from "@/lib/workspace-store";
 import type { WorkspaceTabItem, WorkspaceToolKind } from "@/lib/workspace-tabs";
@@ -228,6 +229,13 @@ export default function WorkspaceScreen() {
   // The inline content's React key: the pane, or the tab and project,
   // never the layout, so crossing the breakpoint keeps it mounted.
   const layout = workspaceLayout(kind, workspaceHostKey(active, paneKey, project));
+  const backToList = useCallback(
+    () => router.setParams({ tab: undefined, pane: undefined }),
+    [router],
+  );
+  // Android's hardware Back on an inherited tab returns to the list, like
+  // the back chip.
+  usePhoneBack(layout.showBack, backToList);
 
   // A tab param from another project (a redirected deep link) selects
   // that project.
@@ -421,7 +429,7 @@ export default function WorkspaceScreen() {
         {layout.showBack && (
           <TouchableOpacity
             style={[styles.back, { paddingTop: insets.top + 10 }]}
-            onPress={() => router.setParams({ tab: undefined, pane: undefined })}
+            onPress={backToList}
             accessibilityRole="button"
           >
             <Text style={styles.backText}>

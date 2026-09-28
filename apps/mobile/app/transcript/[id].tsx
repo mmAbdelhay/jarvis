@@ -1,7 +1,7 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { WidePanel } from "@/components/WidePanel";
+import { useWidePanelTitle, WidePanel } from "@/components/WidePanel";
 import { WideShell } from "@/components/WideShell";
 import { transcriptDisplay, withLrmPrefixes } from "@/lib/history-screen";
 import { createHistoryStore, type HistoryState } from "@/lib/history-store";
@@ -59,6 +59,9 @@ function TranscriptBody({ id }: { id: string }) {
   }, [id, store, view.sessions, view.selectedId]);
 
   const selected = view.sessions.find((session) => session.id === id);
+  // The panel header on a wide screen shows what the phone's stack header
+  // shows: the session summary once the list has it.
+  useWidePanelTitle(selected?.summary);
 
   const refresh = useCallback(() => {
     setRefreshing(true);
