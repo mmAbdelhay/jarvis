@@ -536,6 +536,51 @@ through the same `/rpc` connection the phone uses. The differences:
 - **Log out** and **Unpair** in Settings ask with the browser's own
   confirmation dialog.
 
+**Phone and tablet/desktop layouts.** The browser client, and the app on
+an iPad or Android tablet, chooses its layout from the window size. The
+layout changes on resize or rotation, and nothing reloads.
+
+- **Phone layout.** It is used when the window's shorter side is under
+  600 points or its width is under 768. This is the phone app as it is:
+  a bottom tab bar, full-screen pages, and a session or terminal that
+  opens on its own screen.
+- **Tablet/desktop layout.** It is used when the shorter side is at least
+  600 and the width at least 768. For example, a laptop browser window,
+  an iPad either way round, or an Android tablet. It has a top bar like
+  the desktop app's, with the brand, **Dashboard**, **Sessions**,
+  **Workspace**, **Voice** and **Settings**. The bar also shows the
+  laptop's CPU, RAM, disk and network, the connection state and the
+  laptop's name, the number of running sessions, and a clock. Below
+  900 points wide, for example an iPad in portrait, the system readout
+  is hidden. The screens:
+  - **Dashboard**: System, Sessions and Projects panels side by side.
+    There are three columns from 1100 points wide, and two below that.
+  - **Sessions**: the list on one side and the selected session on the
+    other. The session is in the address as `/sessions?id=<id>`, so it
+    survives a reload or a rotation. A `/session/<id>` link opens this
+    split view.
+  - **Workspace**: the project's tabs as a strip, with a terminal, Changes,
+    Docker or the API client open inline under it. A web or chat tab, and
+    Editor, Database and Cluster, open as they do on the phone: in a new
+    browser tab in a browser.
+  - **Settings**: a section list beside the settings. Choosing a section
+    scrolls to it.
+  - **Voice** sits in a centred panel. History, a transcript, Docker, the
+    API client and Changes open in a centred panel under the top bar, with
+    their own Back button. Unlock and pairing are a centred card, which
+    scrolls when it is taller than the window.
+
+  In Arabic, the top bar, the split views and the Settings section list
+  are mirrored. Rotating an iPad, or resizing across the breakpoint,
+  keeps the same session or terminal open with no second connection to
+  it. A phone that inherits a selection this way shows it with a back
+  link (**All sessions** or **All tabs**). On Android, the hardware Back
+  button does the same.
+
+  **Known limitation:** in the native iPad app, a hardware keyboard cannot
+  type into the terminal. Use the key bar and the compose bar under it.
+  In a browser, the hardware keyboard types into the terminal directly.
+
 **Revocation and signing out** behave as on the phone. Revoking the browser
 from the laptop's Settings closes its connection. The browser then forgets
 its records and returns to the pairing screen. Every trigger in the

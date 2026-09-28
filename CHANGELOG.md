@@ -8,6 +8,19 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Tablet and desktop layout for the browser client and the iPad and
+  Android tablet app: a window at least 768 wide whose shorter side is at
+  least 600 gets a desktop-style top bar (sections, the laptop's metrics,
+  connection and name, running count, clock), a three-panel Dashboard,
+  Sessions as a list beside the selected session (`/sessions?id=`),
+  terminals and tools inline in the Workspace, and a section list in
+  Settings. Other pages sit in a centred panel, and unlock and pairing in
+  a centred card. Resizing or rotating keeps the open session or terminal
+  without reconnecting it, Arabic mirrors the layout, and tablets are no
+  longer locked to portrait. Phones are unchanged. A hardware keyboard
+  does not type into the terminal in the native iPad app; use the key bar
+  and compose bar. See [Phone and tablet/desktop
+  layouts](docs/guide/remote-access.md#the-browser-client).
 - Background daemon: **Settings → General → Keep Jarvis running in the
   background** (`daemon.enabled`, off by default) moves terminals, agent
   runs, the remote bridge and the browser client into `jarvisd`, a
