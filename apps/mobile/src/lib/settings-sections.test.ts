@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { settingsSections } from "./settings-sections";
+import { settingsSections, settingsWideLayout } from "./settings-sections";
 
 const nativeSections = [
   { id: "general", labelKey: "settings.section.general" },
@@ -37,4 +37,18 @@ describe("settingsSections", () => {
     const ids = settingsSections(platform).map(({ id }) => id);
     expect(new Set(ids).size).toBe(ids.length);
   });
+});
+
+describe("settingsWideLayout", () => {
+  it.each([
+    { environment: "Arabic native forced RTL", language: "ar", platformRtl: true, side: "right" },
+    { environment: "Arabic web", language: "ar", platformRtl: false, side: "right" },
+    { environment: "English native", language: "en", platformRtl: false, side: "left" },
+    { environment: "English web", language: "en", platformRtl: false, side: "left" },
+  ] as const)(
+    "puts the section rail on reading-start for $environment",
+    ({ language, platformRtl, side }) => {
+      expect(settingsWideLayout({ language, platformRtl }).railSide).toBe(side);
+    },
+  );
 });

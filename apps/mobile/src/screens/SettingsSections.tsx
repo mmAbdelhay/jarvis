@@ -312,12 +312,9 @@ export function SettingsSections(props: Props): React.JSX.Element {
 
 const styles = StyleSheet.create({
   sectionNav: {
-    width: 220,
-    flexShrink: 0,
+    flex: 1,
     paddingHorizontal: 12,
     paddingTop: 18,
-    borderEndWidth: 1,
-    borderEndColor: theme.colors.hairlineSoft,
     gap: 2,
   },
   navTitle: {

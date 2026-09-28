@@ -1,5 +1,6 @@
 import type { ClientPlatform } from "./client-platform";
-import type { MessageKey } from "./i18n";
+import type { Language, MessageKey } from "./i18n";
+import { firstChildSide, splitLayout, type SplitLayout } from "./session-nav";
 
 export type SettingsSection = {
   id: string;
@@ -29,4 +30,12 @@ const REMOTE_ACCESS = {
 
 export function settingsSections(platform: ClientPlatform): SettingsSection[] {
   return [...(platform === "web" ? WEB_SECTIONS : NATIVE_SECTIONS), REMOTE_ACCESS];
+}
+
+export function settingsWideLayout(input: {
+  language: Language;
+  platformRtl: boolean;
+}): SplitLayout & { railSide: "left" | "right" } {
+  const layout = splitLayout(input);
+  return { ...layout, railSide: firstChildSide(layout.direction) };
 }

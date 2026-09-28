@@ -1,7 +1,15 @@
 import Constants from "expo-constants";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  I18nManager,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import type { ScrollView as ScrollViewType } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WideShell } from "@/components/WideShell";
@@ -16,6 +24,7 @@ import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
+import { settingsWideLayout } from "@/lib/settings-sections";
 import { createSettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
@@ -46,6 +55,11 @@ function SettingsScreen() {
   const scrollRef = useRef<ScrollViewType>(null);
   const sectionOffsets = useRef<Record<string, number>>({});
   const wide = layout.kind === "wide";
+  const wideLayout = settingsWideLayout({
+    language,
+    platformRtl: I18nManager.getConstants().isRTL,
+  });
+  const paneDirection = { direction: wideLayout.paneDirection };
 
   const store = useMemo(
     () =>
@@ -135,16 +149,19 @@ function SettingsScreen() {
 
   if (wide) {
     return (
-      <View style={[styles.wideRoot, language === "ar" && styles.wideRootRtl]}>
-        <SettingsSectionNav
-          language={language}
-          platform={PLATFORM}
-          scrollRef={scrollRef}
-          sectionOffsets={sectionOffsets}
-        />
+      <View style={[styles.wideRoot, { direction: wideLayout.direction }]}>
+        <View style={[styles.navPane, paneDirection]}>
+          <SettingsSectionNav
+            language={language}
+            platform={PLATFORM}
+            scrollRef={scrollRef}
+            sectionOffsets={sectionOffsets}
+          />
+        </View>
+        <View style={styles.divider} />
         <ScrollView
           ref={scrollRef}
-          style={styles.container}
+          style={[styles.container, paneDirection]}
           contentContainerStyle={styles.wideContent}
         >
           {content}
@@ -176,7 +193,8 @@ function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   wideRoot: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
-  wideRootRtl: { flexDirection: "row-reverse" },
+  navPane: { width: 220, flexShrink: 0 },
+  divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
   wideContent: {
     width: "100%",
     maxWidth: 820,
