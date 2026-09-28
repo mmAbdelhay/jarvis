@@ -15,6 +15,7 @@ import {
   type Frame,
   FrameDecoder,
   MAX_CONTROL_FRAME_BYTES,
+  MAX_HELLO_FRAME_BYTES,
 } from "./frames.js";
 import { clientProof, HEX32_PATTERN, NONCE_BYTES, proofMatches, serverProof } from "./handshake.js";
 import {
@@ -73,7 +74,9 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
     const pending = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>();
     const pushListeners = new Set<(channel: string, payload: unknown) => void>();
     const closeListeners = new Set<() => void>();
-    const decoder = new FrameDecoder(MAX_CONTROL_FRAME_BYTES);
+    // Hello-sized until the welcome, as on the server: a peer that has not
+    // proven itself cannot make the client buffer more than that.
+    const decoder = new FrameDecoder(MAX_HELLO_FRAME_BYTES);
     const timer = deps.clock.setTimeout(() => {
       failure ??= new Error("The Jarvis daemon did not answer the control handshake");
       socket.destroy();
@@ -146,6 +149,7 @@ export async function connectControl(options: ConnectControlOptions): Promise<Co
         if (message.t === "welcome") {
           deps.clock.clearTimeout(timer);
           phase = "open";
+          decoder.maxBytes = MAX_CONTROL_FRAME_BYTES;
           return resolve(client);
         }
         if (message.t === "restart-required") {

@@ -1,88 +1,154 @@
-// The single-instance lock (Phase 2, task 2.4; review I2 ruling).
+// The single-instance lock (Phase 2, task 2.4; review I2 ruling, re-review).
 //
-// 1. A pid file, `run/jarvisd.pid`, created exclusively. If it exists and its
-//    pid is dead, it is stale: set aside and retried once. Setting it aside is
-//    a rename, then a check that what moved is still the dead pid we read —
-//    if another starter replaced it in between, it is put back and we lose.
-// 2. Then the endpoint. Unix: a socket file nobody answers on is what a killed
+// 1. A pid file, `run/jarvisd.pid`, holding "<pid>:<random token>" and created
+//    exclusively (a hard link of a finished temp file, so it is never seen
+//    empty). The token makes every holding unique even when a pid repeats.
+// 2. A held lock is stale when its pid is dead, when it is this process's own
+//    pid (a daemon that got its old pid back after a reboot; the in-process
+//    double start is refused before the pid file is read), or when its pid is
+//    alive but no daemon answers on the endpoint — now and again after
+//    STALE_LOCK_GRACE_MS, which covers a holder still starting up. Pids are
+//    reused densely after a reboot, and the pid file outlives a crash, so a
+//    live pid alone proves nothing.
+// 3. Taking over a stale lock is serialised by a second exclusive file,
+//    `jarvisd.pid.takeover`: under it the starter re-reads the lock, removes
+//    it only if it is still the stale one it judged, and creates its own.
+//    Any other outcome is busy, never acquired — so of any number of racing
+//    starters exactly one wins. A takeover marker older than
+//    TAKEOVER_STALE_MS was left by a starter that crashed mid-takeover.
+// 4. Then the endpoint. Unix: a socket file nobody answers on is what a killed
 //    daemon leaves behind; it is unlinked (only if it is a socket) and bound.
-//    Windows: the pipe name is fresh and random at every start, so there is
-//    nothing stale to clear; a name in use still reads as busy.
-// 3. server.ts then connects to the endpoint once and checks the connection
+//    Windows: the pipe name is fresh and random at every start.
+// 5. server.ts then connects to the endpoint once and checks the connection
 //    reached this server, the last word on who owns it.
 import type { Server, Socket } from "node:net";
+import { HANDSHAKE_TIMEOUT_MS } from "@jarvis/wire";
 import { type ControlDeps, errorCode } from "./deps.js";
 import { controlPaths, windowsPipeName } from "./endpoint.js";
-import { createExclusiveFile, tempName } from "./run-dir.js";
+import { daemonAnswers } from "./liveness.js";
+import { createExclusiveFile } from "./run-dir.js";
+
+export const STALE_LOCK_GRACE_MS = 2 * HANDSHAKE_TIMEOUT_MS;
+export const TAKEOVER_STALE_MS = 30_000;
+const MAX_LOCK_ATTEMPTS = 3;
 
 export type PidLock = { kind: "acquired"; release(): Promise<void> } | { kind: "busy" };
 
 export type DaemonLock =
-  | { kind: "acquired"; server: Server; endpoint: string; release(): Promise<void> }
+  | {
+      kind: "acquired";
+      server: Server;
+      endpoint: string;
+      /** Committed by the caller once it has confirmed it owns the endpoint. */
+      publication: Publication;
+      release(): Promise<void>;
+    }
   | { kind: "busy" };
+
+/** What publish() wrote, to keep (the start won) or undo (it lost the endpoint after all). */
+export interface Publication {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
 
 export interface AcquireDaemonLockOptions {
   platform: NodeJS.Platform;
   runDirectory: string;
   deps: ControlDeps;
   onConnection(socket: Socket): void;
-  /** Writes whatever clients must read (secret, pipe name) — before the endpoint listens. */
-  publish(endpoint: string): Promise<void>;
+  /** Writes whatever clients must read (secret, pipe name): after the pid lock, before listen. */
+  publish(endpoint: string): Promise<Publication>;
 }
+
+export interface PidLockOptions {
+  /** Whether a daemon answers on the endpoint — asked only when the holder's pid is alive. */
+  holderAnswers(): Promise<boolean>;
+}
+
+type LockDeps = Pick<ControlDeps, "fs" | "process" | "randomBytes" | "clock">;
 
 function parsePid(text: string): number | undefined {
-  const trimmed = text.trim();
-  if (!/^[1-9][0-9]{0,9}$/.test(trimmed)) return undefined;
-  return Number(trimmed);
+  const match = /^([1-9][0-9]{0,9})(?::[0-9A-Za-z-]*)?$/.exec(text.trim());
+  return match?.[1] === undefined ? undefined : Number(match[1]);
 }
 
-/** Moves a stale lock aside; false if it turned out to be a fresh one after all. */
-async function removeStale(
-  pidPath: string,
-  seen: string,
-  deps: Pick<ControlDeps, "fs" | "randomBytes">,
-): Promise<boolean> {
-  const aside = tempName(pidPath, deps, "stale");
+async function readIfExists(
+  path: string,
+  deps: Pick<ControlDeps, "fs">,
+): Promise<string | undefined> {
   try {
-    await deps.fs.rename(pidPath, aside);
+    return await deps.fs.readFile(path, "utf8");
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return true;
+    if (errorCode(error) === "ENOENT") return undefined;
     throw error;
   }
-  const moved = await deps.fs.readFile(aside, "utf8");
-  if (moved !== seen) {
-    await deps.fs.link(aside, pidPath).catch(() => {});
-    await deps.fs.unlink(aside);
-    return false;
+}
+
+function sleep(ms: number, deps: Pick<ControlDeps, "clock">): Promise<void> {
+  return new Promise((resolve) => deps.clock.setTimeout(resolve, ms));
+}
+
+/** Replaces the stale lock `seen` with `own`, serialised against every other taker. */
+async function takeOver(
+  pidPath: string,
+  seen: string,
+  own: string,
+  deps: LockDeps,
+): Promise<"acquired" | "busy" | "retry"> {
+  const markerPath = `${pidPath}.takeover`;
+  if (!(await createExclusiveFile(markerPath, own, deps))) {
+    try {
+      const marker = await deps.fs.lstat(markerPath);
+      if (deps.clock.now() - marker.mtimeMs <= TAKEOVER_STALE_MS) return "busy";
+      await deps.fs.unlink(markerPath);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+    return "retry";
   }
-  await deps.fs.unlink(aside);
-  return true;
+  try {
+    const current = await readIfExists(pidPath, deps);
+    if (current !== undefined) {
+      if (current !== seen) return "busy";
+      await deps.fs.unlink(pidPath);
+    }
+    return (await createExclusiveFile(pidPath, own, deps)) ? "acquired" : "busy";
+  } finally {
+    await deps.fs.unlink(markerPath).catch(() => {});
+  }
 }
 
 export async function acquirePidLock(
   pidPath: string,
-  deps: Pick<ControlDeps, "fs" | "process" | "randomBytes">,
+  deps: LockDeps,
+  options: PidLockOptions,
 ): Promise<PidLock> {
-  const own = String(deps.process.pid);
+  const own = `${deps.process.pid}:${Buffer.from(deps.randomBytes(8)).toString("hex")}`;
   const release = async () => {
-    try {
-      if ((await deps.fs.readFile(pidPath, "utf8")) === own) await deps.fs.unlink(pidPath);
-    } catch (error) {
-      if (errorCode(error) !== "ENOENT") throw error;
+    if ((await readIfExists(pidPath, deps)) === own) {
+      await deps.fs.unlink(pidPath).catch((error: unknown) => {
+        if (errorCode(error) !== "ENOENT") throw error;
+      });
     }
   };
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (await createExclusiveFile(pidPath, own, deps)) return { kind: "acquired", release };
-    let holder: string;
-    try {
-      holder = await deps.fs.readFile(pidPath, "utf8");
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") continue;
-      throw error;
-    }
+  const acquired: PidLock = { kind: "acquired", release };
+
+  const isStale = async (holder: string): Promise<boolean> => {
     const pid = parsePid(holder);
-    if (pid !== undefined && deps.process.isAlive(pid)) return { kind: "busy" };
-    if (!(await removeStale(pidPath, holder, deps))) return { kind: "busy" };
+    if (pid === undefined || pid === deps.process.pid || !deps.process.isAlive(pid)) return true;
+    if (await options.holderAnswers()) return false;
+    await sleep(STALE_LOCK_GRACE_MS, deps);
+    return !(await options.holderAnswers());
+  };
+
+  for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt++) {
+    if (await createExclusiveFile(pidPath, own, deps)) return acquired;
+    const holder = await readIfExists(pidPath, deps);
+    if (holder === undefined) continue;
+    if (!(await isStale(holder))) return { kind: "busy" };
+    const outcome = await takeOver(pidPath, holder, own, deps);
+    if (outcome === "acquired") return acquired;
+    if (outcome === "busy") return { kind: "busy" };
   }
   return { kind: "busy" };
 }
@@ -126,11 +192,30 @@ function listen(server: Server, endpoint: string): Promise<"listening" | "in-use
   });
 }
 
+/** Run dirs this process holds (or is taking) the lock of: a second start in-process is busy. */
+const heldInThisProcess = new Set<string>();
+
 export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Promise<DaemonLock> {
   const { deps, platform } = options;
   const paths = controlPaths(platform, options.runDirectory);
-  const pidLock = await acquirePidLock(paths.pidPath, deps);
-  if (pidLock.kind === "busy") return { kind: "busy" };
+  // The pid file cannot tell two starts in one process apart (same pid), and
+  // a same-pid holder is otherwise judged stale — so this check comes first.
+  if (heldInThisProcess.has(paths.pidPath)) return { kind: "busy" };
+  heldInThisProcess.add(paths.pidPath);
+  const pidLock = await acquirePidLock(paths.pidPath, deps, {
+    holderAnswers: () => daemonAnswers(platform, options.runDirectory, deps),
+  }).catch((error: unknown) => {
+    heldInThisProcess.delete(paths.pidPath);
+    throw error;
+  });
+  if (pidLock.kind === "busy") {
+    heldInThisProcess.delete(paths.pidPath);
+    return { kind: "busy" };
+  }
+  const release = async () => {
+    heldInThisProcess.delete(paths.pidPath);
+    await pidLock.release();
+  };
   try {
     let endpoint: string;
     if (platform === "win32") {
@@ -139,7 +224,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
       endpoint = paths.socketPath;
       const state = await probe(deps, endpoint);
       if (state === "live") {
-        await pidLock.release();
+        await release();
         return { kind: "busy" };
       }
       if (state === "refused") {
@@ -154,15 +239,23 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
         }
       }
     }
-    await options.publish(endpoint);
+    const publication = await options.publish(endpoint);
     const server = deps.net.createServer(options.onConnection);
-    if ((await listen(server, endpoint)) === "in-use") {
-      await pidLock.release();
+    let state: "listening" | "in-use";
+    try {
+      state = await listen(server, endpoint);
+    } catch (error) {
+      await publication.rollback();
+      throw error;
+    }
+    if (state === "in-use") {
+      await publication.rollback();
+      await release();
       return { kind: "busy" };
     }
-    return { kind: "acquired", server, endpoint, release: pidLock.release };
+    return { kind: "acquired", server, endpoint, publication, release };
   } catch (error) {
-    await pidLock.release();
+    await release();
     throw error;
   }
 }

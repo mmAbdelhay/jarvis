@@ -12,6 +12,7 @@ export interface ControlStat {
   isSymbolicLink(): boolean;
   uid: number;
   mode: number;
+  mtimeMs: number;
 }
 
 export interface ControlFs {
@@ -32,6 +33,8 @@ export interface ControlNet {
 }
 
 export interface ControlClock {
+  /** Epoch milliseconds; compared with file mtimes. */
+  now(): number;
   setTimeout(callback: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
 }
@@ -64,6 +67,7 @@ export function nodeControlDeps(): ControlDeps {
       connect: (endpoint) => connect(endpoint),
     },
     clock: {
+      now: () => Date.now(),
       setTimeout: (callback, ms) => setTimeout(callback, ms),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
     },

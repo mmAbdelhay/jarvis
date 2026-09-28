@@ -22,7 +22,7 @@
 // origin themselves.
 import type { Server, Socket } from "node:net";
 import { HANDSHAKE_TIMEOUT_MS, isValidBlobShape, MAX_BLOB_CHUNK_BYTES } from "@jarvis/wire";
-import type { ControlDeps } from "./deps.js";
+import { type ControlDeps, errorCode } from "./deps.js";
 import { controlPaths } from "./endpoint.js";
 import {
   CONTROL_PROTOCOL_VERSION,
@@ -273,9 +273,36 @@ export async function createControlServer(
     onConnection: attach,
     async publish(endpoint) {
       // The secret first: once a client can see a new pipe name, the secret
-      // beside it is already the one this daemon holds.
-      await writePrivateFile(paths.secretPath, secret.toString("hex"), deps);
-      if (!unix) await writePrivateFile(paths.endpointPath, endpoint, deps);
+      // beside it is already the one this daemon holds. The files found here
+      // are kept under a second name until this start has confirmed it owns
+      // the endpoint, so a start that loses it puts them back untouched.
+      const files: Array<[string, string]> = [[paths.secretPath, secret.toString("hex")]];
+      if (!unix) files.push([paths.endpointPath, endpoint]);
+      const previous: Array<[string, string | undefined]> = [];
+      for (const [path] of files) {
+        const backup = tempName(path, deps, "prev");
+        try {
+          await deps.fs.link(path, backup);
+          previous.push([path, backup]);
+        } catch (error) {
+          if (errorCode(error) !== "ENOENT") throw error;
+          previous.push([path, undefined]);
+        }
+      }
+      for (const [path, content] of files) await writePrivateFile(path, content, deps);
+      return {
+        async commit() {
+          for (const [, backup] of previous) {
+            if (backup !== undefined) await deps.fs.unlink(backup).catch(() => {});
+          }
+        },
+        async rollback() {
+          for (const [path, backup] of previous) {
+            if (backup !== undefined) await deps.fs.rename(backup, path);
+            else await deps.fs.unlink(path).catch(() => {});
+          }
+        },
+      };
     },
   });
   if (lock.kind === "busy") return { kind: "busy" };
@@ -297,11 +324,14 @@ export async function createControlServer(
   try {
     if (unix) await deps.fs.chmod(endpoint, 0o600);
     owned = await reachesThisServer(endpoint);
+    if (owned) await lock.publication.commit();
   } catch (error) {
+    await lock.publication.rollback().catch(() => {});
     await close();
     throw error;
   }
   if (!owned) {
+    await lock.publication.rollback();
     // Another process bound the path after we did. Closing unlinks the path
     // (libuv does, for a Unix socket), which would take the winner's socket
     // with it — so keep a second name for it across the close.

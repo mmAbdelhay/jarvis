@@ -14,6 +14,8 @@ import {
 } from "./client.js";
 import { type ControlClock, type ControlDeps, nodeControlDeps } from "./deps.js";
 import { controlPaths } from "./endpoint.js";
+import { answersWithProof } from "./liveness.js";
+import { STALE_LOCK_GRACE_MS } from "./lock.js";
 import { CONTROL_PROTOCOL_VERSION, encodeJsonFrame, type Frame, FrameDecoder } from "./frames.js";
 import { type ControlHandlers, type ControlServer, createControlServer } from "./server.js";
 
@@ -120,6 +122,7 @@ function fakeClock(): ControlClock & { timers: Array<{ ms: number; fire: () => v
   const timers: Array<{ ms: number; fire: () => void; cleared: boolean }> = [];
   return {
     timers,
+    now: () => Date.now(),
     setTimeout(fn, ms) {
       const timer = { ms, cleared: false, fire: () => (timer.cleared ? undefined : fn()) };
       timers.push(timer);
@@ -127,6 +130,19 @@ function fakeClock(): ControlClock & { timers: Array<{ ms: number; fire: () => v
     },
     clearTimeout(handle) {
       (handle as { cleared: boolean }).cleared = true;
+    },
+  };
+}
+
+/** Real timers, except the stale-lock grace, which fires at once. */
+function graceDeps(): ControlDeps {
+  const real = nodeControlDeps();
+  return {
+    ...real,
+    clock: {
+      ...real.clock,
+      setTimeout: (callback, ms) =>
+        ms === STALE_LOCK_GRACE_MS ? setImmediate(callback) : real.clock.setTimeout(callback, ms),
     },
   };
 }
@@ -249,6 +265,39 @@ describe("the control transport", () => {
       expect(bytes.includes(Buffer.from(secret, "hex"))).toBe(false);
     },
   );
+
+  it.skipIf(WINDOWS)("caps frames at 4 KiB until the daemon has proven itself", async () => {
+    const { runDirectory } = await fixture();
+    const paths = controlPaths(PLATFORM, runDirectory);
+    await mkdir(runDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(paths.secretPath, randomBytes(32).toString("hex"), { mode: 0o600 });
+    let peerClosed: Promise<void> = Promise.resolve();
+    const impostor = createServer((socket) => {
+      peerClosed = new Promise<void>((resolve) => socket.on("close", () => resolve()));
+      socket.once("data", () => socket.write(encodeJsonFrame({ t: "x", pad: "y".repeat(5_000) })));
+    });
+    await new Promise<void>((resolve) => impostor.listen(paths.socketPath, resolve));
+    cleanups.push(() => new Promise<void>((resolve) => impostor.close(() => resolve())));
+    await expect(client(runDirectory)).rejects.toThrow(/too large/);
+    await peerClosed;
+  });
+
+  it("recognises the daemon by its proof, and nothing else", async () => {
+    const { runDirectory } = await fixture();
+    const server = await start(runDirectory);
+    const { secretPath } = controlPaths(PLATFORM, runDirectory);
+    const deps = nodeControlDeps();
+    await expect(answersWithProof(server.endpoint, secretPath, deps)).resolves.toBe(true);
+    await writeFile(`${secretPath}.other`, randomBytes(32).toString("hex"));
+    await expect(answersWithProof(server.endpoint, `${secretPath}.other`, deps)).resolves.toBe(
+      false,
+    );
+    await expect(answersWithProof(server.endpoint, `${secretPath}.missing`, deps)).resolves.toBe(
+      false,
+    );
+    await server.close();
+    await expect(answersWithProof(server.endpoint, secretPath, deps)).resolves.toBe(false);
+  });
 
   it("closes a wrong client proof without replying past the challenge", async () => {
     const { runDirectory } = await fixture();
@@ -436,24 +485,82 @@ describe("the control transport", () => {
     const { runDirectory } = await fixture();
     const pidPath = controlPaths(PLATFORM, runDirectory).pidPath;
     const server = await start(runDirectory);
-    expect(await readFile(pidPath, "utf8")).toBe(String(process.pid));
+    expect(await readFile(pidPath, "utf8")).toMatch(new RegExp(`^${process.pid}:[0-9a-f]+$`));
     await server.close();
     await expect(stat(pidPath)).rejects.toThrow();
   });
 
-  it("takes over the pid lock of a dead daemon, but not of a live process", async () => {
+  async function preparedRunDirectory(): Promise<{ runDirectory: string; pidPath: string }> {
     const { runDirectory } = await fixture();
-    const pidPath = controlPaths(PLATFORM, runDirectory).pidPath;
     await mkdir(runDirectory, { recursive: true, mode: 0o700 });
     await chmod(runDirectory, 0o700);
+    return { runDirectory, pidPath: controlPaths(PLATFORM, runDirectory).pidPath };
+  }
 
-    await writeFile(pidPath, String(process.ppid));
-    await expect(startRaw(runDirectory)).resolves.toEqual({ kind: "busy" });
-
+  it("takes over the pid lock of a dead daemon", async () => {
+    const { runDirectory, pidPath } = await preparedRunDirectory();
     await writeFile(pidPath, String(await killedChildPid()));
     await start(runDirectory);
-    expect(await readFile(pidPath, "utf8")).toBe(String(process.pid));
+    expect(await readFile(pidPath, "utf8")).toMatch(new RegExp(`^${process.pid}:`));
   });
+
+  it("takes over a live unrelated pid when no endpoint answers (pid reuse after a crash)", async () => {
+    const { runDirectory, pidPath } = await preparedRunDirectory();
+    await writeFile(pidPath, String(process.ppid));
+    await start(runDirectory, { deps: graceDeps() });
+    expect(await readFile(pidPath, "utf8")).toMatch(new RegExp(`^${process.pid}:`));
+  });
+
+  it("treats this process's own pid left in the file as stale", async () => {
+    const { runDirectory, pidPath } = await preparedRunDirectory();
+    await writeFile(pidPath, `${process.pid}:from-an-earlier-boot`);
+    await start(runDirectory);
+    expect(await readFile(pidPath, "utf8")).toMatch(new RegExp(`^${process.pid}:[0-9a-f]+$`));
+  });
+
+  it.skipIf(WINDOWS)("stays busy for a live pid whose endpoint answers", async () => {
+    const { runDirectory, pidPath } = await preparedRunDirectory();
+    await writeFile(pidPath, String(process.ppid));
+    const other = createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) =>
+      other.listen(controlPaths(PLATFORM, runDirectory).socketPath, resolve),
+    );
+    cleanups.push(() => new Promise<void>((resolve) => other.close(() => resolve())));
+    await expect(startRaw(runDirectory, { deps: graceDeps() })).resolves.toEqual({ kind: "busy" });
+    expect(await readFile(pidPath, "utf8")).toBe(String(process.ppid));
+  });
+
+  it.skipIf(WINDOWS)(
+    "leaves the secret it found in place when another process binds the endpoint first",
+    async () => {
+      const { runDirectory, pidPath } = await preparedRunDirectory();
+      const paths = controlPaths(PLATFORM, runDirectory);
+      await writeFile(paths.secretPath, "a".repeat(64), { mode: 0o600 });
+      const real = nodeControlDeps();
+      const foreign = createServer((socket) => socket.destroy());
+      cleanups.push(() => new Promise<void>((resolve) => foreign.close(() => resolve())));
+      // A process that ignores the pid lock binds the path between our probe
+      // and our listen, so our listen() meets EADDRINUSE.
+      const deps: ControlDeps = {
+        ...real,
+        net: {
+          ...real.net,
+          createServer(onConnection) {
+            const server = real.net.createServer(onConnection);
+            const listen = server.listen.bind(server) as (path: string) => unknown;
+            (server as unknown as { listen: (path: string) => unknown }).listen = (path) => {
+              foreign.listen(path, () => listen(path));
+              return server;
+            };
+            return server;
+          },
+        },
+      };
+      await expect(startRaw(runDirectory, { deps })).resolves.toEqual({ kind: "busy" });
+      expect(await readFile(paths.secretPath, "utf8")).toBe("a".repeat(64));
+      await expect(stat(pidPath)).rejects.toThrow();
+    },
+  );
 
   it.skipIf(WINDOWS)("keeps the secret 0600, the socket 0600 and the run dir 0700", async () => {
     const { runDirectory } = await fixture();
