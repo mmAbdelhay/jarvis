@@ -24,6 +24,7 @@ import { expoSecureStore } from "@/lib/secure-store";
 import { openSession, sessionTarget } from "@/lib/session-nav";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { WIDE_PANEL_MAX_WIDTH } from "@/lib/wide-panel";
 import {
   DashboardGrid,
   type ProjectActions,
@@ -198,7 +199,9 @@ export default function DashboardScreen() {
           {renderPanel("projects")}
         </>
       )}
-      {view.error?.kind === "remote" && <Text style={styles.error}>{view.error.text}</Text>}
+      {view.error?.kind === "remote" && (
+        <Text style={[styles.error, wide && styles.errorWide]}>{view.error.text}</Text>
+      )}
     </ScrollView>
   );
 }
@@ -251,4 +254,6 @@ const styles = StyleSheet.create({
   },
   gearText: { color: theme.colors.textSecondary, fontSize: 19 },
   error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
+  // Wide: under the grid, inside the same centred 1180 measure.
+  errorWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
 });

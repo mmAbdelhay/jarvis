@@ -1,6 +1,8 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { WidePanel } from "@/components/WidePanel";
+import { WideShell } from "@/components/WideShell";
 import { historyListDisplay } from "@/lib/history-screen";
 import { createHistoryStore, type HistoryState } from "@/lib/history-store";
 import { t } from "@/lib/i18n";
@@ -8,7 +10,20 @@ import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
 
-export default function HistoryScreen() {
+// Wide layout: a root stack screen, so it draws the WideShell itself and
+// sits in a centred panel under the top bar (a phone gets the page as is).
+export default function HistoryRoute() {
+  const language = useLanguage();
+  return (
+    <WideShell>
+      <WidePanel title={t(language, "history.title")}>
+        <HistoryScreen />
+      </WidePanel>
+    </WideShell>
+  );
+}
+
+function HistoryScreen() {
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();

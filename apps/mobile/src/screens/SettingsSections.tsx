@@ -24,6 +24,10 @@ import { connectionStateKey, type SettingsStore, type SettingsView } from "@/lib
 import { theme } from "@/lib/theme";
 import { textDirection } from "@/lib/voice-screen";
 
+// Wraps the fingerprint tail's Latin hex characters so they don't reorder
+// under Arabic bidi — U+2066 LEFT-TO-RIGHT ISOLATE and U+2069 POP
+// DIRECTIONAL ISOLATE, written as `\u` escapes (not the raw invisible
+// characters) so they survive an edit or a formatter pass intact.
 const LRI = "\u2066";
 const PDI = "\u2069";
 
@@ -53,26 +57,32 @@ export function SettingsSectionNav(props: {
       accessibilityLabel={t(props.language, "settings.sectionNav")}
     >
       <Text style={styles.navTitle}>{t(props.language, "settings.title")}</Text>
-      {settingsSections(props.platform).map((section) => (
-        <TouchableOpacity
-          key={section.id}
-          style={styles.navLink}
-          accessibilityRole="link"
-          onPress={() => {
-            props.scrollRef.current?.scrollTo({
-              y: props.sectionOffsets.current[section.id] ?? 0,
-              animated: true,
-            });
-          }}
-        >
-          <Text style={styles.navLinkText}>{t(props.language, section.labelKey)}</Text>
-        </TouchableOpacity>
-      ))}
+      {settingsSections(props.platform, { passkeysSupported: passkeys.isSupported() }).map(
+        (section) => (
+          <TouchableOpacity
+            key={section.id}
+            style={styles.navLink}
+            accessibilityRole="link"
+            onPress={() => {
+              props.scrollRef.current?.scrollTo({
+                y: props.sectionOffsets.current[section.id] ?? 0,
+                animated: true,
+              });
+            }}
+          >
+            <Text style={styles.navLinkText}>{t(props.language, section.labelKey)}</Text>
+          </TouchableOpacity>
+        ),
+      )}
     </View>
   );
 }
 
 export function SettingsSections(props: Props): React.JSX.Element {
+  // M10 Task 6, rule 3: the "error" phase's status line shows the
+  // laptop's own bilingual text verbatim, in its own direction, when
+  // present — same discipline as voice.tsx's server-text notice — and
+  // falls back to the plain i18n key text (or nothing) otherwise.
   const notificationsKey = notificationsStatusKey(props.view.notifications);
   const notificationsServerText =
     props.view.notifications.phase === "error" ? props.view.notifications.serverText : undefined;
@@ -90,6 +100,8 @@ export function SettingsSections(props: Props): React.JSX.Element {
     props.view.lastFrameAgoMs === undefined
       ? undefined
       : Math.max(0, Math.round(props.view.lastFrameAgoMs / 1000));
+  // M3: the paired-at date is formatted in the app's own chosen language,
+  // not whatever the device's ambient locale happens to be.
   const pairedAtDate = useMemo(
     () =>
       props.view.laptop === undefined
@@ -269,6 +281,7 @@ export function SettingsSections(props: Props): React.JSX.Element {
               <Switch
                 value={props.view.keepSignedIn}
                 accessibilityLabel={t(props.language, "auth.keepSignedIn")}
+                // Bound to the store's view: a failed write leaves it as it was.
                 onValueChange={(on) => void props.store.setKeepSignedIn(on).catch(() => {})}
               />
             </View>
@@ -351,7 +364,7 @@ const styles = StyleSheet.create({
   },
   langButtonActive: { backgroundColor: theme.colors.selected, borderColor: theme.colors.selected },
   langButtonText: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
-  notice: { color: theme.colors.warning, fontSize: theme.font.size.sm, marginTop: 8 },
+  notice: { color: theme.colors.warning, fontSize: theme.font.size.sm },
   empty: { color: theme.colors.textMuted, fontSize: theme.font.size.sm },
   switchRow: {
     flexDirection: "row",

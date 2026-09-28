@@ -49,6 +49,7 @@ import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
 import { WebView } from "react-native-webview";
+import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import type { Language } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -168,6 +169,8 @@ export default function SidecarViewScreen() {
         }
       })();
       return () => {
+        // A tablet is never locked (orientation-policy.ts).
+        if (deviceOrientationPolicy() !== "portrait-lock") return;
         void (async () => {
           try {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);

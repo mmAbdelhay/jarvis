@@ -1,6 +1,8 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { WidePanel } from "@/components/WidePanel";
+import { WideShell } from "@/components/WideShell";
 import { transcriptDisplay, withLrmPrefixes } from "@/lib/history-screen";
 import { createHistoryStore, type HistoryState } from "@/lib/history-store";
 import { t } from "@/lib/i18n";
@@ -12,7 +14,19 @@ function routeId(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export default function TranscriptScreen() {
+// Wide layout: drawn inside the shell as a centred panel (see history.tsx).
+export default function TranscriptRoute() {
+  const language = useLanguage();
+  return (
+    <WideShell>
+      <WidePanel title={t(language, "history.transcript")}>
+        <TranscriptScreen />
+      </WidePanel>
+    </WideShell>
+  );
+}
+
+function TranscriptScreen() {
   const id = routeId(useLocalSearchParams().id);
   const language = useLanguage();
   if (id === undefined) return <Text style={styles.empty}>{t(language, "history.notFound")}</Text>;

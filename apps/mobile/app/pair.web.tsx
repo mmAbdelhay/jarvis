@@ -33,6 +33,7 @@ import {
 import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
+import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import {
@@ -118,7 +119,18 @@ function clearLocationHash(): void {
   }
 }
 
-export default function PairWebScreen() {
+// Wide layout: a centred card instead of a full-screen page (the logic
+// below is the same on every screen size).
+export default function PairWebScreenRoute() {
+  return (
+    <AuthCard>
+      <PairWebScreen />
+    </AuthCard>
+  );
+}
+
+function PairWebScreen() {
+  const cardRoot = useAuthCardRootStyle();
   const language = useLanguage();
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
@@ -327,7 +339,7 @@ export default function PairWebScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, cardRoot]}>
       <Text style={styles.title}>{t(language, "pair.title")}</Text>
 
       {phase.kind === "checking" && <ActivityIndicator color={theme.colors.primary} />}

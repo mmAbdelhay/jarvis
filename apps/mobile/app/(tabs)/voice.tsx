@@ -4,6 +4,7 @@ import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from "rea
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MicButton } from "@/components/MicButton";
 import { TurnList } from "@/components/TurnList";
+import { WidePanel } from "@/components/WidePanel";
 import { clientPlatformFor } from "@/lib/client-platform";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -20,7 +21,17 @@ import {
 
 // Ruling 6: the Voice screen sends no target, so the brain answers — its
 // header always reads `voice.targetBrain`, never derived from `view.target`.
-export default function VoiceScreen() {
+// Wide layout: the tabs layout already draws the shell; the page sits in a
+// centred panel under it.
+export default function VoiceRoute() {
+  return (
+    <WidePanel>
+      <VoiceScreen />
+    </WidePanel>
+  );
+}
+
+function VoiceScreen() {
   const language = useLanguage();
   const controller = useVoiceController();
   const [view, setView] = useState<VoiceView>(controller.get());

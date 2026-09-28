@@ -33,6 +33,12 @@ describe("settingsSections", () => {
     expect(settingsSections("native").map(({ id }) => id)).not.toContain("passkeys");
   });
 
+  it("drops Add a passkey on web when the browser has no WebAuthn, so the rail matches the page", () => {
+    const ids = settingsSections("web", { passkeysSupported: false }).map(({ id }) => id);
+    expect(ids).not.toContain("passkeys");
+    expect(ids).toContain("keep-signed-in");
+  });
+
   it.each(["native", "web"] as const)("uses unique anchor ids on %s", (platform) => {
     const ids = settingsSections(platform).map(({ id }) => id);
     expect(new Set(ids).size).toBe(ids.length);

@@ -18,6 +18,7 @@ import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
+import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { nativeTransport } from "@/lib/native-transport";
@@ -114,7 +115,18 @@ function errorKey(reason: ScreenFailure) {
   }
 }
 
-export default function PairScreen() {
+// Wide layout: a centred card instead of a full-screen page (the logic
+// below is the same on every screen size).
+export default function PairScreenRoute() {
+  return (
+    <AuthCard>
+      <PairScreen />
+    </AuthCard>
+  );
+}
+
+function PairScreen() {
+  const cardRoot = useAuthCardRootStyle();
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
@@ -410,7 +422,7 @@ export default function PairScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+    <View style={[styles.container, { paddingTop: insets.top + 8 }, cardRoot]}>
       <Text style={styles.title}>{t(language, "pair.title")}</Text>
 
       {phase.kind === "alreadyPaired" && (

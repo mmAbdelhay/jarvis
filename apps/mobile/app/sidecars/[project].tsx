@@ -7,6 +7,8 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { WidePanel } from "@/components/WidePanel";
+import { WideShell } from "@/components/WideShell";
 import { STRINGS, t } from "@/lib/i18n";
 import type { Language, MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -32,7 +34,19 @@ function rowLabel(language: Language, row: SidecarRow): string {
   return row.label;
 }
 
-export default function SidecarsScreen() {
+// Wide layout: drawn inside the shell as a centred panel (see history.tsx).
+export default function SidecarsRoute() {
+  const language = useLanguage();
+  return (
+    <WideShell>
+      <WidePanel title={t(language, "sidecars.title")}>
+        <SidecarsScreen />
+      </WidePanel>
+    </WideShell>
+  );
+}
+
+function SidecarsScreen() {
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();

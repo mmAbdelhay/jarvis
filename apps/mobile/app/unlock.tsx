@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { UnlockOutcome } from "@/lib/auth-session";
+import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
 import { t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -27,7 +28,18 @@ import { connectionStateKey } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
 import { lockCauseKey, unlockCanRetryConnection, unlockMessageKey } from "@/lib/unlock-screen";
 
-export default function UnlockScreen() {
+// Wide layout: a centred card instead of a full-screen page (the logic
+// below is the same on every screen size).
+export default function UnlockScreenRoute() {
+  return (
+    <AuthCard>
+      <UnlockScreen />
+    </AuthCard>
+  );
+}
+
+function UnlockScreen() {
+  const cardRoot = useAuthCardRootStyle();
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
@@ -96,7 +108,7 @@ export default function UnlockScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, cardRoot]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={[styles.content, { paddingTop: insets.top + 48 }]}>

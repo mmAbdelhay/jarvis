@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { UnlockOutcome } from "@/lib/auth-session";
+import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
 import { platformKey, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -53,7 +54,18 @@ type Phase = "unlock" | "offer";
 /** The automatic sign-in runs once per page load, not once per mount. */
 let pageLoadSignInDone = false;
 
-export default function UnlockScreen() {
+// Wide layout: a centred card instead of a full-screen page (the logic
+// below is the same on every screen size).
+export default function UnlockScreenRoute() {
+  return (
+    <AuthCard>
+      <UnlockScreen />
+    </AuthCard>
+  );
+}
+
+function UnlockScreen() {
+  const cardRoot = useAuthCardRootStyle();
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
@@ -188,7 +200,7 @@ export default function UnlockScreen() {
   if (phase === "offer") {
     return (
       <ScrollView
-        style={styles.container}
+        style={[styles.container, cardRoot]}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
       >
         <Text style={styles.title}>{t(language, "passkey.offerTitle")}</Text>
@@ -205,7 +217,7 @@ export default function UnlockScreen() {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, cardRoot]}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
     >
       <Text style={styles.title}>{t(language, "auth.title")}</Text>

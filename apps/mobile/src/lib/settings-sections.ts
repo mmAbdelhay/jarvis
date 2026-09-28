@@ -28,8 +28,18 @@ const REMOTE_ACCESS = {
   labelKey: "settings.section.remoteAccess",
 } as const satisfies SettingsSection;
 
-export function settingsSections(platform: ClientPlatform): SettingsSection[] {
-  return [...(platform === "web" ? WEB_SECTIONS : NATIVE_SECTIONS), REMOTE_ACCESS];
+/** The sections the screen renders, in order. `passkeysSupported` mirrors
+ *  the screen's own `passkeys.isSupported()` gate, so a browser without
+ *  WebAuthn gets no rail link to a section that isn't there. */
+export function settingsSections(
+  platform: ClientPlatform,
+  options: { passkeysSupported: boolean } = { passkeysSupported: true },
+): SettingsSection[] {
+  const sections: SettingsSection[] = platform === "web" ? [...WEB_SECTIONS] : [...NATIVE_SECTIONS];
+  return [
+    ...sections.filter((section) => options.passkeysSupported || section.id !== "passkeys"),
+    REMOTE_ACCESS,
+  ];
 }
 
 export function settingsWideLayout(input: {

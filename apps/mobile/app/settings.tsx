@@ -34,6 +34,8 @@ import { SettingsSectionNav, SettingsSections } from "@/screens/SettingsSections
 const APP_VERSION = Constants.expoConfig?.version ?? "0.0.0";
 const PLATFORM = clientPlatformFor(Platform.OS);
 
+// Wide layout: Settings is a root stack screen, so it draws the WideShell
+// itself to open inside the shell (on a phone the shell adds nothing).
 export default function SettingsRoute() {
   return (
     <WideShell>
@@ -67,6 +69,8 @@ function SettingsScreen() {
         prefs: filePrefsStore,
         localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
         loadRecord: async () => (await loadPairing(expoSecureStore))?.record,
+        // The same shared read+connect function `_layout.tsx` uses on
+        // entry — one `loadPairing` path in the app.
         connectFromStored: (shouldConnect) =>
           connectFromStoredPairing({ secureStore: expoSecureStore, client, shouldConnect }),
         connection,
@@ -75,12 +79,17 @@ function SettingsScreen() {
         appVersion: APP_VERSION,
         unpair: async () => {
           await clearPairing(expoSecureStore);
+          // The stored refresh token belongs to the pairing it was issued under.
           await authSession.forget();
         },
         navigateToPair: () => {
           router.replace("/pair");
         },
         log: console.log,
+        // M10 Task 6, rule 10 of settings-store.ts: this store only relays
+        // `push`'s own view and forwards `setNotifications` to it — the
+        // one `PushRegistration` `PushProvider` built for the whole app
+        // (push-context.tsx), never a second instance built here.
         push,
         auth: authSession,
       }),
@@ -136,9 +145,19 @@ function SettingsScreen() {
           : undefined
       }
       onSpeakReplies={(on) => {
+        // Prefs first, controller only once the write actually lands —
+        // `store.setSpeakReplies` leaves its own view unchanged on a
+        // rejected write, and since the switch is bound to that view
+        // (not local state), a failed write reverts the switch on its
+        // own without the controller ever having heard about the
+        // change (fix round 1, Minor 1).
         void store
           .setSpeakReplies(on)
           .then(() => voiceController.setSpeakReplies(on))
+          // M6: a rejected write already leaves the store's view (and
+          // so the switch, bound to it) unchanged on its own — this
+          // only keeps that rejection from surfacing as an unhandled
+          // promise rejection (a RN LogBox warning in dev).
           .catch(() => {});
       }}
       onValueChange={(on) => void store.setNotifications(on)}

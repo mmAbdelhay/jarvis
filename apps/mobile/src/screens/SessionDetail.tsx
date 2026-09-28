@@ -21,6 +21,7 @@ import { ComposeBar } from "@/components/ComposeBar";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
+import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
 import { platformKey, t } from "@/lib/i18n";
@@ -134,6 +135,8 @@ export function SessionDetail(props: {
         }
       })();
       return () => {
+        // A tablet is never locked (orientation-policy.ts).
+        if (deviceOrientationPolicy() !== "portrait-lock") return;
         void (async () => {
           try {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);

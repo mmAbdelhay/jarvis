@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { APP_FONTS } from "@/lib/app-fonts";
 import { appActivityFor } from "@/lib/app-lifecycle";
+import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { authChannel } from "@/lib/auth-channel";
 import { createAuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
@@ -70,6 +71,7 @@ export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const layout = useLayoutClass();
+  const wide = layout.kind === "wide";
 
   // Built exactly once, for the app's whole lifetime — this is "the one
   // RpcClient" every screen shares through RpcContext.
@@ -220,6 +222,9 @@ export default function RootLayout() {
   // is only the app's starting state. Wrapped in try/catch: the web
   // target and some simulators reject `lockAsync` outright.
   useEffect(() => {
+    // Phones only: a tablet's wide layout fits both orientations, so it
+    // keeps app.config.ts's "default" (orientation-policy.ts).
+    if (deviceOrientationPolicy() !== "portrait-lock") return;
     void (async () => {
       try {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -376,7 +381,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="changes"
                   options={{
-                    headerShown: true,
+                    // Wide: drawn inside the shell with its own panel header.
+                    headerShown: !wide,
+                    animation: wide ? "none" : "default",
                     headerTitle: t(language, "changes.title"),
                     headerStyle: { backgroundColor: theme.colors.background },
                     headerTintColor: theme.colors.text,
@@ -385,7 +392,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="history"
                   options={{
-                    headerShown: true,
+                    // Wide: drawn inside the shell with its own panel header.
+                    headerShown: !wide,
+                    animation: wide ? "none" : "default",
                     headerTitle: t(language, "history.title"),
                     headerStyle: { backgroundColor: theme.colors.background },
                     headerTintColor: theme.colors.text,
@@ -394,7 +403,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="transcript/[id]"
                   options={{
-                    headerShown: true,
+                    // Wide: drawn inside the shell with its own panel header.
+                    headerShown: !wide,
+                    animation: wide ? "none" : "default",
                     title: t(language, "history.transcript"),
                     headerStyle: { backgroundColor: theme.colors.background },
                     headerTintColor: theme.colors.text,
@@ -403,7 +414,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="sidecars/[project]"
                   options={{
-                    headerShown: true,
+                    // Wide: drawn inside the shell with its own panel header.
+                    headerShown: !wide,
+                    animation: wide ? "none" : "default",
                     headerTitle: t(language, "sidecars.title"),
                     headerStyle: { backgroundColor: theme.colors.background },
                     headerTintColor: theme.colors.text,
@@ -424,7 +437,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="docker/[project]"
                   options={{
-                    headerShown: true,
+                    // Wide: drawn inside the shell with its own panel header.
+                    headerShown: !wide,
+                    animation: wide ? "none" : "default",
                     // The screen's own `<Stack.Screen options={{ title }} />`
                     // merges the project name in once known (session/[id].tsx's
                     // same convention) — this is only the default shown first.
