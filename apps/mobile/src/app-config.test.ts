@@ -135,6 +135,15 @@ describe("app.config.ts: orientation (sidecar landscape fix)", () => {
   });
 });
 
+// Wide layout final review I2: Expo's default is `supportsTablet: false`,
+// which ships an iPhone-only build that an iPad runs in an iPhone-sized
+// compatibility window — never wide, and portrait-locked as a phone.
+describe("app.config.ts: iPad (wide layout)", () => {
+  test("ios.supportsTablet is true [bite-proof: drop it and an iPad never gets the wide layout]", () => {
+    expect(config.ios?.supportsTablet).toBe(true);
+  });
+});
+
 describe("app.config.ts: web target (Task 12)", () => {
   test("web is a single-page Metro export", () => {
     expect(config.web).toMatchObject({ output: "single", bundler: "metro" });

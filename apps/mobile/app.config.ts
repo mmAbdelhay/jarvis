@@ -19,14 +19,16 @@ const config: ExpoConfig = {
   slug: "jarvis-mobile",
   scheme: "jarvis",
   version: "0.0.0",
-  // "default" (not "portrait"): the app locks portrait itself at the JS
-  // level (`expo-screen-orientation`, app/_layout.tsx on mount) everywhere
-  // except the sidecar WebView screen, which unlocks on focus so a
-  // landscape-friendlier desktop UI (code-server, DbGate, Headlamp) can
-  // rotate. A native `orientation: "portrait"` lock here would override
-  // that at the OS level regardless of what the JS side asks for — this is
-  // a native config change, so a new EAS build is required for it to take
-  // effect on-device.
+  // "default" (not "portrait"): orientation is decided at the JS level
+  // (`expo-screen-orientation`, src/lib/orientation-policy.ts via
+  // app/_layout.tsx). A phone is locked portrait except while the terminal,
+  // a session or a sidecar screen is focused, which unlock it (a
+  // landscape-friendlier desktop UI such as code-server, DbGate or
+  // Headlamp can rotate); a tablet is never locked, since the wide layout
+  // handles both orientations. A native `orientation: "portrait"` lock here
+  // would override that at the OS level regardless of what the JS side
+  // asks for — this is a native config change, so a new EAS build is
+  // required for it to take effect on-device.
   orientation: "default",
   // "dark", not "automatic": theme.ts's tokens are dark-only (no light
   // palette exists to switch to), and "automatic" also produces an
@@ -39,6 +41,11 @@ const config: ExpoConfig = {
   // Architecture is the only architecture from SDK 52 on, nothing to opt into.
   ios: {
     bundleIdentifier: "dev.jarvis.mobile",
+    // An iPad-native build (Expo's default is `false`: iPhone-only, which
+    // an iPad runs in an iPhone-sized compatibility window, so it would
+    // never get the wide layout and would be portrait-locked as a phone).
+    // Native config: takes effect only in a new EAS build.
+    supportsTablet: true,
     infoPlist: {
       NSCameraUsageDescription:
         "Jarvis uses the camera to scan the pairing QR code shown by the desktop app. / يستخدم Jarvis الكاميرا لمسح رمز الاقتران المعروض في تطبيق سطح المكتب.",
