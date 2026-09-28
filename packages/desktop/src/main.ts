@@ -47,6 +47,7 @@ import { PRIMARY_HOTKEYS, registerVoiceHotkeys } from "./hotkeys.js";
 import { errorMessage, isWayland, MESSAGES, PRIMARY_LANGUAGE } from "./messages.js";
 import { daemonScriptPath } from "./daemon/script-path.js";
 import { launchDaemonFromApp } from "./daemon/app-launcher.js";
+import { appImageOf } from "./daemon/service-linux.js";
 import { claimSingleInstance } from "./single-instance.js";
 import { openBridgeWebUrl } from "./open-external-guard.js";
 import type { RemoteStatus } from "@jarvis/remote";
@@ -392,13 +393,14 @@ app.whenReady().then(async () => {
       });
     let appWindow: BrowserWindow | undefined;
     const language = PRIMARY_LANGUAGE;
+    const appImage = platform === "linux" ? appImageOf(process.env, process.execPath) : undefined;
     const nodeDeps = nodeDaemonModeDeps({
       platform,
       home: homedir(),
       uid: process.getuid?.() ?? 0,
       execPath: process.execPath,
       // An AppImage's own file: execPath is inside its temporary mount.
-      ...(platform === "linux" && process.env.APPIMAGE ? { appImage: process.env.APPIMAGE } : {}),
+      ...(appImage === undefined ? {} : { appImage }),
       daemonScript: daemonScriptPath({
         packaged: app.isPackaged,
         resourcesPath: process.resourcesPath,

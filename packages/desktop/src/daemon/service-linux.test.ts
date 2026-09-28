@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLinuxService, linuxRecordedExecPath } from "./service-linux.js";
+import { appImageOf, buildLinuxService, linuxRecordedExecPath } from "./service-linux.js";
 
 describe("buildLinuxService", () => {
   it("builds a quoted user unit and exact systemctl argv", () => {
@@ -13,6 +13,8 @@ describe("buildLinuxService", () => {
     expect(service.fileMode).toBe(0o644);
     expect(service.contents).toBe(`[Unit]
 Description=Jarvis background daemon
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 ExecStart="/opt/Jarvis %%App/bin/jarvis\\\\preview$$" "/home/Jarvis User/a \\"quoted\\" daemon.js" "run"
@@ -68,5 +70,19 @@ WantedBy=default.target
     });
     expect(linuxRecordedExecPath(service.contents)).toBe(appImage ?? execPath);
     expect(linuxRecordedExecPath("[Service]\nRestart=on-failure\n")).toBeUndefined();
+  });
+
+  // Re-review N2: APPIMAGE is inherited by every child of an AppImage (a
+  // Jarvis pty, a terminal emulator's shells), so it names this process's
+  // own image only when execPath is inside the image's mount (APPDIR).
+  it("takes $APPIMAGE only when this process runs from that image's mount", () => {
+    const image = { APPIMAGE: "/home/u/Jarvis.AppImage", APPDIR: "/tmp/.mount_Jarv1" };
+    expect(appImageOf(image, "/tmp/.mount_Jarv1/jarvis")).toBe("/home/u/Jarvis.AppImage");
+    // Inherited by a tarball or dev build started from such a shell:
+    expect(appImageOf(image, "/opt/jarvis/jarvis")).toBeUndefined();
+    expect(appImageOf({ APPIMAGE: image.APPIMAGE }, "/tmp/.mount_Jarv1/jarvis")).toBeUndefined();
+    // A sibling directory that only shares the prefix is not inside it.
+    expect(appImageOf(image, "/tmp/.mount_Jarv1x/jarvis")).toBeUndefined();
+    expect(appImageOf({}, "/tmp/.mount_Jarv1/jarvis")).toBeUndefined();
   });
 });

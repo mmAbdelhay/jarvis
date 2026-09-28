@@ -180,9 +180,10 @@ copy and registers the service again from the new place. That restarts the
 daemon, so terminals running in the background close.
 
 Move Jarvis to `/Applications` before turning the setting on. An app run
-straight from Downloads or from the disk image runs from a temporary
-location that macOS can change, and each change means another
-re-registration.
+straight from Downloads or from the disk image runs from a temporary copy
+that macOS moves from launch to launch (App Translocation). Jarvis never
+re-registers the service from such a copy. Settings → General asks you to
+move Jarvis to Applications instead.
 
 ### Linux
 
@@ -210,7 +211,17 @@ The unit names the app by its full path. For an AppImage it names the
 contents are mounted at a temporary path that changes every time. If you
 move the app or the `.AppImage` file later, the next time you open Jarvis it
 sees that the unit names another copy and writes the unit again from the
-new place. That restarts the daemon.
+new place. That restarts the daemon. Jarvis uses `$APPIMAGE` only when it
+is itself running from that AppImage, so a copy started from a shell that
+merely inherited the variable does not register the wrong file.
+
+A daemon run from an AppImage starts the Electron app first, and Electron
+needs a display. **Running the AppImage daemon on a machine with no display
+is not supported.** On a server, run an extracted AppImage
+(`./Jarvis.AppImage --appimage-extract`, then `squashfs-root/jarvis`) or a
+tarball build from a fixed place. The unit gives up after 5 failed starts in
+5 minutes (`StartLimitBurst=5`, `StartLimitIntervalSec=300`); see
+`journalctl --user -u jarvisd` for why.
 
 ### Windows
 
@@ -285,6 +296,21 @@ with no screen `systemctl --user restart jarvisd` (Linux),
 exit with code 75, and launchd or systemd starts it again. That is
 expected. Any other non-zero exit is a crash; the reason is in
 `jarvisd.log`, or in `jarvisd.err.log` on macOS.
+
+**Restart daemon does nothing after turning the setting on while attached.**
+If you turned the setting on while the app was attached to a daemon you
+started yourself, that daemon keeps running, and the service's own copy
+exits at once because one is already running. **Restart daemon** restarts
+only through the service, so it cannot restart the daemon you started.
+Stop that daemon (`jarvisd stop` or Ctrl-C). The service starts its own at
+the next login or the next time you open Jarvis.
+
+**A daemon keeps running after `systemctl --user stop jarvisd` (AppImage).**
+With `KillMode=process`, systemd signals only the unit's main process. For
+an AppImage that is the app's launcher, which passes the stop on to the
+daemon. If the launcher is killed outright or crashes, the daemon it started
+is left running without the service, and the next start exits because one
+is already running. Stop the leftover daemon with `jarvisd stop`.
 
 **"Restart the Jarvis daemon."** A daemon you started yourself with
 `jarvisd run`, and any daemon on Windows, has no service manager to start it

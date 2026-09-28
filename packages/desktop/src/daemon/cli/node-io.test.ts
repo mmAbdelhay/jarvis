@@ -88,7 +88,7 @@ describe("nodeCliIo hidden reads", () => {
     ["Home/End and Delete (with parameters)", "\u001b[1~pass\u001b[3~word\u001b[4~\r"],
     ["modified arrows", "pass\u001b[1;5Cword\r"],
     ["application-mode arrows (SS3)", "\u001bOApass\u001bOBword\r"],
-    ["Alt+key", "pass\u001bxword\r"],
+    ["Alt+arrow sent as ESC ESC [ A", "pass\u001b\u001b[Aword\u001b\u001b[1;3D\r"],
   ])("drops whole escape sequences: %s", async (_name, typed) => {
     const t = fakeTerminal();
     const read = t.io.readHidden("Password: ");
@@ -114,5 +114,14 @@ describe("nodeCliIo hidden reads", () => {
     const second = t.io.readHidden("Password: ");
     t.stdin.emit("data", "Aok\r");
     await expect(second).resolves.toBe("Aok");
+  });
+
+  // Re-review N3(b): a lone Escape press must not eat the next key typed.
+  it("keeps the character typed after a lone Escape", async () => {
+    const t = fakeTerminal();
+    const read = t.io.readHidden("Password: ");
+    t.stdin.emit("data", "pass\u001b");
+    t.stdin.emit("data", "word\r");
+    await expect(read).resolves.toBe("password");
   });
 });

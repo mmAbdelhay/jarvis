@@ -19,6 +19,8 @@ export type DaemonSettingsView = {
   line: string;
   /** The daemon log's last line, under a failure. */
   logLine?: string;
+  /** Something to fix first, whatever the state: a translocated app. */
+  notice?: string;
   warning: boolean;
   /** Restart daemon and Stop now act on a running daemon: shown only while
    *  the core is in it. */
@@ -28,7 +30,11 @@ export type DaemonSettingsView = {
 /** What the General section shows for `status` — pure, so the mapping is
  *  tested without a DOM. */
 export function daemonSettingsView(status: DaemonStatus, language: Language): DaemonSettingsView {
-  const base = { toggleOn: status.enabled, showDaemonActions: !status.inApp };
+  const base = {
+    toggleOn: status.enabled,
+    showDaemonActions: !status.inApp,
+    ...(status.translocated ? { notice: MESSAGES.daemonMoveToApplications(language) } : {}),
+  };
   const { state } = status;
   switch (state.kind) {
     case "starting":
@@ -97,6 +103,7 @@ function render(): void {
   const toggle = $("settings-daemon-enabled") as HTMLInputElement;
   const state = $("settings-daemon-state");
   const log = $("settings-daemon-log");
+  const notice = $("settings-daemon-notice");
   const restart = $("settings-daemon-restart") as HTMLButtonElement;
   const stop = $("settings-daemon-stop") as HTMLButtonElement;
   toggle.disabled = pending || last === undefined;
@@ -110,6 +117,8 @@ function render(): void {
   state.classList.toggle("settings-note--warning", message !== undefined || view.warning);
   log.textContent = view.logLine ?? "";
   log.hidden = view.logLine === undefined;
+  notice.textContent = view.notice ?? "";
+  notice.hidden = view.notice === undefined;
   restart.hidden = !view.showDaemonActions;
   stop.hidden = !view.showDaemonActions;
   restart.disabled = pending;

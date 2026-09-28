@@ -60,6 +60,21 @@ describe("Settings → General: the background service's view of a status", () =
     expect(MESSAGES.daemonStateAttached(812, "1m", "ar")).toMatch(/[\u0600-\u06ff]/);
   });
 
+  it("running from App Translocation: asks to move Jarvis to Applications, in both languages", () => {
+    for (const language of ["en", "ar"] as const) {
+      const view = daemonSettingsView(
+        { enabled: false, inApp: true, state: { kind: "off" }, translocated: true },
+        language,
+      );
+      expect(view.notice).toBe(MESSAGES.daemonMoveToApplications(language));
+    }
+    expect(MESSAGES.daemonMoveToApplications("en")).toContain("Applications");
+    expect(MESSAGES.daemonMoveToApplications("ar")).toMatch(/[\u0600-\u06ff]/);
+    expect(
+      daemonSettingsView({ enabled: false, inApp: true, state: { kind: "off" } }, "en").notice,
+    ).toBeUndefined();
+  });
+
   it("failed: the reason and the log's last line, as a warning", () => {
     expect(
       daemonSettingsView(

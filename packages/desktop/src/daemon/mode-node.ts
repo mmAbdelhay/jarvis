@@ -23,7 +23,7 @@ import { nodeControlDeps } from "./control/deps.js";
 import { runDirectoryFor } from "./control/endpoint.js";
 import { daemonAnswers } from "./control/liveness.js";
 import { daemonLogPath } from "./log-file.js";
-import type { DaemonModeDeps } from "./mode.js";
+import { type DaemonModeDeps, isTranslocated } from "./mode.js";
 import {
   type CommandResult,
   createServiceManager,
@@ -170,6 +170,7 @@ export function nodeDaemonModeDeps(options: NodeModeOptions): NodeModeDeps {
     // launchd's RunAtLoad and systemd's enable --now start it; Windows'
     // Run value runs only at the next login.
     installStarts: platform !== "win32",
+    translocated: isTranslocated(platform, options.execPath),
     connect: (timeoutMs) =>
       connectSocketCoreClient({
         connect: control,

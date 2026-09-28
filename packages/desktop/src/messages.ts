@@ -620,6 +620,10 @@ export const MESSAGES = {
     language === "ar"
       ? "لا يعمل جارفيس في الخلفية الآن."
       : "Jarvis isn't running in the background right now.",
+  daemonMoveToApplications: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يعمل جارفيس من نسخة مؤقتة وضعها macOS. انقل جارفيس إلى مجلد التطبيقات ثم افتحه من هناك، لتبقى الخدمة في الخلفية مرتبطة بمكان ثابت."
+      : "Jarvis is running from a temporary copy macOS made. Move Jarvis to the Applications folder and open it from there, so the background service points at a fixed place.",
   daemonNotService: (language: "ar" | "en"): string =>
     language === "ar"
       ? "لم تبدأ خدمة الخلفية هذه النسخة من jarvisd، فلا يستطيع جارفيس إعادة تشغيلها. أعد تشغيلها حيث تعمل."

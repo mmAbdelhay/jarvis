@@ -6,6 +6,7 @@ import {
   daemonSettingWriter,
   type DaemonModeDeps,
   IN_APP_FLAG,
+  isTranslocated,
   relaunchArgs,
   SOCKET_WAIT_MS,
   STARTED_STOP_WAIT_MS,
@@ -54,6 +55,8 @@ type Options = {
   routeWrites?: boolean;
   /** The installed service names another binary (a moved app). */
   stale?: boolean | Error;
+  /** The app runs from macOS App Translocation's temporary copy. */
+  translocated?: boolean;
 };
 
 function harness(options: Options = {}) {
@@ -90,6 +93,7 @@ function harness(options: Options = {}) {
       },
     },
     installStarts: options.installStarts ?? true,
+    translocated: options.translocated ?? false,
     async connect(timeoutMs) {
       events.push(`connect(${timeoutMs})`);
       const next = connects.shift() ?? new Error("no daemon");
@@ -384,6 +388,25 @@ describe("daemon mode: a moved app's stale service (fix wave)", () => {
     const h = harness({ enabled: true, stale: true });
     expect((await h.mode.launch({ inAppThisSession: false })).kind).toBe("daemon");
     expect(noLogs(h.events)).toEqual(["install", "connect(0)"]);
+  });
+
+  // Re-review N1: a translocated path changes from launch to launch, so a
+  // heal would restart the daemon every time and point it at a path that
+  // vanishes. It is skipped, and Settings asks for a move to Applications.
+  it("never heals from an App Translocation copy, and says to move the app", async () => {
+    const h = harness({ enabled: true, stale: true, translocated: true });
+    expect((await h.mode.launch({ inAppThisSession: false })).kind).toBe("daemon");
+    expect(noLogs(h.events)).toEqual(["connect(0)"]);
+    expect((await h.mode.status()).translocated).toBe(true);
+    expect((await harness({}).mode.status()).translocated).toBeUndefined();
+  });
+
+  it("recognises App Translocation paths on macOS only", () => {
+    const translocated =
+      "/private/var/folders/xy/T/AppTranslocation/0A1B/d/Jarvis.app/Contents/MacOS/Jarvis";
+    expect(isTranslocated("darwin", translocated)).toBe(true);
+    expect(isTranslocated("darwin", "/Applications/Jarvis.app/Contents/MacOS/Jarvis")).toBe(false);
+    expect(isTranslocated("linux", translocated)).toBe(false);
   });
 
   it("leaves a current service alone, never checks when the setting is off, and goes on if the check fails", async () => {

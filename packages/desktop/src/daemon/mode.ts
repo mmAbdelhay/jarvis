@@ -70,6 +70,10 @@ export type DaemonStatus = {
    *  session only". */
   inApp: boolean;
   state: DaemonState;
+  /** The app runs from macOS App Translocation's temporary copy: Settings
+   *  asks to move it to Applications, and the service is never healed
+   *  from it (re-review N1). */
+  translocated?: true;
 };
 
 /** What this machine needs of the socket CoreClient. */
@@ -88,6 +92,8 @@ export type DaemonModeDeps<L extends DaemonLink> = {
   /** Whether install() also starts the service: launchd's RunAtLoad and
    *  systemd's enable --now do; Windows' Run value only runs at login. */
   installStarts: boolean;
+  /** This app runs from an App Translocation copy (isTranslocated). */
+  translocated: boolean;
   /** A connected socket CoreClient, trying for at most `timeoutMs` (0: one
    *  attempt). */
   connect(timeoutMs: number): Promise<L>;
@@ -405,6 +411,9 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
   /** A moved app (or macOS App Translocation) leaves the service naming a
    *  binary that is gone or another build: install it again from here. */
   async function healService(): Promise<void> {
+    // A translocated path changes from launch to launch: healing from it
+    // would restart the daemon every time, onto a path that vanishes.
+    if (deps.translocated) return;
     try {
       if (!(await deps.service.isStale())) return;
       deps.log("the installed background service names another copy of Jarvis; reinstalling it");
@@ -480,7 +489,11 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
       }),
 
     async status() {
-      const base = { enabled, inApp: link === undefined };
+      const base = {
+        enabled,
+        inApp: link === undefined,
+        ...(deps.translocated ? { translocated: true as const } : {}),
+      };
       if (busy) return { ...base, state: { kind: "starting" } };
       if (link !== undefined) {
         const connection = link.connection();
@@ -541,6 +554,12 @@ export function daemonSettingWriter(
     }
     return file(enabled);
   };
+}
+
+/** macOS runs an app opened from Downloads or a disk image, still
+ *  quarantined, from a random read-only copy under …/AppTranslocation/. */
+export function isTranslocated(platform: NodeJS.Platform, execPath: string): boolean {
+  return platform === "darwin" && execPath.includes("/AppTranslocation/");
 }
 
 /** The relaunch flag for "run inside the app this session": the setting
