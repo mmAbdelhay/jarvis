@@ -8,8 +8,8 @@ plain to watch it play in real time. It uses the screenshots in `docs/media/`
 and the app icon, so keep it where it is.
 
 Some figures on screen are illustrative, not measured: the claude capacity, the
-reset countdowns, the session total and both charts, and the files and commit
-in the Changes scene.
+reset countdowns, the session total and both charts, the plan and its comments
+in the plan-panel scene, and the files and commit in the Changes scene.
 
 To re-render (needs Playwright, Chromium, ffmpeg, and numpy for the audio):
 
