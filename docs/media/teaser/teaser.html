@@ -85,6 +85,117 @@
 <div id="bg"></div>
 <div id="grid"></div>
 
+<!-- ============ I: intro hook ============ -->
+<div class="scene" id="sI">
+  <div id="sIcards" class="abs" style="left:0;top:0;width:1080px;height:1920px"></div>
+  <div class="headline" style="top:780px;z-index:20;text-shadow:0 0 30px #060a0f,0 0 60px #060a0f,0 4px 20px #000">
+    <div class="line"><span id="sIh1">Too many windows.</span></div>
+    <div class="line"><span id="sIh2" class="accent">One workspace.</span></div>
+  </div>
+  <div id="sIcore" class="abs" style="left:540px;top:960px;width:0;height:0;border-radius:50%;box-shadow:0 0 120px 60px rgba(69,200,220,.9)"></div>
+</div>
+
+<!-- ============ Ar: bilingual ============ -->
+<div class="scene" id="sAr">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sArh1">Arabic or English.</span></div>
+    <div class="line"><span id="sArh2" class="accent">Both, all the way.</span></div>
+  </div>
+  <div class="window" id="sArwin" style="left:90px;top:500px;width:900px;height:900px">
+    <div class="bar" style="justify-content:space-between"><span style="display:flex;gap:12px"><i></i><i></i><i></i></span>
+      <span id="sArtog" class="mono" style="font-size:22px;padding:6px 14px;border:2px solid #2b3a4a;border-radius:8px"></span></div>
+    <div id="sArbody" class="abs" style="left:0;right:0;top:46px;bottom:0;padding:36px 40px"></div>
+  </div>
+  <div class="sub" id="sArsub" style="top:1480px">The interface mirrors for Arabic,<br>and the brain understands both.</div>
+</div>
+
+<!-- ============ T: terminal ============ -->
+<div class="scene" id="sT">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sTh1">A terminal</span></div>
+    <div class="line"><span id="sTh2" class="accent">made of blocks.</span></div>
+  </div>
+  <div class="window" id="sTwin" style="left:40px;top:500px;width:1000px;height:1040px">
+    <div class="bar"><i></i><i></i><i></i><b>jarvis — Terminal</b>
+      <span id="sTfilter" class="mono" style="margin-left:auto;font-size:20px;padding:4px 12px;border-radius:8px;border:2px solid #2b3a4a;color:var(--muted)">failed only</span></div>
+    <div id="sTblocks" class="abs" style="left:0;right:0;top:46px;height:700px"></div>
+    <div class="abs" style="left:30px;right:30px;bottom:110px;display:flex;gap:12px" id="sTchips"></div>
+    <div id="sTprompt" class="abs mono" style="left:30px;right:30px;bottom:30px;height:64px;border-radius:12px;border:2px solid #23313f;background:#0d131b;padding:14px 18px;font-size:26px"></div>
+    <div id="sTpal" class="abs" style="left:110px;right:110px;top:150px;border-radius:18px;background:#111a24;border:2px solid #2e4152;box-shadow:0 30px 80px rgba(0,0,0,.7);padding:18px">
+      <div id="sTpalIn" class="mono" style="font-size:28px;padding:12px 16px;border-radius:10px;background:#0b1118;border:2px solid #45c8dc"></div>
+      <div id="sTpalList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="sub" id="sTsub" style="top:1610px">Re-run fills the line —<br>you press Enter, always.</div>
+</div>
+
+<!-- ============ Q: prayer times ============ -->
+<div class="scene" id="sQ">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sQh1">It even knows</span></div>
+    <div class="line"><span id="sQh2" class="accent">when to pause.</span></div>
+  </div>
+  <div id="sQpill" class="abs" style="left:150px;width:780px;top:520px;height:120px;border-radius:60px;background:#0d131b;border:2px solid #22303d;display:flex;align-items:center;justify-content:center;gap:24px">
+    <svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#18232e" stroke-width="5"/><circle id="sQspin" cx="28" cy="28" r="22" fill="none" stroke="#5aa2ff" stroke-width="5" stroke-linecap="round" stroke-dasharray="40 200" transform="rotate(0 28 28)"/></svg>
+    <span id="sQtxt" class="mono" style="font-size:44px;font-weight:700;color:#5aa2ff"></span>
+  </div>
+  <div id="sQtoast" class="abs" style="left:110px;right:110px;top:690px;border-radius:22px;background:#151f2b;border:2px solid #2e4152;padding:24px 30px;display:flex;gap:22px;align-items:center;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+    <img src="../../../packages/desktop/assets/icon.svg" style="width:70px;height:70px">
+    <div><div style="font:700 32px Inter">Maghrib in 10 minutes</div><div class="mono" style="font-size:22px;color:var(--muted);margin-top:6px">Jarvis · prayer times</div></div>
+  </div>
+  <svg id="sQsvg" class="abs" style="left:0;top:0" width="1080" height="1920"></svg>
+  <div class="sub" id="sQsub" style="top:1660px">Prayer times in the top bar,<br>with a reminder before each one.</div>
+</div>
+
+<!-- ============ J: daemon ============ -->
+<div class="scene" id="sJ">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sJh1">Quit the app.</span></div>
+    <div class="line"><span id="sJh2" class="accent">The work keeps going.</span></div>
+  </div>
+  <div class="window" id="sJapp" style="left:90px;top:520px;width:900px;height:570px">
+    <div class="bar"><i></i><i></i><i></i><b>JARVIS</b></div>
+    <div class="view"><img src="../dashboard.png" style="width:100%;height:100%;object-fit:cover;object-position:50% 0;position:absolute"></div>
+  </div>
+  <div class="key" id="sJkey" style="left:390px;top:1150px;width:300px;height:130px;font-size:52px">⌘ Q</div>
+  <div class="window" id="sJd" style="left:40px;top:520px;width:1000px;height:820px">
+    <div class="bar"><i></i><i></i><i></i><b>~ — zsh</b></div>
+    <div id="sJlines" class="abs mono" style="left:36px;right:36px;top:80px;font-size:29px;line-height:1.7"></div>
+  </div>
+  <div class="chip" id="sJphone" style="left:50%;top:1400px"><span class="dot"></span>phone · still connected</div>
+  <div class="sub" id="sJsub" style="top:1560px">Terminals, agent runs and remote access<br>live in <span class="mono" style="color:#fff">jarvisd</span>, a background daemon.</div>
+</div>
+
+<!-- ============ Set: setup ============ -->
+<div class="scene" id="sSet">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sSeth1">Nothing to</span></div>
+    <div class="line"><span id="sSeth2" class="accent">set up first.</span></div>
+  </div>
+  <div class="window" id="sSetwin" style="left:40px;top:500px;width:1000px;height:760px">
+    <div class="bar"><i></i><i></i><i></i><b>SETUP — tools Jarvis can use</b></div>
+    <div id="sSetrows" class="abs" style="left:34px;right:34px;top:70px"></div>
+    <div id="sSetbtn" class="abs" style="right:34px;bottom:30px;padding:16px 34px;border-radius:14px;background:#45c8dc;color:#04161a;font:700 30px Inter">Install 2</div>
+    <div class="abs mono" style="left:34px;bottom:44px;font-size:22px;color:var(--muted)">nothing installs until you press it</div>
+  </div>
+  <div class="window" id="sSetyaml" style="left:40px;top:1300px;width:1000px;height:330px">
+    <div class="bar"><i></i><i></i><i></i><b>~/.config/jarvis/jarvis.yaml</b></div>
+    <pre id="sSetcode" class="abs mono" style="left:34px;top:70px;font-size:28px;line-height:1.5;color:#cfe9ef"></pre>
+  </div>
+  <div class="sub" id="sSetsub" style="top:1680px">It writes its own config on first run,<br>and installs only what you tick.</div>
+</div>
+
+<!-- ============ Plat: platforms ============ -->
+<div class="scene" id="sPlat">
+  <div class="headline" style="top:180px">
+    <div class="line"><span id="sPlath1">Runs where</span></div>
+    <div class="line"><span id="sPlath2" class="accent">you work.</span></div>
+  </div>
+  <div id="sPlatgrid" class="abs" style="left:40px;top:500px;width:1000px;height:760px"></div>
+  <div class="abs mono" id="sPlatcmd" style="left:40px;right:40px;top:1320px;font-size:28px;padding:22px 26px;border-radius:16px;background:#0d131b;border:2px solid #22303d"></div>
+  <div class="sub" id="sPlatsub" style="top:1480px">Plus the browser client and tablets.<br>Free and open source, MIT.</div>
+</div>
+
 <!-- ============ S1: boot ============ -->
 <div class="scene" id="s1">
   <svg class="abs" width="1080" height="1920" style="left:0;top:0">
@@ -326,7 +437,7 @@
 <div id="fade"></div>
 
 <script>
-const DURATION = 60;
+
 const $ = id => document.getElementById(id);
 const cl = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const prog = (t, a, b) => cl((t - a) / (b - a));
@@ -337,11 +448,16 @@ const back = x => { const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c *
 const lerp = (a, b, x) => a + (b - a) * x;
 
 // Scene windows: [start, end]
-const S = {
-  s1: [0, 3.4], s2: [3.1, 8.0], s3: [7.7, 12.7], sP: [12.4, 18.0], sA: [17.7, 22.5], sB: [22.2, 27.0],
-  sC: [26.7, 31.4], s4: [31.1, 36.0], s5: [35.7, 41.6], sD: [41.3, 47.2], s6: [46.9, 51.3],
-  sE: [51.0, 55.9], s7: [55.6, 60.5] };
+// Scene order and lengths; each scene overlaps the next by 0.3 s.
+const ORDER = [
+  ['sI', 5.0], ['s1', 4.0], ['s2', 6.0], ['s3', 6.0], ['sAr', 6.0], ['sP', 6.6], ['sT', 8.0],
+  ['s5', 8.0], ['sA', 6.0], ['sB', 6.0], ['s4', 6.0], ['sC', 6.0], ['sD', 6.5], ['sQ', 6.0],
+  ['sJ', 6.5], ['s6', 7.5], ['sE', 6.0], ['sSet', 6.5], ['sPlat', 5.5], ['s7', 6.5],
+];
+const S = {};
+{ let t0 = 0; for (const [id, d] of ORDER) { S[id] = [t0, t0 + d]; t0 += d - .3; } }
 const FADE = .4;
+const DURATION = Math.round((S.s7[1] - .5) * 10) / 10;
 
 function scene(id, t) {
   const [a, b] = S[id], el = $(id);
@@ -393,6 +509,7 @@ const TABS = [
   { name: 'API', img: 'workspace-api.png', desc: 'collections, environments, scripts' },
   { name: 'Cluster', img: 'workspace-cluster.png', desc: 'your cluster, browsable' },
   { name: 'Docker', img: 'workspace-docker.png', desc: 'containers, one click away' },
+  { name: 'Browser', img: 'workspace-browser.png', desc: 'docs and dashboards, logged in' },
 ];
 $('s5tabs').innerHTML = TABS.map((x, i) => `<div class="tab" id="tb${i}">${x.name}</div>`).join('');
 $('s5stack').innerHTML = TABS.map((x, i) => `
@@ -409,7 +526,7 @@ function render(t) {
 
   // global flash on scene cuts (subtle)
   let fl = 0;
-  for (const k of Object.keys(S).filter(k => k !== 's1')) {
+  for (const k of Object.keys(S).filter(k => S[k][0] > 0)) {
     const d = t - S[k][0] - .15;
     if (d > -.15 && d < .5) fl = Math.max(fl, Math.exp(-Math.abs(d) * 9) * .06);
   }
@@ -555,7 +672,7 @@ function render(t) {
   // ===== S5 =====
   if ((L = scene('s5', t)) !== null) {
     line($('s5h1'), L, .15); line($('s5h2'), L, .35);
-    const STEP = .8, T0 = .55;
+    const STEP = 1.0, T0 = .55;
     const idx = cl(Math.floor((L - T0) / STEP), 0, TABS.length - 1);
     TABS.forEach((tab, i) => {
       const tb = $('tb' + i);
@@ -593,9 +710,13 @@ function render(t) {
     const ph = $('s6phone');
     ph.style.opacity = px;
     ph.style.transform = `perspective(1600px) translateY(${(1 - px) * 300}px) rotateY(${lerp(-18, 0, px) + Math.sin(L * 1.2) * 3}deg) rotateX(${(1 - px) * 10}deg)`;
-    const sw = eio(prog(L, 1.9, 2.4));
-    $('s6a').style.opacity = 1 - sw; $('s6b').style.opacity = sw;
-    $('s6b').style.transform = `translateX(${(1 - sw) * 60}px)`;
+    PHONES.forEach((_, i) => {
+      const at = i ? .3 + 1.6 * i : -1, nx = .3 + 1.6 * (i + 1);
+      const inn = i ? eio(prog(L, at, at + .45)) : 1, out = i < PHONES.length - 1 ? eio(prog(L, nx, nx + .45)) : 0;
+      const el = $('ph' + i);
+      el.style.opacity = inn * (1 - out);
+      el.style.transform = `translateX(${(1 - inn) * 120 - out * 120}px)`;
+    });
     ['s6c0', 's6c1', 's6c2'].forEach((id, i) => {
       pop($(id), L, .9 + i * .25, .5, `translateY(${Math.sin(L * 1.5 + i) * 8}px)`);
       $(id).style.zIndex = 5;
@@ -865,8 +986,320 @@ function renderPlan(t) {
   fadeUp($('sPsub'), L, 1.2, .5);
 }
 
+// ======================= scenes added for the long cut =======================
+// ---- I setup ----
+const ICARDS = ['terminal', 'terminal', 'terminal', 'browser', 'db client', 'api client', 'git gui',
+  'k8s dashboard', 'docker', 'notes', 'terminal', 'chat'];
+$('sIcards').innerHTML = ICARDS.map((n, i) => `
+  <div id="ic${i}" class="window" style="width:300px;height:180px;left:0;top:0;border-radius:16px">
+    <div class="bar" style="height:36px"><i></i><i></i><i></i></div>
+    <div class="mono" style="position:absolute;left:20px;top:64px;font-size:28px;color:#cfd8e2">${n}</div>
+    <div style="position:absolute;left:20px;right:20px;top:112px;height:10px;border-radius:5px;background:#18232e"></div>
+    <div style="position:absolute;left:20px;width:${80 + hash(i) * 140}px;top:136px;height:10px;border-radius:5px;background:#18232e"></div>
+  </div>`).join('');
+const ICPOS = ICARDS.map((_, i) => ({
+  x: 20 + hash(i * 3 + 1) * 760, y: 120 + ((i * 0.618) % 1) * 1550, r: (hash(i * 7) - .5) * 24,
+}));
+
+// ---- Ar setup ----
+const AR_EN = { head: 'CONVERSATION', tog: 'AR · <b style="color:#45c8dc">EN</b>', dir: 'ltr', font: 'Inter',
+  msgs: [['in', 'Good evening sir, how can I help you today?'], ['in', '4 agents ready.'], ['out', 'Open the acme store and run the tests.'], ['in', 'Opened acme · claude is running the tests.']],
+  input: 'Type, or press ⌥Space to talk…' };
+const AR_AR = { head: 'المحادثة', tog: '<b style="color:#45c8dc">AR</b> · EN', dir: 'rtl', font: "'IBM Plex Sans Arabic'",
+  msgs: [['in', 'مساء الخير سيدي، كيف أساعدك اليوم؟'], ['in', '٤ وكلاء جاهزون.'], ['out', 'افتح متجر أكمي وشغّل الاختبارات.'], ['in', 'فُتح أكمي · Claude يشغّل الاختبارات.']],
+  input: 'اكتب، أو اضغط ⌥Space للتحدث…' };
+function arHTML(d) {
+  return `<div style="direction:${d.dir};font-family:${d.font};height:100%;position:relative">
+    <div class="mono" style="font-size:24px;letter-spacing:4px;color:var(--muted);font-family:${d.dir === 'rtl' ? d.font : "'JetBrains Mono'"};letter-spacing:${d.dir === 'rtl' ? 0 : 4}px">${d.head}</div>
+    ${d.msgs.map((m, i) => `<div id="arm${i}" style="margin-top:26px;display:flex;justify-content:${m[0] === 'in' ? 'flex-start' : 'flex-end'}">
+      <span style="max-width:640px;padding:22px 28px;border-radius:22px;font-size:${d.dir === 'rtl' ? 36 : 32}px;line-height:1.4;
+        background:${m[0] === 'in' ? '#162130' : 'rgba(90,162,255,.22)'};border:2px solid ${m[0] === 'in' ? '#23313f' : 'rgba(90,162,255,.5)'}">${m[1]}</span></div>`).join('')}
+    <div style="position:absolute;left:0;right:0;bottom:30px;display:flex;gap:16px;align-items:center">
+      <div style="flex:1;padding:20px 24px;border-radius:14px;border:2px solid #23313f;background:#0d131b;color:var(--muted);font-size:${d.dir === 'rtl' ? 30 : 27}px">${d.input}</div>
+      <div style="width:72px;height:72px;border-radius:16px;background:#5aa2ff"></div></div>
+  </div>`;
+}
+
+// ---- T setup ----
+const TBLOCKS = [
+  { cmd: 'git status --short --branch', out: ['<span style="color:#3ddc84">## master...origin/master</span>'], ok: true, dur: '0.1s', h: 150 },
+  { cmd: 'pnpm test', out: ['<span style="color:#ff6b6b">✗ voice/arabic.test.ts › folds alef variants</span>', '1 failed · 212 passed'], ok: false, dur: '4.2s', h: 200 },
+  { cmd: 'pnpm build', out: ['built 14 packages'], ok: true, dur: '12.4s', h: 150 },
+];
+$('sTblocks').innerHTML = TBLOCKS.map((b, i) => `
+  <div id="tb_${i}" class="abs" style="left:30px;right:30px;overflow:hidden;border-left:5px solid ${b.ok ? '#3ddc84' : '#ff6b6b'};padding:18px 22px;background:rgba(255,255,255,.015);border-radius:0 12px 12px 0">
+    <div style="display:flex" class="mono"><span style="font-size:28px">${b.cmd}</span>
+      <span id="tbm${i}" style="margin-left:auto;font-size:22px;color:var(--muted)">${b.ok ? '✓' : '✗'} ${b.dur} · ~/projects/jarvis</span></div>
+    <div id="tbo${i}" class="mono" style="margin-top:10px;font-size:24px;line-height:1.55;color:#9aa6b2">${b.out.join('<br>')}</div>
+  </div>`).join('');
+$('sTchips').innerHTML = ['v26.8.1', '~/projects/jarvis', '<span style="color:#45c8dc">master</span>', '± 3']
+  .map(c => `<span class="mono" style="font-size:22px;padding:6px 14px;border-radius:8px;border:2px solid #23313f;color:#b9c4cf">${c}</span>`).join('');
+const PAL = ['Re-run block', 'Copy output', 'Split pane', 'Toggle plan panel'];
+$('sTpalList').innerHTML = PAL.map((p, i) => `<div id="pl${i}" style="padding:16px 18px;border-radius:10px;font:500 28px Inter;display:flex">${p}<span class="mono" style="margin-left:auto;font-size:22px;color:var(--muted)">${['⌘⇧R', '⌘⇧C', '⌘D', ''][i]}</span></div>`).join('');
+
+// ---- Q setup ----
+const PRAYERS = [['Fajr', 4.33, '04:20'], ['Dhuhr', 11.67, '11:40'], ['Asr', 15.08, '15:05'], ['Maghrib', 17.58, '17:35'], ['Isha', 18.92, '18:55']];
+(() => {
+  const s = $('sQsvg'), cx = 540, cy = 1430, R = 430;
+  svgEl(s, 'line', { x1: 60, x2: 1020, y1: cy, y2: cy, stroke: '#22303d', 'stroke-width': 2 });
+  svgEl(s, 'path', { id: 'sQarc', d: `M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`, fill: 'none', stroke: '#2b4f5a', 'stroke-width': 4, 'stroke-dasharray': '2 10', 'stroke-linecap': 'round' });
+  svgEl(s, 'path', { id: 'sQdone', fill: 'none', stroke: '#45c8dc', 'stroke-width': 5, 'stroke-linecap': 'round' });
+  PRAYERS.forEach(([n, h, lbl], i) => {
+    const a = Math.PI * (1 - (h - 4) / 16), x = cx + Math.cos(a) * R, y = cy - Math.sin(a) * R;
+    const g = svgEl(s, 'g', { id: 'pq' + i });
+    svgEl(g, 'circle', { cx: x, cy: y, r: 13, fill: '#060a0f', stroke: '#45c8dc', 'stroke-width': 4, id: 'pqc' + i });
+    const lx = x + (x < cx ? -24 : 24) * (Math.abs(x - cx) > 60 ? 1 : 0), ly = Math.abs(x - cx) > 60 ? y - 34 : y - 70;
+    const anchor = Math.abs(x - cx) < 60 ? 'middle' : x < cx ? 'end' : 'start';
+    const t1 = svgEl(g, 'text', { x: lx, y: ly, fill: '#e8eef4', 'font-size': 30, 'font-family': 'Inter', 'font-weight': 700, 'text-anchor': anchor }); t1.textContent = n;
+    const t2 = svgEl(g, 'text', { x: lx, y: ly + 30, fill: '#8a97a6', 'font-size': 22, 'font-family': 'JetBrains Mono', 'text-anchor': anchor }); t2.textContent = lbl;
+  });
+  svgEl(s, 'circle', { id: 'sQsun', r: 22, fill: '#f5b84a', style: 'filter:drop-shadow(0 0 18px #f5b84a)' });
+  window.__q = { cx, cy, R };
+})();
+
+// ---- J setup ----
+const JL = [
+  ['$ jarvisd status', '#e8eef4'],
+  ['● running · login item', '#3ddc84'],
+  ['  bridge     on · 1 paired device', '#9aa6b2'],
+  ['  sessions   3 running', '#9aa6b2'],
+  ['', ''],
+];
+const JS = [['claude', 'acme', 754], ['codex', 'web', 2210], ['copilot', 'jarvis', 391]];
+
+// ---- Set setup ----
+const TOOLS = [
+  ['claude', 'the agent', 'found'], ['code-server', 'Editor tab', 'install'], ['ffmpeg', 'voice', 'found'],
+  ['kubectl', 'Cluster tab', 'install'], ['docker', 'Docker tab', 'root'],
+];
+$('sSetrows').innerHTML = TOOLS.map(([n, w, st], i) => `
+  <div id="sr${i}" style="display:flex;align-items:center;gap:20px;height:104px;border-bottom:2px solid #141d27">
+    <span id="sc${i}" style="width:40px;height:40px;border-radius:10px;border:2px solid #2b3a4a;display:flex;align-items:center;justify-content:center;font:700 26px Inter;color:#04161a"></span>
+    <div style="flex:1"><div class="mono" style="font-size:30px">${n}</div><div style="font:400 24px Inter;color:var(--muted)">unlocks ${w}</div></div>
+    <div id="ss${i}" style="width:300px;text-align:right" class="mono"></div>
+  </div>`).join('');
+const YAML = ['agents:', '  claude:', '    command: claude', 'projects:', '  acme: ~/projects/acme'];
+
+// ---- Plat setup ----
+const PLATS = [
+  ['macOS', '.dmg', 'Apple Silicon'], ['Linux', '.AppImage', 'x64 · nothing to install'],
+  ['Windows', '.zip', 'x64 · no installer'], ['Android', '.apk', 'pairs with the desktop'],
+];
+$('sPlatgrid').innerHTML = PLATS.map(([n, f, d], i) => `
+  <div id="pf${i}" style="position:absolute;left:${(i % 2) * 510}px;top:${Math.floor(i / 2) * 390}px;width:490px;height:360px;border-radius:26px;background:rgba(13,19,27,.95);border:2px solid #1d2935;padding:40px">
+    <div style="font:800 64px Inter;letter-spacing:-2px">${n}</div>
+    <div class="mono" style="font-size:40px;color:var(--accent);margin-top:16px">${f}</div>
+    <div style="font:400 28px Inter;color:var(--muted);margin-top:22px">${d}</div>
+  </div>`).join('');
+
+// ---- phone carousel (replaces the two-image swap) ----
+const PHONES = ['phone-dashboard.png', 'phone-sessions.png', 'phone-terminal.png', 'phone-voice.png'];
+(() => {
+  const ph = $('s6phone');
+  ph.innerHTML = PHONES.map((p, i) => `<img id="ph${i}" src="../${p}" style="width:512px;height:1098px">`).join('');
+})();
+
+function renderLong(t) {
+  let L;
+  // ===== I =====
+  if ((L = scene('sI', t)) !== null) {
+    const gather = eio(prog(L, 2.7, 3.7));
+    ICARDS.forEach((_, i) => {
+      const el = $('ic' + i), p = ICPOS[i];
+      const ap = prog(L, .05 + i * .12, .35 + i * .12);
+      const jx = Math.sin(L * 2 + i) * 6, jy = Math.cos(L * 1.7 + i * 2) * 6;
+      const x = lerp(p.x + jx, 390, gather), y = lerp(p.y + jy, 870, gather);
+      el.style.opacity = cl(ap * 2) * (1 - prog(L, 3.4, 3.7)) * lerp(.9, .45, prog(L, .8, 1.3));
+      el.style.transform = `translate(${x}px, ${y}px) rotate(${lerp(p.r, 0, gather)}deg) scale(${(ap ? lerp(.7, 1, back(ap)) : .7) * lerp(1, .05, gather)})`;
+    });
+    line($('sIh1'), L, .9); line($('sIh2'), L, 1.9);
+    const hOut = prog(L, 2.7, 3.2);
+    $('sIh1').style.opacity *= 1 - hOut; $('sIh2').style.opacity *= 1 - hOut;
+    const c = prog(L, 3.5, 3.8) * (1 - prog(L, 3.9, 4.6));
+    $('sIcore').style.opacity = c;
+  }
+
+  // ===== Ar =====
+  if ((L = scene('sAr', t)) !== null) {
+    line($('sArh1'), L, .15); line($('sArh2'), L, .35);
+    fadeUp($('sArwin'), L, .3, .6, 60);
+    const flip = prog(L, 3.0, 3.6);
+    const ar = flip >= .5;
+    const body = $('sArbody');
+    const want = ar ? 'ar' : 'en';
+    if (body.dataset.lang !== want) { body.innerHTML = arHTML(ar ? AR_AR : AR_EN); body.dataset.lang = want; }
+    $('sArtog').innerHTML = (ar ? AR_AR : AR_EN).tog;
+    const ang = flip < .5 ? eio(flip * 2) * 90 : (1 - eio((flip - .5) * 2)) * -90;
+    $('sArwin').style.transform += ` perspective(2000px) rotateY(${ang}deg)`;
+    for (let i = 0; i < 4; i++) {
+      const m = $('arm' + i);
+      if (!m) continue;
+      if (ar) { m.style.opacity = 1; m.style.transform = 'none'; }
+      else fadeUp(m, L, .8 + i * .45, .4, 20);
+    }
+    fadeUp($('sArsub'), L, 1.2, .5);
+  }
+
+  // ===== T =====
+  if ((L = scene('sT', t)) !== null) {
+    line($('sTh1'), L, .15); line($('sTh2'), L, .35);
+    fadeUp($('sTwin'), L, .3, .6, 60);
+    const filt = eio(prog(L, 2.0, 2.4)) * (1 - eio(prog(L, 6.4, 6.8)));
+    const fOn = L > 2.0 && L < 6.6;
+    $('sTfilter').style.color = fOn ? '#ff6b6b' : ''; $('sTfilter').style.borderColor = fOn ? '#ff6b6b' : '';
+    let y = 24;
+    TBLOCKS.forEach((b, i) => {
+      const el = $('tb_' + i);
+      const app = eo(prog(L, .7 + i * .3, 1.1 + i * .3));
+      const vis = b.ok ? 1 - filt : 1;
+      el.style.top = y + 'px';
+      el.style.height = b.h * vis + 'px';
+      el.style.opacity = app * vis;
+      el.style.transform = `translateY(${(1 - app) * 20}px)`;
+      y += (b.h + 18) * vis * (app > 0 ? 1 : 0) + (app > 0 ? 0 : 0);
+    });
+    // palette
+    const pal = prog(L, 2.7, 2.95) * (1 - prog(L, 3.9, 4.1));
+    $('sTpal').style.opacity = pal;
+    $('sTpal').style.transform = `scale(${lerp(.95, 1, pal)})`;
+    const q = 're-run';
+    $('sTpalIn').textContent = '› ' + q.slice(0, Math.floor(cl((L - 2.95) / .5) * q.length));
+    PAL.forEach((_, i) => {
+      $('pl' + i).style.background = i === 0 && L > 3.5 ? 'rgba(69,200,220,.16)' : 'transparent';
+      $('pl' + i).style.opacity = i === 0 || L < 3.3 ? 1 : .35;
+    });
+    // prompt
+    const fillTxt = 'pnpm test';
+    const filled = L > 4.0;
+    const enter = L > 4.9;
+    $('sTprompt').innerHTML = filled && !enter
+      ? `${fillTxt}<span style="opacity:${Math.floor(L * 3) % 2}">▋</span><span style="float:right;font-size:20px;color:#f5b84a">press Enter to run</span>`
+      : `<span style="color:#5f6c7a">Type a command · ⌘P for actions</span>`;
+    $('sTprompt').style.borderColor = filled && !enter ? '#45c8dc' : L > 4.9 && L < 5.1 ? '#3ddc84' : '';
+    // re-run result on the failed block
+    const running = L > 4.9 && L < 6.0, fixed = L >= 6.0;
+    const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(L * 12) % 10];
+    $('tbm1').innerHTML = running ? `<span style="color:#45c8dc">${spin} running…</span>` : fixed ? '<span style="color:#3ddc84">✓ 4.0s</span> · ~/projects/jarvis' : '✗ 4.2s · ~/projects/jarvis';
+    $('tbo1').innerHTML = fixed ? '<span style="color:#3ddc84">213 passed</span>' : TBLOCKS[1].out.join('<br>');
+    $('tb_1').style.borderLeftColor = fixed ? '#3ddc84' : running ? '#45c8dc' : '#ff6b6b';
+    fadeUp($('sTchips'), L, 1.4, .4, 10);
+    fadeUp($('sTsub'), L, 4.0, .5);
+  }
+
+  // ===== Q =====
+  if ((L = scene('sQ', t)) !== null) {
+    line($('sQh1'), L, .15); line($('sQh2'), L, .35);
+    pop($('sQpill'), L, .4, .5);
+    $('sQspin').setAttribute('transform', `rotate(${L * 240} 28 28)`);
+    const secs = Math.max(600, Math.round(606 - L * 2.6));
+    $('sQtxt').textContent = `Maghrib in ${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
+    const toast = eo5(prog(L, 2.9, 3.3)) * (1 - prog(L, 5.2, 5.5));
+    $('sQtoast').style.opacity = toast;
+    $('sQtoast').style.transform = `translateY(${(1 - toast) * -60}px)`;
+    const { cx, cy, R } = window.__q;
+    const arc = $('sQarc'), alen = Math.PI * R;
+    const draw = eio(prog(L, .6, 1.6));
+    arc.style.strokeDashoffset = 0; arc.style.opacity = draw;
+    const nowH = lerp(15.3, 17.42, eio(prog(L, 1.4, 4.0)));
+    const fr = cl((nowH - 4) / 16) * draw;
+    const a = Math.PI * (1 - fr);
+    $('sQsun').setAttribute('cx', cx + Math.cos(a) * R); $('sQsun').setAttribute('cy', cy - Math.sin(a) * R);
+    $('sQsun').style.opacity = draw;
+    $('sQdone').setAttribute('d', `M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + Math.cos(a) * R} ${cy - Math.sin(a) * R}`);
+    $('sQdone').style.opacity = draw;
+    PRAYERS.forEach(([n, h], i) => {
+      const g = $('pq' + i);
+      g.style.opacity = prog(L, 1.0 + i * .15, 1.3 + i * .15);
+      const next = i === 3;
+      $('pqc' + i).setAttribute('fill', h < nowH ? '#45c8dc' : next && L > 2.9 ? '#f5b84a' : '#060a0f');
+      $('pqc' + i).setAttribute('stroke', next && L > 2.9 ? '#f5b84a' : '#45c8dc');
+    });
+    fadeUp($('sQsub'), L, 1.8, .5);
+  }
+
+  // ===== J =====
+  if ((L = scene('sJ', t)) !== null) {
+    line($('sJh1'), L, .15); line($('sJh2'), L, .35);
+    const app = $('sJapp');
+    const ap = eo(prog(L, .3, .8)), quit = eio(prog(L, 1.9, 2.5));
+    app.style.opacity = ap * (1 - quit);
+    app.style.transform = `translateY(${(1 - ap) * 60 + quit * 500}px) scale(${lerp(1, .15, quit)})`;
+    const k = $('sJkey');
+    const kp = prog(L, 1.0, 1.3) * (1 - prog(L, 2.3, 2.6));
+    k.style.opacity = kp;
+    const pressed = L > 1.6 && L < 1.85;
+    k.style.transform = `translateY(${pressed ? 10 : 0}px)`;
+    k.style.color = pressed ? '#45c8dc' : '';
+    k.style.boxShadow = pressed ? '0 4px 0 #070b10, 0 0 50px rgba(69,200,220,.5)' : '';
+    const dv = eo(prog(L, 2.5, 3.0));
+    $('sJd').style.opacity = dv;
+    $('sJd').style.transform = `translateY(${(1 - dv) * 40}px)`;
+    let html = '';
+    const cmd = JL[0][0], n = Math.floor(cl((L - 3.0) / .5) * cmd.length);
+    html += `<div style="color:#e8eef4">${cmd.slice(0, n)}${L < 3.6 ? '▋' : ''}</div>`;
+    for (let i = 1; i < JL.length; i++) if (L > 3.6 + i * .15) html += `<div style="color:${JL[i][1]}">${JL[i][0] || '&nbsp;'}</div>`;
+    const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+    JS.forEach(([a, p, s0], i) => {
+      if (L > 4.4 + i * .15) {
+        const s = s0 + Math.floor(L - 4.4);
+        const hh = String(Math.floor(s / 3600)).padStart(2, '0'), mm = String(Math.floor(s / 60) % 60).padStart(2, '0'), ss = String(s % 60).padStart(2, '0');
+        html += `<div><span style="color:#45c8dc">${spin[(Math.floor(L * 12) + i * 3) % 10]}</span> <span style="display:inline-block;width:150px">${a}</span><span style="display:inline-block;width:170px;color:#9aa6b2">${p}</span><span style="color:#3ddc84">${hh}:${mm}:${ss}</span></div>`;
+      }
+    });
+    $('sJlines').innerHTML = html;
+    const ph = $('sJphone');
+    const pv = prog(L, 4.9, 5.3);
+    ph.style.opacity = cl(pv * 2);
+    ph.style.transform = `translateX(-50%) scale(${pv ? lerp(.6, 1, back(pv)) : .6})`;
+    fadeUp($('sJsub'), L, 3.4, .5);
+  }
+
+  // ===== Set =====
+  if ((L = scene('sSet', t)) !== null) {
+    line($('sSeth1'), L, .15); line($('sSeth2'), L, .35);
+    fadeUp($('sSetwin'), L, .3, .6, 60);
+    let tick = 0;
+    TOOLS.forEach(([n, w, st], i) => {
+      fadeUp($('sr' + i), L, .6 + i * .1, .4, 14);
+      const box = $('sc' + i), s = $('ss' + i);
+      const ticked = st === 'install' && L > 1.5 + tick * .35;
+      const at = 2.6 + tick * .5;
+      if (st === 'install') tick++;
+      if (st === 'found') { box.textContent = ''; box.style.borderColor = '#1d2935'; s.innerHTML = '<span style="color:#3ddc84;font-size:26px">✓ found</span>'; }
+      else if (st === 'root') { s.innerHTML = '<span style="white-space:nowrap;font-size:22px;color:var(--muted);border:2px solid #2b3a4a;border-radius:8px;padding:6px 12px">needs root · copy it</span>'; }
+      else {
+        box.textContent = ticked ? '✓' : '';
+        box.style.background = ticked ? '#45c8dc' : 'transparent';
+        box.style.borderColor = ticked ? '#45c8dc' : '#2b3a4a';
+        const p = prog(L, at, at + 1.1);
+        s.innerHTML = p >= 1 ? '<span style="color:#3ddc84;font-size:26px">✓ installed</span>'
+          : p > 0 ? `<span style="display:inline-block;width:220px;height:14px;border-radius:7px;background:#18232e;overflow:hidden;vertical-align:middle"><i style="display:block;height:100%;width:${p * 100}%;background:#45c8dc"></i></span>`
+          : '<span style="color:var(--muted);font-size:24px">not found</span>';
+      }
+    });
+    const bp = L > 2.35 && L < 2.55;
+    $('sSetbtn').style.transform = `scale(${bp ? .93 : 1})`;
+    $('sSetbtn').style.opacity = L > 4.3 ? .4 : 1;
+    fadeUp($('sSetyaml'), L, 3.4, .5, 40);
+    const full = YAML.join('\n');
+    $('sSetcode').textContent = full.slice(0, Math.floor(cl((L - 3.8) / 1.4) * full.length));
+    fadeUp($('sSetsub'), L, 1.4, .5);
+  }
+
+  // ===== Plat =====
+  if ((L = scene('sPlat', t)) !== null) {
+    line($('sPlath1'), L, .15); line($('sPlath2'), L, .35);
+    PLATS.forEach((_, i) => pop($('pf' + i), L, .5 + i * .2, .55, `translateY(${Math.sin(L * 1.4 + i) * 6}px)`));
+    fadeUp($('sPlatcmd'), L, 1.8, .5, 20);
+    const cmd = '$ chmod +x Jarvis-*.AppImage && ./Jarvis-*.AppImage';
+    $('sPlatcmd').textContent = cmd.slice(0, Math.floor(cl((L - 2.1) / 1.4) * cmd.length));
+    fadeUp($('sPlatsub'), L, 2.8, .5);
+  }
+}
+
 function renderExtra(t) {
   renderPlan(t);
+  renderLong(t);
   let L;
   // ===== A: machine load =====
   if ((L = scene('sA', t)) !== null) {
@@ -1042,6 +1475,21 @@ function renderExtra(t) {
 }
 
 const _render = render;
+const CUES = [];
+{
+  const add = (id, list) => list.forEach(([dt, kind, f]) => CUES.push({ t: +(S[id][0] + dt).toFixed(3), kind, f }));
+  add('sI', [[2.8, 'swish'], [3.6, 'hit']]);
+  add('s3', [[.9, 'click'], [.95, 'chirp'], [3.3, 'click'], [3.4, 'blip', 880], [3.8, 'blip', 1318.5]]);
+  add('sAr', [[3.0, 'swish']]);
+  add('sP', [[3.05, 'click'], [3.25, 'blip', 1174.7], [3.65, 'blip', 1174.7], [4.25, 'click'], [4.35, 'blip', 880], [4.55, 'blip', 1318.5]]);
+  add('sT', [[2.7, 'click'], [3.6, 'click'], [4.9, 'click'], [6.0, 'blip', 1318.5]]);
+  add('sD', [[1.6, 'click'], [1.82, 'click'], [2.04, 'click'], [2.26, 'click'], [2.48, 'click'], [3.95, 'click'], [4.05, 'blip', 987.8], [4.25, 'blip', 1318.5]]);
+  add('sQ', [[2.9, 'blip', 659.25], [3.05, 'blip', 880]]);
+  add('sJ', [[1.6, 'click'], [2.0, 'swish'], [3.6, 'blip', 880]]);
+  add('sSet', [[1.5, 'click'], [1.85, 'click'], [2.4, 'click'], [3.7, 'blip', 1174.7], [4.2, 'blip', 1318.5]]);
+  add('s7', [[.1, 'hit']]);
+}
+window.TIMELINE = { duration: DURATION, scenes: S, cues: CUES };
 window.render = t => { _render(t); renderExtra(t); };
 window.DURATION = DURATION;
 // Live preview: ?t=12 renders a single frame; otherwise plays in real time.

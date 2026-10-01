@@ -12,6 +12,9 @@ page.on('pageerror', e => console.log('PAGEERR', e.message)); page.on('console',
 await page.goto('file://' + path.resolve('teaser.html') + '?capture=1');
 await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(i => i.decode().catch(() => {}))); });
 
+import fs from 'fs';
+fs.writeFileSync('timeline.json', JSON.stringify(await page.evaluate(() => TIMELINE), null, 1));
+
 if (mode === 'stills') {
   const ts = process.argv.slice(3).map(Number);
   for (const t of ts) {
