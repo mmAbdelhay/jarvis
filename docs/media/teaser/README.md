@@ -1,10 +1,10 @@
 # Teaser
 
-`jarvis-teaser.mp4` — a two-minute vertical (1080×1920, 30 fps) reel, 20 scenes:
+`jarvis-teaser.mp4` — a two-minute (2:05) vertical (1080×1920, 30 fps) reel, 21 scenes:
 the hook, boot, agents, voice, Arabic and English, the plan panel, the
 terminal, the Workspace tabs, machine load, provider capacity, the dashboard,
 sessions, Changes, prayer times, `jarvisd`, the phone, privacy, setup,
-platforms and the end card.
+platforms, open source and free, and the end card.
 
 It is rendered from `teaser.html`, a deterministic timeline: `render(t)` draws
 the frame at `t` seconds. `ORDER` near the top of the script sets the scenes
