@@ -65,6 +65,7 @@ import {
   type DatabaseHandlers,
   type DockerHandlers,
   type EditorHandlers,
+  type EntryKind,
   type GitHandlers,
   type GitViewResult,
   type SettingsHandlers,
@@ -953,6 +954,17 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:history": ([paneKey, limit]) => terminal.history(paneKey as string, limit as number),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
+    "terminal:createEntry": ([paneKey, parentPath, name, kind]) =>
+      terminal.createEntry(
+        paneKey as string,
+        parentPath as string,
+        name as string,
+        kind as EntryKind,
+      ),
+    "terminal:renameEntry": ([paneKey, path, newName]) =>
+      terminal.renameEntry(paneKey as string, path as string, newName as string),
+    "terminal:trashEntry": ([paneKey, path]) =>
+      terminal.trashEntry(paneKey as string, path as string),
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },

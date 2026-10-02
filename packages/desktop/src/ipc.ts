@@ -22,7 +22,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
@@ -628,6 +628,19 @@ export type RendererApi = {
    *  dialog: the renderer fires this and forgets it, exactly as it already
    *  does for the file listing. */
   openTerminalFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A new, empty file or folder named `name` inside `parentPath`, from the
+   *  file sidebar — see TerminalHandlers.createEntry. */
+  createTerminalEntry(
+    paneKey: string,
+    parentPath: string,
+    name: string,
+    kind: EntryKind,
+  ): Promise<FileOpResult>;
+  /** `path` renamed to `newName` in the same folder — see
+   *  TerminalHandlers.renameEntry. */
+  renameTerminalEntry(paneKey: string, path: string, newName: string): Promise<FileOpResult>;
+  /** `path` moved to the OS trash — see TerminalHandlers.trashEntry. */
+  trashTerminalEntry(paneKey: string, path: string): Promise<FileOpResult>;
   /** What the renderer needs to know about how terminals behave. Read once
    *  per pane; a change to jarvis.yaml takes effect on restart, like every
    *  other terminal setting. */
@@ -1791,6 +1804,56 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
 /** One immediate child of a listed directory. */
 export type DirEntry = { name: string; directory: boolean };
 
+export type EntryKind = "file" | "directory";
+
+/** Why the sidebar's create, rename or trash did nothing. `outside` covers
+ *  an unknown pane and a path that is not provably inside its project, the
+ *  same single refusal listDir gives both. */
+export type FileOpRefusal = "invalid-name" | "exists" | "outside" | "failed";
+
+export type FileOpResult = { ok: true; path: string } | { ok: false; reason: FileOpRefusal };
+
+/** A thrown fs error's `code` ("EEXIST", "ENOENT", …), or undefined. */
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = (error as { code: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** A single path segment a user typed: not empty, not `.` or `..`, no
+ *  separator of either OS, no NUL, and within the 255 bytes every common
+ *  filesystem allows a name. Leading or trailing whitespace is refused
+ *  rather than trimmed — a name that differs from what was typed would be
+ *  a file the user cannot find by the name they gave it. */
+export function isValidEntryName(name: unknown): name is string {
+  if (typeof name !== "string") return false;
+  if (name === "" || name === "." || name === "..") return false;
+  if (name !== name.trim()) return false;
+  if (/[/\\\0]/.test(name)) return false;
+  return Buffer.byteLength(name, "utf8") <= 255;
+}
+
+/**
+ * An existing entry the sidebar may rename or trash: its *parent* proven
+ * inside `root` by resolveWithin, and the entry itself kept by name rather
+ * than resolved. A symlink is renamed or trashed as the link — resolving
+ * it would act on whatever it points at, possibly outside the project.
+ * The root itself is never an entry: renaming or trashing the project's
+ * own directory from inside it is not something a sidebar offers.
+ */
+export function entryWithin(
+  root: string,
+  candidate: string,
+  realPath: (path: string) => string,
+): string | undefined {
+  if (!isString(candidate) || !isAbsolute(candidate)) return undefined;
+  const name = basename(candidate);
+  if (!isValidEntryName(name)) return undefined;
+  const parent = resolveWithin(root, dirname(candidate), realPath);
+  if (parent === undefined) return undefined;
+  return join(parent, name);
+}
+
 /**
  * The file sidebar's security boundary, and deliberately a named function
  * rather than four lines inside a handler: opening a file from that sidebar
@@ -1892,6 +1955,25 @@ export type TerminalHandlers = {
    *  `editor` integration configured, or a code-server that fails to start
    *  are all a click that opens nothing. */
   openFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A new, empty file or folder, from the file sidebar. `parentPath` goes
+   *  through the same resolveWithin boundary listDir applies, `name` must
+   *  be a single valid segment (isValidEntryName), and an existing entry
+   *  of that name is never overwritten — a file is created exclusively, so
+   *  a race with something writing the same name is refused too. Never
+   *  rejects: every failure is a `FileOpResult` the sidebar shows. */
+  createEntry(
+    paneKey: string,
+    parentPath: string,
+    name: string,
+    kind: EntryKind,
+  ): Promise<FileOpResult>;
+  /** Renames `path` within its own folder. The entry is located with
+   *  entryWithin, so a symlink is renamed as the link. Moving to another
+   *  folder is not offered: `newName` is a name, never a path. */
+  renameEntry(paneKey: string, path: string, newName: string): Promise<FileOpResult>;
+  /** Moves `path` to the OS trash — recoverable, which is why the sidebar
+   *  asks for no confirmation. Located with entryWithin like a rename. */
+  trashEntry(paneKey: string, path: string): Promise<FileOpResult>;
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
@@ -1991,6 +2073,19 @@ export type TerminalHandlerDeps = {
         readDir: (path: string) => DirEntry[];
         /** Resolves symlinks and `..`; `realpathSync` in production. */
         realPath: (path: string) => string;
+        /** The sidebar's writes. Each is optional so a listing-only
+         *  double (and an older wiring) stays valid; an absent one is a
+         *  `failed` answer, never a throw. */
+        /** Whether anything — a file, folder or dangling link — is at
+         *  `path`; `lstat`, not `stat`, so a broken link still counts. */
+        exists?: (path: string) => boolean;
+        /** A new folder; fails if one is already there. */
+        makeDir?: (path: string) => void;
+        /** A new empty file, created exclusively (`wx`). */
+        makeFile?: (path: string) => void;
+        rename?: (from: string, to: string) => void;
+        /** Into the OS trash; rejects when that cannot be done. */
+        trash?: (path: string) => Promise<void>;
       }
     | undefined;
   /** The file sidebar's route into the Editor tab — see `openFile`. Absent
@@ -2252,6 +2347,16 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     return found;
   }
 
+  /** The directory every sidebar write is bounded by: the project of the
+   *  pane `paneKey` names, resolved the way listDir resolves it. Undefined
+   *  for an untyped or unknown key, or a pane in no configured project. */
+  function sidebarRoot(paneKey: unknown): string | undefined {
+    if (!isString(paneKey)) return undefined;
+    const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+    if (paneCwd === undefined) return undefined;
+    return projectFor(paneCwd)?.dir;
+  }
+
   // The runtime probe's result, per directory — not per pane, so two panes
   // (or a pane revisited across chips() calls) sharing a directory cost at
   // most one `node -v` between them. A directory that comes back with no
@@ -2509,6 +2614,75 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // An unreadable directory is an empty folder, not an error dialog.
         return [];
       }
+    },
+
+    async createEntry(paneKey, parentPath, name, kind) {
+      const files = deps.files;
+      if (files === undefined || (kind !== "file" && kind !== "directory")) {
+        return { ok: false, reason: "failed" };
+      }
+      if (!isString(parentPath)) return { ok: false, reason: "outside" };
+      if (!isValidEntryName(name)) return { ok: false, reason: "invalid-name" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const parent = resolveWithin(root, parentPath, files.realPath);
+      if (parent === undefined) return { ok: false, reason: "outside" };
+      const target = join(parent, name);
+      const make = kind === "file" ? files.makeFile : files.makeDir;
+      if (make === undefined || files.exists === undefined) return { ok: false, reason: "failed" };
+      if (files.exists(target)) return { ok: false, reason: "exists" };
+      try {
+        make(target);
+      } catch (error) {
+        // EEXIST here is the race the exists() check above could not
+        // close: something made the same name in between.
+        return { ok: false, reason: errorCode(error) === "EEXIST" ? "exists" : "failed" };
+      }
+      return { ok: true, path: target };
+    },
+
+    async renameEntry(paneKey, path, newName) {
+      const files = deps.files;
+      if (files === undefined) return { ok: false, reason: "failed" };
+      if (!isValidEntryName(newName)) return { ok: false, reason: "invalid-name" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const source = entryWithin(root, path, files.realPath);
+      if (source === undefined || files.exists === undefined || !files.exists(source)) {
+        return { ok: false, reason: "outside" };
+      }
+      const target = join(dirname(source), newName);
+      if (target === source) return { ok: true, path: source };
+      // rename(2) replaces an existing file without a word, which is the
+      // one thing a sidebar rename must never do. A case-only rename on a
+      // case-insensitive volume (macOS, Windows) finds "itself" here, so
+      // that one is let through: the names differ, the entry does not.
+      const caseOnly = target.toLowerCase() === source.toLowerCase();
+      if (!caseOnly && files.exists(target)) return { ok: false, reason: "exists" };
+      if (files.rename === undefined) return { ok: false, reason: "failed" };
+      try {
+        files.rename(source, target);
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+      return { ok: true, path: target };
+    },
+
+    async trashEntry(paneKey, path) {
+      const files = deps.files;
+      if (files === undefined || files.trash === undefined) return { ok: false, reason: "failed" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const target = entryWithin(root, path, files.realPath);
+      if (target === undefined || files.exists === undefined || !files.exists(target)) {
+        return { ok: false, reason: "outside" };
+      }
+      try {
+        await files.trash(target);
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+      return { ok: true, path: target };
     },
 
     async openFile(paneKey, path) {

@@ -84,6 +84,9 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     terminalHistory: vi.fn(async () => []),
     listTerminalDir: vi.fn(async () => []),
     openTerminalFile: vi.fn(async () => notStubbed),
+    createTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
+    renameTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
+    trashTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
     terminalSettings: vi.fn(async () => ({
       blocks: true,
       inputEditor: true,

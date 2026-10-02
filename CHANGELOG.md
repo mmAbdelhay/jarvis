@@ -8,6 +8,14 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- The file sidebar keeps itself current: it re-reads after every command
+  and every few seconds while it is on screen, keeping open folders open
+  and leaving unchanged rows alone. Right-click for **New file**, **New
+  folder**, **Rename** and **Move to Trash** (or use the two buttons by the
+  header); names are typed in place, nothing is ever overwritten, and every
+  write is held to the project root the same way listing is.
+- The plan panel has a user guide section, under Workspace tabs → Terminal.
+
 ## [0.1.5] — 2026-09-28
 
 - Plan panel in every terminal tab: the plan Claude Code writes in plan

@@ -106,6 +106,12 @@ export const CHANNEL_POLICY = {
   "terminal:history": "remote",
   "terminal:listDir": "remote",
   "terminal:openFile": "desktop-only",
+  // The file sidebar's writes. Desktop-only until a phone has a file tree
+  // of its own to drive them from: a channel no phone screen calls is
+  // attack surface with nothing on the other side of it.
+  "terminal:createEntry": "desktop-only",
+  "terminal:renameEntry": "desktop-only",
+  "terminal:trashEntry": "desktop-only",
   "terminal:settings": "remote",
   "terminal:workflows": "remote",
   "terminal:ai": "remote",

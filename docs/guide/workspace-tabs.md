@@ -489,14 +489,30 @@ the project doesn't reopen the door. This is the feature's actual security
 boundary, not an incidental limit.
 
 It is dismissable from **⌘P → "Toggle file sidebar"** — there is no keyboard
-chord for it, only the palette entry. It does not watch the filesystem: the
-tree re-lists when the pane's directory changes, when you expand a folder,
-and on **⌘P → "Refresh file sidebar"**, and nothing else. So a file a command
-just created, deleted or renamed — a `git checkout` of a branch with
-different files — is not there until you refresh (expanded folders collapse
-when you do; a refresh is a fresh listing of the root). It cannot rename,
-delete, create or drag a file — it is a way to see and open, not a file
-manager.
+chord for it, only the palette entry.
+
+**It keeps itself current without watching the disk.** A recursive watch on
+a large repository costs more than a sidebar is worth, and behaves
+differently on every OS, so the tree re-reads instead: after every command
+(each prompt the shell draws), every few seconds while the sidebar is on
+screen, and on **⌘P → "Refresh file sidebar"**. A re-read keeps open folders
+open and leaves every row whose folder did not change exactly as it was, so
+nothing under the pointer jumps. A file an agent writes in another tab shows
+up within a few seconds; a `git checkout` shows up as soon as its prompt
+returns.
+
+**New file, New folder, Rename and Move to Trash.** Right-click a folder for
+all four, a file for the last two, or the empty space below the rows to
+create at the root; the two buttons beside the header create at the root
+too. A name is typed in place — **Enter** commits, **Escape** or clicking
+away cancels — and a rename preselects the name without its extension.
+Nothing is ever overwritten: a name that is already taken is refused, and
+says so under the tree. Move to Trash asks nothing, because it goes to the
+system trash and can be put back from there. The same boundary as listing
+applies to every one of them: the folder is checked against the project
+after symlinks are resolved, and a symlink is renamed or trashed as the
+link, never what it points to. These are desktop-only; a paired phone can
+browse but not change files from the sidebar.
 
 ### The plan panel
 

@@ -46,7 +46,9 @@ import {
   createGitHandlers,
   createSettingsHandlers,
   findEditorTab,
+  entryWithin,
   isDeclaredContainer,
+  isValidEntryName,
   resolveWithin,
   showEditorTab,
   type WiringDeps,
@@ -3138,6 +3140,226 @@ describe("terminal handlers", () => {
   // renderer and a shell can cd anywhere, so every one of these asks the
   // same question: can a string reach a directory outside the project the
   // pane belongs to?
+  describe("isValidEntryName", () => {
+    it("accepts an ordinary file or folder name", () => {
+      expect(isValidEntryName("notes.md")).toBe(true);
+      expect(isValidEntryName(".env.local")).toBe(true);
+      expect(isValidEntryName("مذكرة.txt")).toBe(true);
+    });
+
+    it("refuses anything that is not exactly one path segment", () => {
+      for (const name of ["", ".", "..", "a/b", "a\\b", "nul\0byte", " lead", "trail ", 7]) {
+        expect(isValidEntryName(name)).toBe(false);
+      }
+    });
+
+    it("refuses a name longer than 255 bytes, counting UTF-8 bytes", () => {
+      expect(isValidEntryName("a".repeat(255))).toBe(true);
+      expect(isValidEntryName("a".repeat(256))).toBe(false);
+      // 128 two-byte letters: 128 characters, 256 bytes.
+      expect(isValidEntryName("ب".repeat(128))).toBe(false);
+    });
+  });
+
+  describe.runIf(POSIX_FIXTURES)("entryWithin", () => {
+    const real = (p: string) => (p.startsWith("/proj/out") ? p.replace("/proj/out", "/etc") : p);
+
+    it("keeps the entry itself unresolved, so a link is acted on as the link", () => {
+      const linkToOutside = (p: string) => (p === "/proj/link" ? "/etc" : p);
+      expect(entryWithin("/proj", "/proj/link", linkToOutside)).toBe("/proj/link");
+    });
+
+    it("refuses an entry whose folder resolves outside the project", () => {
+      expect(entryWithin("/proj", "/proj/out/passwd", real)).toBeUndefined();
+      expect(entryWithin("/proj", "/etc/passwd", real)).toBeUndefined();
+    });
+
+    it("never treats the project root itself as an entry", () => {
+      expect(entryWithin("/proj", "/proj", real)).toBeUndefined();
+      expect(entryWithin("/proj", "/proj/..", real)).toBeUndefined();
+    });
+  });
+
+  describe.runIf(POSIX_FIXTURES)("the file sidebar's writes", () => {
+    // An in-memory disk: every path that exists, and every call made. A
+    // refusal asserts `calls` stayed empty — the boundary's promise is that
+    // nothing was touched, not merely that the answer was "no".
+    let disk: Set<string>;
+    let calls: string[];
+    beforeEach(() => {
+      disk = new Set(["/proj", "/proj/src", "/proj/a.ts", "/proj/link"]);
+      calls = [];
+    });
+
+    function files(
+      overrides: Record<string, unknown> = {},
+    ): NonNullable<TerminalHandlerDeps["files"]> {
+      return {
+        readDir: () => [],
+        realPath: (p: string) => (p === "/proj/link" ? "/etc" : p.replace(/\/$/, "")),
+        exists: (p: string) => disk.has(p),
+        makeDir: (p: string) => {
+          calls.push(`mkdir ${p}`);
+          disk.add(p);
+        },
+        makeFile: (p: string) => {
+          calls.push(`touch ${p}`);
+          disk.add(p);
+        },
+        rename: (from: string, to: string) => {
+          calls.push(`mv ${from} ${to}`);
+          disk.delete(from);
+          disk.add(to);
+        },
+        trash: async (p: string) => {
+          calls.push(`trash ${p}`);
+          disk.delete(p);
+        },
+        ...overrides,
+      };
+    }
+
+    function handlersWith(fileDeps = files()): ReturnType<typeof createTerminalHandlers> {
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+        terminalScrollback: 5000,
+        files: fileDeps,
+      });
+      handlers.open("p");
+      return handlers;
+    }
+
+    it("creates a file and a folder inside the project", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.createEntry("tab-1", "/proj/src", "new.ts", "file")).resolves.toEqual({
+        ok: true,
+        path: "/proj/src/new.ts",
+      });
+      await expect(handlers.createEntry("tab-1", "/proj", "docs", "directory")).resolves.toEqual({
+        ok: true,
+        path: "/proj/docs",
+      });
+      expect(calls).toEqual(["touch /proj/src/new.ts", "mkdir /proj/docs"]);
+    });
+
+    it("never overwrites: an existing name is refused before anything is written", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.createEntry("tab-1", "/proj", "a.ts", "file")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+      await expect(handlers.renameEntry("tab-1", "/proj/src", "a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it("answers `exists` when the name appears between the check and the write", async () => {
+      const racing = files({
+        makeFile: () => {
+          throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+        },
+      });
+      const handlers = handlersWith(racing);
+      await expect(handlers.createEntry("tab-1", "/proj", "late.ts", "file")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+    });
+
+    it("refuses a name that is not a single segment, touching nothing", async () => {
+      const handlers = handlersWith();
+      for (const name of ["../escape", "a/b", "..", ""]) {
+        await expect(handlers.createEntry("tab-1", "/proj", name, "file")).resolves.toEqual({
+          ok: false,
+          reason: "invalid-name",
+        });
+        await expect(handlers.renameEntry("tab-1", "/proj/a.ts", name)).resolves.toEqual({
+          ok: false,
+          reason: "invalid-name",
+        });
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses every write outside the project, through a link, or for an unknown pane", async () => {
+      const handlers = handlersWith();
+      const outside = { ok: false, reason: "outside" };
+      await expect(handlers.createEntry("tab-1", "/etc", "x", "file")).resolves.toEqual(outside);
+      await expect(handlers.createEntry("tab-1", "/proj/link", "x", "file")).resolves.toEqual(
+        outside,
+      );
+      await expect(handlers.renameEntry("tab-1", "/etc/passwd", "x")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("tab-1", "/proj")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("nope", "/proj/a.ts")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("tab-1", "/proj/missing.ts")).resolves.toEqual(outside);
+      expect(calls).toEqual([]);
+    });
+
+    it("renames and trashes a link as the link, never what it points at", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.renameEntry("tab-1", "/proj/link", "link2")).resolves.toEqual({
+        ok: true,
+        path: "/proj/link2",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/link2")).resolves.toEqual({
+        ok: true,
+        path: "/proj/link2",
+      });
+      expect(calls).toEqual(["mv /proj/link /proj/link2", "trash /proj/link2"]);
+    });
+
+    it("lets a case-only rename through rather than calling it a clash with itself", async () => {
+      const caseInsensitive = files({
+        exists: (p: string) => [...disk].some((d) => d.toLowerCase() === p.toLowerCase()),
+      });
+      const handlers = handlersWith(caseInsensitive);
+      await expect(handlers.renameEntry("tab-1", "/proj/a.ts", "A.ts")).resolves.toEqual({
+        ok: true,
+        path: "/proj/A.ts",
+      });
+    });
+
+    it("answers `failed` rather than throwing when the disk refuses", async () => {
+      const refusing = files({
+        makeDir: () => {
+          throw new Error("EACCES");
+        },
+        trash: async () => {
+          throw new Error("no trash");
+        },
+      });
+      const handlers = handlersWith(refusing);
+      await expect(handlers.createEntry("tab-1", "/proj", "d", "directory")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    });
+
+    it("answers `failed` when the wiring has no write for it", async () => {
+      const listingOnly = { readDir: () => [], realPath: (p: string) => p };
+      const handlers = handlersWith(listingOnly);
+      await expect(handlers.createEntry("tab-1", "/proj", "x", "file")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    });
+  });
+
   describe.runIf(POSIX_FIXTURES)("listDir", () => {
     // Every path readDir was asked for. Asserting only on the return value
     // cannot tell a refusal from a listing that happened to be empty — the

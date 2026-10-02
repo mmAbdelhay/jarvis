@@ -289,6 +289,9 @@ function createDesktopHost(client: CoreClient) {
         open: (checked) => electronShell.openExternal(checked),
         log: (line) => console.error(line),
       }),
+    // The file sidebar's Move to Trash. The core has already proven the
+    // path inside a project (ipc.ts's trashEntry) before it gets here.
+    trashItem: (path) => electronShell.trashItem(path),
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
     // click, after a save has already succeeded.

@@ -350,6 +350,32 @@ describe("daemon host: security alerts", () => {
     ]);
   });
 
+  it("sends a trash only to the app whose request it is, and refuses without one", async () => {
+    const sent: Array<[number, string, unknown]> = [];
+    let asker: number | undefined;
+    const daemonHost = createDaemonHost({
+      push: () => {
+        throw new Error("a trash must never go to every app");
+      },
+      pushTo: (id, channel, payload) => sent.push([id, channel, payload]),
+      initiator: () => asker,
+      log: () => {},
+      now: () => 0,
+    });
+
+    await expect(daemonHost.host.trashItem("/proj/a.ts")).rejects.toThrow(/No desktop app/);
+    daemonHost.attach(1, { focused: true, awake: true });
+    daemonHost.attach(2, { focused: false, awake: true });
+    // A request running, but from a connection that is not an attached app
+    // (a CLI client): still nobody to trash it.
+    asker = 9;
+    await expect(daemonHost.host.trashItem("/proj/a.ts")).rejects.toThrow(/No desktop app/);
+
+    asker = 2;
+    await daemonHost.host.trashItem("/proj/a.ts");
+    expect(sent).toEqual([[2, DAEMON_PUSHES.trashItem, { path: "/proj/a.ts" }]]);
+  });
+
   it("answers focus and visibility from what the attached apps report", () => {
     const { daemonHost } = hostDouble();
     expect(daemonHost.host.isAwake()).toBe(false);

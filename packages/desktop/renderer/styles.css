@@ -1978,6 +1978,74 @@
   /* The indent guide: a hairline down each nested level. */
   .file-tree-children { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 11px; }
 
+  /* A name being typed — a new entry, or a rename in place. */
+  .file-tree-editing { cursor: default; }
+  .file-tree-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 18px;
+    padding: 0 4px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    outline: none;
+  }
+
+  /* New file / New folder, beside the header. The glyphs are drawn here so
+     the buttons carry no text: the sidebar's text stays its header and its
+     rows. */
+  .terminal-explorer-actions { display: flex; justify-content: flex-end; gap: 2px; margin: -4px 0 4px; }
+  .terminal-explorer-action {
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font: 12px/1 var(--font-mono);
+  }
+  .terminal-explorer-action:hover { color: var(--text); background: var(--accent-quiet); }
+  .terminal-explorer-action:focus-visible { outline: 1px solid var(--accent-quiet); }
+  .terminal-explorer-action--file::before { content: "+"; }
+  .terminal-explorer-action--directory::before { content: "+▸"; }
+
+  /* A refusal, for a few seconds, under the tree. */
+  .terminal-explorer-error { padding: 6px 4px 0; color: var(--warn); white-space: normal; }
+  .terminal-explorer-error:empty { display: none; }
+
+  /* The right-click menu: on the body, fixed at the pointer, so the
+     sidebar's own overflow cannot clip it. */
+  .terminal-explorer-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 170px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    font: 12px/1.6 var(--font-ui);
+  }
+  .terminal-explorer-menu-item {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text);
+    text-align: start;
+    cursor: pointer;
+    font: inherit;
+  }
+  .terminal-explorer-menu-item:hover,
+  .terminal-explorer-menu-item:focus-visible { background: var(--accent-quiet); outline: none; }
+  .terminal-explorer-menu-item--danger { color: var(--bad); }
+
   /* The Docker tab, laid out as the design specifies: a left column of
      configured containers with the compose controls above them, and the log
      tail beside it filling the rest — same page-slot region the terminal and

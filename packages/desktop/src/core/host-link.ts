@@ -29,6 +29,9 @@ export type DesktopHost = {
   showNotification(title: string, body: string): void;
   /** The system browser — remote:openWebClient. */
   openExternal(url: string): Promise<void>;
+  /** The file sidebar's Move to Trash — Electron's `shell.trashItem`. The
+   *  path is already proven inside a project by the core. */
+  trashItem(path: string): Promise<void>;
   /** Settings' Restart button: relaunch the app. */
   restart(): void;
 };
@@ -82,6 +85,10 @@ export function createHostLink(): HostLink {
       attached === undefined
         ? Promise.reject(new Error("No desktop app is attached to open a browser"))
         : attached.openExternal(url),
+    trashItem: (path) =>
+      attached === undefined
+        ? Promise.reject(new Error("No desktop app is attached to move a file to the trash"))
+        : attached.trashItem(path),
     restart: () => {
       if (attached !== undefined) {
         attached.restart();

@@ -104,6 +104,23 @@ export const MESSAGES = {
   planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
   planKeepLater: (language: "ar" | "en"): string =>
     language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  // The file sidebar's own writes (terminal-explorer.ts).
+  explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
+  explorerNewFolder: (language: "ar" | "en"): string =>
+    language === "ar" ? "مجلد جديد" : "New folder",
+  explorerRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
+  explorerTrash: (language: "ar" | "en"): string =>
+    language === "ar" ? "نقل إلى سلة المهملات" : "Move to Trash",
+  explorerErrorExists: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يوجد ملف أو مجلد بهذا الاسم بالفعل."
+      : "Something with that name is already there.",
+  explorerErrorInvalidName: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يمكن استخدام هذا الاسم." : "That name can't be used.",
+  explorerErrorOutside: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا خارج المشروع." : "That's outside the project.",
+  explorerErrorFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر تنفيذ ذلك." : "That didn't work.",
   planSendClaude: (language: "ar" | "en"): string =>
     language === "ar" ? "إرسال إلى Claude" : "Send to Claude",
   planSectionChanged: (language: "ar" | "en"): string =>

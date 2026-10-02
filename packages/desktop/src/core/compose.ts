@@ -15,7 +15,16 @@
 // releaseChildren did.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import {
   access,
   chmod,
@@ -1029,6 +1038,21 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           directory: entry.isDirectory(),
         })),
       realPath: (path) => realpathSync(path),
+      exists: (path) => {
+        try {
+          lstatSync(path);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      makeDir: (path) => mkdirSync(path),
+      makeFile: (path) => writeFileSync(path, "", { flag: "wx" }),
+      rename: (from, to) => renameSync(from, to),
+      // The OS trash is the desktop app's to reach (Electron's shell), so
+      // it goes out through the host — which a headless daemon forwards to
+      // the app that asked, and refuses when no app is attached.
+      trash: (path) => host.trashItem(path),
     },
     // The file sidebar's route into the Editor tab — see
     // TerminalHandlerDeps.editor. `open` is codeServer.open bound
