@@ -511,8 +511,10 @@ says so under the tree. Move to Trash asks nothing, because it goes to the
 system trash and can be put back from there. The same boundary as listing
 applies to every one of them: the folder is checked against the project
 after symlinks are resolved, and a symlink is renamed or trashed as the
-link, never what it points to. These are desktop-only; a paired phone can
-browse but not change files from the sidebar.
+link, never what it points to. These are desktop-only. A paired phone
+browses the same files from a terminal's **Files** button — folders open in
+place, and a file's path can be typed into the terminal — but cannot change
+them.
 
 ### The plan panel
 
