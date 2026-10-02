@@ -2,7 +2,7 @@ import type { AgentConfig } from "../registry/types.js";
 import type { AgentRegistry } from "../registry/registry.js";
 import type { SessionManager } from "../session/manager.js";
 import { sessionLabel } from "../session/label.js";
-import type { GitProvider } from "../git/types.js";
+import type { GitProvider, GitWorktrees } from "../git/types.js";
 import type { SessionChanges } from "../git/tracker.js";
 import {
   gitChangesText,
@@ -22,6 +22,8 @@ const TOOLS = [
       project: "Name of the project to open, from the list of known projects",
       agent: "(optional) explicit agent id to use instead of routing",
       task: "(optional) what the user asked that session to do, in their own words and their own language — typed into the agent once it is ready. Pass it whenever the user asked for work, not just for a session; leave it out only when they asked for nothing more than an open session",
+      isolated:
+        '(optional) "yes" to give this session its own git worktree and branch, so it cannot collide with other sessions in the same project. Pass it when the user asks for a separate, parallel or isolated copy',
     },
   },
   {
@@ -94,6 +96,10 @@ const MESSAGES = {
     language === "ar"
       ? `تعذر العثور على الوكيل: ${message}`
       : `I couldn't find that agent: ${message}`,
+  worktreeFallback: (message: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذر إنشاء worktree منفصلة، فبدأت الجلسة في النسخة المشتركة: ${message}`
+      : `I couldn't make a separate worktree, so the session started in the shared checkout: ${message}`,
   sessionStartFailed: (message: string, language: "ar" | "en"): string =>
     language === "ar" ? `تعذر بدء الجلسة: ${message}` : `I couldn't start that session: ${message}`,
   unknownSession: (sessionId: string, language: "ar" | "en"): string =>
@@ -133,6 +139,16 @@ export type OrchestratorOptions = {
   changes: () => SessionChanges[];
   speak(text: string, language: "ar" | "en"): Promise<void>;
   projects: Record<string, string>;
+  /**
+   * Worktrees for sessions that share a project. `parallel` gives a new
+   * session its own worktree when another session is already live in the
+   * same project — the one case where two agents would otherwise write over
+   * each other; `always` gives every session one. Absent (or no `ops`) is
+   * off: every session runs in the project's own checkout, as before. A
+   * session asked for with `isolated` gets one either way when `ops` is
+   * there.
+   */
+  worktrees?: { mode: "off" | "parallel" | "always"; ops: GitWorktrees };
   /**
    * Read-only view of the provider cache, plus the one call that spends
    * money. `snapshot()` is free; `refresh()` bills one API query per
@@ -248,7 +264,7 @@ export class Orchestrator {
     return this.#handlers()[call.name](call, language);
   }
 
-  #startSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {
+  async #startSession(call: ToolCall, language: "ar" | "en"): Promise<ToolResult> {
     const project = stringInput(call.input, "project");
     const projectPath = this.#options.projects[project];
     if (projectPath === undefined) {
@@ -266,9 +282,24 @@ export class Orchestrator {
       return { context: {}, error: MESSAGES.agentResolveFailed(errorMessage(error), language) };
     }
 
+    // Where the agent runs: the project's checkout, or a worktree of its
+    // own. A worktree that cannot be made (not a git repository, a git too
+    // old for worktrees) is not a reason to start no session at all — the
+    // session starts in the shared checkout and the reply says why.
+    let cwd = projectPath;
+    let worktreeNote: string | undefined;
+    if (this.#wantsWorktree(projectPath, stringInput(call.input, "isolated") === "yes")) {
+      const ops = this.#options.worktrees?.ops;
+      const label = `${agent.id}-${Date.now().toString(36)}`;
+      const made = ops === undefined ? undefined : await ops.create(projectPath, label);
+      if (made?.ok === true) cwd = made.value.path;
+      else if (made !== undefined)
+        worktreeNote = MESSAGES.worktreeFallback(made.error.detail || made.error.code, language);
+    }
+
     let session: ReturnType<SessionManager["start"]>;
     try {
-      session = this.#options.sessions.start({ project, projectPath, agent });
+      session = this.#options.sessions.start({ project, projectPath: cwd, agent });
     } catch (error) {
       return { context: {}, error: MESSAGES.sessionStartFailed(errorMessage(error), language) };
     }
@@ -287,7 +318,29 @@ export class Orchestrator {
         agentId: agent.id,
         ...(agent.model === undefined ? {} : { model: agent.model }),
       },
+      ...(worktreeNote === undefined ? {} : { error: worktreeNote }),
     };
+  }
+
+  /** Whether a session about to start in `projectPath` gets its own
+   *  worktree. Only ever when worktree ops are wired. */
+  #wantsWorktree(projectPath: string, asked: boolean): boolean {
+    const worktrees = this.#options.worktrees;
+    if (worktrees === undefined) return false;
+    if (asked || worktrees.mode === "always") return true;
+    if (worktrees.mode !== "parallel") return false;
+    // A session still live in the very same checkout — not one in a
+    // worktree of it, whose projectPath differs: those already have their
+    // own, and are no reason to leave this one in the shared checkout.
+    return this.#options.sessions
+      .list()
+      .some(
+        (session) =>
+          session.projectPath === projectPath &&
+          (session.state === "starting" ||
+            session.state === "running" ||
+            session.state === "waiting"),
+      );
   }
 
   #sendToSession(call: ToolCall, language: "ar" | "en"): { context: ToolContext; error?: string } {

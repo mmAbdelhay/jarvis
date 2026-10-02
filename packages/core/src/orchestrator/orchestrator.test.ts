@@ -4,7 +4,7 @@ import type { Brain, BrainReply } from "./types.js";
 import { AgentRegistry } from "../registry/registry.js";
 import { SessionManager } from "../session/manager.js";
 import type { ProcessHandle, Session } from "../session/types.js";
-import type { GitProvider } from "../git/types.js";
+import type { GitProvider, GitWorktrees } from "../git/types.js";
 import type { SessionChanges } from "../git/tracker.js";
 import type { ProviderStatus } from "../providers/types.js";
 
@@ -1321,5 +1321,104 @@ describe("git tools", () => {
       const turn = await orchestrator.handle("أي حساب أقدر أستخدم؟", "ar");
       expect(turn.text).toContain("المتبقي 38%");
     });
+  });
+});
+
+describe("Orchestrator worktrees", () => {
+  const start = (extra: Record<string, unknown> = {}): BrainReply => ({
+    text: "ok",
+    toolCalls: [{ name: "session.start", input: { project: "acme", ...extra } }],
+  });
+
+  function build(
+    mode: "off" | "parallel" | "always" | undefined,
+    create: GitWorktrees["create"] = async (_repo, label) => ({
+      ok: true,
+      value: { path: `/wt/${label}`, branch: `jarvis/${label}` },
+    }),
+  ) {
+    const sessions = new SessionManager(() => fakeProcess());
+    const created: string[] = [];
+    const worktrees: GitWorktrees = {
+      create: async (repo, label) => {
+        created.push(repo);
+        return create(repo, label);
+      },
+      info: async () => ({ ok: true, value: null }),
+      mergeBack: async () => ({ ok: true, value: { into: "main" } }),
+      remove: async () => ({ ok: true, value: null }),
+    };
+    let reply = start();
+    const orchestrator = new Orchestrator({
+      brain: { ask: async () => reply },
+      registry,
+      sessions,
+      git: fakeGitProvider(),
+      changes: () => [],
+      speak: async () => {},
+      projects: { acme: "/Users/x/projects/acme" },
+      providers: { snapshot: () => [], refresh: async () => {} },
+      ...(mode === undefined ? {} : { worktrees: { mode, ops: worktrees } }),
+    });
+    const ask = async (next: BrainReply = start()) => {
+      reply = next;
+      return orchestrator.handle("go", "en");
+    };
+    return { sessions, created, ask };
+  }
+
+  it("leaves a lone session in the project's own checkout under `parallel`", async () => {
+    const { sessions, created, ask } = build("parallel");
+    await ask();
+    expect(created).toEqual([]);
+    expect(sessions.list()[0]?.projectPath).toBe("/Users/x/projects/acme");
+  });
+
+  it("gives a second live session in the same checkout a worktree of its own", async () => {
+    const { sessions, created, ask } = build("parallel");
+    await ask();
+    await ask();
+    expect(created).toEqual(["/Users/x/projects/acme"]);
+    const paths = sessions.list().map((session) => session.projectPath);
+    expect(paths[0]).toBe("/Users/x/projects/acme");
+    expect(paths[1]).toMatch(/^\/wt\/claude-acme-/);
+  });
+
+  it("does not count a session that has already ended", async () => {
+    const { sessions, created, ask } = build("parallel");
+    await ask();
+    const first = sessions.list()[0];
+    if (first === undefined) throw new Error("no session");
+    sessions.kill(first.id);
+    await ask();
+    expect(created).toEqual([]);
+  });
+
+  it("gives every session one under `always`, and one asked for even under `off`", async () => {
+    const always = build("always");
+    await always.ask();
+    expect(always.created).toHaveLength(1);
+
+    const off = build("off");
+    await off.ask();
+    await off.ask(start({ isolated: "yes" }));
+    expect(off.created).toHaveLength(1);
+  });
+
+  it("never makes one when no worktree ops are wired, even when asked", async () => {
+    const { created, sessions, ask } = build(undefined);
+    await ask(start({ isolated: "yes" }));
+    expect(created).toEqual([]);
+    expect(sessions.list()).toHaveLength(1);
+  });
+
+  it("starts in the shared checkout, and says why, when the worktree cannot be made", async () => {
+    const { sessions, ask } = build("always", async () => ({
+      ok: false,
+      error: { code: "not-a-repo", detail: "/Users/x/projects/acme" },
+    }));
+    const turn = await ask();
+    expect(sessions.list()[0]?.projectPath).toBe("/Users/x/projects/acme");
+    expect(turn.text).toContain("shared checkout");
   });
 });

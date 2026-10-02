@@ -127,6 +127,22 @@ export const MESSAGES = {
   changesPullRequestReady: (language: "ar" | "en"): string =>
     language === "ar" ? "طلب السحب جاهز:" : "Pull request ready:",
   changesWorking: (language: "ar" | "en"): string => (language === "ar" ? "جارٍ…" : "Working…"),
+  worktreeInUse: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يزال الوكيل يعمل في هذه الـ worktree. أوقف الجلسة أولًا."
+      : "The agent is still working in this worktree. Stop the session first.",
+  changesWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "worktree منفصلة" : "Own worktree",
+  changesMergeInto: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `ادمج في ${branch}` : `Merge into ${branch}`,
+  changesRemoveWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "أزل الـ worktree" : "Remove worktree",
+  changesMerged: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تم الدمج في ${branch}.` : `Merged into ${branch}.`,
+  changesWorktreeRemoved: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أُزيلت الـ worktree، وبقي فرعها."
+      : "Removed the worktree; its branch is kept.",
   // The file sidebar's own writes (terminal-explorer.ts).
   explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
   explorerNewFolder: (language: "ar" | "en"): string =>

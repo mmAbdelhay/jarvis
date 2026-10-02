@@ -582,7 +582,14 @@ export function wireCommitBar(): void {
  *  moves the repository the others read, and two at once would race. */
 let syncing = false;
 
-const SYNC_BUTTONS = ["changes-new-branch", "changes-pull", "changes-push", "changes-pr"] as const;
+const SYNC_BUTTONS = [
+  "changes-new-branch",
+  "changes-pull",
+  "changes-push",
+  "changes-pr",
+  "changes-merge-worktree",
+  "changes-remove-worktree",
+] as const;
 
 function setSyncBusy(busy: boolean): void {
   syncing = busy;
@@ -645,6 +652,30 @@ async function renderSync(view: ChangesView): Promise<void> {
   }
   select.replaceChildren(...options);
   select.value = result.value.detached ? "" : result.value.current;
+  await renderWorktree(view);
+}
+
+/** The worktree controls: shown only for a session running in a worktree
+ *  of its own, with Merge naming the branch the main checkout has out. */
+async function renderWorktree(view: ChangesView): Promise<void> {
+  const box = document.getElementById("changes-worktree");
+  const label = document.getElementById("changes-worktree-label");
+  const merge = document.getElementById("changes-merge-worktree");
+  const remove = document.getElementById("changes-remove-worktree");
+  if (box === null || label === null || merge === null || remove === null) return;
+  const result = await window.jarvis.gitWorktree(view.session.id);
+  if (current?.session.id !== view.session.id) return;
+  if (!result.ok || result.value === null) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  label.textContent = MESSAGES.changesWorktree(PRIMARY_LANGUAGE);
+  label.title = result.value.base;
+  // A detached main checkout has no branch to merge into.
+  merge.hidden = result.value.baseBranch === "";
+  setText(merge, MESSAGES.changesMergeInto(result.value.baseBranch, PRIMARY_LANGUAGE));
+  remove.textContent = MESSAGES.changesRemoveWorktree(PRIMARY_LANGUAGE);
 }
 
 /** Runs one sync action for the session on screen: busy while it runs, the
@@ -653,6 +684,9 @@ async function renderSync(view: ChangesView): Promise<void> {
 async function runSync<T>(
   call: (sessionId: string) => Promise<GitViewResult<T>>,
   done: (value: T, view: ChangesView) => string,
+  /** False when the call leaves nothing to read again — a removed
+   *  worktree is a directory that no longer exists. */
+  reread = true,
 ): Promise<void> {
   const view = current;
   if (view === undefined || syncing) return;
@@ -673,7 +707,7 @@ async function runSync<T>(
   }
   clearError();
   const message = done(result.value, view);
-  await openChanges(view.session.id, selected);
+  if (reread) await openChanges(view.session.id, selected);
   showSyncStatus(message);
 }
 
@@ -745,6 +779,24 @@ export function wireSyncBar(): void {
     void runSync(
       (id) => window.jarvis.gitPush(id),
       () => MESSAGES.changesPushed(PRIMARY_LANGUAGE),
+    );
+  });
+
+  document.getElementById("changes-merge-worktree")?.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitMergeWorktree(id),
+      (value) => MESSAGES.changesMerged(value.into, PRIMARY_LANGUAGE),
+    );
+  });
+  document.getElementById("changes-remove-worktree")?.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitRemoveWorktree(id),
+      () => {
+        const box = document.getElementById("changes-worktree");
+        if (box !== null) box.hidden = true;
+        return MESSAGES.changesWorktreeRemoved(PRIMARY_LANGUAGE);
+      },
+      false,
     );
   });
 

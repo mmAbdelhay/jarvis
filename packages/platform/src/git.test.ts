@@ -1,5 +1,14 @@
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createGitProvider,
   createGitRemoteOps,
+  createGitWorktrees,
   DEFAULT_GIT_TIMEOUT_MS,
   type GhRunner,
 } from "./git.js";
@@ -1150,5 +1160,113 @@ describe("createGitRemoteOps pull requests", () => {
     });
     const signedOut = await createGitRemoteOps({ gh }).pullRequest(local);
     expect(signedOut.ok ? "ok" : signedOut.error.code).toBe("no-gh");
+  });
+});
+
+describe("createGitWorktrees", () => {
+  async function setup() {
+    const repo = await makeRepo();
+    const root = await mkdtemp(join(tmpdir(), "jarvis-worktrees-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    return { repo, root, worktrees: createGitWorktrees({ root }) };
+  }
+
+  it("makes a worktree on a new branch, outside the repository", async () => {
+    const { repo, root, worktrees } = await setup();
+    const made = await worktrees.create(repo, "Claude Acme/1");
+    if (!made.ok) throw new Error(made.error.detail);
+
+    expect(made.value.branch).toBe("jarvis/claude-acme-1");
+    expect(made.value.path.startsWith(root)).toBe(true);
+    expect(await readFile(join(made.value.path, "kept.txt"), "utf8")).toBe("one\ntwo\nthree\n");
+    // The main checkout is untouched: same branch, nothing new in it.
+    expect((await simpleGit(repo).status()).isClean()).toBe(true);
+  });
+
+  it("runs a project configured as a subdirectory in the same subdirectory", async () => {
+    const { repo, worktrees } = await setup();
+    await mkdir(join(repo, "app"));
+    await writeFile(join(repo, "app", "x.ts"), "x\n", "utf8");
+    await simpleGit(repo).add(["app/x.ts"]);
+    await simpleGit(repo).commit("app");
+
+    const made = await worktrees.create(join(repo, "app"), "s");
+    if (!made.ok) throw new Error(made.error.detail);
+    expect(made.value.path.endsWith(join("-s", "app"))).toBe(true);
+  });
+
+  it("knows a worktree from a main checkout", async () => {
+    const { repo, worktrees } = await setup();
+    const made = await worktrees.create(repo, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+
+    expect(await worktrees.info(repo)).toEqual({ ok: true, value: null });
+    const found = await worktrees.info(made.value.path);
+    if (!found.ok || found.value === null) throw new Error("expected a worktree");
+    expect(found.value).toMatchObject({ branch: "jarvis/s", baseBranch: "main" });
+    expect(await realpath(found.value.base)).toBe(await realpath(repo));
+  });
+
+  it("merges a worktree's commits back into the main checkout", async () => {
+    const { repo, worktrees } = await setup();
+    const made = await worktrees.create(repo, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+    await commitFile(made.value.path, "feature.txt", "f\n");
+
+    expect(await worktrees.mergeBack(made.value.path)).toEqual({
+      ok: true,
+      value: { into: "main" },
+    });
+    expect(await readFile(join(repo, "feature.txt"), "utf8")).toBe("f\n");
+  });
+
+  it("refuses to merge over uncommitted work on either side", async () => {
+    const { repo, worktrees } = await setup();
+    const made = await worktrees.create(repo, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+
+    await writeFile(join(made.value.path, "kept.txt"), "wip\n", "utf8");
+    const fromDirtyWorktree = await worktrees.mergeBack(made.value.path);
+    expect(fromDirtyWorktree.ok ? "ok" : fromDirtyWorktree.error.code).toBe("worktree-dirty");
+
+    await simpleGit(made.value.path).checkout(["--", "kept.txt"]);
+    await writeFile(join(repo, "kept.txt"), "local\n", "utf8");
+    const intoDirtyBase = await worktrees.mergeBack(made.value.path);
+    expect(intoDirtyBase.ok ? "ok" : intoDirtyBase.error.code).toBe("base-dirty");
+  });
+
+  it("backs a conflicting merge out completely", async () => {
+    const { repo, worktrees } = await setup();
+    const made = await worktrees.create(repo, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+    await commitFile(made.value.path, "kept.txt", "theirs\n");
+    await commitFile(repo, "kept.txt", "ours\n");
+
+    const result = await worktrees.mergeBack(made.value.path);
+    expect(result.ok ? "ok" : result.error.code).toBe("conflict");
+    const status = await simpleGit(repo).status();
+    expect(status.conflicted).toEqual([]);
+    expect(status.isClean()).toBe(true);
+  });
+
+  it("removes a clean worktree and keeps its branch, but not one with work in it", async () => {
+    const { repo, worktrees } = await setup();
+    const made = await worktrees.create(repo, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+
+    await writeFile(join(made.value.path, "kept.txt"), "wip\n", "utf8");
+    const dirty = await worktrees.remove(made.value.path);
+    expect(dirty.ok ? "ok" : dirty.error.code).toBe("worktree-dirty");
+
+    await simpleGit(made.value.path).checkout(["--", "kept.txt"]);
+    expect(await worktrees.remove(made.value.path)).toEqual({ ok: true, value: null });
+    expect((await simpleGit(repo).branchLocal()).all).toEqual(expect.arrayContaining(["jarvis/s"]));
+  });
+
+  it("answers rather than throwing for a directory that is no repository", async () => {
+    const { root, worktrees } = await setup();
+    const made = await worktrees.create(root, "s");
+    expect(made.ok ? "ok" : made.error.code).toBe("not-a-repo");
+    expect(await worktrees.info(root)).toEqual({ ok: true, value: null });
   });
 });

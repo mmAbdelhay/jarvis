@@ -247,6 +247,9 @@ export type DispatchDeps = {
     | "pull"
     | "push"
     | "pullRequest"
+    | "worktree"
+    | "mergeWorktree"
+    | "removeWorktree"
   >;
   /** The core's tab state (core/tab-host.ts). What only a hosted page's
    *  view can do — back, reload, DevTools, visibility — is not here: those
@@ -611,6 +614,9 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "git:pull": ([sessionId]) => git.pull(sessionId as string),
     "git:push": ([sessionId]) => git.push(sessionId as string),
     "git:pullRequest": ([sessionId]) => git.pullRequest(sessionId as string),
+    "git:worktree": ([sessionId]) => git.worktree(sessionId as string),
+    "git:mergeWorktree": ([sessionId]) => git.mergeWorktree(sessionId as string),
+    "git:removeWorktree": ([sessionId]) => git.removeWorktree(sessionId as string),
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one.

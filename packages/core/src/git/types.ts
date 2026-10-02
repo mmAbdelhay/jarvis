@@ -91,7 +91,11 @@ export type GitFailureCode =
   | "diverged"
   | "rejected"
   | "detached"
-  | "no-gh";
+  | "no-gh"
+  // GitWorktrees' own.
+  | "not-a-worktree"
+  | "base-dirty"
+  | "worktree-dirty";
 
 export type GitFailure = { code: GitFailureCode; detail: string };
 
@@ -148,6 +152,45 @@ export interface GitRemoteOps {
    *  create --fill`) — pushing first when the branch has commits its
    *  remote does not. */
   pullRequest(repoPath: string): Promise<GitOutcome<GitPullRequest>>;
+}
+
+export type GitWorktree = {
+  /** Where the session should run: the new worktree, or the same
+   *  subdirectory of it when the project is a subdirectory of its repo. */
+  path: string;
+  branch: string;
+};
+
+export type GitWorktreeInfo = {
+  /** The repository the worktree was made from — its main checkout. */
+  base: string;
+  /** The worktree's own branch. */
+  branch: string;
+  /** What the main checkout has out: where a merge back would land. Empty
+   *  when it is detached. */
+  baseBranch: string;
+};
+
+/**
+ * One git worktree per agent session, so agents working the same project
+ * at once each have their own checkout and branch instead of writing over
+ * one another. Every method answers with a GitOutcome, never a rejection.
+ */
+export interface GitWorktrees {
+  /** A new worktree of `repoPath`'s repository on a new branch from HEAD,
+   *  named from `label`. */
+  create(repoPath: string, label: string): Promise<GitOutcome<GitWorktree>>;
+  /** What `path` is a worktree of — null when it is a main checkout (or no
+   *  repository's at all, which is the same "nothing to merge back"). */
+  info(path: string): Promise<GitOutcome<GitWorktreeInfo | null>>;
+  /** Merges the worktree's branch into whatever the main checkout has out
+   *  (`--no-ff`). Refused while either side has uncommitted changes, and
+   *  backed out completely on a conflict — the main checkout is never left
+   *  mid-merge. */
+  mergeBack(path: string): Promise<GitOutcome<{ into: string }>>;
+  /** Removes the worktree, keeping its branch. Refused while it has
+   *  uncommitted changes, as `git worktree remove` itself refuses. */
+  remove(path: string): Promise<GitOutcome<null>>;
 }
 
 export interface GitProvider {

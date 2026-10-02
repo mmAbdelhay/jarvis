@@ -3473,6 +3473,8 @@
   .changes-sync-btn:disabled { opacity: 0.45; cursor: default; }
   .changes-sync-btn--accent { color: var(--ground); background: var(--accent); border-color: var(--accent); }
   .changes-sync-status { color: var(--text); }
+  .changes-worktree { display: flex; align-items: center; gap: 8px; }
+  .changes-worktree[hidden] { display: none; }
 
   .changes-body {
     display: grid;

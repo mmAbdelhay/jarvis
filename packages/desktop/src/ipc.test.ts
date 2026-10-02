@@ -547,6 +547,41 @@ describe("createGitHandlers' branch, pull, push and pull-request calls", () => {
     });
   });
 
+  it("refuses to remove a worktree an agent is still running in", async () => {
+    const removed: string[] = [];
+    const handlers = createGitHandlers({
+      git: {
+        changes: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        diff: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        stage: async () => ({ ok: true, value: null }),
+        unstage: async () => ({ ok: true, value: null }),
+        commit: async () => ({ ok: true, value: { sha: "abc", filesChanged: 1 } }),
+      },
+      worktrees: {
+        create: async () => ({ ok: true, value: { path: "/wt", branch: "jarvis/x" } }),
+        info: async () => ({ ok: true, value: null }),
+        mergeBack: async () => ({ ok: true, value: { into: "main" } }),
+        remove: async (path) => {
+          removed.push(path);
+          return { ok: true, value: null };
+        },
+      },
+      sessions: {
+        get: (id) =>
+          id === "live"
+            ? { ...session, id, state: "running" as const }
+            : { ...session, id, state: "done" as const },
+      },
+      language: "en",
+      refresh: async () => {},
+    });
+
+    expect((await handlers.removeWorktree("live")).ok).toBe(false);
+    expect(removed).toEqual([]);
+    expect(await handlers.removeWorktree("ended")).toEqual({ ok: true, value: null });
+    expect(removed).toEqual(["/projects/acme"]);
+  });
+
   it("refuses an unknown session, an untyped argument, and a wiring with no remote ops", async () => {
     const { handlers } = build({});
     expect((await handlers.pull("nope")).ok).toBe(false);

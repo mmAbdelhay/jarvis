@@ -8,6 +8,15 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Sessions can run in a git worktree of their own, so two agents in the
+  same project stop writing over each other. `sessions.worktrees:
+  parallel` gives one to a session started while another is live in the
+  same checkout; `always` gives one to every session; asking for "a
+  separate worktree" works whatever the setting. The session's Changes
+  view can merge it back into the project's branch (refused over
+  uncommitted work, backed out on conflict) or remove it, keeping the
+  branch. Off by default: a fresh worktree has no installed dependencies.
+
 - The Changes view finishes the git loop: a branch picker and **New
   branch**, where the branch stands against its remote (`↑2 ↓1`),
   fast-forward-only **Pull**, never-forced **Push** (the first push sets

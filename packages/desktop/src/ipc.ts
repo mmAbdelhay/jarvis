@@ -17,6 +17,8 @@ import {
   type GitPullResult,
   type GitPushResult,
   type GitRemoteOps,
+  type GitWorktreeInfo,
+  type GitWorktrees,
   type PlanComment,
   type ProviderStatus,
   type Session,
@@ -180,6 +182,9 @@ export type GitHandlers = {
   pull(sessionId: string): Promise<GitViewResult<GitPullResult>>;
   push(sessionId: string): Promise<GitViewResult<GitPushResult>>;
   pullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
+  worktree(sessionId: string): Promise<GitViewResult<GitWorktreeInfo | null>>;
+  mergeWorktree(sessionId: string): Promise<GitViewResult<{ into: string }>>;
+  removeWorktree(sessionId: string): Promise<GitViewResult<null>>;
 };
 
 export type GitHandlerDeps = {
@@ -187,6 +192,9 @@ export type GitHandlerDeps = {
   /** Branches, pull, push and pull requests. Absent, each answers with a
    *  failure rather than throwing — a wiring without network git. */
   remote?: GitRemoteOps | undefined;
+  /** A session's own worktree: what it is of, merging back, removing it.
+   *  Absent, each answers with a failure. */
+  worktrees?: GitWorktrees | undefined;
   sessions: { get(id: string): Session | undefined };
   /** The user's configured primary language, used for every failure string. */
   language: "ar" | "en";
@@ -365,7 +373,53 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
       if (!isString(sessionId)) return invalid();
       return remoteCall(sessionId, true, (remote, repo) => remote.pullRequest(repo));
     },
+
+    async worktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return worktreeCall(sessionId, false, (ops, path) => ops.info(path));
+    },
+
+    async mergeWorktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return worktreeCall(sessionId, true, (ops, path) => ops.mergeBack(path));
+    },
+
+    async removeWorktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      const session = repoFor(sessionId);
+      // The agent's own working directory: removing it under a live agent
+      // would pull the floor out from under every command it runs next.
+      if (
+        session !== undefined &&
+        (session.state === "starting" || session.state === "running" || session.state === "waiting")
+      ) {
+        return fail(MESSAGES.worktreeInUse(deps.language));
+      }
+      return worktreeCall(sessionId, true, (ops, path) => ops.remove(path));
+    },
   };
+
+  /** One GitWorktrees call for a session's directory — the same queue and
+   *  refresh rules as remoteCall. */
+  async function worktreeCall<T>(
+    sessionId: string,
+    mutates: boolean,
+    run: (ops: GitWorktrees, path: string) => Promise<GitOutcome<T>>,
+  ): Promise<GitViewResult<T>> {
+    const session = repoFor(sessionId);
+    if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
+    const ops = deps.worktrees;
+    if (ops === undefined) {
+      return fail(gitFailureText({ code: "failed", detail: "not available" }, deps.language));
+    }
+    const task = async (): Promise<GitViewResult<T>> => {
+      const outcome = await callGit(() => run(ops, session.projectPath));
+      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      if (mutates) await deps.refresh();
+      return { ok: true, value: outcome.value };
+    };
+    return mutates ? enqueue(session.projectPath, task) : task();
+  }
 
   /** One GitRemoteOps call for a session's repository. A call that changes
    *  the repository waits its turn in the same per-repo queue staging and
@@ -495,6 +549,13 @@ export type RendererApi = {
   gitPush(sessionId: string): Promise<GitViewResult<GitPushResult>>;
   /** The current branch's open pull request, or a new one. */
   gitPullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
+  /** What the session's directory is a worktree of; null for a main
+   *  checkout. */
+  gitWorktree(sessionId: string): Promise<GitViewResult<GitWorktreeInfo | null>>;
+  /** Merges the session's worktree branch into the main checkout. */
+  gitMergeWorktree(sessionId: string): Promise<GitViewResult<{ into: string }>>;
+  /** Removes the session's worktree, keeping its branch. */
+  gitRemoveWorktree(sessionId: string): Promise<GitViewResult<null>>;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): void;
   // A session's live output, chunk by chunk, for every session at once —
   // the Session view keeps only the one it is showing. Paired with

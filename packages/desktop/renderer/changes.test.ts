@@ -54,6 +54,9 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitPull: vi.fn(async () => notStubbed),
     gitPush: vi.fn(async () => notStubbed),
     gitPullRequest: vi.fn(async () => notStubbed),
+    gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
+    gitMergeWorktree: vi.fn(async () => notStubbed),
+    gitRemoveWorktree: vi.fn(async () => notStubbed),
     onChangeCounts: vi.fn(),
     onSessionOutput: vi.fn(),
     getSessionLog: vi.fn(async () => ""),
@@ -333,6 +336,11 @@ beforeEach(() => {
         <button id="changes-new-branch" type="button"></button>
         <input id="changes-new-branch-name" type="text" hidden />
         <div id="changes-tracking"></div>
+        <div id="changes-worktree" hidden>
+          <span id="changes-worktree-label"></span>
+          <button id="changes-merge-worktree" type="button"></button>
+          <button id="changes-remove-worktree" type="button"></button>
+        </div>
         <button id="changes-pull" type="button"></button>
         <button id="changes-push" type="button"></button>
         <button id="changes-pr" type="button"></button>
@@ -1927,5 +1935,68 @@ describe("the branch and sync row", () => {
     await settle();
     expect(jarvis.openTab).not.toHaveBeenCalled();
     expect(byId("changes-sync-status").textContent).toContain("https://github.com/o/r/pull/9");
+  });
+});
+
+describe("the worktree controls", () => {
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+  async function open(overrides: Partial<RendererApi>) {
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M", insertions: 1, deletions: 0, staged: false }],
+      undefined,
+      {
+        gitBranches: vi.fn(async () => ({
+          ok: true as const,
+          value: { current: "jarvis/s", detached: false, local: ["main", "jarvis/s"] },
+        })),
+        ...overrides,
+      },
+    );
+    const { wireSyncBar } = await import("./changes.js");
+    wireSyncBar();
+    await settle();
+    await settle();
+    return jarvis;
+  }
+
+  it("stays hidden for a session in a main checkout", async () => {
+    await open({ gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })) });
+    expect(byId("changes-worktree").hidden).toBe(true);
+  });
+
+  it("names the branch a merge would land on, and merges on click", async () => {
+    const jarvis = await open({
+      gitWorktree: vi.fn(async () => ({
+        ok: true as const,
+        value: { base: "/p/acme", branch: "jarvis/s", baseBranch: "main" },
+      })),
+      gitMergeWorktree: vi.fn(async () => ({ ok: true as const, value: { into: "main" } })),
+    });
+    expect(byId("changes-worktree").hidden).toBe(false);
+    expect(byId("changes-merge-worktree").textContent).toContain("main");
+
+    byId("changes-merge-worktree").click();
+    await settle();
+    expect(jarvis.gitMergeWorktree).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not read the view again after removing the worktree it was reading", async () => {
+    const jarvis = await open({
+      gitWorktree: vi.fn(async () => ({
+        ok: true as const,
+        value: { base: "/p/acme", branch: "jarvis/s", baseBranch: "main" },
+      })),
+      gitRemoveWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
+    });
+    const reads = vi.mocked(jarvis.gitChanges).mock.calls.length;
+
+    byId("changes-remove-worktree").click();
+    await settle();
+
+    expect(jarvis.gitRemoveWorktree).toHaveBeenCalledWith("s1");
+    expect(vi.mocked(jarvis.gitChanges).mock.calls.length).toBe(reads);
+    expect(byId("changes-worktree").hidden).toBe(true);
   });
 });

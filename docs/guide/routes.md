@@ -67,6 +67,10 @@ A row under the header carries the rest of the loop:
   opens in the project's own browser tab. It needs the
   [GitHub CLI](https://cli.github.com/), signed in.
 
+A session running in a [worktree of its own](configuration.md) also gets
+**Merge into** (the branch the project's main checkout has out) and **Remove
+worktree** (once the session has ended; the branch is kept).
+
 None of these ever waits on a password prompt: git and gh run with prompts
 switched off, so a remote that needs credentials it does not have says so at
 once instead of hanging. Credential helpers and SSH keys you already use work

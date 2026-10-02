@@ -103,6 +103,7 @@ import {
   createFsImportDeps,
   createGitProvider,
   createGitRemoteOps,
+  createGitWorktrees,
   createHeadlampManager,
   defaultHeadlampBinary,
   defaultHistoryPath,
@@ -659,6 +660,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
   });
 
+  // Worktrees live beside sessions.db, under the config directory —
+  // outside every repository, so none shows up in a main checkout's
+  // Changes view. Wired even when the mode is off: a session the user
+  // explicitly asks to isolate still gets one, and the Changes view needs
+  // these to merge one back or remove it.
+  const sessionWorktrees = createGitWorktrees({
+    root: join(dirname(config.sessionsDbPath), "worktrees"),
+  });
   const orchestrator = new Orchestrator({
     brain,
     registry,
@@ -667,6 +676,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     changes: () => changeTracker.snapshot(),
     speak: (text, language) => announceSpeaking(text, language),
     projects: config.projects,
+    worktrees: { mode: config.sessions.worktrees ?? "off", ops: sessionWorktrees },
     providers: {
       snapshot: () => providers.snapshot(),
       refresh: () => providers.refreshCapacity({ force: true }),
@@ -1892,6 +1902,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // Pull, push and `gh` run with agentEnv, the login-shell PATH, read
     // per call because it is resolved after startup.
     remote: createGitRemoteOps({ env: () => agentEnv }),
+    worktrees: sessionWorktrees,
     sessions: { get: (id) => sessions.get(id) },
     language: PRIMARY_LANGUAGE,
     refresh: () => changeTracker.refresh(),

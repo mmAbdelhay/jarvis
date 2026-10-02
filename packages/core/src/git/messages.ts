@@ -51,6 +51,19 @@ const FAILURES: Record<GitFailure["code"], Record<Language, (detail: string) => 
     ar: () => "لا يوجد فرع مسحوب حاليًا (HEAD منفصل).",
     en: () => "No branch is checked out (detached HEAD).",
   },
+  "not-a-worktree": {
+    ar: () => "هذه الجلسة لا تعمل في worktree خاصة بها.",
+    en: () => "This session isn't running in a worktree of its own.",
+  },
+  "base-dirty": {
+    ar: (detail) => `في النسخة الرئيسية تعديلات غير محفوظة، فلن أدمج فوقها: ${detail}`,
+    en: (detail) =>
+      `The main checkout has uncommitted changes, so I won't merge into it: ${detail}`,
+  },
+  "worktree-dirty": {
+    ar: () => "في الـ worktree تعديلات غير محفوظة. احفظها أولًا.",
+    en: () => "The worktree has uncommitted changes. Commit them first.",
+  },
   "no-gh": {
     ar: (detail) => `يلزم GitHub CLI (gh) مسجّلًا للدخول لفتح طلب سحب: ${detail}`,
     en: (detail) => `Opening a pull request needs the GitHub CLI (gh), signed in: ${detail}`,

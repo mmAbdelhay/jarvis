@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, normalize } from "node:path";
+import { mkdir, readFile, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
 import { spawn } from "node:child_process";
 import type {
@@ -16,6 +16,9 @@ import type {
   GitPushResult,
   GitRemoteOps,
   GitStatusLetter,
+  GitWorktree,
+  GitWorktreeInfo,
+  GitWorktrees,
 } from "@jarvis/core";
 import { GitPluginError, simpleGit, type SimpleGit } from "simple-git";
 import { resolvesInside } from "./paths.js";
@@ -651,6 +654,138 @@ export function createGitRemoteOps(options: GitRemoteOptions = {}): GitRemoteOps
         // ENOENT: there is no gh on this PATH at all.
         const detail = errorMessage(error);
         return /ENOENT/.test(detail) ? failure("no-gh", "gh") : failure("failed", detail);
+      }
+    },
+  };
+}
+
+// ------------------------------------------------------------------ worktrees
+
+export type GitWorktreeOptions = {
+  /** Where new worktrees go, one directory each. Outside every repository
+   *  on purpose: a worktree inside its own repo would show up as an
+   *  untracked directory in the main checkout's Changes view. */
+  root: string;
+  timeoutMs?: number;
+};
+
+/** A label turned into something safe as both a branch segment and a
+ *  directory name on every OS. */
+function slugify(label: string): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug === "" ? "session" : slug;
+}
+
+export function createGitWorktrees(options: GitWorktreeOptions): GitWorktrees {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
+  const gitAt = (dir: string): SimpleGit => simpleGit(dir, { timeout: { block: timeoutMs } });
+
+  /** Tracked changes only: an untracked file is not lost by a merge or a
+   *  removal git would refuse, and a build directory nobody ignored must
+   *  not block either. */
+  async function trackedChanges(git: SimpleGit): Promise<string[]> {
+    const status = await git.status();
+    return status.files.filter((file) => file.index !== "?").map((file) => file.path);
+  }
+
+  async function info(path: string): Promise<GitOutcome<GitWorktreeInfo | null>> {
+    try {
+      const git = gitAt(path);
+      if (!(await git.checkIsRepo())) return { ok: true, value: null };
+      const [gitDir, commonDir] = (
+        await git.raw(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])
+      )
+        .trim()
+        .split("\n")
+        .map((line) => line.trim());
+      // A main checkout's git dir *is* its common dir; a linked worktree's
+      // lives under the common dir's `worktrees/`.
+      if (gitDir === undefined || commonDir === undefined || gitDir === commonDir) {
+        return { ok: true, value: null };
+      }
+      // A worktree of a bare repository has no main checkout to merge into.
+      if (basename(commonDir) !== ".git") return { ok: true, value: null };
+      const base = dirname(commonDir);
+      const branch = (await git.raw(["branch", "--show-current"])).trim();
+      const baseBranch = (await gitAt(base).raw(["branch", "--show-current"])).trim();
+      return { ok: true, value: { base, branch, baseBranch } };
+    } catch (error) {
+      return failure("failed", gitErrorDetail(error, timeoutMs));
+    }
+  }
+
+  return {
+    async create(repoPath, label): Promise<GitOutcome<GitWorktree>> {
+      try {
+        const git = gitAt(repoPath);
+        if (!(await git.checkIsRepo())) return failure("not-a-repo", repoPath);
+        const top = (await git.revparse(["--show-toplevel"])).trim();
+        // A project configured as a subdirectory of its repository runs in
+        // the same subdirectory of the worktree.
+        const inside = relative(top, repoPath);
+        const slug = slugify(label);
+        const branch = `jarvis/${slug}`;
+        const dir = join(options.root, `${slugify(basename(top))}-${slug}`);
+        await mkdir(options.root, { recursive: true });
+        // `--` after the options: the branch and directory are ours, but a
+        // fixed separator costs nothing and keeps either from ever being
+        // read as an option.
+        await git.raw(["worktree", "add", "-b", branch, "--", dir, "HEAD"]);
+        return { ok: true, value: { path: inside === "" ? dir : join(dir, inside), branch } };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+
+    info,
+
+    async mergeBack(path): Promise<GitOutcome<{ into: string }>> {
+      const found = await info(path);
+      if (!found.ok) return found;
+      if (found.value === null) return failure("not-a-worktree", path);
+      const { base, branch, baseBranch } = found.value;
+      if (baseBranch === "") return failure("detached", base);
+      try {
+        if ((await trackedChanges(gitAt(path))).length > 0) return failure("worktree-dirty", "");
+        const baseGit = gitAt(base);
+        const dirty = await trackedChanges(baseGit);
+        if (dirty.length > 0) return failure("base-dirty", dirty.slice(0, 5).join(", "));
+        let detail = "";
+        try {
+          await baseGit.raw(["merge", "--no-ff", "--no-edit", branch]);
+        } catch (error) {
+          detail = gitErrorDetail(error, timeoutMs);
+        }
+        // simple-git does not reject a merge that stopped on conflicts — git
+        // reports those on stdout — so the tree itself is the answer. Never
+        // leave the main checkout mid-merge: back out completely and say so.
+        const conflicted = (await baseGit.status()).conflicted;
+        if (conflicted.length > 0 || detail !== "") {
+          await baseGit.raw(["merge", "--abort"]).catch(() => undefined);
+          return failure("conflict", conflicted.length > 0 ? conflicted.join(", ") : detail);
+        }
+        return { ok: true, value: { into: baseBranch } };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+
+    async remove(path): Promise<GitOutcome<null>> {
+      const found = await info(path);
+      if (!found.ok) return found;
+      if (found.value === null) return failure("not-a-worktree", path);
+      try {
+        const top = (await gitAt(path).revparse(["--show-toplevel"])).trim();
+        if ((await trackedChanges(gitAt(path))).length > 0) return failure("worktree-dirty", "");
+        // No --force: git refuses on its own anything it would lose.
+        await gitAt(found.value.base).raw(["worktree", "remove", "--", top]);
+        return { ok: true, value: null };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
       }
     },
   };

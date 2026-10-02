@@ -127,6 +127,7 @@ whisper:
 
 sessions:                       # optional; the whole section defaults
   importWindowDays: 30          # how far back the transcript import reaches
+  worktrees: parallel           # off (default) | parallel | always — see below
 
 performance:                    # optional; the whole section defaults
   suspendTabsAfterMinutes: 15   # 0 keeps every tab's renderer alive
@@ -448,6 +449,34 @@ time; it defaults to 30. Sessions older than the window are not imported —
 raise it once if you want more history back, and note that anything already
 imported stays imported. Everything newer arrives through the watch regardless
 of this setting.
+
+**`sessions.worktrees` gives a session a git worktree of its own**, so agents
+working the same project at once each have their own checkout and branch
+instead of writing over one another's files:
+
+- `off` (the default, and what an absent key means): every session runs in
+  the project's own checkout, as it always has.
+- `parallel`: a session gets its own worktree only when another session is
+  already live in the same checkout — the one case where two agents would
+  otherwise collide. A lone session still runs in the project itself.
+- `always`: every session gets one.
+
+Whatever the setting, asking for it — "open acme in a separate worktree" —
+gives that one session its own. A worktree is a new branch, `jarvis/<agent>-…`,
+from where the project is, checked out under `~/.config/jarvis/worktrees/`
+(outside every repository, so it never shows up in the project's own Changes
+view). The session's Changes view then shows the worktree, and can push it,
+open a pull request from it, **Merge into** the branch the project has out, or
+**Remove worktree** once the session has ended — keeping the branch. A merge
+is refused while either side has uncommitted changes, and backed out
+completely on a conflict.
+
+It is off by default for a reason worth knowing: a fresh worktree has the
+repository's files but nothing that is not committed — no `node_modules`, no
+`.env`. The agent may need to install dependencies before it can run
+anything. If a worktree cannot be made (the project is not a git
+repository), the session starts in the project's own checkout and Jarvis
+says why. Worktrees need git 2.31 or later.
 
 **`headlamp` has one key, `binary`**, and it is optional: absent, it falls
 back to Headlamp's per-OS install path (see
