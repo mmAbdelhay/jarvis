@@ -70,6 +70,7 @@ export const CHANNEL_POLICY = {
   // `end` (`o + c.length <= end`) rather than rendering it a second time.
   "session:snapshot": "remote",
   "providers:refresh": "remote",
+  "usage:history": "remote",
   "workspace:open": "desktop-only",
   "workspace:close": "desktop-only",
   "workspace:rename": "desktop-only",
@@ -355,6 +356,7 @@ export const REMOTE_EFFECT = {
   "session:resize": "input",
   "session:snapshot": "read",
   "providers:refresh": "mutate",
+  "usage:history": "read",
   "workspace:snapshot": "read",
   "editor:open": "mutate",
   "editor:roots": "read",

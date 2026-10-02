@@ -143,6 +143,15 @@ export const MESSAGES = {
     language === "ar"
       ? "أُزيلت الـ worktree، وبقي فرعها."
       : "Removed the worktree; its branch is kept.",
+  // The Dashboard's usage charts (usage-charts.ts).
+  capacityHistoryLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",
+  capacityPointLeft: (time: string, left: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${time} · متبقٍّ ${left}٪` : `${time} · ${left}% left`,
+  sessionsHistoryLabel: (total: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الجلسات في آخر ١٤ يومًا: ${total}`
+      : `Sessions over the last 14 days: ${total}`,
   // The file sidebar's own writes (terminal-explorer.ts).
   explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
   explorerNewFolder: (language: "ar" | "en"): string =>

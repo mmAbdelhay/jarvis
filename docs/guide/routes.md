@@ -28,7 +28,10 @@ What every agent is doing, and what the machine is doing.
   Codex from the rate limits it records in its own session logs, Copilot
   from GitHub's quota endpoint through the signed-in `gh` (premium
   requests, resetting monthly, so its reset shows as a day). Each row says
-  "as of HH:MM", when its figure was actually taken. Three different unknowns are reported as three different sentences,
+  "as of HH:MM", when its figure was actually taken. Under each meter, a line
+  shows where it has been over the last day — every reading the panel has
+  shown is kept (in `sessions.db`, for 30 days), so the history costs no
+  query of its own. Hover a point for its time and value. Three different unknowns are reported as three different sentences,
   never collapsed into one "unknown": a provider that offers no capacity
   reading, one with no snapshot yet, and one not yet checked are distinct
   facts.
@@ -39,6 +42,8 @@ What every agent is doing, and what the machine is doing.
   every two seconds, memory every six, disk and uptime every minute. Reading
   all of them every tick cost a tenth of a core permanently, most of it
   enumerating two dozen mounted volumes to answer a number that had not moved.
+- **Sessions** carries a row of small bars in its header: sessions started on
+  each of the last 14 days, hover for the day and count.
 - **Conversation** and **History** — what has been said, and to whom.
 
 ## Changes

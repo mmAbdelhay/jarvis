@@ -90,6 +90,7 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
+import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import {
@@ -621,6 +622,10 @@ export type RendererApi = {
    * it is never wired to a timer, a focus event, or a route change.
    */
   refreshProviders(): Promise<void>;
+  /** The Dashboard's usage charts: each account's capacity over the last
+   *  day, and sessions started per day over the last two weeks. Free — it
+   *  reads only what was already recorded. */
+  usageHistory(): Promise<UsageHistory>;
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.

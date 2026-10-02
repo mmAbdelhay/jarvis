@@ -44,6 +44,7 @@ import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast
 import { createHostLink, type DesktopHost } from "./host-link.js";
 import { faviconIntake, type FaviconIntake } from "./favicon-intake.js";
 import { createDispatchTable, type DispatchTable } from "../dispatch.js";
+import { buildUsageHistory, CAPACITY_WINDOW_MS } from "../usage-history.js";
 import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
 import { createBlobTable } from "../remote-blob.js";
@@ -78,6 +79,7 @@ import {
   Orchestrator,
   ProviderMonitor,
   ProviderStatusStore,
+  recordCapacityHistory,
   SessionManager,
   greetingText,
   scanDirtyProjects,
@@ -103,6 +105,7 @@ import {
   createFsImportDeps,
   createGitProvider,
   createGitRemoteOps,
+  createSqliteUsageStore,
   createGitWorktrees,
   createHeadlampManager,
   defaultHeadlampBinary,
@@ -378,6 +381,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   const registry = new AgentRegistry(config.registry);
 
   const providerStore = new ProviderStatusStore(registry.list());
+  // Every capacity reading the panel shows, kept for the Dashboard's
+  // history chart. Its own table in sessions.db (usage-store.ts).
+  const usageStore = createSqliteUsageStore(config.sessionsDbPath);
+  recordCapacityHistory(providerStore, usageStore);
   // agentEnv is declared here, ahead of the capacity reader that closes
   // over it; the comment explaining it sits with the health check below,
   // which is what it was first built for.
@@ -2045,6 +2052,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     setup,
     orchestrator,
     sessionStore,
+    // Read from what is already kept: capacity readings (usageStore, fed
+    // by recordCapacityHistory below) and sessions.db's own rows. Never a
+    // query that costs anything.
+    usageHistory: () => {
+      const now = Date.now();
+      return buildUsageHistory(
+        usageStore.samples(now - CAPACITY_WINDOW_MS),
+        sessionStore.history(),
+        now,
+      );
+    },
     // Bug 5: the platform's own global fetch, the same one the Expo push
     // sender (remote-access.ts) and api-executor.ts already rely on
     // existing, rather than @jarvis/platform's apiFetch or undici.
@@ -2393,6 +2411,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       // Last: sessions killed above still persist their ended rows first.
       // The store ignores any write that lands after this.
       sessionStore.close?.();
+      usageStore.close();
     },
   };
 }

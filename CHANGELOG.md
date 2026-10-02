@@ -8,6 +8,11 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Usage history on the Dashboard: a line under each provider's meter shows
+  its remaining capacity over the last day, and the Sessions header shows
+  sessions started per day for the last two weeks. Readings are kept as
+  they arrive (30 days, in `sessions.db`); nothing extra is ever queried.
+
 - Sessions can run in a git worktree of their own, so two agents in the
   same project stop writing over each other. `sessions.worktrees:
   parallel` gives one to a session started while another is live in the

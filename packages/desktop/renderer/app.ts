@@ -44,7 +44,8 @@ import {
   formatUptime,
   projectLabel,
 } from "./format.js";
-import { renderProviders, wireProvidersPanel } from "./providers.js";
+import { renderProviders, setCapacityHistory, wireProvidersPanel } from "./providers.js";
+import { renderSessionsChart } from "./usage-charts.js";
 import { sessionToAutoOpen } from "./session-auto-open.js";
 import { threadPaths } from "./link-layout.js";
 import {
@@ -264,6 +265,7 @@ export function setPresenceThinking(value: boolean): void {
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
   const previous = latestSessions;
+  if (sessions.length !== previous.length) refreshUsage();
   latestSessions = sessions;
   renderSessions(latestSessions);
   renderRunningPill(latestSessions);
@@ -300,9 +302,35 @@ window.jarvis.onChangeCounts((changes) => {
   latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
   renderSessions(latestSessions);
 });
+// The Dashboard's two history charts. Read on startup and again a moment
+// after anything they show could have moved — a new capacity reading, a
+// session starting — coalesced, since both arrive in bursts. Free: it reads
+// only what main has already kept.
+let usageTimer: ReturnType<typeof setTimeout> | undefined;
+function refreshUsage(): void {
+  if (usageTimer !== undefined) return;
+  usageTimer = setTimeout(() => {
+    usageTimer = undefined;
+    // try as well as catch: a preload without the channel throws before
+    // any promise exists. No history is a Dashboard without its charts.
+    try {
+      void window.jarvis
+        .usageHistory()
+        .then((history) => {
+          setCapacityHistory(history.capacity);
+          renderProviders(latestProviders, Date.now());
+          renderSessionsChart(history.sessionsPerDay);
+        })
+        .catch(() => {});
+    } catch {}
+  }, 500);
+}
+refreshUsage();
+
 window.jarvis.onProviders((statuses) => {
   latestProviders = statuses;
   renderProviders(statuses, Date.now());
+  refreshUsage();
   // A provider's health can change without the registry's agent list
   // changing at all — the orbiting chip's dot colour must still catch up.
   renderAgentOrbits();

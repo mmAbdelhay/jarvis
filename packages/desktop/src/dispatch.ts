@@ -48,6 +48,7 @@ import {
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
+import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
 import {
   DESKTOP_OWNER,
@@ -307,6 +308,8 @@ export type DispatchDeps = {
   bookmarks: BookmarksHandlers;
   settings: SettingsHandlers;
   providers: { refreshCapacity(options: { force: boolean }): Promise<unknown> };
+  // usage:history — usage-history.ts's builder over what is already kept.
+  usageHistory: () => UsageHistory;
   // startVoice / stopVoice from main.ts — the one voice implementation the
   // hotkey and the mic button both drive.
   voiceControl: { start(): void; stop(): void };
@@ -1195,6 +1198,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // so this handler never rejects on a normal per-account failure.
     "providers:refresh": (_args, origin) =>
       deps.providers.refreshCapacity({ force: origin.kind !== "remote" }),
+    "usage:history": () => deps.usageHistory(),
     // M-b: the renderer's mic button drives the exact same start/stop path
     // as the global hotkey, so voice has one implementation no matter which
     // control triggers it — never a second, unwired-looking "click to talk"

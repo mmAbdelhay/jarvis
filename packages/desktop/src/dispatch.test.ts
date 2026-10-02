@@ -172,6 +172,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       restart: vi.fn(),
     },
     providers: { refreshCapacity: vi.fn(async () => undefined) },
+    usageHistory: () => ({ capacity: [], sessionsPerDay: [] }),
     voiceControl: { start: vi.fn(), stop: vi.fn() },
     readFile: vi.fn(async () => "{}"),
     uploads: { readJson: vi.fn(async () => ({ ok: true, value: {} })) },
