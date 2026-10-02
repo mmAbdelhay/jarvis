@@ -48,5 +48,7 @@ describe("createSqliteUsageStore", () => {
     usage.record({ id: "claude", at: 1, usedPercent: 1 });
     expect(sessions.history()).toEqual([]);
     usage.close();
+    // Both handles closed, or Windows cannot delete the file afterwards.
+    sessions.close?.();
   });
 });

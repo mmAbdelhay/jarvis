@@ -1039,7 +1039,10 @@ describe("createGitRemoteOps pull and push", () => {
     await commitFile(other, "theirs.txt", "x\n");
     await simpleGit(other).push();
     expect(await ops.pull(local)).toEqual({ ok: true, value: { updated: true } });
-    expect(await readFile(join(local, "theirs.txt"), "utf8")).toBe("x\n");
+    // Normalized: Git for Windows checks text out with CRLF.
+    expect((await readFile(join(local, "theirs.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe(
+      "x\n",
+    );
   });
 
   it("refuses to pull into a diverged branch rather than merging", async () => {
@@ -1193,6 +1196,23 @@ describe("createGitWorktrees", () => {
     const made = await worktrees.create(join(repo, "app"), "s");
     if (!made.ok) throw new Error(made.error.detail);
     expect(made.value.path.endsWith(join("-s", "app"))).toBe(true);
+  });
+
+  // macOS reaches its temp directory through the /var -> /private/var link
+  // and Windows through 8.3 short names; git reports the other spelling. A
+  // symlinked path is the same mismatch on any platform.
+  it("makes the worktree when the repository is reached through another spelling", async () => {
+    const { repo, root, worktrees } = await setup();
+    const linkDir = await mkdtemp(join(tmpdir(), "jarvis-link-"));
+    cleanups.push(() => rm(linkDir, { recursive: true, force: true }));
+    const linked = join(linkDir, "repo");
+    await symlink(repo, linked, "junction");
+
+    const made = await worktrees.create(linked, "s");
+    if (!made.ok) throw new Error(made.error.detail);
+    expect(made.value.path.startsWith(root)).toBe(true);
+    const found = await worktrees.info(made.value.path);
+    expect(found.ok && found.value !== null).toBe(true);
   });
 
   it("knows a worktree from a main checkout", async () => {

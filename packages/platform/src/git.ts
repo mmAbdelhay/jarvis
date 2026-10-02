@@ -1,5 +1,5 @@
 import { mkdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
 import { spawn } from "node:child_process";
 import type {
@@ -725,8 +725,13 @@ export function createGitWorktrees(options: GitWorktreeOptions): GitWorktrees {
         if (!(await git.checkIsRepo())) return failure("not-a-repo", repoPath);
         const top = (await git.revparse(["--show-toplevel"])).trim();
         // A project configured as a subdirectory of its repository runs in
-        // the same subdirectory of the worktree.
-        const inside = relative(top, repoPath);
+        // the same subdirectory of the worktree. Asked of git rather than
+        // computed with relative(top, repoPath): git spells `top` its own
+        // way (macOS's /private/var for /var, Windows' long name for a
+        // RUNNER~1 short one), and a relative path across two spellings
+        // climbs back out to the main checkout.
+        const prefix = (await git.revparse(["--show-prefix"])).trim();
+        const inside = prefix.replace(/\/+$/, "");
         const slug = slugify(label);
         const branch = `jarvis/${slug}`;
         const dir = join(options.root, `${slugify(basename(top))}-${slug}`);
