@@ -8,6 +8,12 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone redesign, Session and Changes: a session screen switches between Live,
+  Changes, Plan (with its progress) and Transcript; its plan opens on the
+  session, and notes on it are sent to the session (`plans:send` now also
+  accepts a live session id). Changes shows one branch card (branch picker,
+  ahead/behind, Pull / Push / Pull request, the worktree's merge and remove), a
+  file list with status badges and staged toggles, and a commit bar.
 - Phone redesign, Sessions and History: Sessions has a search field and
   status chips (All, Waiting, Running, Done) with live counts; History searches
   on the laptop, groups by day and loads 50 sessions at a time instead of all

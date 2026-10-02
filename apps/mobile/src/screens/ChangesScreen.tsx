@@ -26,6 +26,18 @@ import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
 
+/** Each status letter's badge colours: added green, deleted red, modified
+ *  and renamed blue, conflicted amber, untracked grey. */
+const STATUS_TONES: Record<string, { text: string; ground: string }> = {
+  A: { text: theme.colors.success, ground: theme.colors.successSurface },
+  M: { text: theme.colors.accentText, ground: theme.colors.accentSoft },
+  R: { text: theme.colors.accentText, ground: theme.colors.accentSoft },
+  C: { text: theme.colors.accentText, ground: theme.colors.accentSoft },
+  D: { text: theme.colors.danger, ground: theme.colors.dangerSurface },
+  U: { text: theme.colors.warning, ground: theme.colors.warningSurface },
+  "?": { text: theme.colors.textMuted, ground: theme.colors.surfaceAlt },
+};
+
 /** Git changes: the full-screen `/changes` route on a phone (with the
  *  session a detail link names), or an inline Workspace tab on a wide
  *  screen. The screen has no header of its own, so `embedded` changes
@@ -42,6 +54,7 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
   const [newBranch, setNewBranch] = useState("");
+  const [branchesOpen, setBranchesOpen] = useState(false);
   // Fix round 2 (New Breakage 1): the route id from a session-detail link
   // is consumed once, not on every refocus — otherwise it would keep
   // overriding any chip the user taps afterward for the life of this
@@ -88,6 +101,7 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
 
   const selectedFiles = changes.changes?.changes.files ?? [];
   const diff = changes.diff;
+  const stagedCount = selectedFiles.filter((file) => file.staged).length;
   const sessionsDisplay = historyListDisplay(history, language);
   // Fix round 2 (New Breakage 2): also gate on a session being chosen —
   // Commit/Stage previously reached the store's mutation queue with no
@@ -169,45 +183,61 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
       {changes.uncertain && <Text style={styles.warning}>{t(language, "changes.uncertain")}</Text>}
 
       {changes.changes && (
-        <View style={styles.repoBlock}>
-          <Text selectable style={styles.repoText}>
+        <View style={styles.card}>
+          <View style={styles.cardTop}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={t(language, "changes.branches")}
+              accessibilityState={{ expanded: branchesOpen }}
+              disabled={changes.branches === undefined}
+              onPress={() => setBranchesOpen((open) => !open)}
+              style={styles.branchButton}
+            >
+              <Text style={styles.branchText} numberOfLines={1}>
+                {changes.changes.changes.detached ? "HEAD" : changes.changes.changes.branch}
+                {changes.branches !== undefined && (branchesOpen ? " ▴" : " ▾")}
+              </Text>
+            </TouchableOpacity>
+            <Text
+              selectable
+              style={[styles.tracking, { writingDirection: "ltr" }]}
+              numberOfLines={1}
+            >
+              {trackingText(changes, language)}
+            </Text>
+          </View>
+          <Text selectable style={styles.repoPath} numberOfLines={1}>
             {changes.changes.changes.repoPath}
           </Text>
-          <Text style={styles.meta}>
-            {changes.changes.changes.detached ? "HEAD" : changes.changes.changes.branch} · +
-            {changes.changes.changes.insertions} -{changes.changes.changes.deletions}
-          </Text>
-        </View>
-      )}
-
-      {changes.changes && (
-        <View style={styles.repoBlock}>
-          <Text selectable style={[styles.meta, { writingDirection: "ltr" }]}>
-            {trackingText(changes, language)}
-          </Text>
-          <View style={styles.actionRow}>
+          <View style={styles.syncGrid}>
             {(
               [
-                ["changes.pull", () => changesStore.pull()],
-                ["changes.push", () => changesStore.push()],
-                ["changes.pullRequest", () => changesStore.pullRequest()],
+                ["changes.pull", () => changesStore.pull(), false],
+                ["changes.push", () => changesStore.push(), false],
+                ["changes.pullRequest", () => changesStore.pullRequest(), true],
               ] as const
-            ).map(([key, run]) => (
+            ).map(([key, run, primary]) => (
               <TouchableOpacity
                 key={key}
                 disabled={disabled}
-                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
+                accessibilityRole="button"
+                style={[
+                  styles.syncButton,
+                  primary && styles.syncPrimary,
+                  disabled ? styles.buttonDisabled : undefined,
+                ]}
                 onPress={() => {
                   void run();
                 }}
               >
-                <Text style={styles.buttonText}>{t(language, key)}</Text>
+                <Text style={[styles.syncText, primary && styles.syncPrimaryText]}>
+                  {t(language, key)}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
-          {changes.branches && (
-            <>
-              <Text style={styles.meta}>{t(language, "changes.branches")}</Text>
+          {branchesOpen && changes.branches && (
+            <View style={styles.branches}>
               <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
                 {changes.branches.local.map((branch) => {
                   const current =
@@ -216,28 +246,32 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
                     <TouchableOpacity
                       key={branch}
                       disabled={disabled || current}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: current }}
                       style={[styles.chip, current ? styles.chipActive : undefined]}
                       onPress={() => {
                         void changesStore.switchBranch(branch, false);
                       }}
                     >
-                      <Text style={styles.chipText}>{branch}</Text>
+                      <Text style={styles.chipMono}>{branch}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </ScrollView>
               <View style={styles.actionRow}>
                 <TextInput
-                  style={[styles.input, styles.branchInput]}
+                  style={styles.branchInput}
                   value={newBranch}
                   onChangeText={setNewBranch}
                   placeholder={t(language, "changes.newBranchPlaceholder")}
-                  placeholderTextColor={theme.colors.textMuted}
+                  placeholderTextColor={theme.colors.textDim}
+                  accessibilityLabel={t(language, "changes.newBranchPlaceholder")}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
                 <TouchableOpacity
                   disabled={disabled || newBranch.trim() === ""}
+                  accessibilityRole="button"
                   style={[
                     styles.smallButton,
                     disabled || newBranch.trim() === "" ? styles.buttonDisabled : undefined,
@@ -252,35 +286,39 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
                   <Text style={styles.buttonText}>{t(language, "changes.createBranch")}</Text>
                 </TouchableOpacity>
               </View>
-            </>
+            </View>
           )}
           {changes.worktree && (
-            <View style={styles.actionRow}>
+            <View style={styles.worktreeRow}>
               <Text selectable style={styles.meta}>
                 {t(language, "changes.worktree")}
               </Text>
-              {changes.worktree.baseBranch !== "" && (
+              <View style={styles.actionRow}>
+                {changes.worktree.baseBranch !== "" && (
+                  <TouchableOpacity
+                    disabled={disabled}
+                    accessibilityRole="button"
+                    style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
+                    onPress={() => {
+                      void changesStore.mergeWorktree();
+                    }}
+                  >
+                    <Text style={styles.linkButtonText}>
+                      {t(language, "changes.mergeInto", { branch: changes.worktree.baseBranch })}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   disabled={disabled}
+                  accessibilityRole="button"
                   style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
                   onPress={() => {
-                    void changesStore.mergeWorktree();
+                    void changesStore.removeWorktree();
                   }}
                 >
-                  <Text style={styles.buttonText}>
-                    {t(language, "changes.mergeInto", { branch: changes.worktree.baseBranch })}
-                  </Text>
+                  <Text style={styles.buttonText}>{t(language, "changes.removeWorktree")}</Text>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                disabled={disabled}
-                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
-                onPress={() => {
-                  void changesStore.removeWorktree();
-                }}
-              >
-                <Text style={styles.buttonText}>{t(language, "changes.removeWorktree")}</Text>
-              </TouchableOpacity>
+              </View>
             </View>
           )}
           {changes.done && (
@@ -304,34 +342,70 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
         </View>
       )}
 
-      {selectedFiles.length > 0 && (
-        <View style={styles.fileList}>
-          {selectedFiles.map((file) => (
-            <View key={file.path} style={styles.fileRow}>
-              <TouchableOpacity
-                style={styles.fileName}
-                onPress={() => changesStore.selectFile(file.path)}
-              >
-                <Text selectable style={styles.path}>
-                  {file.path}
-                </Text>
-                <Text style={styles.meta}>
-                  {file.status} · +{file.insertions} -{file.deletions}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={disabled}
-                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
-                onPress={() => {
-                  void changesStore.setStaged(file.path, !file.staged);
-                }}
-              >
-                <Text style={styles.buttonText}>
-                  {file.staged ? t(language, "changes.unstage") : t(language, "changes.stage")}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+      {selectedFiles.length > 0 && changes.changes && (
+        <View style={styles.filesSection}>
+          <Text style={styles.filesTitle}>
+            {t(language, "changes.fileCount", { count: selectedFiles.length })} ·{" "}
+            <Text style={styles.added}>+{changes.changes.changes.insertions}</Text>{" "}
+            <Text style={styles.removed}>−{changes.changes.changes.deletions}</Text>
+          </Text>
+          <View style={styles.fileList}>
+            {selectedFiles.map((file, index) => {
+              const tone = STATUS_TONES[file.status] ?? STATUS_TONES["?"];
+              const open = diff?.path === file.path;
+              return (
+                <View
+                  key={file.path}
+                  style={[
+                    styles.fileRow,
+                    index > 0 && styles.fileRowDivider,
+                    open && styles.fileRowOpen,
+                  ]}
+                >
+                  <Text
+                    style={[styles.statusBadge, { color: tone.text, backgroundColor: tone.ground }]}
+                  >
+                    {file.status}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.fileName}
+                    accessibilityRole="button"
+                    onPress={() => changesStore.selectFile(file.path)}
+                  >
+                    <Text selectable style={styles.path} numberOfLines={1}>
+                      {file.path}
+                    </Text>
+                    <Text style={styles.meta}>
+                      <Text style={styles.added}>+{file.insertions}</Text>{" "}
+                      <Text style={styles.removed}>−{file.deletions}</Text>
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={disabled}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: file.staged, disabled }}
+                    accessibilityLabel={
+                      file.staged ? t(language, "changes.unstage") : t(language, "changes.stage")
+                    }
+                    style={[
+                      styles.stageButton,
+                      file.staged && styles.stageButtonOn,
+                      disabled ? styles.buttonDisabled : undefined,
+                    ]}
+                    onPress={() => {
+                      void changesStore.setStaged(file.path, !file.staged);
+                    }}
+                  >
+                    <Text style={[styles.stageText, file.staged && styles.stageTextOn]}>
+                      {file.staged
+                        ? `✓ ${t(language, "changes.staged")}`
+                        : t(language, "changes.stage")}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </View>
         </View>
       )}
 
@@ -378,26 +452,34 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
         </View>
       )}
 
-      <TextInput
-        style={styles.input}
-        value={message}
-        onChangeText={setMessage}
-        placeholder={t(language, "changes.commitPlaceholder")}
-        placeholderTextColor={theme.colors.textMuted}
-        multiline
-      />
-      <TouchableOpacity
-        disabled={disabled || message.trim() === ""}
-        style={[
-          styles.button,
-          disabled || message.trim() === "" ? styles.buttonDisabled : undefined,
-        ]}
-        onPress={() => {
-          void commit();
-        }}
-      >
-        <Text style={styles.primaryButtonText}>{t(language, "changes.commit")}</Text>
-      </TouchableOpacity>
+      <View style={styles.commitRow}>
+        <TextInput
+          style={styles.input}
+          value={message}
+          onChangeText={setMessage}
+          placeholder={t(language, "changes.commitPlaceholder")}
+          placeholderTextColor={theme.colors.textDim}
+          accessibilityLabel={t(language, "changes.commitPlaceholder")}
+          multiline
+        />
+        <TouchableOpacity
+          disabled={disabled || message.trim() === ""}
+          accessibilityRole="button"
+          style={[
+            styles.button,
+            disabled || message.trim() === "" ? styles.buttonDisabled : undefined,
+          ]}
+          onPress={() => {
+            void commit();
+          }}
+        >
+          <Text style={styles.primaryButtonText}>
+            {stagedCount > 0
+              ? t(language, "changes.commitCount", { count: stagedCount })
+              : t(language, "changes.commit")}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -407,60 +489,168 @@ const styles = StyleSheet.create({
   content: { padding: theme.spacing.lg, gap: theme.spacing.md },
   sectionTitle: {
     color: theme.colors.text,
+    fontFamily: theme.font.bold,
     fontSize: theme.font.size.lg,
-    fontWeight: theme.font.weight.bold,
   },
   sessionStrip: { gap: theme.spacing.sm },
   chip: {
+    minHeight: 36,
+    justifyContent: "center",
     borderColor: theme.colors.border,
     borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
+    borderRadius: 999,
+    paddingHorizontal: 12,
   },
-  chipActive: { borderColor: theme.colors.primary, backgroundColor: theme.colors.surfaceAlt },
-  chipText: { color: theme.colors.text, maxWidth: 220 },
-  empty: { color: theme.colors.textMuted },
-  warning: { color: theme.colors.warning },
-  error: { color: theme.colors.danger },
+  chipActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  chipText: {
+    color: theme.colors.text,
+    fontFamily: theme.font.semibold,
+    fontSize: 13,
+    maxWidth: 220,
+  },
+  chipMono: { color: theme.colors.text, fontFamily: theme.font.mono, fontSize: 12 },
+  empty: { color: theme.colors.textMuted, fontFamily: theme.font.body },
+  warning: { color: theme.colors.warning, fontFamily: theme.font.body },
+  error: { color: theme.colors.danger, fontFamily: theme.font.body },
   failedBlock: { gap: theme.spacing.xs },
-  retry: { color: theme.colors.primary, fontWeight: theme.font.weight.bold },
-  repoBlock: {
-    borderColor: theme.colors.border,
+  retry: { color: theme.colors.accentText, fontFamily: theme.font.bold },
+  card: {
+    gap: 10,
+    padding: 12,
+    borderRadius: theme.radius.card + 2,
     borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    gap: theme.spacing.xs,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
   },
-  repoText: { color: theme.colors.text },
-  meta: { color: theme.colors.textMuted, fontSize: theme.font.size.sm },
-  fileList: { gap: theme.spacing.sm },
-  fileRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing.sm },
-  fileName: {
-    flex: 1,
-    borderColor: theme.colors.border,
+  cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  branchButton: {
+    flexShrink: 1,
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-  },
-  path: { color: theme.colors.text },
-  smallButton: {
+    borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceAlt,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    minWidth: 76,
-    alignItems: "center",
   },
-  buttonText: { color: theme.colors.text },
+  branchText: { color: theme.colors.text, fontFamily: theme.font.mono, fontSize: 13 },
+  tracking: {
+    flexShrink: 1,
+    color: theme.colors.textMuted,
+    fontFamily: theme.font.mono,
+    fontSize: 12,
+  },
+  repoPath: { color: theme.colors.textDim, fontFamily: theme.font.mono, fontSize: 11 },
+  syncGrid: { flexDirection: "row", gap: 8 },
+  syncButton: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.radius.control,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  syncPrimary: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accent },
+  syncText: { color: theme.colors.textSecondary, fontFamily: theme.font.bold, fontSize: 13 },
+  syncPrimaryText: { color: theme.colors.primaryText },
+  branches: { gap: 8 },
+  worktreeRow: {
+    gap: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.hairline,
+  },
+  meta: {
+    color: theme.colors.textMuted,
+    fontFamily: theme.font.body,
+    fontSize: theme.font.size.sm,
+  },
+  filesSection: { gap: 6 },
+  filesTitle: {
+    color: theme.colors.textDim,
+    fontFamily: theme.font.bold,
+    fontSize: 12,
+    letterSpacing: 0.6,
+  },
+  fileList: {
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairline,
+    overflow: "hidden",
+  },
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  fileRowDivider: { borderTopWidth: 1, borderTopColor: theme.colors.hairlineSoft },
+  fileRowOpen: { backgroundColor: theme.colors.surfaceAlt },
+  statusBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    overflow: "hidden",
+    textAlign: "center",
+    lineHeight: 22,
+    fontFamily: theme.font.monoSemibold,
+    fontSize: 11,
+  },
+  fileName: { flex: 1, minHeight: 40, justifyContent: "center", gap: 2 },
+  path: { color: theme.colors.text, fontFamily: theme.font.mono, fontSize: 12 },
+  stageButton: {
+    minHeight: 34,
+    minWidth: 76,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  stageButtonOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  stageText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 12 },
+  stageTextOn: { color: theme.colors.accentText, fontFamily: theme.font.bold },
+  smallButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  buttonText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 13 },
+  linkButtonText: { color: theme.colors.accentText, fontFamily: theme.font.bold, fontSize: 13 },
   actionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
     gap: theme.spacing.sm,
   },
-  branchInput: { flex: 1, minHeight: 0 },
-  success: { color: theme.colors.success },
-  link: { color: theme.colors.primary, textDecorationLine: "underline" },
-  diffBlock: { gap: theme.spacing.sm },
+  branchInput: {
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    color: theme.colors.text,
+    fontFamily: theme.font.mono,
+    fontSize: 13,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  success: { color: theme.colors.success, fontFamily: theme.font.semibold },
+  link: { color: theme.colors.accentText, textDecorationLine: "underline" },
+  diffBlock: {
+    gap: theme.spacing.sm,
+    padding: 10,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairlineSoft,
+    backgroundColor: theme.colors.terminalGround,
+  },
   // Fix round 1 (Important 4): forced LTR, like the terminal
   // (TerminalWebView.tsx) and key bar (KeyBar.tsx) — a unified diff's
   // +/-, padded line numbers and monospace content must not be bidi
@@ -468,26 +658,40 @@ const styles = StyleSheet.create({
   // contain Arabic text (constraint 7: real RTL stays outside code/
   // terminal/diff content).
   diffContent: { minWidth: 720, gap: theme.spacing.md, direction: "ltr" },
-  hunk: { gap: theme.spacing.xs },
-  hunkHeader: { color: theme.colors.primary, fontFamily: "monospace" },
-  diffLine: { color: theme.colors.text, fontFamily: "monospace" },
+  hunk: { gap: 0 },
+  hunkHeader: { color: theme.colors.accentText, fontFamily: theme.font.mono, fontSize: 12 },
+  diffLine: {
+    color: theme.colors.textSecondary,
+    fontFamily: theme.font.mono,
+    fontSize: 12,
+    lineHeight: 19,
+  },
   added: { color: theme.colors.success },
   removed: { color: theme.colors.danger },
+  commitRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   input: {
-    minHeight: 72,
+    flex: 1,
+    minHeight: 46,
+    maxHeight: 120,
     color: theme.colors.text,
+    fontFamily: theme.font.body,
+    fontSize: 15,
     borderColor: theme.colors.border,
     borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
+    borderRadius: theme.radius.card,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: theme.colors.surface,
     textAlignVertical: "top",
   },
   button: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
+    minHeight: 46,
+    paddingHorizontal: 16,
+    justifyContent: "center",
+    backgroundColor: theme.colors.success,
+    borderRadius: theme.radius.card,
     alignItems: "center",
   },
   buttonDisabled: { opacity: 0.45 },
-  primaryButtonText: { color: theme.colors.primaryText, fontWeight: theme.font.weight.bold },
+  primaryButtonText: { color: theme.colors.ground, fontFamily: theme.font.bold, fontSize: 14 },
 });

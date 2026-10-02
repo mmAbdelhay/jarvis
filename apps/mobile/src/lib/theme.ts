@@ -32,6 +32,7 @@ export const theme = {
     onWarning: "#1A1406",
     successSurface: "#10231A",
     successText: "#7FE3B4",
+    dangerSurface: "#2A1416",
     danger: "#FF6B6B",
     selected: "#1E2433",
     disabledDot: "#3A4152",

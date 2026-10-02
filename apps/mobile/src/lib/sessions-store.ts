@@ -19,6 +19,8 @@ export type SessionRowView = {
   summary: string;
   state: SessionState;
   agentId: string;
+  /** Where the session runs — what its plan panel looks in. */
+  projectPath: string;
   // `startedAt` added (fix round, 2026-09-19 redesign): the Sessions
   // screen's row-level "elapsed mono" field (`Sessions.dc.html`) needs a
   // start time — `parseSession` already requires and parses `startedAt` on
@@ -104,6 +106,7 @@ export function parseSessionList(value: unknown): SessionRowView[] {
       summary: session.summary,
       state: session.state,
       agentId: session.agentId,
+      projectPath: session.projectPath,
       startedAt: session.startedAt,
       lastActivityAt: session.lastActivityAt,
     };

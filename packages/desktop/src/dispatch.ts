@@ -1475,7 +1475,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // delivered. `panes()` carries the live/exited distinction `has`
       // alone does not.
       const pane = deps.shells.panes().find((candidate) => candidate.paneKey === paneKeyArg);
-      if (pane === undefined || pane.exited) return { ok: false, reason: "no-pane" };
+      // Not a terminal pane: a session's own screen sends to the session
+      // itself, the same input path session:input writes through — but
+      // only while SessionManager still owns it, so a finished session is
+      // "no pane" exactly as an exited shell is.
+      const sessionTarget =
+        pane === undefined && sessions.get(paneKeyArg) !== undefined ? paneKeyArg : undefined;
+      if ((pane === undefined || pane.exited) && sessionTarget === undefined) {
+        return { ok: false, reason: "no-pane" };
+      }
 
       const read = await deps.plans.files.read(pathArg);
       const blocks = read.ok ? read.value.blocks : [];
@@ -1491,7 +1499,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // The same path terminal:input writes through — ShellManager.write —
       // so a plan comment lands in the pane exactly as if the user had
       // pasted it themselves.
-      deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+      if (sessionTarget !== undefined) sessions.write(sessionTarget, bracketedSubmit(feedback));
+      else deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
       try {
         await deps.plans.comments.markSent(selected.map((comment) => comment.id));
       } catch (error) {

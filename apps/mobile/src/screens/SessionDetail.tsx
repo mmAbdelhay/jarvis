@@ -21,6 +21,7 @@ import { ComposeBar } from "@/components/ComposeBar";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
 import { PromptCard } from "@/components/PromptCard";
+import { SegmentTabs } from "@/components/SegmentTabs";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
@@ -28,7 +29,10 @@ import { clientPlatformFor } from "@/lib/client-platform";
 import { platformKey, t } from "@/lib/i18n";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import { useLanguage } from "@/lib/language-context";
+import { createPlansStore } from "@/lib/plans-store";
 import { useRpcClient } from "@/lib/rpc-context";
+import { PlanSheet } from "@/plan/PlanSheet";
+import { planProgressOf } from "@/plan/plan-progress";
 import { createSessionInput, type SessionInput } from "@/lib/session-input";
 import { answerPrompt, fetchPrompt, type PhonePrompt } from "@/lib/session-prompt";
 import {
@@ -97,6 +101,25 @@ export function SessionDetail(props: {
   const found = row !== undefined;
   const ended = isEnded(row?.state);
   const endedRef = useRef(ended);
+  // The session's plan, looked for where the session runs; notes on it are
+  // sent to the session itself (plans:send falls back to a live session).
+  const projectPath = row?.projectPath;
+  const plansStore = useMemo(
+    () =>
+      createPlansStore({
+        client,
+        paneKey: id,
+        ...(projectPath === undefined ? {} : { cwd: projectPath }),
+      }),
+    [client, id, projectPath],
+  );
+  const [planVisible, setPlanVisible] = useState(false);
+  const [, setPlanRevision] = useState(0);
+  useEffect(() => plansStore.subscribe(() => setPlanRevision((value) => value + 1)), [plansStore]);
+  useEffect(() => {
+    void plansStore.openDefault();
+  }, [plansStore]);
+  const planProgress = planProgressOf(plansStore.state.doc);
 
   // What the agent is waiting on, read every few seconds while this screen
   // is up and the session is live; answered by index and label, which the
@@ -320,16 +343,42 @@ export function SessionDetail(props: {
         <Stack.Screen options={{ title: row.summary }} />
       )}
       <Text style={styles.label}>{row.label}</Text>
-      <View style={styles.links}>
-        <TouchableOpacity onPress={() => router.push({ pathname: "/changes", params: { id } })}>
-          <Text style={styles.link}>{t(language, "changes.title")}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: "/transcript/[id]", params: { id } })}
-        >
-          <Text style={styles.link}>{t(language, "history.transcript")}</Text>
-        </TouchableOpacity>
+      <View style={styles.tabs}>
+        <SegmentTabs
+          label={t(language, "session.views")}
+          tabs={[
+            { key: "live", label: t(language, "session.live"), selected: true, onPress: () => {} },
+            {
+              key: "changes",
+              label: t(language, "changes.title"),
+              selected: false,
+              onPress: () => router.push({ pathname: "/changes", params: { id } }),
+            },
+            {
+              key: "plan",
+              label: t(language, "plans.title"),
+              ...(planProgress === undefined
+                ? {}
+                : { badge: `${planProgress.done}/${planProgress.total}` }),
+              selected: planVisible,
+              onPress: () => setPlanVisible(true),
+            },
+            {
+              key: "transcript",
+              label: t(language, "history.transcript"),
+              selected: false,
+              onPress: () => router.push({ pathname: "/transcript/[id]", params: { id } }),
+            },
+          ]}
+        />
       </View>
+      <PlanSheet
+        visible={planVisible}
+        store={plansStore}
+        language={language}
+        tabTitle={row.summary}
+        onClose={() => setPlanVisible(false)}
+      />
       {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -436,6 +485,7 @@ export function SessionDetail(props: {
 
 const styles = StyleSheet.create({
   promptSlot: { marginHorizontal: 12, marginBottom: 8 },
+  tabs: { paddingHorizontal: 12, paddingBottom: 8, backgroundColor: theme.colors.ground },
   container: { flex: 1, backgroundColor: theme.colors.terminalGround },
   status: {
     color: theme.colors.warning,
@@ -471,11 +521,4 @@ const styles = StyleSheet.create({
   },
   composeBarSlot: { flex: 1 },
   voiceNotice: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
-  links: {
-    flexDirection: "row",
-    gap: theme.spacing.md,
-    paddingHorizontal: theme.spacing.sm,
-    paddingBottom: theme.spacing.sm,
-  },
-  link: { color: theme.colors.primary },
 });
