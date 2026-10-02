@@ -963,6 +963,12 @@ async function makeRemotePair(): Promise<{ remote: string; local: string; other:
   return { remote, local, other };
 }
 
+/** A file git checked out, with Git for Windows' CRLF conversion undone so
+ *  one expectation holds on every platform. */
+async function readCheckedOut(path: string): Promise<string> {
+  return (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
+}
+
 async function commitFile(dir: string, name: string, text: string): Promise<void> {
   await writeFile(join(dir, name), text, "utf8");
   const git = simpleGit(dir);
@@ -1039,10 +1045,7 @@ describe("createGitRemoteOps pull and push", () => {
     await commitFile(other, "theirs.txt", "x\n");
     await simpleGit(other).push();
     expect(await ops.pull(local)).toEqual({ ok: true, value: { updated: true } });
-    // Normalized: Git for Windows checks text out with CRLF.
-    expect((await readFile(join(local, "theirs.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe(
-      "x\n",
-    );
+    expect(await readCheckedOut(join(local, "theirs.txt"))).toBe("x\n");
   });
 
   it("refuses to pull into a diverged branch rather than merging", async () => {
@@ -1181,7 +1184,7 @@ describe("createGitWorktrees", () => {
 
     expect(made.value.branch).toBe("jarvis/claude-acme-1");
     expect(made.value.path.startsWith(root)).toBe(true);
-    expect(await readFile(join(made.value.path, "kept.txt"), "utf8")).toBe("one\ntwo\nthree\n");
+    expect(await readCheckedOut(join(made.value.path, "kept.txt"))).toBe("one\ntwo\nthree\n");
     // The main checkout is untouched: same branch, nothing new in it.
     expect((await simpleGit(repo).status()).isClean()).toBe(true);
   });
@@ -1237,7 +1240,7 @@ describe("createGitWorktrees", () => {
       ok: true,
       value: { into: "main" },
     });
-    expect(await readFile(join(repo, "feature.txt"), "utf8")).toBe("f\n");
+    expect(await readCheckedOut(join(repo, "feature.txt"))).toBe("f\n");
   });
 
   it("refuses to merge over uncommitted work on either side", async () => {
