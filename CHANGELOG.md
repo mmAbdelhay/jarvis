@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- The plan panel shows a plan's checklist progress in its header ("3/7
+  done", with a meter), counted from its own `- [ ]` / `- [x]` items.
+
 - Answer a waiting session without its terminal. A session sitting at a
   permission menu, a `(y/n)` or a "Press Enter" shows the agent's own
   question and options on its Dashboard row and on the phone's session

@@ -3,7 +3,13 @@ import * as fsPromises from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
-import { parsePlan, replaceBlock, type PlanBlock } from "@jarvis/core";
+import {
+  parsePlan,
+  planProgress,
+  replaceBlock,
+  type PlanBlock,
+  type PlanProgress,
+} from "@jarvis/core";
 
 /**
  * Where the panel finds plan text: a running session's own reference to a
@@ -34,7 +40,21 @@ export type PlanEntry = {
 
 export type PlanList = { session?: PlanEntry; planMode: PlanEntry[]; repo: PlanEntry[] };
 
-export type PlanDoc = { path: string; mtimeMs: number; blocks: PlanBlock[] };
+export type PlanDoc = {
+  path: string;
+  mtimeMs: number;
+  blocks: PlanBlock[];
+  /** How far through its own checklist the plan is — computed here so the
+   *  renderer, which may not value-import core, can just show it. Absent
+   *  for a plan with no checklist. */
+  progress?: PlanProgress;
+};
+
+/** A PlanDoc for `content`, with its progress. */
+function planDoc(path: string, mtimeMs: number, blocks: PlanBlock[]): PlanDoc {
+  const progress = planProgress(blocks);
+  return { path, mtimeMs, blocks, ...(progress === undefined ? {} : { progress }) };
+}
 
 export type PlanResult<T> =
   | { ok: true; value: T }
@@ -439,7 +459,7 @@ export function createPlanFiles(deps: {
         const content = buffer.subarray(0, bytesRead).toString("utf8");
         return {
           ok: true,
-          value: { path, mtimeMs: info.mtimeMs, blocks: parsePlan(content) },
+          value: planDoc(path, info.mtimeMs, parsePlan(content)),
         };
       } catch (error) {
         return { ok: false, reason: "io", detail: String(error) };
@@ -469,7 +489,7 @@ export function createPlanFiles(deps: {
           return { ok: false, reason: "io", detail: String(error) };
         }
         const blocks = parsePlan(content);
-        const doc: PlanDoc = { path, mtimeMs: statted.info.mtimeMs, blocks };
+        const doc: PlanDoc = planDoc(path, statted.info.mtimeMs, blocks);
 
         if (statted.info.mtimeMs !== baseMtimeMs) return { ok: false, reason: "conflict", doc };
 
@@ -538,7 +558,7 @@ export function createPlanFiles(deps: {
 
         return {
           ok: true,
-          value: { path, mtimeMs: finalInfo.mtimeMs, blocks: parsePlan(updated) },
+          value: planDoc(path, finalInfo.mtimeMs, parsePlan(updated)),
         };
       });
     },

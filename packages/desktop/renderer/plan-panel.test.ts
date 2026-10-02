@@ -660,6 +660,28 @@ describe("createPlanPanel", () => {
     );
   });
 
+  it("shows the plan's own checklist progress when it has one, and nothing when it has none", async () => {
+    const withProgress = fakeApi({
+      plansRead: vi.fn(
+        async (): Promise<PlanResult<PlanDoc>> => ({
+          ok: true,
+          value: { ...doc, progress: { done: 3, total: 7 } },
+        }),
+      ),
+    });
+    const { panel } = setup(withProgress);
+    await panel.open(doc.path);
+    const progress = panel.element.querySelector<HTMLElement>(".plan-panel__progress");
+    expect(progress?.textContent).toBe("3/7 planDone");
+    expect(progress?.querySelector<HTMLElement>(".plan-panel__progress-fill")?.style.width).toBe(
+      "43%",
+    );
+
+    const { panel: plain } = setup();
+    await plain.open(doc.path);
+    expect(plain.element.querySelector(".plan-panel__progress")).toBeNull();
+  });
+
   it("S1: composes translated relative-time units for older updates", async () => {
     vi.spyOn(Date, "now").mockReturnValue(doc.mtimeMs + 5 * 60_000);
     const { panel } = setup();

@@ -483,6 +483,19 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       el("span", "plan-panel__path", dirName(doc.path)),
       el("span", "plan-panel__updated", `${t("planUpdated")} · ${relativeTime(doc.mtimeMs, t)}`),
     );
+    // The plan's own checklist, as the agent ticks it: "3/7 done" and a
+    // thin meter, so progress through a plan reads at a glance.
+    if (doc.progress !== undefined) {
+      const { done, total } = doc.progress;
+      const progress = el("span", "plan-panel__progress", `${done}/${total} ${t("planDone")}`);
+      progress.dir = "ltr";
+      const meter = el("span", "plan-panel__progress-meter", "");
+      const fill = el("span", "plan-panel__progress-fill", "");
+      fill.style.width = `${Math.round((done / total) * 100)}%`;
+      meter.append(fill);
+      progress.append(meter);
+      sub.append(progress);
+    }
     header.append(top, sub);
     return header;
   }

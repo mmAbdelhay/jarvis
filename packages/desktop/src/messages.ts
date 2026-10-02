@@ -76,6 +76,7 @@ export const MESSAGES = {
   planSourceToggle: (language: "ar" | "en"): string => (language === "ar" ? "المصدر" : "Source"),
   planClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق الخطة" : "Close plan"),
   planUpdated: (language: "ar" | "en"): string => (language === "ar" ? "حُدِّثت" : "Updated"),
+  planDone: (language: "ar" | "en"): string => (language === "ar" ? "منجزة" : "done"),
   planPickerOpen: (language: "ar" | "en"): string =>
     language === "ar" ? "اختر خطة" : "Choose a plan",
   planPickerSearch: (language: "ar" | "en"): string =>

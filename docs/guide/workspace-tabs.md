@@ -535,7 +535,9 @@ Toggle it from **⌘P → "Toggle plan panel"** or the tab's right-click menu.
 Nothing else can be opened, from the desktop or a phone: every read and write
 is checked against those folders after symlinks are resolved, only `.md`
 files, and nothing over 1 MB. **Source** shows the raw markdown instead of the
-rendered view.
+rendered view. A plan with a checklist (`- [ ]` / `- [x]` items) shows how far
+through it is in the header — "3/7 done" and a small meter — which moves as
+the agent ticks items off.
 
 **Editing a section.** Click a heading, paragraph, list or code block to edit
 it in place; **⌘S** writes back that section and nothing else, so the rest of
