@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone Changes screen: pull, push, open a pull request, switch or create a
+  branch, and merge or remove a session's worktree. A commit git refuses now
+  says why on the phone and keeps the draft.
 - Imported Copilot CLI sessions open with their conversation: History reads
   the session's `events.jsonl` instead of showing an empty view.
 - Find in an API response: a search field above the body marks every match,

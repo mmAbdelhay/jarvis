@@ -347,7 +347,11 @@ anything); an Editor, Database or Cluster tab's row links to the sidecar
 screens described above; a Docker or API tab's row opens the phone's own
 Docker or API screen, described next. The Changes tab shows a session's git
 status — staged and unstaged files, a diff per file — and lets you stage,
-unstage and commit from the phone; it refreshes on its own whenever the
+unstage and commit from the phone. It also shows where the branch stands
+against its remote (`origin/main ↑2 ↓1`) with Pull, Push and Pull request,
+lets you switch to another local branch or create one, and — for a session
+running in a worktree of its own — merge that worktree back or remove it.
+A pull request's address opens in the phone's browser. It refreshes on its own whenever the
 laptop's own file counts change, so it never shows a stale "clean" tree
 after a commit made elsewhere. The Docker tab lists a project's configured
 containers and their state, with start, stop, restart and compose up/down

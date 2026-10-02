@@ -586,6 +586,27 @@ export const STRINGS = {
   "changes.unstage": { en: "Unstage", ar: "إزالة" },
   "changes.commitPlaceholder": { en: "Commit message", ar: "رسالة الحفظ" },
   "changes.commit": { en: "Commit", ar: "حفظ" },
+  "changes.pull": { en: "Pull", ar: "سحب" },
+  "changes.push": { en: "Push", ar: "دفع" },
+  "changes.pullRequest": { en: "Pull request", ar: "طلب سحب" },
+  "changes.noUpstream": { en: "not on a remote yet", ar: "ليس على البعيد بعد" },
+  "changes.branches": { en: "Branch", ar: "الفرع" },
+  "changes.newBranchPlaceholder": { en: "New branch name", ar: "اسم فرع جديد" },
+  "changes.createBranch": { en: "Create", ar: "أنشئ" },
+  "changes.pulled": { en: "Pulled.", ar: "تم السحب." },
+  "changes.upToDate": { en: "Already up to date.", ar: "محدّث بالفعل." },
+  "changes.pushed": { en: "Pushed.", ar: "تم الدفع." },
+  "changes.switched": { en: "Switched branch.", ar: "تم تبديل الفرع." },
+  "changes.prCreated": { en: "Opened a new pull request:", ar: "فُتح طلب سحب جديد:" },
+  "changes.prExisting": { en: "The pull request for this branch:", ar: "طلب السحب لهذا الفرع:" },
+  "changes.worktree": { en: "Own worktree", ar: "worktree منفصلة" },
+  "changes.mergeInto": { en: "Merge into {branch}", ar: "ادمج في {branch}" },
+  "changes.merged": { en: "Merged into {branch}.", ar: "تم الدمج في {branch}." },
+  "changes.removeWorktree": { en: "Remove worktree", ar: "أزل الـ worktree" },
+  "changes.worktreeRemoved": {
+    en: "Removed the worktree; its branch is kept.",
+    ar: "أُزيلت الـ worktree، وبقي فرعها.",
+  },
   // Fix round 1 (Important 1 + Minor): a mutation the store refused because
   // the connection isn't open — distinct from a server-side error, so the
   // draft is kept and the user is told to reconnect, not just left silent.

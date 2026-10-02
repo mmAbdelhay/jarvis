@@ -10,6 +10,7 @@ import {
   ENDED_SESSION_NOTICE,
   type ChangesState,
   MUTATION_OFFLINE_NOTICE,
+  type SyncDone,
   MUTATION_SESSION_CHANGED_NOTICE,
   UNSUPPORTED_NOTICE,
 } from "./changes-store";
@@ -86,4 +87,38 @@ export function failedText(state: ChangesState, language: Language): string {
   return state.notice !== undefined
     ? noticeText(state.notice, language)
     : t(language, "common.loadFailed");
+}
+
+/** The branch's tracking line: `origin/main ↑2 ↓1`, the upstream alone when
+ *  in step, or a note that the branch is on no remote yet. */
+export function trackingText(state: ChangesState, language: Language): string {
+  const changes = state.changes?.changes;
+  if (changes === undefined) return "";
+  const { upstream, ahead = 0, behind = 0 } = changes;
+  if (upstream === undefined) return t(language, "changes.noUpstream");
+  const counts = [ahead > 0 ? `↑${ahead}` : "", behind > 0 ? `↓${behind}` : ""]
+    .filter((part) => part !== "")
+    .join(" ");
+  return counts === "" ? upstream : `${upstream} ${counts}`;
+}
+
+/** What a finished sync action says. A pull request's address is shown
+ *  beside it by the screen, which also offers to open it. */
+export function doneText(done: SyncDone, language: Language): string {
+  switch (done.kind) {
+    case "pulled":
+      return t(language, "changes.pulled");
+    case "upToDate":
+      return t(language, "changes.upToDate");
+    case "pushed":
+      return t(language, "changes.pushed");
+    case "switched":
+      return t(language, "changes.switched");
+    case "worktreeRemoved":
+      return t(language, "changes.worktreeRemoved");
+    case "merged":
+      return t(language, "changes.merged", { branch: done.into });
+    case "pullRequest":
+      return t(language, done.created ? "changes.prCreated" : "changes.prExisting");
+  }
 }

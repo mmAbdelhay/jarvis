@@ -1,6 +1,7 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,7 +10,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { failedText, noticeText, sessionIdToReopen, shouldClearDraft } from "@/lib/changes-screen";
+import {
+  doneText,
+  failedText,
+  noticeText,
+  sessionIdToReopen,
+  shouldClearDraft,
+  trackingText,
+} from "@/lib/changes-screen";
 import { createChangesStore, ENDED_SESSION_NOTICE, type ChangesState } from "@/lib/changes-store";
 import { historyListDisplay } from "@/lib/history-screen";
 import { createHistoryStore, type HistoryState } from "@/lib/history-store";
@@ -33,6 +41,7 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   const [connection, setConnection] = useState(client.state());
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
+  const [newBranch, setNewBranch] = useState("");
   // Fix round 2 (New Breakage 1): the route id from a session-detail link
   // is consumed once, not on every refocus — otherwise it would keep
   // overriding any chip the user taps afterward for the life of this
@@ -168,6 +177,130 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
             {changes.changes.changes.detached ? "HEAD" : changes.changes.changes.branch} · +
             {changes.changes.changes.insertions} -{changes.changes.changes.deletions}
           </Text>
+        </View>
+      )}
+
+      {changes.changes && (
+        <View style={styles.repoBlock}>
+          <Text selectable style={[styles.meta, { writingDirection: "ltr" }]}>
+            {trackingText(changes, language)}
+          </Text>
+          <View style={styles.actionRow}>
+            {(
+              [
+                ["changes.pull", () => changesStore.pull()],
+                ["changes.push", () => changesStore.push()],
+                ["changes.pullRequest", () => changesStore.pullRequest()],
+              ] as const
+            ).map(([key, run]) => (
+              <TouchableOpacity
+                key={key}
+                disabled={disabled}
+                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
+                onPress={() => {
+                  void run();
+                }}
+              >
+                <Text style={styles.buttonText}>{t(language, key)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {changes.branches && (
+            <>
+              <Text style={styles.meta}>{t(language, "changes.branches")}</Text>
+              <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
+                {changes.branches.local.map((branch) => {
+                  const current =
+                    !changes.branches?.detached && changes.branches?.current === branch;
+                  return (
+                    <TouchableOpacity
+                      key={branch}
+                      disabled={disabled || current}
+                      style={[styles.chip, current ? styles.chipActive : undefined]}
+                      onPress={() => {
+                        void changesStore.switchBranch(branch, false);
+                      }}
+                    >
+                      <Text style={styles.chipText}>{branch}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <View style={styles.actionRow}>
+                <TextInput
+                  style={[styles.input, styles.branchInput]}
+                  value={newBranch}
+                  onChangeText={setNewBranch}
+                  placeholder={t(language, "changes.newBranchPlaceholder")}
+                  placeholderTextColor={theme.colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  disabled={disabled || newBranch.trim() === ""}
+                  style={[
+                    styles.smallButton,
+                    disabled || newBranch.trim() === "" ? styles.buttonDisabled : undefined,
+                  ]}
+                  onPress={() => {
+                    const name = newBranch.trim();
+                    void changesStore.switchBranch(name, true).then(() => {
+                      if (changesStore.get().done?.kind === "switched") setNewBranch("");
+                    });
+                  }}
+                >
+                  <Text style={styles.buttonText}>{t(language, "changes.createBranch")}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+          {changes.worktree && (
+            <View style={styles.actionRow}>
+              <Text selectable style={styles.meta}>
+                {t(language, "changes.worktree")}
+              </Text>
+              {changes.worktree.baseBranch !== "" && (
+                <TouchableOpacity
+                  disabled={disabled}
+                  style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
+                  onPress={() => {
+                    void changesStore.mergeWorktree();
+                  }}
+                >
+                  <Text style={styles.buttonText}>
+                    {t(language, "changes.mergeInto", { branch: changes.worktree.baseBranch })}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                disabled={disabled}
+                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
+                onPress={() => {
+                  void changesStore.removeWorktree();
+                }}
+              >
+                <Text style={styles.buttonText}>{t(language, "changes.removeWorktree")}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {changes.done && (
+            <Text style={styles.success}>
+              {doneText(changes.done, language)}
+              {changes.done.kind === "pullRequest" && " "}
+              {changes.done.kind === "pullRequest" && (
+                <Text
+                  style={styles.link}
+                  onPress={() => {
+                    if (changes.done?.kind === "pullRequest") {
+                      void Linking.openURL(changes.done.url).catch(() => undefined);
+                    }
+                  }}
+                >
+                  {changes.done.url}
+                </Text>
+              )}
+            </Text>
+          )}
         </View>
       )}
 
@@ -318,6 +451,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { color: theme.colors.text },
+  actionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+  },
+  branchInput: { flex: 1, minHeight: 0 },
+  success: { color: theme.colors.success },
+  link: { color: theme.colors.primary, textDecorationLine: "underline" },
   diffBlock: { gap: theme.spacing.sm },
   // Fix round 1 (Important 4): forced LTR, like the terminal
   // (TerminalWebView.tsx) and key bar (KeyBar.tsx) — a unified diff's

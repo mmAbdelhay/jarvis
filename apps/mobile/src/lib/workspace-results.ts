@@ -1,4 +1,11 @@
-import type { GitChanges, GitFileChange, GitFileDiff } from "@jarvis/core";
+import type {
+  GitBranches,
+  GitChanges,
+  GitFileChange,
+  GitFileDiff,
+  GitPullRequest,
+  GitWorktreeInfo,
+} from "@jarvis/core";
 import type { TranscriptEntry } from "@jarvis/wire";
 import type { Language } from "./i18n";
 
@@ -104,6 +111,11 @@ function parseGitChanges(value: unknown): GitChanges | undefined {
     if (parsed === undefined) return undefined;
     files.push(parsed);
   }
+  // The tracking fields are optional on the wire: a laptop that predates
+  // them sends none, and a branch with no upstream sends no counts.
+  if (obj.upstream !== undefined && !isString(obj.upstream)) return undefined;
+  if (obj.ahead !== undefined && !isFiniteNumber(obj.ahead)) return undefined;
+  if (obj.behind !== undefined && !isFiniteNumber(obj.behind)) return undefined;
   return {
     repoPath: obj.repoPath,
     branch: obj.branch,
@@ -111,7 +123,54 @@ function parseGitChanges(value: unknown): GitChanges | undefined {
     files,
     insertions: obj.insertions,
     deletions: obj.deletions,
+    ...(obj.upstream === undefined ? {} : { upstream: obj.upstream }),
+    ...(obj.ahead === undefined ? {} : { ahead: obj.ahead }),
+    ...(obj.behind === undefined ? {} : { behind: obj.behind }),
   };
+}
+
+export function parseGitBranches(value: unknown): GitBranches | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const obj = value as Record<string, unknown>;
+  if (!isString(obj.current) || typeof obj.detached !== "boolean") return undefined;
+  if (!Array.isArray(obj.local) || !obj.local.every(isString)) return undefined;
+  return { current: obj.current, detached: obj.detached, local: [...obj.local] };
+}
+
+/** `null` is a real answer here — the session runs in no worktree of its
+ *  own — so a parsed "none" is `{ worktree: null }`, never undefined. */
+export function parseWorktreeInfo(
+  value: unknown,
+): { worktree: GitWorktreeInfo | null } | undefined {
+  if (value === null) return { worktree: null };
+  if (typeof value !== "object") return undefined;
+  const obj = value as Record<string, unknown>;
+  if (!isString(obj.base) || !isString(obj.branch) || !isString(obj.baseBranch)) {
+    return undefined;
+  }
+  return { worktree: { base: obj.base, branch: obj.branch, baseBranch: obj.baseBranch } };
+}
+
+export function parsePullResult(value: unknown): { updated: boolean } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const updated = (value as Record<string, unknown>).updated;
+  return typeof updated === "boolean" ? { updated } : undefined;
+}
+
+/** Only an https address is accepted: the phone hands it to the system
+ *  browser, and a URL nobody checked is not something to open. */
+export function parsePullRequest(value: unknown): GitPullRequest | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const obj = value as Record<string, unknown>;
+  if (!isString(obj.url) || !obj.url.startsWith("https://")) return undefined;
+  if (typeof obj.created !== "boolean") return undefined;
+  return { url: obj.url, created: obj.created };
+}
+
+export function parseMergeResult(value: unknown): { into: string } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const into = (value as Record<string, unknown>).into;
+  return isString(into) ? { into } : undefined;
 }
 
 export function parseChangesView(value: unknown): ChangesView | undefined {

@@ -409,3 +409,163 @@ describe("createChangesStore", () => {
     expect(reqs(socket, "git:changes").length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("createChangesStore sync actions", () => {
+  async function opened() {
+    const env = createEnv();
+    const store = createChangesStore({ client: env.client });
+    store.open("s1");
+    await answer(env.socket, reqs(env.socket, "git:changes")[0]?.id as number, changes("s1", {}));
+    return { ...env, store };
+  }
+
+  it("reads branches and the worktree once per session, not on every refresh", async () => {
+    const { socket, store } = await opened();
+    expect(reqs(socket, "git:branches")[0]).toMatchObject({ a: ["s1"] });
+    await answer(socket, reqs(socket, "git:branches")[0]?.id as number, {
+      ok: true,
+      value: { current: "main", detached: false, local: ["feature", "main"] },
+    });
+    await answer(socket, reqs(socket, "git:worktree")[0]?.id as number, {
+      ok: true,
+      value: { base: "/repo", branch: "jarvis/s1", baseBranch: "main" },
+    });
+    expect(store.get().branches?.local).toEqual(["feature", "main"]);
+    expect(store.get().worktree?.baseBranch).toBe("main");
+
+    store.refresh();
+    await answer(socket, reqs(socket, "git:changes")[1]?.id as number, changes());
+    expect(reqs(socket, "git:branches")).toHaveLength(1);
+  });
+
+  it("a session in no worktree, or a laptop that refuses the read, draws no controls", async () => {
+    const { socket, store } = await opened();
+    await fail(socket, reqs(socket, "git:branches")[0]?.id as number, "unknown channel");
+    await answer(socket, reqs(socket, "git:worktree")[0]?.id as number, { ok: true, value: null });
+    expect(store.get().branches).toBeUndefined();
+    expect(store.get().worktree).toBeUndefined();
+    expect(store.get().phase).toBe("ready");
+  });
+
+  it("reports a pull that moved HEAD, then reads branches again", async () => {
+    const { socket, store } = await opened();
+    const pulling = store.pull();
+    await flush();
+    expect(reqs(socket, "git:pull")[0]).toMatchObject({ a: ["s1"] });
+    await answer(socket, reqs(socket, "git:pull")[0]?.id as number, {
+      ok: true,
+      value: { updated: true },
+    });
+    await pulling;
+    expect(store.get().done).toEqual({ kind: "pulled" });
+    await answer(socket, reqs(socket, "git:changes")[1]?.id as number, changes());
+    expect(reqs(socket, "git:branches")).toHaveLength(2);
+  });
+
+  it("says up to date when nothing came in", async () => {
+    const { socket, store } = await opened();
+    const pulling = store.pull();
+    await flush();
+    await answer(socket, reqs(socket, "git:pull")[0]?.id as number, {
+      ok: true,
+      value: { updated: false },
+    });
+    await pulling;
+    expect(store.get().done).toEqual({ kind: "upToDate" });
+  });
+
+  it("shows git's own refusal and reports nothing done", async () => {
+    const { socket, store } = await opened();
+    const pushing = store.push();
+    await flush();
+    await answer(socket, reqs(socket, "git:push")[0]?.id as number, {
+      ok: false,
+      text: "The remote has commits this branch does not.",
+      language: "en",
+    });
+    await pushing;
+    expect(store.get().notice).toBe("The remote has commits this branch does not.");
+    expect(store.get().done).toBeUndefined();
+  });
+
+  it("keeps a pull request's https address, and refuses any other", async () => {
+    const { socket, store } = await opened();
+    const opening = store.pullRequest();
+    await flush();
+    await answer(socket, reqs(socket, "git:pullRequest")[0]?.id as number, {
+      ok: true,
+      value: { url: "https://github.com/o/r/pull/7", created: true },
+    });
+    await opening;
+    expect(store.get().done).toEqual({
+      kind: "pullRequest",
+      url: "https://github.com/o/r/pull/7",
+      created: true,
+    });
+
+    const again = store.pullRequest();
+    await flush();
+    await answer(socket, reqs(socket, "git:pullRequest")[1]?.id as number, {
+      ok: true,
+      value: { url: "javascript:alert(1)", created: false },
+    });
+    await again;
+    expect(store.get().done).toBeUndefined();
+  });
+
+  it("switches and creates branches with the name and flag the laptop expects", async () => {
+    const { socket, store } = await opened();
+    const switching = store.switchBranch("feature/x", true);
+    await flush();
+    expect(reqs(socket, "git:switchBranch")[0]).toMatchObject({ a: ["s1", "feature/x", true] });
+    await answer(socket, reqs(socket, "git:switchBranch")[0]?.id as number, {
+      ok: true,
+      value: null,
+    });
+    await switching;
+    expect(store.get().done).toEqual({ kind: "switched" });
+  });
+
+  it("merges a worktree into the named branch", async () => {
+    const { socket, store } = await opened();
+    const merging = store.mergeWorktree();
+    await flush();
+    await answer(socket, reqs(socket, "git:mergeWorktree")[0]?.id as number, {
+      ok: true,
+      value: { into: "main" },
+    });
+    await merging;
+    expect(store.get().done).toEqual({ kind: "merged", into: "main" });
+  });
+
+  it("does not read a removed worktree again", async () => {
+    const { socket, store } = await opened();
+    await answer(socket, reqs(socket, "git:worktree")[0]?.id as number, {
+      ok: true,
+      value: { base: "/repo", branch: "jarvis/s1", baseBranch: "main" },
+    });
+    const removing = store.removeWorktree();
+    await flush();
+    await answer(socket, reqs(socket, "git:removeWorktree")[0]?.id as number, {
+      ok: true,
+      value: null,
+    });
+    await removing;
+    expect(store.get().done).toEqual({ kind: "worktreeRemoved" });
+    expect(store.get().worktree).toBeUndefined();
+    expect(reqs(socket, "git:changes")).toHaveLength(1);
+  });
+
+  it("keeps the commit draft when git refuses the commit inside a successful reply", async () => {
+    const { socket, store } = await opened();
+    const committing = store.commit("msg");
+    await flush();
+    await answer(socket, reqs(socket, "git:commit")[0]?.id as number, {
+      ok: false,
+      text: "Nothing is staged.",
+      language: "en",
+    });
+    await committing;
+    expect(store.get().notice).toBe("Nothing is staged.");
+  });
+});
