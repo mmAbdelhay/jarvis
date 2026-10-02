@@ -8,6 +8,12 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- The Changes view finishes the git loop: a branch picker and **New
+  branch**, where the branch stands against its remote (`↑2 ↓1`),
+  fast-forward-only **Pull**, never-forced **Push** (the first push sets
+  the upstream), and **Pull request**, which opens the branch's pull
+  request — or creates it with `gh` — in the project's browser tab.
+
 - The file sidebar keeps itself current: it re-reads after every command
   and every few seconds while it is on screen, keeping open folders open
   and leaving unchanged rows alone. Right-click for **New file**, **New

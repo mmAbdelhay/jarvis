@@ -102,6 +102,7 @@ import {
   createFaviconStore,
   createFsImportDeps,
   createGitProvider,
+  createGitRemoteOps,
   createHeadlampManager,
   defaultHeadlampBinary,
   defaultHistoryPath,
@@ -1888,6 +1889,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // createGitHandlers' own doc comment.
   const gitHandlers = createGitHandlers({
     git,
+    // Pull, push and `gh` run with agentEnv, the login-shell PATH, read
+    // per call because it is resolved after startup.
+    remote: createGitRemoteOps({ env: () => agentEnv }),
     sessions: { get: (id) => sessions.get(id) },
     language: PRIMARY_LANGUAGE,
     refresh: () => changeTracker.refresh(),

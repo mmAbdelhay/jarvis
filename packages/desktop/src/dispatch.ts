@@ -236,7 +236,18 @@ export type DispatchDeps = {
   sessionTranscript: ReturnType<typeof createTranscriptHandler>;
   sessionResume: ReturnType<typeof createResumeInTerminalHandler>;
   voice: { setTarget(sessionId: string | undefined): void };
-  git: Pick<GitHandlers, "changes" | "fileDiff" | "setStaged" | "commit">;
+  git: Pick<
+    GitHandlers,
+    | "changes"
+    | "fileDiff"
+    | "setStaged"
+    | "commit"
+    | "branches"
+    | "switchBranch"
+    | "pull"
+    | "push"
+    | "pullRequest"
+  >;
   /** The core's tab state (core/tab-host.ts). What only a hosted page's
    *  view can do — back, reload, DevTools, visibility — is not here: those
    *  channels are Electron-bound (desktop-only.ts). */
@@ -594,6 +605,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "git:setStaged": ([sessionId, path, staged]) =>
       git.setStaged(sessionId as string, path as string, staged as boolean),
     "git:commit": ([sessionId, message]) => git.commit(sessionId as string, message as string),
+    "git:branches": ([sessionId]) => git.branches(sessionId as string),
+    "git:switchBranch": ([sessionId, name, create]) =>
+      git.switchBranch(sessionId as string, name as string, create as boolean),
+    "git:pull": ([sessionId]) => git.pull(sessionId as string),
+    "git:push": ([sessionId]) => git.push(sessionId as string),
+    "git:pullRequest": ([sessionId]) => git.pullRequest(sessionId as string),
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one.

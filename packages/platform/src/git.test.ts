@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 import { parseUnifiedDiff } from "@jarvis/core";
 import { simpleGit } from "simple-git";
 import { afterEach, describe, expect, it } from "vitest";
-import { createGitProvider, DEFAULT_GIT_TIMEOUT_MS } from "./git.js";
+import {
+  createGitProvider,
+  createGitRemoteOps,
+  DEFAULT_GIT_TIMEOUT_MS,
+  type GhRunner,
+} from "./git.js";
 
 /**
  * Whether this process may create symlinks. On macOS and Linux always; on
@@ -923,5 +928,227 @@ describe("createGitProvider() staging and commit", () => {
     const after = await provider.changes(dir);
     if (!after.ok) throw new Error("expected ok");
     expect(after.value.files[0]?.staged).toBe(true);
+  });
+});
+
+/**
+ * A bare "remote" and a clone of it that tracks `main`, both real. A second
+ * clone stands in for someone else pushing.
+ */
+async function makeRemotePair(): Promise<{ remote: string; local: string; other: string }> {
+  const base = await mkdtemp(join(tmpdir(), "jarvis-git-remote-"));
+  cleanups.push(() => rm(base, { recursive: true, force: true }));
+  const seed = await makeRepo();
+  const remote = join(base, "remote.git");
+  await simpleGit().clone(seed, remote, ["--bare"]);
+  const local = join(base, "local");
+  const other = join(base, "other");
+  for (const dir of [local, other]) {
+    await simpleGit().clone(remote, dir);
+    const git = simpleGit(dir);
+    await git.addConfig("user.name", "Jarvis Test");
+    await git.addConfig("user.email", "test@example.invalid");
+    await git.addConfig("commit.gpgsign", "false");
+  }
+  return { remote, local, other };
+}
+
+async function commitFile(dir: string, name: string, text: string): Promise<void> {
+  await writeFile(join(dir, name), text, "utf8");
+  const git = simpleGit(dir);
+  await git.add([name]);
+  await git.commit(`add ${name}`);
+}
+
+describe("createGitProvider().changes tracking", () => {
+  it("reports the upstream and how far ahead and behind it the branch is", async () => {
+    const { local, other } = await makeRemotePair();
+    await commitFile(other, "theirs.txt", "x\n");
+    await simpleGit(other).push();
+    await simpleGit(local).fetch();
+    await commitFile(local, "mine.txt", "y\n");
+
+    const outcome = await createGitProvider().changes(local);
+    if (!outcome.ok) throw new Error(outcome.error.detail);
+    expect(outcome.value).toMatchObject({ upstream: "origin/main", ahead: 1, behind: 1 });
+  });
+
+  it("leaves the tracking fields out entirely for a branch that tracks nothing", async () => {
+    const dir = await makeRepo();
+    const outcome = await createGitProvider().changes(dir);
+    if (!outcome.ok) throw new Error(outcome.error.detail);
+    expect("upstream" in outcome.value).toBe(false);
+  });
+});
+
+describe("createGitRemoteOps branches", () => {
+  it("lists local branches and switches between them", async () => {
+    const dir = await makeRepo();
+    const ops = createGitRemoteOps();
+
+    expect(await ops.switchBranch(dir, "feat/voice", true)).toEqual({ ok: true, value: null });
+    const listed = await ops.branches(dir);
+    if (!listed.ok) throw new Error(listed.error.detail);
+    expect(listed.value.current).toBe("feat/voice");
+    expect(listed.value.local).toEqual(expect.arrayContaining(["main", "feat/voice"]));
+
+    expect(await ops.switchBranch(dir, "main", false)).toEqual({ ok: true, value: null });
+    expect((await simpleGit(dir).status()).current).toBe("main");
+  });
+
+  it("refuses a name git would read as an option or not accept as a ref", async () => {
+    const dir = await makeRepo();
+    const ops = createGitRemoteOps();
+    for (const name of ["-D", "--orphan", "has space", "a..b", "", "trailing/"]) {
+      const result = await ops.switchBranch(dir, name, true);
+      expect(result.ok ? "ok" : result.error.code).toBe("invalid-branch");
+    }
+    expect((await simpleGit(dir).branchLocal()).all).toEqual(["main"]);
+  });
+
+  it("refuses to switch to a branch that does not exist without creating it", async () => {
+    const dir = await makeRepo();
+    const result = await createGitRemoteOps().switchBranch(dir, "nope", false);
+    expect(result.ok ? "ok" : result.error.code).toBe("invalid-branch");
+  });
+
+  it("carries uncommitted changes across a switch, as git does", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "kept.txt"), "edited\n", "utf8");
+    await createGitRemoteOps().switchBranch(dir, "wip", true);
+    expect(await readFile(join(dir, "kept.txt"), "utf8")).toBe("edited\n");
+  });
+});
+
+describe("createGitRemoteOps pull and push", () => {
+  it("fast-forwards a pull and says whether anything came in", async () => {
+    const { local, other } = await makeRemotePair();
+    const ops = createGitRemoteOps();
+    expect(await ops.pull(local)).toEqual({ ok: true, value: { updated: false } });
+
+    await commitFile(other, "theirs.txt", "x\n");
+    await simpleGit(other).push();
+    expect(await ops.pull(local)).toEqual({ ok: true, value: { updated: true } });
+    expect(await readFile(join(local, "theirs.txt"), "utf8")).toBe("x\n");
+  });
+
+  it("refuses to pull into a diverged branch rather than merging", async () => {
+    const { local, other } = await makeRemotePair();
+    await commitFile(other, "theirs.txt", "x\n");
+    await simpleGit(other).push();
+    await commitFile(local, "mine.txt", "y\n");
+    const head = await simpleGit(local).revparse(["HEAD"]);
+
+    const result = await createGitRemoteOps().pull(local);
+    expect(result.ok ? "ok" : result.error.code).toBe("diverged");
+    expect(await simpleGit(local).revparse(["HEAD"])).toBe(head);
+  });
+
+  it("says a branch with no upstream has nothing to pull from", async () => {
+    const dir = await makeRepo();
+    const result = await createGitRemoteOps().pull(dir);
+    expect(result.ok ? "ok" : result.error.code).toBe("no-upstream");
+  });
+
+  it("pushes a tracked branch, and a new branch to origin with its upstream set", async () => {
+    const { local, remote } = await makeRemotePair();
+    const ops = createGitRemoteOps();
+    await commitFile(local, "mine.txt", "y\n");
+    expect(await ops.push(local)).toEqual({
+      ok: true,
+      value: { remote: "origin", branch: "main", upstreamSet: false },
+    });
+
+    await ops.switchBranch(local, "feat/x", true);
+    await commitFile(local, "feature.txt", "z\n");
+    expect(await ops.push(local)).toEqual({
+      ok: true,
+      value: { remote: "origin", branch: "feat/x", upstreamSet: true },
+    });
+    expect((await simpleGit(remote).branch()).all).toEqual(expect.arrayContaining(["feat/x"]));
+    expect((await simpleGit(local).status()).tracking).toBe("origin/feat/x");
+  });
+
+  it("never forces: a push the remote is ahead of is refused, not overwritten", async () => {
+    const { local, other } = await makeRemotePair();
+    await commitFile(other, "theirs.txt", "x\n");
+    await simpleGit(other).push();
+    await commitFile(local, "mine.txt", "y\n");
+
+    const result = await createGitRemoteOps().push(local);
+    expect(result.ok ? "ok" : result.error.code).toBe("rejected");
+  });
+
+  it("says there is nowhere to push when the repository has no remote", async () => {
+    const dir = await makeRepo();
+    const result = await createGitRemoteOps().push(dir);
+    expect(result.ok ? "ok" : result.error.code).toBe("no-remote");
+  });
+});
+
+describe("createGitRemoteOps pull requests", () => {
+  function ghDouble(answers: Record<string, { code: number; stdout: string; stderr?: string }>) {
+    const calls: string[][] = [];
+    const gh: GhRunner = async (args) => {
+      calls.push(args);
+      const answer = answers[args.slice(0, 2).join(" ")] ?? { code: 1, stdout: "" };
+      return { stderr: "", ...answer };
+    };
+    return { gh, calls };
+  }
+
+  it("reuses the open pull request for the branch", async () => {
+    const { local } = await makeRemotePair();
+    const { gh, calls } = ghDouble({
+      "pr view": { code: 0, stdout: '{"url":"https://github.com/o/r/pull/7","state":"OPEN"}' },
+    });
+    const result = await createGitRemoteOps({ gh }).pullRequest(local);
+    expect(result).toEqual({
+      ok: true,
+      value: { url: "https://github.com/o/r/pull/7", created: false },
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("pushes a branch the remote lacks, then creates the pull request", async () => {
+    const { local, remote } = await makeRemotePair();
+    const ops0 = createGitRemoteOps();
+    await ops0.switchBranch(local, "feat/pr", true);
+    await commitFile(local, "pr.txt", "p\n");
+    const { gh, calls } = ghDouble({
+      "pr view": { code: 1, stdout: "", stderr: "no pull requests found" },
+      "pr create": {
+        code: 0,
+        stdout: "Warning: 1 uncommitted change\nhttps://github.com/o/r/pull/8\n",
+      },
+    });
+
+    const result = await createGitRemoteOps({ gh }).pullRequest(local);
+
+    expect(result).toEqual({
+      ok: true,
+      value: { url: "https://github.com/o/r/pull/8", created: true },
+    });
+    expect(calls.map((args) => args.slice(0, 2).join(" "))).toEqual(["pr view", "pr create"]);
+    expect((await simpleGit(remote).branch()).all).toEqual(expect.arrayContaining(["feat/pr"]));
+  });
+
+  it("names gh when it is missing or signed out", async () => {
+    const { local } = await makeRemotePair();
+    const missing: GhRunner = async () => {
+      throw Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
+    };
+    const absent = await createGitRemoteOps({ gh: missing }).pullRequest(local);
+    expect(absent.ok ? "ok" : absent.error.code).toBe("no-gh");
+
+    const { gh } = ghDouble({
+      "pr create": {
+        code: 4,
+        stdout: "",
+        stderr: "To get started with GitHub CLI, please run:  gh auth login",
+      },
+    });
+    const signedOut = await createGitRemoteOps({ gh }).pullRequest(local);
+    expect(signedOut.ok ? "ok" : signedOut.error.code).toBe("no-gh");
   });
 });

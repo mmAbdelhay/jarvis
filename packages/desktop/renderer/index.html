@@ -281,6 +281,18 @@
       <div id="changes-by" class="mono changes-muted"></div>
     </div>
 
+    <div id="changes-sync" class="changes-sync" hidden>
+      <select id="changes-branch-select" class="changes-branch-select mono" dir="ltr"></select>
+      <button id="changes-new-branch" class="changes-sync-btn" type="button">New branch</button>
+      <input id="changes-new-branch-name" class="changes-branch-input mono" type="text" dir="ltr" autocomplete="off" spellcheck="false" hidden />
+      <div id="changes-tracking" class="mono changes-muted" dir="ltr"></div>
+      <div class="spacer"></div>
+      <button id="changes-pull" class="changes-sync-btn" type="button">Pull</button>
+      <button id="changes-push" class="changes-sync-btn" type="button">Push</button>
+      <button id="changes-pr" class="changes-sync-btn changes-sync-btn--accent" type="button">Pull request</button>
+    </div>
+    <div id="changes-sync-status" class="changes-notice changes-sync-status" hidden></div>
+
     <div id="changes-stale-notice" class="changes-notice" hidden></div>
     <div id="changes-error" class="changes-error" hidden></div>
 

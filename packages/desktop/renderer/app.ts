@@ -10,7 +10,13 @@ import type {
 } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
+import {
+  applyStaticChrome,
+  openChanges,
+  wireCommitBar,
+  wireDiffModes,
+  wireSyncBar,
+} from "./changes.js";
 import { showView, syncHostedView } from "./views.js";
 import {
   initWorkspace,
@@ -332,6 +338,7 @@ wireHistoryPanel();
 wireNav();
 wireDiffModes();
 wireCommitBar();
+wireSyncBar();
 wireProvidersPanel();
 wireSessionView();
 // No afterRefresh: the Dashboard SESSIONS card already redraws itself from

@@ -80,6 +80,7 @@ import {
   ProviderMonitor,
   ProviderStatusStore,
   type GitProvider,
+  type GitRemoteOps,
   type ProviderStatus,
 } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
@@ -419,6 +420,142 @@ function handlerFakes(overrides: Partial<GitProvider> = {}) {
   });
   return { handlers, refreshes };
 }
+
+describe("createGitHandlers' branch, pull, push and pull-request calls", () => {
+  const session = {
+    id: "s1",
+    project: "acme",
+    projectPath: "/projects/acme",
+    agentId: "claude-acme",
+    state: "running" as const,
+    summary: "",
+    startedAt: 0,
+    lastActivityAt: 0,
+  };
+
+  function build(remote: Partial<GitRemoteOps> | undefined, git: Partial<GitProvider> = {}) {
+    const order: string[] = [];
+    const refresh = vi.fn(async () => {
+      order.push("refresh");
+    });
+    const full: GitRemoteOps | undefined =
+      remote === undefined
+        ? undefined
+        : {
+            branches: async () => ({
+              ok: true,
+              value: { current: "main", detached: false, local: ["main", "feat/x"] },
+            }),
+            switchBranch: async () => ({ ok: true, value: null }),
+            pull: async () => ({ ok: true, value: { updated: true } }),
+            push: async () => ({
+              ok: true,
+              value: { remote: "origin", branch: "main", upstreamSet: false },
+            }),
+            pullRequest: async () => ({
+              ok: true,
+              value: { url: "https://github.com/o/r/pull/1", created: true },
+            }),
+            ...remote,
+          };
+    const handlers = createGitHandlers({
+      git: {
+        changes: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        diff: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        stage: async () => ({ ok: true, value: null }),
+        unstage: async () => ({ ok: true, value: null }),
+        commit: async () => ({ ok: true, value: { sha: "abc", filesChanged: 1 } }),
+        ...git,
+      },
+      remote: full,
+      sessions: { get: (id) => (id === "s1" ? session : undefined) },
+      language: "en",
+      refresh,
+    });
+    return { handlers, refresh, order };
+  }
+
+  it("runs each against the session's own repository, never a caller's path", async () => {
+    const seen: string[] = [];
+    const { handlers } = build({
+      branches: async (repo) => {
+        seen.push(repo);
+        return { ok: true, value: { current: "main", detached: false, local: ["main"] } };
+      },
+      switchBranch: async (repo, name, create) => {
+        seen.push(`${repo} ${name} ${create}`);
+        return { ok: true, value: null };
+      },
+    });
+
+    await handlers.branches("s1");
+    await handlers.switchBranch("s1", "feat/x", true);
+    expect(seen).toEqual(["/projects/acme", "/projects/acme feat/x true"]);
+  });
+
+  it("refreshes the change counts after anything that moves the repository, not after a read", async () => {
+    const { handlers, refresh } = build({});
+    await handlers.branches("s1");
+    expect(refresh).not.toHaveBeenCalled();
+
+    await handlers.switchBranch("s1", "feat/x", false);
+    await handlers.pull("s1");
+    await handlers.push("s1");
+    await handlers.pullRequest("s1");
+    expect(refresh).toHaveBeenCalledTimes(4);
+  });
+
+  it("queues a switch behind a commit already running for the same repository", async () => {
+    let finishCommit!: () => void;
+    const order: string[] = [];
+    const { handlers } = build(
+      {
+        switchBranch: async () => {
+          order.push("switch");
+          return { ok: true, value: null };
+        },
+      },
+      {
+        commit: () =>
+          new Promise((resolve) => {
+            finishCommit = () => {
+              order.push("commit");
+              resolve({ ok: true, value: { sha: "abc", filesChanged: 1 } });
+            };
+          }),
+      },
+    );
+
+    const committing = handlers.commit("s1", "msg");
+    const switching = handlers.switchBranch("s1", "feat/x", false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual([]);
+    finishCommit();
+    await Promise.all([committing, switching]);
+    expect(order).toEqual(["commit", "switch"]);
+  });
+
+  it("shows a refusal in the user's language rather than rejecting", async () => {
+    const { handlers } = build({
+      push: async () => ({ ok: false, error: { code: "rejected", detail: "" } }),
+    });
+    const result = await handlers.push("s1");
+    expect(result).toEqual({
+      ok: false,
+      text: "The remote rejected the push: it has commits you don't. Pull first.",
+      language: "en",
+    });
+  });
+
+  it("refuses an unknown session, an untyped argument, and a wiring with no remote ops", async () => {
+    const { handlers } = build({});
+    expect((await handlers.pull("nope")).ok).toBe(false);
+    expect((await handlers.switchBranch("s1", 7 as unknown as string, true)).ok).toBe(false);
+
+    const { handlers: bare } = build(undefined);
+    expect((await bare.branches("s1")).ok).toBe(false);
+  });
+});
 
 describe("createGitHandlers", () => {
   it("returns the changes plus the session that produced them", async () => {

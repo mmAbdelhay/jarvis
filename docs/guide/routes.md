@@ -50,6 +50,28 @@ A session that has ended still shows its repository's *current* state, and the
 view says so — it is not a snapshot of what that agent did, and pretending
 otherwise would be the more comfortable lie.
 
+A row under the header carries the rest of the loop:
+
+- **The branch picker** switches branch; **New branch** creates one from where
+  you are and switches to it. Uncommitted changes come along, as they do with
+  `git switch`, and git itself refuses a switch they would be lost in.
+- **Where the branch stands** — `origin/main ↑2 ↓1` is two commits to push and
+  one to pull; a branch that tracks nothing yet says so.
+- **Pull** is fast-forward only. It never starts a merge or leaves conflicts
+  in the tree; a branch that has diverged from its remote is reported, to be
+  settled in the terminal.
+- **Push** pushes the current branch, and a branch's first push goes to
+  `origin` (or the only remote) and starts tracking it. It is never forced.
+- **Pull request** opens the branch's open pull request, or creates one with
+  `gh pr create --fill`, pushing first if the remote is missing commits. It
+  opens in the project's own browser tab. It needs the
+  [GitHub CLI](https://cli.github.com/), signed in.
+
+None of these ever waits on a password prompt: git and gh run with prompts
+switched off, so a remote that needs credentials it does not have says so at
+once instead of hanging. Credential helpers and SSH keys you already use work
+as they do in your terminal.
+
 ## Session
 
 One agent's real terminal, under a pty. Every byte the agent writes goes to

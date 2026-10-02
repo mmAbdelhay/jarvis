@@ -1,7 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
 import { addedFileDiff, parseUnifiedDiff } from "@jarvis/core";
+import { spawn } from "node:child_process";
 import type {
+  GitBranches,
   GitChanges,
   GitCommitResult,
   GitFailure,
@@ -9,6 +11,10 @@ import type {
   GitFileDiff,
   GitOutcome,
   GitProvider,
+  GitPullRequest,
+  GitPullResult,
+  GitPushResult,
+  GitRemoteOps,
   GitStatusLetter,
 } from "@jarvis/core";
 import { GitPluginError, simpleGit, type SimpleGit } from "simple-git";
@@ -117,6 +123,12 @@ async function readChanges(git: SimpleGit, repoPath: string): Promise<GitChanges
     files,
     insertions: files.reduce((total, file) => total + file.insertions, 0),
     deletions: files.reduce((total, file) => total + file.deletions, 0),
+    // Read from the same `git status` call, so it costs nothing. Absent
+    // altogether for a branch that tracks nothing, rather than 0/0, so
+    // "in step with its remote" and "has no remote" never look the same.
+    ...(status.tracking !== null && status.tracking !== ""
+      ? { upstream: status.tracking, ahead: status.ahead, behind: status.behind }
+      : {}),
   };
 }
 
@@ -376,6 +388,269 @@ export function createGitProvider(timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS): G
         };
       } catch (error) {
         return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------- remote ops
+
+/** Pull, push and `gh` reach the network; a slow remote on a slow link is
+ *  still healthy at a minute, so these get far longer than local calls. */
+export const DEFAULT_REMOTE_TIMEOUT_MS = 120_000;
+
+export type GhRunner = (
+  args: string[],
+  cwd: string,
+) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+export type GitRemoteOptions = {
+  timeoutMs?: number;
+  /** What git and gh run with — the login-shell PATH in production, so
+   *  both are found where the user installed them. A function is read on
+   *  every call: that PATH is resolved after startup. */
+  env?: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
+  /** Runs `gh` in a directory. Injected so tests never reach GitHub. */
+  gh?: GhRunner;
+};
+
+/**
+ * Nothing here may wait on a person. A credential prompt from git, a
+ * credential manager or gh would sit invisibly until the timeout and then
+ * report something misleading; with these, each fails at once and says
+ * what it needed instead.
+ */
+const NON_INTERACTIVE: NodeJS.ProcessEnv = {
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "never",
+  GH_PROMPT_DISABLED: "1",
+};
+
+/**
+ * A branch name the user typed, refused before git sees it when it could
+ * be read as an option, and otherwise checked by git itself
+ * (`check-ref-format --branch`): git's own rules for a ref name are long,
+ * version-dependent and not worth restating here.
+ */
+async function validBranchName(git: SimpleGit, name: string): Promise<boolean> {
+  if (name === "" || name.startsWith("-") || name !== name.trim()) return false;
+  try {
+    await git.raw(["check-ref-format", "--branch", name]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultGh(env: () => NodeJS.ProcessEnv, timeoutMs: number): GhRunner {
+  return (args, cwd) =>
+    new Promise((resolve, reject) => {
+      const child = spawn("gh", args, { cwd, env: env(), stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error(`gh timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? 1, stdout, stderr });
+      });
+    });
+}
+
+/** The last https:// URL gh printed — `gh pr create` ends with the new
+ *  pull request's address, after any warnings it chose to print first. */
+function lastUrl(text: string): string | undefined {
+  const urls = text.match(/https:\/\/\S+/g);
+  return urls?.at(-1);
+}
+
+export function createGitRemoteOps(options: GitRemoteOptions = {}): GitRemoteOps {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REMOTE_TIMEOUT_MS;
+  const env = (): NodeJS.ProcessEnv => {
+    const base = typeof options.env === "function" ? options.env() : options.env;
+    return { ...(base ?? process.env), ...NON_INTERACTIVE };
+  };
+  const gh = options.gh ?? defaultGh(env, timeoutMs);
+
+  async function open(repoPath: string): Promise<GitOutcome<SimpleGit>> {
+    try {
+      const git = simpleGit(repoPath, {
+        timeout: { block: timeoutMs },
+        // simple-git vets an environment handed to it explicitly, and
+        // refuses the askpass, editor, pager, ssh and credential settings
+        // a user's own shell commonly carries (an editor's GIT_ASKPASS, a
+        // GIT_SSH_COMMAND). That environment is the user's login shell,
+        // the very one createGitProvider's git inherits without being
+        // asked — passing it explicitly, to add NON_INTERACTIVE, must not
+        // make git behave differently from the user's own terminal. Every
+        // argument this module passes is fixed or validated; nothing here
+        // forwards a `-c` from outside.
+        unsafe: {
+          allowUnsafeAskPass: true,
+          allowUnsafeCredentialHelper: true,
+          allowUnsafeEditor: true,
+          allowUnsafePager: true,
+          allowUnsafeSshCommand: true,
+          allowUnsafeConfigPaths: true,
+          allowUnsafeConfigEnvCount: true,
+        },
+      }).env(env());
+      if (!(await git.checkIsRepo())) return failure("not-a-repo", repoPath);
+      return { ok: true, value: git };
+    } catch (error) {
+      return failure("not-a-repo", `${repoPath}: ${gitErrorDetail(error, timeoutMs)}`);
+    }
+  }
+
+  async function push(repoPath: string): Promise<GitOutcome<GitPushResult>> {
+    const opened = await open(repoPath);
+    if (!opened.ok) return opened;
+    const git = opened.value;
+    try {
+      const status = await git.status();
+      const branch = status.current;
+      if (status.detached || branch === null || branch === "") return failure("detached", "");
+      if (status.tracking !== null && status.tracking !== "") {
+        const remote = status.tracking.split("/")[0] ?? "origin";
+        try {
+          await git.raw(["push"]);
+        } catch (error) {
+          const detail = gitErrorDetail(error, timeoutMs);
+          return /rejected|non-fast-forward|fetch first/i.test(detail)
+            ? failure("rejected", detail)
+            : failure("failed", detail);
+        }
+        return { ok: true, value: { remote, branch, upstreamSet: false } };
+      }
+      // No upstream yet: `origin` when there is one, else the only remote.
+      // With several and no origin, which one is meant is not ours to guess.
+      const remotes = (await git.getRemotes()).map((remote) => remote.name);
+      const remote = remotes.includes("origin")
+        ? "origin"
+        : remotes.length === 1
+          ? remotes[0]
+          : undefined;
+      if (remote === undefined) return failure("no-remote", remotes.join(", "));
+      await git.raw(["push", "--set-upstream", remote, branch]);
+      return { ok: true, value: { remote, branch, upstreamSet: true } };
+    } catch (error) {
+      return failure("failed", gitErrorDetail(error, timeoutMs));
+    }
+  }
+
+  return {
+    async branches(repoPath): Promise<GitOutcome<GitBranches>> {
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      try {
+        const summary = await opened.value.branchLocal();
+        return {
+          ok: true,
+          value: { current: summary.current, detached: summary.detached, local: summary.all },
+        };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+
+    async switchBranch(repoPath, name, create): Promise<GitOutcome<null>> {
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      const git = opened.value;
+      try {
+        if (!(await validBranchName(git, name))) return failure("invalid-branch", name);
+        if (!create) {
+          const local = await git.branchLocal();
+          if (!local.all.includes(name)) return failure("invalid-branch", name);
+        }
+        // Plain `switch`: uncommitted changes come along, and git refuses
+        // on its own when they would be overwritten — its message says
+        // which files, which is the useful thing to show.
+        await git.raw(create ? ["switch", "--create", name] : ["switch", name]);
+        return { ok: true, value: null };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+
+    async pull(repoPath): Promise<GitOutcome<GitPullResult>> {
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      const git = opened.value;
+      try {
+        const status = await git.status();
+        if (status.detached) return failure("detached", "");
+        if (status.tracking === null || status.tracking === "") return failure("no-upstream", "");
+        const before = (await git.revparse(["HEAD"])).trim();
+        try {
+          // Fast-forward only: a pull from a button must never start a
+          // merge, write a merge commit or leave conflicts in the tree.
+          await git.raw(["pull", "--ff-only"]);
+        } catch (error) {
+          const detail = gitErrorDetail(error, timeoutMs);
+          return /fast-forward|diverg/i.test(detail)
+            ? failure("diverged", detail)
+            : failure("failed", detail);
+        }
+        const after = (await git.revparse(["HEAD"])).trim();
+        return { ok: true, value: { updated: before !== after } };
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+    },
+
+    push,
+
+    async pullRequest(repoPath): Promise<GitOutcome<GitPullRequest>> {
+      const opened = await open(repoPath);
+      if (!opened.ok) return opened;
+      try {
+        const status = await opened.value.status();
+        if (status.detached) return failure("detached", "");
+        // A pull request is of what the remote has: commits only this
+        // machine holds go up first, so the pull request is not missing
+        // them.
+        if (status.tracking === null || status.tracking === "" || status.ahead > 0) {
+          const pushed = await push(repoPath);
+          if (!pushed.ok) return pushed;
+        }
+      } catch (error) {
+        return failure("failed", gitErrorDetail(error, timeoutMs));
+      }
+
+      try {
+        const existing = await gh(["pr", "view", "--json", "url,state"], repoPath);
+        if (existing.code === 0) {
+          const parsed = JSON.parse(existing.stdout) as { url?: unknown; state?: unknown };
+          if (typeof parsed.url === "string" && parsed.state === "OPEN") {
+            return { ok: true, value: { url: parsed.url, created: false } };
+          }
+        }
+        const created = await gh(["pr", "create", "--fill"], repoPath);
+        const url = lastUrl(created.stdout);
+        if (created.code !== 0 || url === undefined) {
+          const detail = (created.stderr || created.stdout).trim();
+          return /auth login|not logged|authenticat/i.test(detail)
+            ? failure("no-gh", detail)
+            : failure("failed", detail);
+        }
+        return { ok: true, value: { url, created: true } };
+      } catch (error) {
+        // ENOENT: there is no gh on this PATH at all.
+        const detail = errorMessage(error);
+        return /ENOENT/.test(detail) ? failure("no-gh", "gh") : failure("failed", detail);
       }
     },
   };

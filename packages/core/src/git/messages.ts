@@ -26,6 +26,35 @@ const FAILURES: Record<GitFailure["code"], Record<Language, (detail: string) => 
     ar: (detail) => `تعذر تنفيذ أمر git: ${detail}`,
     en: (detail) => `The git command failed: ${detail}`,
   },
+  "invalid-branch": {
+    ar: (detail) => `لا يصلح هذا اسمًا لفرع: ${detail}`,
+    en: (detail) => `That can't be a branch name: ${detail}`,
+  },
+  "no-upstream": {
+    ar: () => "هذا الفرع لا يتتبّع فرعًا بعيدًا بعد. ادفعه أولًا.",
+    en: () => "This branch doesn't track a remote branch yet. Push it first.",
+  },
+  "no-remote": {
+    ar: () => "لا يوجد مستودع بعيد مضاف لهذا المستودع.",
+    en: () => "This repository has no remote to push to.",
+  },
+  diverged: {
+    ar: () => "تفرّع هذا الفرع عن البعيد، ولا يمكن تقديمه دون دمج. اسحب من الطرفية.",
+    en: () =>
+      "This branch and its remote have diverged; it can't fast-forward. Pull from the terminal.",
+  },
+  rejected: {
+    ar: () => "رفض البعيد الدفع: فيه تعديلات ليست هنا. اسحب أولًا.",
+    en: () => "The remote rejected the push: it has commits you don't. Pull first.",
+  },
+  detached: {
+    ar: () => "لا يوجد فرع مسحوب حاليًا (HEAD منفصل).",
+    en: () => "No branch is checked out (detached HEAD).",
+  },
+  "no-gh": {
+    ar: (detail) => `يلزم GitHub CLI (gh) مسجّلًا للدخول لفتح طلب سحب: ${detail}`,
+    en: (detail) => `Opening a pull request needs the GitHub CLI (gh), signed in: ${detail}`,
+  },
 };
 
 export function gitFailureText(failure: GitFailure, language: Language): string {

@@ -3435,6 +3435,45 @@
     border-bottom: 1px solid var(--border);
   }
 
+  /* The branch and sync row under the header: the branch picker and New
+     branch on the start side, where the repository stands against its
+     remote in the middle, Pull / Push / Pull request on the end side. */
+  .changes-sync {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .changes-sync[hidden] { display: none; }
+  .changes-branch-select,
+  .changes-branch-input {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    max-width: 260px;
+  }
+  .changes-branch-input[hidden] { display: none; }
+  .changes-sync-btn {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .changes-sync-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .changes-sync-btn:disabled { opacity: 0.45; cursor: default; }
+  .changes-sync-btn--accent { color: var(--ground); background: var(--accent); border-color: var(--accent); }
+  .changes-sync-status { color: var(--text); }
+
   .changes-body {
     display: grid;
     grid-template-columns: 300px minmax(0, 1fr);

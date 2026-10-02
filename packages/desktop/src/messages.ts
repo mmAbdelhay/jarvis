@@ -104,6 +104,29 @@ export const MESSAGES = {
   planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
   planKeepLater: (language: "ar" | "en"): string =>
     language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  // The Changes view's branch and sync row (changes.ts).
+  changesNewBranch: (language: "ar" | "en"): string =>
+    language === "ar" ? "فرع جديد" : "New branch",
+  changesNewBranchPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اسم الفرع، ثم Enter" : "Branch name, then Enter",
+  changesBranchLabel: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  changesPull: (language: "ar" | "en"): string => (language === "ar" ? "سحب" : "Pull"),
+  changesPush: (language: "ar" | "en"): string => (language === "ar" ? "دفع" : "Push"),
+  changesPullRequest: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب سحب" : "Pull request",
+  changesNoUpstream: (language: "ar" | "en"): string =>
+    language === "ar" ? "ليس على البعيد بعد" : "not on a remote yet",
+  changesPulled: (language: "ar" | "en"): string => (language === "ar" ? "تم السحب." : "Pulled."),
+  changesUpToDate: (language: "ar" | "en"): string =>
+    language === "ar" ? "محدّث بالفعل." : "Already up to date.",
+  changesPushed: (language: "ar" | "en"): string => (language === "ar" ? "تم الدفع." : "Pushed."),
+  changesSwitched: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم تبديل الفرع." : "Switched branch.",
+  changesPullRequestOpened: (language: "ar" | "en"): string =>
+    language === "ar" ? "فُتح طلب السحب في المتصفح." : "Opened the pull request in the browser.",
+  changesPullRequestReady: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب السحب جاهز:" : "Pull request ready:",
+  changesWorking: (language: "ar" | "en"): string => (language === "ar" ? "جارٍ…" : "Working…"),
   // The file sidebar's own writes (terminal-explorer.ts).
   explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
   explorerNewFolder: (language: "ar" | "en"): string =>

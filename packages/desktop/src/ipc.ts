@@ -8,10 +8,15 @@ import {
   type AgentHealth,
   type AnchoredComment,
   type CommandRunner,
+  type GitBranches,
   type GitChanges,
   type GitFileDiff,
   type GitOutcome,
   type GitProvider,
+  type GitPullRequest,
+  type GitPullResult,
+  type GitPushResult,
+  type GitRemoteOps,
   type PlanComment,
   type ProviderStatus,
   type Session,
@@ -146,6 +151,10 @@ export type ChangesView = {
   session: {
     id: string;
     project: string;
+    /** The configured project's key, when the session has one — what a
+     *  Workspace tab is opened under (a pull request, from this view).
+     *  Absent for a session in no configured project. */
+    projectKey?: string;
     projectPath: string;
     agentId: string;
     lastActivityAt: number;
@@ -166,10 +175,18 @@ export type GitHandlers = {
   fileDiff(sessionId: string, path: string): Promise<GitViewResult<GitFileDiff>>;
   setStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   commit(sessionId: string, message: string): Promise<GitViewResult<null>>;
+  branches(sessionId: string): Promise<GitViewResult<GitBranches>>;
+  switchBranch(sessionId: string, name: string, create: boolean): Promise<GitViewResult<null>>;
+  pull(sessionId: string): Promise<GitViewResult<GitPullResult>>;
+  push(sessionId: string): Promise<GitViewResult<GitPushResult>>;
+  pullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
 };
 
 export type GitHandlerDeps = {
   git: GitProvider;
+  /** Branches, pull, push and pull requests. Absent, each answers with a
+   *  failure rather than throwing — a wiring without network git. */
+  remote?: GitRemoteOps | undefined;
   sessions: { get(id: string): Session | undefined };
   /** The user's configured primary language, used for every failure string. */
   language: "ar" | "en";
@@ -271,6 +288,9 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
             // in the renderer: this view names one repository, and a
             // session with no configured project still has a directory.
             project: sessionLabel(session),
+            ...(session.project !== null && session.project !== ""
+              ? { projectKey: session.project }
+              : {}),
             projectPath: session.projectPath,
             agentId: session.agentId,
             lastActivityAt: session.lastActivityAt,
@@ -320,7 +340,56 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
         return { ok: true, value: null };
       });
     },
+
+    async branches(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, false, (remote, repo) => remote.branches(repo));
+    },
+
+    async switchBranch(sessionId, name, create) {
+      if (!isString(sessionId) || !isString(name) || !isBoolean(create)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.switchBranch(repo, name, create));
+    },
+
+    async pull(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.pull(repo));
+    },
+
+    async push(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.push(repo));
+    },
+
+    async pullRequest(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.pullRequest(repo));
+    },
   };
+
+  /** One GitRemoteOps call for a session's repository. A call that changes
+   *  the repository waits its turn in the same per-repo queue staging and
+   *  committing use — a switch must never land between a stage and its
+   *  commit — and refreshes the change counts after. A read does neither. */
+  async function remoteCall<T>(
+    sessionId: string,
+    mutates: boolean,
+    run: (remote: GitRemoteOps, repoPath: string) => Promise<GitOutcome<T>>,
+  ): Promise<GitViewResult<T>> {
+    const session = repoFor(sessionId);
+    if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
+    const remote = deps.remote;
+    if (remote === undefined) {
+      return fail(gitFailureText({ code: "failed", detail: "not available" }, deps.language));
+    }
+    const task = async (): Promise<GitViewResult<T>> => {
+      const outcome = await callGit(() => run(remote, session.projectPath));
+      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      if (mutates) await deps.refresh();
+      return { ok: true, value: outcome.value };
+    };
+    return mutates ? enqueue(session.projectPath, task) : task();
+  }
 }
 
 /**
@@ -414,6 +483,18 @@ export type RendererApi = {
   gitDiff(sessionId: string, path: string): Promise<GitViewResult<GitFileDiff>>;
   gitSetStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   gitCommit(sessionId: string, message: string): Promise<GitViewResult<null>>;
+  /** The Changes view's branch picker: every local branch and which one
+   *  is checked out. */
+  gitBranches(sessionId: string): Promise<GitViewResult<GitBranches>>;
+  /** Checks out `name` in the session's repository, creating it first
+   *  when `create`. */
+  gitSwitchBranch(sessionId: string, name: string, create: boolean): Promise<GitViewResult<null>>;
+  /** Fast-forward-only pull of the current branch. */
+  gitPull(sessionId: string): Promise<GitViewResult<GitPullResult>>;
+  /** Pushes the current branch, setting its upstream the first time. */
+  gitPush(sessionId: string): Promise<GitViewResult<GitPushResult>>;
+  /** The current branch's open pull request, or a new one. */
+  gitPullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): void;
   // A session's live output, chunk by chunk, for every session at once —
   // the Session view keeps only the one it is showing. Paired with
