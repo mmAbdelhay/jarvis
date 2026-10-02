@@ -89,6 +89,9 @@ pane splits; ⌘P reaches every action. A file sidebar follows the shell as it
 `cd`s, and a row of chips above the input names the directory, the branch and
 what is uncommitted. Re-run, workflows, history and the AI's suggestion all
 *fill* the line — you press Enter yourself, always.
+When Claude Code writes a plan, it opens beside the terminal: edit a section in
+place, pin comments to it, and send them all back as one message
+([the plan panel](docs/guide/workspace-tabs.md#the-plan-panel)).
 
 <p align="center">
   <img src="./docs/media/terminal.png" width="100%" alt="The Terminal tab: each command and its output as an addressable block with its own timing and working directory, a file sidebar on the left, and a row of chips naming the directory, branch and uncommitted count.">
