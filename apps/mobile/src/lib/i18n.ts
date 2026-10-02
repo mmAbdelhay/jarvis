@@ -13,8 +13,8 @@ export const STRINGS = {
     ar: "جارفيس",
   },
   "nav.dashboard": {
-    en: "Dashboard",
-    ar: "لوحة التحكم",
+    en: "Home",
+    ar: "الرئيسية",
   },
   "nav.settings": {
     en: "Settings",
@@ -26,6 +26,7 @@ export const STRINGS = {
   },
   "nav.voice": { en: "Voice", ar: "الصوت" },
   "nav.changes": { en: "Changes", ar: "التغييرات" },
+  "nav.history": { en: "History", ar: "السجل" },
   "nav.talk": { en: "Talk to Jarvis", ar: "تحدّث إلى جارفيس" },
   "plans.openPlan": { en: "Open the plan", ar: "افتح الخطة" },
   "plans.stripTitle": { en: "PLAN", ar: "الخطة" },

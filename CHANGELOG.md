@@ -8,6 +8,11 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Browser and tablet redesign: the top bar becomes a sidebar with every
+  section — Home, Sessions (with its running count), Workspace, Changes,
+  History, Voice, Settings — and the laptop's connection, metrics and clock at
+  its foot. Below 900 points wide it narrows to an icon rail. "Dashboard" is
+  now called Home.
 - Phone redesign, files: a terminal's Files button browses its project
   (folders first, a breadcrumb back up) and types a chosen file's path into the
   terminal, quoted when the shell would misread it. `terminal:listDir` now also

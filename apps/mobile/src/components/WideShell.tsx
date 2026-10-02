@@ -32,17 +32,18 @@ import {
 
 export function WideShell(props: { children: React.ReactNode }): React.JSX.Element {
   const layout = useLayoutClass();
+  const language = useLanguage();
   const insets = useSafeAreaInsets();
   const wide = layout.kind === "wide";
-  // The top bar owns the top inset on a wide screen, so the screens below
-  // it must not pad for it a second time.
-  const contentInsets = useMemo(() => (wide ? { ...insets, top: 0 } : insets), [wide, insets]);
   return (
-    <View style={styles.root}>
-      {wide && <TopBar compact={layout.compact} topInset={insets.top} />}
-      <SafeAreaInsetsContext.Provider value={contentInsets}>
-        {props.children}
-      </SafeAreaInsetsContext.Provider>
+    // A row in the reading direction: the sidebar is at the start, so on
+    // the right in Arabic. The tree is the same on a phone (no sidebar),
+    // so crossing the breakpoint never remounts the screens underneath.
+    <View style={[styles.root, wide && { direction: textDirection(language) }]}>
+      {wide && (
+        <Sidebar compact={layout.compact} topInset={insets.top} bottomInset={insets.bottom} />
+      )}
+      <View style={[styles.content, wide && { direction: "ltr" }]}>{props.children}</View>
     </View>
   );
 }
@@ -74,14 +75,18 @@ function useLaptopName(): string | undefined {
   return name;
 }
 
-function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Element {
+function Sidebar(props: {
+  compact: boolean;
+  topInset: number;
+  bottomInset: number;
+}): React.JSX.Element {
   const language = useLanguage();
   const router = useRouter();
   const pathname = usePathname();
   const client = useRpcClient();
   const connectionStore = useConnectionStore();
-  // One shared store per client for every top bar (tabs shell, Settings):
-  // cached metrics show at once, and no extra list calls.
+  // One shared store per client for every shell (tabs, Settings): cached
+  // metrics show at once, and no extra list calls.
   const store = topBarStoreFor(client);
   const [view, setView] = useState<TopBarView>(store.get());
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
@@ -105,149 +110,184 @@ function TopBar(props: { compact: boolean; topInset: number }): React.JSX.Elemen
     laptopName,
   });
   const active = activeNavKey(pathname);
+  const items = wideNavItems(language);
+  const compact = props.compact;
+
+  const navItem = (item: (typeof items)[number]) => {
+    const on = item.key === active;
+    const badge =
+      item.key === "sessions" && model.running.count > 0 ? model.running.count : undefined;
+    return (
+      <Pressable
+        key={item.key}
+        style={[styles.navItem, compact && styles.navItemCompact, on && styles.navItemOn]}
+        onPress={() => {
+          if (!on) router.navigate(item.href);
+        }}
+        accessibilityRole="tab"
+        accessibilityLabel={item.label}
+        accessibilityState={{ selected: on }}
+      >
+        <Text style={[styles.glyph, on && styles.glyphOn]}>{item.glyph}</Text>
+        {!compact && (
+          <Text style={[styles.navText, on && styles.navTextOn]} numberOfLines={1}>
+            {item.label}
+          </Text>
+        )}
+        {badge !== undefined && (
+          <Text style={[styles.badge, compact && styles.badgeCompact]}>{badge}</Text>
+        )}
+      </Pressable>
+    );
+  };
 
   return (
-    // `direction` mirrors the whole bar in Arabic on native and web alike.
-    <View style={[styles.bar, { paddingTop: props.topInset, direction: textDirection(language) }]}>
-      <Text style={styles.brand}>JARVIS</Text>
-      <View style={styles.nav} accessibilityRole="tablist">
-        {wideNavItems(language).map((item) => {
-          const on = item.key === active;
-          return (
-            <Pressable
-              key={item.key}
-              style={[styles.navButton, on && styles.navButtonOn]}
-              onPress={() => {
-                if (!on) router.navigate(item.href);
-              }}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: on }}
-            >
-              <Text style={[styles.navText, on && styles.navTextOn]}>{item.label}</Text>
-            </Pressable>
-          );
-        })}
+    <View
+      style={[
+        styles.sidebar,
+        compact && styles.sidebarCompact,
+        { paddingTop: props.topInset + 18, paddingBottom: props.bottomInset + 14 },
+      ]}
+    >
+      <View style={[styles.brandRow, compact && styles.brandRowCompact]}>
+        <View style={styles.brandMark}>
+          <View style={styles.brandDot} />
+        </View>
+        {!compact && <Text style={styles.brand}>Jarvis</Text>}
       </View>
-      <View style={styles.status}>
-        {model.showMetrics && (
-          <View style={styles.metrics}>
-            <Text style={styles.unit}>CPU</Text>
-            <Text style={styles.metricValue}>{model.readout.cpu}</Text>
-            <Text style={styles.sep}>·</Text>
-            <Text style={styles.unit}>RAM</Text>
-            <Text style={styles.metricValue}>{model.readout.ram}</Text>
-            <Text style={styles.sep}>·</Text>
-            <Text style={styles.unit}>DISK</Text>
-            <Text style={styles.metricValue}>{model.readout.disk}</Text>
-            <Text style={styles.sep}>·</Text>
-            <Text style={styles.metricValue}>{model.readout.net}</Text>
-          </View>
-        )}
-        <View
-          style={[styles.pill, styles.connectionPill]}
-          accessible
-          accessibilityLabel={
-            model.laptopName === undefined
-              ? t(language, model.pill.key)
-              : `${t(language, model.pill.key)} · ${model.laptopName}`
-          }
-        >
+      <View style={styles.nav} accessibilityRole="tablist">
+        {items.filter((item) => item.key !== "settings").map(navItem)}
+      </View>
+      <View style={styles.spacer} />
+      <View
+        style={[styles.status, compact && styles.statusCompact]}
+        accessible
+        accessibilityLabel={
+          model.laptopName === undefined
+            ? t(language, model.pill.key)
+            : `${t(language, model.pill.key)} · ${model.laptopName}`
+        }
+      >
+        <View style={styles.statusRow}>
           <View style={[styles.dot, { backgroundColor: theme.colors[model.pill.tone] }]} />
-          {model.showPillLabel && (
+          {!compact && (
             <Text style={styles.pillText} numberOfLines={1}>
-              {t(language, model.pill.key)}
-            </Text>
-          )}
-          {model.laptopName !== undefined && (
-            <Text
-              style={[styles.laptopName, { maxWidth: model.laptopNameMaxWidth }]}
-              numberOfLines={1}
-            >
-              {model.laptopName}
+              {model.laptopName ?? t(language, model.pill.key)}
             </Text>
           )}
         </View>
-        <View style={styles.divider} />
-        <Pressable
-          style={styles.pill}
-          onPress={() => router.navigate("/sessions")}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.running, model.running.idle && styles.runningIdle]}>
-            {t(language, "shell.running", { count: model.running.count })}
-          </Text>
-        </Pressable>
-        <View style={styles.divider} />
-        <Text style={styles.clock}>{clock}</Text>
+        {!compact && model.showMetrics && (
+          <View style={styles.metrics}>
+            <Text style={styles.metric}>CPU {model.readout.cpu}</Text>
+            <Text style={styles.metric}>RAM {model.readout.ram}</Text>
+            <Text style={styles.metric}>DISK {model.readout.disk}</Text>
+            <Text style={styles.metric}>{model.readout.net}</Text>
+          </View>
+        )}
+        {!compact && <Text style={styles.clock}>{clock}</Text>}
       </View>
+      {items.filter((item) => item.key === "settings").map(navItem)}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  bar: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    minHeight: 48,
-    paddingStart: 20,
-    paddingEnd: 16,
-    backgroundColor: theme.colors.ground,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.hairlineSoft,
-  },
-  brand: {
-    alignSelf: "center",
-    marginEnd: 22,
-    color: theme.colors.text,
-    fontFamily: theme.font.bold,
-    fontSize: 14,
-    letterSpacing: 3.4,
-  },
-  nav: { flexDirection: "row", alignItems: "stretch", gap: 2, flexShrink: 0 },
-  navButton: {
-    justifyContent: "center",
+  root: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
+  content: { flex: 1, minWidth: 0 },
+  sidebar: {
+    width: 232,
     paddingHorizontal: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
+    gap: 4,
+    backgroundColor: theme.colors.surfaceDim,
+    borderEndWidth: 1,
+    borderEndColor: theme.colors.hairlineSoft,
   },
-  navButtonOn: { borderBottomColor: theme.colors.accent },
-  navText: { color: theme.colors.textMuted, fontFamily: theme.font.semibold, fontSize: 13 },
-  navTextOn: { color: theme.colors.text },
-  status: {
-    flex: 1,
+  sidebarCompact: { width: 68, paddingHorizontal: 10, alignItems: "center" },
+  brandRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 14,
-    minWidth: 0,
-    overflow: "hidden",
+    gap: 10,
+    paddingHorizontal: 8,
+    paddingBottom: 18,
   },
-  metrics: { flexDirection: "row", alignItems: "center", gap: 6, direction: "ltr" },
-  unit: { color: theme.colors.textMuted, fontFamily: theme.font.mono, fontSize: 10 },
-  metricValue: {
+  brandRowCompact: { paddingHorizontal: 0 },
+  brandMark: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: theme.colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    borderWidth: 2.5,
+    borderColor: theme.colors.primaryText,
+  },
+  brand: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 18 },
+  nav: { gap: 2 },
+  navItem: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  navItemCompact: { width: 46, justifyContent: "center", paddingHorizontal: 0 },
+  navItemOn: { backgroundColor: theme.colors.selected },
+  glyph: { width: 18, textAlign: "center", color: theme.colors.textMuted, fontSize: 16 },
+  glyphOn: { color: theme.colors.text },
+  navText: {
+    flex: 1,
+    color: theme.colors.textSecondary,
+    fontFamily: theme.font.semibold,
+    fontSize: 14,
+  },
+  navTextOn: { color: theme.colors.text, fontFamily: theme.font.bold },
+  badge: {
+    minWidth: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 999,
+    overflow: "hidden",
+    textAlign: "center",
+    color: theme.colors.accentText,
+    backgroundColor: theme.colors.accentSoft,
+    fontFamily: theme.font.bold,
+    fontSize: 11,
+  },
+  badgeCompact: { position: "absolute", top: 2, end: 0, minWidth: 16, paddingHorizontal: 4 },
+  spacer: { flex: 1 },
+  status: {
+    gap: 8,
+    marginBottom: 6,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
+  },
+  statusCompact: { padding: 10, alignItems: "center" },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dot: { width: 8, height: 8, borderRadius: theme.radius.full },
+  pillText: {
+    flex: 1,
+    color: theme.colors.textSecondary,
+    fontFamily: theme.font.semibold,
+    fontSize: 12,
+  },
+  metrics: { gap: 2, direction: "ltr" },
+  metric: {
     color: theme.colors.textMuted,
     fontFamily: theme.font.mono,
     fontSize: 11,
     writingDirection: "ltr",
   },
-  sep: { color: theme.colors.border, fontFamily: theme.font.mono, fontSize: 11 },
-  pill: { flexDirection: "row", alignItems: "center", gap: 7 },
-  connectionPill: { flexShrink: 1, minWidth: 0 },
-  dot: { width: 7, height: 7, borderRadius: theme.radius.full },
-  pillText: { color: theme.colors.textSecondary, fontFamily: theme.font.body, fontSize: 12 },
-  laptopName: {
-    flexShrink: 1,
-    color: theme.colors.textMuted,
-    fontFamily: theme.font.body,
-    fontSize: 12,
-  },
-  // Not mono: the label is Arabic in ar, which the mono face lacks.
-  running: { color: theme.colors.accentText, fontFamily: theme.font.medium, fontSize: 12 },
-  runningIdle: { color: theme.colors.textMuted },
-  divider: { width: 1, height: 14, backgroundColor: theme.colors.border },
   clock: {
-    color: theme.colors.textMuted,
+    color: theme.colors.textDim,
     fontFamily: theme.font.mono,
     fontSize: 11,
     writingDirection: "ltr",
