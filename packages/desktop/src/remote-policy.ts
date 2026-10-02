@@ -275,6 +275,9 @@ export const CHANNEL_POLICY = {
   // Electron-bound channel in this table already is. A paired phone opens
   // a plan's links with its own OS, not this one's.
   "plans:openLink": "desktop-only",
+  // A request from the laptop to GitHub, made only from Settings' own
+  // button; a phone has no business triggering laptop network traffic.
+  "app:checkUpdate": "desktop-only",
   // Desktop-only (Phase 1): opens a browser on the laptop itself; a phone
   // has no business launching programs here.
   "remote:openWebClient": "desktop-only",

@@ -276,6 +276,7 @@ export const INVOKE_CHANNELS = {
   // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
   // and length gate before shell.openExternal ever runs.
   plansOpenLink: "plans:openLink",
+  checkForUpdate: "app:checkUpdate",
   // Desktop-only (Phase 1): opens the browser client in the system
   // browser. Takes no URL — main builds it from the bridge's own status.
   openWebClient: "remote:openWebClient",

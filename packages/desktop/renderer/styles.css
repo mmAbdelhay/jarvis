@@ -5267,3 +5267,7 @@
 .plan-panel__progress { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .plan-panel__progress-meter { display: inline-block; width: 48px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .plan-panel__progress-fill { display: block; height: 100%; background: var(--accent); }
+
+/* Settings → General's Check for updates (update-settings.ts). */
+.settings-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.settings-update .settings-note:empty { display: none; }

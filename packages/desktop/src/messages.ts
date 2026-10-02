@@ -148,6 +148,23 @@ export const MESSAGES = {
     language === "ar"
       ? "تغيّر السؤال قبل الإجابة، فلم يُكتب شيء. انظر مجددًا."
       : "That prompt changed before the answer reached it, so nothing was typed. Look again.",
+  // Settings' Check for updates (update-settings.ts).
+  updateCheck: (language: "ar" | "en"): string =>
+    language === "ar" ? "التحقق من وجود تحديث" : "Check for updates",
+  updateChecking: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التحقق…" : "Checking…",
+  updateCurrent: (version: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `هذا أحدث إصدار (${version}).`
+      : `You're on the latest version (${version}).`,
+  updateNewer: (latest: string, current: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الإصدار ${latest} متاح، ولديك ${current}.`
+      : `Jarvis ${latest} is available; you have ${current}.`,
+  updateFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر الوصول إلى GitHub الآن." : "Couldn't reach GitHub just now.",
+  updateOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح صفحة الإصدار" : "Open the release",
   // The Dashboard's usage charts (usage-charts.ts).
   capacityHistoryLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",

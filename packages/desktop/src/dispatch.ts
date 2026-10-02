@@ -184,6 +184,8 @@ export type ElectronBoundChannel =
   | "workspace:pip"
   | "dialog:pickFiles"
   | "plans:openLink"
+  // The app's own version and the app's own network request (update-check.ts).
+  | "app:checkUpdate"
   // Task 23: where the core runs is the host's to decide — these start,
   // stop and replace the core itself (daemon/mode.ts).
   | "background:status"

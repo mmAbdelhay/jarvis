@@ -8,6 +8,10 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- **Check for updates** in Settings → General: one request to GitHub's
+  releases API, only when pressed, with the newer release's page opened in
+  the Personal browser. Nothing is ever checked in the background.
+
 - The plan panel shows a plan's checklist progress in its header ("3/7
   done", with a meter), counted from its own `- [ ]` / `- [x]` items.
 

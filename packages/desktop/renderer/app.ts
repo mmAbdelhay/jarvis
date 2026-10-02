@@ -28,6 +28,7 @@ import {
 } from "./workspace.js";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { initDaemonSettings, refreshDaemonSettings } from "./daemon-settings.js";
+import { initUpdateSettings } from "./update-settings.js";
 import {
   checkPrayerNotifications,
   initPrayerSettings,
@@ -437,6 +438,7 @@ function wireNav(): void {
     // Settings → General's background-service section (Task 23). Its own
     // guard, for the reason the one below gives.
     initDaemonSettings();
+    initUpdateSettings();
   } catch (error) {
     console.error(`background settings did not initialise: ${String(error)}`);
   }

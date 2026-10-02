@@ -91,6 +91,7 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
+import type { UpdateCheck } from "./update-check.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
@@ -635,6 +636,8 @@ export type RendererApi = {
    *  day, and sessions started per day over the last two weeks. Free — it
    *  reads only what was already recorded. */
   usageHistory(): Promise<UsageHistory>;
+  /** Settings' Check for updates — one request to GitHub, only when asked. */
+  checkForUpdate(): Promise<UpdateCheck>;
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.
