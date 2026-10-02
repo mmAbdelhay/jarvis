@@ -441,8 +441,11 @@ Three things follow from that, and are worth knowing:
   `brain.cwd`. They are Jarvis talking to itself and would swamp everything
   else.
 
-Only agents with `vendor: anthropic` and a `configDir` are scanned. Copilot
-stores its sessions in a different format and is not imported.
+Agents with `vendor: anthropic` are scanned under `<configDir>/projects`,
+and agents with `vendor: github` (Copilot CLI) under
+`<configDir>/session-state` — `~/.claude` and `~/.copilot` when no
+`configDir` is set. Opening an imported Copilot session shows its
+conversation, read from the session's own `events.jsonl`.
 
 **`sessions.importWindowDays` bounds the startup scan**, by file modification
 time; it defaults to 30. Sessions older than the window are not imported —

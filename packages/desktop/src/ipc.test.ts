@@ -6069,6 +6069,19 @@ describe("createTranscriptHandler", () => {
     expect(await handler("s1")).toEqual([{ role: "user", text: "hi there", tools: [] }]);
   });
 
+  it("renders a Copilot session from the events.jsonl beside its workspace.yaml", async () => {
+    const read: string[] = [];
+    const handler = createTranscriptHandler({
+      history: () => [session({ transcriptPath: "/c/s1/workspace.yaml" })],
+      readFile: async (path) => {
+        read.push(path);
+        return JSON.stringify({ type: "user.message", data: { content: "hi" } });
+      },
+    });
+    expect(await handler("s1")).toEqual([{ role: "user", text: "hi", tools: [] }]);
+    expect(read).toEqual([join("/c/s1", "events.jsonl")]);
+  });
+
   // A session Jarvis spawned has a pty backlog instead; asking for its
   // transcript is not an error, there simply is not one.
   it("returns nothing for a session with no transcript recorded", async () => {

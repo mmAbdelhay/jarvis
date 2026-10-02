@@ -46,9 +46,9 @@ import {
   chatUrl,
   eksUpdateKubeconfigArgs,
   loadWorkflows,
-  parseTranscript,
   pathPrefix,
   profileForContext,
+  transcriptSource,
 } from "@jarvis/platform";
 import type {
   ApiFailure,
@@ -1534,8 +1534,11 @@ export function createTranscriptHandler(
     const session = deps.history().find((candidate) => candidate.id === sessionId);
     const path = session?.transcriptPath;
     if (path === undefined || path === "") return [];
+    // A Copilot row points at its workspace.yaml; the conversation is the
+    // events.jsonl beside it, in Copilot's own format.
+    const source = transcriptSource(path);
     try {
-      return parseTranscript(await deps.readFile(path));
+      return source.parse(await deps.readFile(source.path));
     } catch {
       return [];
     }

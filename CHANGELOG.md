@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Imported Copilot CLI sessions open with their conversation: History reads
+  the session's `events.jsonl` instead of showing an empty view.
 - Find in an API response: a search field above the body marks every match,
   counts them, and steps through with Enter / Shift+Enter.
 
