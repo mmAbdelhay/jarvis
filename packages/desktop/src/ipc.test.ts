@@ -4092,8 +4092,10 @@ describe("terminal handlers", () => {
       await expect(handlers.listDir("tab-1", "C:\\proj\\..\\Windows")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "C:\\proj-secrets")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "D:\\proj")).resolves.toEqual([]);
+      // Relative: taken from the project root, and refused once it climbs out.
       await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
-      expect(read).toEqual([PROJ, PROJ]);
+      await expect(handlers.listDir("tab-1", "..\\Windows")).resolves.toEqual([]);
+      expect(read).toEqual([PROJ, PROJ, `${PROJ}\\src`]);
     });
 
     it("refuses a junction that resolves outside the project, and reads the real path of one inside", async () => {
