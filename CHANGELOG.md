@@ -8,6 +8,11 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone redesign, Sessions and History: Sessions has a search field and
+  status chips (All, Waiting, Running, Done) with live counts; History searches
+  on the laptop, groups by day and loads 50 sessions at a time instead of all
+  of them (`history:list` takes an optional page request; with none it answers
+  the whole list as before).
 - Phone redesign, Home: a new bottom bar (Home, Sessions, a Talk button in the
   middle, Workspace, Changes); any question a session is waiting at, answerable
   from Home; and each account's capacity with its last-day trend.

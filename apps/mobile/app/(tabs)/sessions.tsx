@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -28,6 +29,7 @@ import {
   splitLayout,
 } from "@/lib/session-nav";
 import { sessionRouteId } from "@/lib/session-screen";
+import { filterRows, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
 import { usePhoneBack } from "@/lib/use-phone-back";
 import type { SessionRowView, SessionsView } from "@/lib/sessions-store";
 import { createSessionsStore } from "@/lib/sessions-store";
@@ -44,6 +46,13 @@ const STATE_KEYS: Record<SessionState, MessageKey> = {
 };
 
 const ACTIVE_STATES = new Set<SessionState>(["starting", "running", "waiting"]);
+
+const STATUS_CHIPS: { status: StatusFilter; label: MessageKey }[] = [
+  { status: "all", label: "sessions.filterAll" },
+  { status: "waiting", label: "sessions.filterWaiting" },
+  { status: "running", label: "sessions.filterRunning" },
+  { status: "done", label: "sessions.filterDone" },
+];
 
 /** The row's mono elapsed field (item 6): time since it started for an
  *  active row, or its total duration (end minus start) for an ended one —
@@ -86,7 +95,8 @@ export default function SessionsScreen() {
   const store = useMemo(() => createSessionsStore({ client }), [client]);
   const [view, setView] = useState<SessionsView>(store.get());
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"active" | "ended">("active");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
   const insets = useSafeAreaInsets();
   const { kind } = useLayoutClass();
   const wide = kind === "wide";
@@ -141,7 +151,10 @@ export default function SessionsScreen() {
 
   const empty = view.active.length === 0 && view.ended.length === 0;
   const now = Date.now();
-  const endedGroups = useMemo(() => groupEndedByDate(view.ended, now), [view.ended, now]);
+  const counts = statusCounts([...view.active, ...view.ended], query);
+  const activeRows = filterRows(view.active, query, status);
+  const endedRows = filterRows(view.ended, query, status);
+  const endedGroups = useMemo(() => groupEndedByDate(endedRows, now), [endedRows, now]);
 
   const renderRows = useCallback(
     (rows: SessionRowView[]) =>
@@ -184,37 +197,84 @@ export default function SessionsScreen() {
       }
     >
       <Text style={styles.title}>{t(language, "sessions.title")}</Text>
-      <View style={styles.segment}>
-        <TouchableOpacity
-          style={[styles.segmentButton, activeTab === "active" && styles.segmentActive]}
-          onPress={() => setActiveTab("active")}
-        >
-          <Text style={[styles.segmentText, activeTab !== "active" && styles.segmentDim]}>
-            {t(language, "sessions.active")} · {view.active.length}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.segmentButton, activeTab === "ended" && styles.segmentActive]}
-          onPress={() => setActiveTab("ended")}
-        >
-          <Text style={[styles.segmentText, activeTab !== "ended" && styles.segmentDim]}>
-            {t(language, "sessions.ended")} · {view.ended.length}
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.search}>
+        <Text style={styles.searchGlyph} accessibilityElementsHidden importantForAccessibility="no">
+          ⌕
+        </Text>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t(language, "sessions.searchPlaceholder")}
+          placeholderTextColor={theme.colors.textDim}
+          accessibilityLabel={t(language, "sessions.search")}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          style={styles.searchInput}
+        />
+        {query !== "" && (
+          <TouchableOpacity
+            onPress={() => setQuery("")}
+            accessibilityRole="button"
+            accessibilityLabel={t(language, "sessions.clearSearch")}
+            style={styles.clear}
+          >
+            <Text style={styles.clearText}>×</Text>
+          </TouchableOpacity>
+        )}
       </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chips}
+        accessibilityRole="tablist"
+      >
+        {STATUS_CHIPS.map((chip) => {
+          const on = status === chip.status;
+          return (
+            <TouchableOpacity
+              key={chip.status}
+              onPress={() => setStatus(chip.status)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+              style={[
+                styles.chip,
+                chip.status === "waiting" && counts.waiting > 0 && styles.chipWaiting,
+                on && styles.chipOn,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  chip.status === "waiting" && counts.waiting > 0 && styles.chipTextWaiting,
+                  on && styles.chipTextOn,
+                ]}
+              >
+                {t(language, chip.label)} {counts[chip.status]}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
       {empty ? (
         <Text style={styles.empty}>{t(language, "sessions.none")}</Text>
-      ) : activeTab === "active" ? (
-        renderRows(view.active)
-      ) : endedGroups.length === 0 ? (
-        <Text style={styles.empty}>{t(language, "sessions.none")}</Text>
+      ) : activeRows.length === 0 && endedRows.length === 0 ? (
+        <Text style={styles.empty}>{t(language, "sessions.noMatch")}</Text>
       ) : (
-        endedGroups.map((group) => (
-          <View key={group.rows[0]?.id ?? group.label.kind}>
-            <Text style={styles.sectionTitle}>{dateGroupLabelText(group.label, language)}</Text>
-            {renderRows(group.rows)}
-          </View>
-        ))
+        <>
+          {activeRows.length > 0 && (
+            <View>
+              <Text style={styles.sectionTitle}>{t(language, "sessions.now")}</Text>
+              {renderRows(activeRows)}
+            </View>
+          )}
+          {endedGroups.map((group) => (
+            <View key={group.rows[0]?.id ?? group.label.kind}>
+              <Text style={styles.sectionTitle}>{dateGroupLabelText(group.label, language)}</Text>
+              {renderRows(group.rows)}
+            </View>
+          ))}
+        </>
       )}
 
       {view.error?.kind === "remote" && <Text style={styles.error}>{view.error.text}</Text>}
@@ -277,25 +337,44 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   title: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 26, marginBottom: 4 },
-  segment: {
+  search: {
+    minHeight: 46,
     flexDirection: "row",
-    padding: 3,
-    borderWidth: 1,
-    borderColor: theme.colors.hairline,
-    borderRadius: 12,
-    backgroundColor: theme.colors.surface,
-    marginBottom: 4,
-  },
-  segmentButton: {
-    flex: 1,
-    height: 34,
     alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 9,
+    gap: 10,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
-  segmentActive: { backgroundColor: theme.colors.selected },
-  segmentText: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 13 },
-  segmentDim: { color: theme.colors.textDim, fontFamily: theme.font.semibold },
+  searchGlyph: { color: theme.colors.textMuted, fontSize: 18 },
+  searchInput: {
+    flex: 1,
+    minHeight: 44,
+    color: theme.colors.text,
+    fontFamily: theme.font.body,
+    fontSize: 15,
+  },
+  clear: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+  clearText: { color: theme.colors.textMuted, fontSize: 20 },
+  chips: { gap: 8, paddingVertical: 2 },
+  chip: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  chipWaiting: {
+    borderColor: theme.colors.warningBorder,
+    backgroundColor: theme.colors.warningSurface,
+  },
+  chipOn: { borderColor: theme.colors.text, backgroundColor: theme.colors.text },
+  chipText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 13 },
+  chipTextWaiting: { color: theme.colors.warning, fontFamily: theme.font.bold },
+  chipTextOn: { color: theme.colors.ground, fontFamily: theme.font.bold },
   sectionTitle: {
     color: theme.colors.textDim,
     fontFamily: theme.font.bold,

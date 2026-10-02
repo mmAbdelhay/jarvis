@@ -78,7 +78,10 @@ describe("createHistoryStore", () => {
     const store = createHistoryStore({ client });
 
     store.open();
-    expect(reqs(socket, "history:list")[0]).toMatchObject({ ch: "history:list", a: [] });
+    expect(reqs(socket, "history:list")[0]).toMatchObject({
+      ch: "history:list",
+      a: [{ limit: 50 }],
+    });
     await answer(socket, reqs(socket, "history:list")[0]?.id as number, [
       session("s1"),
       session("s2", { summary: "older", lastActivityAt: 1 }),
@@ -144,5 +147,51 @@ describe("createHistoryStore", () => {
     expect(allChannels).not.toContain("session:input");
     expect(allChannels).not.toContain("session:resize");
     expect(allChannels).not.toContain("session:output");
+  });
+});
+
+describe("history paging and search", () => {
+  it("loads the next page after the last session, and stops when there is no more", async () => {
+    const { client, socket } = createEnv();
+    const store = createHistoryStore({ client });
+    store.open();
+    await answer(socket, reqs(socket, "history:list")[0]?.id as number, {
+      sessions: [session("s1", { lastActivityAt: 30 }), session("s2", { lastActivityAt: 20 })],
+      more: true,
+    });
+    expect(store.get().more).toBe(true);
+    store.loadMore();
+    await flush();
+    expect(reqs(socket, "history:list")[1]).toMatchObject({
+      a: [{ limit: 50, before: { lastActivityAt: 20, id: "s2" } }],
+    });
+    await answer(socket, reqs(socket, "history:list")[1]?.id as number, {
+      sessions: [session("s2", { lastActivityAt: 20 }), session("s3", { lastActivityAt: 10 })],
+      more: false,
+    });
+    expect(store.get().sessions.map((entry) => entry.id)).toEqual(["s1", "s2", "s3"]);
+    expect(store.get().more).toBe(false);
+  });
+
+  it("takes a laptop's whole-list answer as everything there is", async () => {
+    const { client, socket } = createEnv();
+    const store = createHistoryStore({ client });
+    store.open();
+    await answer(socket, reqs(socket, "history:list")[0]?.id as number, [session("s1")]);
+    expect(store.get().sessions.map((entry) => entry.id)).toEqual(["s1"]);
+    expect(store.get().more).toBe(false);
+  });
+
+  it("asks the laptop again for a new search", async () => {
+    const { client, socket } = createEnv();
+    const store = createHistoryStore({ client });
+    store.open();
+    await answer(socket, reqs(socket, "history:list")[0]?.id as number, []);
+    store.search("  orders ");
+    await flush();
+    expect(reqs(socket, "history:list")[1]).toMatchObject({ a: [{ limit: 50, query: "orders" }] });
+    store.search("orders");
+    await flush();
+    expect(reqs(socket, "history:list")).toHaveLength(2);
   });
 });

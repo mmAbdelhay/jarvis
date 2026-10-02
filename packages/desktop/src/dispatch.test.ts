@@ -1632,6 +1632,22 @@ describe("dispatch table: git, setup and history (deferred M2 table tests)", () 
     expect(await call(table, "history:list")).toBe(history);
   });
 
+  it("history:list answers one page for a page request", async () => {
+    const at = (id: string, lastActivityAt: number) => ({ id, lastActivityAt, summary: id });
+    const history = [at("c", 30), at("a", 20), at("b", 20), at("d", 10)];
+    const deps = fakeDeps({ sessionStore: { history: vi.fn(() => history), edit: vi.fn() } });
+    const table = createDispatchTable(deps);
+    expect(await call(table, "history:list", { limit: 2 })).toEqual({
+      sessions: [history[0], history[1]],
+      more: true,
+    });
+    expect(
+      await call(table, "history:list", { limit: 2, before: { lastActivityAt: 20, id: "a" } }),
+    ).toEqual({ sessions: [history[2], history[3]], more: false });
+    // A malformed request is no request at all.
+    expect(await call(table, "history:list", { limit: "x" })).toBe(history);
+  });
+
   describe("history:edit (bug 7)", () => {
     it("forwards a valid patch to sessionStore.edit and reports ok", async () => {
       const deps = fakeDeps();

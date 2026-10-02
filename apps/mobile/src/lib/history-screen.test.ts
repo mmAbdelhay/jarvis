@@ -3,7 +3,15 @@ import { historyListDisplay, transcriptDisplay, withLrmPrefixes } from "./histor
 import type { HistoryState } from "./history-store";
 import { t } from "./i18n";
 
-const BASE: HistoryState = { sessions: [], transcript: [], stale: false, loading: false };
+const BASE: HistoryState = {
+  sessions: [],
+  transcript: [],
+  stale: false,
+  loading: false,
+  more: false,
+  loadingMore: false,
+  query: "",
+};
 const SESSION = {
   id: "s1",
   project: "jarvis",

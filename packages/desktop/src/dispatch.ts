@@ -77,6 +77,7 @@ import {
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
+import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
@@ -490,7 +491,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // Pulled on demand when the renderer's history panel opens, not
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
-    "history:list": () => sessionStore.history(),
+    // No argument: the whole list, as the desktop renderer reads it. A page
+    // request (history-page.ts) answers one page — a malformed one is
+    // treated as no request, never as an error.
+    "history:list": ([page]) => {
+      const request = parseHistoryPageRequest(page);
+      const all = sessionStore.history();
+      // The store's rows are Sessions (session-store.ts parses each one);
+      // the seam is typed loosely so test fakes can stay partial.
+      return request === undefined || !Array.isArray(all)
+        ? all
+        : historyPage(all as Session[], request);
+    },
     // Bug 5: ignores its args, same as sessions:list/sessions:refresh above
     // — the only "argument" is which laptop clicked "Use my location".
     "prayer:locateIp": () => deps.ipLocate.lookup(),
