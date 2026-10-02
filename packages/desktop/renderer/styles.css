@@ -5271,3 +5271,8 @@
 /* Settings → General's Check for updates (update-settings.ts). */
 .settings-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .settings-update .settings-note:empty { display: none; }
+
+/* The API tab's Copy as code menu: cURL, fetch or Python. */
+.api-copy-wrap { position: relative; display: inline-flex; }
+.api-copy-menu { position: absolute; top: 100%; inset-inline-end: 0; z-index: 20; display: flex; flex-direction: column; gap: 2px; }
+.api-copy-menu[hidden] { display: none; }

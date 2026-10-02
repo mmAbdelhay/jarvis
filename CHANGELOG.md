@@ -8,6 +8,10 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- The API client copies a request as JavaScript `fetch` or Python
+  `requests` as well as cURL, from one menu. All three come from the same
+  resolved request, so they agree on headers, auth and body.
+
 - **Check for updates** in Settings → General: one request to GitHub's
   releases API, only when pressed, with the newer release's page opened in
   the Personal browser. Nothing is ever checked in the background.

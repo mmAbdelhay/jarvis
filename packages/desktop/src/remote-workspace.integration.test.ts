@@ -189,7 +189,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests,
       evaluateAssertions: () => [],
-      toCurl: () => "curl 'http://h'",
+      toSnippet: () => "curl 'http://h'",
       writeImported,
       projects: { [PROJECT]: "/p/acme" },
       language: "en",

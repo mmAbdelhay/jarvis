@@ -117,5 +117,5 @@ none of those bounds.
 ## What is not here
 
 No cookie *editor* (only viewing and deleting), no code generation beyond
-cURL, no response search, and no per-request network override — the settings
+cURL, JavaScript `fetch` and Python `requests`, no response search, and no per-request network override — the settings
 are per project. Postman import handles v2.0 and v2.1 collections.

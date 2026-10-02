@@ -91,6 +91,7 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
+import type { SnippetLanguage } from "@jarvis/platform";
 import type { UpdateCheck } from "./update-check.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
@@ -886,6 +887,8 @@ export type RendererApi = {
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
+    /** Absent is cURL — what every caller meant before there was a choice. */
+    language?: SnippetLanguage,
   ): Promise<GitViewResult<string>>;
   createApiRequest(
     project: string,
@@ -3108,11 +3111,13 @@ export type ApiHandlers = ApiEditHandlers & {
   ): Promise<GitViewResult<Cookie[]>>;
   settings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
-  /** The request as a shell command, with variables resolved. */
+  /** The request as code — a shell command by default, or fetch or
+   *  Python — with variables resolved. */
   curl(
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
+    language?: SnippetLanguage,
   ): Promise<GitViewResult<string>>;
 };
 
@@ -3187,7 +3192,11 @@ export type ApiHandlerDeps = {
     assertions: readonly { name?: string; value?: string; enabled?: boolean }[],
     subject: { status: number; headers: Record<string, string>; body: string; timeMs: number },
   ) => AssertionResult[];
-  toCurl: (request: Record<string, unknown>, variables: Record<string, string>) => string;
+  toSnippet: (
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+    language: SnippetLanguage,
+  ) => string;
   /** The project's persisted API state: history, cookies and settings. */
   store: {
     read: (
@@ -3310,13 +3319,17 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
   }
 
   return {
-    async curl(project, request, variables) {
+    async curl(project, request, variables, language) {
       if (rootFor(project) === undefined) return unknownProject();
       if (typeof request !== "object" || request === null) {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       try {
-        return { ok: true, value: deps.toCurl(request, variables ?? {}) };
+        // Anything but the two other names is cURL: an older client sends
+        // no language at all, and that is what it always got.
+        const chosen: SnippetLanguage =
+          language === "fetch" || language === "python" ? language : "curl";
+        return { ok: true, value: deps.toSnippet(request, variables ?? {}, chosen) };
       } catch {
         return fail(MESSAGES.apiUnavailable(deps.language));
       }

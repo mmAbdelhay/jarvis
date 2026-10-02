@@ -150,7 +150,7 @@ import {
   renameFolder,
   renameRequest,
   sendRequest,
-  toCurl,
+  toSnippet,
   writeEnvironment,
   writeImported,
   writeRequest,
@@ -1021,7 +1021,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     sendRequest: (request, variables, project, remote) =>
       sendApiRequest(request, variables, project, remote),
     evaluateAssertions,
-    toCurl,
+    toSnippet,
     createRequest,
     createFolder,
     renameRequest,

@@ -27,7 +27,7 @@ import {
   type StreamSnapshot,
   type Turn,
 } from "@jarvis/core";
-import type { DockerConfig, PlanCommentStore, PlanFiles } from "@jarvis/platform";
+import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
 import { bracketedSubmit } from "./bracketed.js";
 import {
@@ -923,11 +923,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       return deps.uploads.readJson(origin.deviceId, fileId);
     },
-    "api:curl": ([p, request, variables]) =>
+    "api:curl": ([p, request, variables, language]) =>
       api.curl(
         p as string,
         request as Record<string, unknown>,
         variables as Record<string, string>,
+        language as SnippetLanguage,
       ),
     "api:createRequest": ([p, folder, name, seq]) =>
       api.createRequest(p as string, folder as string, name as string, seq as number),

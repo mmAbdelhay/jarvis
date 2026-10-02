@@ -4691,7 +4691,7 @@ describe("api handlers", () => {
           passed: true,
           actual: "200",
         })),
-      toCurl: () => "curl 'http://h'",
+      toSnippet: () => "curl 'http://h'",
       sendRequest: () =>
         Promise.resolve({
           response: {
@@ -4712,6 +4712,20 @@ describe("api handlers", () => {
     };
     return { api: createApiHandlers(deps), saved };
   }
+
+  it("copies as the language asked for, and as cURL when none (or an unknown one) is named", async () => {
+    const asked: string[] = [];
+    const { api } = handlers({
+      toSnippet: (_request, _variables, language) => {
+        asked.push(language);
+        return language;
+      },
+    });
+    await api.curl("acme", {}, {}, "python");
+    await api.curl("acme", {}, {});
+    await api.curl("acme", {}, {}, "rust" as never);
+    expect(asked).toEqual(["python", "curl", "curl"]);
+  });
 
   it("lists a project's collections", async () => {
     const { api } = handlers();
@@ -5044,7 +5058,7 @@ describe("api handlers — remote api:save against the real serializer", () => {
       sendRequest: () => Promise.reject(new Error("unused")),
       truncateBody: (body: string) => body,
       evaluateAssertions: () => [],
-      toCurl: () => "",
+      toSnippet: () => "",
       store: {
         read: () =>
           Promise.resolve({
@@ -5256,7 +5270,7 @@ describe("api editing handlers", () => {
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests: () => ({ name: "Imported", requests: [] }),
       evaluateAssertions: () => [],
-      toCurl: () => "curl 'http://h'",
+      toSnippet: () => "curl 'http://h'",
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
       projects: { acme: "/p/acme" },
       language: "en",

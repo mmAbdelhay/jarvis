@@ -553,9 +553,16 @@
               <button id="api-env-edit" class="workspace-nav api-icon-btn" type="button" title="Edit this environment" aria-label="Edit this environment">
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
               </button>
-              <button id="api-curl" class="workspace-nav api-icon-btn" type="button" title="Copy as cURL" aria-label="Copy as cURL">
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5"></path><path d="M12 19h8"></path></svg>
-              </button>
+              <div class="api-copy-wrap">
+                <button id="api-curl" class="workspace-nav api-icon-btn" type="button" title="Copy as code" aria-label="Copy as code" aria-haspopup="menu" aria-expanded="false">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5"></path><path d="M12 19h8"></path></svg>
+                </button>
+                <div id="api-copy-menu" class="workspace-menu api-copy-menu" hidden>
+                  <button id="api-copy-curl" class="settings-add" type="button">cURL</button>
+                  <button id="api-copy-fetch" class="settings-add" type="button">fetch</button>
+                  <button id="api-copy-python" class="settings-add" type="button">Python</button>
+                </div>
+              </div>
               <button id="api-history-toggle" class="workspace-nav api-icon-btn" type="button" title="Request history" aria-label="Request history">
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
               </button>
