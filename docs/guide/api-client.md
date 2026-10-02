@@ -32,8 +32,8 @@ sidebar; ✎ and × on a row rename and delete. Renaming a request moves the fil
 
 ## Sending
 
-`⌘Enter` sends, `⌘S` saves. **cURL** copies the request as a shell command with
-variables resolved — a command with `{{base}}` still in it is a note, not a
+`⌘Enter` sends, `⌘S` saves. **Copy as code** copies the request as a cURL
+command, JavaScript `fetch` or Python `requests`, with variables resolved — a command with `{{base}}` still in it is a note, not a
 command.
 
 Requests are issued **from the main process**, not from a browser origin.
