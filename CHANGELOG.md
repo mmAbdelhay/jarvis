@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone redesign, Home: a new bottom bar (Home, Sessions, a Talk button in the
+  middle, Workspace, Changes); any question a session is waiting at, answerable
+  from Home; and each account's capacity with its last-day trend.
 - Phone Changes screen: pull, push, open a pull request, switch or create a
   branch, and merge or remove a session's worktree. A commit git refuses now
   says why on the phone and keeps the draft.

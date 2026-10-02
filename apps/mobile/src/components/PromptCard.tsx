@@ -3,19 +3,38 @@ import type { PhonePrompt } from "@/lib/session-prompt";
 import { theme } from "@/lib/theme";
 
 /**
- * What the session is waiting on, above the compose bar: the agent's own
- * question, and one button per option it offers. The text is the agent's
- * — shown as written, in whatever language it wrote it — so it is laid out
- * by its own content direction rather than the app's.
+ * What a session is waiting on: the agent's own question, and one button per
+ * option it offers, numbered as the agent numbers them. The text is the
+ * agent's — shown as written, in whatever language it wrote it — so it is
+ * laid out by its own content direction rather than the app's.
+ *
+ * On the session screen it sits above the compose bar; on Home it carries a
+ * `heading` (which session is asking) and an Open button.
  */
 export function PromptCard(props: {
   prompt: PhonePrompt;
   busy: boolean;
   note: string | undefined;
   onAnswer(index: number, label: string): void;
+  /** The card's label line: "WAITING FOR YOU", or Home's session line. */
+  heading: string;
+  /** Home only: the session it belongs to. */
+  context?: string;
+  open?: { label: string; onPress(): void };
 }) {
   return (
     <View style={styles.card} accessibilityRole="summary">
+      <View style={styles.top}>
+        <View style={styles.headingRow}>
+          <View style={styles.dot} />
+          <Text style={styles.heading}>{props.heading}</Text>
+        </View>
+        {props.context !== undefined && (
+          <Text style={styles.context} numberOfLines={1}>
+            {props.context}
+          </Text>
+        )}
+      </View>
       <Text style={styles.question}>{props.prompt.question}</Text>
       <View style={styles.options}>
         {props.prompt.options.map((label, index) => (
@@ -27,13 +46,30 @@ export function PromptCard(props: {
             accessibilityState={{ disabled: props.busy }}
             disabled={props.busy}
             onPress={() => props.onAnswer(index, label)}
-            style={[styles.option, props.busy && styles.disabled]}
+            style={[
+              styles.option,
+              index === 0 ? styles.optionFirst : undefined,
+              props.busy && styles.disabled,
+            ]}
           >
-            <Text style={styles.optionText} numberOfLines={2}>
+            <Text style={[styles.number, index === 0 && styles.numberFirst]}>{index + 1}</Text>
+            <Text
+              style={[styles.optionText, index === 0 && styles.optionTextFirst]}
+              numberOfLines={2}
+            >
               {label}
             </Text>
           </TouchableOpacity>
         ))}
+        {props.open !== undefined && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={props.open.onPress}
+            style={[styles.option, styles.openButton]}
+          >
+            <Text style={styles.optionText}>{props.open.label}</Text>
+          </TouchableOpacity>
+        )}
       </View>
       {props.note !== undefined && <Text style={styles.note}>{props.note}</Text>}
     </View>
@@ -42,26 +78,56 @@ export function PromptCard(props: {
 
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: 12,
-    marginBottom: 8,
-    padding: 10,
-    borderRadius: 10,
+    padding: 14,
+    gap: 10,
+    borderRadius: theme.radius.card + 2,
     borderWidth: 1,
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.warningBorder,
+    backgroundColor: theme.colors.warningSurface,
   },
-  question: { color: theme.colors.text, fontSize: 14, marginBottom: 8 },
-  options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  headingRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dot: { width: 8, height: 8, borderRadius: 999, backgroundColor: theme.colors.warning },
+  heading: {
+    color: theme.colors.warning,
+    fontFamily: theme.font.bold,
+    fontSize: 12,
+    letterSpacing: 0.6,
+  },
+  context: {
+    flexShrink: 1,
+    color: theme.colors.warningMuted,
+    fontFamily: theme.font.body,
+    fontSize: 12,
+  },
+  question: {
+    color: theme.colors.text,
+    fontFamily: theme.font.semibold,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  options: { gap: 6 },
   option: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.control,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    maxWidth: "100%",
+    borderColor: theme.colors.warningBorder,
   },
-  optionText: { color: theme.colors.text, fontSize: 13 },
+  optionFirst: { backgroundColor: theme.colors.warning, borderColor: theme.colors.warning },
+  openButton: { justifyContent: "center" },
+  number: { color: theme.colors.warningMuted, fontFamily: theme.font.mono, fontSize: 12 },
+  numberFirst: { color: theme.colors.onWarning },
+  optionText: {
+    flexShrink: 1,
+    color: theme.colors.warningText,
+    fontFamily: theme.font.semibold,
+    fontSize: 14,
+  },
+  optionTextFirst: { color: theme.colors.onWarning, fontFamily: theme.font.bold },
   disabled: { opacity: 0.5 },
-  note: { marginTop: 8, color: theme.colors.accentText, fontSize: 12 },
+  note: { color: theme.colors.warningText, fontFamily: theme.font.body, fontSize: 12 },
 });

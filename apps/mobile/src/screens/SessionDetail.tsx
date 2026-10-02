@@ -369,7 +369,15 @@ export function SessionDetail(props: {
         }}
       />
       {prompt !== undefined && (
-        <PromptCard prompt={prompt} busy={promptBusy} note={promptNote} onAnswer={onAnswer} />
+        <View style={styles.promptSlot}>
+          <PromptCard
+            prompt={prompt}
+            busy={promptBusy}
+            note={promptNote}
+            onAnswer={onAnswer}
+            heading={t(language, "prompt.waiting")}
+          />
+        </View>
       )}
       <View style={styles.composeRow}>
         <View style={styles.composeBarSlot}>
@@ -427,6 +435,7 @@ export function SessionDetail(props: {
 }
 
 const styles = StyleSheet.create({
+  promptSlot: { marginHorizontal: 12, marginBottom: 8 },
   container: { flex: 1, backgroundColor: theme.colors.terminalGround },
   status: {
     color: theme.colors.warning,
