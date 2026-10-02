@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Find in an API response: a search field above the body marks every match,
+  counts them, and steps through with Enter / Shift+Enter.
+
 - The API client copies a request as JavaScript `fetch` or Python
   `requests` as well as cURL, from one menu. All three come from the same
   resolved request, so they agree on headers, auth and body.

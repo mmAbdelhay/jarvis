@@ -5276,3 +5276,11 @@
 .api-copy-wrap { position: relative; display: inline-flex; }
 .api-copy-menu { position: absolute; top: 100%; inset-inline-end: 0; z-index: 20; display: flex; flex-direction: column; gap: 2px; }
 .api-copy-menu[hidden] { display: none; }
+
+/* Find in the API response body (api-response.ts). */
+.api-find { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.api-find-input { flex: 0 1 240px; font: inherit; font-size: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.api-find-count { font-size: 11px; color: var(--text-muted); min-width: 4ch; }
+.api-find-step { padding: 2px 8px; }
+.api-match { background: var(--accent-quiet); color: var(--text); border-radius: 2px; }
+.api-match--current { background: var(--accent); color: var(--ground); }

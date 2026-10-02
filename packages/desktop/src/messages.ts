@@ -165,6 +165,13 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر الوصول إلى GitHub الآن." : "Couldn't reach GitHub just now.",
   updateOpen: (language: "ar" | "en"): string =>
     language === "ar" ? "افتح صفحة الإصدار" : "Open the release",
+  // The API tab's find in response (api-response.ts).
+  apiFindInResponse: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث في الاستجابة" : "Find in response",
+  apiFindPrevious: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق السابق" : "Previous match",
+  apiFindNext: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق التالي" : "Next match",
   // The Dashboard's usage charts (usage-charts.ts).
   capacityHistoryLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",
