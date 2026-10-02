@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { ComposeBar } from "@/components/ComposeBar";
 import { ArrowPad } from "@/components/ArrowPad";
+import { FileBrowserSheet } from "@/components/FileBrowserSheet";
 import { KeyBar } from "@/components/KeyBar";
 import { PlanStrip } from "@/components/PlanStrip";
 import { TerminalNavBar } from "@/components/TerminalNavBar";
@@ -103,6 +104,7 @@ function TerminalPaneBody({
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<boolean | undefined>(undefined);
   const [padOpen, setPadOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [, setPlanRevision] = useState(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
@@ -303,6 +305,14 @@ function TerminalPaneBody({
     <View style={styles.headerActions}>
       <TouchableOpacity
         accessibilityRole="button"
+        accessibilityLabel={t(language, "files.title")}
+        onPress={() => setFilesOpen(true)}
+        style={styles.headerButton}
+      >
+        <Text style={styles.headerButtonText}>▤</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="button"
         accessibilityLabel={t(language, "terminal.find")}
         accessibilityState={{ selected: finding }}
         onPress={() => {
@@ -432,6 +442,16 @@ function TerminalPaneBody({
           onSent={() => setArmed(inputRef.current?.ctrlArmed() ?? false)}
         />
       </View>
+      <FileBrowserSheet
+        visible={filesOpen}
+        client={client}
+        paneKey={paneKey}
+        language={language}
+        onInsert={(text) => {
+          void inputRef.current?.sendText(text);
+        }}
+        onClose={() => setFilesOpen(false)}
+      />
       <PlanSheet
         visible={planVisible}
         store={plansStore}

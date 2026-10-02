@@ -3590,6 +3590,21 @@ describe("terminal handlers", () => {
       expect(read).toEqual([]);
     });
 
+    it("takes a relative path from the project root, and refuses one that climbs out", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "")).resolves.toEqual([
+        { name: "src", directory: true },
+        { name: "a.ts", directory: false },
+      ]);
+      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj", "/proj/src"]);
+      await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "src/../../etc")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj", "/proj/src"]);
+    });
+
     it("refuses a symlink that points outside the project", async () => {
       const escaping = { ...files, realPath: (p: string) => (p === "/proj/link" ? "/etc" : p) };
       const handlers = listing({ files: escaping });
@@ -3684,22 +3699,10 @@ describe("terminal handlers", () => {
 
     // Anything not absolute would resolve against whatever directory the
     // Electron main process happens to be running in — never the project.
-    it("refuses a relative or empty path", async () => {
-      const handlers = listing();
-      handlers.open("p");
-
-      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
-      await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
-      await expect(handlers.listDir("tab-1", "")).resolves.toEqual([]);
-      expect(read).toEqual([]);
-    });
-
-    // Through the handler, a relative path is refused by containment
-    // anyway, because this process's cwd is not inside the fake project —
-    // so that test alone does not pin the guard. Asked of the check
-    // directly, with the process's own cwd as the root, it does: the guard
-    // is the only thing standing between "src" and a listing of whatever
-    // directory Jarvis happens to have been launched from.
+    // listDir takes a relative path from the project root (above); the
+    // check under it still refuses one outright, so nothing else that
+    // calls it can ever list whatever directory Jarvis happens to have
+    // been launched from.
     it("refuses a relative candidate even when the process cwd is the root", () => {
       const identity = (p: string) => p;
 

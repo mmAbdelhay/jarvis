@@ -8,6 +8,11 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone redesign, files: a terminal's Files button browses its project
+  (folders first, a breadcrumb back up) and types a chosen file's path into the
+  terminal, quoted when the shell would misread it. `terminal:listDir` now also
+  takes a path relative to the project root, checked by the same containment
+  rule.
 - Phone redesign, terminal: the plan stays in view above the keys (progress,
   the step it is on, notes waiting to be sent) and opens a restyled sheet with
   a Plan / Notes switch and ticked steps struck through. Getting around the

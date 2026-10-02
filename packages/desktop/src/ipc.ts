@@ -2775,7 +2775,11 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (paneCwd === undefined) return [];
       const project = projectFor(paneCwd);
       if (project === undefined) return [];
-      const target = resolveWithin(project.dir, path, files.realPath);
+      // A relative path is taken from the project's root — how a paired
+      // phone, which never learns the laptop's absolute paths, browses. It
+      // then passes the very same containment check an absolute one does.
+      const candidate = path === "" || !isAbsolute(path) ? join(project.dir, path) : path;
+      const target = resolveWithin(project.dir, candidate, files.realPath);
       if (target === undefined) return [];
       try {
         return files.readDir(target);
