@@ -19,8 +19,15 @@ import {
   View,
 } from "react-native";
 import { ComposeBar } from "@/components/ComposeBar";
+import { ArrowPad } from "@/components/ArrowPad";
 import { KeyBar } from "@/components/KeyBar";
-import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
+import { PlanStrip } from "@/components/PlanStrip";
+import { TerminalNavBar } from "@/components/TerminalNavBar";
+import {
+  TerminalWebView,
+  type TerminalView,
+  type TerminalWebViewHandle,
+} from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
@@ -42,6 +49,7 @@ import { useLayoutClass } from "@/lib/use-layout-class";
 import { createPlansStore } from "@/lib/plans-store";
 import { parseTerminalPanes, resolvePane } from "@/lib/workspace-store";
 import { PlanSheet } from "@/plan/PlanSheet";
+import { currentStep, planProgressOf } from "@/plan/plan-progress";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type ValidationPhase = "checking" | "notFound" | "ok";
@@ -91,6 +99,10 @@ function TerminalPaneBody({
   const [armed, setArmed] = useState(false);
   const [keyNotice, setKeyNotice] = useState("");
   const [planVisible, setPlanVisible] = useState(false);
+  const [view, setView] = useState<TerminalView>({ back: false, commands: false });
+  const [finding, setFinding] = useState(false);
+  const [found, setFound] = useState<boolean | undefined>(undefined);
+  const [padOpen, setPadOpen] = useState(false);
   const [, setPlanRevision] = useState(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
@@ -284,14 +296,33 @@ function TerminalPaneBody({
   }
 
   const statusKey = streamStatusKey(streamView);
-  const planButton = (
-    <TouchableOpacity style={styles.planButton} onPress={() => setPlanVisible(true)}>
-      <Text style={styles.planButtonText}>
-        {t(language, "plans.header", {
-          count: plansStore.state.comments.filter((comment) => comment.sentAt === undefined).length,
-        })}
-      </Text>
-    </TouchableOpacity>
+  const queuedNotes = plansStore.state.comments.filter(
+    (comment) => comment.sentAt === undefined,
+  ).length;
+  const headerActions = (
+    <View style={styles.headerActions}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={t(language, "terminal.find")}
+        accessibilityState={{ selected: finding }}
+        onPress={() => {
+          setFinding((open) => !open);
+          setFound(undefined);
+        }}
+        style={[styles.headerButton, finding && styles.headerButtonOn]}
+      >
+        <Text style={styles.headerButtonText}>⌕</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={t(language, "terminal.arrowPad")}
+        accessibilityState={{ selected: padOpen }}
+        onPress={() => setPadOpen((open) => !open)}
+        style={[styles.headerButton, padOpen && styles.headerButtonOn]}
+      >
+        <Text style={styles.headerButtonText}>✥</Text>
+      </TouchableOpacity>
+    </View>
   );
   return (
     // iOS: KeyboardAvoidingView's padding behavior, as before. Android: no
@@ -309,12 +340,12 @@ function TerminalPaneBody({
         <Stack.Screen
           options={{
             title: paneKey,
-            headerRight: () => planButton,
+            headerRight: () => headerActions,
           }}
         />
       )}
       {/* Wide layout: no stack header, so the same button sits above the pane. */}
-      {embedded && <View style={styles.planRow}>{planButton}</View>}
+      {embedded && <View style={styles.planRow}>{headerActions}</View>}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -344,6 +375,8 @@ function TerminalPaneBody({
         onWheel={(direction) => {
           void inputRef.current?.sendText(sgrWheelSequence(direction));
         }}
+        onView={setView}
+        onFound={setFound}
         onHardwareInput={
           hardwareKeys
             ? (key) => {
@@ -353,6 +386,36 @@ function TerminalPaneBody({
         }
       />
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
+      <TerminalNavBar
+        language={language}
+        view={view}
+        finding={finding}
+        found={found}
+        onJump={(to) => webRef.current?.jump(to)}
+        onFind={(query, direction) => webRef.current?.find(query, direction)}
+        onCloseFind={() => {
+          setFinding(false);
+          setFound(undefined);
+        }}
+      />
+      {plansStore.state.doc !== undefined && (
+        <PlanStrip
+          language={language}
+          progress={planProgressOf(plansStore.state.doc)}
+          step={currentStep(plansStore.state.doc)}
+          queuedNotes={queuedNotes}
+          onOpen={() => setPlanVisible(true)}
+        />
+      )}
+      {padOpen && (
+        <ArrowPad
+          language={language}
+          disabled={disabled}
+          onArrow={(arrow) => {
+            void onKey(arrow);
+          }}
+        />
+      )}
       <KeyBar
         disabled={disabled}
         armed={armed}
@@ -386,6 +449,17 @@ const styles = StyleSheet.create({
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   composeRow: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
   planRow: { flexDirection: "row", justifyContent: "flex-end" },
-  planButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: theme.spacing.sm },
-  planButtonText: { color: theme.colors.accent, fontFamily: theme.font.semibold },
+  headerActions: { flexDirection: "row", gap: 6, paddingHorizontal: theme.spacing.sm },
+  headerButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  headerButtonOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  headerButtonText: { color: theme.colors.textSecondary, fontSize: 17 },
 });

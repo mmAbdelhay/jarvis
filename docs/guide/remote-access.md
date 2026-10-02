@@ -345,7 +345,12 @@ behind the same URL safety check every external link on the phone goes
 through (an unresolvable or unsafe URL shows a notice instead of opening
 anything); an Editor, Database or Cluster tab's row links to the sidecar
 screens described above; a Docker or API tab's row opens the phone's own
-Docker or API screen, described next. The Changes tab shows a session's git
+Docker or API screen, described next. A terminal on the phone keeps its plan in a strip above the keys — how far
+along it is and the step it is on — and tapping it opens the plan. **Previous
+command** and **Next command** jump between the prompts the laptop's shell
+marks, **Latest** returns to the live end once you have scrolled back, the
+search button finds text in the output, and the arrow-pad button opens a pad
+you drag a thumb across to send arrow keys. The Changes tab shows a session's git
 status — staged and unstaged files, a diff per file — and lets you stage,
 unstage and commit from the phone. It also shows where the branch stands
 against its remote (`origin/main ↑2 ↓1`) with Pull, Push and Pull request,

@@ -18,7 +18,13 @@ export type PageMessage =
   // Wide layout (Task 4 fix round 1): the browser build's current mouse
   // selection ("" once cleared). Written to the clipboard on the user's
   // copy chord only; never sent to the pty or any RPC.
-  | { t: "selection"; text: string };
+  | { t: "selection"; text: string }
+  // Where the viewport is: scrolled back from the newest line or not, and
+  // whether the shell has marked any command prompts to jump between.
+  // Geometry and one bit, never terminal text.
+  | { t: "view"; back: boolean; commands: boolean }
+  // Whether the last find matched — the query was the user's own.
+  | { t: "found"; ok: boolean };
 
 export type NativeMessage =
   | { t: "write"; data: string }
@@ -30,7 +36,10 @@ export type NativeMessage =
   // renders it correctly instead of garbling wrapped lines.
   | { t: "size"; cols: number; rows: number }
   // After a copy: drop the selection, so the next Ctrl+C interrupts again.
-  | { t: "clearSelection" };
+  | { t: "clearSelection" }
+  // Getting around the scrollback.
+  | { t: "jump"; to: "latest" | "prevCommand" | "nextCommand" }
+  | { t: "find"; query: string; direction: "next" | "prev" };
 
 const MAX_TEXT_LENGTH = 256;
 /** The longest selection the page posts (it cuts longer ones). */
@@ -75,6 +84,14 @@ export function parsePageMessage(text: unknown): PageMessage | undefined {
       if (typeof obj.text === "string" && obj.text.length <= MAX_SELECTION_CHARS) {
         return { t: "selection", text: obj.text };
       }
+      return undefined;
+    case "view":
+      if (typeof obj.back === "boolean" && typeof obj.commands === "boolean") {
+        return { t: "view", back: obj.back, commands: obj.commands };
+      }
+      return undefined;
+    case "found":
+      if (typeof obj.ok === "boolean") return { t: "found", ok: obj.ok };
       return undefined;
     case "wheel":
       if (obj.direction === "up" || obj.direction === "down") {

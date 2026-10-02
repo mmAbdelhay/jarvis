@@ -59,11 +59,26 @@ import { theme } from "@/lib/theme";
 import { createWriteBatcher } from "@/lib/write-batcher";
 import type { TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
 
-export type { TerminalModes, TerminalWebViewHandle, TerminalWebViewProps } from "./TerminalWebView";
+export type {
+  TerminalModes,
+  TerminalView,
+  TerminalWebViewHandle,
+  TerminalWebViewProps,
+} from "./TerminalWebView";
 
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebViewProps>(
   function TerminalWebView(
-    { onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize, onHardwareInput },
+    {
+      onReady,
+      onResize,
+      onModes,
+      onNeedsReplay,
+      onWheel,
+      fixedSize,
+      onHardwareInput,
+      onView,
+      onFound,
+    },
     ref,
   ) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -141,7 +156,22 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       postToPage({ t: "fit" });
     }, [postToPage]);
 
-    useImperativeHandle(ref, () => ({ write, reset, fit: postFit }), [write, reset, postFit]);
+    const jump = useCallback(
+      (to: "latest" | "prevCommand" | "nextCommand") => postToPage({ t: "jump", to }),
+      [postToPage],
+    );
+    const find = useCallback(
+      (query: string, direction: "next" | "prev") => postToPage({ t: "find", query, direction }),
+      [postToPage],
+    );
+
+    useImperativeHandle(ref, () => ({ write, reset, fit: postFit, jump, find }), [
+      write,
+      reset,
+      postFit,
+      jump,
+      find,
+    ]);
 
     useEffect(() => {
       function handleMessage(event: MessageEvent): void {
@@ -199,6 +229,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
           case "wheel":
             onWheel(message.direction);
             return;
+          case "view":
+            onView?.({ back: message.back, commands: message.commands });
+            return;
+          case "found":
+            onFound?.(message.ok);
+            return;
           case "selection":
             selectionRef.current = message.text;
             return;
@@ -208,7 +244,17 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       return () => {
         window.removeEventListener("message", handleMessage);
       };
-    }, [onReady, onResize, onModes, onNeedsReplay, onWheel, postToPage, getBatcher]);
+    }, [
+      onReady,
+      onResize,
+      onModes,
+      onNeedsReplay,
+      onWheel,
+      postToPage,
+      getBatcher,
+      onView,
+      onFound,
+    ]);
 
     // A click on the terminal focuses the frame (the window blurs with the
     // frame as its active element); the capture textarea takes the focus

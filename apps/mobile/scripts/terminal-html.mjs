@@ -165,8 +165,28 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'else if(window.parent!==window){window.parent.postMessage(s,"*");}' +
     "}," +
     "applyFixedSize:applyFixedSize," +
-    'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;}' +
+    'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;},' +
+    // Getting around the scrollback: xterm's own buffer and viewport,
+    // read and moved here; only geometry and a found/not-found bit ever
+    // go back to native (terminal-page.ts).
+    "nav:{" +
+    "viewportY:function(){return term.buffer.active.viewportY;}," +
+    "baseY:function(){return term.buffer.active.baseY;}," +
+    "lineCount:function(){return term.buffer.active.length;}," +
+    'lineText:function(y){var l=term.buffer.active.getLine(y);return l?l.translateToString(true):"";},' +
+    "scrollToLine:function(y){term.scrollToLine(y);}," +
+    "scrollToBottom:function(){term.scrollToBottom();}," +
+    "select:function(c,r,n){term.select(c,r,n);}" +
+    "}" +
     "});" +
+    // The laptop's shell integration marks each prompt with OSC 133;A.
+    // Each one becomes a stop for "previous / next command"; returning
+    // false leaves the sequence to xterm's own (no-op) handling.
+    "term.parser.registerOscHandler(133,function(data){" +
+    'if(data.charAt(0)==="A"){var m=term.registerMarker(0);if(m)controller.commandMark(m);}' +
+    "return false;" +
+    "});" +
+    "term.onScroll(function(){controller.viewChanged();});" +
     // In the iframe, only the parent (the app) may drive the terminal; the
     // native WebView's own injected events carry no source, and are
     // accepted exactly as before.

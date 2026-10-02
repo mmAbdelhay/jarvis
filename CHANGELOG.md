@@ -8,6 +8,11 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone redesign, terminal: the plan stays in view above the keys (progress,
+  the step it is on, notes waiting to be sent) and opens a restyled sheet with
+  a Plan / Notes switch and ticked steps struck through. Getting around the
+  output: previous / next command (from the shell's own prompt marks),
+  Latest once scrolled back, find in output, and a drag pad for arrow keys.
 - Phone redesign, Session and Changes: a session screen switches between Live,
   Changes, Plan (with its progress) and Transcript; its plan opens on the
   session, and notes on it are sent to the session (`plans:send` now also
