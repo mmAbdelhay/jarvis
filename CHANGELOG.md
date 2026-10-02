@@ -8,6 +8,13 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Answer a waiting session without its terminal. A session sitting at a
+  permission menu, a `(y/n)` or a "Press Enter" shows the agent's own
+  question and options on its Dashboard row and on the phone's session
+  screen, and by voice ("say no to the acme session"). Each answer types
+  what you would, and is refused — typing nothing — if the prompt changed
+  since you saw it.
+
 - Usage history on the Dashboard: a line under each provider's meter shows
   its remaining capacity over the last day, and the Sessions header shows
   sessions started per day for the last two weeks. Readings are kept as

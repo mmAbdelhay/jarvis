@@ -19,6 +19,7 @@ import {
   type GitRemoteOps,
   type GitWorktreeInfo,
   type GitWorktrees,
+  type PendingPrompt,
   type PlanComment,
   type ProviderStatus,
   type Session,
@@ -601,6 +602,14 @@ export type RendererApi = {
    * message" path, because the agent's own terminal UI owns the input line.
    */
   sendSessionInput(sessionId: string, data: string): Promise<void>;
+  /** What the session is sitting at, read from its own output — the
+   *  agent's question and its choices — or null when it is at no prompt
+   *  this can read. */
+  sessionPrompt(sessionId: string): Promise<PendingPrompt | null>;
+  /** Chooses option `index` of the session's current prompt. `label` is
+   *  the option as it was shown; the prompt is read again first, and a
+   *  prompt that is gone or changed is refused rather than typed into. */
+  answerSession(sessionId: string, index: number, label: string): Promise<SessionAnswerResult>;
   /**
    * The terminal pane's new size in character cells. A terminal UI lays
    * itself out from this, so it is sent whenever the pane is measured or
@@ -1950,6 +1959,10 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
 
 /** One immediate child of a listed directory. */
 export type DirEntry = { name: string; directory: boolean };
+
+/** session:answer's reply. `gone`: the session is no longer at a prompt;
+ *  `changed`: it is at a different one than was shown. */
+export type SessionAnswerResult = { ok: true } | { ok: false; reason: "gone" | "changed" };
 
 export type EntryKind = "file" | "directory";
 

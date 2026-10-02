@@ -20,6 +20,7 @@ import {
 import { ComposeBar } from "@/components/ComposeBar";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
+import { PromptCard } from "@/components/PromptCard";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
@@ -29,6 +30,7 @@ import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { createSessionInput, type SessionInput } from "@/lib/session-input";
+import { answerPrompt, fetchPrompt, type PhonePrompt } from "@/lib/session-prompt";
 import {
   isEnded,
   notFoundText,
@@ -95,6 +97,55 @@ export function SessionDetail(props: {
   const found = row !== undefined;
   const ended = isEnded(row?.state);
   const endedRef = useRef(ended);
+
+  // What the agent is waiting on, read every few seconds while this screen
+  // is up and the session is live; answered by index and label, which the
+  // laptop checks against the prompt on screen then.
+  const [prompt, setPrompt] = useState<PhonePrompt | undefined>(undefined);
+  const [promptBusy, setPromptBusy] = useState(false);
+  const [promptNote, setPromptNote] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (ended) {
+      setPrompt(undefined);
+      return;
+    }
+    let cancelled = false;
+    const read = () => {
+      void fetchPrompt(client, id)
+        .then((next) => {
+          if (cancelled) return;
+          setPrompt((previous) =>
+            JSON.stringify(previous) === JSON.stringify(next) ? previous : next,
+          );
+        })
+        .catch(() => {});
+    };
+    read();
+    const timer = setInterval(read, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [client, id, ended]);
+  const onAnswer = useCallback(
+    (index: number, label: string) => {
+      setPromptBusy(true);
+      setPromptNote(undefined);
+      void answerPrompt(client, id, index, label)
+        .then((outcome) => {
+          if (outcome === "answered") setPrompt(undefined);
+          else
+            setPromptNote(
+              t(
+                language,
+                outcome === "changed" ? "session.promptChanged" : "session.promptOffline",
+              ),
+            );
+        })
+        .finally(() => setPromptBusy(false));
+    },
+    [client, id, language],
+  );
   endedRef.current = ended;
   const sink = useMemo(
     () => ({
@@ -317,6 +368,9 @@ export function SessionDetail(props: {
           void onKey(key);
         }}
       />
+      {prompt !== undefined && (
+        <PromptCard prompt={prompt} busy={promptBusy} note={promptNote} onAnswer={onAnswer} />
+      )}
       <View style={styles.composeRow}>
         <View style={styles.composeBarSlot}>
           <ComposeBar

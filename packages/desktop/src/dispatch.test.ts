@@ -340,6 +340,50 @@ describe("dispatch table: sessions and git", () => {
     expect(deps.sessions.write).toHaveBeenCalledWith("s1", "ls\n");
   });
 
+  describe("a waiting prompt", () => {
+    const menu = "Do you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n";
+
+    it("session:prompt reads the agent's own question and options", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:prompt", "s1")).toMatchObject({
+        question: "Do you want to proceed?",
+        options: [{ label: "Yes" }, { label: "No" }],
+      });
+      vi.mocked(deps.sessions.log).mockReturnValue("just output");
+      expect(await call(table, "session:prompt", "s1")).toBeNull();
+    });
+
+    it("session:answer types the chosen option's keys when the prompt is still the one shown", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:answer", "s1", 1, "No")).toEqual({ ok: true });
+      expect(deps.sessions.write).toHaveBeenCalledWith("s1", "\x1b[B\r");
+    });
+
+    it("session:answer refuses, typing nothing, when the prompt is gone or changed", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:answer", "s1", 1, "Yes")).toEqual({
+        ok: false,
+        reason: "changed",
+      });
+      expect(await call(table, "session:answer", "s1", 9, "No")).toEqual({
+        ok: false,
+        reason: "changed",
+      });
+      vi.mocked(deps.sessions.log).mockReturnValue("done");
+      expect(await call(table, "session:answer", "s1", 1, "No")).toEqual({
+        ok: false,
+        reason: "gone",
+      });
+      expect(deps.sessions.write).not.toHaveBeenCalled();
+    });
+  });
+
   it("session:resize rejects a non-string id and non-finite sizes", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);

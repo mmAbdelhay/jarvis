@@ -19,6 +19,7 @@ import {
   anchorComments,
   formatFeedback,
   isSessionState,
+  readPrompt,
   type HandleOptions,
   type PlanComment,
   type Session,
@@ -67,6 +68,7 @@ import {
   type DockerHandlers,
   type EditorHandlers,
   type EntryKind,
+  type SessionAnswerResult,
   type GitHandlers,
   type GitViewResult,
   type SettingsHandlers,
@@ -585,6 +587,22 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "session:input": ([sessionId, data]) => {
       if (typeof sessionId !== "string" || typeof data !== "string") return;
       sessions.write(sessionId, data);
+    },
+    "session:prompt": ([sessionId]) =>
+      typeof sessionId === "string" ? (readPrompt(sessions.log(sessionId)) ?? null) : null,
+    // Read again at the moment of answering, never trusted from the call:
+    // the prompt shown a minute ago may have been answered in the terminal
+    // or replaced by another, and keys meant for one must never land in
+    // the other. The caller names the option by index *and* label, and both
+    // have to match what is on screen now.
+    "session:answer": ([sessionId, index, label]): SessionAnswerResult => {
+      if (typeof sessionId !== "string") return { ok: false, reason: "gone" };
+      const prompt = readPrompt(sessions.log(sessionId));
+      if (prompt === undefined) return { ok: false, reason: "gone" };
+      const option = typeof index === "number" ? prompt.options[index] : undefined;
+      if (option === undefined || option.label !== label) return { ok: false, reason: "changed" };
+      sessions.write(sessionId, option.keys);
+      return { ok: true };
     },
     // Where a spoken utterance goes. Normally the brain, which decides what
     // to do with it; but while a session's terminal is open, speaking is

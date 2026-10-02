@@ -143,6 +143,10 @@ export const MESSAGES = {
     language === "ar"
       ? "أُزيلت الـ worktree، وبقي فرعها."
       : "Removed the worktree; its branch is kept.",
+  promptChanged: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر السؤال قبل الإجابة، فلم يُكتب شيء. انظر مجددًا."
+      : "That prompt changed before the answer reached it, so nothing was typed. Look again.",
   // The Dashboard's usage charts (usage-charts.ts).
   capacityHistoryLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",

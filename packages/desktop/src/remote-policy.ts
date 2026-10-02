@@ -64,6 +64,10 @@ export const CHANNEL_POLICY = {
   "session:transcript": "remote",
   "session:resume": "desktop-only",
   "session:input": "remote",
+  // Read and answer a waiting prompt: the same reach session:log and
+  // session:input already give a phone, narrowed to one keystroke set.
+  "session:prompt": "remote",
+  "session:answer": "remote",
   "session:resize": "remote",
   // Ruling 10's client attach rule (M7): subscribe to session:output first,
   // then call this, then drop any push already covered by the returned
@@ -353,6 +357,8 @@ export const REMOTE_EFFECT = {
   "session:log": "read",
   "session:transcript": "read",
   "session:input": "input",
+  "session:prompt": "read",
+  "session:answer": "input",
   "session:resize": "input",
   "session:snapshot": "read",
   "providers:refresh": "mutate",

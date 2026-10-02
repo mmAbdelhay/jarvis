@@ -128,6 +128,8 @@ export const INVOKE_CHANNELS = {
   resizeSession: "session:resize",
   setVoiceTarget: "voice:target",
   refreshProviders: "providers:refresh",
+  sessionPrompt: "session:prompt",
+  answerSession: "session:answer",
   usageHistory: "usage:history",
   openTab: "workspace:open",
   closeTab: "workspace:close",

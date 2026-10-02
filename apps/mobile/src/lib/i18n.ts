@@ -522,6 +522,14 @@ export const STRINGS = {
   },
   "session.trimmed": { en: "Output trimmed: {amount}", ar: "تم اقتطاع المخرجات: {amount}" },
   "session.sendText": { en: "Send text", ar: "إرسال النص" },
+  "session.promptChanged": {
+    en: "That prompt changed before the answer reached it, so nothing was typed.",
+    ar: "تغيّر السؤال قبل وصول الإجابة، فلم يُكتب شيء.",
+  },
+  "session.promptOffline": {
+    en: "Not connected — nothing was typed.",
+    ar: "غير متصل — لم يُكتب شيء.",
+  },
   "session.composePlaceholder": {
     en: "Type text; use ⏎ to submit",
     ar: "اكتب النص؛ استخدم ⏎ للتنفيذ",

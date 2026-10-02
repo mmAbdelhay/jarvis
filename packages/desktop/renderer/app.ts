@@ -46,6 +46,7 @@ import {
 } from "./format.js";
 import { renderProviders, setCapacityHistory, wireProvidersPanel } from "./providers.js";
 import { renderSessionsChart } from "./usage-charts.js";
+import { promptBlock, refreshPrompts } from "./session-prompts.js";
 import { sessionToAutoOpen } from "./session-auto-open.js";
 import { threadPaths } from "./link-layout.js";
 import {
@@ -266,6 +267,19 @@ window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
   const previous = latestSessions;
   if (sessions.length !== previous.length) refreshUsage();
+
+  // Which live sessions are sitting at a prompt. Polled, not pushed: a
+  // session never enters a "waiting" state of its own (notify.ts infers it
+  // from a quiet spell), and reading a 2 KB tail per live session every few
+  // seconds is cheaper than a push channel for it. Only while the Dashboard
+  // could be looking.
+  setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    const live = latestSessions
+      .filter((session) => LIVE_STATES.has(session.state))
+      .map((session) => session.id);
+    void refreshPrompts(live, () => renderSessions(latestSessions));
+  }, 2500);
   latestSessions = sessions;
   renderSessions(latestSessions);
   renderRunningPill(latestSessions);
@@ -1066,6 +1080,12 @@ function buildSessionRow(session: Session): HTMLElement {
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
 
   row.append(head, summary, meta);
+  // What the agent is asking, with its own options as buttons — answerable
+  // from here without opening the terminal. Only while it is live.
+  if (LIVE_STATES.has(session.state)) {
+    const prompt = promptBlock(session.id, () => renderSessions(latestSessions));
+    if (prompt !== undefined) row.append(prompt);
+  }
   // A row click opens the session's own transcript — what the user came to
   // the row for is "what is this agent doing". Its diff badge is the route
   // to the Changes view instead (see buildDiffBadge), so both destinations

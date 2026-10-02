@@ -106,7 +106,13 @@ function buildPrompt(
       : context.sessions
           .map((session) => {
             const summary = session.summary === "" ? "" : ` "${session.summary}"`;
-            return `${session.id} — project ${session.project}, agent ${session.agentId}, state ${session.state}${summary}`;
+            const prompt =
+              session.prompt === undefined
+                ? ""
+                : `, waiting at prompt "${session.prompt.question}" with options ${session.prompt.options
+                    .map((label, index) => `${index + 1}) ${label}`)
+                    .join(" ")}`;
+            return `${session.id} — project ${session.project}, agent ${session.agentId}, state ${session.state}${summary}${prompt}`;
           })
           .join("; ");
 

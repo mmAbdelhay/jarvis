@@ -42,6 +42,14 @@ What every agent is doing, and what the machine is doing.
   every two seconds, memory every six, disk and uptime every minute. Reading
   all of them every tick cost a tenth of a core permanently, most of it
   enumerating two dozen mounted volumes to answer a number that had not moved.
+- **A session waiting on you** — a permission menu, a `(y/n)`, a "Press
+  Enter" — shows the agent's own question under its row, with one button per
+  option it offers. A button types exactly what you would: for a menu, Down
+  to that option and Enter. The prompt is read again at the moment you
+  answer, and if it has changed or gone (you answered it in the terminal),
+  nothing is typed and the row says so. The phone's session screen has the
+  same card, and by voice, "answer yes to acme" chooses an option the same
+  way.
 - **Sessions** carries a row of small bars in its header: sessions started on
   each of the last 14 days, hover for the day and count.
 - **Conversation** and **History** — what has been said, and to whom.

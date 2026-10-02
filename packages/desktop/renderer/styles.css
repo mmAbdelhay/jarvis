@@ -5231,3 +5231,34 @@
 .usage-bars__empty { fill: var(--border); }
 .usage-bars__hit { fill: transparent; }
 .usage-bars g:hover .usage-bars__bar { fill: var(--text); }
+
+/* A waiting session's own question and options, under its Dashboard row
+   (session-prompts.ts). The options are the agent's words; the accent
+   border is what says "this is waiting on you". */
+.session__prompt {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: default;
+}
+.session__prompt-question { font-size: 12px; color: var(--text); margin-bottom: 6px; }
+.session__prompt-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.session__prompt-option {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session__prompt-option:hover:not(:disabled) { border-color: var(--accent); }
+.session__prompt-option:disabled { opacity: 0.5; cursor: default; }
+.session__prompt-note { margin-top: 6px; font-size: 11px; color: var(--warn); }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Orchestrator, TOOL_NAMES } from "./orchestrator.js";
-import type { Brain, BrainReply } from "./types.js";
+import type { Brain, BrainContext, BrainReply } from "./types.js";
 import { AgentRegistry } from "../registry/registry.js";
 import { SessionManager } from "../session/manager.js";
 import type { ProcessHandle, Session } from "../session/types.js";
@@ -1420,5 +1420,79 @@ describe("Orchestrator worktrees", () => {
     const turn = await ask();
     expect(sessions.list()[0]?.projectPath).toBe("/Users/x/projects/acme");
     expect(turn.text).toContain("shared checkout");
+  });
+});
+
+describe("Orchestrator answering a waiting session", () => {
+  const menu = "Do you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n";
+
+  function build(reply: BrainReply) {
+    let output: ((chunk: string) => void) | undefined;
+    const written: string[] = [];
+    const sessions = new SessionManager(() => ({
+      write: (data) => written.push(data),
+      kill: () => {},
+      onOutput: (listener) => {
+        output = listener;
+      },
+      onExit: () => {},
+    }));
+    const asked: BrainContext[] = [];
+    const orchestrator = new Orchestrator({
+      brain: {
+        ask: async ({ context }) => {
+          asked.push(context);
+          return reply;
+        },
+      },
+      registry,
+      sessions,
+      git: fakeGitProvider(),
+      changes: () => [],
+      speak: async () => {},
+      projects: { acme: "/Users/x/projects/acme" },
+      providers: { snapshot: () => [], refresh: async () => {} },
+    });
+    const session = sessions.start({
+      project: "acme",
+      projectPath: "/Users/x/projects/acme",
+      agent: registry.resolve({ project: "acme" }),
+    });
+    return { orchestrator, session, written, asked, emit: (chunk: string) => output?.(chunk) };
+  }
+
+  it("shows the brain what a session is waiting on", async () => {
+    const { orchestrator, emit, asked } = build({ text: "ok", toolCalls: [] });
+    emit(menu);
+    await orchestrator.handle("what is acme asking?", "en");
+    expect(asked[0]?.sessions[0]?.prompt).toEqual({
+      question: "Do you want to proceed?",
+      options: ["Yes", "No"],
+    });
+  });
+
+  it("types the chosen option's keys into the session", async () => {
+    const reply: BrainReply = { text: "Done.", toolCalls: [] };
+    const { orchestrator, session, emit, written } = build(reply);
+    reply.toolCalls = [{ name: "session.answer", input: { sessionId: session.id, option: "2" } }];
+    emit(menu);
+    written.length = 0;
+    await orchestrator.handle("say no", "en");
+    expect(written).toEqual(["\x1b[B\r"]);
+  });
+
+  it("types nothing, and says so, when the session is at no prompt or has no such option", async () => {
+    const reply: BrainReply = { text: "", toolCalls: [] };
+    const { orchestrator, session, emit, written } = build(reply);
+    reply.toolCalls = [{ name: "session.answer", input: { sessionId: session.id, option: "1" } }];
+    written.length = 0;
+    const idle = await orchestrator.handle("yes", "en");
+    expect(idle.text).toContain("isn't waiting");
+
+    emit(menu);
+    reply.toolCalls = [{ name: "session.answer", input: { sessionId: session.id, option: "7" } }];
+    const wrong = await orchestrator.handle("seven", "en");
+    expect(wrong.text).toContain("no option 7");
+    expect(written).toEqual([]);
   });
 });

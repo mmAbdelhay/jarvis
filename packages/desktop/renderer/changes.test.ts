@@ -56,6 +56,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitPullRequest: vi.fn(async () => notStubbed),
     gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
     usageHistory: vi.fn(async () => ({ capacity: [], sessionsPerDay: [] })),
+    sessionPrompt: vi.fn(async () => null),
+    answerSession: vi.fn(async () => ({ ok: false as const, reason: "gone" as const })),
     gitMergeWorktree: vi.fn(async () => notStubbed),
     gitRemoveWorktree: vi.fn(async () => notStubbed),
     onChangeCounts: vi.fn(),
