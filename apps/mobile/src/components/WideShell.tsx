@@ -8,9 +8,9 @@
 
 import { usePathname, useRouter } from "expo-router";
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionView } from "@/lib/connection-store";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
