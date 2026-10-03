@@ -1,8 +1,10 @@
 // What Settings shows about the paired laptop's own configuration, read
-// through `settings:read`. Read-only by design: a paired device may not save
-// the laptop's settings (they name the commands its agents run). Only the
-// fields shown here are taken off the wire, each checked; nothing else of
-// jarvis.yaml is kept.
+// through `settings:read`. Only the fields shown here are taken off the
+// wire, each checked. The one thing the phone edits is the worktree mode:
+// agents name commands the laptop runs and projects name its folders, so
+// those stay read-only. A save re-reads the `sessions` section, changes that
+// one field and sends only that section back; the laptop applies nothing
+// else from a phone's save.
 import type { RpcClient } from "./rpc-client";
 
 export type LaptopAgent = { id: string; vendor: string | undefined };
@@ -56,4 +58,59 @@ export async function readLaptopSettings(
 ): Promise<LaptopSettings | undefined> {
   const result = await client.call("settings:read", [], { whenNotOpen: "reject" });
   return result.ok ? parseLaptopSettings(result.value) : undefined;
+}
+
+export type SaveOutcome = { ok: true } | { ok: false; text: string };
+
+/**
+ * The only thing a phone's save carries: the `sessions` section with
+ * `worktrees` changed. The section's other fields are carried through
+ * untouched because the laptop replaces the whole section — this is an
+ * outgoing draft, not a parse of input.
+ */
+export function buildWorktreeDraft(raw: unknown, mode: WorktreeMode): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const sessions = (raw as Record<string, unknown>)["sessions"];
+    if (typeof sessions === "object" && sessions !== null && !Array.isArray(sessions)) {
+      Object.assign(kept, sessions);
+    }
+  }
+  kept["worktrees"] = mode;
+  return { sessions: kept };
+}
+
+/** `settings:save`'s reply: `{ok:true}` or `{ok:false,text,...}`. */
+export function parseSaveReply(value: unknown): SaveOutcome {
+  if (typeof value === "object" && value !== null) {
+    const obj = value as Record<string, unknown>;
+    if (obj["ok"] === true) return { ok: true };
+    if (obj["ok"] === false && typeof obj["text"] === "string" && obj["text"] !== "") {
+      return { ok: false, text: obj["text"] };
+    }
+  }
+  return { ok: false, text: "laptopSettings.saveFailed" };
+}
+
+export async function saveWorktreeMode(
+  client: Pick<RpcClient, "call">,
+  mode: WorktreeMode,
+): Promise<SaveOutcome> {
+  const current = await client.call("settings:read", [], { whenNotOpen: "reject" });
+  if (!current.ok) {
+    return {
+      ok: false,
+      text: current.error.kind === "remote" ? current.error.text : "laptopSettings.saveFailed",
+    };
+  }
+  const result = await client.call("settings:save", [buildWorktreeDraft(current.value, mode)], {
+    whenNotOpen: "reject",
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      text: result.error.kind === "remote" ? result.error.text : "laptopSettings.saveFailed",
+    };
+  }
+  return parseSaveReply(result.value);
 }

@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { t, type Language, type MessageKey } from "@/lib/i18n";
-import { type LaptopSettings, readLaptopSettings, type WorktreeMode } from "@/lib/laptop-settings";
+import { noticeText } from "@/lib/laptop-actions";
+import {
+  type LaptopSettings,
+  readLaptopSettings,
+  saveWorktreeMode,
+  type WorktreeMode,
+} from "@/lib/laptop-settings";
 import { useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
 
@@ -11,10 +17,13 @@ const WORKTREE_KEYS: Record<WorktreeMode, MessageKey> = {
   always: "laptopSettings.worktreesAlways",
 };
 
+const MODES: readonly WorktreeMode[] = ["off", "parallel", "always"];
+
 /**
  * Settings' view of the paired laptop: its agents, projects and how it
- * isolates parallel sessions. Read-only — changing them stays on the
- * laptop, which the section says rather than leaving the reader to wonder.
+ * isolates parallel sessions. The worktree mode can be changed from here
+ * (saved to the laptop); agents and projects are read-only, which the
+ * section says rather than leaving the reader to wonder.
  */
 export function LaptopSettingsSection(props: { language: Language }) {
   const client = useRpcClient();
@@ -31,6 +40,23 @@ export function LaptopSettingsSection(props: { language: Language }) {
       cancelled = true;
     };
   }, [client]);
+
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState<{ error: boolean; text: string } | undefined>(undefined);
+
+  async function chooseMode(mode: WorktreeMode): Promise<void> {
+    if (settings === undefined || saving || mode === settings.worktrees) return;
+    setSaving(true);
+    setSaveNote(undefined);
+    const outcome = await saveWorktreeMode(client, mode);
+    setSaving(false);
+    if (outcome.ok) {
+      setSettings({ ...settings, worktrees: mode });
+      setSaveNote({ error: false, text: t(props.language, "laptopSettings.saved") });
+    } else {
+      setSaveNote({ error: true, text: noticeText(props.language, outcome.text) });
+    }
+  }
 
   const { language } = props;
   return (
@@ -62,10 +88,31 @@ export function LaptopSettingsSection(props: { language: Language }) {
             ))}
           </View>
           <Text style={styles.label}>{t(language, "laptopSettings.worktrees")}</Text>
-          <Text style={styles.value}>{t(language, WORKTREE_KEYS[settings.worktrees])}</Text>
+          <View style={styles.chips}>
+            {MODES.map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                accessibilityRole="button"
+                accessibilityState={{ selected: mode === settings.worktrees, disabled: saving }}
+                disabled={saving}
+                onPress={() => void chooseMode(mode)}
+                style={[styles.modeChip, mode === settings.worktrees && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, mode === settings.worktrees && styles.chipTextOn]}>
+                  {t(language, WORKTREE_KEYS[mode])}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {saving && <Text style={styles.note}>{t(language, "laptopSettings.saving")}</Text>}
+          {saveNote !== undefined && (
+            <Text selectable style={saveNote.error ? styles.error : styles.note}>
+              {saveNote.text}
+            </Text>
+          )}
         </>
       )}
-      <Text style={styles.note}>{t(language, "laptopSettings.readOnly")}</Text>
+      <Text style={styles.note}>{t(language, "laptopSettings.edit")}</Text>
     </View>
   );
 }
@@ -109,6 +156,18 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.semibold,
     fontSize: 12,
   },
+  modeChip: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  chipOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  chipText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 12 },
+  chipTextOn: { color: theme.colors.accentText },
+  error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
   value: { color: theme.colors.text, fontFamily: theme.font.semibold, fontSize: 14 },
   note: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
 });

@@ -8,11 +8,12 @@
 // Editor/Database/Cluster rows here link straight to the existing
 // `/sidecars/[project]` screen rather than rendering a placeholder.
 // Controller ruling (c): a phone never rearranges the laptop's own tabs —
-// every row below either opens the phone's own route/browser or reads a
-// row that already exists; nothing here calls a workspace:*/terminal:open
-// mutation.
+// no reorder, activate or split. The owner's 2026-10-03 exceptions are
+// rename and close on a laptop tab row (lib/laptop-actions.ts); every
+// other row opens the phone's own route/browser or reads a row that
+// already exists.
 import { useFocusEffect, useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   I18nManager,
@@ -26,8 +27,18 @@ import {
 } from "react-native";
 import type { MobileWorkspaceTab } from "@jarvis/wire";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { STRINGS, t } from "@/lib/i18n";
-import type { Language, MessageKey } from "@/lib/i18n";
+import { RenameField } from "@/components/RenameField";
+import { dialogs } from "@/lib/dialog";
+import { t } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
+import {
+  closeLaptopTab,
+  isMessageKey,
+  noticeText,
+  renameLaptopTab,
+  titleProblemKey,
+  validateTabTitle,
+} from "@/lib/laptop-actions";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { splitLayout } from "@/lib/session-nav";
@@ -69,10 +80,6 @@ function sidecarKind(kind: MobileWorkspaceTab["kind"]): boolean {
   return kind === "editor" || kind === "database" || kind === "cluster";
 }
 
-function isMessageKey(value: string): value is MessageKey {
-  return Object.hasOwn(STRINGS, value);
-}
-
 export default function WorkspaceScreen() {
   const language = useLanguage();
   const router = useRouter();
@@ -84,6 +91,10 @@ export default function WorkspaceScreen() {
   const [chatNames, setChatNames] = useState<string[] | undefined>(undefined);
   const [chatBusy, setChatBusy] = useState(false);
   const [terminalBusy, setTerminalBusy] = useState(false);
+  // The tab being renamed on the laptop, and why its last save failed.
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | undefined>(undefined);
+  const [renameError, setRenameError] = useState<string | undefined>(undefined);
+  const [renameBusy, setRenameBusy] = useState(false);
   const [openTools, setOpenTools] = useState<WorkspaceToolKind[]>([]);
   const insets = useSafeAreaInsets();
   const { kind } = useLayoutClass();
@@ -275,6 +286,70 @@ export default function WorkspaceScreen() {
     if (tab.id === activeId) router.setParams({ tab: undefined, pane: undefined });
   }
 
+  function startRename(id: string, title: string): void {
+    setRenameError(undefined);
+    setRenaming(renaming?.id === id ? undefined : { id, title });
+  }
+
+  async function submitRename(title: string): Promise<void> {
+    if (renaming === undefined) return;
+    setRenameBusy(true);
+    setRenameError(undefined);
+    const outcome = await renameLaptopTab(client, renaming.id, title);
+    setRenameBusy(false);
+    if (outcome.ok) {
+      setRenaming(undefined);
+      store.refresh();
+    } else {
+      setRenameError(noticeText(language, outcome.text));
+    }
+  }
+
+  // The confirm dialog outlives this render: its callback reads the tab being
+  // renamed and the open tab as they are when the user confirms.
+  const current = useRef({ renaming, tabParam });
+  current.current = { renaming, tabParam };
+
+  function confirmCloseLaptopTab(id: string, title: string): void {
+    dialogs.confirm({
+      title: t(language, "workspace.closeConfirmTitle"),
+      message: t(language, "workspace.closeConfirmMessage", { title }),
+      confirmText: t(language, "workspace.closeConfirm"),
+      cancelText: t(language, "common.cancel"),
+      destructive: true,
+      onConfirm: () => {
+        void closeLaptopTab(client, id).then((outcome) => {
+          if (!outcome.ok) {
+            setNotice(outcome.text);
+            return;
+          }
+          if (current.current.renaming?.id === id) setRenaming(undefined);
+          if (id === current.current.tabParam)
+            router.setParams({ tab: undefined, pane: undefined });
+          store.refresh();
+        });
+      },
+    });
+  }
+
+  const renameField =
+    renaming === undefined ? null : (
+      <RenameField
+        key={renaming.id}
+        language={language}
+        initial={renaming.title}
+        label={t(language, "workspace.renameLabel")}
+        problem={(draft) => {
+          const problem = validateTabTitle(draft);
+          return problem === undefined ? undefined : titleProblemKey(problem);
+        }}
+        error={renameError}
+        busy={renameBusy}
+        onCancel={() => setRenaming(undefined)}
+        onSubmit={(draft) => void submitRename(draft)}
+      />
+    );
+
   function pickTool(tool: WorkspaceTool): void {
     if (selected === undefined) return;
     if (tool === "terminal") {
@@ -356,6 +431,10 @@ export default function WorkspaceScreen() {
           chatBusy={chatBusy}
           notice={notice}
           onOpenTab={(tab) => openTab(selected.name, tab)}
+          renamingId={renaming?.id}
+          renameField={renameField}
+          onRenameTab={(tab) => startRename(tab.id, tab.title)}
+          onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
           onOpenPane={openPane}
           onNewTerminal={() => void handleNewTerminal(selected.name)}
           terminalBusy={terminalBusy}
@@ -404,6 +483,8 @@ export default function WorkspaceScreen() {
               activeId={activeId}
               onSelectTab={selectTab}
               onCloseTab={closeTab}
+              onRenameLaptopTab={(tab) => startRename(tab.id, tab.title)}
+              onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
               panes={
                 activeTerminal !== undefined && view.panesTabId === activeTerminal
                   ? view.panes.map((pane) => pane.paneKey)
@@ -418,6 +499,7 @@ export default function WorkspaceScreen() {
                 );
               }}
             />
+            {renameField}
             {statusLines}
             {notice !== undefined && (
               <Text selectable style={styles.error}>
@@ -499,6 +581,10 @@ function ProjectSection(props: {
   chatBusy: boolean;
   notice: string | undefined;
   onOpenTab: (tab: MobileWorkspaceTab) => void;
+  renamingId: string | undefined;
+  renameField: ReactNode;
+  onRenameTab: (tab: MobileWorkspaceTab) => void;
+  onCloseLaptopTab: (tab: MobileWorkspaceTab) => void;
   onOpenPane: (tabId: string, paneKey: string) => void;
   onNewTerminal: () => void;
   terminalBusy: boolean;
@@ -549,6 +635,27 @@ function ProjectSection(props: {
                 <Text style={styles.rowLabel}>{tabLabel(tab)}</Text>
                 <Text style={styles.rowKind}>{tab.kind}</Text>
               </TouchableOpacity>
+              <View style={styles.tabActions}>
+                <TouchableOpacity
+                  style={styles.tabAction}
+                  onPress={() => props.onRenameTab(tab)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, "workspace.renameTab", { title: tab.title })}
+                >
+                  <Text style={styles.tabActionText}>{t(language, "rename.action")}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.tabAction}
+                  onPress={() => props.onCloseLaptopTab(tab)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, "workspace.closeTab", { title: tab.title })}
+                >
+                  <Text style={styles.tabActionDanger}>
+                    {t(language, "workspace.closeConfirm")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {props.renamingId === tab.id && props.renameField}
               {tab.kind === "terminal" && props.panesTabId === tab.id && (
                 <View style={styles.paneList}>
                   <Text style={styles.sectionTitle}>{t(language, "workspace.panes.title")}</Text>
@@ -677,6 +784,10 @@ const styles = StyleSheet.create({
   },
   newTerminalText: { color: theme.colors.accent, fontFamily: theme.font.semibold, fontSize: 12 },
   list: { gap: theme.spacing.sm },
+  tabActions: { flexDirection: "row", gap: 6, paddingTop: 4 },
+  tabAction: { minHeight: 32, justifyContent: "center", paddingHorizontal: 10 },
+  tabActionText: { color: theme.colors.accent, fontFamily: theme.font.semibold, fontSize: 12 },
+  tabActionDanger: { color: theme.colors.danger, fontFamily: theme.font.semibold, fontSize: 12 },
   row: {
     backgroundColor: theme.colors.surface,
     borderColor: theme.colors.hairline,

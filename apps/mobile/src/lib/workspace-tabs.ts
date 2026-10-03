@@ -46,6 +46,11 @@ function inlineKind(kind: MobileWorkspaceTab["kind"]): kind is "terminal" | "doc
   return kind === "terminal" || kind === "docker" || kind === "api";
 }
 
+/** A tab the laptop owns (as opposed to a tool opened only on the phone). */
+export function isLaptopTabId(id: string): boolean {
+  return !id.startsWith(TOOL_PREFIX);
+}
+
 export function toolTabId(kind: WorkspaceToolKind): string {
   return `${TOOL_PREFIX}${kind}`;
 }

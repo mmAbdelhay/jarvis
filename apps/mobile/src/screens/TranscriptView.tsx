@@ -1,6 +1,7 @@
 import { Stack, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ResumeButton } from "@/components/ResumeButton";
 import { useWidePanelTitle } from "@/components/WidePanel";
 import { transcriptDisplay, withLrmPrefixes } from "@/lib/history-screen";
 import { createHistoryStore, type HistoryState } from "@/lib/history-store";
@@ -74,6 +75,9 @@ export function TranscriptBody({ id, embedded = false }: { id: string; embedded?
         selected !== undefined && <Text style={styles.heading}>{selected.summary}</Text>
       ) : (
         <Stack.Screen options={{ title: selected?.summary ?? t(language, "history.transcript") }} />
+      )}
+      {selected !== undefined && (
+        <ResumeButton sessionId={selected.id} project={selected.project} state={selected.state} />
       )}
       {display.kind === "loading" && (
         <Text style={styles.empty}>{t(language, "history.loading")}</Text>

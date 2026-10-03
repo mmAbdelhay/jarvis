@@ -5,7 +5,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { t, type Language, type MessageKey } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
-import type { WorkspaceTabItem } from "@/lib/workspace-tabs";
+import { isLaptopTabId, type WorkspaceTabItem } from "@/lib/workspace-tabs";
 import type { WorkspaceProjectView } from "@/lib/workspace-store";
 
 /** The project chips, shared by the phone list and the wide header. */
@@ -74,6 +74,9 @@ export function WorkspaceTools(props: {
   activeId: string | undefined;
   onSelectTab(tab: WorkspaceTabItem): void;
   onCloseTab(tab: WorkspaceTabItem): void;
+  /** Rename or close a tab on the laptop itself. */
+  onRenameLaptopTab(tab: WorkspaceTabItem): void;
+  onCloseLaptopTab(tab: WorkspaceTabItem): void;
   panes: readonly string[];
   activePane: string | undefined;
   onSelectPane(paneKey: string): void;
@@ -151,6 +154,26 @@ export function WorkspaceTools(props: {
                     {tab.title}
                   </Text>
                 </TouchableOpacity>
+                {!tab.closable && isLaptopTabId(tab.id) && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.tabClose}
+                      onPress={() => props.onRenameLaptopTab(tab)}
+                      accessibilityRole="button"
+                      accessibilityLabel={t(language, "workspace.renameTab", { title: tab.title })}
+                    >
+                      <Text style={styles.tabCloseText}>✎</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.tabClose}
+                      onPress={() => props.onCloseLaptopTab(tab)}
+                      accessibilityRole="button"
+                      accessibilityLabel={t(language, "workspace.closeTab", { title: tab.title })}
+                    >
+                      <Text style={styles.tabCloseText}>×</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
                 {tab.closable && (
                   <TouchableOpacity
                     style={styles.tabClose}

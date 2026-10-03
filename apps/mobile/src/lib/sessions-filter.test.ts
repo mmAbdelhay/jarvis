@@ -9,6 +9,7 @@ function row(over: Partial<SessionRowView>): SessionRowView {
     summary: "Add orders migration",
     state: "running",
     agentId: "claude-main",
+    project: null,
     projectPath: "/code/api",
     startedAt: 0,
     lastActivityAt: 0,

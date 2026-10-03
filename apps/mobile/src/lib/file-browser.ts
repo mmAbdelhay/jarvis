@@ -2,6 +2,7 @@
 // relative to the pane's project root — the phone never learns the
 // laptop's absolute paths. Parsed field by field; folders first, then by
 // name.
+import { hasControlChar } from "./laptop-actions";
 import type { RpcClient } from "./rpc-client";
 
 export type DirEntry = { name: string; directory: boolean };
@@ -59,3 +60,62 @@ export async function listDir(
   const result = await client.call("terminal:listDir", [paneKey, path], { whenNotOpen: "reject" });
   return result.ok ? parseDirEntries(result.value) : undefined;
 }
+
+export type FileOpRefusal = "invalid-name" | "exists" | "outside" | "failed";
+export type FileOpOutcome = { ok: true } | { ok: false; reason: FileOpRefusal };
+
+const REFUSALS = new Set<string>(["invalid-name", "exists", "outside", "failed"]);
+
+/** A `FileOpResult` off the wire; anything unreadable is a plain failure. */
+export function parseFileOp(value: unknown): FileOpOutcome {
+  if (typeof value !== "object" || value === null) return { ok: false, reason: "failed" };
+  const obj = value as Record<string, unknown>;
+  if (obj["ok"] === true) return { ok: true };
+  const reason = obj["reason"];
+  return {
+    ok: false,
+    reason:
+      typeof reason === "string" && REFUSALS.has(reason) ? (reason as FileOpRefusal) : "failed",
+  };
+}
+
+/** Why a new name is unusable before asking the laptop: one segment, not
+ *  blank, not `.`/`..`, no control characters. */
+export function validateEntryName(name: string): "invalid-name" | undefined {
+  if (name.trim() === "" || name === "." || name === ".." || name.length > 255) {
+    return "invalid-name";
+  }
+  if (/[/\\]/.test(name) || hasControlChar(name)) return "invalid-name";
+  return undefined;
+}
+
+export async function renameEntry(
+  client: Pick<RpcClient, "call">,
+  paneKey: string,
+  path: string,
+  newName: string,
+): Promise<FileOpOutcome> {
+  if (validateEntryName(newName) !== undefined) return { ok: false, reason: "invalid-name" };
+  const result = await client.call("terminal:renameEntry", [paneKey, path, newName], {
+    whenNotOpen: "reject",
+  });
+  return result.ok ? parseFileOp(result.value) : { ok: false, reason: "failed" };
+}
+
+export async function trashEntry(
+  client: Pick<RpcClient, "call">,
+  paneKey: string,
+  path: string,
+): Promise<FileOpOutcome> {
+  const result = await client.call("terminal:trashEntry", [paneKey, path], {
+    whenNotOpen: "reject",
+  });
+  return result.ok ? parseFileOp(result.value) : { ok: false, reason: "failed" };
+}
+
+export const FILE_OP_ERROR_KEYS = {
+  "invalid-name": "files.errInvalidName",
+  exists: "files.errExists",
+  outside: "files.errOutside",
+  failed: "files.errFailed",
+} as const satisfies Record<FileOpRefusal, string>;

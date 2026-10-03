@@ -9,6 +9,7 @@ function row(overrides: Partial<SessionRowView> = {}): SessionRowView {
     summary: "fixing tests",
     state: "done",
     agentId: "claude-main",
+    project: null,
     projectPath: "/code/acme",
     startedAt: 0,
     lastActivityAt: 0,

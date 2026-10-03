@@ -1,14 +1,28 @@
 import { useEffect, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { childPath, crumbs, type DirEntry, listDir, shellQuote } from "@/lib/file-browser";
+import { RenameField } from "@/components/RenameField";
+import { dialogs } from "@/lib/dialog";
+import {
+  childPath,
+  crumbs,
+  type DirEntry,
+  FILE_OP_ERROR_KEYS,
+  type FileOpOutcome,
+  listDir,
+  renameEntry,
+  shellQuote,
+  trashEntry,
+  validateEntryName,
+} from "@/lib/file-browser";
 import { t, type Language } from "@/lib/i18n";
 import type { RpcClient } from "@/lib/rpc-client";
 import { theme } from "@/lib/theme";
 
 /**
  * The pane's project, browsed from the phone: folders open in place, and a
- * file can be typed into the terminal as its path. Read-only — creating,
- * renaming and trashing stay on the laptop's own sidebar.
+ * file can be typed into the terminal as its path. Each entry can be renamed
+ * or moved to the laptop's Trash (after a confirmation); creating stays on
+ * the laptop's own sidebar.
  */
 export function FileBrowserSheet(props: {
   visible: boolean;
@@ -22,7 +36,19 @@ export function FileBrowserSheet(props: {
   const [entries, setEntries] = useState<DirEntry[] | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [picked, setPicked] = useState<string | undefined>(undefined);
+  const [renaming, setRenaming] = useState<string | undefined>(undefined);
+  const [opError, setOpError] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  // Bumped after a rename or trash so the listing is read again.
+  const [revision, setRevision] = useState(0);
 
+  // A failure shown for one folder is not about the next one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `path` is the trigger, not a value read here.
+  useEffect(() => {
+    setOpError(undefined);
+  }, [path]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `revision` is a re-read trigger bumped after a rename or trash.
   useEffect(() => {
     if (!props.visible) return;
     let cancelled = false;
@@ -36,9 +62,35 @@ export function FileBrowserSheet(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.visible, props.client, props.paneKey, path]);
+  }, [props.visible, props.client, props.paneKey, path, revision]);
 
   const { language } = props;
+
+  async function finish(run: () => Promise<FileOpOutcome>): Promise<void> {
+    setBusy(true);
+    setOpError(undefined);
+    const outcome = await run();
+    setBusy(false);
+    if (outcome.ok) {
+      setRenaming(undefined);
+      setPicked(undefined);
+      setRevision((value) => value + 1);
+      return;
+    }
+    setOpError(t(language, FILE_OP_ERROR_KEYS[outcome.reason]));
+  }
+
+  function confirmTrash(entry: DirEntry, full: string): void {
+    dialogs.confirm({
+      title: t(language, "files.trashTitle"),
+      message: t(language, "files.trashMessage", { name: entry.name }),
+      confirmText: t(language, "files.trash"),
+      cancelText: t(language, "common.cancel"),
+      destructive: true,
+      onConfirm: () => void finish(() => trashEntry(props.client, props.paneKey, full)),
+    });
+  }
+
   return (
     <Modal transparent animationType="slide" visible={props.visible} onRequestClose={props.onClose}>
       <View style={styles.backdrop}>
@@ -73,6 +125,11 @@ export function FileBrowserSheet(props: {
             ))}
           </ScrollView>
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+            {opError !== undefined && (
+              <Text selectable style={styles.opError}>
+                {opError}
+              </Text>
+            )}
             {loading && <Text style={styles.note}>{t(language, "files.loading")}</Text>}
             {!loading && entries === undefined && (
               <Text style={styles.note}>{t(language, "files.unavailable")}</Text>
@@ -86,23 +143,65 @@ export function FileBrowserSheet(props: {
                 const open = picked === full;
                 return (
                   <View key={entry.name}>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      onPress={() =>
-                        entry.directory ? setPath(full) : setPicked(open ? undefined : full)
-                      }
-                      style={[styles.row, open && styles.rowOpen]}
-                    >
-                      <Text style={[styles.icon, entry.directory ? styles.folder : styles.file]}>
-                        {entry.directory ? "▸" : "·"}
-                      </Text>
-                      <Text
-                        style={[styles.name, !entry.directory && styles.fileName]}
-                        numberOfLines={1}
+                    <View style={[styles.row, open && styles.rowOpen]}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        onPress={() =>
+                          entry.directory ? setPath(full) : setPicked(open ? undefined : full)
+                        }
+                        style={styles.rowMain}
                       >
-                        {entry.name}
-                      </Text>
-                    </TouchableOpacity>
+                        <Text style={[styles.icon, entry.directory ? styles.folder : styles.file]}>
+                          {entry.directory ? "▸" : "·"}
+                        </Text>
+                        <Text
+                          style={[styles.name, !entry.directory && styles.fileName]}
+                          numberOfLines={1}
+                        >
+                          {entry.name}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t(language, "files.rename")} ${entry.name}`}
+                        disabled={busy}
+                        onPress={() => {
+                          setOpError(undefined);
+                          setRenaming(renaming === full ? undefined : full);
+                        }}
+                        style={styles.action}
+                      >
+                        <Text style={styles.actionText}>✎</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t(language, "files.trash")} ${entry.name}`}
+                        disabled={busy}
+                        onPress={() => confirmTrash(entry, full)}
+                        style={styles.action}
+                      >
+                        <Text style={styles.trashText}>⌫</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {renaming === full && (
+                      <View style={styles.renameBox}>
+                        <RenameField
+                          language={language}
+                          initial={entry.name}
+                          label={t(language, "files.rename")}
+                          problem={(draft) =>
+                            validateEntryName(draft) === undefined
+                              ? undefined
+                              : "files.errInvalidName"
+                          }
+                          busy={busy}
+                          onCancel={() => setRenaming(undefined)}
+                          onSubmit={(draft) =>
+                            void finish(() => renameEntry(props.client, props.paneKey, full, draft))
+                          }
+                        />
+                      </View>
+                    )}
                     {open && (
                       <TouchableOpacity
                         accessibilityRole="button"
@@ -173,10 +272,22 @@ const styles = StyleSheet.create({
     minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: theme.spacing.md,
+    paddingStart: theme.spacing.md,
+    paddingEnd: 4,
   },
+  rowMain: { flex: 1, minHeight: 46, flexDirection: "row", alignItems: "center", gap: 10 },
   rowOpen: { backgroundColor: theme.colors.surfaceAlt },
+  action: { width: 40, height: 44, alignItems: "center", justifyContent: "center" },
+  actionText: { color: theme.colors.textMuted, fontSize: 17 },
+  trashText: { color: theme.colors.danger, fontSize: 17 },
+  renameBox: { paddingHorizontal: theme.spacing.md },
+  opError: {
+    paddingHorizontal: theme.spacing.md,
+    paddingBottom: 6,
+    color: theme.colors.danger,
+    fontFamily: theme.font.body,
+    fontSize: 12,
+  },
   icon: { width: 14, fontFamily: theme.font.monoSemibold, fontSize: 14 },
   folder: { color: theme.colors.warning },
   file: { color: theme.colors.accentText },

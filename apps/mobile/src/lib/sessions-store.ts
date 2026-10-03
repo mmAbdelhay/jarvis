@@ -19,6 +19,8 @@ export type SessionRowView = {
   summary: string;
   state: SessionState;
   agentId: string;
+  /** The configured project the session belongs to; null for none. */
+  project: string | null;
   /** Where the session runs — what its plan panel looks in. */
   projectPath: string;
   // `startedAt` added (fix round, 2026-09-19 redesign): the Sessions
@@ -106,6 +108,7 @@ export function parseSessionList(value: unknown): SessionRowView[] {
       summary: session.summary,
       state: session.state,
       agentId: session.agentId,
+      project: session.project,
       projectPath: session.projectPath,
       startedAt: session.startedAt,
       lastActivityAt: session.lastActivityAt,

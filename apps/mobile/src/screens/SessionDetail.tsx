@@ -21,6 +21,7 @@ import { ComposeBar } from "@/components/ComposeBar";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
 import { PromptCard } from "@/components/PromptCard";
+import { ResumeButton } from "@/components/ResumeButton";
 import { SegmentTabs } from "@/components/SegmentTabs";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
@@ -388,6 +389,14 @@ export function SessionDetail(props: {
         onClose={() => setPlanVisible(false)}
       />
       {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
+      {/* The laptop refuses a resume that names no project of its own (it has
+          no screen selection to fall back on), so a session without one gets
+          no button rather than a guaranteed refusal. */}
+      {ended && row.project !== null && (
+        <View style={styles.resume}>
+          <ResumeButton sessionId={id} project={row.project} state={row.state} />
+        </View>
+      )}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
           {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
@@ -492,6 +501,7 @@ export function SessionDetail(props: {
 }
 
 const styles = StyleSheet.create({
+  resume: { paddingHorizontal: 12, paddingBottom: 6 },
   promptSlot: { marginHorizontal: 12, marginBottom: 8 },
   tabs: { paddingHorizontal: 12, paddingBottom: 8, backgroundColor: theme.colors.ground },
   container: { flex: 1, backgroundColor: theme.colors.terminalGround },
