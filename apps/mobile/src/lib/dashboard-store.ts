@@ -49,7 +49,7 @@ export type DashboardStore = {
   openTerminal(project: string): Promise<TerminalOpenOutcome>;
 };
 
-function parseProjects(value: unknown): ProjectSummary[] {
+export function parseProjects(value: unknown): ProjectSummary[] {
   if (!Array.isArray(value)) return [];
   const projects: ProjectSummary[] = [];
   for (const item of value) {

@@ -1,103 +1,88 @@
-// One row of a sessions list — the Dashboard's `dashboard.sessions` section
-// (Task 6, rule 5) and the full session table (Task 7, `app/sessions.tsx`)
-// both render through this one component: summary, an optional label
-// (project name or path segment) and a running/idle indicator dot. Task 7
-// adds an optional tap target (a session row opens `/session/[id]`) and an
-// optional state chip (the session table shows one; the Dashboard doesn't).
-// `summary`/`label` are shown verbatim — server text, never routed through
-// i18n. `stateLabel`, if given, is already-translated text from the
-// screen's own i18n lookup — this component does no translation itself.
+// One row of a sessions list: the Sessions tab and the dashboard's list both
+// render through it. Active rows are filled cards, a row waiting for the
+// user has an amber border and may say what it asks, and a finished row is
+// an outline with a hollow dot and an optional trailing action (Resume).
+// Everything shown is already-formatted text from the caller: `title` is
+// server text, never routed through i18n.
+import type { ReactNode } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import type { SessionState } from "@jarvis/core";
+import type { RowVariant } from "@/lib/sessions-row";
 import { theme } from "@/lib/theme";
 
-function isRunning(state: SessionState): boolean {
-  return state === "starting" || state === "running";
-}
-
 export type SessionRowProps = {
-  summary: string;
-  label: string | null;
-  state: SessionState;
-  stateLabel?: string;
-  // Fix round (2026-09-19 redesign): the board's mono elapsed field
-  // (`12m`, `1h 04m`) — already formatted by the caller (formatSessionElapsed,
-  // format.ts), never computed here. Shown alone (Dashboard's rows have no
-  // `stateLabel`) or under the state chip (the Sessions table).
-  elapsed?: string;
-  // Sessions-refresh feature: already-translated text ("outside Jarvis" /
-  // "خارج جارفيس"), shown only for a row process-scan.ts found running
-  // outside Jarvis. Its own chip, distinct from stateLabel's, so a
-  // read-only row still reads its ordinary running/waiting/done state too.
-  externalLabel?: string;
+  title: string;
+  /** "api · claude-main", already composed. */
+  subtitle: string;
+  /** The elapsed time or clock time at the trailing edge. */
+  time?: string;
+  variant: RowVariant;
+  /** A waiting row's question, already translated ("Asks: …"). */
+  asks?: string;
+  counts?: { insertions: number; deletions: number };
+  /** An action beside the text, vertically centred (Resume). */
+  trailing?: ReactNode;
   onPress?: () => void;
-  // Wide sessions split: the row whose detail is open beside the list.
+  /** Wide sessions split: the row whose detail is open beside the list. */
   selected?: boolean;
 };
 
-export function SessionRow({
-  summary,
-  label,
-  state,
-  stateLabel,
-  elapsed,
-  externalLabel,
-  onPress,
-  selected,
-}: SessionRowProps) {
-  const running = isRunning(state);
-  const waiting = state === "waiting";
-  const color = running
-    ? theme.colors.success
-    : waiting
-      ? theme.colors.warning
-      : theme.colors.disabledDot;
+export function SessionRow(props: SessionRowProps) {
+  const { variant } = props;
+  const done = variant === "done";
   return (
     <TouchableOpacity
-      style={selected ? [styles.row, styles.rowSelected] : styles.row}
-      onPress={onPress}
-      disabled={onPress === undefined}
+      style={[
+        styles.row,
+        variant === "waiting" && styles.rowWaiting,
+        done && styles.rowDone,
+        props.selected && styles.rowSelected,
+      ]}
+      onPress={props.onPress}
+      disabled={props.onPress === undefined}
       activeOpacity={0.7}
-      accessibilityRole={onPress !== undefined ? "button" : undefined}
-      accessibilityLabel={onPress !== undefined ? summary : undefined}
-      accessibilityState={selected ? { selected: true } : undefined}
+      accessibilityRole={props.onPress !== undefined ? "button" : undefined}
+      accessibilityLabel={props.onPress !== undefined ? props.title : undefined}
+      accessibilityState={props.selected ? { selected: true } : undefined}
     >
       <View
         style={[
-          styles.indicator,
-          {
-            backgroundColor: color,
-            shadowColor: color,
-            shadowOpacity: running || waiting ? 0.35 : 0,
-            shadowRadius: 5,
-          },
+          styles.dot,
+          variant === "active" && { backgroundColor: theme.colors.accent },
+          variant === "waiting" && { backgroundColor: theme.colors.warning },
+          done && styles.dotDone,
         ]}
       />
       <View style={styles.text}>
-        <Text style={styles.title} numberOfLines={1}>
-          {summary}
+        <View style={styles.top}>
+          <Text style={[styles.title, done && styles.titleDone]} numberOfLines={1}>
+            {props.title}
+          </Text>
+          {props.time !== undefined && (
+            <Text style={[styles.time, done && styles.timeDone]}>{props.time}</Text>
+          )}
+        </View>
+        <Text style={[styles.sub, done && styles.subDone]} numberOfLines={1}>
+          {props.subtitle}
+          {props.counts !== undefined && (
+            <Text style={styles.mono}>
+              {props.subtitle === "" ? "" : " · "}
+              {props.counts.insertions > 0 && (
+                <Text style={styles.added}>+{props.counts.insertions}</Text>
+              )}
+              {props.counts.insertions > 0 && props.counts.deletions > 0 ? " " : ""}
+              {props.counts.deletions > 0 && (
+                <Text style={styles.removed}>−{props.counts.deletions}</Text>
+              )}
+            </Text>
+          )}
         </Text>
-        {label !== null && label.length > 0 && (
-          <Text style={styles.project} numberOfLines={1}>
-            {label}
+        {props.asks !== undefined && (
+          <Text style={styles.asks} numberOfLines={2}>
+            {props.asks}
           </Text>
         )}
       </View>
-      {(stateLabel !== undefined || elapsed !== undefined || externalLabel !== undefined) && (
-        <View style={styles.trailing}>
-          {externalLabel !== undefined && (
-            <View style={[styles.chip, styles.externalChip]}>
-              <Text style={[styles.chipText, styles.externalChipText]}>{externalLabel}</Text>
-            </View>
-          )}
-          {stateLabel !== undefined && (
-            <View style={[styles.chip, { backgroundColor: `${color}24` }]}>
-              <Text style={[styles.chipText, { color }]}>{stateLabel}</Text>
-            </View>
-          )}
-          {elapsed !== undefined && <Text style={styles.elapsed}>{elapsed}</Text>}
-        </View>
-      )}
+      {props.trailing !== undefined && <View style={styles.trailing}>{props.trailing}</View>}
     </TouchableOpacity>
   );
 }
@@ -105,56 +90,30 @@ export function SessionRow({
 const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: theme.colors.surface,
-    borderColor: theme.colors.hairline,
-    borderWidth: 1,
-    borderRadius: theme.radius.card,
-    padding: theme.spacing.md,
+    alignItems: "flex-start",
     gap: 12,
-    minHeight: 68,
-  },
-  rowSelected: { backgroundColor: theme.colors.selected, borderColor: theme.colors.accent },
-  indicator: {
-    width: 10,
-    height: 10,
-    borderRadius: theme.radius.full,
-  },
-  text: {
-    flex: 1,
-    gap: theme.spacing.xs,
-  },
-  title: {
-    color: theme.colors.text,
-    fontSize: theme.font.size.md,
-    fontFamily: theme.font.semibold,
-  },
-  project: {
-    color: theme.colors.textDim,
-    fontSize: theme.font.size.sm,
-  },
-  trailing: { alignItems: "flex-end", gap: 4 },
-  chip: {
-    backgroundColor: theme.colors.surfaceAlt,
-    borderRadius: theme.radius.full,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-  },
-  chipText: {
-    fontFamily: theme.font.bold,
-    fontSize: 11,
-  },
-  externalChip: {
-    backgroundColor: theme.colors.surfaceAlt,
+    padding: 12,
+    borderRadius: theme.radius.card,
     borderWidth: 1,
-    borderColor: theme.colors.primary,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
   },
-  externalChipText: {
-    color: theme.colors.primary,
-  },
-  elapsed: {
-    color: theme.colors.textDim,
-    fontFamily: theme.font.mono,
-    fontSize: 11,
-  },
+  rowWaiting: { borderColor: theme.colors.warningBorder },
+  rowDone: { borderColor: theme.colors.hairlineSoft, backgroundColor: "transparent" },
+  rowSelected: { backgroundColor: theme.colors.selected, borderColor: theme.colors.accent },
+  dot: { width: 10, height: 10, marginTop: 5, borderRadius: theme.radius.full },
+  dotDone: { borderWidth: 2, borderColor: theme.colors.textFaint },
+  text: { flex: 1, minWidth: 0, gap: 3 },
+  top: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  title: { ...theme.type.rowTitle, flexShrink: 1, color: theme.colors.text },
+  titleDone: { fontFamily: theme.font.semibold, color: theme.colors.textSecondary },
+  time: { ...theme.type.meta, flexShrink: 0, color: theme.colors.textMuted },
+  timeDone: { color: theme.colors.textDim },
+  sub: { ...theme.type.meta, color: theme.colors.textMuted },
+  subDone: { color: theme.colors.textDim },
+  mono: { ...theme.type.mono },
+  added: { color: theme.colors.success },
+  removed: { color: theme.colors.dangerText },
+  asks: { ...theme.type.meta, fontFamily: theme.font.semibold, color: theme.colors.warning },
+  trailing: { alignSelf: "center" },
 });

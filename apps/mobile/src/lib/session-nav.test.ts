@@ -23,6 +23,18 @@ describe("sessionTarget", () => {
     expect(sessionTarget("wide", "a")).toEqual({ action: "setParams", params: { id: "a" } });
   });
 
+  it("opens a history-only session's transcript on a phone", () => {
+    expect(sessionTarget("phone", "a", "sessions", "history")).toEqual({
+      action: "push",
+      href: "/transcript/[id]",
+      params: { id: "a" },
+    });
+    expect(sessionTarget("wide", "a", "sessions", "history")).toEqual({
+      action: "setParams",
+      params: { id: "a" },
+    });
+  });
+
   it("goes to the sessions split from another wide screen", () => {
     expect(sessionTarget("wide", "a", "elsewhere")).toEqual({
       action: "navigate",

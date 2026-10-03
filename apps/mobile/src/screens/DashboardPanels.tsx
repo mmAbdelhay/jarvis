@@ -118,12 +118,20 @@ export function SessionsPanel({
       sessions.map((session) => (
         <SessionRow
           key={session.id}
-          summary={session.summary}
-          label={session.project}
-          state={session.state}
-          elapsed={formatSessionElapsed(now - session.startedAt)}
-          externalLabel={
-            session.origin === "external" ? t(language, "sessions.external") : undefined
+          title={session.summary}
+          subtitle={[
+            session.project,
+            session.origin === "external" ? t(language, "sessions.external") : null,
+          ]
+            .filter((part): part is string => part !== null && part !== "")
+            .join(" · ")}
+          time={formatSessionElapsed(now - session.startedAt)}
+          variant={
+            session.state === "waiting"
+              ? "waiting"
+              : session.state === "starting" || session.state === "running"
+                ? "active"
+                : "done"
           }
           onPress={session.origin === "external" ? undefined : () => onOpenSession(session.id)}
         />

@@ -32,12 +32,29 @@ export function matchesQuery(
   return words.every((word) => haystack.includes(word));
 }
 
+/** The project chip: undefined keeps every row. */
+export function matchesProject(row: Pick<SessionRowView, "project">, project?: string): boolean {
+  return project === undefined || row.project === project;
+}
+
 export function filterRows<T extends SessionRowView>(
   rows: readonly T[],
   query: string,
   status: StatusFilter,
+  project?: string,
 ): T[] {
-  return rows.filter((row) => matchesStatus(row, status) && matchesQuery(row, query));
+  return rows.filter(
+    (row) => matchesStatus(row, status) && matchesQuery(row, query) && matchesProject(row, project),
+  );
+}
+
+/** The projects the rows belong to, sorted, for the Project chip's menu. */
+export function projectsOf(rows: readonly Pick<SessionRowView, "project">[]): string[] {
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (row.project !== null && row.project !== "") names.add(row.project);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
 
 /** Each chip's count under the current query, so a chip never promises
@@ -45,8 +62,9 @@ export function filterRows<T extends SessionRowView>(
 export function statusCounts(
   rows: readonly SessionRowView[],
   query: string,
+  project?: string,
 ): Record<StatusFilter, number> {
-  const matching = rows.filter((row) => matchesQuery(row, query));
+  const matching = rows.filter((row) => matchesQuery(row, query) && matchesProject(row, project));
   return {
     all: matching.length,
     waiting: matching.filter((row) => matchesStatus(row, "waiting")).length,
