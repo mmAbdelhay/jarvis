@@ -21,6 +21,7 @@ export const theme = {
     accentText: "#8CBEFF",
     primaryText: "#0B0D12",
     userBubble: "#1B2740",
+    transcriptText: "#E3E7EF",
     success: "#3ECF8E",
     warning: "#F5B93F",
     // A session waiting on the user: amber ground, border and text that

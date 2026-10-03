@@ -8,19 +8,30 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { ActionSheet } from "@/components/ActionSheet";
+import { Icon } from "@/components/Icon";
 import { WidePanel } from "@/components/WidePanel";
 import { WideShell } from "@/components/WideShell";
-import { historyListDisplay } from "@/lib/history-screen";
-import { createHistoryStore, type HistoryState } from "@/lib/history-store";
+import {
+  agentsOf,
+  filterHistory,
+  historyListDisplay,
+  historyRowSub,
+  historyRowTime,
+  projectsOf,
+} from "@/lib/history-screen";
 import { formatSessionElapsed } from "@/lib/format";
+import { createHistoryStore, type HistoryState } from "@/lib/history-store";
 import { type Language, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { type SessionDateLabel, sessionDateLabel } from "@/lib/session-date-groups";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { contentWidth, historyListWidth } from "@/lib/wide-breakpoints";
 import { textDirection } from "@/lib/voice-screen";
 import { TranscriptBody } from "@/screens/TranscriptView";
 
@@ -64,6 +75,8 @@ function timeOfDay(ms: number, language: Language): string {
 export default function HistoryRoute() {
   const language = useLanguage();
   const layout = useLayoutClass();
+  const { width: windowWidth } = useWindowDimensions();
+  const listWidth = historyListWidth(contentWidth(windowWidth, layout.compact ? "rail" : "full"));
   const [selected, setSelected] = useState<string | undefined>(undefined);
   if (layout.kind === "wide") {
     // Wide: the list and the open transcript side by side, the way the
@@ -71,15 +84,15 @@ export default function HistoryRoute() {
     return (
       <WideShell>
         <View style={[styles.split, { direction: textDirection(language) }]}>
-          <View style={[styles.listPane, { direction: "ltr" }]}>
-            <HistoryScreen selectedId={selected} onOpen={setSelected} />
+          <View style={[styles.listPane, { width: listWidth, direction: textDirection(language) }]}>
+            <HistoryScreen wide selectedId={selected} onOpen={setSelected} />
           </View>
           <View style={styles.divider} />
           <View style={[styles.detailPane, { direction: "ltr" }]}>
             {selected === undefined ? (
               <Text style={[styles.empty, styles.pick]}>{t(language, "history.pick")}</Text>
             ) : (
-              <TranscriptBody key={selected} id={selected} embedded />
+              <TranscriptBody key={selected} id={selected} embedded variant="chat" />
             )}
           </View>
         </View>
@@ -95,7 +108,12 @@ export default function HistoryRoute() {
   );
 }
 
-function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => void }) {
+function HistoryScreen(props: {
+  wide?: boolean;
+  selectedId?: string;
+  onOpen?: (id: string) => void;
+}) {
+  const wide = props.wide === true;
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();
@@ -103,6 +121,9 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
   const [view, setView] = useState<HistoryState>(store.get());
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [project, setProject] = useState<string | undefined>(undefined);
+  const [agent, setAgent] = useState<string | undefined>(undefined);
+  const [sheet, setSheet] = useState<"project" | "agent" | undefined>(undefined);
   useEffect(() => {
     const handle = setTimeout(() => store.search(query), SEARCH_DELAY_MS);
     return () => clearTimeout(handle);
@@ -131,11 +152,28 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
   // why nothing loaded. `historyListDisplay` tells a real empty account
   // apart from a failed fetch (state.stale).
   const display = historyListDisplay(view, language);
+  // Wide only: the project and agent filters narrow the loaded rows; the
+  // search itself is still the server's.
+  const shown = wide ? filterHistory(view.sessions, project, agent) : view.sessions;
+  const filterActions = (
+    kind: "project" | "agent",
+  ): { key: string; label: string; onPress(): void }[] => {
+    const all = kind === "project" ? projectsOf(view.sessions) : agentsOf(view.sessions);
+    const set = kind === "project" ? setProject : setAgent;
+    return [
+      {
+        key: "all",
+        label: t(language, kind === "project" ? "history.allProjects" : "history.allAgents"),
+        onPress: () => set(undefined),
+      },
+      ...all.map((name) => ({ key: name, label: name, onPress: () => set(name) })),
+    ];
+  };
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={wide ? styles.wideContent : styles.content}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -144,22 +182,67 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
         />
       }
     >
-      <View style={styles.search}>
-        <Text style={styles.searchGlyph} accessibilityElementsHidden importantForAccessibility="no">
-          ⌕
-        </Text>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={t(language, "history.searchPlaceholder")}
-          placeholderTextColor={theme.colors.textDim}
-          accessibilityLabel={t(language, "history.search")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          style={styles.searchInput}
-        />
-      </View>
+      {wide && <Text style={styles.wideTitle}>{t(language, "history.title")}</Text>}
+      {wide ? (
+        <View style={styles.filters}>
+          <View style={styles.wideSearch}>
+            <Icon name="search" size={16} color={theme.colors.textMuted} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={t(language, "history.searchPlaceholder")}
+              placeholderTextColor={theme.colors.textDim}
+              accessibilityLabel={t(language, "history.search")}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              style={styles.wideSearchInput}
+            />
+          </View>
+          {(["project", "agent"] as const).map((kind) => {
+            const value = kind === "project" ? project : agent;
+            return (
+              <TouchableOpacity
+                key={kind}
+                onPress={() => setSheet(kind)}
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  language,
+                  kind === "project" ? "history.projectFilter" : "history.agentFilter",
+                )}
+                style={styles.filterButton}
+              >
+                <Text style={styles.filterText} numberOfLines={1}>
+                  {value ??
+                    t(language, kind === "project" ? "history.allProjects" : "history.allAgents")}
+                </Text>
+                <Icon name="chevronDown" size={14} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={styles.search}>
+          <Text
+            style={styles.searchGlyph}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          >
+            ⌕
+          </Text>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t(language, "history.searchPlaceholder")}
+            placeholderTextColor={theme.colors.textDim}
+            accessibilityLabel={t(language, "history.search")}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            style={styles.searchInput}
+          />
+        </View>
+      )}
       {display.kind === "loading" && (
         <Text style={styles.empty}>{t(language, "history.loading")}</Text>
       )}
@@ -174,14 +257,21 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
           </TouchableOpacity>
         </View>
       )}
+      {display.kind === "list" && shown.length === 0 && (
+        <Text style={styles.empty}>{t(language, "history.empty")}</Text>
+      )}
       {display.kind === "list" &&
-        byDay(view.sessions, Date.now()).map((group) => (
-          <View key={group.key} style={styles.list}>
+        byDay(shown, Date.now()).map((group) => (
+          <View key={group.key} style={wide ? styles.wideList : styles.list}>
             <Text style={styles.day}>{dayTitle(group.label, language)}</Text>
             {group.rows.map((session) => (
               <TouchableOpacity
                 key={session.id}
-                style={[styles.row, props.selectedId === session.id && styles.rowSelected]}
+                style={[
+                  wide ? styles.wideRow : styles.row,
+                  props.selectedId === session.id &&
+                    (wide ? styles.wideRowSelected : styles.rowSelected),
+                ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: props.selectedId === session.id }}
                 onPress={() =>
@@ -190,35 +280,70 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
                     : router.push({ pathname: "/transcript/[id]", params: { id: session.id } })
                 }
               >
-                <View style={styles.rowTop}>
-                  <Text style={styles.title} numberOfLines={2}>
-                    {session.summary}
-                  </Text>
-                  <Text style={styles.time}>{timeOfDay(session.lastActivityAt, language)}</Text>
-                </View>
-                <Text style={styles.meta} numberOfLines={1}>
-                  {[
-                    session.project ?? undefined,
-                    session.agentId,
-                    formatSessionElapsed(
-                      Math.max(0, (session.endedAt ?? session.lastActivityAt) - session.startedAt),
-                    ),
-                  ]
-                    .filter((part): part is string => part !== undefined && part !== "")
-                    .join(" · ")}
-                </Text>
+                {wide ? (
+                  <>
+                    <View style={styles.rowTop}>
+                      <Text
+                        style={[
+                          styles.wideTitleText,
+                          props.selectedId === session.id && styles.wideTitleOn,
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {session.summary}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.wideTime,
+                          props.selectedId === session.id && styles.wideMetaOn,
+                        ]}
+                      >
+                        {historyRowTime(session)}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[styles.wideSub, props.selectedId === session.id && styles.wideMetaOn]}
+                      numberOfLines={1}
+                    >
+                      {historyRowSub(session, t(language, "sessions.imported"))}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.rowTop}>
+                      <Text style={styles.title} numberOfLines={2}>
+                        {session.summary}
+                      </Text>
+                      <Text style={styles.time}>{timeOfDay(session.lastActivityAt, language)}</Text>
+                    </View>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {[
+                        session.project ?? undefined,
+                        session.agentId,
+                        formatSessionElapsed(
+                          Math.max(
+                            0,
+                            (session.endedAt ?? session.lastActivityAt) - session.startedAt,
+                          ),
+                        ),
+                      ]
+                        .filter((part): part is string => part !== undefined && part !== "")
+                        .join(" · ")}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             ))}
           </View>
         ))}
       {display.kind === "list" && view.more && (
         <TouchableOpacity
-          style={styles.more}
+          style={wide ? styles.wideMore : styles.more}
           accessibilityRole="button"
           disabled={view.loadingMore}
           onPress={() => store.loadMore()}
         >
-          <Text style={styles.moreText}>
+          <Text style={wide ? styles.wideMoreText : styles.moreText}>
             {t(language, view.loadingMore ? "history.loadingMore" : "history.loadMore")}
           </Text>
         </TouchableOpacity>
@@ -231,19 +356,93 @@ function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => vo
           {view.notice}
         </Text>
       )}
+      {wide && sheet !== undefined && (
+        <ActionSheet
+          visible
+          title={t(language, sheet === "project" ? "history.projectFilter" : "history.agentFilter")}
+          actions={filterActions(sheet)}
+          onClose={() => setSheet(undefined)}
+        />
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   split: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
-  listPane: { width: 440, flexShrink: 0 },
+  listPane: { flexShrink: 0 },
+  wideTitle: { color: theme.colors.text, fontFamily: theme.font.extrabold, fontSize: 22 },
+  filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  wideSearch: {
+    flexGrow: 1,
+    flexBasis: 200,
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  wideSearchInput: {
+    flex: 1,
+    minHeight: 38,
+    color: theme.colors.text,
+    fontFamily: theme.font.body,
+    fontSize: 14,
+  },
+  filterButton: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  filterText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 13 },
+  wideList: { gap: 4 },
+  wideRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: "transparent",
+    gap: 4,
+  },
+  wideRowSelected: {
+    borderColor: theme.colors.accentBorder,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
+  wideTitleText: {
+    flexShrink: 1,
+    color: theme.colors.textSecondary,
+    fontFamily: theme.font.semibold,
+    fontSize: 14,
+  },
+  wideTitleOn: { color: theme.colors.text, fontFamily: theme.font.bold },
+  wideTime: { color: theme.colors.textDim, fontFamily: theme.font.body, fontSize: 12 },
+  wideSub: { color: theme.colors.textDim, fontFamily: theme.font.body, fontSize: 12 },
+  wideMetaOn: { color: theme.colors.textMuted },
+  wideMore: {
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  wideMoreText: { color: theme.colors.accentText, fontFamily: theme.font.bold, fontSize: 13 },
   divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
   detailPane: { flex: 1, minWidth: 0 },
   pick: { padding: theme.spacing.xl },
   rowSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surfaceAlt },
   container: { flex: 1, backgroundColor: theme.colors.background },
   content: { padding: theme.spacing.lg, gap: theme.spacing.md },
+  wideContent: { paddingVertical: 20, paddingHorizontal: 16, gap: 12 },
   list: { gap: theme.spacing.sm },
   row: {
     borderColor: theme.colors.border,

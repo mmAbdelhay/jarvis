@@ -17,13 +17,14 @@ import { openWorkspaceTab, terminalTargetFromElsewhere } from "@/lib/workspace-t
  *
  * `variant="inline"` is the small bordered button a list row carries: it
  * does not draw a failure itself but hands it to `onError` (the row shows it
- * under itself); a new attempt clears it.
+ * under itself); a new attempt clears it. `variant="header"` is the wide
+ * History detail header's accent button, "Resume in a terminal".
  */
 export function ResumeButton(props: {
   sessionId: string;
   project: string | null | undefined;
   state: string | undefined;
-  variant?: "inline";
+  variant?: "inline" | "header";
   onError?: (text: string | undefined) => void;
 }) {
   const language = useLanguage();
@@ -34,6 +35,7 @@ export function ResumeButton(props: {
   if (!canResume(props.state)) return null;
 
   const inline = props.variant === "inline";
+  const header = props.variant === "header";
 
   function report(text: string | undefined): void {
     setError(text);
@@ -58,10 +60,16 @@ export function ResumeButton(props: {
         accessibilityRole="button"
         disabled={busy}
         onPress={() => void resume()}
-        style={[inline ? styles.inline : styles.button, busy && styles.dim]}
+        style={[
+          inline ? styles.inline : header ? styles.header : styles.button,
+          busy && styles.dim,
+        ]}
       >
-        <Text style={inline ? styles.inlineText : styles.text}>
-          {t(language, busy ? "resume.busy" : "resume.action")}
+        <Text style={inline ? styles.inlineText : header ? styles.headerText : styles.text}>
+          {t(
+            language,
+            busy ? "resume.busy" : header ? "history.resumeInTerminal" : "resume.action",
+          )}
         </Text>
       </TouchableOpacity>
       {!inline && error !== undefined && (
@@ -84,6 +92,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accentSoft,
   },
   text: { color: theme.colors.accentText, fontFamily: theme.font.bold, fontSize: 13 },
+  header: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.radius.small,
+    backgroundColor: theme.colors.accent,
+  },
+  headerText: { color: theme.colors.primaryText, fontFamily: theme.font.bold, fontSize: 13 },
   inline: {
     minHeight: 36,
     paddingHorizontal: 12,
