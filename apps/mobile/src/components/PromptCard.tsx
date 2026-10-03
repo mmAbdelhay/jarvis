@@ -22,12 +22,15 @@ export function PromptCard(props: {
   context?: string;
   open?: { label: string; onPress(): void };
   /** "row": one row of equal buttons without numbers (Home, two options or
-   *  fewer); "stacked" (default): one numbered button per line. */
-  layout?: "row" | "stacked";
+   *  fewer); "stacked" (default): one numbered button per line; "banner"
+   *  (wide Home, three options or fewer): the question and the buttons on one
+   *  row. */
+  layout?: "row" | "stacked" | "banner";
   /** The Session screen's card has no dot before its heading. */
   hideDot?: boolean;
 }) {
   const row = props.layout === "row";
+  if (props.layout === "banner") return <BannerCard {...props} />;
   return (
     <View style={styles.card} accessibilityRole="summary">
       <View style={styles.top}>
@@ -89,7 +92,82 @@ export function PromptCard(props: {
   );
 }
 
+type Props = Parameters<typeof PromptCard>[0];
+
+/** Wide Home: kicker and question at the start, the buttons at the end. */
+function BannerCard(props: Props) {
+  const kicker =
+    props.context === undefined ? props.heading : `${props.heading} · ${props.context}`;
+  return (
+    <View style={styles.banner} accessibilityRole="summary">
+      <View style={styles.bannerText}>
+        <Text style={styles.heading} numberOfLines={1}>
+          {kicker}
+        </Text>
+        <Text style={styles.bannerQuestion}>{props.prompt.question}</Text>
+        {props.note !== undefined && <Text style={styles.note}>{props.note}</Text>}
+      </View>
+      <View style={styles.bannerButtons}>
+        {props.prompt.options.map((label, index) => (
+          <TouchableOpacity
+            // biome-ignore lint/suspicious/noArrayIndexKey: options are positional, and two may share a label.
+            key={index}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: props.busy }}
+            disabled={props.busy}
+            onPress={() => props.onAnswer(index, label)}
+            style={[
+              styles.bannerButton,
+              index === 0 ? styles.optionFirst : undefined,
+              props.busy && styles.disabled,
+            ]}
+          >
+            <Text style={[styles.optionText, index === 0 && styles.optionTextFirst]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+        {props.open !== undefined && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={props.open.onPress}
+            style={styles.bannerButton}
+          >
+            <Text style={styles.optionText}>{props.open.label}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  banner: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    borderRadius: theme.radius.card16,
+    borderWidth: 1,
+    borderColor: theme.colors.warningBorder,
+    backgroundColor: theme.colors.warningSurface,
+  },
+  bannerText: { flexGrow: 1, flexBasis: 320, minWidth: 0, gap: 4 },
+  bannerQuestion: {
+    color: theme.colors.text,
+    fontFamily: theme.font.bold,
+    fontSize: 17,
+    lineHeight: 23,
+  },
+  bannerButtons: { flexDirection: "row", gap: 8 },
+  bannerButton: {
+    minHeight: 42,
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    borderRadius: theme.radius.control,
+    borderWidth: 1,
+    borderColor: theme.colors.warningBorder,
+  },
   card: {
     padding: 14,
     gap: 10,

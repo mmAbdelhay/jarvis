@@ -17,7 +17,10 @@ export function NewSessionSheet(props: {
   onPick(project: string): void;
   onAskJarvis(): void;
   onClose(): void;
+  /** "terminal": titled "New terminal", with no Ask-Jarvis row. */
+  mode?: "session" | "terminal";
 }) {
+  const terminal = props.mode === "terminal";
   const { language } = props;
   return (
     <Modal transparent animationType="slide" visible={props.visible} onRequestClose={props.onClose}>
@@ -26,7 +29,9 @@ export function NewSessionSheet(props: {
           <View style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.titles}>
-              <Text style={styles.title}>{t(language, "sessions.newTitle")}</Text>
+              <Text style={styles.title}>
+                {t(language, terminal ? "home.newTerminal" : "sessions.newTitle")}
+              </Text>
               <Text style={styles.hint}>{t(language, "sessions.newHint")}</Text>
             </View>
             <IconButton
@@ -59,14 +64,16 @@ export function NewSessionSheet(props: {
                 </Text>
               </Pressable>
             ))}
-            <Pressable
-              accessibilityRole="button"
-              disabled={props.busy}
-              onPress={props.onAskJarvis}
-              style={[styles.row, styles.ask, props.busy && styles.dim]}
-            >
-              <Text style={styles.askText}>{t(language, "sessions.newAskJarvis")}</Text>
-            </Pressable>
+            {!terminal && (
+              <Pressable
+                accessibilityRole="button"
+                disabled={props.busy}
+                onPress={props.onAskJarvis}
+                style={[styles.row, styles.ask, props.busy && styles.dim]}
+              >
+                <Text style={styles.askText}>{t(language, "sessions.newAskJarvis")}</Text>
+              </Pressable>
+            )}
             {props.error !== undefined && (
               <Text selectable style={styles.error}>
                 {props.error}

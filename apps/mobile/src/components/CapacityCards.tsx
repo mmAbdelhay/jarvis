@@ -15,6 +15,35 @@ const WINDOW_KEYS: Record<CapacityCard["window"], MessageKey> = {
   window: "home.windowOther",
 };
 
+/** Wide Home: one account as a tile of the four-up row. */
+export function CapacityTile(props: {
+  language: Language;
+  card: CapacityCard;
+  trend: number[];
+  now: number;
+  width: number;
+}) {
+  const { card } = props;
+  return (
+    <View style={[styles.tile, { width: props.width }]}>
+      <Text style={styles.tileName} numberOfLines={1}>
+        {t(props.language, "home.capacityWindow", {
+          name: card.id,
+          window: t(props.language, WINDOW_KEYS[card.window]),
+        })}
+      </Text>
+      <Text
+        style={styles.tileValue}
+        accessibilityLabel={t(props.language, "home.left", { percent: card.left })}
+      >
+        {card.left}%
+      </Text>
+      <Sparkline points={props.trend} color={theme.colors[capacityTone(card)]} height={34} />
+      <Text style={styles.tileCaption}>{resetLabel(card, props.now, props.language)}</Text>
+    </View>
+  );
+}
+
 /**
  * One card per account with a known window: what is left, a line trend of
  * the last day, and when it resets.
@@ -57,6 +86,17 @@ export function CapacityCards(props: {
 }
 
 const styles = StyleSheet.create({
+  tile: {
+    gap: 6,
+    padding: 14,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
+  },
+  tileName: { color: theme.colors.textMuted, fontFamily: theme.font.semibold, fontSize: 12 },
+  tileValue: { color: theme.colors.text, fontFamily: theme.font.extrabold, fontSize: 26 },
+  tileCaption: { color: theme.colors.textDim, fontFamily: theme.font.body, fontSize: 12 },
   section: { gap: 10 },
   titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
   title: { ...theme.type.sectionLabelLarge, color: theme.colors.textMuted },

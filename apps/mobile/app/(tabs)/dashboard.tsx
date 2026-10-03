@@ -10,18 +10,22 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActiveList } from "@/components/ActiveList";
+import { ActiveTable } from "@/components/ActiveTable";
+import { NewSessionSheet } from "@/components/NewSessionSheet";
+import { ProjectToolRow } from "@/components/ProjectToolRow";
 import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
 import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import type { ConnectionView } from "@/lib/connection-store";
 import { machinePillModel } from "@/lib/connection-pill";
-import { type DashboardPanel, dashboardColumns } from "@/lib/dashboard-grid";
 import type { DashboardView } from "@/lib/dashboard-store";
 import { createDashboardStore } from "@/lib/dashboard-store";
 import { createHomeStore, type HomeView } from "@/lib/home-store";
+import { PROJECT_TOOLS, type ProjectTool } from "@/lib/home-wide";
 import { STRINGS, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
+import { loadProjectChoices } from "@/lib/new-session";
 import { loadPairing } from "@/lib/pairing-record";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
@@ -29,14 +33,9 @@ import { openSession, sessionTarget } from "@/lib/session-nav";
 import { answerPrompt } from "@/lib/session-prompt";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { contentWidth, homeSideBySide } from "@/lib/wide-breakpoints";
 import { WIDE_PANEL_MAX_WIDTH } from "@/lib/wide-panel";
-import {
-  DashboardGrid,
-  type ProjectActions,
-  ProjectsPanel,
-  SessionsPanel,
-  SystemPanel,
-} from "@/screens/DashboardPanels";
+import type { ProjectSummary } from "@/lib/dashboard-store";
 import { HomeTop } from "@/screens/HomeTop";
 
 function isMessageKey(value: string): value is MessageKey {
@@ -64,6 +63,9 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalError, setTerminalError] = useState<string | undefined>(undefined);
+  // Wide: the New terminal / New session sheet.
+  const [sheet, setSheet] = useState<"session" | "terminal" | undefined>(undefined);
+  const [choices, setChoices] = useState<ProjectSummary[] | null | undefined>(undefined);
   const insets = useSafeAreaInsets();
   // Wide: the WideShell top bar replaces the phone header (brand,
   // connection pill, History and Settings buttons) and the panels sit in a
@@ -81,9 +83,8 @@ export default function DashboardScreen() {
       homeStore.focus();
       setCounts(countsStore.get());
       const unsubscribeCounts = countsStore.subscribe(setCounts);
-      // Only the phone's ActiveList reads the counts; wide Home skips the
-      // `git:counts` subscription (re-enable here for a wide reader).
-      if (!wide) countsStore.focus();
+      // The phone's ActiveList and the wide Active table both read the counts.
+      countsStore.focus();
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
@@ -96,11 +97,11 @@ export default function DashboardScreen() {
         unsubscribeHome();
         homeStore.blur();
         unsubscribeCounts();
-        if (!wide) countsStore.blur();
+        countsStore.blur();
         unsubscribeConnection();
         cancelled = true;
       };
-    }, [store, homeStore, countsStore, connectionStore, wide]),
+    }, [store, homeStore, countsStore, connectionStore]),
   );
   // The sessions a question could be waiting in: Jarvis's own live ones.
   // A row found by the process scan has no terminal to answer through.
@@ -121,7 +122,7 @@ export default function DashboardScreen() {
     void store.refresh().finally(() => setRefreshing(false));
   }, [store]);
   const openProjectTerminal = useCallback(
-    async (projectName: string) => {
+    async (projectName: string): Promise<boolean> => {
       setTerminalError(undefined);
       setTerminalBusy(true);
       const outcome = await store.openTerminal(projectName);
@@ -131,9 +132,10 @@ export default function DashboardScreen() {
           pathname: "/terminal/[paneKey]",
           params: { paneKey: outcome.tabId, tabId: outcome.tabId },
         });
-        return;
+        return true;
       }
       setTerminalError(isMessageKey(outcome.text) ? t(language, outcome.text) : outcome.text);
+      return false;
     },
     [store, router, language],
   );
@@ -141,41 +143,37 @@ export default function DashboardScreen() {
   const pillPalette = PILL_PALETTE[pill.tone];
   const pillText = pill.label.kind === "name" ? pill.label.name : t(language, pill.label.key);
   const now = Date.now();
-  const projectActions: ProjectActions = {
-    openTerminal: (projectName) => void openProjectTerminal(projectName),
-    openWorkspace: () => router.push("/workspace"),
-    openDocker: (projectName) => router.push(`/docker/${encodeURIComponent(projectName)}`),
-    openVoice: () => router.push("/voice"),
-    openSidecars: (projectName) => router.push(`/sidecars/${encodeURIComponent(projectName)}`),
-  };
-  const renderPanel = (panel: DashboardPanel) => {
-    if (panel === "system") {
-      return <SystemPanel language={language} metrics={view.metrics} wide={wide} />;
-    }
-    if (panel === "sessions") {
-      return (
-        <SessionsPanel
-          language={language}
-          sessions={view.sessions}
-          now={now}
-          wide={wide}
-          onOpenSession={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
-          onAllSessions={() => router.push("/sessions")}
-          onHistory={() => router.push("/history")}
-        />
+  const openSheet = useCallback(
+    (mode: "session" | "terminal") => {
+      setTerminalError(undefined);
+      setChoices(undefined);
+      setSheet(mode);
+      void loadProjectChoices(client).then((loaded) =>
+        setChoices(loaded.ok ? loaded.projects : null),
       );
-    }
-    return (
-      <ProjectsPanel
-        language={language}
-        projects={view.projects}
-        wide={wide}
-        terminalDisabled={connection.state !== "open" || terminalBusy}
-        terminalBusy={terminalBusy}
-        terminalError={terminalError}
-        actions={projectActions}
-      />
-    );
+    },
+    [client],
+  );
+  // One project: New terminal skips the sheet and opens straight into it.
+  const newTerminal = () => {
+    const only = view.projects.length === 1 ? view.projects[0] : undefined;
+    if (only !== undefined) void openProjectTerminal(only.name);
+    else openSheet("terminal");
+  };
+  const runTool = (project: string, tool: ProjectTool) => {
+    const name = encodeURIComponent(project);
+    if (tool === "terminal") void openProjectTerminal(project);
+    else if (tool === "docker") router.push(`/docker/${name}`);
+    else if (tool === "api") router.push(`/api/${name}`);
+    else router.push(`/sidecars/${name}`);
+  };
+  const content = contentWidth(width, layout.compact ? "rail" : "full");
+  const inner = Math.min(content - 64, WIDE_PANEL_MAX_WIDTH);
+  const openById = (id: string) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"));
+  const answer = async (sessionId: string, index: number, label: string) => {
+    const outcome = await answerPrompt(client, sessionId, index, label);
+    if (outcome === "answered") homeStore.dismiss(sessionId);
+    return outcome;
   };
   return (
     <ScrollView
@@ -220,40 +218,102 @@ export default function DashboardScreen() {
           </View>
         </View>
       )}
-      <View style={wide ? styles.homeTopWide : undefined}>
-        <HomeTop
-          language={language}
-          home={home}
-          sessions={view.sessions}
-          liveCount={liveIds.length}
-          now={now}
-          wide={wide}
-          onAnswer={async (sessionId, index, label) => {
-            const outcome = await answerPrompt(client, sessionId, index, label);
-            if (outcome === "answered") homeStore.dismiss(sessionId);
-            return outcome;
-          }}
-          onOpen={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
-        />
-      </View>
       {wide ? (
-        <DashboardGrid
-          language={language}
-          columns={dashboardColumns(width)}
-          renderPanel={renderPanel}
-        />
+        <View style={styles.homeTopWide}>
+          <HomeTop
+            language={language}
+            home={home}
+            sessions={view.sessions}
+            liveCount={liveIds.length}
+            now={now}
+            wide={{
+              connection: pillText,
+              metrics: view.metrics,
+              content,
+              inner,
+              onNewTerminal: newTerminal,
+              onNewSession: () => openSheet("session"),
+            }}
+            onAnswer={answer}
+            onOpen={openById}
+          />
+          <View style={[styles.lower, homeSideBySide(content) && styles.lowerRow]}>
+            <View style={homeSideBySide(content) ? styles.activeCol : undefined}>
+              <ActiveTable
+                language={language}
+                sessions={view.sessions}
+                counts={counts}
+                onOpen={openById}
+                onAll={() => router.push("/sessions")}
+              />
+            </View>
+            <View style={[styles.projectsCol, homeSideBySide(content) && styles.projectsColRow]}>
+              <Text style={styles.sectionTitle}>
+                {t(language, "dashboard.projects").toUpperCase()}
+              </Text>
+              {view.projects.length === 0 && (
+                <Text style={styles.empty}>{t(language, "dashboard.noProjects")}</Text>
+              )}
+              {view.projects.map((project) => (
+                <ProjectToolRow
+                  key={project.name}
+                  language={language}
+                  name={project.name}
+                  tools={PROJECT_TOOLS}
+                  disabled={connection.state !== "open" || terminalBusy ? ["terminal"] : []}
+                  onTool={(tool) => runTool(project.name, tool)}
+                />
+              ))}
+              {terminalError !== undefined && sheet === undefined && (
+                <Text style={styles.error}>{terminalError}</Text>
+              )}
+            </View>
+          </View>
+        </View>
       ) : (
-        <ActiveList
-          language={language}
-          sessions={view.sessions}
-          counts={counts}
-          now={now}
-          onOpen={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
-          onAll={() => router.push("/sessions")}
-        />
+        <>
+          <HomeTop
+            language={language}
+            home={home}
+            sessions={view.sessions}
+            liveCount={liveIds.length}
+            now={now}
+            wide={undefined}
+            onAnswer={answer}
+            onOpen={openById}
+          />
+          <ActiveList
+            language={language}
+            sessions={view.sessions}
+            counts={counts}
+            now={now}
+            onOpen={openById}
+            onAll={() => router.push("/sessions")}
+          />
+        </>
       )}
       {view.error?.kind === "remote" && (
         <Text style={[styles.error, wide && styles.errorWide]}>{view.error.text}</Text>
+      )}
+      {wide && (
+        <NewSessionSheet
+          language={language}
+          visible={sheet !== undefined}
+          mode={sheet}
+          projects={choices}
+          busy={terminalBusy}
+          error={terminalError}
+          onPick={(name) =>
+            void openProjectTerminal(name).then((ok) => {
+              if (ok) setSheet(undefined);
+            })
+          }
+          onAskJarvis={() => {
+            setSheet(undefined);
+            router.push("/voice");
+          }}
+          onClose={() => setSheet(undefined)}
+        />
       )}
     </ScrollView>
   );
@@ -269,7 +329,7 @@ const PILL_PALETTE = {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.ground },
   content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, gap: 16 },
-  contentWide: { paddingTop: 16 },
+  contentWide: { paddingTop: 28, paddingHorizontal: 32, paddingBottom: 28 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -305,5 +365,12 @@ const styles = StyleSheet.create({
   error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
   // Wide: under the grid, inside the same centred 1180 measure.
   errorWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
-  homeTopWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
+  homeTopWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center", gap: 22 },
+  lower: { gap: 18 },
+  lowerRow: { flexDirection: "row", alignItems: "flex-start" },
+  activeCol: { flex: 3, minWidth: 0 },
+  projectsCol: { gap: 8, minWidth: 0 },
+  projectsColRow: { flex: 2 },
+  sectionTitle: { ...theme.type.sectionLabelLarge, color: theme.colors.textMuted },
+  empty: { ...theme.type.body, color: theme.colors.textMuted },
 });
