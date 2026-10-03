@@ -84,6 +84,19 @@ export function mergeSessions(
 
 /** The merged row for an id, so a selection is "present" when it is live or
  *  in the loaded history. */
+/** The selected row: the one in `rows`, else `remembered` when it is that
+ *  same id — a wide-pane selection a search has since filtered out of the
+ *  loaded history keeps its pane rather than reading "not found". */
+export function selectedRow(
+  rows: readonly MergedRow[],
+  id: string | undefined,
+  remembered: MergedRow | undefined,
+): MergedRow | undefined {
+  const found = findRow(rows, id);
+  if (found !== undefined) return found;
+  return id !== undefined && remembered?.id === id ? remembered : undefined;
+}
+
 export function findRow(rows: readonly MergedRow[], id: string | undefined): MergedRow | undefined {
   return id === undefined ? undefined : rows.find((row) => row.id === id);
 }

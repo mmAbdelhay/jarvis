@@ -244,4 +244,17 @@ describe("createHomeStore", () => {
     expect(store.get().trends).toEqual([{ id: "a", points: [40] }]);
     expect(store.get().sessionsPerDay).toEqual([2, 0]);
   });
+
+  it("with capacity off it polls prompts only: no push, no usage read", async () => {
+    const fake = fakeClient(() => ({ ok: true, value: null }));
+    const store = createHomeStore({ client: fake.client, ...fakeTimer() });
+    store.focus({ capacity: false });
+    store.setLiveSessions(["s1"]);
+    await flush();
+    expect(fake.subscribed).toEqual([]);
+    expect(fake.calls.some((call) => call.channel === "usage:history")).toBe(false);
+    expect(fake.calls.some((call) => call.channel !== "usage:history")).toBe(true);
+    store.blur();
+    expect(fake.unsubscribed).toEqual([]);
+  });
 });

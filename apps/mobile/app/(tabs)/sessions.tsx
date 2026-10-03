@@ -37,7 +37,7 @@ import {
 } from "@/lib/session-nav";
 import { sessionRouteId } from "@/lib/session-screen";
 import { filterRows, projectsOf, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
-import { findRow, isActiveRow, type MergedRow, mergeSessions } from "@/lib/sessions-merge";
+import { isActiveRow, type MergedRow, mergeSessions, selectedRow } from "@/lib/sessions-merge";
 import { resumable, rowCounts, rowSubtitle, rowTimeLabel, rowVariant } from "@/lib/sessions-row";
 import { usePhoneBack } from "@/lib/use-phone-back";
 import type { SessionsView } from "@/lib/sessions-store";
@@ -124,7 +124,11 @@ export default function SessionsScreen() {
     () => mergeSessions([...view.active, ...view.ended], history.sessions),
     [view.active, view.ended, history.sessions],
   );
-  const selected = findRow(rows, selectedId);
+  // A selected history-only row stays on screen when a search drops it from
+  // the loaded history (the wide pane would read "not found" otherwise).
+  const rememberedRow = useRef<MergedRow | undefined>(undefined);
+  const selected = selectedRow(rows, selectedId, rememberedRow.current);
+  rememberedRow.current = selected;
   const presence = sessionPresence({
     listed,
     loading: view.loading || history.loading,
@@ -157,7 +161,7 @@ export default function SessionsScreen() {
       // The "Asks:" line: the laptop reports a waiting question only when
       // asked, so this polls, and only while this screen is on.
       const unsubscribeHome = homeStore.subscribe(setHome);
-      homeStore.focus();
+      homeStore.focus({ capacity: false });
       setHome(homeStore.get());
       return () => {
         unsubscribe();
@@ -181,6 +185,8 @@ export default function SessionsScreen() {
     .filter(
       (row) =>
         isActiveRow(row) &&
+        // The wide pane's own SessionDetail already polls this session.
+        !(wide && row.id === selectedId) &&
         row.origin !== "external" &&
         (row.state === "running" || row.state === "waiting"),
     )

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  paneCountText,
   type Language,
   type MessageKey,
   STRINGS,
@@ -230,5 +231,20 @@ describe("platformKey (D8)", () => {
       expect(STRINGS[key as MessageKey].en.toLowerCase()).not.toContain("phone");
       expect(STRINGS[key as MessageKey].ar).not.toContain("الهاتف");
     }
+  });
+});
+
+describe("paneCountText", () => {
+  it("counts panes in English", () => {
+    expect(paneCountText("en", 1)).toBe("1 pane");
+    expect(paneCountText("en", 3)).toBe("3 panes");
+  });
+  it("uses the Arabic singular, dual, plural and post-number singular", () => {
+    expect(paneCountText("ar", 1)).toBe("لوحة واحدة");
+    expect(paneCountText("ar", 2)).toBe("لوحتان");
+    expect(paneCountText("ar", 3)).toBe("3 لوحات");
+    expect(paneCountText("ar", 10)).toBe("10 لوحات");
+    expect(paneCountText("ar", 11)).toBe("11 لوحة");
+    expect(paneCountText("ar", 102)).toBe("102 لوحة");
   });
 });

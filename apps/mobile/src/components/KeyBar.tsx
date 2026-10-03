@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { KEY_CAPS, KEY_LABEL_KEYS } from "@/lib/session-screen";
-import type { Latches } from "@/lib/session-input";
+import { anyLatch, type Latches } from "@/lib/session-input";
 import type { BarKey } from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 
@@ -20,12 +20,16 @@ export function KeyBar<K extends BarKey>(props: {
   variant?: "footer";
   /** A "⋯" cap that the screen owns (a mode switch) rather than the extra row. */
   modeToggle?: { open: boolean; onPress(): void };
+  /** The "⋯" row closed, so its caps (and any latch armed there) are gone. */
+  onMoreClose?(): void;
   onKey(key: K): void;
 }) {
   const language = useLanguage();
   const [open, setOpen] = useState(false);
   const footer = props.variant === "footer";
   const more = props.moreKeys ?? [];
+  // A latch armed behind a "⋯" cap stays visible on that cap.
+  const latched = anyLatch(props.armed);
 
   function cap(key: K) {
     const armed = key === "ctrl" ? props.armed.ctrl : key === "alt" ? props.armed.alt : false;
@@ -70,9 +74,21 @@ export function KeyBar<K extends BarKey>(props: {
             accessibilityLabel={t(language, props.modeToggle.open ? "keys.less" : "keys.more")}
             accessibilityState={{ expanded: props.modeToggle.open }}
             onPress={props.modeToggle.onPress}
-            style={[styles.cap, props.modeToggle.open && styles.open]}
+            style={[
+              styles.cap,
+              props.modeToggle.open && styles.open,
+              latched && !props.modeToggle.open && styles.armed,
+            ]}
           >
-            <Text style={[styles.text, props.modeToggle.open && styles.openText]}>⋯</Text>
+            <Text
+              style={[
+                styles.text,
+                props.modeToggle.open && styles.openText,
+                latched && !props.modeToggle.open && styles.armedText,
+              ]}
+            >
+              ⋯
+            </Text>
           </TouchableOpacity>
         )}
         {more.length > 0 && (
@@ -80,10 +96,17 @@ export function KeyBar<K extends BarKey>(props: {
             accessibilityRole="button"
             accessibilityLabel={t(language, open ? "keys.less" : "keys.more")}
             accessibilityState={{ expanded: open }}
-            onPress={() => setOpen((value) => !value)}
-            style={[styles.cap, open && styles.open]}
+            onPress={() => {
+              if (open) props.onMoreClose?.();
+              setOpen((value) => !value);
+            }}
+            style={[styles.cap, open && styles.open, latched && !open && styles.armed]}
           >
-            <Text style={[styles.text, open && styles.openText]}>⋯</Text>
+            <Text
+              style={[styles.text, open && styles.openText, latched && !open && styles.armedText]}
+            >
+              ⋯
+            </Text>
           </TouchableOpacity>
         )}
       </ScrollView>

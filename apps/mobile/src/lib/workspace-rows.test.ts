@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   breadcrumbParts,
   defaultWorkspaceProject,
+  requestedWorkspaceProject,
   filesPaneFor,
   tabRowModel,
 } from "./workspace-rows";
@@ -100,5 +101,18 @@ describe("defaultWorkspaceProject", () => {
   it("keeps a chosen project and chooses nothing from an empty list", () => {
     expect(defaultWorkspaceProject([{ name: "api", tabs: [{}] }], "web")).toBeUndefined();
     expect(defaultWorkspaceProject([], undefined)).toBeUndefined();
+  });
+});
+
+describe("requestedWorkspaceProject", () => {
+  const projects = [{ name: "api" }, { name: "web" }];
+  it("names a listed project that is not selected yet", () => {
+    expect(requestedWorkspaceProject(projects, "web", "api")).toBe("web");
+    expect(requestedWorkspaceProject(projects, "web", undefined)).toBe("web");
+  });
+  it("ignores an unknown, absent or already selected project", () => {
+    expect(requestedWorkspaceProject(projects, "nope", "api")).toBeUndefined();
+    expect(requestedWorkspaceProject(projects, undefined, "api")).toBeUndefined();
+    expect(requestedWorkspaceProject(projects, "web", "web")).toBeUndefined();
   });
 });

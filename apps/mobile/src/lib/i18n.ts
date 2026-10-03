@@ -45,7 +45,7 @@ export const STRINGS = {
   "terminal.nextCommand": { en: "Next command", ar: "الأمر التالي" },
   "terminal.latest": { en: "Latest", ar: "الأحدث" },
   "terminal.scrolledBack": { en: "Scrolled back", ar: "تم التمرير للخلف" },
-  "terminal.pane": { en: "Pane {n}", ar: "اللوحة {n}" },
+  "terminal.pane": { en: "Pane {n}", ar: "لوحة {n}" },
   "terminal.typePlaceholder": { en: "Type a command or reply", ar: "اكتب أمرًا أو ردًّا" },
   "terminal.arrowPad": { en: "Arrow pad", ar: "لوحة الأسهم" },
   "terminal.arrowPadHint": {
@@ -1097,8 +1097,8 @@ export const STRINGS = {
     ar: "افتح أداة، أو افتح طرفية على الحاسوب.",
   },
   "workspace.closeTab": { en: "Close {title}", ar: "إغلاق {title}" },
-  "workspace.panes.title": { en: "Terminal panes", ar: "أجزاء الطرفية" },
-  "workspace.panes.empty": { en: "No panes.", ar: "لا توجد أجزاء." },
+  "workspace.panes.title": { en: "Terminal panes", ar: "لوحات الطرفية" },
+  "workspace.panes.empty": { en: "No panes.", ar: "لا توجد لوحات." },
   "workspace.panes.exited": { en: "Exited", ar: "منتهية" },
   "workspace.panes.live": { en: "Live", ar: "مباشرة" },
   "workspace.addTab": { en: "Tab", ar: "تبويب" },
@@ -1108,10 +1108,8 @@ export const STRINGS = {
     en: "Open a terminal on the laptop to browse this project's files.",
     ar: "افتح طرفية على الحاسوب لتصفح ملفات هذا المشروع.",
   },
-  "workspace.paneCount": { en: "{count} panes", ar: "{count} أجزاء" },
-  "workspace.paneCountOne": { en: "1 pane", ar: "جزء واحد" },
   "workspace.kindWeb": { en: "Web", ar: "ويب" },
-  "workspace.kindSubtitle.terminal": { en: "tap to see its panes", ar: "المس لعرض أجزائها" },
+  "workspace.kindSubtitle.terminal": { en: "tap to see its panes", ar: "المس لعرض لوحاتها" },
   "workspace.kindSubtitle.docker": { en: "containers and logs", ar: "الحاويات والسجلات" },
   "workspace.kindSubtitle.api": { en: "requests and collections", ar: "الطلبات والمجموعات" },
   "workspace.kindSubtitle.editor": {
@@ -1446,6 +1444,17 @@ export function t(
   return template.replace(PLACEHOLDER_PATTERN, (match, name: string) =>
     Object.hasOwn(params, name) ? String(params[name]) : match,
   );
+}
+
+/** "2 panes": a counted noun. Arabic takes the singular "لوحة واحدة", the
+ *  dual "لوحتان", the plural "N لوحات" for 3-10, and the singular again
+ *  after a number for 11 and up ("11 لوحة"). */
+export function paneCountText(language: Language, count: number): string {
+  if (language === "en") return count === 1 ? "1 pane" : `${count} panes`;
+  if (count === 1) return "لوحة واحدة";
+  if (count === 2) return "لوحتان";
+  const tail = count % 100;
+  return tail >= 3 && tail <= 10 ? `${count} لوحات` : `${count} لوحة`;
 }
 
 export function languageFromLocale(localeTag: string): Language {

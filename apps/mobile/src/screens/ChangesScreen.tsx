@@ -27,8 +27,6 @@ import {
   shouldClearDraft,
 } from "@/lib/changes-screen";
 import { createChangesStore, ENDED_SESSION_NOTICE, type ChangesState } from "@/lib/changes-store";
-import { historyListDisplay } from "@/lib/history-screen";
-import { createHistoryStore, type HistoryState } from "@/lib/history-store";
 import { t } from "@/lib/i18n";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import { useLanguage } from "@/lib/language-context";
@@ -53,10 +51,8 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   const phoneHeader = !props.embedded && !wideLayout;
   const client = useRpcClient();
   const routeSessionId = props.sessionId;
-  const historyStore = useMemo(() => createHistoryStore({ client }), [client]);
   const sessionsStore = useMemo(() => createSessionsStore({ client }), [client]);
   const changesStore = useMemo(() => createChangesStore({ client }), [client]);
-  const [history, setHistory] = useState<HistoryState>(historyStore.get());
   const [sessions, setSessions] = useState<SessionsView>(sessionsStore.get());
   const [changes, setChanges] = useState<ChangesState>(changesStore.get());
   const [connection, setConnection] = useState(client.state());
@@ -76,12 +72,10 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   // restores the session, the body and pull-to-refresh on every refocus.
   useFocusEffect(
     useCallback(() => {
-      const unHistory = historyStore.subscribe(setHistory);
       const unSessions = sessionsStore.subscribe(setSessions);
       const unChanges = changesStore.subscribe(setChanges);
       const unConnection = client.onState((state) => setConnection(state));
       setConnection(client.state());
-      historyStore.open();
       sessionsStore.focus();
       const toOpen = sessionIdToReopen(
         changesStore.get(),
@@ -90,19 +84,16 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
       );
       if (routeSessionId !== undefined) consumedRouteIdRef.current = routeSessionId;
       if (toOpen !== undefined) changesStore.open(toOpen);
-      setHistory(historyStore.get());
       setSessions(sessionsStore.get());
       setChanges(changesStore.get());
       return () => {
-        unHistory();
         unSessions();
         unChanges();
         unConnection();
-        historyStore.close();
         sessionsStore.blur();
         changesStore.close();
       };
-    }, [historyStore, sessionsStore, changesStore, client, routeSessionId]),
+    }, [sessionsStore, changesStore, client, routeSessionId]),
   );
 
   // Only sessions the laptop's own list holds: git:changes resolves a
@@ -125,16 +116,14 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    historyStore.refresh();
     void sessionsStore.refresh();
     changesStore.refresh();
     setTimeout(() => setRefreshing(false), 250);
-  }, [historyStore, sessionsStore, changesStore]);
+  }, [sessionsStore, changesStore]);
 
   const selectedFiles = changes.changes?.changes.files ?? [];
   const diff = changes.diff;
   const stagedCount = selectedFiles.filter((file) => file.staged).length;
-  const sessionsDisplay = historyListDisplay(history, language);
   const selectedRow = findRow(merged, changes.sessionId);
   // Fix round 2 (New Breakage 2): also gate on a session being chosen —
   // Commit/Stage previously reached the store's mutation queue with no
@@ -199,16 +188,6 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
         )}
         {merged.length === 0 && !sessions.loading && (
           <Text style={styles.empty}>{t(language, "changes.noSessions")}</Text>
-        )}
-        {sessionsDisplay.kind === "failed" && (
-          <View style={styles.failedBlock}>
-            <Text selectable style={styles.error}>
-              {sessionsDisplay.text}
-            </Text>
-            <TouchableOpacity onPress={() => historyStore.refresh()}>
-              <Text style={styles.retry}>{t(language, "common.retry")}</Text>
-            </TouchableOpacity>
-          </View>
         )}
 
         {changes.phase === "loading" && (

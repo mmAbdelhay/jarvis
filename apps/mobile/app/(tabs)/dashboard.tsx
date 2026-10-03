@@ -81,7 +81,9 @@ export default function DashboardScreen() {
       homeStore.focus();
       setCounts(countsStore.get());
       const unsubscribeCounts = countsStore.subscribe(setCounts);
-      countsStore.focus();
+      // Only the phone's ActiveList reads the counts; wide Home skips the
+      // `git:counts` subscription (re-enable here for a wide reader).
+      if (!wide) countsStore.focus();
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
@@ -94,11 +96,11 @@ export default function DashboardScreen() {
         unsubscribeHome();
         homeStore.blur();
         unsubscribeCounts();
-        countsStore.blur();
+        if (!wide) countsStore.blur();
         unsubscribeConnection();
         cancelled = true;
       };
-    }, [store, homeStore, countsStore, connectionStore]),
+    }, [store, homeStore, countsStore, connectionStore, wide]),
   );
   // The sessions a question could be waiting in: Jarvis's own live ones.
   // A row found by the process scan has no terminal to answer through.

@@ -70,7 +70,12 @@ import { ChangesScreen } from "@/screens/ChangesScreen";
 import { DockerScreen } from "@/screens/DockerScreen";
 import { TerminalPane } from "@/screens/TerminalPane";
 import { ProjectPicker, TOOLS, type WorkspaceTool, WorkspaceTools } from "@/screens/WorkspaceTools";
-import { defaultWorkspaceProject, filesPaneFor, tabRowModel } from "@/lib/workspace-rows";
+import {
+  defaultWorkspaceProject,
+  filesPaneFor,
+  requestedWorkspaceProject,
+  tabRowModel,
+} from "@/lib/workspace-rows";
 import {
   createWorkspaceStore,
   listChatNames,
@@ -105,9 +110,10 @@ export default function WorkspaceScreen() {
   const insets = useSafeAreaInsets();
   const { kind } = useLayoutClass();
   const wide = kind === "wide";
-  const params = useLocalSearchParams<{ tab?: string; pane?: string }>();
+  const params = useLocalSearchParams<{ tab?: string; pane?: string; project?: string }>();
   const tabParam = sessionRouteId(params.tab);
   const paneParam = sessionRouteId(params.pane);
+  const projectParam = sessionRouteId(params.project);
   const split = splitLayout({ language, platformRtl: I18nManager.getConstants().isRTL });
 
   useFocusEffect(
@@ -267,6 +273,18 @@ export default function WorkspaceScreen() {
   useEffect(() => {
     if (owner === undefined && fallbackProject !== undefined) store.selectProject(fallbackProject);
   }, [owner, fallbackProject, store]);
+
+  // A project param (the session's Files tab) selects that project once,
+  // then is dropped so later picks are not overridden.
+  const requestedProject = requestedWorkspaceProject(
+    view.projects,
+    projectParam,
+    view.selectedProject,
+  );
+  useEffect(() => {
+    if (requestedProject !== undefined) store.selectProject(requestedProject);
+    if (projectParam !== undefined && !view.loading) router.setParams({ project: undefined });
+  }, [requestedProject, projectParam, view.loading, store, router]);
 
   // Wide with no tab param: make the first tab the explicit selection, so
   // a rotation to the phone layout keeps showing it (and its one attach).

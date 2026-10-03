@@ -39,6 +39,7 @@ import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import {
   type Latches,
+  clearLatches,
   latchesOf,
   NO_LATCHES,
   type SendResult,
@@ -201,14 +202,17 @@ function TerminalPaneBody({
       });
       // The tab's own title and project for the header; a failed read
       // leaves the pane key as the title.
-      void client.call("workspace:snapshot", []).then((result) => {
-        if (cancelled || !result.ok) return;
-        setTab(parseWorkspaceSnapshot(result.value)?.tabs.find((item) => item.id === tabId));
-      });
+      // Embedded (wide) has no stack header to title, so it skips the read.
+      if (!embedded) {
+        void client.call("workspace:snapshot", []).then((result) => {
+          if (cancelled || !result.ok) return;
+          setTab(parseWorkspaceSnapshot(result.value)?.tabs.find((item) => item.id === tabId));
+        });
+      }
       return () => {
         cancelled = true;
       };
-    }, [client, tabId, paneKey]),
+    }, [client, tabId, paneKey, embedded]),
   );
 
   // Attach/input — only once the pane has been validated. Bite-proof
@@ -308,6 +312,7 @@ function TerminalPaneBody({
   if (phase === "checking") {
     return (
       <View style={styles.container}>
+        {!embedded && <ScreenHeader title={paneKey} onBack={router.back} />}
         <Text style={styles.status}>{t(language, "session.attaching")}</Text>
       </View>
     );
@@ -480,7 +485,14 @@ function TerminalPaneBody({
           keys={terminalFooterKeys(navMode)}
           disabled={disabled}
           armed={armed}
-          modeToggle={{ open: navMode, onPress: () => setNavMode((open) => !open) }}
+          modeToggle={{
+            open: navMode,
+            onPress: () => {
+              // Ctrl/Alt caps sit in the navigation row only.
+              setArmed(clearLatches(inputRef.current));
+              setNavMode((open) => !open);
+            },
+          }}
           onKey={(key) => {
             void onKey(key);
           }}

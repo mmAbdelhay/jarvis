@@ -4,7 +4,7 @@
 import type { MobileWorkspaceTab } from "@jarvis/wire";
 import { crumbs } from "./file-browser";
 import type { IconName } from "./icon-paths";
-import { t, type Language, type MessageKey } from "./i18n";
+import { paneCountText, t, type Language, type MessageKey } from "./i18n";
 
 type TabKind = MobileWorkspaceTab["kind"];
 
@@ -62,9 +62,7 @@ export function tabRowModel(
     subtitle =
       paneCount === undefined
         ? t(language, "workspace.kindSubtitle.terminal")
-        : paneCount === 1
-          ? t(language, "workspace.paneCountOne")
-          : t(language, "workspace.paneCount", { count: paneCount });
+        : paneCountText(language, paneCount);
   } else {
     subtitle = t(language, KIND_SUBTITLE[tab.kind]);
   }
@@ -93,6 +91,17 @@ export function defaultWorkspaceProject(
 ): string | undefined {
   if (selected !== undefined) return undefined;
   return (projects.find((project) => project.tabs.length > 0) ?? projects[0])?.name;
+}
+
+/** The project a deep link asks the Workspace to open on: the named one when
+ *  it is listed and not already selected, else nothing. */
+export function requestedWorkspaceProject(
+  projects: readonly { name: string }[],
+  requested: string | undefined,
+  selected: string | undefined,
+): string | undefined {
+  if (requested === undefined || requested === selected) return undefined;
+  return projects.some((project) => project.name === requested) ? requested : undefined;
 }
 
 export type BreadcrumbPart = { name: string; path: string; current: boolean };

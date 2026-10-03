@@ -39,6 +39,7 @@ import { useRpcClient } from "@/lib/rpc-context";
 import { PlanSheet } from "@/plan/PlanSheet";
 import { planProgressOf } from "@/plan/plan-progress";
 import {
+  clearLatches,
   createSessionInput,
   type Latches,
   latchesOf,
@@ -420,7 +421,12 @@ export function SessionDetail(props: {
                 key: "files",
                 label: t(language, "session.files"),
                 selected: false,
-                onPress: () => router.push("/workspace"),
+                onPress: () =>
+                  router.push(
+                    row.project === null || row.project === ""
+                      ? "/workspace"
+                      : { pathname: "/workspace", params: { project: row.project } },
+                  ),
               },
             ]}
           />
@@ -505,6 +511,7 @@ export function SessionDetail(props: {
           moreKeys={MORE_KEYS}
           disabled={disabled}
           armed={armed}
+          onMoreClose={() => setArmed(clearLatches(inputRef.current))}
           onKey={(key) => {
             void onKey(key);
           }}

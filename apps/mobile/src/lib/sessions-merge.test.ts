@@ -1,6 +1,6 @@
 import type { Session } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
-import { findRow, historyRow, isActiveRow, mergeSessions } from "./sessions-merge";
+import { findRow, historyRow, selectedRow, isActiveRow, mergeSessions } from "./sessions-merge";
 import type { SessionRowView } from "./sessions-store";
 
 function live(overrides: Partial<SessionRowView> = {}): SessionRowView {
@@ -83,5 +83,16 @@ describe("findRow", () => {
     expect(findRow(rows, "h")?.source).toBe("history");
     expect(findRow(rows, "nope")).toBeUndefined();
     expect(findRow(rows, undefined)).toBeUndefined();
+  });
+});
+
+describe("selectedRow", () => {
+  it("keeps a remembered row of the same id once the rows no longer hold it", () => {
+    const remembered = findRow(mergeSessions([live()], [saved()]), "h");
+    const rows = mergeSessions([live()], []);
+    expect(selectedRow(rows, "h", remembered)).toBe(remembered);
+    expect(selectedRow(rows, "other", remembered)).toBeUndefined();
+    expect(selectedRow(rows, undefined, remembered)).toBeUndefined();
+    expect(selectedRow(mergeSessions([live()], [saved()]), "h", undefined)?.id).toBe("h");
   });
 });
