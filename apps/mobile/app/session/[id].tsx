@@ -1,6 +1,7 @@
 import { useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, Text } from "react-native";
+import { ScreenHeader } from "@/components/ScreenHeader";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { WIDE_REDIRECT_METHOD, wideRedirectFor } from "@/lib/session-nav";
@@ -27,7 +28,14 @@ export default function SessionScreen() {
   }, [focused, redirect, router]);
   // Never mount the detail here while redirecting: the split mounts its own.
   if (redirect !== undefined) return null;
-  if (id === undefined) return <Text style={styles.status}>{t(language, "session.notFound")}</Text>;
+  if (id === undefined) {
+    return (
+      <>
+        <ScreenHeader title={t(language, "sessions.title")} onBack={router.back} />
+        <Text style={styles.status}>{t(language, "session.notFound")}</Text>
+      </>
+    );
+  }
   return <SessionDetail key={id} id={id} embedded={false} />;
 }
 

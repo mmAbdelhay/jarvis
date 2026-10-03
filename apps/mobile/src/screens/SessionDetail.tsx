@@ -4,7 +4,7 @@
 // the same component. Subscriptions are keyed by `id`: callers key this
 // component by id, never by layout, so a rotation keeps one subscription.
 
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,6 +22,7 @@ import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
 import { PromptCard } from "@/components/PromptCard";
 import { ResumeButton } from "@/components/ResumeButton";
+import { ScreenHeader } from "@/components/ScreenHeader";
 import { SegmentTabs } from "@/components/SegmentTabs";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
@@ -316,6 +317,7 @@ export function SessionDetail(props: {
     const text = notFoundText(sessions, language);
     return (
       <View style={styles.container}>
+        {!embedded && <ScreenHeader title={t(language, "sessions.title")} onBack={router.back} />}
         <Text style={styles.status}>{text}</Text>
         <TouchableOpacity
           onPress={() => {
@@ -345,13 +347,15 @@ export function SessionDetail(props: {
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
       {embedded ? (
-        <Text style={styles.title} numberOfLines={1}>
-          {row.summary}
-        </Text>
+        <>
+          <Text style={styles.title} numberOfLines={1}>
+            {row.summary}
+          </Text>
+          <Text style={styles.label}>{row.label}</Text>
+        </>
       ) : (
-        <Stack.Screen options={{ title: row.summary }} />
+        <ScreenHeader title={row.summary} subtitle={row.label} subtitleMono onBack={router.back} />
       )}
-      <Text style={styles.label}>{row.label}</Text>
       <View style={styles.tabs}>
         <SegmentTabs
           label={t(language, "session.views")}

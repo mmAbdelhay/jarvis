@@ -6,7 +6,7 @@
 // (rule 6/global constraint — a deep link never reaches terminal bytes or
 // an unvalidated pane). Never creates, splits or closes a pane — only ever
 // attaches to one the laptop already has.
-import { Stack, useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,6 +23,7 @@ import { ArrowPad } from "@/components/ArrowPad";
 import { FileBrowserSheet } from "@/components/FileBrowserSheet";
 import { KeyBar } from "@/components/KeyBar";
 import { PlanStrip } from "@/components/PlanStrip";
+import { ScreenHeader } from "@/components/ScreenHeader";
 import { TerminalNavBar } from "@/components/TerminalNavBar";
 import {
   TerminalWebView,
@@ -89,6 +90,7 @@ function TerminalPaneBody({
   embedded: boolean;
 }) {
   const client = useRpcClient();
+  const router = useRouter();
   // Wide (Review Focus 4): a hardware keyboard types into the terminal
   // itself. The phone keeps its compose bar and key bar only.
   const hardwareKeys = useLayoutClass().kind === "wide";
@@ -300,6 +302,7 @@ function TerminalPaneBody({
   if (phase === "notFound") {
     return (
       <View style={styles.container}>
+        {!embedded && <ScreenHeader title={paneKey} onBack={router.back} />}
         <Text style={styles.status}>{t(language, "terminal.notFound")}</Text>
       </View>
     );
@@ -354,14 +357,7 @@ function TerminalPaneBody({
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      {!embedded && (
-        <Stack.Screen
-          options={{
-            title: paneKey,
-            headerRight: () => headerActions,
-          }}
-        />
-      )}
+      {!embedded && <ScreenHeader title={paneKey} onBack={router.back} trailing={headerActions} />}
       {/* Wide layout: no stack header, so the same button sits above the pane. */}
       {embedded && <View style={styles.planRow}>{headerActions}</View>}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
