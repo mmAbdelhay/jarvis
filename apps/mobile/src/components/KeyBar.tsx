@@ -2,38 +2,44 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { KEY_CAPS, KEY_LABEL_KEYS } from "@/lib/session-screen";
-import { KEY_BAR, type KeyName } from "@/lib/terminal-keys";
+import type { Latches } from "@/lib/session-input";
+import { KEY_BAR, type KeyName, type Latch } from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 
 export function KeyBar(props: {
   disabled: boolean;
-  armed: boolean;
-  onKey(key: KeyName | "ctrl"): void;
+  armed: Latches;
+  onKey(key: KeyName | Latch): void;
 }) {
   const language = useLanguage();
   return (
     <ScrollView horizontal style={styles.row} contentContainerStyle={styles.content}>
-      {KEY_BAR.map((key) => (
-        <TouchableOpacity
-          key={key}
-          disabled={props.disabled}
-          accessibilityRole="button"
-          accessibilityLabel={t(language, KEY_LABEL_KEYS[key])}
-          accessibilityHint={
-            key === "ctrl" && props.armed ? t(language, "session.ctrlArmed") : undefined
-          }
-          accessibilityState={{ disabled: props.disabled, selected: key === "ctrl" && props.armed }}
-          onPress={() => props.onKey(key)}
-          style={[
-            styles.cap,
-            key === "enter" && styles.enter,
-            key === "ctrl" && props.armed && styles.armed,
-            props.disabled && styles.disabled,
-          ]}
-        >
-          <Text style={styles.text}>{KEY_CAPS[key]}</Text>
-        </TouchableOpacity>
-      ))}
+      {KEY_BAR.map((key) => {
+        const armed = (key === "ctrl" || key === "alt") && props.armed[key];
+        return (
+          <TouchableOpacity
+            key={key}
+            disabled={props.disabled}
+            accessibilityRole="button"
+            accessibilityLabel={t(language, KEY_LABEL_KEYS[key])}
+            accessibilityHint={
+              armed
+                ? t(language, key === "ctrl" ? "session.ctrlArmed" : "session.altArmed")
+                : undefined
+            }
+            accessibilityState={{ disabled: props.disabled, selected: armed }}
+            onPress={() => props.onKey(key)}
+            style={[
+              styles.cap,
+              key === "enter" && styles.enter,
+              armed && styles.armed,
+              props.disabled && styles.disabled,
+            ]}
+          >
+            <Text style={styles.text}>{KEY_CAPS[key]}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </ScrollView>
   );
 }

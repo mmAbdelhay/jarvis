@@ -310,7 +310,7 @@ Pulling to refresh on the Sessions screen calls `sessions:refresh` (a `read` cha
 
 A project's Terminal tile on the Dashboard, and the Workspace screen's own "New terminal" button, open a new terminal tab on the laptop in that project and land the phone on it — the same `terminal:open` channel the desktop's own tab uses, remote-legal for exactly the projects the laptop has configured. It is a `mutate` channel, so every call is audited, the same weight as a Docker start or an API save.
 
-Tapping a session opens its terminal: the same output the laptop shows, rendered by the same terminal engine, with a key bar for Esc, Tab, Shift-Tab, Ctrl, arrows and Enter.
+Tapping a session opens its terminal: the same output the laptop shows, rendered by the same terminal engine, with a key bar for Esc, Tab, Shift-Tab, Ctrl, Alt, arrows and Enter. Ctrl and Alt stay lit after a tap and apply to the next key or text you send: Alt then ⌫ deletes a word, Alt then ← moves back one.
 
 Typed text is sent exactly as written and never presses Enter for you; the ⏎ key is the only thing that does.
 

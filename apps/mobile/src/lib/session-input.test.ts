@@ -16,6 +16,8 @@ import {
   RESIZE_DEBOUNCE_MS,
   type SessionInput,
   createSessionInput,
+  latchesOf,
+  toggleLatch,
 } from "./session-input";
 import type { KeyName, TerminalModes } from "./terminal-keys";
 import { keyBytes } from "./terminal-keys";
@@ -414,6 +416,48 @@ describe("session-input: Ctrl latch", () => {
     h.input.armCtrl();
     h.input.disarmCtrl();
     expect(h.input.ctrlArmed()).toBe(false);
+  });
+});
+
+describe("session-input: Alt latch", () => {
+  it("armAlt(); sendText('b') sends ESC b and clears the latch", async () => {
+    const h = createHarness();
+    const socket = connectAndOpen(h);
+    h.input.armAlt();
+    expect(h.input.altArmed()).toBe(true);
+    void h.input.sendText("b");
+    expect(reqFrames(socket, "session:input")[0].a).toEqual([SESSION_ID, "\x1bb"]);
+    expect(h.input.altArmed()).toBe(false);
+  });
+
+  it("Ctrl and Alt together send ESC before the control byte", () => {
+    const h = createHarness();
+    const socket = connectAndOpen(h);
+    h.input.armCtrl();
+    h.input.armAlt();
+    void h.input.sendText("c");
+    expect(reqFrames(socket, "session:input")[0].a).toEqual([SESSION_ID, "\x1b\x03"]);
+    expect(h.input.ctrlArmed()).toBe(false);
+    expect(h.input.altArmed()).toBe(false);
+  });
+
+  it("armAlt(); sendKey consumes the latch with the Alt form of the key", () => {
+    const h = createHarness();
+    const socket = connectAndOpen(h);
+    h.input.armAlt();
+    void h.input.sendKey("backspace");
+    void h.input.sendKey("backspace");
+    const frames = reqFrames(socket, "session:input");
+    expect(frames[0].a).toEqual([SESSION_ID, "\x1b\x7f"]);
+    expect(frames[1].a).toEqual([SESSION_ID, "\x7f"]);
+  });
+
+  it("toggleLatch flips one latch and reports both", () => {
+    const h = createHarness();
+    expect(toggleLatch(h.input, "alt")).toEqual({ ctrl: false, alt: true });
+    expect(toggleLatch(h.input, "ctrl")).toEqual({ ctrl: true, alt: true });
+    expect(toggleLatch(h.input, "alt")).toEqual({ ctrl: true, alt: false });
+    expect(latchesOf(undefined)).toEqual({ ctrl: false, alt: false });
   });
 });
 

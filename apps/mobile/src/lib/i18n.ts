@@ -641,6 +641,10 @@ export const STRINGS = {
     en: "Ctrl needs one letter or control character.",
     ar: "يتطلب Ctrl حرفًا واحدًا صالحًا.",
   },
+  "session.altArmed": {
+    en: "Alt is armed for the next key.",
+    ar: "Alt مفعّل للمفتاح التالي.",
+  },
   "session.ctrlArmed": {
     en: "Ctrl is armed for the next character.",
     ar: "Ctrl مفعّل للحرف التالي.",
@@ -649,6 +653,7 @@ export const STRINGS = {
   "key.tab": { en: "Tab", ar: "جدولة" },
   "key.shiftTab": { en: "Shift Tab", ar: "جدولة عكسية" },
   "key.ctrl": { en: "Control", ar: "تحكم" },
+  "key.alt": { en: "Alt", ar: "بديل" },
   "key.ctrlC": { en: "Interrupt", ar: "مقاطعة" },
   "key.left": { en: "Left arrow", ar: "سهم لليسار" },
   "key.up": { en: "Up arrow", ar: "سهم للأعلى" },

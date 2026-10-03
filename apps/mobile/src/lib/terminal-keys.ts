@@ -5,6 +5,9 @@
 // terminal. See
 // the mobile milestone 7, task 5 plan (docs/superpowers/plans).
 
+/** The key bar's two latches: armed by a tap, applied to the next input. */
+export type Latch = "ctrl" | "alt";
+
 export type KeyName =
   | "esc"
   | "tab"
@@ -17,13 +20,14 @@ export type KeyName =
   | "backspace"
   | "enter";
 
-// Display order per the brief: esc, tab, shiftTab, ctrl, ctrlC, left, up,
-// down, right, backspace, enter.
-export const KEY_BAR: readonly (KeyName | "ctrl")[] = [
+// Display order per the brief: esc, tab, shiftTab, ctrl, alt, ctrlC, left,
+// up, down, right, backspace, enter.
+export const KEY_BAR: readonly (KeyName | Latch)[] = [
   "esc",
   "tab",
   "shiftTab",
   "ctrl",
+  "alt",
   "ctrlC",
   "left",
   "up",
@@ -63,6 +67,24 @@ export function keyBytes(key: KeyName, modes: TerminalModes): string {
       const letter = CURSOR_KEY_LETTER[key];
       return modes.applicationCursor ? `\x1bO${letter}` : `\x1b[${letter}`;
     }
+  }
+}
+
+/**
+ * The bytes for Alt+<key>, as xterm sends them with Alt as Meta: an arrow
+ * carries the modifier parameter (`ESC [ 1 ; 3 D`, whatever the cursor
+ * mode), every other key is its usual bytes behind an ESC — so Alt+⌫
+ * deletes a word and Alt+← moves back one in a shell.
+ */
+export function altKeyBytes(key: KeyName, modes: TerminalModes): string {
+  switch (key) {
+    case "up":
+    case "down":
+    case "right":
+    case "left":
+      return `\x1b[1;3${CURSOR_KEY_LETTER[key]}`;
+    default:
+      return `\x1b${keyBytes(key, modes)}`;
   }
 }
 

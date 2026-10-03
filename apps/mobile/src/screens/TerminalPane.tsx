@@ -35,11 +35,18 @@ import { clientPlatformFor } from "@/lib/client-platform";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
-import type { SendResult, SessionInput } from "@/lib/session-input";
+import {
+  type Latches,
+  latchesOf,
+  NO_LATCHES,
+  type SendResult,
+  type SessionInput,
+  toggleLatch,
+} from "@/lib/session-input";
 import { sendResultText, streamStatusKey, trimmedAmount } from "@/lib/session-screen";
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
-import type { KeyName } from "@/lib/terminal-keys";
+import type { KeyName, Latch } from "@/lib/terminal-keys";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
 import { createTerminalInput } from "@/lib/terminal-input";
@@ -97,7 +104,7 @@ function TerminalPaneBody({
     ignoredCount: 0,
   });
   const [connection, setConnection] = useState(client.state());
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState<Latches>(NO_LATCHES);
   const [keyNotice, setKeyNotice] = useState("");
   const [planVisible, setPlanVisible] = useState(false);
   const [view, setView] = useState<TerminalView>({ back: false, commands: false });
@@ -240,7 +247,7 @@ function TerminalPaneBody({
         inputRef.current = undefined;
         streamRef.current = undefined;
         clearTimeout(noticeTimer.current);
-        setArmed(false);
+        setArmed(NO_LATCHES);
         setKeyNotice("");
       };
     }, [client, paneKey, phase, sink]),
@@ -258,16 +265,17 @@ function TerminalPaneBody({
     noticeTimer.current = setTimeout(() => setKeyNotice(""), 4000);
   }
 
-  async function onKey(key: KeyName | "ctrl") {
+  async function onKey(key: KeyName | Latch) {
     const input = inputRef.current;
     if (input === undefined || disabled) return;
-    if (key === "ctrl") {
-      if (input.ctrlArmed()) input.disarmCtrl();
-      else input.armCtrl();
-      setArmed(input.ctrlArmed());
+    if (key === "ctrl" || key === "alt") {
+      setArmed(toggleLatch(input, key));
       return;
     }
-    const result = await input.sendKey(key);
+    // The Alt latch is spent the moment the key goes, not when it lands.
+    const pending = input.sendKey(key);
+    setArmed(latchesOf(input));
+    const result = await pending;
     showResult(input, result);
   }
 
@@ -278,7 +286,7 @@ function TerminalPaneBody({
     if (input === undefined || disabled) return;
     const result =
       key.kind === "key" ? await input.sendKey(key.key) : await input.sendText(key.text);
-    setArmed(input.ctrlArmed());
+    setArmed(latchesOf(input));
     if (result.kind !== "sent") showResult(input, result);
   }
 
@@ -439,7 +447,7 @@ function TerminalPaneBody({
           onSend={(text) =>
             inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
           }
-          onSent={() => setArmed(inputRef.current?.ctrlArmed() ?? false)}
+          onSent={() => setArmed(latchesOf(inputRef.current))}
         />
       </View>
       <FileBrowserSheet

@@ -33,7 +33,14 @@ import { createPlansStore } from "@/lib/plans-store";
 import { useRpcClient } from "@/lib/rpc-context";
 import { PlanSheet } from "@/plan/PlanSheet";
 import { planProgressOf } from "@/plan/plan-progress";
-import { createSessionInput, type SessionInput } from "@/lib/session-input";
+import {
+  createSessionInput,
+  type Latches,
+  latchesOf,
+  NO_LATCHES,
+  type SessionInput,
+  toggleLatch,
+} from "@/lib/session-input";
 import { answerPrompt, fetchPrompt, type PhonePrompt } from "@/lib/session-prompt";
 import {
   isEnded,
@@ -48,7 +55,7 @@ import {
   type SessionStreamView,
 } from "@/lib/session-stream";
 import { createSessionsStore, type SessionsStore, type SessionsView } from "@/lib/sessions-store";
-import type { KeyName } from "@/lib/terminal-keys";
+import type { KeyName, Latch } from "@/lib/terminal-keys";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
@@ -87,7 +94,7 @@ export function SessionDetail(props: {
     ignoredCount: 0,
   });
   const [connection, setConnection] = useState(client.state());
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState<Latches>(NO_LATCHES);
   const [keyNotice, setKeyNotice] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
@@ -263,7 +270,7 @@ export function SessionDetail(props: {
         // Ctrl, backgrounding, and returning left the cap showing armed
         // against a fresh `SessionInput` (ctrlArmedFlag reset to false),
         // so the next compose send would reach the pty unmodified.
-        setArmed(false);
+        setArmed(NO_LATCHES);
         setKeyNotice("");
       };
     }, [client, id, found, sink]),
@@ -287,16 +294,17 @@ export function SessionDetail(props: {
   }, [ended]);
   const disabled = ended || connection !== "open";
 
-  async function onKey(key: KeyName | "ctrl") {
+  async function onKey(key: KeyName | Latch) {
     const input = inputRef.current;
     if (input === undefined || disabled) return;
-    if (key === "ctrl") {
-      if (input.ctrlArmed()) input.disarmCtrl();
-      else input.armCtrl();
-      setArmed(input.ctrlArmed());
+    if (key === "ctrl" || key === "alt") {
+      setArmed(toggleLatch(input, key));
       return;
     }
-    const result = await input.sendKey(key);
+    // The Alt latch is spent the moment the key goes, not when it lands.
+    const pending = input.sendKey(key);
+    setArmed(latchesOf(input));
+    const result = await pending;
     if (inputRef.current !== input) return;
     setKeyNotice(sendResultText(result, language, clientPlatformFor(Platform.OS)));
     clearTimeout(noticeTimer.current);
@@ -435,7 +443,7 @@ export function SessionDetail(props: {
             onSend={(text) =>
               inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
             }
-            onSent={() => setArmed(inputRef.current?.ctrlArmed() ?? false)}
+            onSent={() => setArmed(latchesOf(inputRef.current))}
           />
         </View>
         <MicButton compact enabled={mic.enabled} active={mic.active} labelKey={mic.labelKey} />

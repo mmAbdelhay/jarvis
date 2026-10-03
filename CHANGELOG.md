@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- The phone's terminal key bar has an Alt key. Like Ctrl, it applies to the
+  next key or text sent, so Alt+⌫ deletes a word and Alt+arrows move by word.
+- Home shows how many sessions started each day over the last two weeks.
 - Browser and tablet History shows the list and the open conversation side by
   side. A transcript now opens for any session, not only those on History's
   first page (`history:list` also takes an `id`).
