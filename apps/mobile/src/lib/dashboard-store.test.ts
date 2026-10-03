@@ -159,7 +159,14 @@ describe("createDashboardStore: focus/blur", () => {
     ]);
     expect(store.get().projects).toEqual([{ name: "acme", path: "/repos/acme" }]);
     expect(store.get().sessions).toEqual([
-      { id: "s1", project: "acme", state: "running", summary: "fixing tests", startedAt: 1 },
+      {
+        id: "s1",
+        project: "acme",
+        agentId: "claude-main",
+        state: "running",
+        summary: "fixing tests",
+        startedAt: 1,
+      },
     ]);
     expect(store.get().loading).toBe(false);
   });
@@ -183,7 +190,14 @@ describe("createDashboardStore: focus/blur", () => {
 
     fake.push("sessions:update", [sessionPayload()]);
     expect(store.get().sessions).toEqual([
-      { id: "s1", project: "acme", state: "running", summary: "fixing tests", startedAt: 1 },
+      {
+        id: "s1",
+        project: "acme",
+        agentId: "claude-main",
+        state: "running",
+        summary: "fixing tests",
+        startedAt: 1,
+      },
     ]);
 
     fake.push("sessions:update", []);
@@ -295,7 +309,14 @@ describe("createDashboardStore: focus/blur", () => {
 
     fake.push("sessions:update", [sessionPayload({ id: "from-push", summary: "pushed" })]);
     expect(store.get().sessions).toEqual([
-      { id: "from-push", project: "acme", state: "running", summary: "pushed", startedAt: 1 },
+      {
+        id: "from-push",
+        project: "acme",
+        agentId: "claude-main",
+        state: "running",
+        summary: "pushed",
+        startedAt: 1,
+      },
     ]);
 
     // The older sessions:list answer arrives after — it must not clobber
@@ -309,7 +330,14 @@ describe("createDashboardStore: focus/blur", () => {
     await Promise.resolve();
 
     expect(store.get().sessions).toEqual([
-      { id: "from-push", project: "acme", state: "running", summary: "pushed", startedAt: 1 },
+      {
+        id: "from-push",
+        project: "acme",
+        agentId: "claude-main",
+        state: "running",
+        summary: "pushed",
+        startedAt: 1,
+      },
     ]);
   });
 });

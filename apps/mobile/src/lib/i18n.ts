@@ -147,6 +147,9 @@ export const STRINGS = {
   "home.sessionsDays": { en: "last {days} days", ar: "آخر {days} يومًا" },
   "home.sessionsTotal": { en: "{count} started", ar: "بدأت {count}" },
   "home.active": { en: "ACTIVE", ar: "النشطة" },
+  "home.running": { en: "running {time}", ar: "يعمل منذ {time}" },
+  "home.waiting": { en: "waiting", ar: "بانتظارك" },
+  "home.resetsOn": { en: "resets {date}", ar: "يُعاد في {date}" },
   "nav.workspace": { en: "Workspace", ar: "مساحة العمل" },
   // The wide shell's top bar (desktop renderer's "N running" pill).
   "shell.running": { en: "{count} running", ar: "{count} قيد التشغيل" },

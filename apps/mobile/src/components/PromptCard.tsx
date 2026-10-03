@@ -21,7 +21,11 @@ export function PromptCard(props: {
   /** Home only: the session it belongs to. */
   context?: string;
   open?: { label: string; onPress(): void };
+  /** "row": one row of equal buttons without numbers (Home, two options or
+   *  fewer); "stacked" (default): one numbered button per line. */
+  layout?: "row" | "stacked";
 }) {
+  const row = props.layout === "row";
   return (
     <View style={styles.card} accessibilityRole="summary">
       <View style={styles.top}>
@@ -36,7 +40,7 @@ export function PromptCard(props: {
         )}
       </View>
       <Text style={styles.question}>{props.prompt.question}</Text>
-      <View style={styles.options}>
+      <View style={row ? styles.optionsRow : styles.options}>
         {props.prompt.options.map((label, index) => (
           <TouchableOpacity
             // The index is the option's identity: the laptop answers by it.
@@ -48,13 +52,20 @@ export function PromptCard(props: {
             onPress={() => props.onAnswer(index, label)}
             style={[
               styles.option,
+              row && styles.optionRow,
               index === 0 ? styles.optionFirst : undefined,
               props.busy && styles.disabled,
             ]}
           >
-            <Text style={[styles.number, index === 0 && styles.numberFirst]}>{index + 1}</Text>
+            {!row && (
+              <Text style={[styles.number, index === 0 && styles.numberFirst]}>{index + 1}</Text>
+            )}
             <Text
-              style={[styles.optionText, index === 0 && styles.optionTextFirst]}
+              style={[
+                styles.optionText,
+                row && styles.optionTextRow,
+                index === 0 && styles.optionTextFirst,
+              ]}
               numberOfLines={2}
             >
               {label}
@@ -65,9 +76,9 @@ export function PromptCard(props: {
           <TouchableOpacity
             accessibilityRole="button"
             onPress={props.open.onPress}
-            style={[styles.option, styles.openButton]}
+            style={[styles.option, row && styles.optionRow, styles.openButton]}
           >
-            <Text style={styles.optionText}>{props.open.label}</Text>
+            <Text style={[styles.optionText, row && styles.optionTextRow]}>{props.open.label}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -107,6 +118,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   options: { gap: 6 },
+  optionsRow: { flexDirection: "row", gap: 8 },
   option: {
     minHeight: 46,
     flexDirection: "row",
@@ -118,6 +130,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.warningBorder,
   },
   optionFirst: { backgroundColor: theme.colors.warning, borderColor: theme.colors.warning },
+  optionRow: { flex: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   openButton: { justifyContent: "center" },
   number: { color: theme.colors.warningMuted, fontFamily: theme.font.mono, fontSize: 12 },
   numberFirst: { color: theme.colors.onWarning },
@@ -127,6 +140,7 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.semibold,
     fontSize: 14,
   },
+  optionTextRow: { textAlign: "center" },
   optionTextFirst: { color: theme.colors.onWarning, fontFamily: theme.font.bold },
   disabled: { opacity: 0.5 },
   note: { color: theme.colors.warningText, fontFamily: theme.font.body, fontSize: 12 },

@@ -43,3 +43,26 @@ export function connectionPillModel(view: ConnectionView): ConnectionPillModel {
       return { key: "conn.offline", tone: "danger" };
   }
 }
+
+export type MachinePillModel = {
+  /** The paired laptop's own name, shown verbatim; otherwise a `conn.*` key. */
+  label: { kind: "name"; name: string } | { kind: "key"; key: MessageKey };
+  tone: ConnectionPillTone;
+};
+
+/**
+ * The phone Home pill: when connected it names the laptop (falling back to
+ * "Connected" when there is no name); any other state keeps its own text
+ * with the warning or danger palette, so a dropped link never reads as a
+ * healthy machine name.
+ */
+export function machinePillModel(
+  view: ConnectionView,
+  laptopName: string | undefined,
+): MachinePillModel {
+  const pill = connectionPillModel(view);
+  if (pill.key === "conn.connected" && laptopName !== undefined && laptopName.trim() !== "") {
+    return { label: { kind: "name", name: laptopName.trim() }, tone: pill.tone };
+  }
+  return { label: { kind: "key", key: pill.key }, tone: pill.tone };
+}

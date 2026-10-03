@@ -3,6 +3,8 @@
 // (the same window's remaining percent over the last day). Parsed field by
 // field: a reading that does not have the shape is left out, never guessed.
 
+import { type Language, t } from "./i18n";
+
 export type CapacityCard = {
   id: string;
   /** Which window the figure is: "5h" for Claude and Codex, "month" for
@@ -116,4 +118,30 @@ export function parseSessionsPerDay(value: unknown): number[] {
     counts.push(count);
   }
   return counts;
+}
+
+const TWO_DAYS_MS = 48 * 60 * 60_000;
+
+/** The card's caption: "resets in 1h 40m", or a short date ("resets Nov 1")
+ *  for the month window and for any reset two days or more away; "reset due"
+ *  once the time has passed. Latin digits in both languages. */
+export function resetLabel(card: CapacityCard, now: number, language: Language): string {
+  const until = resetsIn(card.resetsAt, now);
+  if (until === undefined) return t(language, "home.resetPassed");
+  if (card.window !== "month" && card.resetsAt - now < TWO_DAYS_MS) {
+    return t(language, "home.resetsIn", { time: until });
+  }
+  const date = new Date(card.resetsAt).toLocaleDateString(
+    language === "ar" ? "ar-u-nu-latn" : "en-US",
+    { month: "short", day: "numeric" },
+  );
+  return t(language, "home.resetsOn", { date });
+}
+
+/** The sparkline and value colour: low capacity warns whatever the window,
+ *  otherwise the 5h windows are accent and the month window is success. */
+export function capacityTone(card: CapacityCard): "danger" | "warning" | "accent" | "success" {
+  if (card.left <= 10) return "danger";
+  if (card.left <= 30) return "warning";
+  return card.window === "month" ? "success" : "accent";
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answerPrompt, fetchPrompt, parsePhonePrompt } from "./session-prompt";
+import { answerPrompt, fetchPrompt, parsePhonePrompt, promptLayout } from "./session-prompt";
 
 describe("parsePhonePrompt", () => {
   it("keeps the question and the option labels, and nothing else", () => {
@@ -61,5 +61,13 @@ describe("talking to the laptop", () => {
     };
     // biome-ignore lint/suspicious/noExplicitAny: a minimal RpcError stand-in.
     expect(await answerPrompt(offline as any, "s1", 1, "No")).toBe("offline");
+  });
+});
+
+describe("promptLayout", () => {
+  it("is a row for two options or fewer and stacked for three or more", () => {
+    expect(promptLayout(1)).toBe("row");
+    expect(promptLayout(2)).toBe("row");
+    expect(promptLayout(3)).toBe("stacked");
   });
 });

@@ -10,6 +10,7 @@ import { PromptCard } from "@/components/PromptCard";
 import type { SessionSummary } from "@/lib/dashboard-store";
 import { formatSessionElapsed } from "@/lib/format";
 import type { HomeView } from "@/lib/home-store";
+import { promptLayout } from "@/lib/session-prompt";
 import { t, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 
@@ -40,6 +41,8 @@ export function HomeTop(props: {
   sessions: SessionSummary[];
   liveCount: number;
   now: number;
+  /** Wide keeps the sessions-per-day chart; the phone's Home does not draw it. */
+  wide: boolean;
   onAnswer(
     sessionId: string,
     index: number,
@@ -76,6 +79,7 @@ export function HomeTop(props: {
       {props.home.waiting.slice(0, MAX_WAITING_CARDS).map((entry) => {
         const session = props.sessions.find((candidate) => candidate.id === entry.sessionId);
         const context = [
+          session?.agentId,
           session?.project ?? undefined,
           session === undefined ? undefined : formatSessionElapsed(props.now - session.startedAt),
         ]
@@ -87,6 +91,7 @@ export function HomeTop(props: {
             prompt={entry.prompt}
             busy={busy === entry.sessionId}
             note={notes[entry.sessionId]}
+            layout={promptLayout(entry.prompt.options.length)}
             heading={t(props.language, "home.needsYou")}
             context={context === "" ? undefined : context}
             onAnswer={(index, label) => void answer(entry.sessionId, index, label)}
@@ -103,20 +108,16 @@ export function HomeTop(props: {
         trends={props.home.trends}
         now={props.now}
       />
-      <SessionsPerDay language={props.language} counts={props.home.sessionsPerDay} />
+      {props.wide && (
+        <SessionsPerDay language={props.language} counts={props.home.sessionsPerDay} />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   top: { gap: 16 },
-  title: {
-    color: theme.colors.text,
-    fontFamily: theme.font.bold,
-    fontSize: 26,
-    lineHeight: 32,
-    letterSpacing: -0.5,
-  },
+  title: { ...theme.type.display, color: theme.colors.text },
   subtitle: {
     marginTop: 4,
     color: theme.colors.textMuted,

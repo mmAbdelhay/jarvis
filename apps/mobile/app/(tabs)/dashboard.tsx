@@ -5,13 +5,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActiveList } from "@/components/ActiveList";
+import { Icon } from "@/components/Icon";
+import { IconButton } from "@/components/IconButton";
+import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import type { ConnectionView } from "@/lib/connection-store";
-import { connectionPillModel } from "@/lib/connection-pill";
+import { machinePillModel } from "@/lib/connection-pill";
 import { type DashboardPanel, dashboardColumns } from "@/lib/dashboard-grid";
 import type { DashboardView } from "@/lib/dashboard-store";
 import { createDashboardStore } from "@/lib/dashboard-store";
@@ -49,6 +52,8 @@ export default function DashboardScreen() {
   const [view, setView] = useState<DashboardView>(store.get());
   const homeStore = useMemo(() => createHomeStore({ client }), [client]);
   const [home, setHome] = useState<HomeView>(homeStore.get());
+  const countsStore = useMemo(() => createChangeCountsStore({ client }), [client]);
+  const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   // The paired computer's display name — read from the same
   // `loadPairing(expoSecureStore)` source `settings.tsx` uses (item 3):
@@ -74,6 +79,9 @@ export default function DashboardScreen() {
       setHome(homeStore.get());
       const unsubscribeHome = homeStore.subscribe(setHome);
       homeStore.focus();
+      setCounts(countsStore.get());
+      const unsubscribeCounts = countsStore.subscribe(setCounts);
+      countsStore.focus();
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
@@ -85,10 +93,12 @@ export default function DashboardScreen() {
         store.blur();
         unsubscribeHome();
         homeStore.blur();
+        unsubscribeCounts();
+        countsStore.blur();
         unsubscribeConnection();
         cancelled = true;
       };
-    }, [store, homeStore, connectionStore]),
+    }, [store, homeStore, countsStore, connectionStore]),
   );
   // The sessions a question could be waiting in: Jarvis's own live ones.
   // A row found by the process scan has no terminal to answer through.
@@ -125,8 +135,9 @@ export default function DashboardScreen() {
     },
     [store, router, language],
   );
-  const pill = connectionPillModel(connection);
-  const pillColor = theme.colors[pill.tone];
+  const pill = machinePillModel(connection, laptopName);
+  const pillPalette = PILL_PALETTE[pill.tone];
+  const pillText = pill.label.kind === "name" ? pill.label.name : t(language, pill.label.key);
   const now = Date.now();
   const projectActions: ProjectActions = {
     openTerminal: (projectName) => void openProjectTerminal(projectName),
@@ -169,7 +180,7 @@ export default function DashboardScreen() {
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        wide ? styles.contentWide : { paddingTop: insets.top + 8 },
+        wide ? styles.contentWide : { paddingTop: insets.top },
       ]}
       refreshControl={
         <RefreshControl
@@ -181,36 +192,30 @@ export default function DashboardScreen() {
     >
       {!wide && (
         <View style={styles.header}>
-          <View style={styles.brandMark} accessibilityElementsHidden importantForAccessibility="no">
-            <View style={styles.brandDot} />
+          <View style={styles.brandGroup}>
+            <View
+              style={styles.brandMark}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            >
+              <Icon name="brand" size={16} color={theme.colors.primaryText} />
+            </View>
+            <Text style={styles.brand}>Jarvis</Text>
           </View>
-          <Text style={styles.brand}>Jarvis</Text>
-          <View style={styles.connection}>
-            <View style={[styles.liveDot, { backgroundColor: pillColor }]} />
-            <Text style={styles.connectionText}>{t(language, pill.key)}</Text>
-            {laptopName !== undefined && laptopName.length > 0 && (
-              <Text style={styles.connectionName} numberOfLines={1}>
-                {laptopName}
+          <View style={styles.headerEnd}>
+            <View style={[styles.connection, { backgroundColor: pillPalette.ground }]}>
+              <View style={[styles.liveDot, { backgroundColor: theme.colors[pill.tone] }]} />
+              <Text style={[styles.connectionText, { color: pillPalette.text }]} numberOfLines={1}>
+                {pillText}
               </Text>
-            )}
+            </View>
+            <IconButton
+              icon="settings"
+              iconSize={18}
+              label={t(language, "nav.settings")}
+              onPress={() => router.push("/settings")}
+            />
           </View>
-          <View style={styles.spacer} />
-          <TouchableOpacity
-            style={styles.gear}
-            onPress={() => router.push("/history")}
-            accessibilityRole="button"
-            accessibilityLabel={t(language, "dashboard.history")}
-          >
-            <Text style={styles.gearText}>◷</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gear}
-            onPress={() => router.push("/settings")}
-            accessibilityRole="button"
-            accessibilityLabel={t(language, "nav.settings")}
-          >
-            <Text style={styles.gearText}>⚙</Text>
-          </TouchableOpacity>
         </View>
       )}
       <View style={wide ? styles.homeTopWide : undefined}>
@@ -220,6 +225,7 @@ export default function DashboardScreen() {
           sessions={view.sessions}
           liveCount={liveIds.length}
           now={now}
+          wide={wide}
           onAnswer={async (sessionId, index, label) => {
             const outcome = await answerPrompt(client, sessionId, index, label);
             if (outcome === "answered") homeStore.dismiss(sessionId);
@@ -235,11 +241,14 @@ export default function DashboardScreen() {
           renderPanel={renderPanel}
         />
       ) : (
-        <>
-          {renderPanel("system")}
-          {renderPanel("sessions")}
-          {renderPanel("projects")}
-        </>
+        <ActiveList
+          language={language}
+          sessions={view.sessions}
+          counts={counts}
+          now={now}
+          onOpen={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
+          onAll={() => router.push("/sessions")}
+        />
       )}
       {view.error?.kind === "remote" && (
         <Text style={[styles.error, wide && styles.errorWide]}>{view.error.text}</Text>
@@ -248,11 +257,29 @@ export default function DashboardScreen() {
   );
 }
 
+// The pill's ground and text per tone: success, warning and danger palettes.
+const PILL_PALETTE = {
+  success: { ground: theme.colors.successSurface, text: theme.colors.successText },
+  warning: { ground: theme.colors.warningSurface, text: theme.colors.warningText },
+  danger: { ground: theme.colors.dangerSurface, text: theme.colors.dangerText },
+} as const;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.ground },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24, gap: 18 },
+  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, gap: 16 },
   contentWide: { paddingTop: 16 },
-  header: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 18,
+    paddingBottom: 10,
+    // The content gap (16) already separates the header from the body; the
+    // mockup's header-to-body distance is 10 + 6.
+    marginBottom: -10,
+  },
+  brandGroup: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerEnd: { flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   brandMark: {
     width: 30,
     height: 30,
@@ -261,55 +288,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  brandDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    borderWidth: 2.5,
-    borderColor: theme.colors.primaryText,
-  },
-  brand: {
-    color: theme.colors.text,
-    fontFamily: theme.font.bold,
-    fontSize: 19,
-    letterSpacing: -0.3,
-  },
+  brand: { ...theme.type.brand, color: theme.colors.text },
   connection: {
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 10,
-    height: 30,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 999,
-    backgroundColor: theme.colors.surface,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
   },
-  liveDot: { width: 7, height: 7, borderRadius: 999, backgroundColor: theme.colors.success },
-  connectionText: {
-    color: theme.colors.textSecondary,
-    fontFamily: theme.font.semibold,
-    fontSize: 12,
-  },
-  connectionName: {
-    flexShrink: 1,
-    color: theme.colors.textDim,
-    fontFamily: theme.font.mono,
-    fontSize: 11,
-  },
-  spacer: { flex: 1 },
-  gear: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 12,
-    backgroundColor: theme.colors.surface,
-  },
-  gearText: { color: theme.colors.textSecondary, fontSize: 19 },
+  liveDot: { width: 7, height: 7, borderRadius: 999 },
+  connectionText: { flexShrink: 1, fontFamily: theme.font.semibold, fontSize: 12 },
   error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
   // Wide: under the grid, inside the same centred 1180 measure.
   errorWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
