@@ -1552,6 +1552,67 @@ describe("the terminal tab's plan panel", () => {
     expect(panel()?.hidden).toBe(true);
   });
 
+  describe("the plan toggle button", () => {
+    const toggle = () => document.querySelector<HTMLButtonElement>(".plan-toggle");
+
+    it("sits in the tab's panes area, labelled, and not pressed while the panel is closed", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      const button = toggle();
+      expect(button?.parentElement?.className).toBe("terminal-split");
+      expect(button?.getAttribute("aria-label")).toBe("Toggle plan panel");
+      expect(button?.title).toBe("Toggle plan panel");
+      expect(button?.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("opens and closes the tab's panel on click, showing pressed while open", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      toggle()?.click();
+      await settle();
+      expect(panel()?.hidden).toBe(false);
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("true");
+
+      toggle()?.click();
+      await settle();
+      expect(panel()?.hidden).toBe(true);
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("follows a toggle from anywhere else, such as the tab menu", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      tabPlansListener?.("tab-1");
+      await settle();
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("marks the button once the tab's session has a plan, and clears it when it has none", async () => {
+      const { renderWorkspaceTerminals } = await tabWithPanel();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      expect(toggle()?.classList.contains("plan-toggle--has-plan")).toBe(false);
+
+      sessionPlanEntry = { path: "/plans/build.md" };
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      await advance(320);
+      expect(toggle()?.classList.contains("plan-toggle--has-plan")).toBe(true);
+
+      sessionPlanEntry = undefined;
+      dataListener?.("tab-1", CWD("/other"));
+      await settle();
+      await advance(320);
+      expect(toggle()?.classList.contains("plan-toggle--has-plan")).toBe(false);
+    });
+  });
+
   it("ignores the Plans push for a tab id with no pane", async () => {
     await tabWithPanel();
 

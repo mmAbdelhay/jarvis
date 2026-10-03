@@ -63,7 +63,17 @@ type Pane = {
   focusedPaneKey: string | undefined;
   focusedCwd: string | undefined;
   dismissedPlanPath: string | undefined;
+  /** The tab's own visible way to the plan panel: pressed while it is
+   *  open, marked while `sessionPlanPath` names a plan. */
+  planToggle: HTMLButtonElement;
 };
+
+/** The one place `sessionPlanPath` is written, so the toggle button's
+ *  "this session has a plan" mark can never drift from it. */
+function setSessionPlanPath(pane: Pane, path: string | undefined): void {
+  pane.sessionPlanPath = path;
+  pane.planToggle.classList.toggle("plan-toggle--has-plan", path !== undefined);
+}
 
 /** Which shell each pane is drawing. A WeakMap rather than a lookup table
  *  the tree would have to keep in step: a pane that has been closed is
@@ -172,7 +182,7 @@ function scheduleSessionPlanRefresh(
       .then((list) => {
         if (pane.sessionPlanRequestId !== requestId) return; // superseded — discard
         const resolved = list.session?.path;
-        pane.sessionPlanPath = resolved;
+        setSessionPlanPath(pane, resolved);
         // A *different, defined* session plan than the one the user
         // dismissed re-arms auto-open for it (controller ruling); the
         // dismissal itself only ever suppresses the exact path it was
@@ -253,7 +263,7 @@ function setFocusedPane(tabId: string, paneKey: string, cwd: string | undefined)
   pane.focusedPaneKey = paneKey;
   pane.focusedCwd = cwd;
   if (cwd === undefined) {
-    pane.sessionPlanPath = undefined;
+    setSessionPlanPath(pane, undefined);
     if (pane.sessionPlanTimer !== undefined) {
       clearTimeout(pane.sessionPlanTimer);
       pane.sessionPlanTimer = undefined;
@@ -738,6 +748,19 @@ function ensurePane(
   // from here on.
   planHandle.hidden = true;
 
+  // The panel's visible switch (the tab menu and the palette are the
+  // other two): floated in the panes' own top corner, so it costs the
+  // terminal no width and stays left of the panel once that is open.
+  const planToggle = document.createElement("button");
+  planToggle.type = "button";
+  planToggle.className = "plan-toggle";
+  planToggle.textContent = "☰";
+  planToggle.title = planPanelT("planPanelToggle");
+  planToggle.setAttribute("aria-label", planPanelT("planPanelToggle"));
+  planToggle.setAttribute("aria-pressed", "false");
+  planToggle.addEventListener("click", () => planPanel?.toggle());
+  built.element.append(planToggle);
+
   const builtPanel = createPlanPanel({
     api: window.jarvis,
     t: planPanelT,
@@ -747,6 +770,7 @@ function ensurePane(
     // what keeps an auto-open from stealing the terminal's keys.
     onToggle: (open) => {
       planHandle.hidden = !open;
+      planToggle.setAttribute("aria-pressed", String(open));
       for (const leaf of built.panes()) leaf.refit();
       // Controller ruling (fix round 1): every close reaching this hook is
       // the user's own — auto-open only ever calls open(), never
@@ -790,6 +814,7 @@ function ensurePane(
     focusedPaneKey: undefined,
     focusedCwd: undefined,
     dismissedPlanPath: undefined,
+    planToggle,
   };
   panes.set(tabId, pane);
   return pane;
