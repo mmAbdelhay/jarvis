@@ -69,7 +69,9 @@ const styles = StyleSheet.create({
   },
   stacked: { flexDirection: "column", alignItems: "stretch" },
   // In a column, the row's flex: 1 would stretch the name's height instead.
-  nameStacked: { flex: 0 },
+  // Spelled out rather than `flex: 0`: react-native-web turns that into
+  // `flex: 0 1 0%`, a zero basis that left the name 0px tall on phone Home.
+  nameStacked: { flexGrow: 0, flexShrink: 0, flexBasis: "auto" },
   buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   name: { flex: 1, minWidth: 0, ...theme.type.rowTitle, color: theme.colors.text },
   button: {

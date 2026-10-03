@@ -211,7 +211,7 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     // scrollLines()/wheel calls by the controller itself — a mostly
     // sideways one excepted, which is the native "pan-x" pan (its axis is
     // locked in the controller, so it never scrolls as well). `{passive:true}`
-    // throughout: CSS `touch-action` (STYLE, and applyFixedSize's
+    // throughout: CSS `touch-action` (buildStyle, and applyFixedSize's
     // "pan-x" override) is what stops the WebView's own default handling,
     // not preventDefault() here.
     "var touchY=0;" +
@@ -268,9 +268,20 @@ const CSP =
 // tracking on, an SGR wheel sequence). applyFixedSize() (bug 8) is the only
 // thing that ever relaxes this, to "pan-x" for whatever a size that cannot
 // shrink to the WebView's width still overflows by.
-const STYLE =
-  "html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}" +
-  "#t{width:100%;height:100%;touch-action:none;}";
+//
+// The page is painted in the theme's own background: a pty with fewer rows
+// than the WebView is tall leaves page showing under xterm's last row, and
+// plain black there read as a hole in the terminal.
+function buildStyle(theme) {
+  const ground = theme.background;
+  if (typeof ground !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(ground)) {
+    throw new Error(`terminal theme background must be a hex colour, got ${String(ground)}`);
+  }
+  return (
+    `html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:${ground};}` +
+    "#t{width:100%;height:100%;touch-action:none;}"
+  );
+}
 
 /** The page's one script, exactly as both the native inline page and the
  *  browser's external terminal.<hash>.js carry it. */
@@ -312,7 +323,7 @@ export function buildTerminalHtml(inputs) {
     '<meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
-    `<style>${inputs.xtermCss}${STYLE}</style>` +
+    `<style>${inputs.xtermCss}${buildStyle(inputs.theme)}</style>` +
     "</head>" +
     "<body>" +
     '<div id="t"></div>' +
@@ -348,7 +359,7 @@ function contentName(text, extension) {
 
 export function buildTerminalWebPage(inputs) {
   const script = buildTerminalScript(inputs);
-  const style = inputs.xtermCss + STYLE;
+  const style = inputs.xtermCss + buildStyle(inputs.theme);
   const scriptName = contentName(script, "js");
   const styleName = contentName(style, "css");
   const html =

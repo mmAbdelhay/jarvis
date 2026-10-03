@@ -5,6 +5,7 @@
 // (N5 hand-off in rpc-client.ts), and drives an unpaired episode's
 // clear-and-navigate exactly once (rule 3).
 
+import { PING_INTERVAL_MS } from "@jarvis/wire";
 import type { Clock } from "./clock";
 import type { ClientState, RpcClient } from "./rpc-client";
 
@@ -36,7 +37,12 @@ function viewsEqual(a: ConnectionView, b: ConnectionView): boolean {
   );
 }
 
-const STALE_AFTER_MS = 10_000;
+// Longer than one server ping interval plus a grace for its trip: the
+// laptop's 15s ping is the only frame a healthy but quiet connection ever
+// sees (an idle terminal sends nothing), so any threshold under it called
+// every quiet stretch "stale" — and flashed the banner on opening a pane
+// 10s+ after the last ping, until that pane's first frame arrived.
+const STALE_AFTER_MS = PING_INTERVAL_MS + 5_000;
 const RECHECK_INTERVAL_MS = 1_000;
 
 export function createConnectionStore(deps: {
