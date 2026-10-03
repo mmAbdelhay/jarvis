@@ -2,6 +2,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   I18nManager,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -9,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,13 +31,12 @@ import type { SessionDateGroup } from "@/lib/session-date-groups";
 import { groupByDay } from "@/lib/session-date-groups";
 import {
   openSession,
-  SESSIONS_LIST_WIDTH,
   sessionTarget,
   sessionPresence,
   sessionsSplit,
   splitLayout,
 } from "@/lib/session-nav";
-import { sessionRouteId } from "@/lib/session-screen";
+import { isSearchHotkey, sessionRouteId } from "@/lib/session-screen";
 import { filterRows, projectsOf, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
 import { isActiveRow, type MergedRow, mergeSessions, selectedRow } from "@/lib/sessions-merge";
 import { resumable, rowCounts, rowSubtitle, rowTimeLabel, rowVariant } from "@/lib/sessions-row";
@@ -45,6 +46,7 @@ import { createSessionsStore } from "@/lib/sessions-store";
 import { openTerminal } from "@/lib/terminal-open";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { contentWidth, sessionsListWidth } from "@/lib/wide-breakpoints";
 import { SessionDetail } from "@/screens/SessionDetail";
 import { TranscriptBody } from "@/screens/TranscriptView";
 
@@ -112,8 +114,11 @@ export default function SessionsScreen() {
   const [newBusy, setNewBusy] = useState(false);
   const [newError, setNewError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
-  const { kind } = useLayoutClass();
+  const { kind, compact } = useLayoutClass();
   const wide = kind === "wide";
+  const { width: windowWidth } = useWindowDimensions();
+  const listWidth = sessionsListWidth(contentWidth(windowWidth, compact ? "rail" : "full"));
+  const searchRef = useRef<TextInput>(null);
   const selectedId = sessionRouteId(useLocalSearchParams().id);
   // Set once a `sessions:list` has answered since mount: until then an
   // empty list says nothing about whether the selected session exists.
@@ -175,6 +180,36 @@ export default function SessionsScreen() {
       };
     }, [store, historyStore, countsStore, homeStore]),
   );
+
+  // Wide has no Project chip, so a project filter set on the phone layout
+  // would be invisible there: entering wide shows every project.
+  useEffect(() => {
+    if (!wide) return;
+    setProject(undefined);
+    setProjectsOpen(false);
+  }, [wide]);
+
+  // Web, wide: "/" focuses the search field unless typing somewhere already.
+  useEffect(() => {
+    if (!wide || Platform.OS !== "web" || typeof document === "undefined") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : undefined;
+      if (
+        !isSearchHotkey({
+          key: event.key,
+          targetTag: target?.tagName,
+          editable: target?.isContentEditable === true,
+          modified: event.metaKey || event.ctrlKey || event.altKey,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [wide]);
 
   useEffect(() => {
     const handle = setTimeout(() => historyStore.search(query), SEARCH_DELAY_MS);
@@ -249,7 +284,7 @@ export default function SessionsScreen() {
   const renderRow = (row: MergedRow) => {
     const variant = rowVariant(row);
     const question =
-      variant === "waiting"
+      variant === "waiting" && !wide
         ? home.waiting.find((entry) => entry.sessionId === row.id)?.prompt.question
         : undefined;
     const resumeError = resumeErrors[row.id];
@@ -266,7 +301,8 @@ export default function SessionsScreen() {
           // into a terminal nothing is attached to.
           {...(row.origin === "external" ? {} : { onPress: () => selectSession(row) })}
           selected={wide && row.id === selectedId}
-          {...(resumable(row)
+          {...(wide ? { density: "compact" as const } : {})}
+          {...(resumable(row) && !wide
             ? {
                 trailing: (
                   <ResumeButton
@@ -280,7 +316,7 @@ export default function SessionsScreen() {
               }
             : {})}
         />
-        {resumeError !== undefined && (
+        {!wide && resumeError !== undefined && (
           <Text selectable style={styles.error}>
             {resumeError}
           </Text>
@@ -292,7 +328,10 @@ export default function SessionsScreen() {
   const list = (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}
+      contentContainerStyle={[
+        styles.content,
+        wide ? styles.contentWide : { paddingTop: insets.top + 18 },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -303,24 +342,38 @@ export default function SessionsScreen() {
     >
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>{t(language, "sessions.title")}</Text>
-          <Pressable accessibilityRole="button" onPress={openNew} style={styles.newButton}>
-            <Icon name="plus" size={16} strokeWidth={2.6} color={theme.colors.primaryText} />
-            <Text style={styles.newText}>{t(language, "sessions.new")}</Text>
+          <Text style={[styles.title, wide && styles.titleWide]}>
+            {t(language, "sessions.title")}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={openNew}
+            style={[styles.newButton, wide && styles.newButtonWide]}
+          >
+            {!wide && (
+              <Icon name="plus" size={16} strokeWidth={2.6} color={theme.colors.primaryText} />
+            )}
+            <Text style={[styles.newText, wide && styles.newTextWide]}>
+              {t(language, wide ? "sessions.newTitle" : "sessions.new")}
+            </Text>
           </Pressable>
         </View>
-        <View style={styles.search}>
-          <Icon name="search" size={18} color={theme.colors.textMuted} />
+        <View style={[styles.search, wide && styles.searchWide]}>
+          <Icon name="search" size={wide ? 16 : 18} color={theme.colors.textMuted} />
           <TextInput
+            ref={searchRef}
             value={query}
             onChangeText={setQuery}
-            placeholder={t(language, "sessions.searchPlaceholder")}
+            placeholder={t(
+              language,
+              wide && Platform.OS === "web" ? "sessions.searchHint" : "sessions.searchPlaceholder",
+            )}
             placeholderTextColor={theme.colors.textDim}
             accessibilityLabel={t(language, "sessions.search")}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
-            style={styles.searchInput}
+            style={[styles.searchInput, wide && styles.searchInputWide]}
           />
           {query !== "" && (
             <TouchableOpacity
@@ -334,9 +387,9 @@ export default function SessionsScreen() {
           )}
         </View>
         <ScrollView
-          horizontal
+          horizontal={!wide}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chips}
+          contentContainerStyle={wide ? styles.chipsWide : styles.chips}
           accessibilityRole="tablist"
         >
           {STATUS_CHIPS.map((chip) => {
@@ -348,13 +401,19 @@ export default function SessionsScreen() {
                 onPress={() => setStatus(chip.status)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: on }}
-                style={[styles.chip, amber && styles.chipWaiting, on && styles.chipOn]}
+                style={[
+                  styles.chip,
+                  wide && styles.chipWide,
+                  amber && styles.chipWaiting,
+                  on && styles.chipOn,
+                ]}
               >
                 <Text
                   style={[
                     styles.chipText,
                     amber && styles.chipTextWaiting,
                     on && styles.chipTextOn,
+                    wide && styles.chipTextWide,
                   ]}
                 >
                   {t(language, chip.label)} {chipCounts[chip.status]}
@@ -362,7 +421,7 @@ export default function SessionsScreen() {
               </TouchableOpacity>
             );
           })}
-          {(projects.length > 0 || project !== undefined) && (
+          {!wide && (projects.length > 0 || project !== undefined) && (
             <TouchableOpacity
               onPress={() => setProjectsOpen((open) => !open)}
               accessibilityRole="button"
@@ -382,7 +441,7 @@ export default function SessionsScreen() {
             </TouchableOpacity>
           )}
         </ScrollView>
-        {projectsOpen && (
+        {!wide && projectsOpen && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -454,7 +513,9 @@ export default function SessionsScreen() {
         // Always wrapped, so a rotation never remounts the list either. The
         // pane, not the ScrollView, takes the width: on web the refresh
         // control repeats the ScrollView's style on an inner element.
-        <View style={[wide ? styles.listPane : styles.fill, paneDirection]}>{list}</View>
+        <View style={[wide ? { width: listWidth, flexShrink: 0 } : styles.fill, paneDirection]}>
+          {list}
+        </View>
       )}
       {wide && split.showList && <View style={styles.divider} />}
       {split.detailKey !== undefined && (
@@ -502,7 +563,7 @@ export default function SessionsScreen() {
 const styles = StyleSheet.create({
   split: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
   fill: { flex: 1 },
-  listPane: { width: SESSIONS_LIST_WIDTH, flexShrink: 0 },
+
   divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
   detailPane: { flex: 1, minWidth: 0 },
   emptyPane: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
@@ -517,6 +578,15 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     gap: 8,
   },
+  contentWide: { paddingHorizontal: 16, paddingVertical: 20 },
+  titleWide: { fontFamily: theme.font.extrabold, fontSize: 22, lineHeight: 28 },
+  newButtonWide: { minHeight: 38, paddingHorizontal: 12, borderRadius: theme.radius.small },
+  newTextWide: { fontSize: 13 },
+  searchWide: { minHeight: 40, paddingHorizontal: 12, borderRadius: theme.radius.small },
+  searchInputWide: { minHeight: 38, fontSize: 14 },
+  chipsWide: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chipWide: { minHeight: 30, paddingHorizontal: 10 },
+  chipTextWide: { fontSize: 12 },
   header: { gap: 12, paddingBottom: 4 },
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { ...theme.type.display, color: theme.colors.text },

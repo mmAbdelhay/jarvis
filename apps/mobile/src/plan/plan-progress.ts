@@ -47,3 +47,42 @@ export function currentStep(doc: unknown): string | undefined {
   }
   return undefined;
 }
+
+export type PlanStep = { text: string; state: "done" | "current" | "later" };
+const STEPS_SHOWN = 8;
+
+/**
+ * The plan's task items for the wide Session's summary card: each one done,
+ * the first open one current, the rest later. Read with the same task-item
+ * rule as `currentStep`. At most 8 are returned, windowed so the current one
+ * stays inside (the last 8 when everything is done).
+ */
+export function planSteps(doc: unknown): PlanStep[] {
+  if (typeof doc !== "object" || doc === null) return [];
+  const blocks = (doc as Record<string, unknown>)["blocks"];
+  if (!Array.isArray(blocks)) return [];
+  const items: { text: string; done: boolean }[] = [];
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null) continue;
+    const { kind, source } = block as Record<string, unknown>;
+    if (kind !== "list" || typeof source !== "string") continue;
+    for (const line of source.split("\n")) {
+      const match = TASK_ITEM.exec(line);
+      if (match === null) continue;
+      const text = (match[2] ?? "").replaceAll(/[*_`~]/g, "").trim();
+      if (text !== "") items.push({ text: text.slice(0, STEP_MAX), done: match[1] !== " " });
+    }
+  }
+  const currentAt = items.findIndex((item) => !item.done);
+  const steps = items.map(
+    (item, index): PlanStep => ({
+      text: item.text,
+      state: item.done ? "done" : index === currentAt ? "current" : "later",
+    }),
+  );
+  if (steps.length <= STEPS_SHOWN) return steps;
+  // Show two finished steps before the current one when there is room.
+  const anchor = currentAt === -1 ? steps.length : currentAt;
+  const start = Math.max(0, Math.min(anchor - 2, steps.length - STEPS_SHOWN));
+  return steps.slice(start, start + STEPS_SHOWN);
+}

@@ -138,6 +138,7 @@ export function sessionSubtitle(
     startedAt: number;
     endedAt?: number | undefined;
     state: SessionState;
+    branch?: string | undefined;
   },
   now: number,
 ): string {
@@ -145,4 +146,30 @@ export function sessionSubtitle(
   return [row.project, row.agentId, formatSessionElapsed(until - row.startedAt)]
     .filter((part): part is string => part !== null && part !== "")
     .join(" · ");
+}
+
+/** The wide header's sub line: the usual one, then "branch" and its name
+ *  (drawn mono by the screen). `branch` is undefined when the laptop sent none. */
+export function sessionWideSubtitle(
+  row: Parameters<typeof sessionSubtitle>[0],
+  now: number,
+): { text: string; branch: string | undefined } {
+  return { text: sessionSubtitle(row, now), branch: row.branch === "" ? undefined : row.branch };
+}
+
+/** The Sessions search field's "/" shortcut: a bare "/" outside any text field. */
+export function isSearchHotkey(input: {
+  key: string;
+  targetTag: string | undefined;
+  editable?: boolean;
+  modified?: boolean;
+}): boolean {
+  if (input.key !== "/" || input.modified === true || input.editable === true) return false;
+  const tag = input.targetTag?.toUpperCase();
+  return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
+}
+
+/** ⌘Enter or Ctrl+Enter sends from the compose field (web). */
+export function isSendChord(input: { key: string; metaKey: boolean; ctrlKey: boolean }): boolean {
+  return input.key === "Enter" && (input.metaKey || input.ctrlKey);
 }

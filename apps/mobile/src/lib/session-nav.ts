@@ -127,5 +127,3 @@ export function splitLayout(input: { language: Language; platformRtl: boolean })
 export function firstChildSide(direction: "rtl" | "ltr"): "left" | "right" {
   return direction === "rtl" ? "right" : "left";
 }
-
-export const SESSIONS_LIST_WIDTH = 360;

@@ -22,10 +22,11 @@ import { ComposeBar } from "@/components/ComposeBar";
 import { IconButton } from "@/components/IconButton";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
+import { PlanSummaryCard } from "@/components/PlanSummaryCard";
 import { PromptCard } from "@/components/PromptCard";
 import { ResumeButton } from "@/components/ResumeButton";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { SegmentTabs } from "@/components/SegmentTabs";
+import { SegmentTabs, type SegmentTab } from "@/components/SegmentTabs";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
 import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
@@ -37,7 +38,7 @@ import { useLanguage } from "@/lib/language-context";
 import { createPlansStore } from "@/lib/plans-store";
 import { useRpcClient } from "@/lib/rpc-context";
 import { PlanSheet } from "@/plan/PlanSheet";
-import { planProgressOf } from "@/plan/plan-progress";
+import { planProgressOf, planSteps } from "@/plan/plan-progress";
 import {
   clearLatches,
   createSessionInput,
@@ -53,6 +54,7 @@ import {
   notFoundText,
   sendResultText,
   sessionSubtitle,
+  sessionWideSubtitle,
   streamStatusKey,
   trimmedAmount,
 } from "@/lib/session-screen";
@@ -72,6 +74,7 @@ import {
 } from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
+import { useLayoutClass } from "@/lib/use-layout-class";
 import type { VoiceView } from "@/lib/voice-controller";
 import { useVoiceController } from "@/lib/voice-context";
 import { micButtonState, noticeKey, textDirection } from "@/lib/voice-screen";
@@ -111,6 +114,10 @@ export function SessionDetail(props: {
   const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
   const [now, setNow] = useState(() => realClock.now());
   const [menuOpen, setMenuOpen] = useState(false);
+  // The wide pane (tablet or browser): the same session in a card layout.
+  // A phone that inherits a selection keeps the phone layout.
+  const wide = useLayoutClass().kind === "wide" && embedded;
+  const [keysOpen, setKeysOpen] = useState(false);
   const [armed, setArmed] = useState<Latches>(NO_LATCHES);
   const [keyNotice, setKeyNotice] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -144,6 +151,7 @@ export function SessionDetail(props: {
     void plansStore.openDefault();
   }, [plansStore]);
   const planProgress = planProgressOf(plansStore.state.doc);
+  const plan = planSteps(plansStore.state.doc);
 
   // What the agent is waiting on, read every few seconds while this screen
   // is up and the session is live; answered by index and label, which the
@@ -359,6 +367,134 @@ export function SessionDetail(props: {
   const voiceNotice = voiceView.notice;
   const voiceNoticeKey =
     voiceNotice && voiceNotice.code !== "server" ? noticeKey(voiceNotice.code) : undefined;
+  const tabs: SegmentTab[] = [
+    {
+      key: "live",
+      label: t(language, "session.live"),
+      selected: true,
+      onPress: () => {},
+    },
+    {
+      key: "changes",
+      label: t(language, "changes.title"),
+      ...(changedFiles === undefined || changedFiles === 0
+        ? {}
+        : { badge: String(changedFiles), badgeTone: "success" as const }),
+      selected: false,
+      onPress: () => router.push({ pathname: "/changes", params: { id } }),
+    },
+    {
+      key: "plan",
+      label: t(language, "plans.title"),
+      ...(planProgress === undefined
+        ? {}
+        : {
+            badge: `${planProgress.done}/${planProgress.total}`,
+            badgeTone: "muted" as const,
+          }),
+      selected: planVisible,
+      onPress: () => setPlanVisible(true),
+    },
+    {
+      key: "files",
+      label: t(language, "session.files"),
+      selected: false,
+      onPress: () =>
+        router.push(
+          row.project === null || row.project === ""
+            ? "/workspace"
+            : { pathname: "/workspace", params: { project: row.project } },
+        ),
+    },
+  ];
+  const wideSubtitle = sessionWideSubtitle(row, now);
+  const notices = (
+    <>
+      {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
+      {/* The laptop refuses a resume that names no project of its own (it has
+        no screen selection to fall back on), so a session without one gets
+        no button rather than a guaranteed refusal. */}
+      {ended && row.project !== null && (
+        <View style={styles.resume}>
+          <ResumeButton sessionId={id} project={row.project} state={row.state} />
+        </View>
+      )}
+      {streamView.gapCount > 0 && (
+        <Text style={styles.badge}>
+          {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
+        </Text>
+      )}
+      {statusKey && (
+        <TouchableOpacity
+          disabled={streamView.phase !== "failed"}
+          onPress={() => streamRef.current?.retry()}
+        >
+          <Text style={styles.status}>
+            {streamView.error?.kind === "remote" ? streamView.error.text : t(language, statusKey)}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </>
+  );
+  const terminalView = (
+    <TerminalWebView
+      ref={webRef}
+      onReady={({ cols, rows }) => {
+        inputRef.current?.resize(cols, rows);
+        inputRef.current?.reassert();
+      }}
+      onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
+      onModes={(modes) => inputRef.current?.setModes(modes)}
+      onNeedsReplay={() => streamRef.current?.restart(sink)}
+      fixedSize={streamView.size}
+      onWheel={(direction) => {
+        void inputRef.current?.sendText(sgrWheelSequence(direction));
+      }}
+    />
+  );
+  const voiceBlock = (
+    <>
+      {voiceNotice && (
+        <View style={styles.voiceNotice}>
+          {voiceNotice.code === "server" && voiceNotice.server && (
+            <Text
+              style={[
+                styles.status,
+                { writingDirection: textDirection(voiceNotice.server.language) },
+              ]}
+            >
+              {voiceNotice.server.text}
+            </Text>
+          )}
+          {voiceNotice.code !== "server" && voiceNoticeKey && (
+            <Text style={styles.status}>
+              {t(language, platformKey(voiceNoticeKey, clientPlatformFor(Platform.OS)))}
+            </Text>
+          )}
+          {voiceNotice.code === "sentToSession" && voiceNotice.server && (
+            <Text
+              style={[
+                styles.status,
+                { writingDirection: textDirection(voiceNotice.server.language) },
+              ]}
+            >
+              {voiceNotice.server.text}
+            </Text>
+          )}
+          {voiceNotice.code === "micBlocked" && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => {
+                void Linking.openSettings();
+              }}
+            >
+              <Text style={styles.status}>{t(language, "voice.openSettings")}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </>
+  );
   return (
     // iOS: KeyboardAvoidingView's padding behavior, as before. Android: no
     // behavior (a plain View) and the screen pads itself from the measured
@@ -367,71 +503,60 @@ export function SessionDetail(props: {
     <KeyboardAvoidingView
       style={[
         styles.container,
+        wide && styles.wideContainer,
         { paddingBottom: keyboardBottomPadding(Platform.OS, keyboardHeight, insets.bottom) },
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      <View style={styles.header}>
-        <ScreenHeader
-          title={row.summary}
-          subtitle={sessionSubtitle(row, now)}
-          bordered={false}
-          {...(embedded ? {} : { onBack: router.back })}
-          trailing={
+      {wide ? (
+        <View style={styles.wideHeader}>
+          <View style={styles.wideHeading}>
+            <Text style={styles.wideTitle} numberOfLines={1}>
+              {row.summary}
+            </Text>
+            <Text style={styles.wideSub} numberOfLines={1}>
+              {wideSubtitle.text}
+              {wideSubtitle.branch !== undefined && (
+                <>
+                  {" · "}
+                  {t(language, "session.branch")}{" "}
+                  <Text style={styles.wideBranch}>{wideSubtitle.branch}</Text>
+                </>
+              )}
+            </Text>
+          </View>
+          <View style={styles.wideTabs}>
+            <SegmentTabs variant="inline" label={t(language, "session.views")} tabs={tabs} />
             <IconButton
               icon="more"
               label={t(language, "session.more")}
+              size={40}
               iconSize={18}
               onPress={() => setMenuOpen(true)}
             />
-          }
-        />
-        <View style={styles.tabs}>
-          <SegmentTabs
-            label={t(language, "session.views")}
-            tabs={[
-              {
-                key: "live",
-                label: t(language, "session.live"),
-                selected: true,
-                onPress: () => {},
-              },
-              {
-                key: "changes",
-                label: t(language, "changes.title"),
-                ...(changedFiles === undefined || changedFiles === 0
-                  ? {}
-                  : { badge: String(changedFiles), badgeTone: "success" as const }),
-                selected: false,
-                onPress: () => router.push({ pathname: "/changes", params: { id } }),
-              },
-              {
-                key: "plan",
-                label: t(language, "plans.title"),
-                ...(planProgress === undefined
-                  ? {}
-                  : {
-                      badge: `${planProgress.done}/${planProgress.total}`,
-                      badgeTone: "muted" as const,
-                    }),
-                selected: planVisible,
-                onPress: () => setPlanVisible(true),
-              },
-              {
-                key: "files",
-                label: t(language, "session.files"),
-                selected: false,
-                onPress: () =>
-                  router.push(
-                    row.project === null || row.project === ""
-                      ? "/workspace"
-                      : { pathname: "/workspace", params: { project: row.project } },
-                  ),
-              },
-            ]}
-          />
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={styles.header}>
+          <ScreenHeader
+            title={row.summary}
+            subtitle={sessionSubtitle(row, now)}
+            bordered={false}
+            {...(embedded ? {} : { onBack: router.back })}
+            trailing={
+              <IconButton
+                icon="more"
+                label={t(language, "session.more")}
+                iconSize={18}
+                onPress={() => setMenuOpen(true)}
+              />
+            }
+          />
+          <View style={styles.tabs}>
+            <SegmentTabs label={t(language, "session.views")} tabs={tabs} />
+          </View>
+        </View>
+      )}
       <ActionSheet
         visible={menuOpen}
         title={row.summary}
@@ -451,132 +576,184 @@ export function SessionDetail(props: {
         tabTitle={row.summary}
         onClose={() => setPlanVisible(false)}
       />
-      <View style={styles.body}>
-        {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
-        {/* The laptop refuses a resume that names no project of its own (it has
-          no screen selection to fall back on), so a session without one gets
-          no button rather than a guaranteed refusal. */}
-        {ended && row.project !== null && (
-          <View style={styles.resume}>
-            <ResumeButton sessionId={id} project={row.project} state={row.state} />
-          </View>
-        )}
-        {streamView.gapCount > 0 && (
-          <Text style={styles.badge}>
-            {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
-          </Text>
-        )}
-        {statusKey && (
-          <TouchableOpacity
-            disabled={streamView.phase !== "failed"}
-            onPress={() => streamRef.current?.retry()}
-          >
-            <Text style={styles.status}>
-              {streamView.error?.kind === "remote" ? streamView.error.text : t(language, statusKey)}
-            </Text>
-          </TouchableOpacity>
-        )}
-        <View style={styles.output}>
-          <TerminalWebView
-            ref={webRef}
-            onReady={({ cols, rows }) => {
-              inputRef.current?.resize(cols, rows);
-              inputRef.current?.reassert();
-            }}
-            onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
-            onModes={(modes) => inputRef.current?.setModes(modes)}
-            onNeedsReplay={() => streamRef.current?.restart(sink)}
-            fixedSize={streamView.size}
-            onWheel={(direction) => {
-              void inputRef.current?.sendText(sgrWheelSequence(direction));
-            }}
-          />
-        </View>
-        {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
-        {prompt !== undefined && (
-          <PromptCard
-            prompt={prompt}
-            busy={promptBusy}
-            note={promptNote}
-            onAnswer={onAnswer}
-            heading={t(language, "prompt.waiting")}
-            hideDot
-          />
-        )}
-      </View>
-      <View style={styles.footer}>
-        <KeyBar
-          variant="footer"
-          keys={SESSION_KEYS}
-          moreKeys={MORE_KEYS}
-          disabled={disabled}
-          armed={armed}
-          onMoreClose={() => setArmed(clearLatches(inputRef.current))}
-          onKey={(key) => {
-            void onKey(key);
-          }}
-        />
-        <ComposeBar
-          disabled={disabled}
-          placeholder={t(language, "session.messagePlaceholder", { agent: row.agentId })}
-          onSend={(text) =>
-            inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
-          }
-          onSent={() => setArmed(latchesOf(inputRef.current))}
-          beforeSend={
-            <MicButton
-              variant="square"
-              enabled={mic.enabled}
-              active={mic.active}
-              labelKey={mic.labelKey}
-            />
-          }
-        />
-        {voiceNotice && (
-          <View style={styles.voiceNotice}>
-            {voiceNotice.code === "server" && voiceNotice.server && (
-              <Text
-                style={[
-                  styles.status,
-                  { writingDirection: textDirection(voiceNotice.server.language) },
-                ]}
-              >
-                {voiceNotice.server.text}
-              </Text>
-            )}
-            {voiceNotice.code !== "server" && voiceNoticeKey && (
-              <Text style={styles.status}>
-                {t(language, platformKey(voiceNoticeKey, clientPlatformFor(Platform.OS)))}
-              </Text>
-            )}
-            {voiceNotice.code === "sentToSession" && voiceNotice.server && (
-              <Text
-                style={[
-                  styles.status,
-                  { writingDirection: textDirection(voiceNotice.server.language) },
-                ]}
-              >
-                {voiceNotice.server.text}
-              </Text>
-            )}
-            {voiceNotice.code === "micBlocked" && (
-              <TouchableOpacity
-                accessibilityRole="button"
-                onPress={() => {
-                  void Linking.openSettings();
+      {wide ? (
+        <View style={styles.wideBody}>
+          <View style={styles.wideOutput}>
+            {notices}
+            <View style={styles.wideTerminal}>{terminalView}</View>
+            {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
+            {keysOpen && (
+              <KeyBar
+                variant="footer"
+                keys={SESSION_KEYS}
+                moreKeys={MORE_KEYS}
+                disabled={disabled}
+                armed={armed}
+                onMoreClose={() => setArmed(clearLatches(inputRef.current))}
+                onKey={(key) => {
+                  void onKey(key);
                 }}
-              >
-                <Text style={styles.status}>{t(language, "voice.openSettings")}</Text>
-              </TouchableOpacity>
+              />
+            )}
+            <ComposeBar
+              variant="inline"
+              disabled={disabled}
+              placeholder={`${t(language, "session.messagePlaceholder", { agent: row.agentId })}${
+                Platform.OS === "web" ? `  ${t(language, "session.sendHint")}` : ""
+              }`}
+              onSend={(text) =>
+                inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
+              }
+              onSent={() => setArmed(latchesOf(inputRef.current))}
+              beforeSend={
+                <View style={styles.wideTools}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: keysOpen }}
+                    onPress={() => {
+                      // Hiding the keys drops a latch armed on them.
+                      if (keysOpen) setArmed(clearLatches(inputRef.current));
+                      setKeysOpen((open) => !open);
+                    }}
+                    style={[styles.keysToggle, keysOpen && styles.keysToggleOn]}
+                  >
+                    <Text style={[styles.keysText, keysOpen && styles.keysTextOn]}>
+                      {t(language, "session.keys")}
+                    </Text>
+                  </TouchableOpacity>
+                  <MicButton
+                    variant="square"
+                    enabled={mic.enabled}
+                    active={mic.active}
+                    labelKey={mic.labelKey}
+                  />
+                </View>
+              }
+            />
+            {voiceBlock}
+          </View>
+          {(prompt !== undefined || planProgress !== undefined || plan.length > 0) && (
+            <View style={styles.wideAside}>
+              {prompt !== undefined && (
+                <PromptCard
+                  prompt={prompt}
+                  busy={promptBusy}
+                  note={promptNote}
+                  onAnswer={onAnswer}
+                  heading={t(language, "prompt.waiting")}
+                  hideDot
+                  density="compact"
+                />
+              )}
+              {(planProgress !== undefined || plan.length > 0) && (
+                <PlanSummaryCard
+                  progress={planProgress}
+                  steps={plan}
+                  onPress={() => setPlanVisible(true)}
+                />
+              )}
+            </View>
+          )}
+        </View>
+      ) : (
+        <>
+          <View style={styles.body}>
+            {notices}
+            <View style={styles.output}>{terminalView}</View>
+            {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
+            {prompt !== undefined && (
+              <PromptCard
+                prompt={prompt}
+                busy={promptBusy}
+                note={promptNote}
+                onAnswer={onAnswer}
+                heading={t(language, "prompt.waiting")}
+                hideDot
+              />
             )}
           </View>
-        )}
-      </View>
+          <View style={styles.footer}>
+            <KeyBar
+              variant="footer"
+              keys={SESSION_KEYS}
+              moreKeys={MORE_KEYS}
+              disabled={disabled}
+              armed={armed}
+              onMoreClose={() => setArmed(clearLatches(inputRef.current))}
+              onKey={(key) => {
+                void onKey(key);
+              }}
+            />
+            <ComposeBar
+              disabled={disabled}
+              placeholder={t(language, "session.messagePlaceholder", { agent: row.agentId })}
+              onSend={(text) =>
+                inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
+              }
+              onSent={() => setArmed(latchesOf(inputRef.current))}
+              beforeSend={
+                <MicButton
+                  variant="square"
+                  enabled={mic.enabled}
+                  active={mic.active}
+                  labelKey={mic.labelKey}
+                />
+              }
+            />
+            {voiceBlock}
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  // Wide pane: 20/24 padding, 14 between the header and the body.
+  wideContainer: {
+    gap: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    backgroundColor: theme.colors.ground,
+  },
+  wideHeader: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  wideHeading: { flexShrink: 1, minWidth: 0, gap: 2 },
+  wideTitle: { color: theme.colors.text, fontFamily: theme.font.extrabold, fontSize: 22 },
+  wideSub: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 13 },
+  wideBranch: { color: theme.colors.textSecondary, fontFamily: theme.font.mono },
+  wideTabs: { flexDirection: "row", alignItems: "center", gap: 8 },
+  wideBody: { flex: 1, flexDirection: "row", gap: 14, minHeight: 0 },
+  wideOutput: {
+    flex: 3,
+    minWidth: 420,
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairlineSoft,
+    backgroundColor: theme.colors.terminalGround,
+  },
+  wideTerminal: { flex: 1, overflow: "hidden" },
+  wideTools: { flexDirection: "row", alignItems: "center", gap: 8 },
+  keysToggle: {
+    minHeight: 42,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  keysToggleOn: { backgroundColor: theme.colors.selected },
+  keysText: { color: theme.colors.textMuted, fontFamily: theme.font.semibold, fontSize: 13 },
+  keysTextOn: { color: theme.colors.text },
+  wideAside: { flex: 1, minWidth: 260, gap: 14 },
   resume: { paddingBottom: 6 },
   header: {
     backgroundColor: theme.colors.ground,

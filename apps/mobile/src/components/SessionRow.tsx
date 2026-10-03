@@ -24,15 +24,19 @@ export type SessionRowProps = {
   onPress?: () => void;
   /** Wide sessions split: the row whose detail is open beside the list. */
   selected?: boolean;
+  /** "compact" (wide list): tighter, with no Asks line and no trailing action. */
+  density?: "regular" | "compact";
 };
 
 export function SessionRow(props: SessionRowProps) {
   const { variant } = props;
   const done = variant === "done";
+  const compact = props.density === "compact";
   return (
     <TouchableOpacity
       style={[
         styles.row,
+        compact && styles.rowCompact,
         variant === "waiting" && styles.rowWaiting,
         done && styles.rowDone,
         props.selected && styles.rowSelected,
@@ -47,6 +51,7 @@ export function SessionRow(props: SessionRowProps) {
       <View
         style={[
           styles.dot,
+          compact && styles.dotCompact,
           variant === "active" && { backgroundColor: theme.colors.accent },
           variant === "waiting" && { backgroundColor: theme.colors.warning },
           done && styles.dotDone,
@@ -76,13 +81,15 @@ export function SessionRow(props: SessionRowProps) {
             </Text>
           )}
         </Text>
-        {props.asks !== undefined && (
+        {!compact && props.asks !== undefined && (
           <Text style={styles.asks} numberOfLines={2}>
             {props.asks}
           </Text>
         )}
       </View>
-      {props.trailing !== undefined && <View style={styles.trailing}>{props.trailing}</View>}
+      {!compact && props.trailing !== undefined && (
+        <View style={styles.trailing}>{props.trailing}</View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -100,7 +107,10 @@ const styles = StyleSheet.create({
   },
   rowWaiting: { borderColor: theme.colors.warningBorder },
   rowDone: { borderColor: theme.colors.hairlineSoft, backgroundColor: "transparent" },
-  rowSelected: { backgroundColor: theme.colors.selected, borderColor: theme.colors.accent },
+  // The border keeps its variant colour: only the ground changes.
+  rowSelected: { backgroundColor: theme.colors.surfaceAlt },
+  rowCompact: { gap: 10, padding: 10, borderRadius: theme.radius.md },
+  dotCompact: { width: 9, height: 9 },
   dot: { width: 10, height: 10, marginTop: 5, borderRadius: theme.radius.full },
   dotDone: { borderWidth: 2, borderColor: theme.colors.textFaint },
   text: { flex: 1, minWidth: 0, gap: 3 },

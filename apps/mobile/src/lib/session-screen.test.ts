@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { STRINGS, t, type MessageKey } from "./i18n";
 import {
   isEnded,
+  isSearchHotkey,
+  isSendChord,
   KEY_CAPS,
   KEY_LABEL_KEYS,
   notFoundText,
@@ -12,6 +14,7 @@ import {
   sendResultText,
   sessionRouteId,
   sessionSubtitle,
+  sessionWideSubtitle,
   streamStatusKey,
   trimmedAmount,
 } from "./session-screen";
@@ -266,4 +269,34 @@ describe("app/session/[id].tsx and app/terminal/[paneKey].tsx source scan: lands
       });
     });
   }
+});
+
+describe("wide session helpers", () => {
+  const row = { project: "api", agentId: "claude-main", startedAt: 0, state: "running" as const };
+
+  it("sessionWideSubtitle adds the branch only when there is one", () => {
+    expect(sessionWideSubtitle({ ...row, branch: "jarvis/orders" }, 18 * 60_000)).toEqual({
+      text: sessionSubtitle(row, 18 * 60_000),
+      branch: "jarvis/orders",
+    });
+    expect(sessionWideSubtitle(row, 60_000).branch).toBeUndefined();
+    expect(sessionWideSubtitle({ ...row, branch: "" }, 60_000).branch).toBeUndefined();
+  });
+
+  it("isSearchHotkey takes a bare slash and ignores text fields", () => {
+    expect(isSearchHotkey({ key: "/", targetTag: "BODY" })).toBe(true);
+    expect(isSearchHotkey({ key: "/", targetTag: undefined })).toBe(true);
+    expect(isSearchHotkey({ key: "/", targetTag: "input" })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "TEXTAREA" })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "DIV", editable: true })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "BODY", modified: true })).toBe(false);
+    expect(isSearchHotkey({ key: "a", targetTag: "BODY" })).toBe(false);
+  });
+
+  it("isSendChord is meta or ctrl with Enter only", () => {
+    expect(isSendChord({ key: "Enter", metaKey: true, ctrlKey: false })).toBe(true);
+    expect(isSendChord({ key: "Enter", metaKey: false, ctrlKey: true })).toBe(true);
+    expect(isSendChord({ key: "Enter", metaKey: false, ctrlKey: false })).toBe(false);
+    expect(isSendChord({ key: "a", metaKey: true, ctrlKey: false })).toBe(false);
+  });
 });

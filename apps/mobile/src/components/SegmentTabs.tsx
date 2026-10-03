@@ -18,21 +18,43 @@ export type SegmentTab = {
  * screen is still a segment here — the row is how a session's views are
  * reached, whichever of them happen to be separate screens.
  */
-export function SegmentTabs(props: { tabs: SegmentTab[]; label: string; compact?: boolean }) {
+export function SegmentTabs(props: {
+  tabs: SegmentTab[];
+  label: string;
+  compact?: boolean;
+  /** "inline" (wide header): intrinsic widths, the count in the label's own colour. */
+  variant?: "grid" | "inline";
+}) {
+  const inline = props.variant === "inline";
   return (
-    <View style={styles.row} accessibilityRole="tablist" accessibilityLabel={props.label}>
+    <View
+      style={[styles.row, inline && styles.rowInline]}
+      accessibilityRole="tablist"
+      accessibilityLabel={props.label}
+    >
       {props.tabs.map((tab) => (
         <TouchableOpacity
           key={tab.key}
           accessibilityRole="tab"
           accessibilityState={{ selected: tab.selected }}
           onPress={tab.onPress}
-          style={[styles.tab, props.compact && styles.tabCompact, tab.selected && styles.tabOn]}
+          style={[
+            styles.tab,
+            props.compact && styles.tabCompact,
+            inline && styles.tabInline,
+            tab.selected && styles.tabOn,
+          ]}
         >
           <Text style={[styles.label, tab.selected && styles.labelOn]} numberOfLines={1}>
             {tab.label}
             {tab.badge !== undefined && (
-              <Text style={[styles.badge, tab.badgeTone === "muted" && styles.badgeMuted]}>
+              <Text
+                style={
+                  inline
+                    ? undefined
+                    : [styles.badge, tab.badgeTone === "muted" && styles.badgeMuted]
+                }
+              >
                 {" "}
                 {tab.badge}
               </Text>
@@ -61,6 +83,8 @@ const styles = StyleSheet.create({
     borderRadius: 9,
   },
   tabCompact: { minHeight: 34 },
+  rowInline: { alignSelf: "flex-start", backgroundColor: theme.colors.surface },
+  tabInline: { flex: 0, minHeight: 34, paddingHorizontal: 14 },
   tabOn: { backgroundColor: theme.colors.selected },
   label: { color: theme.colors.textMuted, fontFamily: theme.font.semibold, fontSize: 13 },
   labelOn: { color: theme.colors.text, fontFamily: theme.font.bold },

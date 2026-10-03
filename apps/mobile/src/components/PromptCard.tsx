@@ -28,7 +28,10 @@ export function PromptCard(props: {
   layout?: "row" | "stacked" | "banner";
   /** The Session screen's card has no dot before its heading. */
   hideDot?: boolean;
+  /** "compact" (wide Session aside): shorter option buttons, r10. */
+  density?: "regular" | "compact";
 }) {
+  const compact = props.density === "compact";
   const row = props.layout === "row";
   if (props.layout === "banner") return <BannerCard {...props} />;
   return (
@@ -57,6 +60,7 @@ export function PromptCard(props: {
             onPress={() => props.onAnswer(index, label)}
             style={[
               styles.option,
+              compact && styles.optionCompact,
               row && styles.optionRow,
               index === 0 ? styles.optionFirst : undefined,
               props.busy && styles.disabled,
@@ -68,6 +72,7 @@ export function PromptCard(props: {
             <Text
               style={[
                 styles.optionText,
+                compact && styles.optionTextCompact,
                 row && styles.optionTextRow,
                 index === 0 && styles.optionTextFirst,
               ]}
@@ -209,6 +214,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.warningBorder,
   },
+  optionCompact: { minHeight: 40, borderRadius: theme.radius.small },
   optionFirst: { backgroundColor: theme.colors.warning, borderColor: theme.colors.warning },
   optionRow: { flex: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   openButton: { justifyContent: "center" },
@@ -220,6 +226,7 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.semibold,
     fontSize: 14,
   },
+  optionTextCompact: { fontSize: 13 },
   optionTextRow: { textAlign: "center" },
   optionTextFirst: { color: theme.colors.onWarning, fontFamily: theme.font.bold },
   disabled: { opacity: 0.5 },
