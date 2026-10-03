@@ -172,7 +172,12 @@ function SettingsScreen() {
           label={t(language, "settings.scopeTabs")}
           tabs={SETTINGS_SCOPES.map((key) => ({
             key,
-            label: t(language, key === "browser" ? "settings.thisBrowser" : "settings.theLaptop"),
+            label: t(
+              language,
+              key === "browser"
+                ? platformKey("settings.thisDevice", PLATFORM)
+                : "settings.theLaptop",
+            ),
             selected: scope === key,
             onPress: () => setScope(key),
           }))}

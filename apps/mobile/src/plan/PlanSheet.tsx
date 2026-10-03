@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import { t, type Language } from "../lib/i18n";
+import { sendNotesText, t, type Language } from "../lib/i18n";
 import type { PlansStore } from "../lib/plans-store";
 import { allowTerminalNavigation, TERMINAL_WEBVIEW_PROPS } from "../lib/terminal-webview-config";
 import { theme } from "../lib/theme";
@@ -205,9 +205,7 @@ function PlanPanelBody(props: {
               onPress={() => void props.store.send()}
               style={[styles.dockSend, queued.length === 0 && styles.disabled]}
             >
-              <Text style={styles.sendText}>
-                {t(props.language, "plans.sendNotes", { count: queued.length })}
-              </Text>
+              <Text style={styles.sendText}>{sendNotesText(props.language, queued.length)}</Text>
             </TouchableOpacity>
           </View>
         ) : (

@@ -227,7 +227,10 @@ export default function DashboardScreen() {
             liveCount={liveIds.length}
             now={now}
             wide={{
-              connection: pillText,
+              connection:
+                pill.label.kind === "name"
+                  ? t(language, "home.connectedTo", { name: pill.label.name })
+                  : pillText,
               metrics: view.metrics,
               content,
               inner,

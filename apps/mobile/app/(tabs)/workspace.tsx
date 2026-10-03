@@ -58,10 +58,13 @@ import {
   workspaceShowsPlanDock,
 } from "@/lib/wide-breakpoints";
 import type { WorkspaceProjectView, WorkspaceView } from "@/lib/workspace-store";
-import type { WorkspaceStripTab, WorkspaceTabItem, WorkspaceToolKind } from "@/lib/workspace-tabs";
+import type { WorkspaceStripTab, WorkspaceTabItem } from "@/lib/workspace-tabs";
 import {
   activeTab,
   openToolsWith,
+  toolProjectOf,
+  withTool,
+  type WorkspaceOpenTool,
   openWorkspaceTab,
   tabStatusDot,
   terminalPaneFor,
@@ -111,14 +114,16 @@ export default function WorkspaceScreen() {
   const [view, setView] = useState<WorkspaceView>(store.get());
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
-  const [chatNames, setChatNames] = useState<string[] | undefined>(undefined);
+  const [chatNames, setChatNames] = useState<{ project: string; names: string[] } | undefined>(
+    undefined,
+  );
   const [chatBusy, setChatBusy] = useState(false);
   const [terminalBusy, setTerminalBusy] = useState(false);
   // The tab being renamed on the laptop, and why its last save failed.
   const [renaming, setRenaming] = useState<{ id: string; title: string } | undefined>(undefined);
   const [renameError, setRenameError] = useState<string | undefined>(undefined);
   const [renameBusy, setRenameBusy] = useState(false);
-  const [openTools, setOpenTools] = useState<WorkspaceToolKind[]>([]);
+  const [openTools, setOpenTools] = useState<WorkspaceOpenTool[]>([]);
   const [tabSheet, setTabSheet] = useState(false);
   // Wide "+": a project step first when there is more than one, then the tool.
   const [plus, setPlus] = useState<
@@ -219,7 +224,7 @@ export default function WorkspaceScreen() {
     setChatBusy(true);
     const names = await listChatNames(client, project);
     setChatBusy(false);
-    setChatNames(names);
+    setChatNames({ project, names });
   }
 
   function openPane(tabId: string, paneKey: string): void {
@@ -253,10 +258,10 @@ export default function WorkspaceScreen() {
 
   // Wide (and a phone that inherited a tab from a rotation): the tab strip
   // and the active tab's inline content.
-  const tools = openToolsWith(openTools, tabParam);
-  // Wide: every project's tabs in one strip (tools open here follow the
-  // selected project). A phone-sized window keeps the selected project's.
-  const stripTabs = workspaceTabsAll(view.projects, tools, language, view.selectedProject);
+  const tools = openToolsWith(openTools, tabParam, view.selectedProject ?? "");
+  // Wide: every project's tabs in one strip (each tool open here keeps the
+  // project it was opened for). A phone-sized window keeps the selected one's.
+  const stripTabs = workspaceTabsAll(view.projects, tools, language);
   const tabs: readonly WorkspaceTabItem[] = wide
     ? stripTabs
     : workspaceTabsFrom({ tabs: selected?.tabs ?? [] }, tools, language);
@@ -279,6 +284,7 @@ export default function WorkspaceScreen() {
   // The active tab's own project (the selection follows it a render later).
   const project =
     (wide ? stripTabs.find((tab) => tab.id === activeId)?.project : undefined) ??
+    toolProjectOf(tools, activeId) ??
     view.selectedProject ??
     "";
   // The inline content's React key: the pane, or the tab and project,
@@ -344,7 +350,10 @@ export default function WorkspaceScreen() {
       if (owning !== undefined && laptopTab !== undefined) openTab(owning, laptopTab);
       return;
     }
-    openWorkspaceTab(router, workspaceTarget(kind, { id: tab.id, kind: tab.kind, project }));
+    openWorkspaceTab(
+      router,
+      workspaceTarget(kind, { id: tab.id, kind: tab.kind, project: tab.project ?? project }),
+    );
   }
 
   function closeTab(tab: WorkspaceTabItem): void {
@@ -421,7 +430,7 @@ export default function WorkspaceScreen() {
   function pickTool(tool: WorkspaceTool, target?: string): void {
     const name = target ?? selected?.name;
     if (name === undefined) return;
-    if (name !== selected?.name) store.selectProject(name);
+    if (name !== selected?.name) selectProject(name);
     if (tool === "terminal") {
       void handleNewTerminal(name);
       return;
@@ -436,8 +445,15 @@ export default function WorkspaceScreen() {
       router.push(`/sidecars/${encodeURIComponent(name)}`);
       return;
     }
-    setOpenTools(openToolsWith(tools, toolTabId(tool)));
-    selectTab({ id: toolTabId(tool), kind: tool, inline: true, title: "", closable: true });
+    setOpenTools(withTool(tools, tool, name));
+    selectTab({
+      id: toolTabId(tool),
+      kind: tool,
+      inline: true,
+      title: "",
+      closable: true,
+      project: name,
+    });
   }
 
   const errorText =
@@ -514,7 +530,7 @@ export default function WorkspaceScreen() {
           client={client}
           panes={panesForSelectedTerminal}
           panesTabId={view.panesTabId}
-          chatNames={chatNames}
+          chatNames={chatNames?.names}
           chatBusy={chatBusy}
           notice={notice}
           onOpenTab={(tab) => openTab(selected.name, tab)}
@@ -523,7 +539,7 @@ export default function WorkspaceScreen() {
           onRenameTab={(tab) => startRename(tab.id, tab.title)}
           onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
           onOpenPane={openPane}
-          onOpenChat={(name) => void openChat(selected.name, name)}
+          onOpenChat={(name) => void openChat(chatNames?.project ?? selected.name, name)}
         />
       )}
     </ScrollView>
@@ -564,10 +580,11 @@ export default function WorkspaceScreen() {
               onCloseTab={closeTab}
               onTabActions={(tab) => setTabActions(tab)}
               onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
-              chatNames={chatNames}
+              chatNames={chatNames?.names}
               chatBusy={chatBusy}
               onOpenChat={(name) => {
-                if (selected !== undefined) void openChat(selected.name, name);
+                const owner = chatNames?.project ?? selected?.name;
+                if (owner !== undefined) void openChat(owner, name);
               }}
               panes={
                 activeTerminal !== undefined && view.panesTabId === activeTerminal

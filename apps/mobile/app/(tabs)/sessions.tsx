@@ -1,4 +1,4 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   I18nManager,
@@ -196,8 +196,10 @@ export default function SessionsScreen() {
   }, [wide]);
 
   // Web, wide: "/" focuses the search field unless typing somewhere already.
+  // Only while focused: wide tabs stay mounted behind the others.
+  const focused = useIsFocused();
   useEffect(() => {
-    if (!wide || Platform.OS !== "web" || typeof document === "undefined") return;
+    if (!focused || !wide || Platform.OS !== "web" || typeof document === "undefined") return;
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : undefined;
       if (
@@ -215,7 +217,7 @@ export default function SessionsScreen() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [wide]);
+  }, [focused, wide]);
 
   useEffect(() => {
     const handle = setTimeout(() => historyStore.search(query), SEARCH_DELAY_MS);
@@ -290,9 +292,9 @@ export default function SessionsScreen() {
   // Wide opens on the first row (waiting first) rather than an empty pane.
   const firstId = firstOpenableRow(groups.flatMap((group) => group.rows))?.id;
   useEffect(() => {
-    if (!wide || selectedId !== undefined || firstId === undefined) return;
+    if (!focused || !wide || selectedId !== undefined || firstId === undefined) return;
     router.setParams({ id: firstId });
-  }, [wide, selectedId, firstId, router]);
+  }, [focused, wide, selectedId, firstId, router]);
 
   const renderRow = (row: MergedRow) => {
     const variant = rowVariant(row);

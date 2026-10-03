@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { SESSIONS_DAYS, tileDays, todayCount } from "@/lib/home-wide";
-import { t, type Language } from "@/lib/i18n";
+import { t, todaySessionsText, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 
 /**
@@ -32,7 +32,7 @@ export function SessionsTile(props: { language: Language; counts: number[]; widt
         ))}
       </View>
       <Text style={styles.caption}>
-        {t(props.language, "home.today", { count: todayCount(props.counts) })}
+        {todaySessionsText(props.language, todayCount(props.counts))}
       </Text>
     </View>
   );

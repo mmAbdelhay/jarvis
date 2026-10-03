@@ -32,7 +32,7 @@ import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-cou
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
-import { platformKey, t } from "@/lib/i18n";
+import { isApplePlatform, platformKey, sendHintText, t } from "@/lib/i18n";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import { useLanguage } from "@/lib/language-context";
 import { createPlansStore } from "@/lib/plans-store";
@@ -576,63 +576,82 @@ export function SessionDetail(props: {
         tabTitle={row.summary}
         onClose={() => setPlanVisible(false)}
       />
-      {wide ? (
-        <View style={styles.wideBody}>
-          <View style={styles.wideOutput}>
-            {notices}
-            <View style={styles.wideTerminal}>{terminalView}</View>
-            {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
-            {keysOpen && (
-              <KeyBar
-                variant="footer"
-                keys={SESSION_KEYS}
-                moreKeys={MORE_KEYS}
+      {/* One tree position for the terminal in both layouts, so crossing the
+          breakpoint only restyles it (no WebView remount). */}
+      <View style={wide ? styles.wideBody : styles.phoneStack}>
+        <View style={wide ? styles.wideOutput : styles.body}>
+          {notices}
+          <View style={wide ? styles.wideTerminal : styles.output}>{terminalView}</View>
+          {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
+          {wide ? (
+            <>
+              {keysOpen && (
+                <KeyBar
+                  variant="footer"
+                  keys={SESSION_KEYS}
+                  moreKeys={MORE_KEYS}
+                  disabled={disabled}
+                  armed={armed}
+                  onMoreClose={() => setArmed(clearLatches(inputRef.current))}
+                  onKey={(key) => {
+                    void onKey(key);
+                  }}
+                />
+              )}
+              <ComposeBar
+                variant="inline"
                 disabled={disabled}
-                armed={armed}
-                onMoreClose={() => setArmed(clearLatches(inputRef.current))}
-                onKey={(key) => {
-                  void onKey(key);
-                }}
+                placeholder={`${t(language, "session.messagePlaceholder", { agent: row.agentId })}${
+                  Platform.OS === "web"
+                    ? `  ${sendHintText(language, isApplePlatform(globalThis.navigator ?? {}))}`
+                    : ""
+                }`}
+                onSend={(text) =>
+                  inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
+                }
+                onSent={() => setArmed(latchesOf(inputRef.current))}
+                beforeSend={
+                  <View style={styles.wideTools}>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: keysOpen }}
+                      onPress={() => {
+                        // Hiding the keys drops a latch armed on them.
+                        if (keysOpen) setArmed(clearLatches(inputRef.current));
+                        setKeysOpen((open) => !open);
+                      }}
+                      style={[styles.keysToggle, keysOpen && styles.keysToggleOn]}
+                    >
+                      <Text style={[styles.keysText, keysOpen && styles.keysTextOn]}>
+                        {t(language, "session.keys")}
+                      </Text>
+                    </TouchableOpacity>
+                    <MicButton
+                      variant="square"
+                      enabled={mic.enabled}
+                      active={mic.active}
+                      labelKey={mic.labelKey}
+                    />
+                  </View>
+                }
               />
-            )}
-            <ComposeBar
-              variant="inline"
-              disabled={disabled}
-              placeholder={`${t(language, "session.messagePlaceholder", { agent: row.agentId })}${
-                Platform.OS === "web" ? `  ${t(language, "session.sendHint")}` : ""
-              }`}
-              onSend={(text) =>
-                inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
-              }
-              onSent={() => setArmed(latchesOf(inputRef.current))}
-              beforeSend={
-                <View style={styles.wideTools}>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: keysOpen }}
-                    onPress={() => {
-                      // Hiding the keys drops a latch armed on them.
-                      if (keysOpen) setArmed(clearLatches(inputRef.current));
-                      setKeysOpen((open) => !open);
-                    }}
-                    style={[styles.keysToggle, keysOpen && styles.keysToggleOn]}
-                  >
-                    <Text style={[styles.keysText, keysOpen && styles.keysTextOn]}>
-                      {t(language, "session.keys")}
-                    </Text>
-                  </TouchableOpacity>
-                  <MicButton
-                    variant="square"
-                    enabled={mic.enabled}
-                    active={mic.active}
-                    labelKey={mic.labelKey}
-                  />
-                </View>
-              }
-            />
-            {voiceBlock}
-          </View>
-          {(prompt !== undefined || planProgress !== undefined || plan.length > 0) && (
+              {voiceBlock}
+            </>
+          ) : (
+            prompt !== undefined && (
+              <PromptCard
+                prompt={prompt}
+                busy={promptBusy}
+                note={promptNote}
+                onAnswer={onAnswer}
+                heading={t(language, "prompt.waiting")}
+                hideDot
+              />
+            )
+          )}
+        </View>
+        {wide ? (
+          (prompt !== undefined || planProgress !== undefined || plan.length > 0) && (
             <View style={styles.wideAside}>
               {prompt !== undefined && (
                 <PromptCard
@@ -653,25 +672,8 @@ export function SessionDetail(props: {
                 />
               )}
             </View>
-          )}
-        </View>
-      ) : (
-        <>
-          <View style={styles.body}>
-            {notices}
-            <View style={styles.output}>{terminalView}</View>
-            {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
-            {prompt !== undefined && (
-              <PromptCard
-                prompt={prompt}
-                busy={promptBusy}
-                note={promptNote}
-                onAnswer={onAnswer}
-                heading={t(language, "prompt.waiting")}
-                hideDot
-              />
-            )}
-          </View>
+          )
+        ) : (
           <View style={styles.footer}>
             <KeyBar
               variant="footer"
@@ -702,8 +704,8 @@ export function SessionDetail(props: {
             />
             {voiceBlock}
           </View>
-        </>
-      )}
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -728,6 +730,7 @@ const styles = StyleSheet.create({
   wideSub: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 13 },
   wideBranch: { color: theme.colors.textSecondary, fontFamily: theme.font.mono },
   wideTabs: { flexDirection: "row", alignItems: "center", gap: 8 },
+  phoneStack: { flex: 1 },
   wideBody: { flex: 1, flexDirection: "row", gap: 14, minHeight: 0 },
   wideOutput: {
     flex: 3,

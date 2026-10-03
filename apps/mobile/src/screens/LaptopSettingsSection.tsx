@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Icon } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
-import { t, type Language, type MessageKey } from "@/lib/i18n";
+import { clientPlatformFor } from "@/lib/client-platform";
+import { platformKey, t, type Language, type MessageKey } from "@/lib/i18n";
 import { noticeText } from "@/lib/laptop-actions";
 import {
   type LaptopSettings,
@@ -255,7 +256,9 @@ function LaptopCards(props: { language: Language }) {
       )}
       <SettingsCard title={t(language, "settings.pairedDevices")}>
         <View style={styles.agentRow}>
-          <Text style={styles.agentName}>{t(language, "settings.thisBrowser")}</Text>
+          <Text style={styles.agentName}>
+            {t(language, platformKey("settings.thisDevice", clientPlatformFor(Platform.OS)))}
+          </Text>
           <Text style={styles.currentChip}>{t(language, "settings.current")}</Text>
         </View>
         <Text style={styles.deviceNote}>{t(language, "settings.devicesNote")}</Text>

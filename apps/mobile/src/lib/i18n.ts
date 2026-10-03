@@ -159,7 +159,6 @@ export const STRINGS = {
   "home.connectedTo": { en: "{name} connected", ar: "{name} متصل" },
   "home.laptop": { en: "Laptop", ar: "الحاسوب" },
   "home.sessions14": { en: "Sessions · 14 days", ar: "الجلسات · 14 يومًا" },
-  "home.today": { en: "today: {count} sessions", ar: "اليوم: {count} جلسات" },
   "home.activeSessions": { en: "ACTIVE SESSIONS", ar: "الجلسات النشطة" },
   "home.capacityWindow": { en: "{name} · {window}", ar: "{name} — {window}" },
   "home.resetsOn": { en: "resets {date}", ar: "يُعاد في {date}" },
@@ -221,7 +220,8 @@ export const STRINGS = {
     en: "Remote access",
     ar: "الوصول عن بُعد",
   },
-  "settings.thisBrowser": { en: "This browser", ar: "هذا المتصفح" },
+  "settings.thisDevice": { en: "This device", ar: "هذا الجهاز" },
+  "settings.thisDevice.web": { en: "This browser", ar: "هذا المتصفح" },
   "settings.theLaptop": { en: "The laptop", ar: "الحاسوب" },
   "settings.scopeTabs": { en: "Settings scope", ar: "نطاق الإعدادات" },
   "settings.pairedDevices": { en: "Paired devices", ar: "الأجهزة المقترنة" },
@@ -752,7 +752,7 @@ export const STRINGS = {
   "keys.less": { en: "Fewer keys", ar: "مفاتيح أقل" },
   "session.more": { en: "More actions", ar: "المزيد من الإجراءات" },
   "session.files": { en: "Files", ar: "الملفات" },
-  "session.sendHint": { en: "( ⌘ Enter to send )", ar: "( ⌘ Enter للإرسال )" },
+  "session.sendHint": { en: "( {key} Enter to send )", ar: "( {key} Enter للإرسال )" },
   "session.send": { en: "Send", ar: "إرسال" },
   "session.branch": { en: "branch", ar: "الفرع" },
   "session.keys": { en: "Keys", ar: "المفاتيح" },
@@ -1152,7 +1152,6 @@ export const STRINGS = {
   "workspace.newTabProject": { en: "Which project?", ar: "أي مشروع؟" },
   "terminal.historyHint": { en: "⌃R history", ar: "⌃R السجل" },
   "plans.sessionPlan": { en: "Session plan", ar: "خطة الجلسة" },
-  "plans.sendNotes": { en: "Send {count} notes to Claude", ar: "إرسال {count} ملاحظات إلى Claude" },
   "workspace.filesNeedTerminal": {
     en: "Open a terminal on the laptop to browse this project's files.",
     ar: "افتح طرفية على الحاسوب لتصفح ملفات هذا المشروع.",
@@ -1504,6 +1503,40 @@ export function paneCountText(language: Language, count: number): string {
   if (count === 2) return "لوحتان";
   const tail = count % 100;
   return tail >= 3 && tail <= 10 ? `${count} لوحات` : `${count} لوحة`;
+}
+
+/** Arabic counted noun: singular for 1, dual for 2, plural for 3-10, and the
+ *  singular again after the number for 11 and up. */
+function arabicCounted(
+  count: number,
+  forms: { one: string; two: string; few: string; many: string },
+): string {
+  if (count === 1) return forms.one;
+  if (count === 2) return forms.two;
+  const tail = count % 100;
+  return tail >= 3 && tail <= 10 ? `${count} ${forms.few}` : `${count} ${forms.many}`;
+}
+
+/** The Home sessions tile's "today: 3 sessions". */
+export function todaySessionsText(language: Language, count: number): string {
+  if (language === "en") return `today: ${count} ${count === 1 ? "session" : "sessions"}`;
+  return `اليوم: ${arabicCounted(count, { one: "جلسة واحدة", two: "جلستان", few: "جلسات", many: "جلسة" })}`;
+}
+
+/** The plan sheet's send button: "Send 3 notes to Claude". */
+export function sendNotesText(language: Language, count: number): string {
+  if (language === "en") return `Send ${count} ${count === 1 ? "note" : "notes"} to Claude`;
+  return `إرسال ${arabicCounted(count, { one: "ملاحظة واحدة", two: "ملاحظتين", few: "ملاحظات", many: "ملاحظة" })} إلى Claude`;
+}
+
+/** Apple platforms send with Cmd; everything else with Ctrl. */
+export function isApplePlatform(navigatorLike: { platform?: string; userAgent?: string }): boolean {
+  return /mac|iphone|ipad|ipod/i.test(navigatorLike.platform || navigatorLike.userAgent || "");
+}
+
+/** The compose field's "( Cmd Enter to send )" hint. */
+export function sendHintText(language: Language, apple: boolean): string {
+  return t(language, "session.sendHint", { key: apple ? "⌘" : "Ctrl" });
 }
 
 export function languageFromLocale(localeTag: string): Language {

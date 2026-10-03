@@ -9,7 +9,9 @@ import {
   openWorkspaceTab,
   terminalTargetFromElsewhere,
   terminalPaneFor,
+  toolProjectOf,
   toolTabId,
+  withTool,
   withoutTool,
   workspaceHostKey,
   workspaceLayout,
@@ -18,7 +20,10 @@ import {
   workspaceTabsAll,
   workspaceTabsFrom,
   workspaceTarget,
+  type WorkspaceToolKind,
 } from "./workspace-tabs";
+
+const ot = (kind: WorkspaceToolKind, project = "acme") => ({ kind, project });
 
 function tab(id: string, kind: MobileWorkspaceTab["kind"], title: string): MobileWorkspaceTab {
   return {
@@ -50,7 +55,7 @@ const SNAPSHOT = {
 
 describe("workspaceTabsFrom", () => {
   it("keeps the snapshot's own order, then the open tools", () => {
-    const tabs = workspaceTabsFrom(SNAPSHOT, ["changes", "docker"], "en");
+    const tabs = workspaceTabsFrom(SNAPSHOT, [ot("changes"), ot("docker")], "en");
     expect(tabs.map((t) => t.id)).toEqual([
       "t2",
       "w1",
@@ -83,16 +88,16 @@ describe("workspaceTabsFrom", () => {
   });
 
   it("titles laptop tabs verbatim and tools from the strings table", () => {
-    const tabs = workspaceTabsFrom(SNAPSHOT, ["changes", "api"], "en");
+    const tabs = workspaceTabsFrom(SNAPSHOT, [ot("changes"), ot("api")], "en");
     expect(tabs.find((t) => t.id === "t2")?.title).toBe("zsh");
     expect(tabs.find((t) => t.id === "tool:changes")?.title).toBe("Changes");
     expect(tabs.find((t) => t.id === "tool:api")?.title).toBe("API");
-    const ar = workspaceTabsFrom(SNAPSHOT, ["changes"], "ar");
+    const ar = workspaceTabsFrom(SNAPSHOT, [ot("changes")], "ar");
     expect(ar.find((t) => t.id === "tool:changes")?.title).not.toBe("Changes");
   });
 
-  it("marks only tools as closable, and lists each tool once", () => {
-    const tabs = workspaceTabsFrom({ tabs: [] }, ["api", "api"], "en");
+  it("marks only tools as closable", () => {
+    const tabs = workspaceTabsFrom({ tabs: [] }, [ot("api")], "en");
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.closable).toBe(true);
     expect(workspaceTabsFrom(SNAPSHOT, [], "en").every((t) => !t.closable)).toBe(true);
@@ -100,17 +105,34 @@ describe("workspaceTabsFrom", () => {
 });
 
 describe("open tools", () => {
-  it("adds the tool the tab param names, once", () => {
-    expect(openToolsWith([], "tool:docker")).toEqual(["docker"]);
-    expect(openToolsWith(["docker"], "tool:docker")).toEqual(["docker"]);
-    expect(openToolsWith(["api"], "t1")).toEqual(["api"]);
-    expect(openToolsWith(["api"], "tool:bogus")).toEqual(["api"]);
-    expect(openToolsWith(["api"], undefined)).toEqual(["api"]);
+  it("adds the tool the tab param names, once, for the given project", () => {
+    expect(openToolsWith([], "tool:docker", "acme")).toEqual([ot("docker", "acme")]);
+    expect(openToolsWith([ot("docker", "web")], "tool:docker", "acme")).toEqual([
+      ot("docker", "web"),
+    ]);
+    expect(openToolsWith([ot("api")], "t1", "acme")).toEqual([ot("api")]);
+    expect(openToolsWith([ot("api")], "tool:bogus", "acme")).toEqual([ot("api")]);
+    expect(openToolsWith([ot("api")], undefined, "acme")).toEqual([ot("api")]);
   });
 
   it("closes a tool", () => {
-    expect(withoutTool(["api", "docker"], "tool:api")).toEqual(["docker"]);
+    expect(withoutTool([ot("api"), ot("docker")], "tool:api")).toEqual([ot("docker")]);
     expect(toolTabId("changes")).toBe("tool:changes");
+  });
+
+  it("opens a tool for a project and re-points the same kind", () => {
+    expect(withTool([], "docker", "a")).toEqual([ot("docker", "a")]);
+    expect(withTool([ot("docker", "a"), ot("api", "a")], "docker", "b")).toEqual([
+      ot("docker", "b"),
+      ot("api", "a"),
+    ]);
+  });
+
+  it("reports the project a tool was opened for", () => {
+    const open = [ot("docker", "a"), ot("api", "b")];
+    expect(toolProjectOf(open, "tool:api")).toBe("b");
+    expect(toolProjectOf(open, "tool:changes")).toBeUndefined();
+    expect(toolProjectOf(open, "t1")).toBeUndefined();
   });
 });
 
@@ -241,7 +263,7 @@ describe("workspaceLayout", () => {
 });
 
 describe("workspaceHostKey", () => {
-  const tabs = workspaceTabsFrom(SNAPSHOT, ["docker"], "en");
+  const tabs = workspaceTabsFrom(SNAPSHOT, [ot("docker")], "en");
   const find = (id: string) => tabs.find((t) => t.id === id);
   it("is the pane for a terminal, a placeholder until its inventory is read", () => {
     expect(workspaceHostKey(find("t1"), "t1:p2", "acme")).toBe("t1:p2");
@@ -332,7 +354,7 @@ describe("workspaceTabsAll", () => {
   ];
 
   it("lists every project's tabs as 'project · title': project order, then tab order, tools last", () => {
-    const tabs = workspaceTabsAll(projects, ["docker"], "en", "web");
+    const tabs = workspaceTabsAll(projects, [ot("docker", "web")], "en");
     expect(tabs.map((t) => t.label)).toEqual([
       "acme · server",
       "acme · Docs",
@@ -343,12 +365,16 @@ describe("workspaceTabsAll", () => {
     expect(tabs[3]).toMatchObject({ id: "tool:docker", closable: true });
   });
 
-  it("draws no tools without a project to hold them", () => {
-    expect(workspaceTabsAll(projects, ["docker"], "en", undefined)).toHaveLength(3);
+  it("labels each tool by its own project, not the selected one", () => {
+    const tabs = workspaceTabsAll(projects, [ot("docker", "acme"), ot("api", "web")], "en");
+    expect(tabs.slice(3).map((t) => [t.label, t.project])).toEqual([
+      ["acme · Docker", "acme"],
+      ["web · API", "web"],
+    ]);
   });
 
   it("keeps non-inline tabs unselectable across projects", () => {
-    const tabs = workspaceTabsAll(projects, [], "en", "acme");
+    const tabs = workspaceTabsAll(projects, [], "en");
     expect(activeTab(tabs, "w1")).toBe("t1");
     expect(activeTab(tabs, "t9")).toBe("t9");
   });
