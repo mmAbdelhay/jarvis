@@ -38,7 +38,13 @@ import {
 } from "@/lib/session-nav";
 import { isSearchHotkey, sessionRouteId } from "@/lib/session-screen";
 import { filterRows, projectsOf, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
-import { isActiveRow, type MergedRow, mergeSessions, selectedRow } from "@/lib/sessions-merge";
+import {
+  firstOpenableRow,
+  isActiveRow,
+  type MergedRow,
+  mergeSessions,
+  selectedRow,
+} from "@/lib/sessions-merge";
 import { resumable, rowCounts, rowSubtitle, rowTimeLabel, rowVariant } from "@/lib/sessions-row";
 import { usePhoneBack } from "@/lib/use-phone-back";
 import type { SessionsView } from "@/lib/sessions-store";
@@ -280,6 +286,13 @@ export default function SessionsScreen() {
   const chipCounts = statusCounts(rows, query, project);
   const shown = filterRows(rows, query, status, project);
   const groups = useMemo(() => groupByDay(shown, now), [shown, now]);
+
+  // Wide opens on the first row (waiting first) rather than an empty pane.
+  const firstId = firstOpenableRow(groups.flatMap((group) => group.rows))?.id;
+  useEffect(() => {
+    if (!wide || selectedId !== undefined || firstId === undefined) return;
+    router.setParams({ id: firstId });
+  }, [wide, selectedId, firstId, router]);
 
   const renderRow = (row: MergedRow) => {
     const variant = rowVariant(row);

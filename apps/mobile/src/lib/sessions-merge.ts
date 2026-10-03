@@ -100,3 +100,10 @@ export function selectedRow(
 export function findRow(rows: readonly MergedRow[], id: string | undefined): MergedRow | undefined {
   return id === undefined ? undefined : rows.find((row) => row.id === id);
 }
+
+/** The row a wide Sessions screen opens on when nothing is selected: the
+ *  first of `rows` (in display order) that can be opened. A row outside
+ *  Jarvis has no pty behind it, so it is never picked. */
+export function firstOpenableRow(rows: readonly MergedRow[]): MergedRow | undefined {
+  return rows.find((row) => row.origin !== "external");
+}

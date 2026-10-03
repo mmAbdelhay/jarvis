@@ -255,7 +255,9 @@ export function SettingsSections(props: Props): React.JSX.Element {
       {Platform.OS === "web" && shown("keep-signed-in") && (
         <>
           <View {...section("keep-signed-in")}>
-            <Text style={styles.cardLine}>{t(props.language, "auth.keepSignedIn")}</Text>
+            <Text style={wide ? sectionTitle : styles.cardLine}>
+              {t(props.language, "auth.keepSignedIn")}
+            </Text>
             <View style={styles.switchRow}>
               <Text style={styles.switchHint}>{t(props.language, "auth.keepSignedInHint")}</Text>
               <Switch

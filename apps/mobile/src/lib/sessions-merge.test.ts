@@ -1,6 +1,13 @@
 import type { Session } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
-import { findRow, historyRow, selectedRow, isActiveRow, mergeSessions } from "./sessions-merge";
+import {
+  findRow,
+  firstOpenableRow,
+  historyRow,
+  selectedRow,
+  isActiveRow,
+  mergeSessions,
+} from "./sessions-merge";
 import type { SessionRowView } from "./sessions-store";
 
 function live(overrides: Partial<SessionRowView> = {}): SessionRowView {
@@ -94,5 +101,16 @@ describe("selectedRow", () => {
     expect(selectedRow(rows, "other", remembered)).toBeUndefined();
     expect(selectedRow(rows, undefined, remembered)).toBeUndefined();
     expect(selectedRow(mergeSessions([live()], [saved()]), "h", undefined)?.id).toBe("h");
+  });
+});
+
+describe("firstOpenableRow", () => {
+  it("picks the first row, skipping one outside Jarvis", () => {
+    const rows = mergeSessions([live({ id: "ext", origin: "external" }), live({ id: "own" })], []);
+    expect(firstOpenableRow(rows)?.id).toBe("own");
+  });
+
+  it("is undefined for an empty list", () => {
+    expect(firstOpenableRow([])).toBeUndefined();
   });
 });
