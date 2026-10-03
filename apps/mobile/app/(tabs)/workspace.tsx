@@ -27,6 +27,10 @@ import {
 } from "react-native";
 import type { MobileWorkspaceTab } from "@jarvis/wire";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActionSheet } from "@/components/ActionSheet";
+import { FileList } from "@/components/FileList";
+import { Icon } from "@/components/Icon";
+import { IconButton } from "@/components/IconButton";
 import { RenameField } from "@/components/RenameField";
 import { dialogs } from "@/lib/dialog";
 import { t } from "@/lib/i18n";
@@ -65,7 +69,8 @@ import { ApiScreen } from "@/screens/ApiScreen";
 import { ChangesScreen } from "@/screens/ChangesScreen";
 import { DockerScreen } from "@/screens/DockerScreen";
 import { TerminalPane } from "@/screens/TerminalPane";
-import { ProjectPicker, type WorkspaceTool, WorkspaceTools } from "@/screens/WorkspaceTools";
+import { ProjectPicker, TOOLS, type WorkspaceTool, WorkspaceTools } from "@/screens/WorkspaceTools";
+import { filesPaneFor, tabRowModel } from "@/lib/workspace-rows";
 import {
   createWorkspaceStore,
   listChatNames,
@@ -96,6 +101,7 @@ export default function WorkspaceScreen() {
   const [renameError, setRenameError] = useState<string | undefined>(undefined);
   const [renameBusy, setRenameBusy] = useState(false);
   const [openTools, setOpenTools] = useState<WorkspaceToolKind[]>([]);
+  const [tabSheet, setTabSheet] = useState(false);
   const insets = useSafeAreaInsets();
   const { kind } = useLayoutClass();
   const wide = kind === "wide";
@@ -390,7 +396,7 @@ export default function WorkspaceScreen() {
   const list = (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -399,7 +405,23 @@ export default function WorkspaceScreen() {
         />
       }
     >
-      <Text style={styles.title}>{t(language, "workspace.title")}</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>{t(language, "workspace.title")}</Text>
+        <TouchableOpacity
+          style={[styles.addTab, (selected === undefined || terminalBusy) && styles.addTabOff]}
+          disabled={selected === undefined || terminalBusy}
+          onPress={() => setTabSheet(true)}
+          accessibilityRole="button"
+          accessibilityLabel={t(language, "workspace.addTabTitle")}
+        >
+          <Icon name="plus" size={16} color={theme.colors.text} />
+          <Text style={styles.addTabText}>
+            {terminalBusy
+              ? t(language, "workspace.openingTerminal")
+              : t(language, "workspace.addTab")}
+          </Text>
+        </TouchableOpacity>
+      </View>
       {view.loading && view.projects.length === 0 && (
         <View style={styles.center}>
           <ActivityIndicator
@@ -425,6 +447,7 @@ export default function WorkspaceScreen() {
         <ProjectSection
           project={selected}
           language={language}
+          client={client}
           panes={panesForSelectedTerminal}
           panesTabId={view.panesTabId}
           chatNames={chatNames}
@@ -436,22 +459,7 @@ export default function WorkspaceScreen() {
           onRenameTab={(tab) => startRename(tab.id, tab.title)}
           onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
           onOpenPane={openPane}
-          onNewTerminal={() => void handleNewTerminal(selected.name)}
-          terminalBusy={terminalBusy}
-          onOpenDocker={() => router.push(`/docker/${encodeURIComponent(selected.name)}`)}
-          onOpenApi={() => router.push(`/api/${encodeURIComponent(selected.name)}`)}
-          onOpenSidecars={() => router.push(`/sidecars/${encodeURIComponent(selected.name)}`)}
-          onLoadChat={() => void loadChatNames(selected.name)}
           onOpenChat={(name) => void openChat(selected.name, name)}
-          // Fix round item 2: `Workspace.dc.html`'s "Changes" row. The old
-          // Dashboard's own `dashboard.changes` quick-link (removed in the
-          // redesign) pushed to the same global `/changes` route with no
-          // session id and did no fetch of its own for +/- counts — there
-          // is no per-project git-counts RPC to pull them from here either
-          // (git:counts/git:changes are both keyed by session id, not
-          // project — changes-store.ts, workspace-store.ts), so this row
-          // matches that: no counts, same route.
-          onOpenChanges={() => router.push("/changes")}
         />
       )}
     </ScrollView>
@@ -531,6 +539,16 @@ export default function WorkspaceScreen() {
             />
           </View>
         )}
+        <ActionSheet
+          visible={tabSheet}
+          title={t(language, "workspace.addTabTitle")}
+          actions={TOOLS.filter(({ tool }) => tool !== "changes").map(({ tool, label }) => ({
+            key: tool,
+            label: t(language, tool === "terminal" ? "workspace.newTerminal" : label),
+            onPress: () => pickTool(tool),
+          }))}
+          onClose={() => setTabSheet(false)}
+        />
         {layout.showEmpty && (
           <View style={styles.emptyPane}>
             <Text style={styles.empty}>
@@ -567,14 +585,10 @@ function InlineTab(props: {
   return <ChangesScreen sessionId={undefined} embedded />;
 }
 
-function tabLabel(tab: MobileWorkspaceTab): string {
-  // Server-originated text — displayed verbatim (global constraint 7).
-  return tab.title;
-}
-
 function ProjectSection(props: {
   project: WorkspaceProjectView;
   language: Language;
+  client: ReturnType<typeof useRpcClient>;
   panes: { paneKey: string; exited: boolean }[] | undefined;
   panesTabId: string | undefined;
   chatNames: string[] | undefined;
@@ -586,16 +600,10 @@ function ProjectSection(props: {
   onRenameTab: (tab: MobileWorkspaceTab) => void;
   onCloseLaptopTab: (tab: MobileWorkspaceTab) => void;
   onOpenPane: (tabId: string, paneKey: string) => void;
-  onNewTerminal: () => void;
-  terminalBusy: boolean;
-  onOpenDocker: () => void;
-  onOpenApi: () => void;
-  onOpenSidecars: () => void;
-  onLoadChat: () => void;
   onOpenChat: (name: string) => void;
-  onOpenChanges: () => void;
 }) {
   const { language } = props;
+  const filesPane = filesPaneFor(props.project.tabs);
   return (
     <View style={styles.section}>
       {props.notice !== undefined && (
@@ -604,133 +612,110 @@ function ProjectSection(props: {
         </Text>
       )}
 
-      <View style={styles.tabsHeader}>
+      <View style={styles.tabs}>
         <Text style={styles.sectionTitle}>{t(language, "workspace.openOnLaptop")}</Text>
-        <View style={styles.tabsHeaderSpacer} />
-        <TouchableOpacity
-          style={styles.newTerminalButton}
-          disabled={props.terminalBusy}
-          onPress={props.onNewTerminal}
-          accessibilityRole="button"
-        >
-          <Text style={styles.newTerminalText}>
-            {props.terminalBusy
-              ? t(language, "workspace.openingTerminal")
-              : t(language, "workspace.newTerminal")}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {props.project.tabs.length === 0 ? (
-        <Text style={styles.empty}>{t(language, "workspace.noTabs")}</Text>
-      ) : (
-        <View style={styles.list}>
-          {props.project.tabs.map((tab) => (
-            <View key={tab.id}>
-              <TouchableOpacity
-                style={styles.row}
-                onPress={() => props.onOpenTab(tab)}
-                accessibilityRole="button"
-              >
-                <Text style={styles.rowLabel}>{tabLabel(tab)}</Text>
-                <Text style={styles.rowKind}>{tab.kind}</Text>
-              </TouchableOpacity>
-              <View style={styles.tabActions}>
-                <TouchableOpacity
-                  style={styles.tabAction}
-                  onPress={() => props.onRenameTab(tab)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t(language, "workspace.renameTab", { title: tab.title })}
-                >
-                  <Text style={styles.tabActionText}>{t(language, "rename.action")}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.tabAction}
-                  onPress={() => props.onCloseLaptopTab(tab)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t(language, "workspace.closeTab", { title: tab.title })}
-                >
-                  <Text style={styles.tabActionDanger}>
-                    {t(language, "workspace.closeConfirm")}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {props.renamingId === tab.id && props.renameField}
-              {tab.kind === "terminal" && props.panesTabId === tab.id && (
-                <View style={styles.paneList}>
-                  <Text style={styles.sectionTitle}>{t(language, "workspace.panes.title")}</Text>
-                  {props.panes === undefined || props.panes.length === 0 ? (
-                    <Text style={styles.empty}>{t(language, "workspace.panes.empty")}</Text>
-                  ) : (
-                    props.panes.map((pane) => (
-                      <TouchableOpacity
-                        key={pane.paneKey}
-                        style={styles.paneRow}
-                        onPress={() => props.onOpenPane(tab.id, pane.paneKey)}
-                        accessibilityRole="button"
-                      >
-                        <Text style={styles.rowLabel}>{pane.paneKey}</Text>
-                        <Text style={styles.rowKind}>
-                          {t(
-                            language,
-                            pane.exited ? "workspace.panes.exited" : "workspace.panes.live",
-                          )}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  )}
+        {props.project.tabs.length === 0 ? (
+          <Text style={styles.empty}>{t(language, "workspace.noTabs")}</Text>
+        ) : (
+          props.project.tabs.map((tab) => {
+            const model = tabRowModel(
+              tab,
+              language,
+              props.panesTabId === tab.id && props.panes !== undefined
+                ? props.panes.length
+                : undefined,
+            );
+            return (
+              <View key={tab.id}>
+                <View style={styles.row}>
+                  <TouchableOpacity
+                    style={styles.rowMain}
+                    onPress={() => props.onOpenTab(tab)}
+                    accessibilityRole="button"
+                  >
+                    <Icon
+                      name={model.icon}
+                      size={18}
+                      color={
+                        model.tone === "accent"
+                          ? theme.colors.accent
+                          : model.tone === "success"
+                            ? theme.colors.success
+                            : theme.colors.textMuted
+                      }
+                    />
+                    <View style={styles.rowText}>
+                      <Text style={styles.rowLabel} numberOfLines={1}>
+                        {model.title}
+                      </Text>
+                      <Text style={styles.rowSub} numberOfLines={1}>
+                        {model.subtitle}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  <IconButton
+                    icon="pencil"
+                    size={40}
+                    iconSize={16}
+                    color={theme.colors.textMuted}
+                    label={t(language, "workspace.renameTab", { title: tab.title })}
+                    onPress={() => props.onRenameTab(tab)}
+                  />
+                  <IconButton
+                    icon="close"
+                    size={40}
+                    iconSize={16}
+                    color={theme.colors.textMuted}
+                    label={t(language, "workspace.closeTab", { title: tab.title })}
+                    onPress={() => props.onCloseLaptopTab(tab)}
+                  />
                 </View>
-              )}
-            </View>
-          ))}
-        </View>
-      )}
-
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={props.onOpenDocker}
-          accessibilityRole="button"
-        >
-          <Text style={styles.actionButtonText}>{t(language, "docker.title")}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={props.onOpenApi}
-          accessibilityRole="button"
-        >
-          <Text style={styles.actionButtonText}>{t(language, "api.title")}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={props.onOpenSidecars}
-          accessibilityRole="button"
-        >
-          <Text style={styles.actionButtonText}>{t(language, "sidecars.title")}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          disabled={props.chatBusy}
-          onPress={props.onLoadChat}
-          accessibilityRole="button"
-        >
-          <Text style={styles.actionButtonText}>{t(language, "workspace.chat")}</Text>
-        </TouchableOpacity>
+                {props.renamingId === tab.id && props.renameField}
+                {tab.kind === "terminal" && props.panesTabId === tab.id && (
+                  <View style={styles.paneList}>
+                    <Text style={styles.sectionTitle}>{t(language, "workspace.panes.title")}</Text>
+                    {props.panes === undefined || props.panes.length === 0 ? (
+                      <Text style={styles.empty}>{t(language, "workspace.panes.empty")}</Text>
+                    ) : (
+                      props.panes.map((pane) => (
+                        <TouchableOpacity
+                          key={pane.paneKey}
+                          style={styles.paneRow}
+                          onPress={() => props.onOpenPane(tab.id, pane.paneKey)}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.paneLabel}>{pane.paneKey}</Text>
+                          <Text style={styles.rowSub}>
+                            {t(
+                              language,
+                              pane.exited ? "workspace.panes.exited" : "workspace.panes.live",
+                            )}
+                          </Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+              </View>
+            );
+          })
+        )}
       </View>
 
       {props.chatNames !== undefined && (
-        <View style={styles.list}>
+        <View style={styles.tabs}>
           {props.chatNames.length === 0 ? (
             <Text style={styles.empty}>{t(language, "workspace.chatUnavailable")}</Text>
           ) : (
             props.chatNames.map((name) => (
               <TouchableOpacity
                 key={name}
-                style={styles.row}
+                style={styles.chatRow}
                 disabled={props.chatBusy}
                 onPress={() => props.onOpenChat(name)}
                 accessibilityRole="button"
               >
+                {/* Server-originated text: shown verbatim. */}
                 <Text style={styles.rowLabel}>{name}</Text>
               </TouchableOpacity>
             ))
@@ -738,14 +723,19 @@ function ProjectSection(props: {
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.changesRow}
-        onPress={props.onOpenChanges}
-        accessibilityRole="button"
-      >
-        <Text style={styles.changesIcon}>⎇</Text>
-        <Text style={styles.changesLabel}>{t(language, "dashboard.changes")}</Text>
-      </TouchableOpacity>
+      <View style={styles.tabs}>
+        <Text style={styles.sectionTitle}>{t(language, "workspace.files")}</Text>
+        {filesPane === undefined ? (
+          <Text style={styles.empty}>{t(language, "workspace.filesNeedTerminal")}</Text>
+        ) : (
+          <FileList
+            key={`${props.project.name}:${filesPane}`}
+            client={props.client}
+            paneKey={filesPane}
+            language={language}
+          />
+        )}
+      </View>
     </View>
   );
 }
@@ -761,45 +751,51 @@ const styles = StyleSheet.create({
   backText: { color: theme.colors.primary, fontFamily: theme.font.semibold, fontSize: 14 },
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
   container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, gap: 18 },
-  title: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 26 },
+  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, gap: 14 },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  title: { ...theme.type.display, color: theme.colors.text },
+  addTab: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.control,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  addTabOff: { opacity: 0.45 },
+  addTabText: { ...theme.type.button, color: theme.colors.text },
   center: { alignItems: "center", padding: theme.spacing.lg },
   section: { gap: theme.spacing.md },
-  sectionTitle: {
-    color: theme.colors.textDim,
-    fontFamily: theme.font.bold,
-    fontSize: 12,
-    letterSpacing: 1.2,
+  sectionTitle: { ...theme.type.sectionLabel, color: theme.colors.textDim },
+  tabs: { gap: 6 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingStart: 12,
+    paddingEnd: 6,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
   },
-  tabsHeader: { flexDirection: "row", alignItems: "baseline", gap: theme.spacing.sm },
-  tabsHeaderSpacer: { flex: 1 },
-  newTerminalButton: {
-    height: 32,
+  rowMain: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 },
+  rowText: { flex: 1, minWidth: 0 },
+  rowLabel: { ...theme.type.rowTitle, color: theme.colors.text },
+  rowSub: { ...theme.type.meta, color: theme.colors.textMuted },
+  chatRow: {
+    minHeight: 46,
     justifyContent: "center",
     paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.hairline,
-    borderRadius: theme.radius.small,
-    backgroundColor: theme.colors.surface,
-  },
-  newTerminalText: { color: theme.colors.accent, fontFamily: theme.font.semibold, fontSize: 12 },
-  list: { gap: theme.spacing.sm },
-  tabActions: { flexDirection: "row", gap: 6, paddingTop: 4 },
-  tabAction: { minHeight: 32, justifyContent: "center", paddingHorizontal: 10 },
-  tabActionText: { color: theme.colors.accent, fontFamily: theme.font.semibold, fontSize: 12 },
-  tabActionDanger: { color: theme.colors.danger, fontFamily: theme.font.semibold, fontSize: 12 },
-  row: {
-    backgroundColor: theme.colors.surface,
-    borderColor: theme.colors.hairline,
-    borderWidth: 1,
     borderRadius: theme.radius.card,
-    padding: theme.spacing.md,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    borderWidth: 1,
+    borderColor: theme.colors.hairline,
+    backgroundColor: theme.colors.surface,
   },
-  rowLabel: { color: theme.colors.text, fontFamily: theme.font.semibold, fontSize: 14 },
-  rowKind: { color: theme.colors.textDim, fontFamily: theme.font.mono, fontSize: 11 },
   paneList: { paddingStart: theme.spacing.md, gap: theme.spacing.sm, marginTop: theme.spacing.sm },
   paneRow: {
     backgroundColor: theme.colors.surfaceAlt,
@@ -809,31 +805,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  actionButton: {
-    width: "48%",
-    minHeight: 92,
-    justifyContent: "center",
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.card,
-    borderWidth: 1,
-    borderColor: theme.colors.hairline,
-    padding: 14,
-    alignItems: "flex-start",
-  },
-  actionButtonText: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 15 },
-  changesRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.hairline,
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.colors.surface,
-  },
-  changesIcon: { color: theme.colors.textSecondary, fontFamily: theme.font.mono, fontSize: 18 },
-  changesLabel: { flex: 1, color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 15 },
+  paneLabel: { ...theme.type.mono, color: theme.colors.text },
   empty: { color: theme.colors.textMuted, fontSize: theme.font.size.sm },
   warning: { color: theme.colors.warning, fontSize: theme.font.size.sm },
   error: { color: theme.colors.danger, fontSize: theme.font.size.sm },

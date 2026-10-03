@@ -15,7 +15,7 @@ export function ProjectPicker(props: {
   onSelect(name: string): void;
 }) {
   return (
-    <View style={styles.projectRow}>
+    <View style={styles.projectRow} accessibilityRole="tablist">
       {props.projects.map((project) => (
         <TouchableOpacity
           key={project.name}
@@ -24,9 +24,17 @@ export function ProjectPicker(props: {
             project.name === props.selected && styles.projectChipSelected,
           ]}
           onPress={() => props.onSelect(project.name)}
-          accessibilityRole="button"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: project.name === props.selected }}
         >
-          <Text style={styles.projectChipText}>{project.name}</Text>
+          <Text
+            style={[
+              styles.projectChipText,
+              project.name === props.selected && styles.projectChipTextSelected,
+            ]}
+          >
+            {project.name}
+          </Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -44,7 +52,7 @@ export type WorkspaceTool =
   | "chat";
 
 // The desktop's order.
-const TOOLS: readonly { tool: WorkspaceTool; label: MessageKey }[] = [
+export const TOOLS: readonly { tool: WorkspaceTool; label: MessageKey }[] = [
   { tool: "terminal", label: "workspace.terminal" },
   { tool: "api", label: "api.title" },
   { tool: "docker", label: "docker.title" },
@@ -211,23 +219,19 @@ export function WorkspaceTools(props: {
 const styles = StyleSheet.create({
   projectRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing.sm },
   projectChip: {
-    height: 36,
+    minHeight: 36,
     justifyContent: "center",
-    backgroundColor: theme.colors.surface,
-    borderRadius: 999,
+    borderRadius: theme.radius.pill,
     borderWidth: 1,
     borderColor: theme.colors.border,
     paddingHorizontal: 14,
   },
   projectChipSelected: {
-    backgroundColor: theme.colors.accentSoft,
-    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.text,
+    borderColor: theme.colors.text,
   },
-  projectChipText: {
-    color: theme.colors.textSecondary,
-    fontFamily: theme.font.semibold,
-    fontSize: 13,
-  },
+  projectChipText: { ...theme.type.chip, color: theme.colors.textSecondary },
+  projectChipTextSelected: { ...theme.type.chipSelected, color: theme.colors.primaryText },
   header: { gap: 10 },
   toolRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   tool: {
