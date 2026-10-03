@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.6] — 2026-10-03
+
 - The phone's terminal key bar has an Alt key. Like Ctrl, it applies to the
   next key or text sent, so Alt+⌫ deletes a word and Alt+arrows move by word.
 - Home shows how many sessions started each day over the last two weeks.
@@ -106,6 +108,9 @@ version and the downloads. This file is the index.
   header); names are typed in place, nothing is ever overwritten, and every
   write is held to the project root the same way listing is.
 - The plan panel has a user guide section, under Workspace tabs → Terminal.
+- Jarvis no longer thinks a background daemon is running when the home
+  folder's path is too long for a socket, which showed a startup dialog
+  offering to stop a daemon that did not exist.
 
 ## [0.1.5] — 2026-09-28
 
