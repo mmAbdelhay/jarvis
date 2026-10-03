@@ -89,6 +89,48 @@ export function workspaceTabsFrom(
   return tabs;
 }
 
+/** A wide strip tab: any project's tab, labelled with its project. */
+export type WorkspaceStripTab = WorkspaceTabItem & {
+  project: string;
+  /** "project · title". */
+  label: string;
+};
+
+/** The wide strip, across every project: each project's tabs in the
+ *  snapshot's order (projects in their own order), then the tools opened
+ *  here, which belong to `toolProject`. */
+export function workspaceTabsAll(
+  projects: readonly { name: string; tabs: readonly MobileWorkspaceTab[] }[],
+  openTools: readonly WorkspaceToolKind[],
+  language: Language,
+  toolProject: string | undefined,
+): WorkspaceStripTab[] {
+  const all: WorkspaceStripTab[] = [];
+  for (const project of projects) {
+    for (const tab of workspaceTabsFrom({ tabs: project.tabs }, [], language)) {
+      all.push({ ...tab, project: project.name, label: `${project.name} · ${tab.title}` });
+    }
+  }
+  if (toolProject !== undefined) {
+    for (const tab of workspaceTabsFrom({ tabs: [] }, openTools, language)) {
+      all.push({ ...tab, project: toolProject, label: `${toolProject} · ${tab.title}` });
+    }
+  }
+  return all;
+}
+
+/** The dot on a strip tab: drawn only for a terminal tab whose panes have
+ *  been read and include one that exited (there is no tab-to-session link
+ *  for a "waiting" dot). */
+export function tabStatusDot(
+  tab: Pick<WorkspaceTabItem, "id" | "kind">,
+  panes: readonly TerminalPaneInfo[],
+  panesTabId: string | undefined,
+): "exited" | undefined {
+  if (tab.kind !== "terminal" || panesTabId !== tab.id) return undefined;
+  return panes.some((pane) => pane.exited) ? "exited" : undefined;
+}
+
 /** The open tools, plus the one a `?tab=` param names (a reload or a
  *  shared link keeps its tool open). */
 export function openToolsWith(

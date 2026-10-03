@@ -14,6 +14,8 @@ import {
   workspaceHostKey,
   workspaceLayout,
   workspaceRedirectFor,
+  tabStatusDot,
+  workspaceTabsAll,
   workspaceTabsFrom,
   workspaceTarget,
 } from "./workspace-tabs";
@@ -316,5 +318,52 @@ describe("RF2: attach count across the breakpoint", () => {
     render(workspaceLayout("wide", "t1").paneKey);
     render(workspaceLayout("wide", "t2").paneKey);
     expect(attaches).toEqual(["t1", "t2"]);
+  });
+});
+
+describe("workspaceTabsAll", () => {
+  const other = (id: string, kind: MobileWorkspaceTab["kind"], title: string) => ({
+    ...tab(id, kind, title),
+    project: "web",
+  });
+  const projects = [
+    { name: "acme", tabs: [tab("t1", "terminal", "server"), tab("w1", "web", "Docs")] },
+    { name: "web", tabs: [other("t9", "terminal", "zsh")] },
+  ];
+
+  it("lists every project's tabs as 'project · title': project order, then tab order, tools last", () => {
+    const tabs = workspaceTabsAll(projects, ["docker"], "en", "web");
+    expect(tabs.map((t) => t.label)).toEqual([
+      "acme · server",
+      "acme · Docs",
+      "web · zsh",
+      "web · Docker",
+    ]);
+    expect(tabs.map((t) => t.project)).toEqual(["acme", "acme", "web", "web"]);
+    expect(tabs[3]).toMatchObject({ id: "tool:docker", closable: true });
+  });
+
+  it("draws no tools without a project to hold them", () => {
+    expect(workspaceTabsAll(projects, ["docker"], "en", undefined)).toHaveLength(3);
+  });
+
+  it("keeps non-inline tabs unselectable across projects", () => {
+    const tabs = workspaceTabsAll(projects, [], "en", "acme");
+    expect(activeTab(tabs, "w1")).toBe("t1");
+    expect(activeTab(tabs, "t9")).toBe("t9");
+  });
+});
+
+describe("tabStatusDot", () => {
+  const exited = [{ paneKey: "t1", exited: true }];
+  it("marks a terminal tab whose panes include an exited one", () => {
+    expect(tabStatusDot({ id: "t1", kind: "terminal" }, exited, "t1")).toBe("exited");
+  });
+  it("draws nothing for live panes, other tabs or unread panes", () => {
+    expect(
+      tabStatusDot({ id: "t1", kind: "terminal" }, [{ paneKey: "t1", exited: false }], "t1"),
+    ).toBeUndefined();
+    expect(tabStatusDot({ id: "t2", kind: "terminal" }, exited, "t1")).toBeUndefined();
+    expect(tabStatusDot({ id: "d1", kind: "docker" }, exited, "d1")).toBeUndefined();
   });
 });

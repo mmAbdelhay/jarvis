@@ -209,10 +209,6 @@ export const STRINGS = {
     en: "Settings",
     ar: "الإعدادات",
   },
-  "settings.sectionNav": {
-    en: "Settings sections",
-    ar: "أقسام الإعدادات",
-  },
   "settings.section.general": {
     en: "General",
     ar: "عام",
@@ -1151,6 +1147,12 @@ export const STRINGS = {
   "workspace.addTab": { en: "Tab", ar: "تبويب" },
   "workspace.addTabTitle": { en: "Add a tab", ar: "إضافة تبويب" },
   "workspace.files": { en: "FILES", ar: "الملفات" },
+  "workspace.newTab": { en: "New tab", ar: "تبويب جديد" },
+  "workspace.tabActions": { en: "Tab actions: {title}", ar: "إجراءات التبويب: {title}" },
+  "workspace.newTabProject": { en: "Which project?", ar: "أي مشروع؟" },
+  "terminal.historyHint": { en: "⌃R history", ar: "⌃R السجل" },
+  "plans.sessionPlan": { en: "Session plan", ar: "خطة الجلسة" },
+  "plans.sendNotes": { en: "Send {count} notes to Claude", ar: "إرسال {count} ملاحظات إلى Claude" },
   "workspace.filesNeedTerminal": {
     en: "Open a terminal on the laptop to browse this project's files.",
     ar: "افتح طرفية على الحاسوب لتصفح ملفات هذا المشروع.",

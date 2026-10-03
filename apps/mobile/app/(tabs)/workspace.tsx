@@ -23,6 +23,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import type { MobileWorkspaceTab } from "@jarvis/wire";
@@ -51,17 +52,24 @@ import { openTerminal } from "@/lib/terminal-open";
 import { theme } from "@/lib/theme";
 import { usePhoneBack } from "@/lib/use-phone-back";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import {
+  contentWidth,
+  workspaceShowsFilesAside,
+  workspaceShowsPlanDock,
+} from "@/lib/wide-breakpoints";
 import type { WorkspaceProjectView, WorkspaceView } from "@/lib/workspace-store";
-import type { WorkspaceTabItem, WorkspaceToolKind } from "@/lib/workspace-tabs";
+import type { WorkspaceStripTab, WorkspaceTabItem, WorkspaceToolKind } from "@/lib/workspace-tabs";
 import {
   activeTab,
   openToolsWith,
   openWorkspaceTab,
+  tabStatusDot,
   terminalPaneFor,
   toolTabId,
   withoutTool,
   workspaceHostKey,
   workspaceLayout,
+  workspaceTabsAll,
   workspaceTabsFrom,
   workspaceTarget,
 } from "@/lib/workspace-tabs";
@@ -69,7 +77,12 @@ import { ApiScreen } from "@/screens/ApiScreen";
 import { ChangesScreen } from "@/screens/ChangesScreen";
 import { DockerScreen } from "@/screens/DockerScreen";
 import { TerminalPane } from "@/screens/TerminalPane";
-import { ProjectPicker, TOOLS, type WorkspaceTool, WorkspaceTools } from "@/screens/WorkspaceTools";
+import {
+  ProjectPicker,
+  TOOLS,
+  type WorkspaceTool,
+  WorkspaceTabStrip,
+} from "@/screens/WorkspaceTools";
 import {
   defaultWorkspaceProject,
   filesPaneFor,
@@ -107,9 +120,19 @@ export default function WorkspaceScreen() {
   const [renameBusy, setRenameBusy] = useState(false);
   const [openTools, setOpenTools] = useState<WorkspaceToolKind[]>([]);
   const [tabSheet, setTabSheet] = useState(false);
+  // Wide "+": a project step first when there is more than one, then the tool.
+  const [plus, setPlus] = useState<
+    { step: "project" } | { step: "tool"; project: string } | undefined
+  >(undefined);
+  // The tab whose long-press menu (Rename, Close) is open.
+  const [tabActions, setTabActions] = useState<WorkspaceStripTab | undefined>(undefined);
+  const windowWidth = useWindowDimensions().width;
   const insets = useSafeAreaInsets();
   const { kind } = useLayoutClass();
   const wide = kind === "wide";
+  const sideContent = contentWidth(windowWidth, "rail");
+  const filesAside = wide && workspaceShowsFilesAside(sideContent);
+  const planDock = wide && workspaceShowsPlanDock(sideContent);
   const params = useLocalSearchParams<{ tab?: string; pane?: string; project?: string }>();
   const tabParam = sessionRouteId(params.tab);
   const paneParam = sessionRouteId(params.pane);
@@ -231,7 +254,12 @@ export default function WorkspaceScreen() {
   // Wide (and a phone that inherited a tab from a rotation): the tab strip
   // and the active tab's inline content.
   const tools = openToolsWith(openTools, tabParam);
-  const tabs = workspaceTabsFrom({ tabs: selected?.tabs ?? [] }, tools, language);
+  // Wide: every project's tabs in one strip (tools open here follow the
+  // selected project). A phone-sized window keeps the selected project's.
+  const stripTabs = workspaceTabsAll(view.projects, tools, language, view.selectedProject);
+  const tabs: readonly WorkspaceTabItem[] = wide
+    ? stripTabs
+    : workspaceTabsFrom({ tabs: selected?.tabs ?? [] }, tools, language);
   const activeId = wide
     ? activeTab(tabs, tabParam)
     : tabs.some((tab) => tab.inline && tab.id === tabParam)
@@ -248,7 +276,11 @@ export default function WorkspaceScreen() {
           panesTabId: view.panesTabId,
           pane: paneParam,
         });
-  const project = view.selectedProject ?? "";
+  // The active tab's own project (the selection follows it a render later).
+  const project =
+    (wide ? stripTabs.find((tab) => tab.id === activeId)?.project : undefined) ??
+    view.selectedProject ??
+    "";
   // The inline content's React key: the pane, or the tab and project,
   // never the layout, so crossing the breakpoint keeps it mounted.
   const layout = workspaceLayout(kind, workspaceHostKey(active, paneKey, project));
@@ -302,11 +334,14 @@ export default function WorkspaceScreen() {
     if (focused && activeTerminal !== undefined) store.readPanes(activeTerminal);
   }, [focused, activeTerminal, store]);
 
-  function selectTab(tab: WorkspaceTabItem): void {
+  function selectTab(tab: WorkspaceTabItem & { project?: string }): void {
     if (!tab.inline) {
       // A web page, chat or sidecar: exactly what the phone's row does.
-      const laptopTab = selected?.tabs.find((candidate) => candidate.id === tab.id);
-      if (selected !== undefined && laptopTab !== undefined) openTab(selected.name, laptopTab);
+      const owning = tab.project ?? selected?.name;
+      const laptopTab = view.projects
+        .find((candidate) => candidate.name === owning)
+        ?.tabs.find((candidate) => candidate.id === tab.id);
+      if (owning !== undefined && laptopTab !== undefined) openTab(owning, laptopTab);
       return;
     }
     openWorkspaceTab(router, workspaceTarget(kind, { id: tab.id, kind: tab.kind, project }));
@@ -381,20 +416,24 @@ export default function WorkspaceScreen() {
       />
     );
 
-  function pickTool(tool: WorkspaceTool): void {
-    if (selected === undefined) return;
+  // `target` is the wide "+" sheet's chosen project; the phone's sheet acts
+  // on the selected one.
+  function pickTool(tool: WorkspaceTool, target?: string): void {
+    const name = target ?? selected?.name;
+    if (name === undefined) return;
+    if (name !== selected?.name) store.selectProject(name);
     if (tool === "terminal") {
-      void handleNewTerminal(selected.name);
+      void handleNewTerminal(name);
       return;
     }
     if (tool === "chat") {
-      void loadChatNames(selected.name);
+      void loadChatNames(name);
       return;
     }
     if (tool === "editor" || tool === "database" || tool === "cluster") {
       // Sidecars keep their own screen: a new browser tab on web, the
       // sidecar view on native.
-      router.push(`/sidecars/${encodeURIComponent(selected.name)}`);
+      router.push(`/sidecars/${encodeURIComponent(name)}`);
       return;
     }
     setOpenTools(openToolsWith(tools, toolTabId(tool)));
@@ -495,29 +534,41 @@ export default function WorkspaceScreen() {
     // whether the wide header or the phone's back chip is above it, so
     // crossing the breakpoint never remounts it (Review Focus 2).
     <View style={styles.root}>
-      <View style={styles.column}>
+      <View style={[styles.column, wide && styles.columnWide]}>
         {layout.showTools && (
           // Mirrored like the top bar: the reading direction, never a
           // reversed row (native already forces RTL).
-          <View style={[styles.wideHeader, { direction: split.direction }]}>
-            <WorkspaceTools
+          <View style={{ direction: split.direction }}>
+            <WorkspaceTabStrip
               language={language}
-              projects={view.projects}
-              selectedProject={view.selectedProject}
-              onSelectProject={selectProject}
-              terminalBusy={terminalBusy}
-              onTool={pickTool}
+              tabs={stripTabs}
+              activeId={activeId}
+              exitedIds={
+                new Set(
+                  stripTabs
+                    .filter((tab) => tabStatusDot(tab, view.panes, view.panesTabId) === "exited")
+                    .map((tab) => tab.id),
+                )
+              }
+              plusDisabled={view.projects.length === 0 || terminalBusy}
+              onPlus={() =>
+                setPlus(
+                  view.projects.length > 1
+                    ? { step: "project" }
+                    : selected === undefined
+                      ? undefined
+                      : { step: "tool", project: selected.name },
+                )
+              }
+              onSelectTab={selectTab}
+              onCloseTab={closeTab}
+              onTabActions={(tab) => setTabActions(tab)}
+              onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
               chatNames={chatNames}
               chatBusy={chatBusy}
               onOpenChat={(name) => {
                 if (selected !== undefined) void openChat(selected.name, name);
               }}
-              tabs={tabs}
-              activeId={activeId}
-              onSelectTab={selectTab}
-              onCloseTab={closeTab}
-              onRenameLaptopTab={(tab) => startRename(tab.id, tab.title)}
-              onCloseLaptopTab={(tab) => confirmCloseLaptopTab(tab.id, tab.title)}
               panes={
                 activeTerminal !== undefined && view.panesTabId === activeTerminal
                   ? view.panes.map((pane) => pane.paneKey)
@@ -532,12 +583,20 @@ export default function WorkspaceScreen() {
                 );
               }}
             />
-            {renameField}
-            {statusLines}
-            {notice !== undefined && (
-              <Text selectable style={styles.error}>
-                {isMessageKey(notice) ? t(language, notice) : notice}
-              </Text>
+            {(renameField !== null ||
+              view.stale ||
+              view.liveUpdatesUnsupported ||
+              errorText !== undefined ||
+              notice !== undefined) && (
+              <View style={styles.wideNotices}>
+                {renameField}
+                {statusLines}
+                {notice !== undefined && (
+                  <Text selectable style={styles.error}>
+                    {isMessageKey(notice) ? t(language, notice) : notice}
+                  </Text>
+                )}
+              </View>
             )}
           </View>
         )}
@@ -561,6 +620,8 @@ export default function WorkspaceScreen() {
               paneKey={paneKey}
               project={project}
               language={language}
+              filesAside={filesAside}
+              planDock={planDock}
             />
           </View>
         )}
@@ -573,6 +634,51 @@ export default function WorkspaceScreen() {
             onPress: () => pickTool(tool),
           }))}
           onClose={() => setTabSheet(false)}
+        />
+        <ActionSheet
+          visible={plus !== undefined}
+          title={t(
+            language,
+            plus?.step === "project" ? "workspace.newTabProject" : "workspace.newTab",
+          )}
+          actions={
+            plus === undefined
+              ? []
+              : plus.step === "project"
+                ? view.projects.map((candidate) => ({
+                    key: candidate.name,
+                    // Server-originated text: shown verbatim.
+                    label: candidate.name,
+                    onPress: () => setPlus({ step: "tool", project: candidate.name }),
+                  }))
+                : TOOLS.filter(({ tool }) => tool !== "changes").map(({ tool, label }) => ({
+                    key: tool,
+                    label: t(language, tool === "terminal" ? "workspace.newTerminal" : label),
+                    onPress: () => pickTool(tool, plus.project),
+                  }))
+          }
+          onClose={() => setPlus(undefined)}
+        />
+        <ActionSheet
+          visible={tabActions !== undefined}
+          title={tabActions?.label ?? ""}
+          actions={
+            tabActions === undefined
+              ? []
+              : [
+                  {
+                    key: "rename",
+                    label: t(language, "workspace.rename"),
+                    onPress: () => startRename(tabActions.id, tabActions.title),
+                  },
+                  {
+                    key: "close",
+                    label: t(language, "workspace.closeConfirm"),
+                    onPress: () => confirmCloseLaptopTab(tabActions.id, tabActions.title),
+                  },
+                ]
+          }
+          onClose={() => setTabActions(undefined)}
         />
         {layout.showEmpty && (
           <View style={styles.emptyPane}>
@@ -597,13 +703,24 @@ function InlineTab(props: {
   paneKey: string | undefined;
   project: string;
   language: Language;
+  filesAside: boolean;
+  planDock: boolean;
 }) {
   const { tab } = props;
   if (tab.kind === "terminal") {
     if (props.paneKey === undefined) {
       return <Text style={styles.status}>{t(props.language, "session.attaching")}</Text>;
     }
-    return <TerminalPane paneKey={props.paneKey} tabId={tab.id} embedded />;
+    return (
+      <TerminalPane
+        paneKey={props.paneKey}
+        tabId={tab.id}
+        embedded
+        project={props.project}
+        filesAside={props.filesAside}
+        planDock={props.planDock}
+      />
+    );
   }
   if (tab.kind === "docker") return <DockerScreen project={props.project} embedded />;
   if (tab.kind === "api") return <ApiScreen project={props.project} embedded />;
@@ -769,7 +886,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.background },
   // The desktop's content measure; a phone is narrower than it anyway.
   column: { flex: 1, width: "100%", maxWidth: 1180, alignSelf: "center" },
-  wideHeader: { paddingHorizontal: 20, paddingTop: 14, gap: 8 },
+  // The wide Workspace uses the whole content width: the tab strip, the
+  // Files tree, the terminal and the plan dock run edge to edge.
+  columnWide: { maxWidth: "100%" },
+  wideNotices: { paddingHorizontal: 20, paddingVertical: 8, gap: 8 },
   paneHost: { flex: 1, minHeight: 0 },
   emptyPane: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   back: { paddingHorizontal: 14, paddingBottom: 10, backgroundColor: theme.colors.ground },

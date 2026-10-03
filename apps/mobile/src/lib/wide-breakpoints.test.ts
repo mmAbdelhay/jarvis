@@ -30,4 +30,14 @@ describe("wide breakpoints", () => {
     expect([workspaceShowsPlanDock(1099), workspaceShowsPlanDock(1100)]).toEqual([false, true]);
     expect([settingsSideBySide(819), settingsSideBySide(820)]).toEqual([false, true]);
   });
+
+  it("Workspace chrome by window width: the rail leaves 64 off", () => {
+    const chrome = (width: number) => {
+      const content = contentWidth(width, "rail");
+      return [workspaceShowsFilesAside(content), workspaceShowsPlanDock(content)];
+    };
+    expect(chrome(1440)).toEqual([true, true]);
+    expect(chrome(1024)).toEqual([true, false]);
+    expect(chrome(820)).toEqual([false, false]);
+  });
 });

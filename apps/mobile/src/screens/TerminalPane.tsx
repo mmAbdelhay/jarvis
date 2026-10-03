@@ -21,6 +21,7 @@ import {
 import { ComposeBar } from "@/components/ComposeBar";
 import { ArrowPad } from "@/components/ArrowPad";
 import { FileBrowserSheet } from "@/components/FileBrowserSheet";
+import { FileTree } from "@/components/FileTree";
 import { IconButton } from "@/components/IconButton";
 import { KeyBar } from "@/components/KeyBar";
 import { PlanStrip } from "@/components/PlanStrip";
@@ -60,7 +61,7 @@ import { useKeyboardHeight } from "@/lib/use-keyboard-height";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { createPlansStore } from "@/lib/plans-store";
 import { parseTerminalPanes, parseWorkspaceSnapshot, resolvePane } from "@/lib/workspace-store";
-import { PlanSheet } from "@/plan/PlanSheet";
+import { PlanDock, PlanSheet } from "@/plan/PlanSheet";
 import { currentStep, planProgressOf } from "@/plan/plan-progress";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MobileWorkspaceTab, TerminalPaneInfo } from "@jarvis/wire";
@@ -72,7 +73,17 @@ type ValidationPhase = "checking" | "notFound" | "ok";
  *  stack header). Keyed by pane, so a parent that keeps the same pane keeps
  *  the same attach. `tabId` defaults to the pane key: a fresh tab's main
  *  pane key is its own tab id. */
-export function TerminalPane(props: { paneKey: string; tabId?: string; embedded: boolean }) {
+export function TerminalPane(props: {
+  paneKey: string;
+  tabId?: string;
+  embedded: boolean;
+  /** Wide Workspace: the project's name for the status bar. */
+  project?: string;
+  /** Wide Workspace: the Files tree beside the terminal (otherwise the Files button). */
+  filesAside?: boolean;
+  /** Wide Workspace: the plan docked beside the terminal (otherwise the PlanStrip). */
+  planDock?: boolean;
+}) {
   const tabId = props.tabId ?? props.paneKey;
   return (
     <TerminalPaneBody
@@ -80,6 +91,9 @@ export function TerminalPane(props: { paneKey: string; tabId?: string; embedded:
       paneKey={props.paneKey}
       tabId={tabId}
       embedded={props.embedded}
+      project={props.project}
+      filesAside={props.filesAside === true}
+      planDock={props.planDock === true}
     />
   );
 }
@@ -88,10 +102,16 @@ function TerminalPaneBody({
   paneKey,
   tabId,
   embedded,
+  project,
+  filesAside,
+  planDock,
 }: {
   paneKey: string;
   tabId: string;
   embedded: boolean;
+  project: string | undefined;
+  filesAside: boolean;
+  planDock: boolean;
 }) {
   const client = useRpcClient();
   const router = useRouter();
@@ -335,36 +355,44 @@ function TerminalPaneBody({
     setFound(undefined);
     setQuery("");
   };
+  const findControl = finding ? (
+    <TerminalFindField
+      language={language}
+      value={query}
+      found={found}
+      onChange={setQuery}
+      onSubmit={() => query !== "" && webRef.current?.find(query, "next")}
+    />
+  ) : (
+    <IconButton
+      icon="search"
+      label={t(language, "terminal.find")}
+      {...(embedded ? { size: 28 as const, iconSize: 16 } : {})}
+      onPress={() => {
+        setFinding(true);
+        setFound(undefined);
+      }}
+    />
+  );
+  const filesButton = (
+    <IconButton
+      icon="folder"
+      label={t(language, "files.title")}
+      onPress={() => setFilesOpen(true)}
+    />
+  );
+  // The phone's header keeps both; the wide pane moves find into its status
+  // bar and shows the Files button only when no aside holds the tree.
   const headerActions = (
     <View style={styles.headerActions}>
-      <IconButton
-        icon="folder"
-        label={t(language, "files.title")}
-        onPress={() => setFilesOpen(true)}
-      />
-      {finding ? (
-        <TerminalFindField
-          language={language}
-          value={query}
-          found={found}
-          onChange={setQuery}
-          onSubmit={() => query !== "" && webRef.current?.find(query, "next")}
-        />
-      ) : (
-        <IconButton
-          icon="search"
-          label={t(language, "terminal.find")}
-          onPress={() => {
-            setFinding(true);
-            setFound(undefined);
-          }}
-        />
-      )}
+      {filesButton}
+      {findControl}
     </View>
   );
+  const dockShown = planDock && plansStore.state.doc !== undefined;
   const chips = embedded ? [] : paneChips(panes, paneKey);
   const showChips = chips.length > 1;
-  return (
+  const terminal = (
     // iOS: KeyboardAvoidingView's padding behavior, as before. Android: no
     // behavior (a plain View) and the screen pads itself from the measured
     // keyboard height + bottom inset — keyboard-offset.ts has the measured
@@ -372,6 +400,7 @@ function TerminalPaneBody({
     <KeyboardAvoidingView
       style={[
         styles.container,
+        embedded && styles.embeddedColumn,
         { paddingBottom: keyboardBottomPadding(Platform.OS, keyboardHeight, insets.bottom) },
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
@@ -413,8 +442,9 @@ function TerminalPaneBody({
           ))}
         </View>
       )}
-      {/* Wide layout: no stack header, so the same button sits above the pane. */}
-      {embedded && <View style={styles.planRow}>{headerActions}</View>}
+      {/* Wide layout: no stack header, so the Files button sits above the pane
+          (unless the aside shows the tree); find is in the status bar. */}
+      {embedded && !filesAside && <View style={styles.planRow}>{filesButton}</View>}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -470,7 +500,7 @@ function TerminalPaneBody({
         onFind={(text, direction) => webRef.current?.find(text, direction)}
         onCloseFind={closeFind}
       />
-      {plansStore.state.doc !== undefined && (
+      {plansStore.state.doc !== undefined && !dockShown && (
         <PlanStrip
           language={language}
           progress={planProgressOf(plansStore.state.doc)}
@@ -478,6 +508,17 @@ function TerminalPaneBody({
           queuedNotes={queuedNotes}
           onOpen={() => setPlanVisible(true)}
         />
+      )}
+      {embedded && (
+        <View style={styles.statusBar}>
+          <Text style={styles.statusPath} numberOfLines={1}>
+            {project ?? ""}
+          </Text>
+          <View style={styles.statusEnd}>
+            <Text style={styles.statusHint}>{t(language, "terminal.historyHint")}</Text>
+            {findControl}
+          </View>
+        </View>
       )}
       <View style={styles.footer}>
         <KeyBar
@@ -539,6 +580,26 @@ function TerminalPaneBody({
       />
     </KeyboardAvoidingView>
   );
+  if (!embedded) return terminal;
+  // Wide Workspace: the Files tree and the plan dock flank the terminal. The
+  // terminal keeps one position, so showing or hiding a side never remounts it.
+  return (
+    <View style={styles.dockRow}>
+      {filesAside ? (
+        <FileTree
+          key={paneKey}
+          client={client}
+          paneKey={paneKey}
+          language={language}
+          onInsert={(text) => {
+            void inputRef.current?.sendText(text);
+          }}
+        />
+      ) : null}
+      {terminal}
+      {dockShown ? <PlanDock store={plansStore} language={language} tabTitle={paneKey} /> : null}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -547,6 +608,21 @@ const styles = StyleSheet.create({
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   planRow: { flexDirection: "row", justifyContent: "flex-end" },
+  embeddedColumn: { minWidth: 0 },
+  dockRow: { flex: 1, flexDirection: "row", minHeight: 0 },
+  statusBar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.hairlineSoft,
+  },
+  statusPath: { ...theme.type.mono, flexShrink: 1, color: theme.colors.textDim },
+  statusEnd: { flexDirection: "row", alignItems: "center", gap: 8, marginStart: "auto" },
+  statusHint: { ...theme.type.meta, color: theme.colors.textDim },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   chips: {
     flexDirection: "row",
