@@ -71,7 +71,21 @@ function fakeLocalStorage(): Storage {
   } as Storage;
 }
 
+/** The module the last test loaded. vi.resetModules() gives each test a
+ *  fresh copy, but the previous copy's tabs live on: their timers (the
+ *  sidebar's 150 ms re-read, the 4 s poll) fire into whichever test runs
+ *  next and call its `window.jarvis` mocks. On a slow runner that lands
+ *  inside a later test's assertions, so each test closes the last one's
+ *  tabs first. */
+let loaded: typeof import("./workspace-terminal.js") | undefined;
+
 function harness(buffered = ""): void {
+  try {
+    loaded?.renderWorkspaceTerminals([], undefined, "");
+  } catch {
+    // A test that tore down its own host already left nothing to close.
+  }
+  loaded = undefined;
   document.body.innerHTML = `<div id="workspace-terminal" hidden></div>`;
   calls = [];
   dataListener = undefined;
@@ -158,6 +172,7 @@ async function load() {
   vi.resetModules();
   const module = await import("./workspace-terminal.js");
   module.initWorkspaceTerminals();
+  loaded = module;
   return module;
 }
 
