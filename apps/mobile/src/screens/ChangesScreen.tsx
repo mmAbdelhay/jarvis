@@ -19,6 +19,7 @@ import { FileList } from "@/components/changes/FileList";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { SessionPickerSheet } from "@/components/SessionPickerSheet";
 import {
+  changesSessions,
   defaultChangesSession,
   failedText,
   noticeText,
@@ -104,10 +105,10 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
     }, [historyStore, sessionsStore, changesStore, client, routeSessionId]),
   );
 
-  const merged = useMemo(
-    () => mergeSessions([...sessions.active, ...sessions.ended], history.sessions),
-    [sessions, history.sessions],
-  );
+  // Only sessions the laptop's own list holds: git:changes resolves a
+  // session through that list, so a History-only or imported session would
+  // answer "I don't know a session with that id".
+  const merged = useMemo(() => mergeSessions(changesSessions(sessions), []), [sessions]);
   const defaultId = useMemo(
     () =>
       defaultChangesSession(
@@ -196,7 +197,7 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
             ))}
           </ScrollView>
         )}
-        {merged.length === 0 && sessionsDisplay.kind === "empty" && (
+        {merged.length === 0 && !sessions.loading && (
           <Text style={styles.empty}>{t(language, "changes.noSessions")}</Text>
         )}
         {sessionsDisplay.kind === "failed" && (

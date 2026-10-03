@@ -84,6 +84,17 @@ export function filesPaneFor(
   return tabs.find((tab) => tab.kind === "terminal")?.id;
 }
 
+/** The project the Workspace opens on when none is chosen yet: the first
+ *  with a tab open on the laptop, else the first listed. A chosen project
+ *  is kept, and an empty list chooses nothing. */
+export function defaultWorkspaceProject(
+  projects: readonly { name: string; tabs: readonly unknown[] }[],
+  selected: string | undefined,
+): string | undefined {
+  if (selected !== undefined) return undefined;
+  return (projects.find((project) => project.tabs.length > 0) ?? projects[0])?.name;
+}
+
 export type BreadcrumbPart = { name: string; path: string; current: boolean };
 
 /** The root, then each folder step; only the last one is current. */

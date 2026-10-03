@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumbParts, filesPaneFor, tabRowModel } from "./workspace-rows";
+import {
+  breadcrumbParts,
+  defaultWorkspaceProject,
+  filesPaneFor,
+  tabRowModel,
+} from "./workspace-rows";
 
 describe("tabRowModel", () => {
   it("shows a terminal tab with its pane count", () => {
@@ -75,5 +80,25 @@ describe("breadcrumbParts", () => {
 
   it("flags the root at the root", () => {
     expect(breadcrumbParts("project", "")).toEqual([{ name: "project", path: "", current: true }]);
+  });
+});
+
+describe("defaultWorkspaceProject", () => {
+  it("opens on the first project with a laptop tab, else the first one", () => {
+    expect(
+      defaultWorkspaceProject(
+        [
+          { name: "api", tabs: [] },
+          { name: "web", tabs: [{}] },
+        ],
+        undefined,
+      ),
+    ).toBe("web");
+    expect(defaultWorkspaceProject([{ name: "api", tabs: [] }], undefined)).toBe("api");
+  });
+
+  it("keeps a chosen project and chooses nothing from an empty list", () => {
+    expect(defaultWorkspaceProject([{ name: "api", tabs: [{}] }], "web")).toBeUndefined();
+    expect(defaultWorkspaceProject([], undefined)).toBeUndefined();
   });
 });

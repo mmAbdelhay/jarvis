@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  changesSessions,
   defaultChangesSession,
   diffRows,
   failedText,
@@ -246,5 +247,15 @@ describe("diffRows", () => {
       { key: "h0l1", kind: "added", text: "+ y" },
       { key: "h0l2", kind: "removed", text: "- z" },
     ]);
+  });
+});
+
+describe("changesSessions", () => {
+  it("offers the laptop's live and ended sessions, never History-only ones", () => {
+    expect(changesSessions({ active: [{ id: "a" }], ended: [{ id: "b" }] })).toEqual([
+      { id: "a" },
+      { id: "b" },
+    ]);
+    expect(changesSessions({ active: [], ended: [] })).toEqual([]);
   });
 });

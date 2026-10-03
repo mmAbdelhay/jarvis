@@ -209,3 +209,15 @@ export function diffRows(diff: Pick<GitFileDiff, "path" | "hunks">): DiffRow[] {
   });
   return rows;
 }
+
+/**
+ * The sessions Changes can show: the laptop's own sessions list, live and
+ * ended. git:changes looks a session up there, so History-only and
+ * imported sessions are left out rather than offered and then refused.
+ */
+export function changesSessions<Row>(view: {
+  active: readonly Row[];
+  ended: readonly Row[];
+}): Row[] {
+  return [...view.active, ...view.ended];
+}

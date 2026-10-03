@@ -70,7 +70,7 @@ import { ChangesScreen } from "@/screens/ChangesScreen";
 import { DockerScreen } from "@/screens/DockerScreen";
 import { TerminalPane } from "@/screens/TerminalPane";
 import { ProjectPicker, TOOLS, type WorkspaceTool, WorkspaceTools } from "@/screens/WorkspaceTools";
-import { filesPaneFor, tabRowModel } from "@/lib/workspace-rows";
+import { defaultWorkspaceProject, filesPaneFor, tabRowModel } from "@/lib/workspace-rows";
 import {
   createWorkspaceStore,
   listChatNames,
@@ -260,6 +260,13 @@ export default function WorkspaceScreen() {
   useEffect(() => {
     if (owner !== undefined && owner !== view.selectedProject) store.selectProject(owner);
   }, [owner, view.selectedProject, store]);
+
+  // Nothing chosen yet: open on a project, as the redesign does, rather
+  // than on a bare row of chips.
+  const fallbackProject = defaultWorkspaceProject(view.projects, view.selectedProject);
+  useEffect(() => {
+    if (owner === undefined && fallbackProject !== undefined) store.selectProject(fallbackProject);
+  }, [owner, fallbackProject, store]);
 
   // Wide with no tab param: make the first tab the explicit selection, so
   // a rotation to the phone layout keeps showing it (and its one attach).

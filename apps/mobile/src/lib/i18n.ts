@@ -1074,7 +1074,7 @@ export const STRINGS = {
     ar: "إصدار جارفيس على هذا الجهاز قديم — التحديثات المباشرة متوقفة. اسحب للتحديث بدلاً من ذلك.",
   },
   "workspace.noTabs": { en: "No open tabs.", ar: "لا توجد تبويبات مفتوحة." },
-  "workspace.openOnLaptop": { en: "Open on the laptop", ar: "مفتوح على الحاسوب" },
+  "workspace.openOnLaptop": { en: "OPEN ON THE LAPTOP", ar: "مفتوح على الحاسوب" },
   "workspace.newTerminal": { en: "New terminal", ar: "طرفية جديدة" },
   "workspace.openingTerminal": { en: "Opening…", ar: "جارٍ الفتح…" },
   "workspace.terminal": { en: "Terminal", ar: "الطرفية" },
