@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isIP } from "node:net";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_IMPORT_WINDOW_DAYS, parseSessions } from "./sessions-config.js";
 import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type {
@@ -310,15 +311,6 @@ const DEFAULT_PIPER_ARABIC_MODEL = join(homedir(), ".config/jarvis/voices/ar_JO-
 // sessions inherit hooks and skills from their cwd, so this must never
 // default to the repo or to `process.cwd()`.
 const DEFAULT_BRAIN_CWD = join(homedir(), ".config/jarvis/brain");
-
-/**
- * How far back the transcript backfill reaches, by file mtime.
- *
- * 30 days was 90 of the 125 transcripts on the machine this was designed
- * against, and 90 days was all of them — generous without being unbounded
- * on a machine with years of history.
- */
-const DEFAULT_IMPORT_WINDOW_DAYS = 30;
 
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
 // large-v3-turbo, not base: synthesised-speech testing of the spec's own
@@ -704,38 +696,6 @@ function parseRouting(rawRouting: unknown): RoutingRule[] {
       },
     };
   });
-}
-
-function parseSessions(rawSessions: unknown): JarvisConfig["sessions"] {
-  if (rawSessions === undefined) {
-    return { importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS };
-  }
-  if (typeof rawSessions !== "object" || rawSessions === null || Array.isArray(rawSessions)) {
-    throw new Error("Config `sessions` must be an object");
-  }
-  const sessions = rawSessions as Record<string, unknown>;
-  const window = sessions["importWindowDays"] ?? DEFAULT_IMPORT_WINDOW_DAYS;
-  // Rejected rather than clamped: a window of zero or a string imports
-  // nothing, and silently reads as a bug in the importer rather than in
-  // the config line that caused it.
-  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) {
-    throw new Error("Config `sessions.importWindowDays` must be a positive number");
-  }
-  // "off" is accepted and dropped, so the parsed config is the same as an
-  // absent key — and Settings never writes a section that says only that.
-  const worktrees = sessions["worktrees"];
-  if (
-    worktrees !== undefined &&
-    worktrees !== "off" &&
-    worktrees !== "parallel" &&
-    worktrees !== "always"
-  ) {
-    throw new Error('Config `sessions.worktrees` must be "off", "parallel" or "always"');
-  }
-  return {
-    importWindowDays: window,
-    ...(worktrees === "parallel" || worktrees === "always" ? { worktrees } : {}),
-  };
 }
 
 /** The `browser:` section as it stands with nothing in jarvis.yaml. */

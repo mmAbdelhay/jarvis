@@ -15,8 +15,15 @@ version and the downloads. This file is the index.
   side. A transcript now opens for any session, not only those on History's
   first page (`history:list` also takes an `id`).
 - Phone and browser Settings: an "On the laptop" section shows the laptop's
-  agents, projects and worktree mode, read-only (`settings:read`); changing them
-  stays on the laptop.
+  agents, projects and worktree mode (`settings:read`).
+- The phone can change the worktree mode in the laptop's settings. A save from
+  a phone changes only the `sessions` section; everything else is ignored, so
+  it cannot turn the bridge off or change project roots or command paths.
+- The phone can close and rename the laptop's tabs.
+- The phone can resume a past session; it opens in a new terminal tab on the
+  laptop and the phone lands on it.
+- The phone can rename a file or move it to the trash inside a project; the
+  project's root and anything outside it are refused.
 - Browser and tablet redesign: the top bar becomes a sidebar with every
   section — Home, Sessions (with its running count), Workspace, Changes,
   History, Voice, Settings — and the laptop's connection, metrics and clock at

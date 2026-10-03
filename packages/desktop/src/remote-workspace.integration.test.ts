@@ -30,7 +30,7 @@ import { createDispatchTable } from "./dispatch.js";
 import { fakeDeps } from "./dispatch.test.js";
 import { createFileUploadHandler, createFileUploadStore, type UploadStore } from "./file-upload.js";
 import type { ApiHandlerDeps } from "./ipc.js";
-import { buildWiring, createApiHandlers } from "./ipc.js";
+import { buildWiring, createApiHandlers, createTerminalHandlers } from "./ipc.js";
 import { MESSAGES } from "./messages.js";
 import { REMOTE_TIMEOUT_CAP_MS } from "./remote-api.js";
 import { remoteRequestHandler } from "./remote-access.js";
@@ -258,9 +258,73 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     ]);
     const sessionStore = { history: vi.fn(() => [{ id: "s1" }]), edit: vi.fn() };
 
+    // The real terminal handlers over an in-memory disk, so the remote
+    // file-write tests below exercise the real containment (resolveWithin)
+    // and name rules and watch what reaches the host seam.
+    const fileOps: string[] = [];
+    const disk = new Set(["/p/acme", "/p/acme/a.ts", "/p/other/a.ts"]);
+    const terminalHandlers = createTerminalHandlers({
+      shells: {
+        start: () => {},
+        onOutput: () => () => {},
+        onShellExit: () => () => {},
+        log: () => "",
+        snapshot: () => ({ text: "", end: 0 }),
+        has: () => false,
+        panes: () => [],
+        write: () => {},
+        resize: () => {},
+        kill: () => {},
+        stopAll: async () => {},
+      },
+      openTerminalTab: () => "tab-terminal-1",
+      projects: { [PROJECT]: "/p/acme" },
+      language: "en",
+      terminal: {} as never,
+      terminalScrollback: 5000,
+      files: {
+        readDir: () => [],
+        // A link inside the project that points outside it.
+        realPath: (path: string) =>
+          path === "/p/acme/escape" || path.startsWith("/p/acme/escape/")
+            ? `/etc${path.slice("/p/acme/escape".length)}`
+            : path,
+        exists: (path: string) => disk.has(path),
+        rename: (from: string, to: string) => {
+          fileOps.push(`mv ${from} ${to}`);
+          disk.delete(from);
+          disk.add(to);
+        },
+        trash: async (path: string) => {
+          fileOps.push(`trash ${path}`);
+          disk.delete(path);
+        },
+      },
+    });
+    terminalHandlers.open(PROJECT);
+    const resume = vi.fn(async () => ({
+      ok: true as const,
+      project: PROJECT,
+      tabId: "tab-9",
+      language: "en" as const,
+    }));
+    const settings = {
+      read: vi.fn(async () => ({ remote: { enabled: true } }) as never),
+      save: vi.fn(async () => ({ ok: true }) as never),
+      saveSessions: vi.fn(async () => ({ ok: true }) as never),
+      testAgent: vi.fn(async () => ({}) as never),
+      restart: vi.fn(),
+    };
+
     const dispatchDeps = fakeDeps({
       api,
       workspace,
+      terminal: {
+        ...fakeDeps().terminal,
+        renameEntry: terminalHandlers.renameEntry,
+        trashEntry: terminalHandlers.trashEntry,
+      },
+      settings,
       // The one project this stack declares — terminal:open's own remote
       // membership gate (dispatch.ts) checks a call's project name against
       // exactly this map.
@@ -276,6 +340,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       dockerConfig: { [PROJECT]: [{ name: "Web", container: "web" }] },
       sessionTranscript,
       sessionStore,
+      sessionResume: resume,
       uploads: { readJson: uploadStore.readJson },
       language: "en",
     });
@@ -291,6 +356,9 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
 
     return {
       handle,
+      settings,
+      fileOps,
+      resume,
       authorizeKey,
       followers,
       git,
@@ -327,8 +395,6 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     // now — see the dedicated test below for its own project gate.
     const forbiddenChannels: [string, unknown[]][] = [
       ["workspace:open", [PROJECT, "https://x", "web", undefined]],
-      ["workspace:close", ["tab-terminal-1"]],
-      ["workspace:rename", ["tab-terminal-1", "renamed"]],
       ["workspace:move", ["tab-terminal-1", "tab-web-1", true]],
       ["workspace:activate", ["tab-terminal-1"]],
       ["workspace:navigate", ["tab-terminal-1", "https://x"]],
@@ -339,8 +405,6 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       ["docker:open", [PROJECT]],
       ["dialog:readJson", ["/etc/passwd"]],
       ["dialog:pickFiles", []],
-      ["session:resume", ["s1", PROJECT]],
-      ["settings:save", [{}]],
       ["api:saveSettings", [PROJECT, {}]],
     ];
     for (const [channel, args] of forbiddenChannels) {
@@ -351,6 +415,110 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     expect(workspace.close).not.toHaveBeenCalled();
     expect(workspace.activate).not.toHaveBeenCalled();
     expect(workspace.navigate).not.toHaveBeenCalled();
+  });
+
+  it("a remote device can rename and close a tab through the real policy gate, with the title rule enforced", async () => {
+    const { handle, workspace } = buildStack();
+
+    expect(await handle("workspace:rename", ["tab-terminal-1", "Build"], DEVICE_A)).toEqual({
+      kind: "value",
+      value: undefined,
+    });
+    expect(workspace.rename).toHaveBeenCalledWith("tab-terminal-1", "Build");
+
+    for (const bad of ["x".repeat(81), "", "   ", "\u0007", "a\u009fb"]) {
+      await expect(handle("workspace:rename", ["tab-terminal-1", bad], DEVICE_A)).rejects.toThrow();
+    }
+    expect(workspace.rename).toHaveBeenCalledTimes(1);
+
+    await expect(handle("workspace:close", ["no-such-tab"], DEVICE_A)).rejects.toThrow();
+    expect(workspace.close).not.toHaveBeenCalled();
+    expect(await handle("workspace:close", ["tab-terminal-1"], DEVICE_A)).toEqual({
+      kind: "value",
+      value: undefined,
+    });
+    expect(workspace.close).toHaveBeenCalledWith("tab-terminal-1");
+  });
+
+  it("settings:save from a remote device reaches settings.saveSessions with only the sessions section", async () => {
+    const { handle, settings } = buildStack();
+    const outcome = (await handle(
+      "settings:save",
+      [{ sessions: { importWindowDays: 14, worktrees: "off" }, remote: { enabled: false } }],
+      DEVICE_A,
+    )) as Outcome;
+    expect(outcome.kind).toBe("value");
+    expect(settings.saveSessions).toHaveBeenCalledWith({ importWindowDays: 14 });
+    expect(settings.save).not.toHaveBeenCalled();
+  });
+
+  it("terminal:renameEntry and terminal:trashEntry from a remote device stay inside the project root and reach the host", async () => {
+    const { handle, fileOps } = buildStack();
+
+    // Inside the root: reaches the host seam.
+    expect(
+      await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", "b.ts"], DEVICE_A),
+    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
+    expect(
+      await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme/b.ts"], DEVICE_A),
+    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
+    expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/b.ts", "trash /p/acme/b.ts"]);
+
+    fileOps.length = 0;
+    const outside = { kind: "value", value: { ok: false, reason: "outside" } };
+    // Outside the root, and the root itself: refused, host never touched.
+    expect(
+      await handle("terminal:renameEntry", ["tab-terminal-1", "/etc/passwd", "x"], DEVICE_A),
+    ).toEqual(outside);
+    expect(await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme"], DEVICE_A)).toEqual(
+      outside,
+    );
+    expect(
+      await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme", "x"], DEVICE_A),
+    ).toEqual(outside);
+    expect(
+      await handle("terminal:trashEntry", ["tab-terminal-1", "/p/other/a.ts"], DEVICE_A),
+    ).toEqual(outside);
+    // A bad new name is refused before anything moves.
+    for (const name of ["a/b", "a\\b", "..", ".", "a\u0000b", "a\nb", "é".repeat(200)]) {
+      expect(
+        await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", name], DEVICE_A),
+      ).toEqual({ kind: "value", value: { ok: false, reason: "invalid-name" } });
+    }
+    expect(fileOps).toEqual([]);
+
+    // File creation stays desktop-only.
+    expect(
+      await handle("terminal:createEntry", ["tab-terminal-1", "/p/acme", "n", "file"], DEVICE_A),
+    ).toEqual({ kind: "forbidden" });
+  });
+
+  it("terminal:renameEntry and terminal:trashEntry take the phone's project-relative paths, and refuse any that leave the root", async () => {
+    const { handle, fileOps } = buildStack();
+    const outside = { kind: "value", value: { ok: false, reason: "outside" } };
+    // A phone sends paths relative to the project root.
+    fileOps.length = 0;
+    expect(
+      await handle("terminal:renameEntry", ["tab-terminal-1", "a.ts", "c.ts"], DEVICE_A),
+    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/c.ts" } });
+    expect(await handle("terminal:trashEntry", ["tab-terminal-1", "c.ts"], DEVICE_A)).toEqual({
+      kind: "value",
+      value: { ok: true, path: "/p/acme/c.ts" },
+    });
+    expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/c.ts", "trash /p/acme/c.ts"]);
+
+    // A relative path that leaves the root, names the root, or goes through
+    // a link that points outside it is refused, host untouched.
+    fileOps.length = 0;
+    for (const path of ["../other/a.ts", "..", "", ".", "escape/passwd"]) {
+      expect(await handle("terminal:renameEntry", ["tab-terminal-1", path, "x"], DEVICE_A)).toEqual(
+        outside,
+      );
+      expect(await handle("terminal:trashEntry", ["tab-terminal-1", path], DEVICE_A)).toEqual(
+        outside,
+      );
+    }
+    expect(fileOps).toEqual([]);
   });
 
   it("terminal:open: remote-legal for a declared project, refused for an undeclared one, through the real policy gate", async () => {
@@ -667,12 +835,16 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
 
     const transcriptOutcome = (await handle("session:transcript", ["s1"], DEVICE_A)) as Outcome;
     expect(outcomeValue(transcriptOutcome)).toEqual(await sessionTranscript("s1"));
+  });
 
-    // session:resume (resuming a session in the laptop's own terminal) is
-    // desktop-only — a read of history/transcript never implies the power
-    // to take one over.
-    const resumeOutcome = (await handle("session:resume", ["s1", PROJECT], DEVICE_A)) as Outcome;
-    expect(resumeOutcome).toEqual({ kind: "forbidden" });
+  it("session:resume from a remote device passes the policy gate and reaches the handler", async () => {
+    const { handle, resume } = buildStack();
+    const outcome = (await handle("session:resume", ["s1", PROJECT], DEVICE_A)) as Outcome;
+    expect(outcome).toEqual({
+      kind: "value",
+      value: { ok: true, project: PROJECT, tabId: "tab-9", language: "en" },
+    });
+    expect(resume).toHaveBeenCalledWith("s1", PROJECT);
   });
 });
 

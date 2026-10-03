@@ -336,10 +336,25 @@ and tapping them makes no request. A Cluster tab needs the cluster already
 connected on the laptop — opening it from the phone never starts a login
 flow or an MFA prompt there.
 
+**Acting on the laptop from the phone.** Beyond reading, the phone can
+resume a past session (`session:resume`: it opens a new terminal tab on the
+laptop running the session's own agent, in the session's own directory, and
+lands the phone on it), rename or trash a file in a project's file list, and
+change the laptop's worktree mode. Every one is a
+`mutate` channel and is audited on each call. What stays protected: file
+rename and trash only work inside a configured project root (the root itself
+is refused, and trash goes to the OS trash, never a hard delete); a settings
+save from the phone changes only the `sessions` section and ignores the rest
+of the request, so it cannot turn the bridge off or change project roots or
+command paths; testing an agent command and the API client's settings stay on
+the laptop.
+
 **Workspace, Changes, Docker, history and the API client, in M9.** The
-Workspace tab shows the laptop's open tabs grouped by project, read-only —
-tapping into an open Terminal tab attaches to one of its existing panes
-(never creates, splits or closes one) with the same terminal engine and key
+Workspace tab shows the laptop's open tabs grouped by project. A phone can
+close a tab or rename it (an 80-character title, no control characters), but
+never opens, moves or activates one on the laptop's screen — those stay on the
+laptop. Tapping into an open Terminal tab attaches to one of its existing panes
+(never creates or splits one) with the same terminal engine and key
 bar Sessions uses; a web or chat tab's row hands off to the system browser,
 behind the same URL safety check every external link on the phone goes
 through (an unresolvable or unsafe URL shows a notice instead of opening

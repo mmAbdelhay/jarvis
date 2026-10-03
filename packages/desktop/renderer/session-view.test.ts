@@ -71,7 +71,12 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
     getSessionTranscript: vi.fn(async () => []),
-    resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
+    resumeSession: vi.fn(async () => ({
+      ok: true as const,
+      project: "app",
+      tabId: "t1",
+      language: "en" as const,
+    })),
     getHistory: vi.fn(async () => [] as Session[]),
     listSessions: vi.fn(async () => [] as Session[]),
     refreshSessions: vi.fn(async () => ({ jarvis: 0, external: 0, importedTranscripts: 0 })),
@@ -834,7 +839,12 @@ describe("resume", () => {
   });
 
   it("resumes the session that is on screen", async () => {
-    const resumeSession = vi.fn(async () => ({ ok: true, language: "en" as const }));
+    const resumeSession = vi.fn(async () => ({
+      ok: true as const,
+      project: "app",
+      tabId: "t1",
+      language: "en" as const,
+    }));
     stubJarvis({ resumeSession });
     const { openSession } = await import("./session-view.js");
     await openSession(makeSession({ id: "past-1", state: "done" }));
@@ -850,7 +860,7 @@ describe("resume", () => {
   it("says why when a resume is refused", async () => {
     stubJarvis({
       resumeSession: vi.fn(async () => ({
-        ok: false,
+        ok: false as const,
         text: "This session cannot be resumed.",
         language: "en" as const,
       })),
@@ -918,8 +928,9 @@ describe("session table", () => {
 
   it("resumes the row's own session, naming the selected project", async () => {
     const resumeSession = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       project: "app",
+      tabId: "t1",
       language: "en" as const,
     }));
     stubJarvis({

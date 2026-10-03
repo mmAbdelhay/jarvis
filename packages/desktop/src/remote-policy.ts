@@ -8,7 +8,9 @@
 // The rule (spec, finding 3): parity of content, not of the tab model.
 // Anything that creates, destroys or rearranges a tab, pane or view on the
 // LAPTOP's screen is desktop-only; the phone reads `workspace:update` and
-// opens its own surfaces. Anything that speaks, records or shows a native
+// opens its own surfaces. The two exceptions, by owner decision 2026-10-03,
+// are `workspace:rename` and `workspace:close`: they touch only a tab's
+// title or its existence, never the layout of the laptop's screen. Anything that speaks, records or shows a native
 // dialog on the laptop is desktop-only. Everything that reads or mutates
 // project state — sessions, git, files, Docker, API collections, bookmarks,
 // settings — is remote, because a paired device is the user.
@@ -62,7 +64,10 @@ export const CHANNEL_POLICY = {
   "git:removeWorktree": "remote",
   "session:log": "remote",
   "session:transcript": "remote",
-  "session:resume": "desktop-only",
+  // Owner decision 2026-10-03: a phone may continue a past session in a new
+  // laptop terminal tab. The handler only resumes a session already in
+  // history, with its own configured agent, in a configured project.
+  "session:resume": "remote",
   "session:input": "remote",
   // Read and answer a waiting prompt: the same reach session:log and
   // session:input already give a phone, narrowed to one keystroke set.
@@ -76,8 +81,15 @@ export const CHANNEL_POLICY = {
   "providers:refresh": "remote",
   "usage:history": "remote",
   "workspace:open": "desktop-only",
-  "workspace:close": "desktop-only",
-  "workspace:rename": "desktop-only",
+  // Owner decision 2026-10-03: a phone may close a tab. Closing changes
+  // the tab's existence, not the layout; dispatch.ts requires the id to name
+  // an existing tab for a remote origin (any laptop tab, listed on the phone
+  // or not).
+  "workspace:close": "remote",
+  // Owner decision 2026-10-03: renaming touches only a tab's title.
+  // dispatch.ts requires an existing tab and bounds a remote title (80
+  // chars, no control or bidi override characters).
+  "workspace:rename": "remote",
   "workspace:move": "desktop-only",
   "workspace:activate": "desktop-only",
   "workspace:navigate": "desktop-only",
@@ -119,12 +131,16 @@ export const CHANNEL_POLICY = {
   "terminal:history": "remote",
   "terminal:listDir": "remote",
   "terminal:openFile": "desktop-only",
-  // The file sidebar's writes. Desktop-only until a phone has a file tree
-  // of its own to drive them from: a channel no phone screen calls is
-  // attack surface with nothing on the other side of it.
+  // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
+  // are remote — the phone's file list drives them. Both stay inside a
+  // configured project root (ipc.ts's resolveWithin/entryWithin, the same
+  // containment terminal:listDir uses, never loosened for a remote origin),
+  // refuse the root itself, and trash goes through the DesktopHost seam to
+  // the OS trash, never a hard delete. Creating a file stays desktop-only:
+  // no phone screen calls it.
   "terminal:createEntry": "desktop-only",
-  "terminal:renameEntry": "desktop-only",
-  "terminal:trashEntry": "desktop-only",
+  "terminal:renameEntry": "remote",
+  "terminal:trashEntry": "remote",
   "terminal:settings": "remote",
   "terminal:workflows": "remote",
   "terminal:ai": "remote",
@@ -200,11 +216,13 @@ export const CHANNEL_POLICY = {
   "bookmarks:rename": "remote",
   "bookmarks:reorder": "remote",
   "settings:read": "remote",
-  // Desktop-only (M4 final review, I2): settings:save persistently rewrites
-  // spawned agent commands and project roots, and racing it against a
-  // concurrent config write can silently undo the user turning the bridge
-  // off. Revisit when a phone Settings UI ships.
-  "settings:save": "desktop-only",
+  // Remote, owner decision 2026-10-03 (the phone's "The laptop" settings).
+  // A phone may change only the `sessions` section: dispatch.ts parses that
+  // section alone and applies it inside the serialized config write, ignoring
+  // the rest of the draft, so a save can neither change the bridge, project
+  // roots or command paths nor undo a concurrent laptop-side change.
+  // testAgent stays desktop-only.
+  "settings:save": "remote",
   // Desktop-only (M4 final review, I2): runs a phone-supplied executable on
   // the laptop by name. Revisit when a phone Settings UI ships.
   "settings:testAgent": "desktop-only",
@@ -367,6 +385,9 @@ export const REMOTE_EFFECT = {
   "providers:refresh": "mutate",
   "usage:history": "read",
   "workspace:snapshot": "read",
+  "session:resume": "mutate",
+  "workspace:close": "mutate",
+  "workspace:rename": "mutate",
   "editor:open": "mutate",
   "editor:roots": "read",
   "database:open": "mutate",
@@ -378,6 +399,8 @@ export const REMOTE_EFFECT = {
   "terminal:suggest": "input",
   "terminal:history": "read",
   "terminal:listDir": "read",
+  "terminal:renameEntry": "mutate",
+  "terminal:trashEntry": "mutate",
   "terminal:settings": "read",
   "terminal:workflows": "read",
   "terminal:ai": "mutate",
@@ -424,6 +447,7 @@ export const REMOTE_EFFECT = {
   "bookmarks:rename": "mutate",
   "bookmarks:reorder": "mutate",
   "settings:read": "read",
+  "settings:save": "mutate",
   "projects:list": "read",
   "remote:registerPush": "mutate",
   "remote:unregisterPush": "mutate",

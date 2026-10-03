@@ -51,6 +51,7 @@ import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
+import { parseSessions, type SessionsConfig } from "./sessions-config.js";
 import {
   DESKTOP_OWNER,
   REMOTE_FOLLOW_TAB_PATTERN,
@@ -74,6 +75,7 @@ import {
   type SettingsHandlers,
   type SetupHandlers,
   type TerminalHandlers,
+  hasControlCharacter,
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
@@ -87,6 +89,21 @@ export type Origin = { kind: "desktop" } | { kind: "remote"; deviceId: string; d
 export const DESKTOP_ORIGIN: Origin = { kind: "desktop" };
 
 export type Handler = (args: readonly unknown[], origin: Origin) => unknown | Promise<unknown>;
+
+const REMOTE_TAB_TITLE_MAX = 80;
+
+/** A title a remote origin may give a tab. */
+function isRemoteTabTitle(title: unknown): title is string {
+  return (
+    typeof title === "string" &&
+    title.trim() !== "" &&
+    title.length <= REMOTE_TAB_TITLE_MAX &&
+    !hasControlCharacter(title) &&
+    // Bidi override and isolate characters would let a title draw as
+    // something other than what it says on the laptop's tab strip.
+    !/[\u202A-\u202E\u2066-\u2069]/.test(title)
+  );
+}
 
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
@@ -664,16 +681,24 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         typeof detail === "string" ? detail : undefined,
       );
     },
-    "workspace:close": ([id]) => {
-      if (typeof id !== "string") return;
+    "workspace:close": ([id], origin) => {
+      if (typeof id !== "string") {
+        if (origin.kind === "remote") throw new Error("workspace:close: invalid tab id");
+        return;
+      }
+      // A remote origin may only close a tab that exists: the id comes off
+      // the wire, and the reaping below acts on a shell and a follower by id.
+      if (origin.kind === "remote" && !workspace.state().tabs.some((tab) => tab.id === id)) {
+        throw new Error("workspace:close: unknown tab");
+      }
       // A terminal tab's shell and a Docker tab's `docker logs -f` are both
       // child processes of their own; closing the tab has to reap them.
       // Either call on a tab that has neither is a no-op, so this needs no
       // test of the tab's kind. The renderer unfollows too when it notices
       // the tab go away, but a guarantee about a live child process must not
-      // rest on the renderer alone. workspace:close is desktop-only by
-      // policy (remote-policy.ts), so the owner is always the desktop's own
-      // — never a phone's follower, which docker:unfollow reaps instead.
+      // rest on the renderer alone. The follower owner here is always the
+      // desktop's own — never a phone's follower, which docker:unfollow
+      // reaps instead — even when a phone asked for the close.
       deps.terminal.close(id);
       deps.followers.unfollow(id, DESKTOP_OWNER);
       workspace.close(id);
@@ -687,7 +712,21 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
     },
-    "workspace:rename": ([id, title]) => {
+    "workspace:rename": ([id, title], origin) => {
+      if (origin.kind === "remote") {
+        // A phone-supplied title is shown on the laptop's own tab strip:
+        // bound it the way the phone's own prompt does (80 characters, no
+        // control characters, not blank) rather than trusting the client.
+        if (typeof id !== "string" || !isRemoteTabTitle(title)) {
+          throw new Error("workspace:rename: invalid argument");
+        }
+        // Same as close: the id must name a tab that exists.
+        if (!workspace.state().tabs.some((tab) => tab.id === id)) {
+          throw new Error("workspace:rename: unknown tab");
+        }
+        workspace.rename(id, title);
+        return;
+      }
       if (typeof id === "string" && typeof title === "string") workspace.rename(id, title);
     },
     "workspace:move": ([id, targetId, after]) => {
@@ -1064,22 +1103,29 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "bookmarks:reorder": ([project, urls]) =>
       bookmarks.reorder(project as string, urls as string[]),
     "settings:read": () => settings.read(),
-    // A phone can propose the rest of jarvis.yaml, but never its own bridge
-    // configuration — a paired device deciding remote.enabled or its own
-    // idle timeout is the bridge granting itself more access than the
-    // laptop chose (ruling 28). So a remote-origin object draft has its
-    // `remote` key overwritten with whatever is on disk right now before
-    // the save, and only that key; every other origin/shape passes through
-    // exactly as it always has, including the desktop path, which must
-    // never call settings.read() (see settings:read for that path). If the
-    // read itself rejects, the save never runs — failing the same way a
-    // failed save already does today, rather than proceeding on stale trust.
+    // A phone may change one section of jarvis.yaml: `sessions`. Project
+    // roots, agent and binary paths, history locations and the bridge's own
+    // configuration (ruling 28) are the laptop's to decide, so a remote
+    // draft is read for `sessions` alone — field by field, with the rule the
+    // config parser applies — and everything else in it is ignored. The
+    // change is applied inside the serialized config write as an update of
+    // the file as it is then, so a laptop-side change made between the
+    // phone's read and this write is never undone. The desktop path is
+    // unchanged and never calls settings.read() (see settings:read).
     "settings:save": async ([draft], origin) => {
-      if (origin.kind === "remote" && typeof draft === "object" && draft !== null) {
-        const current = await settings.read();
-        return settings.save({ ...draft, remote: current.remote });
+      if (origin.kind !== "remote") return settings.save(draft);
+      if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
+        return invalidArgument(deps.language);
       }
-      return settings.save(draft);
+      const raw = (draft as Record<string, unknown>)["sessions"];
+      if (raw === undefined) return invalidArgument(deps.language);
+      let sessions: SessionsConfig;
+      try {
+        sessions = parseSessions(raw);
+      } catch {
+        return invalidArgument(deps.language);
+      }
+      return settings.saveSessions(sessions);
     },
     "settings:testAgent": ([agent]) => settings.testAgent(agent),
     "settings:restart": () => settings.restart(),

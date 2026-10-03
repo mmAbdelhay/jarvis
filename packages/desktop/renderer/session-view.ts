@@ -838,7 +838,7 @@ function detail(text: string): HTMLElement {
 async function resumeInTerminal(id: string): Promise<void> {
   const selected = (document.getElementById("workspace-project") as HTMLSelectElement | null)
     ?.value;
-  let result: { ok: boolean; text?: string; project?: string };
+  let result: { ok: boolean; text?: string; project?: string; tabId?: string };
   try {
     result = await window.jarvis.resumeSession(id, selected ?? "");
   } catch (error) {

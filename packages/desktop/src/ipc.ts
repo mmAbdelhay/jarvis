@@ -592,11 +592,15 @@ export type RendererApi = {
   /** Continues a past session in a Workspace Terminal tab, rooted where the
    *  session ran. `selectedProject` is the project the tab hangs on when the
    *  session's own directory belongs to none. Resolves with the project the
-   *  tab landed under, so the view can follow it. */
+   *  tab landed under, so the view can follow it, and the new tab's id, so a
+   *  phone can open that terminal. */
   resumeSession(
     sessionId: string,
     selectedProject: string,
-  ): Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }>;
+  ): Promise<
+    | { ok: true; project: string; tabId: string; language: "ar" | "en" }
+    | { ok: false; text: string; language: "ar" | "en" }
+  >;
   /**
    * Raw keystrokes for one session's terminal, written to its pty exactly
    * as given — including control bytes (Ctrl-C, arrows, Escape). This is
@@ -1621,7 +1625,10 @@ export function createResumeInTerminalHandler(
 ): (
   sessionId: unknown,
   selectedProject: unknown,
-) => Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }> {
+) => Promise<
+  | { ok: true; project: string; tabId: string; language: "ar" | "en" }
+  | { ok: false; text: string; language: "ar" | "en" }
+> {
   const refuse = (): { ok: false; text: string; language: "ar" | "en" } => ({
     ok: false,
     text: MESSAGES.cannotResumeSession(deps.language),
@@ -1658,7 +1665,7 @@ export function createResumeInTerminalHandler(
       return refuse();
     }
     deps.sendInput(tabId, `${command}\r`);
-    return { ok: true, project, language: deps.language };
+    return { ok: true, project, tabId, language: deps.language };
   };
 }
 
@@ -2000,6 +2007,34 @@ export function isValidEntryName(name: unknown): name is string {
   if (name !== name.trim()) return false;
   if (/[/\\\0]/.test(name)) return false;
   return Buffer.byteLength(name, "utf8") <= 255;
+}
+
+/**
+ * A name the sidebar may *give* an entry: a valid entry name with no control
+ * character in it. Kept apart from isValidEntryName because that one also
+ * vets the name of an entry that already exists (entryWithin), and a file
+ * somebody already made with an odd name must stay renameable.
+ */
+export function isValidNewEntryName(name: unknown): name is string {
+  return isValidEntryName(name) && !hasControlCharacter(name);
+}
+
+/** True when `text` holds a C0 or C1 control character or DEL. A loop over
+ *  code units rather than a regex, which the linter rightly distrusts. */
+export function hasControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/** A path a paired phone sends is relative to the project root — it never
+ *  learns the laptop's absolute paths — so it is joined to `root` first, the
+ *  way listDir does. Absolute paths and non-strings pass through, and
+ *  entryWithin's containment check decides either way. */
+function underRoot(root: string, path: string): string {
+  return isString(path) && path !== "" && !isAbsolute(path) ? join(root, path) : path;
 }
 
 /**
@@ -2795,7 +2830,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         return { ok: false, reason: "failed" };
       }
       if (!isString(parentPath)) return { ok: false, reason: "outside" };
-      if (!isValidEntryName(name)) return { ok: false, reason: "invalid-name" };
+      if (!isValidNewEntryName(name)) return { ok: false, reason: "invalid-name" };
       const root = sidebarRoot(paneKey);
       if (root === undefined) return { ok: false, reason: "outside" };
       const parent = resolveWithin(root, parentPath, files.realPath);
@@ -2817,10 +2852,10 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     async renameEntry(paneKey, path, newName) {
       const files = deps.files;
       if (files === undefined) return { ok: false, reason: "failed" };
-      if (!isValidEntryName(newName)) return { ok: false, reason: "invalid-name" };
+      if (!isValidNewEntryName(newName)) return { ok: false, reason: "invalid-name" };
       const root = sidebarRoot(paneKey);
       if (root === undefined) return { ok: false, reason: "outside" };
-      const source = entryWithin(root, path, files.realPath);
+      const source = entryWithin(root, underRoot(root, path), files.realPath);
       if (source === undefined || files.exists === undefined || !files.exists(source)) {
         return { ok: false, reason: "outside" };
       }
@@ -2846,7 +2881,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (files === undefined || files.trash === undefined) return { ok: false, reason: "failed" };
       const root = sidebarRoot(paneKey);
       if (root === undefined) return { ok: false, reason: "outside" };
-      const target = entryWithin(root, path, files.realPath);
+      const target = entryWithin(root, underRoot(root, path), files.realPath);
       if (target === undefined || files.exists === undefined || !files.exists(target)) {
         return { ok: false, reason: "outside" };
       }
@@ -3816,6 +3851,9 @@ export type SettingsSaveResult =
 export type SettingsHandlers = {
   read(): Promise<JarvisConfig>;
   save(draft: unknown): Promise<SettingsSaveResult>;
+  /** What a paired phone's settings:save may do: replace the `sessions`
+   *  section of the config as it is on disk right now, nothing else. */
+  saveSessions(sessions: JarvisConfig["sessions"]): Promise<SettingsSaveResult>;
   testAgent(agent: unknown): Promise<AgentHealth>;
   restart(): void;
 };
@@ -3824,25 +3862,37 @@ export type SettingsHandlerDeps = {
   readConfig(): Promise<JarvisConfig>;
   /** settings-io.ts's writeSettingsFile, injected so this file's own tests
    *  never touch a real filesystem. */
-  writeConfig(draft: JarvisConfig): Promise<{ ok: true } | { ok: false; detail: string }>;
+  writeConfig(
+    draft: JarvisConfig | ((current: JarvisConfig) => JarvisConfig),
+  ): Promise<{ ok: true } | { ok: false; detail: string }>;
   run: CommandRunner;
   restart(): void;
   language: "ar" | "en";
 };
 
 export function createSettingsHandlers(deps: SettingsHandlerDeps): SettingsHandlers {
+  const saveResult = (result: { ok: true } | { ok: false; detail: string }): SettingsSaveResult =>
+    result.ok
+      ? { ok: true }
+      : {
+          ok: false,
+          text: MESSAGES.settingsSaveFailed(deps.language),
+          detail: result.detail,
+          language: deps.language,
+        };
+
   return {
     read: () => deps.readConfig(),
 
     async save(draft) {
-      const result = await deps.writeConfig(draft as JarvisConfig);
-      if (result.ok) return { ok: true };
-      return {
-        ok: false,
-        text: MESSAGES.settingsSaveFailed(deps.language),
-        detail: result.detail,
-        language: deps.language,
-      };
+      return saveResult(await deps.writeConfig(draft as JarvisConfig));
+    },
+
+    // An updater over the config the serialized write itself reads, so a
+    // change made on the laptop between the phone's read and this write
+    // (the bridge turned off, say) is never overwritten with a stale copy.
+    async saveSessions(sessions) {
+      return saveResult(await deps.writeConfig((current) => ({ ...current, sessions })));
     },
 
     // checkAgent never rejects — a malformed draft agent (missing command,

@@ -1589,8 +1589,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // The same hoisted writeConfig instance createRemoteAccess's own
     // onIdleDisabled callback uses above — never a second writer to
     // jarvis.yaml. After a successful write, the file on disk is the
-    // only source of truth for `remote:` (settings:save already pins a
-    // remote-origin draft's own `remote` key to it — dispatch.ts) — so
+    // only source of truth for `remote:` (a remote-origin settings:save
+    // changes only `sessions`, as an update of that file — dispatch.ts) — so
     // writeConfig re-reads the file rather than trusting `draft.remote`,
     // and applies whatever that read finds to the live bridge, via the
     // queued applyFromDisk above it. A rejected re-read (or a rejected

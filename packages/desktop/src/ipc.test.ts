@@ -1639,7 +1639,9 @@ const sampleConfig: JarvisConfig = {
 function settingsDeps(
   overrides: Partial<{
     readConfig: () => Promise<JarvisConfig>;
-    writeConfig: (draft: JarvisConfig) => Promise<{ ok: true } | { ok: false; detail: string }>;
+    writeConfig: (
+      draft: JarvisConfig | ((current: JarvisConfig) => JarvisConfig),
+    ) => Promise<{ ok: true } | { ok: false; detail: string }>;
     run: (
       command: string,
       args: string[],
@@ -1668,7 +1670,7 @@ describe("createSettingsHandlers", () => {
     const handlers = createSettingsHandlers(
       settingsDeps({
         writeConfig: (draft) => {
-          written.push(draft);
+          written.push(draft as JarvisConfig);
           return Promise.resolve({ ok: true });
         },
       }),
@@ -1678,6 +1680,41 @@ describe("createSettingsHandlers", () => {
 
     expect(result).toEqual({ ok: true });
     expect(written).toEqual([sampleConfig]);
+  });
+
+  // [bite-proof] Writing a config read earlier (settings.read() then save)
+  // would put `remote.enabled` back to true here.
+  it("saveSessions changes only `sessions`, on the config as it is when the write runs", async () => {
+    let disk: JarvisConfig = { ...sampleConfig, remote: { ...sampleConfig.remote, enabled: true } };
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        writeConfig: (input) => {
+          disk = typeof input === "function" ? input(disk) : input;
+          return Promise.resolve({ ok: true });
+        },
+      }),
+    );
+    // The laptop turns the bridge off after the phone read its settings and
+    // before the phone's save lands.
+    disk = { ...disk, remote: { ...disk.remote, enabled: false } };
+
+    const result = await handlers.saveSessions({ importWindowDays: 3, worktrees: "parallel" });
+
+    expect(result).toEqual({ ok: true });
+    expect(disk.remote.enabled).toBe(false);
+    expect(disk.sessions).toEqual({ importWindowDays: 3, worktrees: "parallel" });
+    expect(disk.projects).toEqual(sampleConfig.projects);
+    expect(disk.whisper).toEqual(sampleConfig.whisper);
+  });
+
+  it("saveSessions reports a write failure like save does", async () => {
+    const handlers = createSettingsHandlers(
+      settingsDeps({ writeConfig: () => Promise.resolve({ ok: false, detail: "disk full" }) }),
+    );
+    expect(await handlers.saveSessions({ importWindowDays: 3 })).toMatchObject({
+      ok: false,
+      detail: "disk full",
+    });
   });
 
   it("wraps a write failure in the bilingual headline plus the raw detail", async () => {
@@ -3447,7 +3484,7 @@ describe("terminal handlers", () => {
 
     it("refuses a name that is not a single segment, touching nothing", async () => {
       const handlers = handlersWith();
-      for (const name of ["../escape", "a/b", "..", ""]) {
+      for (const name of ["../escape", "a/b", "..", "", "a\nb", "a\u007fb", "é".repeat(200)]) {
         await expect(handlers.createEntry("tab-1", "/proj", name, "file")).resolves.toEqual({
           ok: false,
           reason: "invalid-name",
@@ -6270,6 +6307,7 @@ describe("createResumeInTerminalHandler", () => {
     const result = await handler(past({ project: "app" }).id, "other");
     expect(result.ok).toBe(true);
     expect(opened).toEqual([{ project: "app", cwd: "/home/u/app" }]);
+    expect(result).toEqual({ ok: true, project: "app", tabId: "tab-1", language: "en" });
   });
 
   // 66 of 95 sessions on the machine this was built against have no
@@ -6291,7 +6329,12 @@ describe("createResumeInTerminalHandler", () => {
 
   it("reports which project the tab landed under, so the view can follow it", async () => {
     const { handler } = harness(past({ project: "app" }));
-    expect((await handler(past().id, "other")).project).toBe("app");
+    expect(await handler(past().id, "other")).toMatchObject({ ok: true, project: "app" });
+  });
+
+  it("returns the new terminal tab's id so a phone can open it", async () => {
+    const { handler } = harness(past({ project: "app" }));
+    expect(await handler(past().id, "app")).toMatchObject({ ok: true, tabId: "tab-1" });
   });
 
   it("refuses when the session's agent is no longer configured", async () => {
