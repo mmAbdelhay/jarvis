@@ -177,6 +177,15 @@ export function openWorkspaceTab(router: WorkspaceRouter, target: WorkspaceTarge
   else router.setParams(target.params);
 }
 
+/** Opening a laptop terminal from a screen other than the Workspace
+ *  (Resume, on History and the session screen). Always the terminal route:
+ *  a wide screen's in-place `setParams` would land on the screen the
+ *  button is on, while the route redirects to the Workspace tab itself
+ *  (workspaceRedirectFor below). */
+export function terminalTargetFromElsewhere(tabId: string): WorkspaceTarget {
+  return workspaceTarget("phone", { id: tabId, kind: "terminal", paneKey: tabId });
+}
+
 /** The `/terminal/[paneKey]` route on a wide screen shows the pane inline
  *  in the Workspace instead (left by `dismissTo`, as the session route
  *  does). A fresh tab's main pane key is its own tab id. */

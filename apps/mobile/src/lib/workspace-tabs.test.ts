@@ -7,6 +7,7 @@ import {
   activeTab,
   openToolsWith,
   openWorkspaceTab,
+  terminalTargetFromElsewhere,
   terminalPaneFor,
   toolTabId,
   withoutTool,
@@ -170,6 +171,18 @@ describe("workspaceTarget", () => {
     openWorkspaceTab(router, workspaceTarget("wide", { id: "t1", kind: "terminal" }));
     expect(router.push).toHaveBeenCalledWith({ pathname: "/changes", params: {} });
     expect(router.setParams).toHaveBeenCalledWith({ tab: "t1", pane: undefined });
+  });
+});
+
+// Resume lives on History and the session screen, not on Workspace: a wide
+// screen's in-place setParams would land on the screen the button is on.
+describe("terminalTargetFromElsewhere", () => {
+  it("pushes the terminal route, which a wide screen redirects to its workspace tab", () => {
+    expect(terminalTargetFromElsewhere("tab-3")).toEqual({
+      action: "push",
+      href: "/terminal/[paneKey]",
+      params: { paneKey: "tab-3", tabId: "tab-3" },
+    });
   });
 });
 

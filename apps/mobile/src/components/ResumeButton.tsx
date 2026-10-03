@@ -6,13 +6,13 @@ import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { theme } from "@/lib/theme";
-import { useLayoutClass } from "@/lib/use-layout-class";
-import { openWorkspaceTab, workspaceTarget } from "@/lib/workspace-tabs";
+import { openWorkspaceTab, terminalTargetFromElsewhere } from "@/lib/workspace-tabs";
 
 /**
  * Resume a finished session: the laptop opens a terminal tab running the
  * agent's resume command, and this opens that tab the way any laptop
- * terminal opens (pushed on a phone, selected in place when wide). Renders
+ * terminal opens from outside the Workspace (the terminal route, which a
+ * wide screen redirects to the Workspace tab). Renders
  * nothing for a session that has not ended.
  */
 export function ResumeButton(props: {
@@ -23,7 +23,6 @@ export function ResumeButton(props: {
   const language = useLanguage();
   const client = useRpcClient();
   const router = useRouter();
-  const { kind } = useLayoutClass();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   if (!canResume(props.state)) return null;
@@ -37,10 +36,7 @@ export function ResumeButton(props: {
       setError(noticeText(language, outcome.text));
       return;
     }
-    openWorkspaceTab(
-      router,
-      workspaceTarget(kind, { id: outcome.tabId, kind: "terminal", paneKey: outcome.tabId }),
-    );
+    openWorkspaceTab(router, terminalTargetFromElsewhere(outcome.tabId));
   }
 
   return (
