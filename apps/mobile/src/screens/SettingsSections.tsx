@@ -1,16 +1,8 @@
-import { type RefObject, useMemo } from "react";
+import { useMemo } from "react";
 import { LaptopSettingsSection } from "./LaptopSettingsSection";
-import {
-  Linking,
-  Platform,
-  type ScrollView as ScrollViewType,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Linking, Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
+import { SETTINGS_CARD, SETTINGS_CARD_TITLE } from "@/components/SettingsCard";
 import type { ClientPlatform } from "@/lib/client-platform";
 import { platformKey, t, type Language } from "@/lib/i18n";
 import { passkeys } from "@/lib/passkey";
@@ -20,7 +12,7 @@ import {
   notificationsSwitchValue,
   showsNotificationsSetting,
 } from "@/lib/push-screen";
-import { settingsSections } from "@/lib/settings-sections";
+import { type SettingsScope, sectionScope } from "@/lib/settings-sections";
 import { connectionStateKey, type SettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
 import { textDirection } from "@/lib/voice-screen";
@@ -38,46 +30,13 @@ type Props = {
   view: SettingsView;
   store: SettingsStore;
   wide: boolean;
-  onSectionLayout?(id: string, y: number): void;
+  /** Wide layout: only one scope's sections, drawn as cards. */
+  scope?: SettingsScope;
   onSpeakReplies(on: boolean): void;
   onValueChange(on: boolean): void;
   onLogout(): void;
   onUnpair(): void;
 };
-
-export function SettingsSectionNav(props: {
-  language: Language;
-  platform: ClientPlatform;
-  scrollRef: RefObject<ScrollViewType | null>;
-  sectionOffsets: RefObject<Record<string, number>>;
-}): React.JSX.Element {
-  return (
-    <View
-      style={[styles.sectionNav, { direction: textDirection(props.language) }]}
-      accessibilityRole="tablist"
-      accessibilityLabel={t(props.language, "settings.sectionNav")}
-    >
-      <Text style={styles.navTitle}>{t(props.language, "settings.title")}</Text>
-      {settingsSections(props.platform, { passkeysSupported: passkeys.isSupported() }).map(
-        (section) => (
-          <TouchableOpacity
-            key={section.id}
-            style={styles.navLink}
-            accessibilityRole="link"
-            onPress={() => {
-              props.scrollRef.current?.scrollTo({
-                y: props.sectionOffsets.current[section.id] ?? 0,
-                animated: true,
-              });
-            }}
-          >
-            <Text style={styles.navLinkText}>{t(props.language, section.labelKey)}</Text>
-          </TouchableOpacity>
-        ),
-      )}
-    </View>
-  );
-}
 
 export function SettingsSections(props: Props): React.JSX.Element {
   // M10 Task 6, rule 3: the "error" phase's status line shows the
@@ -113,62 +72,66 @@ export function SettingsSections(props: Props): React.JSX.Element {
           ),
     [props.language, props.view.laptop],
   );
+  const wide = props.wide;
+  const shown = (id: string) => props.scope === undefined || sectionScope(id) === props.scope;
   const section = (id: string) => ({
     nativeID: id,
-    style: styles.section,
-    onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
-      props.onSectionLayout?.(id, event.nativeEvent.layout.y);
-    },
+    style: wide ? [styles.section, SETTINGS_CARD] : styles.section,
   });
+  const sectionTitle = wide ? SETTINGS_CARD_TITLE : styles.sectionTitle;
 
   return (
-    <View style={styles.sections}>
-      <View {...section("general")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "settings.language")}</Text>
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.langButton, props.view.language === "en" && styles.langButtonActive]}
-            onPress={() => void props.store.setLanguage("en")}
-          >
-            <Text style={styles.langButtonText}>{t(props.language, "settings.language.en")}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.langButton, props.view.language === "ar" && styles.langButtonActive]}
-            onPress={() => void props.store.setLanguage("ar")}
-          >
-            <Text style={styles.langButtonText}>{t(props.language, "settings.language.ar")}</Text>
-          </TouchableOpacity>
+    <View style={[styles.sections, wide && styles.sectionsWide]}>
+      {shown("general") && (
+        <View {...section("general")}>
+          <Text style={sectionTitle}>{t(props.language, "settings.language")}</Text>
+          <View style={styles.row}>
+            <TouchableOpacity
+              style={[styles.langButton, props.view.language === "en" && styles.langButtonActive]}
+              onPress={() => void props.store.setLanguage("en")}
+            >
+              <Text style={styles.langButtonText}>{t(props.language, "settings.language.en")}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.langButton, props.view.language === "ar" && styles.langButtonActive]}
+              onPress={() => void props.store.setLanguage("ar")}
+            >
+              <Text style={styles.langButtonText}>{t(props.language, "settings.language.ar")}</Text>
+            </TouchableOpacity>
+          </View>
+          {props.view.restartRequired && props.view.language !== undefined && (
+            <Text style={styles.notice}>
+              {t(props.language, "settings.restartToApply", {
+                app: t(props.language, "app.title"),
+                language: t(
+                  props.language,
+                  props.view.language === "ar" ? "settings.language.ar" : "settings.language.en",
+                ),
+              })}
+            </Text>
+          )}
         </View>
-        {props.view.restartRequired && props.view.language !== undefined && (
-          <Text style={styles.notice}>
-            {t(props.language, "settings.restartToApply", {
-              app: t(props.language, "app.title"),
-              language: t(
-                props.language,
-                props.view.language === "ar" ? "settings.language.ar" : "settings.language.en",
-              ),
-            })}
-          </Text>
-        )}
-      </View>
+      )}
 
-      <View {...section("voice")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "settings.speakReplies")}</Text>
-        <View style={styles.switchRow}>
-          <Text style={styles.switchHint}>
-            {t(props.language, platformKey("settings.speakRepliesHint", props.platform))}
-          </Text>
-          <Switch
-            value={props.view.speakReplies}
-            accessibilityLabel={t(props.language, "settings.speakReplies")}
-            onValueChange={props.onSpeakReplies}
-          />
+      {shown("voice") && (
+        <View {...section("voice")}>
+          <Text style={sectionTitle}>{t(props.language, "settings.speakReplies")}</Text>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchHint}>
+              {t(props.language, platformKey("settings.speakRepliesHint", props.platform))}
+            </Text>
+            <Switch
+              value={props.view.speakReplies}
+              accessibilityLabel={t(props.language, "settings.speakReplies")}
+              onValueChange={props.onSpeakReplies}
+            />
+          </View>
         </View>
-      </View>
+      )}
 
-      {showsNotificationsSetting(props.platform) && (
+      {showsNotificationsSetting(props.platform) && shown("notifications") && (
         <View {...section("notifications")}>
-          <Text style={styles.sectionTitle}>{t(props.language, "settings.notifications")}</Text>
+          <Text style={sectionTitle}>{t(props.language, "settings.notifications")}</Text>
           <View style={styles.switchRow}>
             <Text style={styles.switchHint}>{t(props.language, "settings.notificationsHint")}</Text>
             <Switch
@@ -199,86 +162,97 @@ export function SettingsSections(props: Props): React.JSX.Element {
         </View>
       )}
 
-      <View {...section("paired-computer")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "settings.pairedLaptop")}</Text>
-        {props.view.laptop === undefined ? (
-          <Text style={styles.empty}>{t(props.language, "settings.notPaired")}</Text>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardLine}>
-              {t(props.language, "settings.address", {
-                value: `${props.view.laptop.host}:${props.view.laptop.port}`,
-              })}
-            </Text>
-            {props.view.fingerprintTail !== undefined && (
+      {shown("paired-computer") && (
+        <View {...section("paired-computer")}>
+          <Text style={sectionTitle}>{t(props.language, "settings.pairedLaptop")}</Text>
+          {props.view.laptop === undefined ? (
+            <Text style={styles.empty}>{t(props.language, "settings.notPaired")}</Text>
+          ) : (
+            <View style={styles.card}>
               <Text style={styles.cardLine}>
-                {t(props.language, "settings.fingerprintTail", {
-                  tail: `${LRI}${props.view.fingerprintTail}${PDI}`,
+                {t(props.language, "settings.address", {
+                  value: `${props.view.laptop.host}:${props.view.laptop.port}`,
                 })}
               </Text>
-            )}
-            <Text style={styles.cardLine}>
-              {t(props.language, "settings.deviceId", { value: props.view.laptop.deviceId })}
-            </Text>
-            {pairedAtDate !== undefined && (
+              {props.view.fingerprintTail !== undefined && (
+                <Text style={styles.cardLine}>
+                  {t(props.language, "settings.fingerprintTail", {
+                    tail: `${LRI}${props.view.fingerprintTail}${PDI}`,
+                  })}
+                </Text>
+              )}
               <Text style={styles.cardLine}>
-                {t(props.language, "settings.pairedAt", { date: pairedAtDate })}
+                {t(props.language, "settings.deviceId", { value: props.view.laptop.deviceId })}
               </Text>
+              {pairedAtDate !== undefined && (
+                <Text style={styles.cardLine}>
+                  {t(props.language, "settings.pairedAt", { date: pairedAtDate })}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
+      {shown("laptop") &&
+        (wide ? (
+          <LaptopSettingsSection language={props.language} variant="cards" />
+        ) : (
+          <View {...section("laptop")}>
+            <Text style={sectionTitle}>{t(props.language, "laptopSettings.title")}</Text>
+            <LaptopSettingsSection language={props.language} variant="list" />
+          </View>
+        ))}
+
+      {shown("connection") && (
+        <View {...section("connection")}>
+          <Text style={sectionTitle}>{t(props.language, "settings.connection")}</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardLine}>
+              {t(
+                props.language,
+                platformKey(connectionStateKey(props.view.connection), props.platform),
+              )}
+            </Text>
+            {lastFrameSeconds !== undefined && (
+              <Text style={styles.cardLine}>
+                {t(props.language, "settings.lastFrame", { seconds: lastFrameSeconds })}
+              </Text>
+            )}
+            <TouchableOpacity style={styles.button} onPress={() => props.store.reconnect()}>
+              <Text style={styles.buttonText}>{t(props.language, "settings.reconnect")}</Text>
+            </TouchableOpacity>
+            {props.view.reconnectError && (
+              <Text style={styles.errorText}>{t(props.language, "settings.reconnectFailed")}</Text>
             )}
           </View>
-        )}
-      </View>
-
-      <View {...section("laptop")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "laptopSettings.title")}</Text>
-        <LaptopSettingsSection language={props.language} />
-      </View>
-
-      <View {...section("connection")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "settings.connection")}</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardLine}>
-            {t(
-              props.language,
-              platformKey(connectionStateKey(props.view.connection), props.platform),
-            )}
-          </Text>
-          {lastFrameSeconds !== undefined && (
-            <Text style={styles.cardLine}>
-              {t(props.language, "settings.lastFrame", { seconds: lastFrameSeconds })}
-            </Text>
-          )}
-          <TouchableOpacity style={styles.button} onPress={() => props.store.reconnect()}>
-            <Text style={styles.buttonText}>{t(props.language, "settings.reconnect")}</Text>
-          </TouchableOpacity>
-          {props.view.reconnectError && (
-            <Text style={styles.errorText}>{t(props.language, "settings.reconnectFailed")}</Text>
-          )}
         </View>
-      </View>
+      )}
 
-      <View {...section("security")}>
-        <Text style={styles.sectionTitle}>{t(props.language, "settings.security")}</Text>
-        <Text style={styles.switchHint}>{t(props.language, "settings.idleLock")}</Text>
-        <View style={styles.row}>
-          {IDLE_LOCK_MINUTES.map((minutes) => (
-            <TouchableOpacity
-              key={minutes}
-              style={[
-                styles.langButton,
-                props.view.idleLockMinutes === minutes && styles.langButtonActive,
-              ]}
-              onPress={() => void props.store.setIdleLockMinutes(minutes).catch(() => {})}
-            >
-              <Text style={styles.langButtonText}>
-                {t(props.language, "settings.idleLock.minutes", { minutes })}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      {shown("security") && (
+        <View {...section("security")}>
+          <Text style={sectionTitle}>{t(props.language, "settings.security")}</Text>
+          <Text style={styles.switchHint}>{t(props.language, "settings.idleLock")}</Text>
+          <View style={styles.row}>
+            {IDLE_LOCK_MINUTES.map((minutes) => (
+              <TouchableOpacity
+                key={minutes}
+                style={[
+                  styles.langButton,
+                  props.view.idleLockMinutes === minutes && styles.langButtonActive,
+                ]}
+                onPress={() => void props.store.setIdleLockMinutes(minutes).catch(() => {})}
+              >
+                <Text style={styles.langButtonText}>
+                  {t(props.language, "settings.idleLock.minutes", { minutes })}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
-      {Platform.OS === "web" && (
+      {Platform.OS === "web" && shown("keep-signed-in") && (
         <>
           <View {...section("keep-signed-in")}>
             <Text style={styles.cardLine}>{t(props.language, "auth.keepSignedIn")}</Text>
@@ -294,7 +268,7 @@ export function SettingsSections(props: Props): React.JSX.Element {
           </View>
           {passkeys.isSupported() && (
             <View {...section("passkeys")}>
-              <Text style={styles.sectionTitle}>{t(props.language, "settings.passkeys")}</Text>
+              <Text style={sectionTitle}>{t(props.language, "settings.passkeys")}</Text>
               <Text style={styles.switchHint}>{t(props.language, "settings.passkeysHint")}</Text>
               <PasskeyRegisterForm />
             </View>
@@ -302,29 +276,29 @@ export function SettingsSections(props: Props): React.JSX.Element {
         </>
       )}
 
-      <View {...section("remote-access")}>
-        {props.wide && (
-          <Text style={styles.sectionTitle}>
-            {t(props.language, "settings.section.remoteAccess")}
+      {shown("remote-access") && (
+        <View {...section("remote-access")}>
+          {props.wide && (
+            <Text style={sectionTitle}>{t(props.language, "settings.section.remoteAccess")}</Text>
+          )}
+          <TouchableOpacity style={styles.dangerButton} onPress={props.onLogout}>
+            <Text style={styles.dangerButtonText}>{t(props.language, "settings.logout")}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dangerButton} onPress={props.onUnpair}>
+            <Text style={styles.dangerButtonText}>
+              {t(props.language, platformKey("settings.unpair", props.platform))}
+            </Text>
+          </TouchableOpacity>
+          {props.view.unpairError && (
+            <Text style={styles.errorText}>
+              {t(props.language, platformKey("settings.unpairFailed", props.platform))}
+            </Text>
+          )}
+          <Text style={styles.version}>
+            {t(props.language, "settings.appVersion", { version: props.view.appVersion })}
           </Text>
-        )}
-        <TouchableOpacity style={styles.dangerButton} onPress={props.onLogout}>
-          <Text style={styles.dangerButtonText}>{t(props.language, "settings.logout")}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.dangerButton} onPress={props.onUnpair}>
-          <Text style={styles.dangerButtonText}>
-            {t(props.language, platformKey("settings.unpair", props.platform))}
-          </Text>
-        </TouchableOpacity>
-        {props.view.unpairError && (
-          <Text style={styles.errorText}>
-            {t(props.language, platformKey("settings.unpairFailed", props.platform))}
-          </Text>
-        )}
-        <Text style={styles.version}>
-          {t(props.language, "settings.appVersion", { version: props.view.appVersion })}
-        </Text>
-      </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -350,6 +324,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   sections: { flex: 1, gap: 8 },
+  sectionsWide: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 20 },
   section: { gap: 8 },
   sectionTitle: {
     color: theme.colors.textDim,

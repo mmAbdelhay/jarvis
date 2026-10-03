@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   I18nManager,
   Platform,
@@ -10,7 +10,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import type { ScrollView as ScrollViewType } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WideShell } from "@/components/WideShell";
 import { realClock } from "@/lib/clock";
@@ -24,12 +23,13 @@ import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
-import { settingsWideLayout } from "@/lib/settings-sections";
+import { SETTINGS_SCOPES, type SettingsScope, settingsWideLayout } from "@/lib/settings-sections";
 import { createSettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { useVoiceController } from "@/lib/voice-context";
-import { SettingsSectionNav, SettingsSections } from "@/screens/SettingsSections";
+import { SegmentTabs } from "@/components/SegmentTabs";
+import { SettingsSections } from "@/screens/SettingsSections";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "0.0.0";
 const PLATFORM = clientPlatformFor(Platform.OS);
@@ -54,14 +54,12 @@ function SettingsScreen() {
   const voiceController = useVoiceController();
   const push = usePushRegistration();
   const authSession = useAuthSession();
-  const scrollRef = useRef<ScrollViewType>(null);
-  const sectionOffsets = useRef<Record<string, number>>({});
+  const [scope, setScope] = useState<SettingsScope>("browser");
   const wide = layout.kind === "wide";
   const wideLayout = settingsWideLayout({
     language,
     platformRtl: I18nManager.getConstants().isRTL,
   });
-  const paneDirection = { direction: wideLayout.paneDirection };
 
   const store = useMemo(
     () =>
@@ -137,13 +135,7 @@ function SettingsScreen() {
       view={view}
       store={store}
       wide={wide}
-      onSectionLayout={
-        wide
-          ? (id, y) => {
-              sectionOffsets.current[id] = y;
-            }
-          : undefined
-      }
+      scope={wide ? scope : undefined}
       onSpeakReplies={(on) => {
         // Prefs first, controller only once the write actually lands —
         // `store.setSpeakReplies` leaves its own view unchanged on a
@@ -168,24 +160,25 @@ function SettingsScreen() {
 
   if (wide) {
     return (
-      <View style={[styles.wideRoot, { direction: wideLayout.direction }]}>
-        <View style={[styles.navPane, paneDirection]}>
-          <SettingsSectionNav
-            language={language}
-            platform={PLATFORM}
-            scrollRef={scrollRef}
-            sectionOffsets={sectionOffsets}
-          />
-        </View>
-        <View style={styles.divider} />
-        <ScrollView
-          ref={scrollRef}
-          style={[styles.container, paneDirection]}
-          contentContainerStyle={styles.wideContent}
-        >
-          {content}
-        </ScrollView>
-      </View>
+      <ScrollView
+        style={[styles.container, { direction: wideLayout.direction }]}
+        contentContainerStyle={styles.wideContent}
+      >
+        <Text style={styles.wideTitle} accessibilityRole="header">
+          {t(language, "settings.title")}
+        </Text>
+        <SegmentTabs
+          variant="inline"
+          label={t(language, "settings.scopeTabs")}
+          tabs={SETTINGS_SCOPES.map((key) => ({
+            key,
+            label: t(language, key === "browser" ? "settings.thisBrowser" : "settings.theLaptop"),
+            selected: scope === key,
+            onPress: () => setScope(key),
+          }))}
+        />
+        {content}
+      </ScrollView>
     );
   }
 
@@ -211,16 +204,8 @@ function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
-  wideRoot: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
-  navPane: { width: 220, flexShrink: 0 },
-  divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
-  wideContent: {
-    width: "100%",
-    maxWidth: 820,
-    alignSelf: "center",
-    padding: 24,
-    paddingBottom: 40,
-  },
+  wideContent: { paddingHorizontal: 32, paddingVertical: 28, paddingBottom: 40, gap: 20 },
+  wideTitle: { color: theme.colors.text, fontSize: 26, fontFamily: theme.font.extrabold },
   phoneContent: { paddingHorizontal: 20, paddingBottom: 34, gap: 8 },
   header: { flexDirection: "row", alignItems: "center", marginStart: -8, marginBottom: 4 },
   back: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },

@@ -225,6 +225,22 @@ export const STRINGS = {
     en: "Remote access",
     ar: "الوصول عن بُعد",
   },
+  "settings.thisBrowser": { en: "This browser", ar: "هذا المتصفح" },
+  "settings.theLaptop": { en: "The laptop", ar: "الحاسوب" },
+  "settings.scopeTabs": { en: "Settings scope", ar: "نطاق الإعدادات" },
+  "settings.pairedDevices": { en: "Paired devices", ar: "الأجهزة المقترنة" },
+  "settings.devicesNote": {
+    en: "Pairing a new device and changing the owner password stay on the laptop.",
+    ar: "اقتران جهاز جديد وتغيير كلمة مرور المالك يبقيان على الحاسوب.",
+  },
+  "settings.current": { en: "current", ar: "الحالي" },
+  "settings.saveToLaptop": { en: "Save to the laptop", ar: "حفظ على الحاسوب" },
+  "settings.discard": { en: "Discard", ar: "تجاهل" },
+  "settings.worktreeHint": {
+    en: "Give parallel agents their own checkout",
+    ar: "امنح الوكلاء المتوازيين نسخة عمل خاصة بكل منهم",
+  },
+  "laptopSettings.worktreesLabel": { en: "Worktree per session", ar: "worktree لكل جلسة" },
   "settings.language": {
     en: "Language",
     ar: "اللغة",
