@@ -54,6 +54,7 @@ import { type BarKey, isTextKey, TEXT_KEY_VALUE, terminalFooterKeys } from "@/li
 import { paneChips, terminalTitle } from "@/lib/terminal-header";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
+import { createTerminalFit, type TerminalSize } from "@/lib/terminal-fit";
 import { createTerminalInput } from "@/lib/terminal-input";
 import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
@@ -148,6 +149,25 @@ function TerminalPaneBody({
   const streamRef = useRef<SessionStream | undefined>(undefined);
   const exitedRef = useRef(exited);
   exitedRef.current = exited;
+  // Fit toggle (terminal-fit.ts): on, the phone sizes the pty to its own
+  // fit; `ptySize` is the size the pty has as far as this screen knows —
+  // the attach snapshot's, or the desktop's size Fit just gave back.
+  const [fitOn, setFitOn] = useState(false);
+  const [ptySize, setPtySize] = useState<TerminalSize | undefined>(undefined);
+  const fit = useMemo(
+    () =>
+      createTerminalFit({
+        // Marked "fit": the host applies it even to a pane the desktop sized.
+        // Straight to the host, not through the debounced input — the
+        // restore on blur must go out before the input is disposed.
+        send: ({ cols, rows }) => {
+          void client.call("terminal:resize", [paneKey, cols, rows, "fit"], {
+            whenNotOpen: "reject",
+          });
+        },
+      }),
+    [client, paneKey],
+  );
   const sink = useMemo(
     () => ({
       write: (data: string) => webRef.current?.write(data),
@@ -295,6 +315,37 @@ function TerminalPaneBody({
   useEffect(() => {
     inputRef.current?.setEnded(exited);
   }, [exited]);
+
+  // A pty size the host reports. Never answered with a resize of our own,
+  // so it cannot start a loop: a size Fit did not set means the desktop
+  // resized the pane meanwhile, and Fit simply goes off.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the size's own cols/rows, not the view object, which changes on every stream update.
+  useEffect(() => {
+    setPtySize(streamView.size);
+    if (fit.ptyReported(streamView.size)) setFitOn(false);
+  }, [streamView.size?.cols, streamView.size?.rows, fit]);
+
+  // Leaving the screen (blur or unmount) with Fit on gives the desktop its
+  // size back.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        const restored = fit.disable();
+        if (restored !== undefined) setPtySize(restored);
+        setFitOn(false);
+      };
+    }, [fit]),
+  );
+
+  function toggleFit(): void {
+    if (fit.isOn()) {
+      const restored = fit.disable();
+      if (restored !== undefined) setPtySize(restored);
+      setFitOn(false);
+      return;
+    }
+    if (fit.enable(ptySize)) setFitOn(true);
+  }
   const disabled = exited || phase !== "ok" || connection !== "open";
 
   function showResult(input: SessionInput, result: SendResult): void {
@@ -374,6 +425,16 @@ function TerminalPaneBody({
       }}
     />
   );
+  const fitButton = (
+    <IconButton
+      icon="fitWidth"
+      label={t(language, "terminal.fit")}
+      selected={fitOn}
+      disabled={!fitOn && (ptySize === undefined || disabled)}
+      {...(embedded ? { size: 28 as const, iconSize: 16 } : {})}
+      onPress={toggleFit}
+    />
+  );
   const filesButton = (
     <IconButton
       icon="folder"
@@ -385,6 +446,7 @@ function TerminalPaneBody({
   // bar and shows the Files button only when no aside holds the tree.
   const headerActions = (
     <View style={styles.headerActions}>
+      {fitButton}
       {filesButton}
       {findControl}
     </View>
@@ -445,6 +507,11 @@ function TerminalPaneBody({
       {/* Wide layout: no stack header, so the Files button sits above the pane
           (unless the aside shows the tree); find is in the status bar. */}
       {embedded && !filesAside && <View style={styles.planRow}>{filesButton}</View>}
+      {fitOn && (
+        <Text style={styles.fitNote} numberOfLines={1}>
+          {t(language, "terminal.fitOn")}
+        </Text>
+      )}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -467,11 +534,15 @@ function TerminalPaneBody({
           onReady={({ cols, rows }) => {
             inputRef.current?.resize(cols, rows);
             inputRef.current?.reassert();
+            fit.pageSize({ cols, rows });
           }}
-          onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
+          onResize={({ cols, rows }) => {
+            inputRef.current?.resize(cols, rows);
+            fit.pageSize({ cols, rows });
+          }}
           onModes={(modes) => inputRef.current?.setModes(modes)}
           onNeedsReplay={() => streamRef.current?.restart(sink)}
-          fixedSize={streamView.size}
+          fixedSize={fitOn ? undefined : ptySize}
           onWheel={(direction) => {
             void inputRef.current?.sendText(sgrWheelSequence(direction));
           }}
@@ -492,11 +563,9 @@ function TerminalPaneBody({
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
       <TerminalNavBar
         language={language}
-        view={view}
         finding={finding}
         query={query}
         found={found}
-        onJump={(to) => webRef.current?.jump(to)}
         onFind={(text, direction) => webRef.current?.find(text, direction)}
         onCloseFind={closeFind}
       />
@@ -516,6 +585,7 @@ function TerminalPaneBody({
           </Text>
           <View style={styles.statusEnd}>
             <Text style={styles.statusHint}>{t(language, "terminal.historyHint")}</Text>
+            {fitButton}
             {findControl}
           </View>
         </View>
@@ -526,6 +596,17 @@ function TerminalPaneBody({
           keys={terminalFooterKeys(navMode)}
           disabled={disabled}
           armed={armed}
+          // Previous / next command, when the shell marks its prompts.
+          actions={
+            view.commands
+              ? (["prevCommand", "nextCommand"] as const).map((to) => ({
+                  id: to,
+                  icon: to === "prevCommand" ? ("chevronUp" as const) : ("chevronDown" as const),
+                  label: t(language, `terminal.${to}`),
+                  onPress: () => webRef.current?.jump(to),
+                }))
+              : undefined
+          }
           modeToggle={{
             open: navMode,
             onPress: () => {
@@ -606,6 +687,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.terminalGround },
   output: { flex: 1 },
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
+  fitNote: {
+    ...theme.type.meta,
+    color: theme.colors.warning,
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+  },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   planRow: { flexDirection: "row", justifyContent: "flex-end" },
   embeddedColumn: { minWidth: 0 },

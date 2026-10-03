@@ -1066,13 +1066,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },
-    "terminal:resize": ([tabId, cols, rows], origin) => {
+    "terminal:resize": ([tabId, cols, rows, mode], origin) => {
       if (typeof tabId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
       if (origin.kind === "remote") {
         // The desktop already claimed this pane's size — see the comment
-        // by `desktopSizedPanes`'s declaration.
-        if (desktopSizedPanes.has(tabId)) return;
+        // by `desktopSizedPanes`'s declaration — unless the phone's user
+        // turned on Fit, which takes the size outright (and gives the
+        // desktop's back the same way). Never claims ownership itself.
+        if (desktopSizedPanes.has(tabId) && mode !== "fit") return;
       } else {
         desktopSizedPanes.add(tabId);
       }

@@ -45,6 +45,11 @@ export const STRINGS = {
   "terminal.prevCommand": { en: "Previous command", ar: "الأمر السابق" },
   "terminal.nextCommand": { en: "Next command", ar: "الأمر التالي" },
   "terminal.latest": { en: "Latest", ar: "الأحدث" },
+  "terminal.fit": { en: "Fit to phone", ar: "ملاءمة للهاتف" },
+  "terminal.fitOn": {
+    en: "Desktop view is narrow while Fit is on",
+    ar: "عرض سطح المكتب ضيق ما دامت الملاءمة مفعّلة",
+  },
   "terminal.scrolledBack": { en: "Scrolled back", ar: "تم التمرير للخلف" },
   "terminal.pane": { en: "Pane {n}", ar: "لوحة {n}" },
   "terminal.typePlaceholder": { en: "Type a command or reply", ar: "اكتب أمرًا أو ردًّا" },

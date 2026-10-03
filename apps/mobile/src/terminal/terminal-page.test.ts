@@ -318,6 +318,40 @@ describe("createPageController", () => {
       expect(deps.fixedSizes).toEqual([{ cols: 100, rows: 30 }]);
     });
 
+    // Fit toggle: the phone takes the pty's size itself, so the page goes
+    // back to fitting its own width and reports what that fits.
+    it('receive({"t":"free"}) drops the fixed size: fit() again, and resize posts the fitted size', () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      deps.fit = () => term.setSize(48, 40);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"size","cols":200,"rows":50}');
+      deps.posted.length = 0;
+      deps.fixedSizes.length = 0;
+
+      controller.receive('{"t":"free"}');
+      controller.layoutChanged();
+
+      expect(deps.fixedSizes).toEqual([]);
+      expect(deps.posted).toEqual([{ t: "resize", cols: 48, rows: 40 }]);
+    });
+
+    it("a size after a free fixes the size again", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      deps.fit = () => term.setSize(48, 40);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"free"}');
+      deps.posted.length = 0;
+
+      controller.receive('{"t":"size","cols":200,"rows":50}');
+
+      expect(deps.fixedSizes).toEqual([{ cols: 200, rows: 50 }]);
+      expect(deps.posted).toEqual([{ t: "resize", cols: 200, rows: 50 }]);
+    });
+
     it("ignores a size message with a non-number cols/rows", () => {
       const term = makeFakeTerminal();
       const deps = makeDeps(term);
@@ -625,5 +659,26 @@ describe("scrollback navigation", () => {
       t: "found",
       ok: false,
     });
+  });
+});
+
+// The fixed size's font: the largest in [11, 14]px whose columns fit the
+// width. A wider pty overflows at 11px and pans rather than shrinking to
+// an unreadable size.
+describe("fixedFont", () => {
+  const controller = createPageController(makeDeps(makeFakeTerminal()));
+  const monoWidth = (size: number) => size * 0.6;
+
+  it("picks the largest size whose columns fit", () => {
+    // 80 cols x 0.6 x 13 = 624 <= 640; 14 would be 672.
+    expect(controller.fixedFont(80, 640, monoWidth)).toEqual({ size: 13, overflowing: false });
+  });
+
+  it("never goes below 11px, and says the width overflows there", () => {
+    expect(controller.fixedFont(200, 400, monoWidth)).toEqual({ size: 11, overflowing: true });
+  });
+
+  it("caps at 14px for a narrow pty", () => {
+    expect(controller.fixedFont(20, 1000, monoWidth)).toEqual({ size: 14, overflowing: false });
   });
 });

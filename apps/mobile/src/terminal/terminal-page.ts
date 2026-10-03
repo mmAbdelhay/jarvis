@@ -96,6 +96,11 @@ export type CommandMark = { readonly line: number; readonly isDisposed: boolean 
 /** The longest search the page accepts; longer is refused, not cut. */
 const MAX_FIND_CHARS = 200;
 
+// A fixed size's font range. 11px is the smallest that stays readable on a
+// phone; a pty wider than that fits overflows and pans sideways instead.
+const MIN_FIXED_FONT_PX = 11;
+const MAX_FIXED_FONT_PX = 14;
+
 export function createPageController(deps: PageDeps): {
   receive(raw: unknown): void;
   start(): void;
@@ -114,6 +119,14 @@ export function createPageController(deps: PageDeps): {
   commandMark(mark: CommandMark): void;
   /** The viewport moved or the buffer grew: re-reports the view state. */
   viewChanged(): void;
+  /** Bug 8: the font for a fixed `cols`-wide size in `width` px — the
+   *  largest in [11,14]px whose columns fit, else 11px and overflowing.
+   *  `charWidthAt` measures one cell at a font size. */
+  fixedFont(
+    cols: number,
+    width: number,
+    charWidthAt: (size: number) => number,
+  ): { size: number; overflowing: boolean };
 } {
   let lastCols = -1;
   let lastRows = -1;
@@ -299,6 +312,13 @@ export function createPageController(deps: PageDeps): {
       layoutChanged();
       return;
     }
+    // Fit toggle: native is driving the pty's size from this page's own
+    // fit now, so it goes back to fitting until the next `size`.
+    if (obj.t === "free") {
+      fixedSize = undefined;
+      layoutChanged();
+      return;
+    }
     if (obj.t === "size") {
       if (typeof obj.cols !== "number" || typeof obj.rows !== "number") {
         return;
@@ -360,7 +380,22 @@ export function createPageController(deps: PageDeps): {
     viewChanged();
   }
 
+  function fixedFont(
+    cols: number,
+    width: number,
+    charWidthAt: (size: number) => number,
+  ): { size: number; overflowing: boolean } {
+    for (let size = MAX_FIXED_FONT_PX; size > MIN_FIXED_FONT_PX; size--) {
+      if (charWidthAt(size) * cols <= width) return { size, overflowing: false };
+    }
+    return {
+      size: MIN_FIXED_FONT_PX,
+      overflowing: charWidthAt(MIN_FIXED_FONT_PX) * cols > width,
+    };
+  }
+
   return {
+    fixedFont,
     receive,
     start,
     layoutChanged,

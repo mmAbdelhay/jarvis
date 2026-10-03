@@ -112,6 +112,10 @@ describe("encodeNativeMessage", () => {
     const encoded = encodeNativeMessage({ t: "size", cols: 80, rows: 24 });
     expect(JSON.parse(encoded)).toEqual({ t: "size", cols: 80, rows: 24 });
   });
+
+  it("round-trips a free message through JSON.parse", () => {
+    expect(JSON.parse(encodeNativeMessage({ t: "free" }))).toEqual({ t: "free" });
+  });
 });
 
 describe("parseFrameMessage (web iframe, Task 13)", () => {

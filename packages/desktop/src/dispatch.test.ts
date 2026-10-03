@@ -479,6 +479,22 @@ describe("dispatch table: sessions and git", () => {
       expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 40, 100);
     });
 
+    // Fit toggle: the phone's user asked for the phone's size outright, and
+    // gives the desktop's size back the same way when Fit goes off.
+    it('applies a remote resize marked "fit" even to a pane the desktop sized', async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 120, 40, "fit");
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 50, 90);
+
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(3);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t1", 40, 100);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(3, "t1", 120, 40);
+    });
+
     it("tracks ownership separately per pane/session id", async () => {
       const deps = fakeDeps();
       const table = createDispatchTable(deps);

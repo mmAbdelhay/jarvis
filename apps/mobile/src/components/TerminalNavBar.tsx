@@ -3,91 +3,60 @@ import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
 import { t, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
-import type { TerminalView } from "./TerminalWebView";
 
 /**
- * Getting around a terminal's scrollback on a phone: jump to the previous
- * or next command (when the shell marks its prompts), step through find
- * matches, and — over the output, see TerminalLatestPill — back to the live
- * end. The find field itself sits in the screen header (TerminalFindField).
- * Shown only when one of those has something to do.
+ * Stepping through find matches in a terminal's scrollback on a phone. The
+ * find field itself sits in the screen header (TerminalFindField); previous
+ * / next command are icon caps in the key bar, and the way back to the live
+ * end floats over the output (TerminalLatestPill). Shown only while finding.
  */
 export function TerminalNavBar(props: {
   language: Language;
-  view: TerminalView;
   finding: boolean;
   /** The text being found; the field in the header owns it. */
   query: string;
   /** Whether the last find matched; undefined before any. */
   found: boolean | undefined;
-  onJump(to: "prevCommand" | "nextCommand"): void;
   onFind(query: string, direction: "next" | "prev"): void;
   onCloseFind(): void;
 }) {
-  const { language, view } = props;
-  if (!props.finding && !view.commands) return null;
+  const { language } = props;
+  if (!props.finding) return null;
   return (
     <View style={styles.bar}>
-      {props.finding && (
-        <View style={styles.findRow}>
-          {(["prev", "next"] as const).map((direction) => (
-            <TouchableOpacity
-              key={direction}
-              accessibilityRole="button"
-              accessibilityLabel={t(
-                language,
-                direction === "next" ? "terminal.findNext" : "terminal.findPrev",
-              )}
-              disabled={props.query === ""}
-              onPress={() => props.onFind(props.query, direction)}
-              style={[styles.jump, props.query === "" && styles.disabled]}
-            >
-              <Icon
-                name={direction === "next" ? "chevronDown" : "chevronUp"}
-                size={14}
-                color={theme.colors.textSecondary}
-                strokeWidth={2.4}
-              />
-              <Text style={styles.jumpText}>
-                {t(language, direction === "next" ? "terminal.findNext" : "terminal.findPrev")}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <IconButton
-            icon="close"
-            size={40}
-            iconSize={16}
-            label={t(language, "terminal.findClose")}
-            onPress={props.onCloseFind}
-          />
-        </View>
-      )}
-      {view.commands && (
-        <View style={styles.jumpRow}>
-          {(["prevCommand", "nextCommand"] as const).map((to) => (
-            <TouchableOpacity
-              key={to}
-              accessibilityRole="button"
-              onPress={() => props.onJump(to)}
-              style={styles.jump}
-            >
-              <Icon
-                name={to === "prevCommand" ? "chevronUp" : "chevronDown"}
-                size={14}
-                color={theme.colors.textSecondary}
-                strokeWidth={2.4}
-              />
-              <Text style={styles.jumpText}>
-                {t(
-                  language,
-                  to === "prevCommand" ? "terminal.prevCommand" : "terminal.nextCommand",
-                )}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-      {props.finding && props.found === false && (
+      <View style={styles.findRow}>
+        {(["prev", "next"] as const).map((direction) => (
+          <TouchableOpacity
+            key={direction}
+            accessibilityRole="button"
+            accessibilityLabel={t(
+              language,
+              direction === "next" ? "terminal.findNext" : "terminal.findPrev",
+            )}
+            disabled={props.query === ""}
+            onPress={() => props.onFind(props.query, direction)}
+            style={[styles.jump, props.query === "" && styles.disabled]}
+          >
+            <Icon
+              name={direction === "next" ? "chevronDown" : "chevronUp"}
+              size={14}
+              color={theme.colors.textSecondary}
+              strokeWidth={2.4}
+            />
+            <Text style={styles.jumpText}>
+              {t(language, direction === "next" ? "terminal.findNext" : "terminal.findPrev")}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <IconButton
+          icon="close"
+          size={40}
+          iconSize={16}
+          label={t(language, "terminal.findClose")}
+          onPress={props.onCloseFind}
+        />
+      </View>
+      {props.found === false && (
         <Text style={styles.missing}>{t(language, "terminal.findNone")}</Text>
       )}
     </View>
@@ -122,12 +91,13 @@ export function TerminalFindField(props: {
   );
 }
 
-/** "Latest": a floating pill over the output, once scrolled away from the live end. */
+/** "Latest": a small chip floating at the output's bottom corner, once
+ *  scrolled away from the live end — over the output, not under it. */
 export function TerminalLatestPill(props: { language: Language; onPress(): void }) {
   return (
     <View pointerEvents="box-none" style={styles.pillLayer}>
       <TouchableOpacity accessibilityRole="button" onPress={props.onPress} style={styles.pill}>
-        <Icon name="arrowDown" size={14} color={theme.colors.primaryText} strokeWidth={2.6} />
+        <Icon name="arrowDown" size={12} color={theme.colors.primaryText} strokeWidth={2.6} />
         <Text style={styles.pillText}>{t(props.language, "terminal.latest")}</Text>
       </TouchableOpacity>
     </View>
@@ -145,7 +115,6 @@ const styles = StyleSheet.create({
   },
   findRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   disabled: { opacity: 0.4 },
-  jumpRow: { flexDirection: "row", gap: 6 },
   jump: {
     flex: 1,
     minHeight: 40,
@@ -181,21 +150,15 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.mono,
     fontSize: 12,
   },
-  pillLayer: {
-    position: "absolute",
-    bottom: 14,
-    insetInlineStart: 0,
-    insetInlineEnd: 0,
-    alignItems: "center",
-  },
+  pillLayer: { position: "absolute", bottom: 10, insetInlineEnd: 10 },
   pill: {
-    minHeight: 40,
-    paddingHorizontal: 14,
+    minHeight: 28,
+    paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.accent,
   },
-  pillText: { color: theme.colors.primaryText, fontFamily: theme.font.extrabold, fontSize: 13 },
+  pillText: { color: theme.colors.primaryText, fontFamily: theme.font.extrabold, fontSize: 12 },
 });

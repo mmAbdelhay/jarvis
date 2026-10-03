@@ -121,12 +121,15 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "textarea.readOnly=true;" +
     'textarea.setAttribute("inputmode","none");' +
     "}" +
-    // Bug 8: a fixed size from native (the pty's real cols/rows) picks the
-    // largest font size in [6,14]px whose `cols` columns fit the WebView's
-    // current width, measured with a scratch canvas rather than xterm's own
-    // (fontSize-dependent) internals — clamped to 6px rather than shrunk
-    // further, with native horizontal panning left on for whatever still
-    // overflows at that floor.
+    // Bug 8: a fixed size from native (the pty's real cols/rows) gets the
+    // largest font in [11,14]px whose `cols` columns fit the WebView's
+    // current width (the controller's fixedFont), measured with a scratch
+    // canvas rather than xterm's own (fontSize-dependent) internals. A pty
+    // wider than 11px fits overflows and pans sideways instead of shrinking
+    // to an unreadable size. xterm rounds its cell width to device pixels,
+    // so the rendered screen can still come out wider than the canvas
+    // estimate — its real width decides the pan too, or the right edge is
+    // cut off with no way to reach it.
     'var fitCanvas=document.createElement("canvas");' +
     'var fitCtx=fitCanvas.getContext("2d");' +
     "function charWidthAt(size){" +
@@ -136,15 +139,22 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "function applyFixedSize(cols,rows){" +
     'var container=document.getElementById("t");' +
     "var width=container.clientWidth;" +
-    "var chosen=6;" +
-    "for(var size=14;size>=6;size--){" +
-    "if(charWidthAt(size)*cols<=width){chosen=size;break;}" +
-    "}" +
-    "term.options.fontSize=chosen;" +
+    "var font=controller.fixedFont(cols,width,charWidthAt);" +
+    "term.options.fontSize=font.size;" +
     "term.resize(cols,rows);" +
-    "var overflowing=charWidthAt(chosen)*cols>width;" +
+    'var screen=container.querySelector(".xterm-screen");' +
+    "var overflowing=font.overflowing||(screen!==null&&screen.scrollWidth>width);" +
     'container.style.overflowX=overflowing?"auto":"hidden";' +
     'container.style.touchAction=overflowing?"pan-x":"none";' +
+    "}" +
+    // Fit toggle: back to fitting the WebView — no pan, and fitAddon's own
+    // font size rather than whatever the fixed size last picked.
+    "function fitToView(){" +
+    'var container=document.getElementById("t");' +
+    "term.options.fontSize=fontSize;" +
+    'container.style.overflowX="hidden";' +
+    'container.style.touchAction="none";' +
+    "fitAddon.fit();" +
     "}" +
     // Bug 9: `term` is passed straight through as `PageDeps.term` — real
     // xterm 6 already shapes `.write`/`.reset`/`.cols`/`.rows`/`.modes`/
@@ -152,7 +162,7 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     // no adapter object is needed here.
     "var controller=createPageController({" +
     "term:term," +
-    "fit:function(){fitAddon.fit();}," +
+    "fit:fitToView," +
     // Task 13: the same script also runs in the browser build, as the
     // static terminal.html in a sandboxed iframe (TerminalWebView.web.tsx)
     // with no ReactNativeWebView bridge — there it posts to its parent.

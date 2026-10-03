@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Icon } from "@/components/Icon";
+import type { IconName } from "@/lib/icon-paths";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { KEY_CAPS, KEY_LABEL_KEYS } from "@/lib/session-screen";
@@ -22,6 +24,9 @@ export function KeyBar<K extends BarKey>(props: {
   modeToggle?: { open: boolean; onPress(): void };
   /** The "⋯" row closed, so its caps (and any latch armed there) are gone. */
   onMoreClose?(): void;
+  /** Icon caps ahead of the keys that act on the screen, not the pty (the
+   *  terminal's previous / next command). Never disabled with the keys. */
+  actions?: readonly { id: string; icon: IconName; label: string; onPress(): void }[];
   onKey(key: K): void;
 }) {
   const language = useLanguage();
@@ -67,6 +72,22 @@ export function KeyBar<K extends BarKey>(props: {
         style={styles.row}
         contentContainerStyle={footer ? styles.footerContent : styles.content}
       >
+        {props.actions?.map((action) => (
+          <TouchableOpacity
+            key={action.id}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            onPress={action.onPress}
+            style={styles.cap}
+          >
+            <Icon
+              name={action.icon}
+              size={16}
+              color={theme.colors.textSecondary}
+              strokeWidth={2.4}
+            />
+          </TouchableOpacity>
+        ))}
         {props.keys.map(cap)}
         {props.modeToggle !== undefined && (
           <TouchableOpacity

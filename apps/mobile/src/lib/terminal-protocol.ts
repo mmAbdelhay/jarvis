@@ -35,6 +35,9 @@ export type NativeMessage =
   // dimensions, so a phone attaching to a pane the desktop already sized
   // renders it correctly instead of garbling wrapped lines.
   | { t: "size"; cols: number; rows: number }
+  // Fit toggle: forget the fixed size and fit the WebView again; the
+  // screen sends the pty that fitted size itself.
+  | { t: "free" }
   // After a copy: drop the selection, so the next Ctrl+C interrupts again.
   | { t: "clearSelection" }
   // Getting around the scrollback.

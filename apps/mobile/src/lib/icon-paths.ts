@@ -110,6 +110,11 @@ export const ICONS = {
   },
   check: { strokeWidth: 3.4, shapes: [path("M5 12l5 5 9-10")] },
   arrowDown: { strokeWidth: 2.6, shapes: [path("M12 5v14M6 13l6 6 6-6")] },
+  // The terminal's Fit toggle: two edges, arrows spreading out to them.
+  fitWidth: {
+    strokeWidth: 2.2,
+    shapes: [path("M4 5v14M20 5v14M8 12h8M11 9l-3 3 3 3M13 9l3 3-3 3")],
+  },
 } as const satisfies Record<string, IconSpec>;
 
 export type IconName = keyof typeof ICONS;
