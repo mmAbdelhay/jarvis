@@ -27,6 +27,7 @@ export const STRINGS = {
   "nav.voice": { en: "Voice", ar: "الصوت" },
   "nav.changes": { en: "Changes", ar: "التغييرات" },
   "nav.history": { en: "History", ar: "السجل" },
+  "nav.capacity": { en: "CAPACITY", ar: "السعة" },
   "nav.talk": { en: "Talk to Jarvis", ar: "تحدّث إلى جارفيس" },
   "plans.close": { en: "Close the plan", ar: "أغلق الخطة" },
   "plans.openPlan": { en: "Open the plan", ar: "افتح الخطة" },

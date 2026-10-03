@@ -60,6 +60,7 @@ export const ICONS = {
       path("M6 8.5v7M8.3 7.2l7.4 3.6"),
     ],
   },
+  history: { shapes: [circle(12, 12, 8), path("M12 8v4l3 2")] },
   plus: { strokeWidth: 2.6, shapes: [path("M12 5v14M5 12h14")] },
   search: { shapes: [circle(11, 11, 7), path("M20 20l-3.5-3.5")] },
   chevronDown: { strokeWidth: 2.2, shapes: [path("M6 9l6 6 6-6")] },
