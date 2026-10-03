@@ -195,3 +195,29 @@ describe("history paging and search", () => {
     expect(reqs(socket, "history:list")).toHaveLength(2);
   });
 });
+
+describe("a pinned session", () => {
+  it("is fetched by id when the first page lacks it", async () => {
+    const { client, socket } = createEnv();
+    const store = createHistoryStore({ client, pinnedId: "old" });
+    store.open();
+    await answer(socket, reqs(socket, "history:list")[0]?.id as number, {
+      sessions: [session("s1")],
+      more: true,
+    });
+    expect(reqs(socket, "history:list")[1]).toMatchObject({ a: [{ limit: 1, id: "old" }] });
+    await answer(socket, reqs(socket, "history:list")[1]?.id as number, {
+      sessions: [session("old", { lastActivityAt: 1 })],
+      more: false,
+    });
+    expect(store.get().sessions.map((entry) => entry.id)).toEqual(["s1", "old"]);
+  });
+
+  it("asks nothing more when the first page already has it", async () => {
+    const { client, socket } = createEnv();
+    const store = createHistoryStore({ client, pinnedId: "s1" });
+    store.open();
+    await answer(socket, reqs(socket, "history:list")[0]?.id as number, [session("s1")]);
+    expect(reqs(socket, "history:list")).toHaveLength(1);
+  });
+});

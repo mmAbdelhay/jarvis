@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Browser and tablet History shows the list and the open conversation side by
+  side. A transcript now opens for any session, not only those on History's
+  first page (`history:list` also takes an `id`).
 - Phone and browser Settings: an "On the laptop" section shows the laptop's
   agents, projects and worktree mode, read-only (`settings:read`); changing them
   stays on the laptop.

@@ -15,6 +15,9 @@ export type HistoryPageRequest = {
   limit: number;
   before?: { lastActivityAt: number; id: string };
   query?: string;
+  /** One session by its id, wherever it falls in the list — how a
+   *  transcript screen finds a session older than the first page. */
+  id?: string;
 };
 
 export type HistoryPage = { sessions: Session[]; more: boolean };
@@ -37,6 +40,11 @@ export function parseHistoryPageRequest(value: unknown): HistoryPageRequest | un
       return undefined;
     }
     request.before = { lastActivityAt: cursor["lastActivityAt"], id: cursor["id"] };
+  }
+  const id = raw["id"];
+  if (id !== undefined) {
+    if (typeof id !== "string" || id === "" || id.length > QUERY_MAX) return undefined;
+    request.id = id;
   }
   const query = raw["query"];
   if (query !== undefined) {
@@ -80,7 +88,10 @@ export function historyPage(
     .filter((word) => word !== "");
   const before = request.before;
   const rest = ordered.filter(
-    (session) => (before === undefined || afterCursor(session, before)) && matches(session, words),
+    (session) =>
+      (request.id === undefined || session.id === request.id) &&
+      (before === undefined || afterCursor(session, before)) &&
+      matches(session, words),
   );
   return { sessions: rest.slice(0, request.limit), more: rest.length > request.limit };
 }

@@ -72,4 +72,10 @@ describe("historyPage", () => {
       "y",
     ]);
   });
+
+  it("finds one session by its id, wherever it is in the list", () => {
+    expect(historyPage(all, { limit: 1, id: "d" })).toEqual({ sessions: [all[3]], more: false });
+    expect(historyPage(all, { limit: 1, id: "nope" })).toEqual({ sessions: [], more: false });
+    expect(parseHistoryPageRequest({ limit: 1, id: 4 })).toBeUndefined();
+  });
 });

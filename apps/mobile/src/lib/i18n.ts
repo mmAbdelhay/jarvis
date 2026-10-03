@@ -732,6 +732,10 @@ export const STRINGS = {
     en: "Search tasks, projects and agents",
     ar: "ابحث في المهام والمشاريع والوكلاء",
   },
+  "history.pick": {
+    en: "Pick a session to read its conversation.",
+    ar: "اختر جلسة لقراءة محادثتها.",
+  },
   "history.loadMore": { en: "Load older sessions", ar: "حمّل جلسات أقدم" },
   "history.loadingMore": { en: "Loading…", ar: "جارٍ التحميل…" },
   "history.title": { en: "History", ar: "السجل" },

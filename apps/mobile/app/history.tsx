@@ -20,6 +20,9 @@ import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
 import { type SessionDateLabel, sessionDateLabel } from "@/lib/session-date-groups";
 import { theme } from "@/lib/theme";
+import { useLayoutClass } from "@/lib/use-layout-class";
+import { textDirection } from "@/lib/voice-screen";
+import { TranscriptBody } from "@/screens/TranscriptView";
 
 /** A search is sent once typing pauses, not on every key. */
 const SEARCH_DELAY_MS = 300;
@@ -60,6 +63,29 @@ function timeOfDay(ms: number, language: Language): string {
 // sits in a centred panel under the top bar (a phone gets the page as is).
 export default function HistoryRoute() {
   const language = useLanguage();
+  const layout = useLayoutClass();
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+  if (layout.kind === "wide") {
+    // Wide: the list and the open transcript side by side, the way the
+    // Sessions tab lays out a session — no navigating away to read one.
+    return (
+      <WideShell>
+        <View style={[styles.split, { direction: textDirection(language) }]}>
+          <View style={[styles.listPane, { direction: "ltr" }]}>
+            <HistoryScreen selectedId={selected} onOpen={setSelected} />
+          </View>
+          <View style={styles.divider} />
+          <View style={[styles.detailPane, { direction: "ltr" }]}>
+            {selected === undefined ? (
+              <Text style={[styles.empty, styles.pick]}>{t(language, "history.pick")}</Text>
+            ) : (
+              <TranscriptBody key={selected} id={selected} embedded />
+            )}
+          </View>
+        </View>
+      </WideShell>
+    );
+  }
   return (
     <WideShell>
       <WidePanel title={t(language, "history.title")}>
@@ -69,7 +95,7 @@ export default function HistoryRoute() {
   );
 }
 
-function HistoryScreen() {
+function HistoryScreen(props: { selectedId?: string; onOpen?: (id: string) => void }) {
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();
@@ -155,10 +181,13 @@ function HistoryScreen() {
             {group.rows.map((session) => (
               <TouchableOpacity
                 key={session.id}
-                style={styles.row}
+                style={[styles.row, props.selectedId === session.id && styles.rowSelected]}
                 accessibilityRole="button"
+                accessibilityState={{ selected: props.selectedId === session.id }}
                 onPress={() =>
-                  router.push({ pathname: "/transcript/[id]", params: { id: session.id } })
+                  props.onOpen !== undefined
+                    ? props.onOpen(session.id)
+                    : router.push({ pathname: "/transcript/[id]", params: { id: session.id } })
                 }
               >
                 <View style={styles.rowTop}>
@@ -207,6 +236,12 @@ function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  split: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
+  listPane: { width: 440, flexShrink: 0 },
+  divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
+  detailPane: { flex: 1, minWidth: 0 },
+  pick: { padding: theme.spacing.xl },
+  rowSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surfaceAlt },
   container: { flex: 1, backgroundColor: theme.colors.background },
   content: { padding: theme.spacing.lg, gap: theme.spacing.md },
   list: { gap: theme.spacing.sm },

@@ -56,7 +56,13 @@ function toSessions(value: unknown): Session[] {
   return sessions;
 }
 
-export function createHistoryStore(deps: { client: RpcClient }): HistoryStore {
+export function createHistoryStore(deps: {
+  client: RpcClient;
+  /** A session this screen must have whether or not it is on the first
+   *  page — the transcript screen's own. Fetched by id when the page lacks
+   *  it; a laptop that does not page answers the whole list anyway. */
+  pinnedId?: string;
+}): HistoryStore {
   const listeners = new Set<(state: HistoryState) => void>();
   let state: HistoryState = {
     sessions: [],
@@ -107,6 +113,17 @@ export function createHistoryStore(deps: { client: RpcClient }): HistoryStore {
     if (generation !== refreshGeneration) return;
     if (result.ok) {
       const { sessions, more } = toPage(result.value);
+      const pinned = deps.pinnedId;
+      if (pinned !== undefined && !sessions.some((session) => session.id === pinned)) {
+        const lookup = await deps.client.call("history:list", [{ limit: 1, id: pinned }], {
+          whenNotOpen: "reject",
+        });
+        if (generation !== refreshGeneration) return;
+        if (lookup.ok) {
+          const found = toPage(lookup.value).sessions.find((session) => session.id === pinned);
+          if (found !== undefined) sessions.push(found);
+        }
+      }
       const selectedId =
         state.selectedId !== undefined &&
         sessions.some((session) => session.id === state.selectedId)
