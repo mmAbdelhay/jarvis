@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseUnifiedDiff } from "@jarvis/core";
 import { simpleGit } from "simple-git";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createGitProvider,
   createGitRemoteOps,
@@ -43,6 +43,12 @@ const canSymlink = ((): boolean => {
   }
 })();
 
+// Every test here spawns real git several times over. On a Windows CI
+// runner each spawn can take the better part of a second, so the default
+// 5 s budget cut off a test mid-way ("stages a renamed file", 5.1 s) and
+// its cleanup then hit EBUSY on the folder git still held.
+vi.setConfig({ testTimeout: 30_000 });
+
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -59,7 +65,9 @@ afterEach(async () => {
  */
 async function makeRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-git-"));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  // Retried: on Windows a git process that has just exited can hold the
+  // folder for a moment longer.
+  cleanups.push(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
 
   const git = simpleGit(dir);
   await git.init(["--initial-branch=main"]);
