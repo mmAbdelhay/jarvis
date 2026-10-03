@@ -208,23 +208,29 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'window.addEventListener("resize",function(){controller.layoutChanged();});' +
     // Bug 9: touch scrolling — xterm 6's own viewport is wheel-only, so
     // every touch gesture on the terminal element is turned into
-    // scrollLines()/wheel calls by the controller itself. `{passive:true}`
+    // scrollLines()/wheel calls by the controller itself — a mostly
+    // sideways one excepted, which is the native "pan-x" pan (its axis is
+    // locked in the controller, so it never scrolls as well). `{passive:true}`
     // throughout: CSS `touch-action` (STYLE, and applyFixedSize's
     // "pan-x" override) is what stops the WebView's own default handling,
     // not preventDefault() here.
     "var touchY=0;" +
+    "var touchX=0;" +
     'document.getElementById("t").addEventListener("touchstart",function(e){' +
     "var t0=e.touches[0];" +
     "if(!t0)return;" +
     "touchY=t0.clientY;" +
+    "touchX=t0.clientX;" +
     "controller.touchStart();" +
     "},{passive:true});" +
     'document.getElementById("t").addEventListener("touchmove",function(e){' +
     "var t0=e.touches[0];" +
     "if(!t0)return;" +
     "var dy=t0.clientY-touchY;" +
+    "var dx=t0.clientX-touchX;" +
     "touchY=t0.clientY;" +
-    "controller.touchMove(dy);" +
+    "touchX=t0.clientX;" +
+    "controller.touchMove(dy,dx);" +
     "},{passive:true});" +
     'document.getElementById("t").addEventListener("touchend",function(){' +
     "controller.touchEnd();" +

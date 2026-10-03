@@ -15,6 +15,7 @@ import {
 } from "./dispatch.js";
 import { createDockerFollowers, DESKTOP_OWNER } from "./docker-followers.js";
 import { createGitHandlers } from "./ipc.js";
+import { createTerminalFitOverrides } from "./terminal-fit-overrides.js";
 import { MESSAGES } from "./messages.js";
 import { CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
 
@@ -480,19 +481,74 @@ describe("dispatch table: sessions and git", () => {
     });
 
     // Fit toggle: the phone's user asked for the phone's size outright, and
-    // gives the desktop's size back the same way when Fit goes off.
-    it('applies a remote resize marked "fit" even to a pane the desktop sized', async () => {
+    // gives the desktop's size back with a "restore" — answered with the
+    // size the pty has from the desktop's side.
+    it('applies a remote resize marked "fit" to a desktop-sized pane, and "restore" undoes it', async () => {
       const deps = fakeDeps();
       const table = createDispatchTable(deps);
 
       await call(table, "terminal:resize", "t1", 120, 40);
       await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
-      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 120, 40, "fit");
+      const restored = await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 1, 1, "restore");
       await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 50, 90);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 50, 90, "FIT");
 
+      expect(restored).toEqual({ cols: 120, rows: 40 });
       expect(deps.terminal.resize).toHaveBeenCalledTimes(3);
       expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t1", 40, 100);
       expect(deps.terminal.resize).toHaveBeenNthCalledWith(3, "t1", 120, 40);
+    });
+
+    it("drops a stale restore after the desktop resized the pane during Fit", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      await call(table, "terminal:resize", "t1", 150, 45);
+      const restored = await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "terminal:resize",
+        "t1",
+        120,
+        40,
+        "restore",
+      );
+
+      expect(restored).toEqual({ cols: 150, rows: 45 });
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(3);
+      expect(deps.terminal.resize).toHaveBeenLastCalledWith("t1", 150, 45);
+    });
+
+    it("a restore on a pane the desktop never sized is an ordinary remote resize", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const restored = await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "terminal:resize",
+        "t1",
+        80,
+        24,
+        "restore",
+      );
+
+      expect(restored).toEqual({ cols: 80, rows: 24 });
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 80, 24);
+    });
+
+    it("the fitting device's disconnect gives the desktop its size back", async () => {
+      const deps = fakeDeps();
+      const fitOverrides = createTerminalFitOverrides({ resize: deps.terminal.resize });
+      const table = createDispatchTable({ ...deps, fitOverrides });
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      fitOverrides.deviceDisconnected("d1");
+
+      expect(deps.terminal.resize).toHaveBeenLastCalledWith("t1", 120, 40);
     });
 
     it("tracks ownership separately per pane/session id", async () => {

@@ -83,6 +83,7 @@ import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
+import { createTerminalFitOverrides, type TerminalFitOverrides } from "./terminal-fit-overrides.js";
 
 export type Origin = { kind: "desktop" } | { kind: "remote"; deviceId: string; deviceName: string };
 
@@ -290,6 +291,10 @@ export type DispatchDeps = {
     | "state"
   >;
   terminal: TerminalHandlers;
+  // The phone's Fit toggle (terminal-fit-overrides.ts): which desktop-sized
+  // panes a phone has fitted. Passed in so the host can give a fitted pane
+  // back on that device's disconnect; made here when it is not.
+  fitOverrides?: TerminalFitOverrides;
   // terminal:attach's backlog read; not part of TerminalHandlers because it
   // reads the shell manager directly rather than going through terminal.ts.
   // `write` backs plans:send (Task 5): the same ShellManager.write path
@@ -480,7 +485,13 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
   // the phone (never sized by the desktop). "Desktop" vs "remote" comes
   // from `origin`, which the dispatch path derives itself and a payload
   // cannot spoof — never a flag read out of `args`.
-  const desktopSizedPanes = new Set<string>();
+  // Panes live in `fitOverrides` instead — the same ownership, plus the
+  // desktop's size and the phone Fit that may be holding the pane.
+  const fitOverrides =
+    deps.fitOverrides ??
+    createTerminalFitOverrides({
+      resize: (paneKey, cols, rows) => deps.terminal.resize(paneKey, cols, rows),
+    });
   const desktopSizedSessions = new Set<string>();
   return {
     "setup:check": () => setup.check(),
@@ -707,7 +718,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // here is what lets that fresh pane start unowned rather than
       // inheriting a stale "the desktop already sized this" from the tab
       // that used to have this id.
-      desktopSizedPanes.delete(id);
+      fitOverrides.forget(id);
     },
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
@@ -1040,7 +1051,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       terminal.closePane(paneKey as string);
       // Bug 8: same reasoning as workspace:close above, for a split's own
       // pane key rather than its tab's.
-      desktopSizedPanes.delete(paneKey as string);
+      fitOverrides.forget(paneKey as string);
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(
@@ -1070,13 +1081,22 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       if (typeof tabId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
       if (origin.kind === "remote") {
+        // The phone's Fit toggle: "fit" takes a desktop-sized pane's size
+        // outright; "restore" gives the desktop's back (or nothing, if the
+        // desktop resized the pane meanwhile) and answers with the size the
+        // pty has from the desktop's side, so the phone renders at that.
+        if (mode === "restore") {
+          const desktop = fitOverrides.restore(tabId);
+          if (desktop !== undefined) return desktop;
+          terminal.resize(tabId, cols, rows);
+          return { cols, rows };
+        }
+        if (mode === "fit" && fitOverrides.fit(tabId, origin.deviceId, { cols, rows })) return;
         // The desktop already claimed this pane's size — see the comment
-        // by `desktopSizedPanes`'s declaration — unless the phone's user
-        // turned on Fit, which takes the size outright (and gives the
-        // desktop's back the same way). Never claims ownership itself.
-        if (desktopSizedPanes.has(tabId) && mode !== "fit") return;
+        // by `fitOverrides`'s declaration (bug 8).
+        if (fitOverrides.isDesktopSized(tabId)) return;
       } else {
-        desktopSizedPanes.add(tabId);
+        fitOverrides.desktopResized(tabId, { cols, rows });
       }
       terminal.resize(tabId, cols, rows);
     },

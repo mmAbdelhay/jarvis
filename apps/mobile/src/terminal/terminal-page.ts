@@ -101,16 +101,20 @@ const MAX_FIND_CHARS = 200;
 const MIN_FIXED_FONT_PX = 11;
 const MAX_FIXED_FONT_PX = 14;
 
+// A touch's first few px decide its axis: mostly sideways is the native
+// horizontal pan of a wide fixed size, and never scrolls as well.
+const AXIS_LOCK_PX = 8;
+
 export function createPageController(deps: PageDeps): {
   receive(raw: unknown): void;
   start(): void;
   layoutChanged(): void;
   // Bug 9: driven by the WebView's own touchstart/touchmove/touchend —
-  // `dy` is this move's delta in device px (current Y minus previous Y),
-  // not a running total; the controller accumulates it itself so a caller
+  // `dy`/`dx` are this move's deltas in device px (current minus previous),
+  // not running totals; the controller accumulates them itself so a caller
   // never has to track a remainder between calls.
   touchStart(): void;
-  touchMove(dy: number): void;
+  touchMove(dy: number, dx?: number): void;
   touchEnd(): void;
   // Wired to xterm's onSelectionChange in the browser build only.
   selectionChanged(): void;
@@ -137,6 +141,10 @@ export function createPageController(deps: PageDeps): {
   // Bug 9: the running, not-yet-consumed touch-drag distance (device px)
   // since the last touchStart/whole line-height step.
   let touchAccumulator = 0;
+  // The touch's axis once decided, and its travel until then.
+  let touchAxis: "none" | "x" | "y" = "none";
+  let travelX = 0;
+  let travelY = 0;
   let lastSelection = "";
   const marks: CommandMark[] = [];
   let lastView = "";
@@ -335,9 +343,23 @@ export function createPageController(deps: PageDeps): {
   // turned mouse tracking on) right here, one whole line-height at a time.
   function touchStart(): void {
     touchAccumulator = 0;
+    touchAxis = "none";
+    travelX = 0;
+    travelY = 0;
   }
 
-  function touchMove(dy: number): void {
+  function touchMove(moveY: number, moveX = 0): void {
+    if (touchAxis === "x") return;
+    let dy = moveY;
+    if (touchAxis === "none") {
+      travelX += moveX;
+      travelY += moveY;
+      if (Math.max(Math.abs(travelX), Math.abs(travelY)) < AXIS_LOCK_PX) return;
+      touchAxis = Math.abs(travelX) > Math.abs(travelY) ? "x" : "y";
+      if (touchAxis === "x") return;
+      // Everything held back until the lock counts toward the scroll.
+      dy = travelY;
+    }
     const mouseTrackingOn = deps.term.modes.mouseTrackingMode !== "none";
     const bufferType = deps.term.buffer.active.type;
     if (bufferType === "alternate" && !mouseTrackingOn) {

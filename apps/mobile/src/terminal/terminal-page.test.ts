@@ -412,6 +412,51 @@ describe("createPageController", () => {
       expect(term.scrolls).toEqual([]);
     });
 
+    // A wide fixed size pans sideways natively; that drag must not also
+    // scroll the scrollback (or send wheel events to a full-screen program).
+    it("a mostly-sideways drag is a pan: no scrolling for the rest of the touch", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-3, 6);
+      controller.touchMove(-4, 10);
+      controller.touchMove(-60, 0);
+      controller.touchEnd();
+
+      expect(term.scrolls).toEqual([]);
+    });
+
+    it("a mostly-vertical drag still scrolls, the movement before the lock included", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-6, 2);
+      controller.touchMove(-34, 3);
+
+      expect(term.scrolls).toEqual([1, 1]);
+    });
+
+    it("a sideways pan in the alternate buffer sends no wheel", () => {
+      const term = makeFakeTerminal();
+      term.setBufferType("alternate");
+      term.setMouseTrackingMode("vt200");
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+
+      controller.touchStart();
+      controller.touchMove(-20, 40);
+
+      expect(deps.posted).toEqual([]);
+    });
+
     it("accumulates a drag across several touchMove calls", () => {
       const term = makeFakeTerminal();
       const deps = makeDeps(term);

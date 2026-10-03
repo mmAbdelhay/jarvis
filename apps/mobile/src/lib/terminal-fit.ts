@@ -3,13 +3,21 @@
 // window makes too small to read. Fit hands the one shared pty the phone's
 // own size for as long as it is on, and gives the desktop its size back
 // the moment it goes off — the desktop's own view is narrow meanwhile,
-// which the screen says.
+// which the screen says. The host keeps its own record too (it gives the
+// size back if this phone drops off, and drops a stale restore if the
+// desktop resized the pane meanwhile — terminal-fit-overrides.ts).
 //
-// No timers and no I/O: `send` is the screen's explicit resize call, and
-// every decision about when to call it is here. It never sends anything in
-// answer to a reported pty size, so a size report can never start a loop.
+// No timers: `send` is the explicit resize call and answers whether it
+// landed; a send that did not is sent again on the connection's next
+// `open`. The desktop's size is kept until a restore has landed, so going
+// offline never loses it. Nothing is ever sent in answer to a reported pty
+// size except the phone's own fit again, so a report cannot start a loop.
 
 export type TerminalSize = { cols: number; rows: number };
+
+/** A resize's outcome. `size` is the host's answer to a restore: the
+ *  size the pty has from the desktop's side. */
+export type FitSendResult = { ok: boolean; size?: TerminalSize };
 
 export type TerminalFit = {
   isOn(): boolean;
@@ -19,11 +27,12 @@ export type TerminalFit = {
   /** The page fitted itself to this size: sent while on, once per change. */
   pageSize(size: TerminalSize): void;
   /** Turns Fit off and sends the desktop's size back. Returns that size
-   *  (the pty's size from now on), or undefined when it was not on. */
+   *  (to render at meanwhile), or undefined when it was not on. */
   disable(): TerminalSize | undefined;
-  /** The host reported the pty's size (an attach snapshot). A size that is
-   *  neither the phone's last one nor the desktop's means the desktop
-   *  resized the pane meanwhile: Fit goes off without restoring anything,
+  /** The host reported the pty's size (an attach snapshot). The desktop's
+   *  own size means the fit never held (or the host gave it back when
+   *  this phone dropped off): it is sent again. Any size but the phone's
+   *  means the desktop resized the pane: Fit goes off, restoring nothing,
    *  and this returns true. */
   ptyReported(size: TerminalSize | undefined): boolean;
 };
@@ -32,37 +41,112 @@ function same(a: TerminalSize | undefined, b: TerminalSize | undefined): boolean
   return a !== undefined && b !== undefined && a.cols === b.cols && a.rows === b.rows;
 }
 
-export function createTerminalFit(deps: { send(size: TerminalSize): void }): TerminalFit {
+export function createTerminalFit(deps: {
+  send(size: TerminalSize, mode: "fit" | "restore"): Promise<FitSendResult>;
+  /** Calls `listener` on the connection's next `open`; returns its unsubscribe. */
+  watchOpen(listener: () => void): () => void;
+  /** A restore landed: the pty's size now. */
+  restored(size: TerminalSize): void;
+}): TerminalFit {
+  let on = false;
+  // The desktop's size: set while on, and kept after until a restore lands.
   let desktop: TerminalSize | undefined;
+  let restorePending = false;
+  let wanted: TerminalSize | undefined;
   let lastSent: TerminalSize | undefined;
+  let fitInFlight = false;
+  let restoreInFlight = false;
+  let unwatch: (() => void) | undefined;
+
+  function retryOnOpen(): void {
+    if (unwatch !== undefined) return;
+    unwatch = deps.watchOpen(() => {
+      unwatch?.();
+      unwatch = undefined;
+      if (restorePending) sendRestore();
+      else pushFit();
+    });
+  }
+
+  function pushFit(): void {
+    if (!on || fitInFlight || restoreInFlight || wanted === undefined) return;
+    if (same(wanted, lastSent)) return;
+    const size = wanted;
+    fitInFlight = true;
+    void deps.send(size, "fit").then((result) => {
+      fitInFlight = false;
+      if (!result.ok) {
+        retryOnOpen();
+        return;
+      }
+      if (on) lastSent = size;
+      pushFit();
+    });
+  }
+
+  function sendRestore(): void {
+    if (restoreInFlight || desktop === undefined) return;
+    const size = desktop;
+    restoreInFlight = true;
+    void deps.send(size, "restore").then((result) => {
+      restoreInFlight = false;
+      if (!result.ok) {
+        if (restorePending) retryOnOpen();
+        return;
+      }
+      if (restorePending) {
+        restorePending = false;
+        desktop = undefined;
+        deps.restored(result.size ?? size);
+        return;
+      }
+      // Turned back on while the restore was in flight: fit again.
+      lastSent = undefined;
+      pushFit();
+    });
+  }
 
   function enable(ptySize: TerminalSize | undefined): boolean {
-    if (ptySize === undefined) return false;
-    if (desktop === undefined) desktop = ptySize;
+    if (on) return true;
+    if (restorePending) {
+      restorePending = false;
+    } else {
+      if (ptySize === undefined) return false;
+      desktop = ptySize;
+    }
+    on = true;
+    lastSent = undefined;
+    pushFit();
     return true;
   }
 
   function pageSize(size: TerminalSize): void {
-    if (desktop === undefined || same(size, lastSent)) return;
-    lastSent = size;
-    deps.send(size);
+    wanted = size;
+    pushFit();
   }
 
   function disable(): TerminalSize | undefined {
-    const restore = desktop;
-    desktop = undefined;
+    if (!on) return undefined;
+    on = false;
     lastSent = undefined;
-    if (restore !== undefined) deps.send(restore);
-    return restore;
+    restorePending = true;
+    sendRestore();
+    return desktop;
   }
 
   function ptyReported(size: TerminalSize | undefined): boolean {
-    if (desktop === undefined || size === undefined) return false;
-    if (same(size, desktop) || same(size, lastSent)) return false;
+    if (!on || size === undefined) return false;
+    if (same(size, lastSent) || same(size, wanted)) return false;
+    if (same(size, desktop)) {
+      lastSent = undefined;
+      pushFit();
+      return false;
+    }
+    on = false;
     desktop = undefined;
     lastSent = undefined;
     return true;
   }
 
-  return { isOn: () => desktop !== undefined, enable, pageSize, disable, ptyReported };
+  return { isOn: () => on, enable, pageSize, disable, ptyReported };
 }

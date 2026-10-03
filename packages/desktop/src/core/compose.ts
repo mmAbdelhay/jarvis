@@ -217,6 +217,7 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
+import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
 
 /** The `performance:` section states its timeouts in minutes, because that is
  *  the unit anybody reasons about "leave a tab alone for a while" in. Every
@@ -1529,6 +1530,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // are (remote-access.ts's own per-device cleanup).
     onDeviceDisconnected: (deviceId) => {
       followers.unfollowOwnedBy(deviceId);
+      // A phone that drops off with Fit on gives the desktop its size back.
+      fitOverrides.deviceDisconnected(deviceId);
     },
     // M9 Task 3: a revoked device's staged files and quota reservation
     // are reclaimed here — never on a plain disconnect, which leaves them
@@ -2045,6 +2048,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     platform,
   };
 
+  // The phone's Fit toggle (terminal-fit-overrides.ts): shared with
+  // onDeviceDisconnected above, which runs only well after this is set.
+  const fitOverrides = createTerminalFitOverrides({
+    resize: (paneKey, cols, rows) => terminal.resize(paneKey, cols, rows),
+  });
   // Every request handler, in one table (dispatch.ts). Each host registers
   // it on its own transport; the remote bridge calls the same table with a
   // different Origin.
@@ -2095,6 +2103,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     git: gitHandlers,
     workspace,
     terminal,
+    fitOverrides,
     shells,
     followers,
     editor,

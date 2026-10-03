@@ -3,12 +3,16 @@ import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
 import { t, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
+import type { TerminalView } from "./TerminalWebView";
 
 /**
- * Stepping through find matches in a terminal's scrollback on a phone. The
- * find field itself sits in the screen header (TerminalFindField); previous
- * / next command are icon caps in the key bar, and the way back to the live
- * end floats over the output (TerminalLatestPill). Shown only while finding.
+ * Getting around a terminal's scrollback: step through find matches and —
+ * given `jumps` (the wide layout) — jump to the previous or next command
+ * when the shell marks its prompts. The find field itself sits in the
+ * screen header (TerminalFindField); the phone has previous / next command
+ * as icon caps in its key bar instead. The way back to the live end floats
+ * over the output (TerminalLatestPill). Shown only when one of those has
+ * something to do.
  */
 export function TerminalNavBar(props: {
   language: Language;
@@ -19,44 +23,72 @@ export function TerminalNavBar(props: {
   found: boolean | undefined;
   onFind(query: string, direction: "next" | "prev"): void;
   onCloseFind(): void;
+  jumps?: { view: TerminalView; onJump(to: "prevCommand" | "nextCommand"): void };
 }) {
-  const { language } = props;
-  if (!props.finding) return null;
+  const { language, jumps } = props;
+  if (!props.finding && !jumps?.view.commands) return null;
   return (
     <View style={styles.bar}>
-      <View style={styles.findRow}>
-        {(["prev", "next"] as const).map((direction) => (
-          <TouchableOpacity
-            key={direction}
-            accessibilityRole="button"
-            accessibilityLabel={t(
-              language,
-              direction === "next" ? "terminal.findNext" : "terminal.findPrev",
-            )}
-            disabled={props.query === ""}
-            onPress={() => props.onFind(props.query, direction)}
-            style={[styles.jump, props.query === "" && styles.disabled]}
-          >
-            <Icon
-              name={direction === "next" ? "chevronDown" : "chevronUp"}
-              size={14}
-              color={theme.colors.textSecondary}
-              strokeWidth={2.4}
-            />
-            <Text style={styles.jumpText}>
-              {t(language, direction === "next" ? "terminal.findNext" : "terminal.findPrev")}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <IconButton
-          icon="close"
-          size={40}
-          iconSize={16}
-          label={t(language, "terminal.findClose")}
-          onPress={props.onCloseFind}
-        />
-      </View>
-      {props.found === false && (
+      {props.finding && (
+        <View style={styles.findRow}>
+          {(["prev", "next"] as const).map((direction) => (
+            <TouchableOpacity
+              key={direction}
+              accessibilityRole="button"
+              accessibilityLabel={t(
+                language,
+                direction === "next" ? "terminal.findNext" : "terminal.findPrev",
+              )}
+              disabled={props.query === ""}
+              onPress={() => props.onFind(props.query, direction)}
+              style={[styles.jump, props.query === "" && styles.disabled]}
+            >
+              <Icon
+                name={direction === "next" ? "chevronDown" : "chevronUp"}
+                size={14}
+                color={theme.colors.textSecondary}
+                strokeWidth={2.4}
+              />
+              <Text style={styles.jumpText}>
+                {t(language, direction === "next" ? "terminal.findNext" : "terminal.findPrev")}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <IconButton
+            icon="close"
+            size={40}
+            iconSize={16}
+            label={t(language, "terminal.findClose")}
+            onPress={props.onCloseFind}
+          />
+        </View>
+      )}
+      {jumps?.view.commands && (
+        <View style={styles.jumpRow}>
+          {(["prevCommand", "nextCommand"] as const).map((to) => (
+            <TouchableOpacity
+              key={to}
+              accessibilityRole="button"
+              onPress={() => jumps.onJump(to)}
+              style={styles.jump}
+            >
+              <Icon
+                name={to === "prevCommand" ? "chevronUp" : "chevronDown"}
+                size={14}
+                color={theme.colors.textSecondary}
+                strokeWidth={2.4}
+              />
+              <Text style={styles.jumpText}>
+                {t(
+                  language,
+                  to === "prevCommand" ? "terminal.prevCommand" : "terminal.nextCommand",
+                )}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {props.finding && props.found === false && (
         <Text style={styles.missing}>{t(language, "terminal.findNone")}</Text>
       )}
     </View>
@@ -91,14 +123,30 @@ export function TerminalFindField(props: {
   );
 }
 
-/** "Latest": a small chip floating at the output's bottom corner, once
- *  scrolled away from the live end — over the output, not under it. */
-export function TerminalLatestPill(props: { language: Language; onPress(): void }) {
+/** "Latest": floats over the output once scrolled away from the live end —
+ *  centred, or (`compact`, the phone) a small chip in the bottom corner. */
+export function TerminalLatestPill(props: {
+  language: Language;
+  compact?: boolean;
+  onPress(): void;
+}) {
+  const compact = props.compact === true;
   return (
-    <View pointerEvents="box-none" style={styles.pillLayer}>
-      <TouchableOpacity accessibilityRole="button" onPress={props.onPress} style={styles.pill}>
-        <Icon name="arrowDown" size={12} color={theme.colors.primaryText} strokeWidth={2.6} />
-        <Text style={styles.pillText}>{t(props.language, "terminal.latest")}</Text>
+    <View pointerEvents="box-none" style={compact ? styles.chipLayer : styles.pillLayer}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={props.onPress}
+        style={[styles.pill, compact && styles.chip]}
+      >
+        <Icon
+          name="arrowDown"
+          size={compact ? 12 : 14}
+          color={theme.colors.primaryText}
+          strokeWidth={2.6}
+        />
+        <Text style={[styles.pillText, compact && styles.chipText]}>
+          {t(props.language, "terminal.latest")}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -150,15 +198,25 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.mono,
     fontSize: 12,
   },
-  pillLayer: { position: "absolute", bottom: 10, insetInlineEnd: 10 },
+  jumpRow: { flexDirection: "row", gap: 6 },
+  pillLayer: {
+    position: "absolute",
+    bottom: 14,
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
+    alignItems: "center",
+  },
+  chipLayer: { position: "absolute", bottom: 10, insetInlineEnd: 10 },
   pill: {
-    minHeight: 28,
-    paddingHorizontal: 10,
+    minHeight: 40,
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.accent,
   },
-  pillText: { color: theme.colors.primaryText, fontFamily: theme.font.extrabold, fontSize: 12 },
+  chip: { minHeight: 28, paddingHorizontal: 10, gap: 4 },
+  pillText: { color: theme.colors.primaryText, fontFamily: theme.font.extrabold, fontSize: 13 },
+  chipText: { fontSize: 12 },
 });
