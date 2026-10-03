@@ -52,6 +52,11 @@ const DEVICE_B: AuthenticatedDevice = { id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 
 // asserts.
 const RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 } as const;
 const PROJECT = "acme";
+// The file-op tests' fake disk and project root are POSIX paths ("/p/acme");
+// on Windows the real handlers resolve them against a drive letter, so they
+// run where those fixtures mean what they say — the same split ipc.test.ts
+// makes for these handlers' own unit tests ("the file sidebar's writes").
+const POSIX_FIXTURES = process.platform !== "win32";
 
 type Outcome =
   | { kind: "value"; value: unknown }
@@ -452,74 +457,80 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     expect(settings.save).not.toHaveBeenCalled();
   });
 
-  it("terminal:renameEntry and terminal:trashEntry from a remote device stay inside the project root and reach the host", async () => {
-    const { handle, fileOps } = buildStack();
+  it.runIf(POSIX_FIXTURES)(
+    "terminal:renameEntry and terminal:trashEntry from a remote device stay inside the project root and reach the host",
+    async () => {
+      const { handle, fileOps } = buildStack();
 
-    // Inside the root: reaches the host seam.
-    expect(
-      await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", "b.ts"], DEVICE_A),
-    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
-    expect(
-      await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme/b.ts"], DEVICE_A),
-    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
-    expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/b.ts", "trash /p/acme/b.ts"]);
-
-    fileOps.length = 0;
-    const outside = { kind: "value", value: { ok: false, reason: "outside" } };
-    // Outside the root, and the root itself: refused, host never touched.
-    expect(
-      await handle("terminal:renameEntry", ["tab-terminal-1", "/etc/passwd", "x"], DEVICE_A),
-    ).toEqual(outside);
-    expect(await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme"], DEVICE_A)).toEqual(
-      outside,
-    );
-    expect(
-      await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme", "x"], DEVICE_A),
-    ).toEqual(outside);
-    expect(
-      await handle("terminal:trashEntry", ["tab-terminal-1", "/p/other/a.ts"], DEVICE_A),
-    ).toEqual(outside);
-    // A bad new name is refused before anything moves.
-    for (const name of ["a/b", "a\\b", "..", ".", "a\u0000b", "a\nb", "é".repeat(200)]) {
+      // Inside the root: reaches the host seam.
       expect(
-        await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", name], DEVICE_A),
-      ).toEqual({ kind: "value", value: { ok: false, reason: "invalid-name" } });
-    }
-    expect(fileOps).toEqual([]);
+        await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", "b.ts"], DEVICE_A),
+      ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
+      expect(
+        await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme/b.ts"], DEVICE_A),
+      ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/b.ts" } });
+      expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/b.ts", "trash /p/acme/b.ts"]);
 
-    // File creation stays desktop-only.
-    expect(
-      await handle("terminal:createEntry", ["tab-terminal-1", "/p/acme", "n", "file"], DEVICE_A),
-    ).toEqual({ kind: "forbidden" });
-  });
-
-  it("terminal:renameEntry and terminal:trashEntry take the phone's project-relative paths, and refuse any that leave the root", async () => {
-    const { handle, fileOps } = buildStack();
-    const outside = { kind: "value", value: { ok: false, reason: "outside" } };
-    // A phone sends paths relative to the project root.
-    fileOps.length = 0;
-    expect(
-      await handle("terminal:renameEntry", ["tab-terminal-1", "a.ts", "c.ts"], DEVICE_A),
-    ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/c.ts" } });
-    expect(await handle("terminal:trashEntry", ["tab-terminal-1", "c.ts"], DEVICE_A)).toEqual({
-      kind: "value",
-      value: { ok: true, path: "/p/acme/c.ts" },
-    });
-    expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/c.ts", "trash /p/acme/c.ts"]);
-
-    // A relative path that leaves the root, names the root, or goes through
-    // a link that points outside it is refused, host untouched.
-    fileOps.length = 0;
-    for (const path of ["../other/a.ts", "..", "", ".", "escape/passwd"]) {
-      expect(await handle("terminal:renameEntry", ["tab-terminal-1", path, "x"], DEVICE_A)).toEqual(
+      fileOps.length = 0;
+      const outside = { kind: "value", value: { ok: false, reason: "outside" } };
+      // Outside the root, and the root itself: refused, host never touched.
+      expect(
+        await handle("terminal:renameEntry", ["tab-terminal-1", "/etc/passwd", "x"], DEVICE_A),
+      ).toEqual(outside);
+      expect(await handle("terminal:trashEntry", ["tab-terminal-1", "/p/acme"], DEVICE_A)).toEqual(
         outside,
       );
-      expect(await handle("terminal:trashEntry", ["tab-terminal-1", path], DEVICE_A)).toEqual(
-        outside,
-      );
-    }
-    expect(fileOps).toEqual([]);
-  });
+      expect(
+        await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme", "x"], DEVICE_A),
+      ).toEqual(outside);
+      expect(
+        await handle("terminal:trashEntry", ["tab-terminal-1", "/p/other/a.ts"], DEVICE_A),
+      ).toEqual(outside);
+      // A bad new name is refused before anything moves.
+      for (const name of ["a/b", "a\\b", "..", ".", "a\u0000b", "a\nb", "é".repeat(200)]) {
+        expect(
+          await handle("terminal:renameEntry", ["tab-terminal-1", "/p/acme/a.ts", name], DEVICE_A),
+        ).toEqual({ kind: "value", value: { ok: false, reason: "invalid-name" } });
+      }
+      expect(fileOps).toEqual([]);
+
+      // File creation stays desktop-only.
+      expect(
+        await handle("terminal:createEntry", ["tab-terminal-1", "/p/acme", "n", "file"], DEVICE_A),
+      ).toEqual({ kind: "forbidden" });
+    },
+  );
+
+  it.runIf(POSIX_FIXTURES)(
+    "terminal:renameEntry and terminal:trashEntry take the phone's project-relative paths, and refuse any that leave the root",
+    async () => {
+      const { handle, fileOps } = buildStack();
+      const outside = { kind: "value", value: { ok: false, reason: "outside" } };
+      // A phone sends paths relative to the project root.
+      fileOps.length = 0;
+      expect(
+        await handle("terminal:renameEntry", ["tab-terminal-1", "a.ts", "c.ts"], DEVICE_A),
+      ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/c.ts" } });
+      expect(await handle("terminal:trashEntry", ["tab-terminal-1", "c.ts"], DEVICE_A)).toEqual({
+        kind: "value",
+        value: { ok: true, path: "/p/acme/c.ts" },
+      });
+      expect(fileOps).toEqual(["mv /p/acme/a.ts /p/acme/c.ts", "trash /p/acme/c.ts"]);
+
+      // A relative path that leaves the root, names the root, or goes through
+      // a link that points outside it is refused, host untouched.
+      fileOps.length = 0;
+      for (const path of ["../other/a.ts", "..", "", ".", "escape/passwd"]) {
+        expect(
+          await handle("terminal:renameEntry", ["tab-terminal-1", path, "x"], DEVICE_A),
+        ).toEqual(outside);
+        expect(await handle("terminal:trashEntry", ["tab-terminal-1", path], DEVICE_A)).toEqual(
+          outside,
+        );
+      }
+      expect(fileOps).toEqual([]);
+    },
+  );
 
   it("terminal:open: remote-legal for a declared project, refused for an undeclared one, through the real policy gate", async () => {
     const { handle } = buildStack();
