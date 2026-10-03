@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Phone and browser Settings: an "On the laptop" section shows the laptop's
+  agents, projects and worktree mode, read-only (`settings:read`); changing them
+  stays on the laptop.
 - Browser and tablet redesign: the top bar becomes a sidebar with every
   section — Home, Sessions (with its running count), Workspace, Changes,
   History, Voice, Settings — and the laptop's connection, metrics and clock at
