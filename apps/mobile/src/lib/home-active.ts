@@ -44,14 +44,30 @@ export function activeRows(
     .sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.startedAt - a.startedAt);
 }
 
-/** "project · agent · waiting" or "project · agent · running 14m". */
+/** How many agents Home's headline says are working: every running or
+ *  waiting session, the ones found outside Jarvis included. */
+export function workingCount(sessions: readonly SessionSummary[]): number {
+  return sessions.filter((session) => session.state === "running" || session.state === "waiting")
+    .length;
+}
+
+/** Phone row title: a session's summary, or for one found outside Jarvis
+ *  (whose summary is the same generic line for every row) its project, else
+ *  its agent. */
+export function activeTitle(row: ActiveRow): string {
+  if (!row.external) return row.title;
+  return row.project !== null && row.project !== "" ? row.project : row.agentId;
+}
+
+/** "project · agent · waiting" or "project · agent · running 14m"; an
+ *  external row drops the project, which is already its title. */
 export function activeSubtitle(language: Language, row: ActiveRow, now: number): string {
   const status = row.external
     ? t(language, "sessions.external")
     : row.waiting
       ? t(language, "home.waiting")
       : t(language, "home.running", { time: formatSessionElapsed(now - row.startedAt) });
-  return [row.project, row.agentId, status]
+  return [row.external ? null : row.project, row.agentId, status]
     .filter((part): part is string => part !== null && part !== "")
     .join(" · ");
 }

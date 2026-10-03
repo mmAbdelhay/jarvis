@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ChangeCountsView } from "@/lib/change-counts";
 import type { SessionSummary } from "@/lib/dashboard-store";
-import { type ActiveRow, activeRows, activeSubtitle } from "@/lib/home-active";
+import { type ActiveRow, activeRows, activeSubtitle, activeTitle } from "@/lib/home-active";
 import { type Language, t } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 
@@ -46,13 +46,14 @@ export function ActiveList(props: {
 
 function Row(props: { row: ActiveRow; subtitle: string; onPress: (() => void) | undefined }) {
   const { row } = props;
+  const title = activeTitle(row);
   return (
     <Pressable
       style={styles.row}
       onPress={props.onPress}
       disabled={props.onPress === undefined}
       accessibilityRole={props.onPress === undefined ? undefined : "button"}
-      accessibilityLabel={props.onPress === undefined ? undefined : row.title}
+      accessibilityLabel={props.onPress === undefined ? undefined : title}
     >
       <View
         style={[
@@ -62,7 +63,7 @@ function Row(props: { row: ActiveRow; subtitle: string; onPress: (() => void) | 
       />
       <View style={styles.text}>
         <Text style={styles.rowTitle} numberOfLines={1}>
-          {row.title}
+          {title}
         </Text>
         <Text style={styles.sub} numberOfLines={1}>
           {props.subtitle}

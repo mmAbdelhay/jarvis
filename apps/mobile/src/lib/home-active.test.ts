@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "./dashboard-store";
-import { type ActiveRow, activeRows, activeSubtitle } from "./home-active";
+import {
+  type ActiveRow,
+  activeRows,
+  activeSubtitle,
+  activeTitle,
+  workingCount,
+} from "./home-active";
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
   return {
@@ -64,5 +70,40 @@ describe("activeSubtitle", () => {
   it("skips a null project and says outside Jarvis for external rows", () => {
     const row = only(session({ project: null, origin: "external" }));
     expect(activeSubtitle("en", row, now)).toBe("claude-main · outside Jarvis");
+  });
+
+  it("leaves the project out of an external row's sub line: it is the title", () => {
+    const row = only(session({ project: "video-streaming", agentId: "codex", origin: "external" }));
+    expect(activeSubtitle("en", row, now)).toBe("codex · outside Jarvis");
+  });
+});
+
+describe("activeTitle", () => {
+  it("keeps a Jarvis session's summary", () => {
+    expect(activeTitle(only(session({})))).toBe("Add orders migration");
+  });
+
+  it("titles an external row by its project, else its agent", () => {
+    const summary = "Running outside Jarvis";
+    expect(
+      activeTitle(only(session({ project: "video-streaming", summary, origin: "external" }))),
+    ).toBe("video-streaming");
+    expect(
+      activeTitle(only(session({ project: null, agentId: "codex", summary, origin: "external" }))),
+    ).toBe("codex");
+  });
+});
+
+describe("workingCount", () => {
+  it("counts running and waiting sessions, external ones included", () => {
+    expect(
+      workingCount([
+        session({ id: "a", origin: "external" }),
+        session({ id: "b", origin: "external", state: "waiting" }),
+        session({ id: "c" }),
+        session({ id: "d", state: "done" }),
+        session({ id: "e", state: "starting" }),
+      ]),
+    ).toBe(3);
   });
 });
