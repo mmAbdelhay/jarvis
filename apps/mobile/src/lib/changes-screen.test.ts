@@ -2,7 +2,17 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { failedText, noticeText, sessionIdToReopen, shouldClearDraft } from "./changes-screen";
+import {
+  defaultChangesSession,
+  diffRows,
+  failedText,
+  noticeText,
+  pushLabel,
+  sessionIdToReopen,
+  shouldClearDraft,
+  stageAllTargets,
+  trackingParts,
+} from "./changes-screen";
 import {
   ENDED_SESSION_NOTICE,
   MUTATION_OFFLINE_NOTICE,
@@ -128,7 +138,8 @@ describe(
     // src/screens/ChangesScreen.tsx (wide layout, Task 4).
     const screenSource =
       readFileSync(resolve(here, "../../app/changes.tsx"), "utf8") +
-      readFileSync(resolve(here, "../screens/ChangesScreen.tsx"), "utf8");
+      readFileSync(resolve(here, "../screens/ChangesScreen.tsx"), "utf8") +
+      readFileSync(resolve(here, "../components/changes/DiffView.tsx"), "utf8");
 
     it("forces the horizontally-scrolled diff container to ltr layout", () => {
       expect(screenSource).toMatch(/diffContent:\s*\{[^}]*direction:\s*"ltr"/);
@@ -140,3 +151,100 @@ describe(
     });
   },
 );
+
+describe("defaultChangesSession", () => {
+  it("prefers the most recent live session over any finished one", () => {
+    const live = [
+      { id: "a", lastActivityAt: 1 },
+      { id: "b", lastActivityAt: 5 },
+    ];
+    expect(defaultChangesSession(live, [{ id: "h", lastActivityAt: 99 }])).toBe("b");
+  });
+
+  it("falls back to the newest finished session by when it ended", () => {
+    const finished = [
+      { id: "old", lastActivityAt: 1, endedAt: 2 },
+      { id: "new", lastActivityAt: 3, endedAt: 9 },
+      { id: "idle", lastActivityAt: 4 },
+    ];
+    expect(defaultChangesSession([], finished)).toBe("new");
+  });
+
+  it("has none when there are no sessions", () => {
+    expect(defaultChangesSession([], [])).toBeUndefined();
+  });
+});
+
+describe("stageAllTargets", () => {
+  it("returns only the unstaged paths to stage", () => {
+    expect(
+      stageAllTargets([
+        { path: "a", staged: true },
+        { path: "b", staged: false },
+      ]),
+    ).toEqual({ paths: ["b"], staged: true });
+  });
+
+  it("returns every path to unstage when all are staged", () => {
+    expect(
+      stageAllTargets([
+        { path: "a", staged: true },
+        { path: "b", staged: true },
+      ]),
+    ).toEqual({ paths: ["a", "b"], staged: false });
+  });
+});
+
+describe("pushLabel", () => {
+  it("shows the count only when ahead", () => {
+    expect(pushLabel(2, "en")).toBe("Push 2");
+    expect(pushLabel(0, "en")).toBe("Push");
+    expect(pushLabel(undefined, "en")).toBe("Push");
+  });
+});
+
+describe("trackingParts", () => {
+  const view = (changes: Record<string, unknown>) =>
+    ({
+      ...BASE,
+      changes: { changes: { files: [], ...changes } },
+    }) as unknown as ChangesState;
+
+  it("splits the upstream, ahead and behind", () => {
+    expect(trackingParts(view({ upstream: "origin/main", ahead: 2 }))).toEqual({
+      kind: "upstream",
+      upstream: "origin/main",
+      ahead: 2,
+      behind: 0,
+    });
+  });
+
+  it("says none without an upstream, and nothing before the first read", () => {
+    expect(trackingParts(view({}))).toEqual({ kind: "none" });
+    expect(trackingParts(BASE)).toBeUndefined();
+  });
+});
+
+describe("diffRows", () => {
+  it("puts the path on the hunk header and drops line numbers", () => {
+    const rows = diffRows({
+      path: "a.ts",
+      hunks: [
+        {
+          header: "@@ -1 +1,2 @@",
+          lines: [
+            { kind: "context", text: "x", beforeLine: 1, afterLine: 1 },
+            { kind: "added", text: "y", beforeLine: undefined, afterLine: 2 },
+            { kind: "removed", text: "z", beforeLine: 2, afterLine: undefined },
+          ],
+        },
+      ],
+    });
+    expect(rows).toEqual([
+      { key: "h0", kind: "hunk", text: "@@ -1 +1,2 @@ a.ts" },
+      { key: "h0l0", kind: "context", text: "  x" },
+      { key: "h0l1", kind: "added", text: "+ y" },
+      { key: "h0l2", kind: "removed", text: "- z" },
+    ]);
+  });
+});

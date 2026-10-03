@@ -6,6 +6,7 @@
 // previously chosen session must reopen on refocus (Behaviour 2), and a
 // `failed` phase or a non-remote notice must never be a blank/misleading
 // screen (Important 3).
+import type { GitFileDiff } from "@jarvis/core";
 import {
   ENDED_SESSION_NOTICE,
   type ChangesState,
@@ -121,4 +122,90 @@ export function doneText(done: SyncDone, language: Language): string {
     case "pullRequest":
       return t(language, done.created ? "changes.prCreated" : "changes.prExisting");
   }
+}
+
+/**
+ * The session the screen opens on when no route id names one: the most
+ * recently active live session, else the newest finished one (from the
+ * laptop's ended rows and saved history together), else none.
+ */
+export function defaultChangesSession(
+  live: readonly { id: string; lastActivityAt: number }[],
+  finished: readonly { id: string; lastActivityAt: number; endedAt?: number }[],
+): string | undefined {
+  let best: { id: string; at: number } | undefined;
+  for (const row of live) {
+    if (best === undefined || row.lastActivityAt > best.at) {
+      best = { id: row.id, at: row.lastActivityAt };
+    }
+  }
+  if (best !== undefined) return best.id;
+  for (const row of finished) {
+    const at = row.endedAt ?? row.lastActivityAt;
+    if (best === undefined || at > best.at) best = { id: row.id, at };
+  }
+  return best?.id;
+}
+
+/**
+ * What "Stage all" does: the unstaged paths to stage, or, when every file
+ * is already staged, all of them to unstage (the button then reads
+ * "Unstage all").
+ */
+export function stageAllTargets(files: readonly { path: string; staged: boolean }[]): {
+  paths: string[];
+  staged: boolean;
+} {
+  const unstaged = files.filter((file) => !file.staged).map((file) => file.path);
+  if (unstaged.length > 0) return { paths: unstaged, staged: true };
+  return { paths: files.map((file) => file.path), staged: false };
+}
+
+/** The Push button's label: the count of commits ahead only when there are some. */
+export function pushLabel(ahead: number | undefined, language: Language): string {
+  return ahead !== undefined && ahead > 0
+    ? t(language, "changes.pushCount", { count: ahead })
+    : t(language, "changes.push");
+}
+
+export type TrackingParts =
+  | { kind: "none" }
+  | { kind: "upstream"; upstream: string; ahead: number; behind: number };
+
+/** The branch's tracking line as parts, so the screen can tone ↑ and ↓ apart. */
+export function trackingParts(state: ChangesState): TrackingParts | undefined {
+  const changes = state.changes?.changes;
+  if (changes === undefined) return undefined;
+  if (changes.upstream === undefined) return { kind: "none" };
+  return {
+    kind: "upstream",
+    upstream: changes.upstream,
+    ahead: changes.ahead ?? 0,
+    behind: changes.behind ?? 0,
+  };
+}
+
+export type DiffRow = {
+  /** Unique within one diff: hunk position, then line position. */
+  key: string;
+  kind: "hunk" | "added" | "removed" | "context";
+  text: string;
+};
+
+/** A diff as display rows with no line numbers: each hunk's header followed
+ *  by the path, then its lines behind their `+`, `-` or blank marker. */
+export function diffRows(diff: Pick<GitFileDiff, "path" | "hunks">): DiffRow[] {
+  const rows: DiffRow[] = [];
+  diff.hunks.forEach((hunk, hunkIndex) => {
+    rows.push({ key: `h${hunkIndex}`, kind: "hunk", text: `${hunk.header} ${diff.path}` });
+    hunk.lines.forEach((line, lineIndex) => {
+      const marker = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
+      rows.push({
+        key: `h${hunkIndex}l${lineIndex}`,
+        kind: line.kind,
+        text: `${marker} ${line.text}`,
+      });
+    });
+  });
+  return rows;
 }
