@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshControl,
   ScrollView,
@@ -15,6 +15,7 @@ import { connectionPillModel } from "@/lib/connection-pill";
 import { type DashboardPanel, dashboardColumns } from "@/lib/dashboard-grid";
 import type { DashboardView } from "@/lib/dashboard-store";
 import { createDashboardStore } from "@/lib/dashboard-store";
+import { createHomeStore, type HomeView } from "@/lib/home-store";
 import { STRINGS, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
@@ -22,6 +23,7 @@ import { loadPairing } from "@/lib/pairing-record";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import { openSession, sessionTarget } from "@/lib/session-nav";
+import { answerPrompt } from "@/lib/session-prompt";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { WIDE_PANEL_MAX_WIDTH } from "@/lib/wide-panel";
@@ -32,6 +34,7 @@ import {
   SessionsPanel,
   SystemPanel,
 } from "@/screens/DashboardPanels";
+import { HomeTop } from "@/screens/HomeTop";
 
 function isMessageKey(value: string): value is MessageKey {
   return Object.hasOwn(STRINGS, value);
@@ -44,6 +47,8 @@ export default function DashboardScreen() {
   const connectionStore = useConnectionStore();
   const store = useMemo(() => createDashboardStore({ client }), [client]);
   const [view, setView] = useState<DashboardView>(store.get());
+  const homeStore = useMemo(() => createHomeStore({ client }), [client]);
+  const [home, setHome] = useState<HomeView>(homeStore.get());
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   // The paired computer's display name — read from the same
   // `loadPairing(expoSecureStore)` source `settings.tsx` uses (item 3):
@@ -66,6 +71,9 @@ export default function DashboardScreen() {
       setView(store.get());
       const unsubscribe = store.subscribe(setView);
       store.focus();
+      setHome(homeStore.get());
+      const unsubscribeHome = homeStore.subscribe(setHome);
+      homeStore.focus();
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
@@ -75,11 +83,27 @@ export default function DashboardScreen() {
       return () => {
         unsubscribe();
         store.blur();
+        unsubscribeHome();
+        homeStore.blur();
         unsubscribeConnection();
         cancelled = true;
       };
-    }, [store, connectionStore]),
+    }, [store, homeStore, connectionStore]),
   );
+  // The sessions a question could be waiting in: Jarvis's own live ones.
+  // A row found by the process scan has no terminal to answer through.
+  const liveIds = view.sessions
+    .filter(
+      (session) =>
+        session.origin !== "external" &&
+        (session.state === "running" || session.state === "waiting"),
+    )
+    .map((session) => session.id);
+  const liveKey = liveIds.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the id list's contents, not its identity.
+  useEffect(() => {
+    homeStore.setLiveSessions(liveIds);
+  }, [homeStore, liveKey]);
   const refresh = useCallback(() => {
     setRefreshing(true);
     void store.refresh().finally(() => setRefreshing(false));
@@ -157,7 +181,10 @@ export default function DashboardScreen() {
     >
       {!wide && (
         <View style={styles.header}>
-          <Text style={styles.brand}>JARVIS</Text>
+          <View style={styles.brandMark} accessibilityElementsHidden importantForAccessibility="no">
+            <View style={styles.brandDot} />
+          </View>
+          <Text style={styles.brand}>Jarvis</Text>
           <View style={styles.connection}>
             <View style={[styles.liveDot, { backgroundColor: pillColor }]} />
             <Text style={styles.connectionText}>{t(language, pill.key)}</Text>
@@ -186,6 +213,21 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
       )}
+      <View style={wide ? styles.homeTopWide : undefined}>
+        <HomeTop
+          language={language}
+          home={home}
+          sessions={view.sessions}
+          liveCount={liveIds.length}
+          now={now}
+          onAnswer={async (sessionId, index, label) => {
+            const outcome = await answerPrompt(client, sessionId, index, label);
+            if (outcome === "answered") homeStore.dismiss(sessionId);
+            return outcome;
+          }}
+          onOpen={(id) => openSession(router, sessionTarget(layout.kind, id, "elsewhere"))}
+        />
+      </View>
       {wide ? (
         <DashboardGrid
           language={language}
@@ -211,11 +253,26 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24, gap: 18 },
   contentWide: { paddingTop: 16 },
   header: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 },
+  brandMark: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: theme.colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    borderWidth: 2.5,
+    borderColor: theme.colors.primaryText,
+  },
   brand: {
     color: theme.colors.text,
     fontFamily: theme.font.bold,
-    fontSize: 15,
-    letterSpacing: 3.3,
+    fontSize: 19,
+    letterSpacing: -0.3,
   },
   connection: {
     flexShrink: 1,
@@ -256,4 +313,5 @@ const styles = StyleSheet.create({
   error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
   // Wide: under the grid, inside the same centred 1180 measure.
   errorWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
+  homeTopWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
 });

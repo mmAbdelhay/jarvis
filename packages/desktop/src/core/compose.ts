@@ -15,7 +15,16 @@
 // releaseChildren did.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import {
   access,
   chmod,
@@ -35,6 +44,7 @@ import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast
 import { createHostLink, type DesktopHost } from "./host-link.js";
 import { faviconIntake, type FaviconIntake } from "./favicon-intake.js";
 import { createDispatchTable, type DispatchTable } from "../dispatch.js";
+import { buildUsageHistory, CAPACITY_WINDOW_MS } from "../usage-history.js";
 import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
 import { createBlobTable } from "../remote-blob.js";
@@ -69,6 +79,7 @@ import {
   Orchestrator,
   ProviderMonitor,
   ProviderStatusStore,
+  recordCapacityHistory,
   SessionManager,
   greetingText,
   scanDirtyProjects,
@@ -93,6 +104,9 @@ import {
   createFaviconStore,
   createFsImportDeps,
   createGitProvider,
+  createGitRemoteOps,
+  createSqliteUsageStore,
+  createGitWorktrees,
   createHeadlampManager,
   defaultHeadlampBinary,
   defaultHistoryPath,
@@ -136,7 +150,7 @@ import {
   renameFolder,
   renameRequest,
   sendRequest,
-  toCurl,
+  toSnippet,
   writeEnvironment,
   writeImported,
   writeRequest,
@@ -367,6 +381,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   const registry = new AgentRegistry(config.registry);
 
   const providerStore = new ProviderStatusStore(registry.list());
+  // Every capacity reading the panel shows, kept for the Dashboard's
+  // history chart. Its own table in sessions.db (usage-store.ts).
+  const usageStore = createSqliteUsageStore(config.sessionsDbPath);
+  recordCapacityHistory(providerStore, usageStore);
   // agentEnv is declared here, ahead of the capacity reader that closes
   // over it; the comment explaining it sits with the health check below,
   // which is what it was first built for.
@@ -649,6 +667,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
   });
 
+  // Worktrees live beside sessions.db, under the config directory —
+  // outside every repository, so none shows up in a main checkout's
+  // Changes view. Wired even when the mode is off: a session the user
+  // explicitly asks to isolate still gets one, and the Changes view needs
+  // these to merge one back or remove it.
+  const sessionWorktrees = createGitWorktrees({
+    root: join(dirname(config.sessionsDbPath), "worktrees"),
+  });
   const orchestrator = new Orchestrator({
     brain,
     registry,
@@ -657,6 +683,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     changes: () => changeTracker.snapshot(),
     speak: (text, language) => announceSpeaking(text, language),
     projects: config.projects,
+    worktrees: { mode: config.sessions.worktrees ?? "off", ops: sessionWorktrees },
     providers: {
       snapshot: () => providers.snapshot(),
       refresh: () => providers.refreshCapacity({ force: true }),
@@ -994,7 +1021,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     sendRequest: (request, variables, project, remote) =>
       sendApiRequest(request, variables, project, remote),
     evaluateAssertions,
-    toCurl,
+    toSnippet,
     createRequest,
     createFolder,
     renameRequest,
@@ -1029,6 +1056,21 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           directory: entry.isDirectory(),
         })),
       realPath: (path) => realpathSync(path),
+      exists: (path) => {
+        try {
+          lstatSync(path);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      makeDir: (path) => mkdirSync(path),
+      makeFile: (path) => writeFileSync(path, "", { flag: "wx" }),
+      rename: (from, to) => renameSync(from, to),
+      // The OS trash is the desktop app's to reach (Electron's shell), so
+      // it goes out through the host — which a headless daemon forwards to
+      // the app that asked, and refuses when no app is attached.
+      trash: (path) => host.trashItem(path),
     },
     // The file sidebar's route into the Editor tab — see
     // TerminalHandlerDeps.editor. `open` is codeServer.open bound
@@ -1547,8 +1589,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // The same hoisted writeConfig instance createRemoteAccess's own
     // onIdleDisabled callback uses above — never a second writer to
     // jarvis.yaml. After a successful write, the file on disk is the
-    // only source of truth for `remote:` (settings:save already pins a
-    // remote-origin draft's own `remote` key to it — dispatch.ts) — so
+    // only source of truth for `remote:` (a remote-origin settings:save
+    // changes only `sessions`, as an update of that file — dispatch.ts) — so
     // writeConfig re-reads the file rather than trusting `draft.remote`,
     // and applies whatever that read finds to the live bridge, via the
     // queued applyFromDisk above it. A rejected re-read (or a rejected
@@ -1864,6 +1906,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // createGitHandlers' own doc comment.
   const gitHandlers = createGitHandlers({
     git,
+    // Pull, push and `gh` run with agentEnv, the login-shell PATH, read
+    // per call because it is resolved after startup.
+    remote: createGitRemoteOps({ env: () => agentEnv }),
+    worktrees: sessionWorktrees,
     sessions: { get: (id) => sessions.get(id) },
     language: PRIMARY_LANGUAGE,
     refresh: () => changeTracker.refresh(),
@@ -2006,6 +2052,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     setup,
     orchestrator,
     sessionStore,
+    // Read from what is already kept: capacity readings (usageStore, fed
+    // by recordCapacityHistory below) and sessions.db's own rows. Never a
+    // query that costs anything.
+    usageHistory: () => {
+      const now = Date.now();
+      return buildUsageHistory(
+        usageStore.samples(now - CAPACITY_WINDOW_MS),
+        sessionStore.history(),
+        now,
+      );
+    },
     // Bug 5: the platform's own global fetch, the same one the Expo push
     // sender (remote-access.ts) and api-executor.ts already rely on
     // existing, rather than @jarvis/platform's apiFetch or undici.
@@ -2354,6 +2411,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       // Last: sessions killed above still persist their ended rows first.
       // The store ignores any write that lands after this.
       sessionStore.close?.();
+      usageStore.close();
     },
   };
 }

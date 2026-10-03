@@ -10,7 +10,13 @@ import type {
 } from "@jarvis/core";
 import type { RendererApi, VoiceNotice } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
-import { applyStaticChrome, openChanges, wireCommitBar, wireDiffModes } from "./changes.js";
+import {
+  applyStaticChrome,
+  openChanges,
+  wireCommitBar,
+  wireDiffModes,
+  wireSyncBar,
+} from "./changes.js";
 import { showView, syncHostedView } from "./views.js";
 import {
   initWorkspace,
@@ -22,6 +28,7 @@ import {
 } from "./workspace.js";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { initDaemonSettings, refreshDaemonSettings } from "./daemon-settings.js";
+import { initUpdateSettings } from "./update-settings.js";
 import {
   checkPrayerNotifications,
   initPrayerSettings,
@@ -38,7 +45,9 @@ import {
   formatUptime,
   projectLabel,
 } from "./format.js";
-import { renderProviders, wireProvidersPanel } from "./providers.js";
+import { renderProviders, setCapacityHistory, wireProvidersPanel } from "./providers.js";
+import { renderSessionsChart } from "./usage-charts.js";
+import { promptBlock, refreshPrompts } from "./session-prompts.js";
 import { sessionToAutoOpen } from "./session-auto-open.js";
 import { threadPaths } from "./link-layout.js";
 import {
@@ -258,6 +267,20 @@ export function setPresenceThinking(value: boolean): void {
 window.jarvis.onMetrics((metrics) => renderMetrics(metrics));
 window.jarvis.onSessions((sessions) => {
   const previous = latestSessions;
+  if (sessions.length !== previous.length) refreshUsage();
+
+  // Which live sessions are sitting at a prompt. Polled, not pushed: a
+  // session never enters a "waiting" state of its own (notify.ts infers it
+  // from a quiet spell), and reading a 2 KB tail per live session every few
+  // seconds is cheaper than a push channel for it. Only while the Dashboard
+  // could be looking.
+  setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    const live = latestSessions
+      .filter((session) => LIVE_STATES.has(session.state))
+      .map((session) => session.id);
+    void refreshPrompts(live, () => renderSessions(latestSessions));
+  }, 2500);
   latestSessions = sessions;
   renderSessions(latestSessions);
   renderRunningPill(latestSessions);
@@ -294,9 +317,35 @@ window.jarvis.onChangeCounts((changes) => {
   latestChanges = new Map(changes.map((entry) => [entry.sessionId, entry]));
   renderSessions(latestSessions);
 });
+// The Dashboard's two history charts. Read on startup and again a moment
+// after anything they show could have moved — a new capacity reading, a
+// session starting — coalesced, since both arrive in bursts. Free: it reads
+// only what main has already kept.
+let usageTimer: ReturnType<typeof setTimeout> | undefined;
+function refreshUsage(): void {
+  if (usageTimer !== undefined) return;
+  usageTimer = setTimeout(() => {
+    usageTimer = undefined;
+    // try as well as catch: a preload without the channel throws before
+    // any promise exists. No history is a Dashboard without its charts.
+    try {
+      void window.jarvis
+        .usageHistory()
+        .then((history) => {
+          setCapacityHistory(history.capacity);
+          renderProviders(latestProviders, Date.now());
+          renderSessionsChart(history.sessionsPerDay);
+        })
+        .catch(() => {});
+    } catch {}
+  }, 500);
+}
+refreshUsage();
+
 window.jarvis.onProviders((statuses) => {
   latestProviders = statuses;
   renderProviders(statuses, Date.now());
+  refreshUsage();
   // A provider's health can change without the registry's agent list
   // changing at all — the orbiting chip's dot colour must still catch up.
   renderAgentOrbits();
@@ -332,6 +381,7 @@ wireHistoryPanel();
 wireNav();
 wireDiffModes();
 wireCommitBar();
+wireSyncBar();
 wireProvidersPanel();
 wireSessionView();
 // No afterRefresh: the Dashboard SESSIONS card already redraws itself from
@@ -388,6 +438,7 @@ function wireNav(): void {
     // Settings → General's background-service section (Task 23). Its own
     // guard, for the reason the one below gives.
     initDaemonSettings();
+    initUpdateSettings();
   } catch (error) {
     console.error(`background settings did not initialise: ${String(error)}`);
   }
@@ -1031,6 +1082,12 @@ function buildSessionRow(session: Session): HTMLElement {
   meta.textContent = [session.agentId, session.model].filter(Boolean).join(" · ");
 
   row.append(head, summary, meta);
+  // What the agent is asking, with its own options as buttons — answerable
+  // from here without opening the terminal. Only while it is live.
+  if (LIVE_STATES.has(session.state)) {
+    const prompt = promptBlock(session.id, () => renderSessions(latestSessions));
+    if (prompt !== undefined) row.append(prompt);
+  }
   // A row click opens the session's own transcript — what the user came to
   // the row for is "what is this agent doing". Its diff badge is the route
   // to the Changes view instead (see buildDiffBadge), so both destinations

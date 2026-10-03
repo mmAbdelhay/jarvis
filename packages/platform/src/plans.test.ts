@@ -668,6 +668,10 @@ describe("writeBlock", () => {
 
     // Someone else changes the file after this caller last read it.
     await writeFile(path, source.replace("First paragraph.", "Someone else's edit."));
+    // Moved explicitly: a rewrite within the same filesystem tick can keep
+    // the old mtime (seen on Windows), which is not the case under test.
+    const later = new Date(mtimeMs + 5000);
+    await utimes(path, later, later);
 
     const result = await planFiles.writeBlock(path, paragraph.id, "My edit.", mtimeMs);
     expect(result.ok).toBe(false);

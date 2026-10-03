@@ -32,9 +32,14 @@ sidebar; ✎ and × on a row rename and delete. Renaming a request moves the fil
 
 ## Sending
 
-`⌘Enter` sends, `⌘S` saves. **cURL** copies the request as a shell command with
-variables resolved — a command with `{{base}}` still in it is a note, not a
-command.
+`⌘Enter` sends, `⌘S` saves. **Copy as code** copies the request as a cURL
+command, JavaScript `fetch` or Python `requests`, with variables resolved — a
+command with `{{base}}` still in it is a note, not a command.
+
+**Find in response**, above the body, marks every match in it (ignoring
+case), counts them, and steps through them with Enter and Shift+Enter;
+Escape clears it. The search stays when you send again, so watching for a
+value across retries is one field, not a re-type.
 
 Requests are issued **from the main process**, not from a browser origin.
 That is why CORS never applies here, and it is the reason this is a native tab
@@ -117,5 +122,5 @@ none of those bounds.
 ## What is not here
 
 No cookie *editor* (only viewing and deleting), no code generation beyond
-cURL, no response search, and no per-request network override — the settings
+cURL, JavaScript `fetch` and Python `requests`, and no per-request network override — the settings
 are per project. Postman import handles v2.0 and v2.1 collections.

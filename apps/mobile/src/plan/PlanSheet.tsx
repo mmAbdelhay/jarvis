@@ -16,7 +16,9 @@ import { allowTerminalNavigation, TERMINAL_WEBVIEW_PROPS } from "../lib/terminal
 import { theme } from "../lib/theme";
 import { PlanBlockSheet } from "./PlanBlockSheet";
 import { PlanCommentsScreen } from "./PlanCommentsScreen";
+import { SegmentTabs } from "../components/SegmentTabs";
 import { planErrorText } from "./plan-error";
+import { planProgressOf } from "./plan-progress";
 import { buildPlanPage, parsePlanPageMessage } from "./plan-page";
 import type { PlanBlock, PlanEntry } from "./types";
 
@@ -41,6 +43,7 @@ export function PlanSheet(props: {
   const state = props.store.state;
   const activeEntry = findEntry(state.list, state.doc?.path);
   const queued = state.comments.filter((comment) => comment.sentAt === undefined);
+  const progress = planProgressOf(state.doc);
   const html = useMemo(
     () =>
       state.doc === undefined
@@ -84,22 +87,50 @@ export function PlanSheet(props: {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.headerButton}
-              onPress={() => setCommentsScreen((value) => !value)}
-            >
-              <Text style={styles.headerButtonText}>
-                {commentsScreen
-                  ? t(props.language, "plans.title")
-                  : t(props.language, "plans.comments")}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={styles.close}
               onPress={props.onClose}
               accessibilityLabel={t(props.language, "common.cancel")}
             >
               <Text style={styles.closeText}>×</Text>
             </TouchableOpacity>
+          </View>
+          <View style={styles.subheader}>
+            {progress !== undefined && (
+              <View style={styles.progressRow}>
+                <View style={styles.track}>
+                  <View
+                    style={[
+                      styles.fill,
+                      { width: `${Math.round((progress.done / progress.total) * 100)}%` },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.progressText}>
+                  {t(props.language, "plans.doneOf", {
+                    done: progress.done,
+                    total: progress.total,
+                  })}
+                </Text>
+              </View>
+            )}
+            <SegmentTabs
+              label={t(props.language, "plans.title")}
+              tabs={[
+                {
+                  key: "plan",
+                  label: t(props.language, "plans.title"),
+                  selected: !commentsScreen,
+                  onPress: () => setCommentsScreen(false),
+                },
+                {
+                  key: "notes",
+                  label: t(props.language, "plans.comments"),
+                  ...(state.comments.length === 0 ? {} : { badge: String(state.comments.length) }),
+                  selected: commentsScreen,
+                  onPress: () => setCommentsScreen(true),
+                },
+              ]}
+            />
           </View>
           {picker && state.list !== undefined && (
             <PlanPicker
@@ -144,9 +175,14 @@ export function PlanSheet(props: {
           )}
           {!commentsScreen && (
             <View style={styles.footer}>
-              <Text style={styles.queued}>
-                {t(props.language, "plans.queuedCount", { count: queued.length })}
-              </Text>
+              <View style={styles.queuedBlock}>
+                <Text style={styles.queued}>
+                  {t(props.language, "plans.queuedCount", { count: queued.length })}
+                </Text>
+                {queued.length > 1 && (
+                  <Text style={styles.queuedHint}>{t(props.language, "plans.sentTogether")}</Text>
+                )}
+              </View>
               <TouchableOpacity
                 disabled={queued.length === 0}
                 onPress={() => void props.store.send()}
@@ -222,9 +258,11 @@ function PlanPicker(props: {
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: theme.colors.surface,
-    borderTopStartRadius: theme.radius.lg,
-    borderTopEndRadius: theme.radius.lg,
+    backgroundColor: theme.colors.ground,
+    borderTopStartRadius: 22,
+    borderTopEndRadius: 22,
+    borderTopWidth: 1,
+    borderColor: theme.colors.border,
     overflow: "hidden",
   },
   grabber: {
@@ -247,8 +285,17 @@ const styles = StyleSheet.create({
   planTitle: { flex: 1, minHeight: 48, justifyContent: "center" },
   fileName: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 16 },
   sourceLine: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
-  headerButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: theme.spacing.sm },
-  headerButtonText: { color: theme.colors.accent, fontFamily: theme.font.semibold },
+  subheader: {
+    gap: 10,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 10,
+    borderBottomColor: theme.colors.hairline,
+    borderBottomWidth: 1,
+  },
+  progressRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  track: { flex: 1, height: 6, borderRadius: 999, backgroundColor: theme.colors.selected },
+  fill: { height: 6, borderRadius: 999, backgroundColor: theme.colors.success },
+  progressText: { color: theme.colors.textSecondary, fontFamily: theme.font.bold, fontSize: 12 },
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   closeText: { color: theme.colors.textMuted, fontSize: 30, lineHeight: 32 },
   webview: { flex: 1, backgroundColor: theme.colors.surface },
@@ -266,7 +313,7 @@ const styles = StyleSheet.create({
   picker: {
     position: "absolute",
     zIndex: 4,
-    top: 73,
+    top: 62,
     insetInlineStart: theme.spacing.md,
     insetInlineEnd: theme.spacing.md,
     maxHeight: 300,
@@ -293,7 +340,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: theme.spacing.md,
   },
-  queued: { flex: 1, color: theme.colors.textMuted, fontFamily: theme.font.medium },
+  queuedBlock: { flex: 1, gap: 2 },
+  queued: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
+  queuedHint: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
   send: {
     minHeight: 44,
     justifyContent: "center",

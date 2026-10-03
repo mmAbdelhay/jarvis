@@ -19,6 +19,11 @@
 //     daemon log gets the title only, never the body;
 //   - openExternal: forwarded to an attached app, which opens only the
 //     bridge's own web client (open-external-guard.ts). With none it rejects;
+//   - trashItem: forwarded to the one app whose request is running — the
+//     sidebar that asked — never to every app, which would each try to
+//     trash the same path. With no such app it rejects. The app's answer
+//     does not travel back: the sidebar re-lists either way, and a file
+//     still there says what a result would have;
 //   - restart (Settings' Restart) restarts the daemon, since the settings it
 //     applies live here. Under a service manager every client is told
 //     `daemon:restarting` and the daemon exits DAEMON_EXIT.restart, to be
@@ -94,6 +99,14 @@ export function createDaemonHost(deps: {
         return Promise.reject(new Error("No desktop app is connected to open a browser"));
       }
       deps.push(DAEMON_PUSHES.openExternal, { url });
+      return Promise.resolve();
+    },
+    trashItem(path) {
+      const asker = deps.initiator();
+      if (asker === undefined || !attached.has(asker)) {
+        return Promise.reject(new Error("No desktop app asked to move a file to the trash"));
+      }
+      deps.pushTo(asker, DAEMON_PUSHES.trashItem, { path });
       return Promise.resolve();
     },
     restart() {

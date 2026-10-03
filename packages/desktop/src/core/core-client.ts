@@ -223,6 +223,7 @@ export function inProcessCoreClient(core: Core, options: InProcessOptions = {}):
         showNotification: (...args) => host.showNotification(...wire(args, "showNotification")),
         openExternal: (url) =>
           settle(host.openExternal(wire(url, "openExternal")), "openExternal result"),
+        trashItem: (path) => settle(host.trashItem(wire(path, "trashItem")), "trashItem result"),
         restart: () => host.restart(),
       }),
 

@@ -37,6 +37,7 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
+import { checkForUpdate } from "./update-check.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -289,6 +290,9 @@ function createDesktopHost(client: CoreClient) {
         open: (checked) => electronShell.openExternal(checked),
         log: (line) => console.error(line),
       }),
+    // The file sidebar's Move to Trash. The core has already proven the
+    // path inside a project (ipc.ts's trashEntry) before it gets here.
+    trashItem: (path) => electronShell.trashItem(path),
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
     // click, after a save has already succeeded.
@@ -585,6 +589,8 @@ app.whenReady().then(async () => {
       isTerminalTab: (tabId) =>
         client.workspace.state().tabs.some((tab) => tab.id === tabId && tab.kind === "terminal"),
       shell: electronShell,
+      checkForUpdate: () =>
+        checkForUpdate({ current: app.getVersion(), fetch: (url, init) => fetch(url, init) }),
       language: PRIMARY_LANGUAGE,
       background: {
         status: () => mode.status(),

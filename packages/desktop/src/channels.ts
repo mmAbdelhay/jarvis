@@ -112,6 +112,14 @@ export const INVOKE_CHANNELS = {
   gitDiff: "git:diff",
   gitSetStaged: "git:setStaged",
   gitCommit: "git:commit",
+  gitBranches: "git:branches",
+  gitSwitchBranch: "git:switchBranch",
+  gitPull: "git:pull",
+  gitPush: "git:push",
+  gitPullRequest: "git:pullRequest",
+  gitWorktree: "git:worktree",
+  gitMergeWorktree: "git:mergeWorktree",
+  gitRemoveWorktree: "git:removeWorktree",
   getSessionLog: "session:log",
   sessionSnapshot: "session:snapshot",
   getSessionTranscript: "session:transcript",
@@ -120,6 +128,9 @@ export const INVOKE_CHANNELS = {
   resizeSession: "session:resize",
   setVoiceTarget: "voice:target",
   refreshProviders: "providers:refresh",
+  sessionPrompt: "session:prompt",
+  answerSession: "session:answer",
+  usageHistory: "usage:history",
   openTab: "workspace:open",
   closeTab: "workspace:close",
   activateTab: "workspace:activate",
@@ -157,6 +168,9 @@ export const INVOKE_CHANNELS = {
   terminalHistory: "terminal:history",
   listTerminalDir: "terminal:listDir",
   openTerminalFile: "terminal:openFile",
+  createTerminalEntry: "terminal:createEntry",
+  renameTerminalEntry: "terminal:renameEntry",
+  trashTerminalEntry: "terminal:trashEntry",
   terminalSettings: "terminal:settings",
   terminalWorkflows: "terminal:workflows",
   terminalAi: "terminal:ai",
@@ -262,6 +276,7 @@ export const INVOKE_CHANNELS = {
   // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
   // and length gate before shell.openExternal ever runs.
   plansOpenLink: "plans:openLink",
+  checkForUpdate: "app:checkUpdate",
   // Desktop-only (Phase 1): opens the browser client in the system
   // browser. Takes no URL — main builds it from the bridge's own status.
   openWebClient: "remote:openWebClient",

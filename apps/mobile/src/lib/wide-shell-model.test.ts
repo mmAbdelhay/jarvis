@@ -30,6 +30,8 @@ describe("wideNavItems", () => {
       "dashboard",
       "sessions",
       "workspace",
+      "changes",
+      "history",
       "voice",
       "settings",
     ]);
@@ -37,10 +39,12 @@ describe("wideNavItems", () => {
       "/dashboard",
       "/sessions",
       "/workspace",
+      "/changes",
+      "/history",
       "/voice",
       "/settings",
     ]);
-    expect(items[0]?.label).toBe("Dashboard");
+    expect(items[0]?.label).toBe("Home");
   });
 
   it("uses the Arabic labels in ar", () => {
@@ -49,6 +53,8 @@ describe("wideNavItems", () => {
       STRINGS["nav.dashboard"].ar,
       STRINGS["nav.sessions"].ar,
       STRINGS["nav.workspace"].ar,
+      STRINGS["nav.changes"].ar,
+      STRINGS["nav.history"].ar,
       STRINGS["nav.voice"].ar,
       STRINGS["nav.settings"].ar,
     ]);
@@ -69,7 +75,9 @@ describe("activeNavKey", () => {
     expect(activeNavKey("/session/abc")).toBe("sessions");
     expect(activeNavKey("/terminal/pane-1")).toBe("workspace");
     expect(activeNavKey("/docker/jarvis")).toBe("workspace");
-    expect(activeNavKey("/history")).toBe("dashboard");
+    expect(activeNavKey("/history")).toBe("history");
+    expect(activeNavKey("/transcript/abc")).toBe("history");
+    expect(activeNavKey("/changes")).toBe("changes");
   });
 
   it("has no active item for an unknown route", () => {

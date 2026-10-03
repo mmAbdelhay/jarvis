@@ -76,6 +76,7 @@ export const MESSAGES = {
   planSourceToggle: (language: "ar" | "en"): string => (language === "ar" ? "المصدر" : "Source"),
   planClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق الخطة" : "Close plan"),
   planUpdated: (language: "ar" | "en"): string => (language === "ar" ? "حُدِّثت" : "Updated"),
+  planDone: (language: "ar" | "en"): string => (language === "ar" ? "منجزة" : "done"),
   planPickerOpen: (language: "ar" | "en"): string =>
     language === "ar" ? "اختر خطة" : "Choose a plan",
   planPickerSearch: (language: "ar" | "en"): string =>
@@ -104,6 +105,99 @@ export const MESSAGES = {
   planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
   planKeepLater: (language: "ar" | "en"): string =>
     language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  // The Changes view's branch and sync row (changes.ts).
+  changesNewBranch: (language: "ar" | "en"): string =>
+    language === "ar" ? "فرع جديد" : "New branch",
+  changesNewBranchPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اسم الفرع، ثم Enter" : "Branch name, then Enter",
+  changesBranchLabel: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  changesPull: (language: "ar" | "en"): string => (language === "ar" ? "سحب" : "Pull"),
+  changesPush: (language: "ar" | "en"): string => (language === "ar" ? "دفع" : "Push"),
+  changesPullRequest: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب سحب" : "Pull request",
+  changesNoUpstream: (language: "ar" | "en"): string =>
+    language === "ar" ? "ليس على البعيد بعد" : "not on a remote yet",
+  changesPulled: (language: "ar" | "en"): string => (language === "ar" ? "تم السحب." : "Pulled."),
+  changesUpToDate: (language: "ar" | "en"): string =>
+    language === "ar" ? "محدّث بالفعل." : "Already up to date.",
+  changesPushed: (language: "ar" | "en"): string => (language === "ar" ? "تم الدفع." : "Pushed."),
+  changesSwitched: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم تبديل الفرع." : "Switched branch.",
+  changesPullRequestOpened: (language: "ar" | "en"): string =>
+    language === "ar" ? "فُتح طلب السحب في المتصفح." : "Opened the pull request in the browser.",
+  changesPullRequestReady: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب السحب جاهز:" : "Pull request ready:",
+  changesWorking: (language: "ar" | "en"): string => (language === "ar" ? "جارٍ…" : "Working…"),
+  worktreeInUse: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يزال الوكيل يعمل في هذه الـ worktree. أوقف الجلسة أولًا."
+      : "The agent is still working in this worktree. Stop the session first.",
+  changesWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "worktree منفصلة" : "Own worktree",
+  changesMergeInto: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `ادمج في ${branch}` : `Merge into ${branch}`,
+  changesRemoveWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "أزل الـ worktree" : "Remove worktree",
+  changesMerged: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تم الدمج في ${branch}.` : `Merged into ${branch}.`,
+  changesWorktreeRemoved: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أُزيلت الـ worktree، وبقي فرعها."
+      : "Removed the worktree; its branch is kept.",
+  promptChanged: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر السؤال قبل الإجابة، فلم يُكتب شيء. انظر مجددًا."
+      : "That prompt changed before the answer reached it, so nothing was typed. Look again.",
+  // Settings' Check for updates (update-settings.ts).
+  updateCheck: (language: "ar" | "en"): string =>
+    language === "ar" ? "التحقق من وجود تحديث" : "Check for updates",
+  updateChecking: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التحقق…" : "Checking…",
+  updateCurrent: (version: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `هذا أحدث إصدار (${version}).`
+      : `You're on the latest version (${version}).`,
+  updateNewer: (latest: string, current: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الإصدار ${latest} متاح، ولديك ${current}.`
+      : `Jarvis ${latest} is available; you have ${current}.`,
+  updateFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر الوصول إلى GitHub الآن." : "Couldn't reach GitHub just now.",
+  updateOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح صفحة الإصدار" : "Open the release",
+  // The API tab's find in response (api-response.ts).
+  apiFindInResponse: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث في الاستجابة" : "Find in response",
+  apiFindPrevious: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق السابق" : "Previous match",
+  apiFindNext: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق التالي" : "Next match",
+  // The Dashboard's usage charts (usage-charts.ts).
+  capacityHistoryLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",
+  capacityPointLeft: (time: string, left: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${time} · متبقٍّ ${left}٪` : `${time} · ${left}% left`,
+  sessionsHistoryLabel: (total: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الجلسات في آخر ١٤ يومًا: ${total}`
+      : `Sessions over the last 14 days: ${total}`,
+  // The file sidebar's own writes (terminal-explorer.ts).
+  explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
+  explorerNewFolder: (language: "ar" | "en"): string =>
+    language === "ar" ? "مجلد جديد" : "New folder",
+  explorerRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
+  explorerTrash: (language: "ar" | "en"): string =>
+    language === "ar" ? "نقل إلى سلة المهملات" : "Move to Trash",
+  explorerErrorExists: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يوجد ملف أو مجلد بهذا الاسم بالفعل."
+      : "Something with that name is already there.",
+  explorerErrorInvalidName: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يمكن استخدام هذا الاسم." : "That name can't be used.",
+  explorerErrorOutside: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا خارج المشروع." : "That's outside the project.",
+  explorerErrorFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر تنفيذ ذلك." : "That didn't work.",
   planSendClaude: (language: "ar" | "en"): string =>
     language === "ar" ? "إرسال إلى Claude" : "Send to Claude",
   planSectionChanged: (language: "ar" | "en"): string =>

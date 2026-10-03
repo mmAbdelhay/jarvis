@@ -6,6 +6,7 @@ const nativeSections = [
   { id: "voice", labelKey: "settings.speakReplies" },
   { id: "notifications", labelKey: "settings.notifications" },
   { id: "paired-computer", labelKey: "settings.pairedLaptop" },
+  { id: "laptop", labelKey: "laptopSettings.title" },
   { id: "connection", labelKey: "settings.connection" },
   { id: "security", labelKey: "settings.security" },
   { id: "remote-access", labelKey: "settings.section.remoteAccess" },

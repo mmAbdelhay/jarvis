@@ -23,6 +23,16 @@ export const theme = {
     userBubble: "#1B2740",
     success: "#3ECF8E",
     warning: "#F5B93F",
+    // A session waiting on the user: amber ground, border and text that
+    // keep 4.5:1 on that ground.
+    warningSurface: "#1F1A0E",
+    warningBorder: "#4A3B14",
+    warningText: "#F4E3B8",
+    warningMuted: "#B9A777",
+    onWarning: "#1A1406",
+    successSurface: "#10231A",
+    successText: "#7FE3B4",
+    dangerSurface: "#2A1416",
     danger: "#FF6B6B",
     selected: "#1E2433",
     disabledDot: "#3A4152",

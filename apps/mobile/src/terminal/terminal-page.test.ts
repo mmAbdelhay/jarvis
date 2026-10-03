@@ -502,3 +502,128 @@ describe("selection (wide layout, fix round 1)", () => {
     expect(term.getSelection()).toBe("");
   });
 });
+
+describe("scrollback navigation", () => {
+  function navDeps(lines: string[], rows = 4) {
+    const term = makeFakeTerminal();
+    term.setSize(80, rows);
+    let viewport = Math.max(0, lines.length - rows);
+    const selections: [number, number, number][] = [];
+    const deps = makeDeps(term);
+    deps.nav = {
+      viewportY: () => viewport,
+      baseY: () => Math.max(0, lines.length - rows),
+      lineCount: () => lines.length,
+      lineText: (row) => lines[row] ?? "",
+      scrollToLine: (row) => {
+        viewport = row;
+      },
+      scrollToBottom: () => {
+        viewport = Math.max(0, lines.length - rows);
+      },
+      select: (column, row, length) => {
+        selections.push([column, row, length]);
+      },
+    };
+    const controller = createPageController(deps);
+    return {
+      controller,
+      deps,
+      selections,
+      viewport: () => viewport,
+      setViewport: (row: number) => {
+        viewport = row;
+      },
+    };
+  }
+
+  const LINES = Array.from({ length: 20 }, (_, index) => `line ${index}`);
+
+  it("jumps between marked prompts and back to the live end", () => {
+    const nav = navDeps(LINES);
+    for (const line of [2, 8, 14]) nav.controller.commandMark({ line, isDisposed: false });
+    nav.setViewport(10);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(8);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(2);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(8);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(14);
+    // Past the newest prompt only the live end is left.
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(16);
+    nav.setViewport(0);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "latest" }));
+    expect(nav.viewport()).toBe(16);
+  });
+
+  it("forgets a prompt xterm trimmed out of the scrollback", () => {
+    const nav = navDeps(LINES);
+    nav.controller.commandMark({ line: 2, isDisposed: true });
+    nav.controller.commandMark({ line: 6, isDisposed: false });
+    nav.setViewport(10);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(6);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(6);
+  });
+
+  it("reports only whether it is scrolled back and whether prompts are marked", () => {
+    const nav = navDeps(LINES);
+    nav.controller.viewChanged();
+    nav.setViewport(3);
+    nav.controller.viewChanged();
+    nav.controller.commandMark({ line: 1, isDisposed: false });
+    expect(nav.deps.posted.filter((m) => (m as { t: string }).t === "view")).toEqual([
+      { t: "view", back: false, commands: false },
+      { t: "view", back: true, commands: false },
+      { t: "view", back: true, commands: true },
+    ]);
+  });
+
+  it("finds the next and previous match, ignoring case, and says when there is none", () => {
+    const lines = ["$ make", "ok", "ERROR one", "fine", "error two", "$ "];
+    const nav = navDeps(lines, 2);
+    nav.setViewport(0);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "next" }));
+    expect(nav.selections.at(-1)).toEqual([0, 2, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "next" }));
+    expect(nav.selections.at(-1)).toEqual([0, 4, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "prev" }));
+    expect(nav.selections.at(-1)).toEqual([0, 2, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "missing", direction: "next" }));
+    const found = nav.deps.posted.filter((m) => (m as { t: string }).t === "found");
+    expect(found).toEqual([
+      { t: "found", ok: true },
+      { t: "found", ok: true },
+      { t: "found", ok: true },
+      { t: "found", ok: false },
+    ]);
+  });
+
+  it("ignores an empty or oversized search", () => {
+    const nav = navDeps(LINES);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "", direction: "next" }));
+    nav.controller.receive(
+      JSON.stringify({ t: "find", query: "x".repeat(201), direction: "next" }),
+    );
+    expect(nav.deps.posted.filter((m) => (m as { t: string }).t === "found")).toEqual([]);
+  });
+
+  it("parses the new page messages field by field", () => {
+    expect(parsePageMessage(JSON.stringify({ t: "view", back: true, commands: false }))).toEqual({
+      t: "view",
+      back: true,
+      commands: false,
+    });
+    expect(
+      parsePageMessage(JSON.stringify({ t: "view", back: "yes", commands: false })),
+    ).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "found", ok: false }))).toEqual({
+      t: "found",
+      ok: false,
+    });
+  });
+});

@@ -46,6 +46,11 @@ function inlineKind(kind: MobileWorkspaceTab["kind"]): kind is "terminal" | "doc
   return kind === "terminal" || kind === "docker" || kind === "api";
 }
 
+/** A tab the laptop owns (as opposed to a tool opened only on the phone). */
+export function isLaptopTabId(id: string): boolean {
+  return !id.startsWith(TOOL_PREFIX);
+}
+
 export function toolTabId(kind: WorkspaceToolKind): string {
   return `${TOOL_PREFIX}${kind}`;
 }
@@ -170,6 +175,15 @@ export type WorkspaceRouter = {
 export function openWorkspaceTab(router: WorkspaceRouter, target: WorkspaceTarget): void {
   if (target.action === "push") router.push({ pathname: target.href, params: target.params });
   else router.setParams(target.params);
+}
+
+/** Opening a laptop terminal from a screen other than the Workspace
+ *  (Resume, on History and the session screen). Always the terminal route:
+ *  a wide screen's in-place `setParams` would land on the screen the
+ *  button is on, while the route redirects to the Workspace tab itself
+ *  (workspaceRedirectFor below). */
+export function terminalTargetFromElsewhere(tabId: string): WorkspaceTarget {
+  return workspaceTarget("phone", { id: tabId, kind: "terminal", paneKey: tabId });
 }
 
 /** The `/terminal/[paneKey]` route on a wide screen shows the pane inline

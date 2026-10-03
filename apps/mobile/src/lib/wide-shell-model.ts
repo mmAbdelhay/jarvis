@@ -11,36 +11,61 @@ import { formatPercent } from "./format";
 import type { Language } from "./i18n";
 import { t } from "./i18n";
 
-export type WideNavKey = "dashboard" | "sessions" | "workspace" | "voice" | "settings";
+export type WideNavKey =
+  | "dashboard"
+  | "sessions"
+  | "workspace"
+  | "changes"
+  | "history"
+  | "voice"
+  | "settings";
 
-export type WideNavItem = { key: WideNavKey; label: string; href: string };
+export type WideNavItem = { key: WideNavKey; label: string; href: string; glyph: string };
 
 const NAV_ORDER: readonly WideNavKey[] = [
   "dashboard",
   "sessions",
   "workspace",
+  "changes",
+  "history",
   "voice",
   "settings",
 ];
 
+/** Each section's mark in the sidebar, alone when the sidebar is a rail. */
+const NAV_GLYPHS: Record<WideNavKey, string> = {
+  dashboard: "⌂",
+  sessions: "≡",
+  workspace: "⊞",
+  changes: "±",
+  history: "◷",
+  voice: "◉",
+  settings: "⚙",
+};
+
 /** The nav items in the desktop's order. RTL mirroring is the component's
  *  job (it lays the bar out right-to-left), not this list's. */
 export function wideNavItems(language: Language): WideNavItem[] {
-  return NAV_ORDER.map((key) => ({ key, label: t(language, `nav.${key}`), href: `/${key}` }));
+  return NAV_ORDER.map((key) => ({
+    key,
+    label: t(language, `nav.${key}`),
+    href: `/${key}`,
+    glyph: NAV_GLYPHS[key],
+  }));
 }
 
 // Detail routes belong to the section they are opened from.
 const SECTION_OF: Record<string, WideNavKey> = {
   dashboard: "dashboard",
-  history: "dashboard",
-  transcript: "dashboard",
+  history: "history",
+  transcript: "history",
   sessions: "sessions",
   session: "sessions",
   workspace: "workspace",
   terminal: "workspace",
   docker: "workspace",
   api: "workspace",
-  changes: "workspace",
+  changes: "changes",
   sidecars: "workspace",
   "sidecar-view": "workspace",
   voice: "voice",

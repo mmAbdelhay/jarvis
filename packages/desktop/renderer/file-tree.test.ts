@@ -231,3 +231,195 @@ describe("the file tree", () => {
     expect(fileName?.getAttribute("title")).toBe("read  me.md");
   });
 });
+
+describe("reloading the file tree in place", () => {
+  /** A mutable disk this describe owns, so one test's edits never leak. */
+  function disk() {
+    const entries: Record<string, { name: string; directory: boolean }[]> = {
+      "/proj": [
+        { name: "src", directory: true },
+        { name: "a.md", directory: false },
+      ],
+      "/proj/src": [
+        { name: "lib", directory: true },
+        { name: "main.ts", directory: false },
+      ],
+      "/proj/src/lib": [{ name: "util.ts", directory: false }],
+    };
+    const list = vi.fn(async (path: string) => entries[path] ?? []);
+    return { entries, list, tree: createFileTree({ list, choose: vi.fn() }) };
+  }
+
+  const row = (t: { element: HTMLElement }, path: string) =>
+    t.element.querySelector<HTMLElement>(`[data-path="${path}"]`);
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  async function expand(t: { element: HTMLElement }, path: string) {
+    row(t, path)?.click();
+    await settle();
+  }
+
+  it("keeps open folders open, nested ones included, when a parent's listing changed", async () => {
+    const { entries, tree: t } = disk();
+    await t.setRoot("/proj");
+    await expand(t, "/proj/src");
+    await expand(t, "/proj/src/lib");
+
+    entries["/proj"] = [...(entries["/proj"] ?? []), { name: "b.md", directory: false }];
+    entries["/proj/src/lib"] = [{ name: "fresh.ts", directory: false }];
+    await t.reload();
+
+    expect(row(t, "/proj/b.md")).not.toBeNull();
+    expect(row(t, "/proj/src/lib/fresh.ts")).not.toBeNull();
+    expect(row(t, "/proj/src/lib/util.ts")).toBeNull();
+  });
+
+  it("leaves the very same rows in place when nothing changed", async () => {
+    const { tree: t } = disk();
+    await t.setRoot("/proj");
+    await expand(t, "/proj/src");
+    const before = row(t, "/proj/src/main.ts");
+
+    await t.reload();
+
+    expect(row(t, "/proj/src/main.ts")).toBe(before);
+  });
+
+  it("forgets a collapsed folder, so its next expansion lists it fresh", async () => {
+    const { entries, list, tree: t } = disk();
+    await t.setRoot("/proj");
+    await expand(t, "/proj/src");
+    await expand(t, "/proj/src"); // collapse
+    entries["/proj/src"] = [{ name: "new.ts", directory: false }];
+
+    await t.reload();
+    const calls = list.mock.calls.length;
+    await expand(t, "/proj/src");
+
+    expect(list.mock.calls.length).toBe(calls + 1);
+    expect(row(t, "/proj/src/new.ts")).not.toBeNull();
+  });
+
+  it("does nothing before it has a root", async () => {
+    const { list, tree: t } = disk();
+    await t.reload();
+    expect(list).not.toHaveBeenCalled();
+  });
+});
+
+describe("typing a name in the file tree", () => {
+  function setup() {
+    const list = vi.fn(async (path: string) => listing[path] ?? []);
+    const t = createFileTree({ list, choose: vi.fn() });
+    document.body.append(t.element);
+    return { list, t };
+  }
+
+  function type(input: HTMLInputElement | null, value: string, key: string) {
+    if (input === null) throw new Error("no name field");
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  }
+
+  const field = (t: { element: HTMLElement }) =>
+    t.element.querySelector<HTMLInputElement>(".file-tree-input");
+
+  it("draws a new row at the top of the folder and resolves with the name on Enter", async () => {
+    const { t } = setup();
+    await t.setRoot("/proj");
+    const pending = t.edit({ kind: "create", parent: "/proj", entry: "file" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(t.element.firstElementChild?.classList.contains("file-tree-editing")).toBe(true);
+    type(field(t), "notes.md", "Enter");
+
+    await expect(pending).resolves.toBe("notes.md");
+    expect(field(t)).toBeNull();
+  });
+
+  it("expands a closed folder to create inside it", async () => {
+    const { t } = setup();
+    await t.setRoot("/proj");
+    const pending = t.edit({ kind: "create", parent: "/proj/src", entry: "directory" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const children = t.element.querySelector<HTMLElement>(".file-tree-children");
+    expect(children?.hidden).toBe(false);
+    expect(children?.querySelector(".file-tree-input")).not.toBeNull();
+    type(field(t), "", "Escape");
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("renames in place, preselecting the name without its extension", async () => {
+    const { t } = setup();
+    await t.setRoot("/proj");
+    const pending = t.edit({ kind: "rename", path: "/proj/read me.md" });
+    const input = field(t);
+
+    expect(input?.value).toBe("read me.md");
+    expect([input?.selectionStart, input?.selectionEnd]).toEqual([0, "read me".length]);
+    type(input, "readme.md", "Enter");
+
+    await expect(pending).resolves.toBe("readme.md");
+    const label = t.element.querySelector<HTMLElement>(
+      '[data-path="/proj/read me.md"] .file-tree-name',
+    );
+    expect(label?.hidden).toBe(false);
+  });
+
+  it("treats Enter on an unchanged or empty name as a cancel", async () => {
+    const { t } = setup();
+    await t.setRoot("/proj");
+    const same = t.edit({ kind: "rename", path: "/proj/read me.md" });
+    type(field(t), "read me.md", "Enter");
+    await expect(same).resolves.toBeUndefined();
+
+    const empty = t.edit({ kind: "rename", path: "/proj/read me.md" });
+    type(field(t), "", "Enter");
+    await expect(empty).resolves.toBeUndefined();
+  });
+
+  it("keeps the terminal from seeing the keys typed into the field", async () => {
+    const { t } = setup();
+    await t.setRoot("/proj");
+    const outside = vi.fn();
+    document.addEventListener("keydown", outside);
+    void t.edit({ kind: "rename", path: "/proj/read me.md" });
+    type(field(t), "x", "a");
+    document.removeEventListener("keydown", outside);
+    expect(outside).not.toHaveBeenCalled();
+  });
+
+  it("does not reload under a name being typed, and cancels it on a re-root", async () => {
+    const { list, t } = setup();
+    await t.setRoot("/proj");
+    const pending = t.edit({ kind: "rename", path: "/proj/read me.md" });
+    const calls = list.mock.calls.length;
+
+    await t.reload();
+    expect(list.mock.calls.length).toBe(calls);
+
+    await t.setRoot("/proj/src");
+    await expect(pending).resolves.toBeUndefined();
+  });
+});
+
+describe("the file tree's context menu hook", () => {
+  it("reports a row as its target and the empty space below as the root", async () => {
+    const menu = vi.fn();
+    const t = createFileTree({ list: async (p) => listing[p] ?? [], choose: vi.fn(), menu });
+    await t.setRoot("/proj");
+
+    t.element
+      .querySelector('[data-path="/proj/src"]')
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 3, clientY: 4 }));
+    t.element.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 6 }),
+    );
+
+    expect(menu.mock.calls).toEqual([
+      [{ path: "/proj/src", directory: true }, 3, 4],
+      [undefined, 5, 6],
+    ]);
+  });
+});

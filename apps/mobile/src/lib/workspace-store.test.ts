@@ -169,6 +169,36 @@ describe("createWorkspaceStore: open/refresh", () => {
     expect(store.get().projects.map((p) => p.name)).toEqual(["orphan"]);
   });
 
+  // A rename — on the laptop or from this phone — is stored as `customTitle`
+  // beside the page's own title; the laptop's tab strip shows it first, and
+  // so must every row here.
+  it("shows a tab's custom title over its page title, ignoring a blank one", async () => {
+    const fake = createFakeClient();
+    fake.queueResult({ ok: true, value: ["acme"] });
+    fake.queueResult({
+      ok: true,
+      value: {
+        tabs: [
+          TAB({ customTitle: "Build watcher" }),
+          TAB({ id: "tab-2", customTitle: "" }),
+          TAB({ id: "tab-3", customTitle: 42 }),
+        ],
+        activeTabId: "tab-1",
+      },
+    });
+    const store = createWorkspaceStore({ client: fake.client });
+
+    store.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.get().projects[0]?.tabs.map((tab) => tab.title)).toEqual([
+      "Build watcher",
+      "acme — Terminal",
+      "acme — Terminal",
+    ]);
+  });
+
   // Tab removal: a later workspace:update with a shorter tab list drops the
   // removed tab from its project's row.
   it("removes a tab from its project on the next workspace:update push", async () => {

@@ -7,7 +7,7 @@
 // openChanges/showView, so there is no "wire the minimal DOM or the module
 // throws on import" step here.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GitFileChange, GitFileDiff } from "@jarvis/core";
+import type { GitFileChange, GitFileDiff, GitPushResult } from "@jarvis/core";
 import type { GitViewResult, RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
@@ -49,12 +49,29 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitDiff: vi.fn(async () => notStubbed),
     gitSetStaged: vi.fn(async () => notStubbed),
     gitCommit: vi.fn(async () => notStubbed),
+    gitBranches: vi.fn(async () => notStubbed),
+    gitSwitchBranch: vi.fn(async () => notStubbed),
+    gitPull: vi.fn(async () => notStubbed),
+    gitPush: vi.fn(async () => notStubbed),
+    gitPullRequest: vi.fn(async () => notStubbed),
+    gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
+    usageHistory: vi.fn(async () => ({ capacity: [], sessionsPerDay: [] })),
+    sessionPrompt: vi.fn(async () => null),
+    checkForUpdate: vi.fn(async () => ({ kind: "current" as const, current: "0.1.5" })),
+    answerSession: vi.fn(async () => ({ ok: false as const, reason: "gone" as const })),
+    gitMergeWorktree: vi.fn(async () => notStubbed),
+    gitRemoveWorktree: vi.fn(async () => notStubbed),
     onChangeCounts: vi.fn(),
     onSessionOutput: vi.fn(),
     getSessionLog: vi.fn(async () => ""),
     sessionSnapshot: vi.fn(async () => ({ text: "", end: 0 })),
     getSessionTranscript: vi.fn(async () => []),
-    resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
+    resumeSession: vi.fn(async () => ({
+      ok: true as const,
+      project: "app",
+      tabId: "t1",
+      language: "en" as const,
+    })),
     sendSessionInput: vi.fn(async () => {}),
     resizeSession: vi.fn(async () => {}),
     setVoiceTarget: vi.fn(async () => {}),
@@ -84,6 +101,9 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     terminalHistory: vi.fn(async () => []),
     listTerminalDir: vi.fn(async () => []),
     openTerminalFile: vi.fn(async () => notStubbed),
+    createTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
+    renameTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
+    trashTerminalEntry: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
     terminalSettings: vi.fn(async () => ({
       blocks: true,
       inputEditor: true,
@@ -320,6 +340,21 @@ beforeEach(() => {
         <div id="changes-del" class="mono diff-del" dir="ltr"></div>
         <div id="changes-by" class="mono changes-muted"></div>
       </div>
+      <div id="changes-sync" hidden>
+        <select id="changes-branch-select"></select>
+        <button id="changes-new-branch" type="button"></button>
+        <input id="changes-new-branch-name" type="text" hidden />
+        <div id="changes-tracking"></div>
+        <div id="changes-worktree" hidden>
+          <span id="changes-worktree-label"></span>
+          <button id="changes-merge-worktree" type="button"></button>
+          <button id="changes-remove-worktree" type="button"></button>
+        </div>
+        <button id="changes-pull" type="button"></button>
+        <button id="changes-push" type="button"></button>
+        <button id="changes-pr" type="button"></button>
+      </div>
+      <div id="changes-sync-status" hidden></div>
       <div id="changes-stale-notice" class="changes-notice" hidden></div>
       <div id="changes-error" class="changes-error" hidden></div>
       <div class="changes-files-head">
@@ -1739,5 +1774,238 @@ describe("the commit bar", () => {
     settledButton.click();
     await Promise.resolve();
     expect(jarvis.gitCommit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the branch and sync row", () => {
+  const file: GitFileChange = {
+    path: "a.php",
+    status: "M",
+    insertions: 1,
+    deletions: 0,
+    staged: false,
+  };
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** openChangesWith, plus a tracked branch, a branch list, and the sync row
+   *  wired — the bits of app.ts this harness has no copy of. */
+  async function openSync(overrides: Partial<RendererApi> = {}, sessionExtra = {}) {
+    const jarvis = await openChangesWith([file], undefined, {
+      gitChanges: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          session: {
+            id: "s1",
+            project: "acme",
+            projectKey: "acme",
+            projectPath: "~/projects/acme",
+            agentId: "claude-acme",
+            lastActivityAt: Date.now(),
+            endedAt: undefined,
+            ...sessionExtra,
+          },
+          changes: {
+            repoPath: "~/projects/acme",
+            branch: "main",
+            detached: false,
+            files: [file],
+            insertions: 1,
+            deletions: 0,
+            upstream: "origin/main",
+            ahead: 2,
+            behind: 1,
+          },
+        },
+      })),
+      gitBranches: vi.fn(async () => ({
+        ok: true as const,
+        value: { current: "main", detached: false, local: ["main", "feat/x"] },
+      })),
+      openTab: vi.fn(async () => {}),
+      ...overrides,
+    });
+    const { wireSyncBar } = await import("./changes.js");
+    wireSyncBar();
+    await settle();
+    return jarvis;
+  }
+
+  const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+  it("shows where the branch stands against its remote, and every local branch", async () => {
+    await openSync();
+    expect(byId("changes-sync").hidden).toBe(false);
+    expect(byId("changes-tracking").textContent).toBe("origin/main ↑2 ↓1");
+    const select = byId<HTMLSelectElement>("changes-branch-select");
+    expect([...select.options].map((option) => option.textContent)).toEqual(["main", "feat/x"]);
+    expect(select.value).toBe("main");
+  });
+
+  it("switches branch from the picker and reads the view again", async () => {
+    const jarvis = await openSync({
+      gitSwitchBranch: vi.fn(async () => ({ ok: true as const, value: null })),
+    });
+    const select = byId<HTMLSelectElement>("changes-branch-select");
+    select.value = "feat/x";
+    select.dispatchEvent(new Event("change"));
+    await settle();
+
+    expect(jarvis.gitSwitchBranch).toHaveBeenCalledWith("s1", "feat/x", false);
+    expect(jarvis.gitChanges).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a branch from the name typed after New branch", async () => {
+    const jarvis = await openSync({
+      gitSwitchBranch: vi.fn(async () => ({ ok: true as const, value: null })),
+    });
+    byId("changes-new-branch").click();
+    const name = byId<HTMLInputElement>("changes-new-branch-name");
+    expect(name.hidden).toBe(false);
+    name.value = "feat/voice";
+    name.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    await settle();
+
+    expect(jarvis.gitSwitchBranch).toHaveBeenCalledWith("s1", "feat/voice", true);
+    expect(name.hidden).toBe(true);
+  });
+
+  it("says what a pull did on the status line", async () => {
+    await openSync({
+      gitPull: vi.fn(async () => ({ ok: true as const, value: { updated: false } })),
+    });
+    byId("changes-pull").click();
+    await settle();
+    expect(byId("changes-sync-status").hidden).toBe(false);
+    expect(byId("changes-sync-status").textContent).not.toBe("");
+  });
+
+  it("puts a refused push in the error banner, not the status line", async () => {
+    await openSync({
+      gitPush: vi.fn(async () => ({
+        ok: false as const,
+        text: "rejected",
+        language: "en" as const,
+      })),
+    });
+    byId("changes-push").click();
+    await settle();
+    expect(byId("changes-error").textContent).toBe("rejected");
+    expect(byId("changes-sync-status").hidden).toBe(true);
+  });
+
+  it("keeps every sync control disabled while one call is in flight", async () => {
+    let finish!: () => void;
+    const jarvis = await openSync({
+      gitPush: vi.fn(
+        () =>
+          new Promise<GitViewResult<GitPushResult>>((resolve) => {
+            finish = () =>
+              resolve({
+                ok: true as const,
+                value: { remote: "origin", branch: "main", upstreamSet: false },
+              });
+          }),
+      ),
+    });
+    byId("changes-push").click();
+    expect(byId<HTMLButtonElement>("changes-pull").disabled).toBe(true);
+    expect(byId<HTMLSelectElement>("changes-branch-select").disabled).toBe(true);
+    byId("changes-push").click();
+    expect(jarvis.gitPush).toHaveBeenCalledTimes(1);
+
+    finish();
+    await settle();
+    expect(byId<HTMLButtonElement>("changes-pull").disabled).toBe(false);
+  });
+
+  it("opens the pull request in the project's own browser tab", async () => {
+    const jarvis = await openSync({
+      gitPullRequest: vi.fn(async () => ({
+        ok: true as const,
+        value: { url: "https://github.com/o/r/pull/9", created: true },
+      })),
+    });
+    byId("changes-pr").click();
+    await settle();
+    expect(jarvis.openTab).toHaveBeenCalledWith("acme", "https://github.com/o/r/pull/9");
+  });
+
+  it("shows the address instead when the session has no project to open it under", async () => {
+    const jarvis = await openSync(
+      {
+        gitPullRequest: vi.fn(async () => ({
+          ok: true as const,
+          value: { url: "https://github.com/o/r/pull/9", created: false },
+        })),
+      },
+      { projectKey: undefined },
+    );
+    byId("changes-pr").click();
+    await settle();
+    expect(jarvis.openTab).not.toHaveBeenCalled();
+    expect(byId("changes-sync-status").textContent).toContain("https://github.com/o/r/pull/9");
+  });
+});
+
+describe("the worktree controls", () => {
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+  async function open(overrides: Partial<RendererApi>) {
+    const jarvis = await openChangesWith(
+      [{ path: "a.php", status: "M", insertions: 1, deletions: 0, staged: false }],
+      undefined,
+      {
+        gitBranches: vi.fn(async () => ({
+          ok: true as const,
+          value: { current: "jarvis/s", detached: false, local: ["main", "jarvis/s"] },
+        })),
+        ...overrides,
+      },
+    );
+    const { wireSyncBar } = await import("./changes.js");
+    wireSyncBar();
+    await settle();
+    await settle();
+    return jarvis;
+  }
+
+  it("stays hidden for a session in a main checkout", async () => {
+    await open({ gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })) });
+    expect(byId("changes-worktree").hidden).toBe(true);
+  });
+
+  it("names the branch a merge would land on, and merges on click", async () => {
+    const jarvis = await open({
+      gitWorktree: vi.fn(async () => ({
+        ok: true as const,
+        value: { base: "/p/acme", branch: "jarvis/s", baseBranch: "main" },
+      })),
+      gitMergeWorktree: vi.fn(async () => ({ ok: true as const, value: { into: "main" } })),
+    });
+    expect(byId("changes-worktree").hidden).toBe(false);
+    expect(byId("changes-merge-worktree").textContent).toContain("main");
+
+    byId("changes-merge-worktree").click();
+    await settle();
+    expect(jarvis.gitMergeWorktree).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not read the view again after removing the worktree it was reading", async () => {
+    const jarvis = await open({
+      gitWorktree: vi.fn(async () => ({
+        ok: true as const,
+        value: { base: "/p/acme", branch: "jarvis/s", baseBranch: "main" },
+      })),
+      gitRemoveWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
+    });
+    const reads = vi.mocked(jarvis.gitChanges).mock.calls.length;
+
+    byId("changes-remove-worktree").click();
+    await settle();
+
+    expect(jarvis.gitRemoveWorktree).toHaveBeenCalledWith("s1");
+    expect(vi.mocked(jarvis.gitChanges).mock.calls.length).toBe(reads);
+    expect(byId("changes-worktree").hidden).toBe(true);
   });
 });

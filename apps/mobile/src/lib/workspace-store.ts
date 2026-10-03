@@ -107,7 +107,10 @@ function parseTab(value: unknown): MobileWorkspaceTab | undefined {
     project: obj.project,
     url: obj.url,
     kind: obj.kind as MobileWorkspaceTab["kind"],
-    title: obj.title,
+    // A rename lives in `customTitle`, beside the page's own title; the
+    // laptop's tab strip shows it first, so every row here does too.
+    title:
+      typeof obj.customTitle === "string" && obj.customTitle !== "" ? obj.customTitle : obj.title,
     loading: obj.loading,
     canGoBack: obj.canGoBack,
     canGoForward: obj.canGoForward,

@@ -1,4 +1,5 @@
 import { type RefObject, useMemo } from "react";
+import { LaptopSettingsSection } from "./LaptopSettingsSection";
 import {
   Linking,
   Platform,
@@ -226,6 +227,11 @@ export function SettingsSections(props: Props): React.JSX.Element {
             )}
           </View>
         )}
+      </View>
+
+      <View {...section("laptop")}>
+        <Text style={styles.sectionTitle}>{t(props.language, "laptopSettings.title")}</Text>
+        <LaptopSettingsSection language={props.language} />
       </View>
 
       <View {...section("connection")}>

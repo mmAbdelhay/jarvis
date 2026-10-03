@@ -357,6 +357,7 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     startTabPlans: vi.fn(),
     isTerminalTab: vi.fn(() => true),
     shell: { openExternal: vi.fn(async () => {}) },
+    checkForUpdate: vi.fn(async () => ({ kind: "current" as const, current: "0.1.5" })),
     background: {
       status: vi.fn(async () => ({ enabled: false, inApp: true, state: { kind: "off" as const } })),
       setEnabled: vi.fn(async () => ({ ok: true as const })),

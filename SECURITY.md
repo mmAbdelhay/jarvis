@@ -127,11 +127,19 @@ These are design, stated plainly in the README under "What it exposes":
   private temporary folder deleted before the request answers; a decoder
   vulnerability in the installed `ffmpeg` is therefore reachable from a
   paired device.
-  In this release, sending or scripting an API request, saving API settings
-  (a proxy, TLS verification), and changing Jarvis's own settings (Settings'
-  save, and testing an agent command) are all desktop-only — a paired phone
-  cannot reach any of them, and cannot change which command an agent runs or
-  which directories are configured as projects. If a device is lost or a
+  In this release, saving API settings (a proxy, TLS verification) and
+  testing an agent command are desktop-only — a paired phone cannot reach
+  either. A phone can save the laptop's settings, but a phone may change only the
+  `sessions` section (the worktree mode): the laptop reads that one section
+  from the request, checks it field by field and applies it to the file as it
+  is at that moment, ignoring everything else, so a phone cannot turn the
+  bridge off, rebind it, change a project root or a command path. A phone
+  can also close or rename a tab (a close may name any existing laptop tab,
+  including ones the phone does not list; a rename title is bounded and free
+  of control and bidi override characters), resume a past session in a new terminal tab,
+  and rename or move to the OS trash a file inside a configured project root
+  (never the root itself, never a hard delete, never a path outside it); each
+  of those is audited on every call. If a device is lost or a
   token might be compromised, revoke it from **Settings → Remote access** — this
   closes any live connection from it immediately. A `devices.json` that
   fails to parse is treated as an error, not an empty file: the bridge

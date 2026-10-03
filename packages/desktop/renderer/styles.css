@@ -1978,6 +1978,74 @@
   /* The indent guide: a hairline down each nested level. */
   .file-tree-children { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 11px; }
 
+  /* A name being typed — a new entry, or a rename in place. */
+  .file-tree-editing { cursor: default; }
+  .file-tree-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 18px;
+    padding: 0 4px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    outline: none;
+  }
+
+  /* New file / New folder, beside the header. The glyphs are drawn here so
+     the buttons carry no text: the sidebar's text stays its header and its
+     rows. */
+  .terminal-explorer-actions { display: flex; justify-content: flex-end; gap: 2px; margin: -4px 0 4px; }
+  .terminal-explorer-action {
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font: 12px/1 var(--font-mono);
+  }
+  .terminal-explorer-action:hover { color: var(--text); background: var(--accent-quiet); }
+  .terminal-explorer-action:focus-visible { outline: 1px solid var(--accent-quiet); }
+  .terminal-explorer-action--file::before { content: "+"; }
+  .terminal-explorer-action--directory::before { content: "+▸"; }
+
+  /* A refusal, for a few seconds, under the tree. */
+  .terminal-explorer-error { padding: 6px 4px 0; color: var(--warn); white-space: normal; }
+  .terminal-explorer-error:empty { display: none; }
+
+  /* The right-click menu: on the body, fixed at the pointer, so the
+     sidebar's own overflow cannot clip it. */
+  .terminal-explorer-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 170px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    font: 12px/1.6 var(--font-ui);
+  }
+  .terminal-explorer-menu-item {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text);
+    text-align: start;
+    cursor: pointer;
+    font: inherit;
+  }
+  .terminal-explorer-menu-item:hover,
+  .terminal-explorer-menu-item:focus-visible { background: var(--accent-quiet); outline: none; }
+  .terminal-explorer-menu-item--danger { color: var(--bad); }
+
   /* The Docker tab, laid out as the design specifies: a left column of
      configured containers with the compose controls above them, and the log
      tail beside it filling the rest — same page-slot region the terminal and
@@ -3366,6 +3434,47 @@
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
+
+  /* The branch and sync row under the header: the branch picker and New
+     branch on the start side, where the repository stands against its
+     remote in the middle, Pull / Push / Pull request on the end side. */
+  .changes-sync {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .changes-sync[hidden] { display: none; }
+  .changes-branch-select,
+  .changes-branch-input {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    max-width: 260px;
+  }
+  .changes-branch-input[hidden] { display: none; }
+  .changes-sync-btn {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .changes-sync-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .changes-sync-btn:disabled { opacity: 0.45; cursor: default; }
+  .changes-sync-btn--accent { color: var(--ground); background: var(--accent); border-color: var(--accent); }
+  .changes-sync-status { color: var(--text); }
+  .changes-worktree { display: flex; align-items: center; gap: 8px; }
+  .changes-worktree[hidden] { display: none; }
 
   .changes-body {
     display: grid;
@@ -5106,3 +5215,72 @@
   font-size: 12px;
   resize: vertical;
 }
+
+/* The Dashboard's usage history (usage-charts.ts): a 2px accent line under
+   each provider's meter, and a row of day bars in the Sessions header. The
+   grid-less, axis-less form is deliberate at this size — every mark has a
+   hover title, and each chart an aria-label with its total. */
+.usage-spark { display: block; width: 100%; height: 32px; margin: 4px 0 2px; overflow: visible; }
+.usage-spark__line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.usage-spark__dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; opacity: 0; }
+.usage-spark__hit { fill: transparent; }
+.usage-spark__point:hover .usage-spark__dot { opacity: 1; }
+.usage-bars { display: flex; align-items: flex-end; margin-inline-start: 10px; }
+.usage-bars:empty { display: none; }
+.usage-bars__bar { fill: var(--accent); }
+.usage-bars__empty { fill: var(--border); }
+.usage-bars__hit { fill: transparent; }
+.usage-bars g:hover .usage-bars__bar { fill: var(--text); }
+
+/* A waiting session's own question and options, under its Dashboard row
+   (session-prompts.ts). The options are the agent's words; the accent
+   border is what says "this is waiting on you". */
+.session__prompt {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: default;
+}
+.session__prompt-question { font-size: 12px; color: var(--text); margin-bottom: 6px; }
+.session__prompt-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.session__prompt-option {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session__prompt-option:hover:not(:disabled) { border-color: var(--accent); }
+.session__prompt-option:disabled { opacity: 0.5; cursor: default; }
+.session__prompt-note { margin-top: 6px; font-size: 11px; color: var(--warn); }
+
+/* The plan's own checklist progress, in the panel header (plan-panel.ts). */
+.plan-panel__progress { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.plan-panel__progress-meter { display: inline-block; width: 48px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.plan-panel__progress-fill { display: block; height: 100%; background: var(--accent); }
+
+/* Settings → General's Check for updates (update-settings.ts). */
+.settings-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.settings-update .settings-note:empty { display: none; }
+
+/* The API tab's Copy as code menu: cURL, fetch or Python. */
+.api-copy-wrap { position: relative; display: inline-flex; }
+.api-copy-menu { position: absolute; top: 100%; inset-inline-end: 0; z-index: 20; display: flex; flex-direction: column; gap: 2px; }
+.api-copy-menu[hidden] { display: none; }
+
+/* Find in the API response body (api-response.ts). */
+.api-find { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.api-find-input { flex: 0 1 240px; font: inherit; font-size: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.api-find-count { font-size: 11px; color: var(--text-muted); min-width: 4ch; }
+.api-find-step { padding: 2px 8px; }
+.api-match { background: var(--accent-quiet); color: var(--text); border-radius: 2px; }
+.api-match--current { background: var(--accent); color: var(--ground); }

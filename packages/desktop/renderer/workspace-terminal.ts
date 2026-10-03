@@ -650,6 +650,17 @@ function ensurePane(
         // A preload without the channel. Same fallback as `list` above.
       }
     },
+    // New file, New folder, Rename and Move to Trash. Main proves every
+    // path inside the pane's project (ipc.ts's createEntry and friends);
+    // these only carry the request. A preload without a channel throws
+    // here, which the explorer turns into a `failed` it shows.
+    writes: {
+      create: (paneKey, parent, name, kind) =>
+        window.jarvis.createTerminalEntry(paneKey, parent, name, kind),
+      rename: (paneKey, path, newName) => window.jarvis.renameTerminalEntry(paneKey, path, newName),
+      trash: (paneKey, path) => window.jarvis.trashTerminalEntry(paneKey, path),
+      t: planPanelT,
+    },
   });
 
   /** Where each pane's shell last said it was. Read on a focus change:
@@ -682,9 +693,9 @@ function ensurePane(
         },
         // The sidebar's only way out: no chord, one palette action.
         () => explorer.toggle(),
-        // And its only way to notice a file a command just created,
-        // deleted or renamed: nothing watches the filesystem, and a root
-        // that has not changed is not re-listed.
+        // A re-read now, keeping open folders open. The prompt and the
+        // sidebar's own on-screen check already do this; the palette entry
+        // is for not wanting to wait.
         () => explorer.refresh(),
         // The plan panel's own only way out besides the tab menu's Plans
         // item (Task 8) — no chord of its own, same rule as the sidebar.

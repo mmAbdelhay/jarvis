@@ -92,6 +92,7 @@ describe("plan page links", () => {
       addEventListener: (_type: string, listener: (event: unknown) => void) =>
         listeners.push(listener),
       querySelectorAll: () => [],
+      querySelector: () => null,
     };
     const fakeWindow = { ReactNativeWebView: { postMessage: (data: string) => posted.push(data) } };
     new Function("window", "document", script)(fakeWindow, fakeDocument);

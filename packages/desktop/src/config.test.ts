@@ -241,6 +241,19 @@ describe("parseConfig", () => {
     );
   });
 
+  it("reads sessions.worktrees, and drops an explicit off so it parses like an absent key", () => {
+    expect(parseConfig({ ...valid, sessions: { worktrees: "parallel" } }).sessions).toEqual({
+      importWindowDays: 30,
+      worktrees: "parallel",
+    });
+    expect(parseConfig({ ...valid, sessions: { worktrees: "off" } }).sessions).toEqual(
+      parseConfig(valid).sessions,
+    );
+    expect(() => parseConfig({ ...valid, sessions: { worktrees: "yes" } })).toThrow(
+      /sessions\.worktrees/,
+    );
+  });
+
   it("throws when sessions.importWindowDays is not positive", () => {
     // A window of zero would import nothing and read as a bug in the
     // importer rather than in the config that caused it.

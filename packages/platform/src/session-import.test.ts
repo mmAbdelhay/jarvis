@@ -6,6 +6,7 @@ import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
+  parseCopilotTranscript,
   parseTranscript,
   createFsImportDeps,
   createSessionImporter,
@@ -14,6 +15,7 @@ import {
   resolveProject,
   sessionFromTranscript,
   transcriptDirs,
+  transcriptSource,
   type SessionImporterDeps,
   type TranscriptFile,
 } from "./session-import.js";
@@ -126,6 +128,70 @@ describe("resolveProject", () => {
 
   it("ignores a trailing separator on a configured path", () => {
     expect(resolveProject("/Users/u/work/site/src", { site: "/Users/u/work/site/" })).toBe("site");
+  });
+});
+
+describe("parseCopilotTranscript", () => {
+  // Event shapes from Copilot's published session-events.schema.json:
+  // every event carries id/timestamp/parentId/type/data.
+  const event = (type: string, data: Record<string, unknown>): string =>
+    JSON.stringify({ id: "e", timestamp: "2026-01-01T00:00:00Z", parentId: null, type, data });
+
+  it("reads user and assistant messages and names the tools", () => {
+    const text = [
+      event("session.start", { sessionId: "s", context: { cwd: "/w" } }),
+      event("user.message", { content: "  fix the build  " }),
+      event("assistant.message_delta", { deltaContent: "Look" }),
+      event("assistant.message", {
+        messageId: "m1",
+        content: "Looking at it.",
+        toolRequests: [{ toolCallId: "t1", name: "bash" }],
+      }),
+      event("tool.execution_complete", { toolCallId: "t1" }),
+      event("assistant.message", {
+        messageId: "m2",
+        content: "",
+        toolRequests: [{ toolCallId: "t2", name: "edit" }],
+      }),
+      event("assistant.message", { messageId: "m3", content: "Fixed." }),
+    ].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([
+      { role: "user", text: "fix the build", tools: [] },
+      { role: "assistant", text: "Looking at it.", tools: ["bash", "edit"] },
+      { role: "assistant", text: "Fixed.", tools: [] },
+    ]);
+  });
+
+  it("leaves out injected messages, autopilot continuations and sub-agents", () => {
+    const text = [
+      event("user.message", { content: "skill text", source: "skill-pdf" }),
+      event("user.message", { content: "continue", isAutopilotContinuation: true }),
+      event("assistant.message", { messageId: "m", content: "sub", parentToolCallId: "t" }),
+      event("user.message", { content: "real" }),
+    ].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([{ role: "user", text: "real", tools: [] }]);
+  });
+
+  it("skips unreadable lines rather than losing the rest", () => {
+    const text = ["{nope", "42", event("user.message", { content: "hi" }), ""].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([{ role: "user", text: "hi", tools: [] }]);
+  });
+});
+
+describe("transcriptSource", () => {
+  it("reads a Copilot row's events.jsonl beside its workspace.yaml", () => {
+    const source = transcriptSource(
+      join("/h", ".copilot", "session-state", "s1", "workspace.yaml"),
+    );
+    expect(source.path).toBe(join("/h", ".copilot", "session-state", "s1", "events.jsonl"));
+    expect(source.parse).toBe(parseCopilotTranscript);
+  });
+
+  it("reads a Claude transcript as it stands", () => {
+    expect(transcriptSource("/t/s1.jsonl")).toEqual({
+      path: "/t/s1.jsonl",
+      parse: parseTranscript,
+    });
   });
 });
 

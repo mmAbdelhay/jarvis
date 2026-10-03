@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { KeyName, TerminalModes } from "./terminal-keys";
-import { ctrlByte, KEY_BAR, keyBytes, sgrWheelSequence } from "./terminal-keys";
+import { altKeyBytes, ctrlByte, KEY_BAR, keyBytes, sgrWheelSequence } from "./terminal-keys";
 
 const NORMAL: TerminalModes = { applicationCursor: false };
 const APP_CURSOR: TerminalModes = { applicationCursor: true };
@@ -60,12 +60,13 @@ describe("keyBytes", () => {
 });
 
 describe("KEY_BAR", () => {
-  it("contains every KeyName exactly once, plus 'ctrl', in the specified display order", () => {
-    const expected: (KeyName | "ctrl")[] = [
+  it("contains every KeyName exactly once, plus the two latches, in the specified display order", () => {
+    const expected: (KeyName | "ctrl" | "alt")[] = [
       "esc",
       "tab",
       "shiftTab",
       "ctrl",
+      "alt",
       "ctrlC",
       "left",
       "up",
@@ -115,5 +116,17 @@ describe("sgrWheelSequence", () => {
 
   it("encodes wheel-down as button 65", () => {
     expect(sgrWheelSequence("down")).toBe("\x1b[<65;1;1M");
+  });
+});
+
+describe("altKeyBytes", () => {
+  it("puts the Alt modifier on arrows whatever the cursor mode", () => {
+    expect(altKeyBytes("left", { applicationCursor: false })).toBe("\x1b[1;3D");
+    expect(altKeyBytes("up", { applicationCursor: true })).toBe("\x1b[1;3A");
+  });
+
+  it("puts ESC before every other key's bytes", () => {
+    expect(altKeyBytes("backspace", { applicationCursor: false })).toBe("\x1b\x7f");
+    expect(altKeyBytes("enter", { applicationCursor: false })).toBe("\x1b\r");
   });
 });

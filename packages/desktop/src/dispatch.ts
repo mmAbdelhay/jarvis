@@ -19,6 +19,7 @@ import {
   anchorComments,
   formatFeedback,
   isSessionState,
+  readPrompt,
   type HandleOptions,
   type PlanComment,
   type Session,
@@ -26,7 +27,7 @@ import {
   type StreamSnapshot,
   type Turn,
 } from "@jarvis/core";
-import type { DockerConfig, PlanCommentStore, PlanFiles } from "@jarvis/platform";
+import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
 import { bracketedSubmit } from "./bracketed.js";
 import {
@@ -48,7 +49,9 @@ import {
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
+import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
+import { parseSessions, type SessionsConfig } from "./sessions-config.js";
 import {
   DESKTOP_OWNER,
   REMOTE_FOLLOW_TAB_PATTERN,
@@ -65,14 +68,18 @@ import {
   type DatabaseHandlers,
   type DockerHandlers,
   type EditorHandlers,
+  type EntryKind,
+  type SessionAnswerResult,
   type GitHandlers,
   type GitViewResult,
   type SettingsHandlers,
   type SetupHandlers,
   type TerminalHandlers,
+  hasControlCharacter,
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
+import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
@@ -82,6 +89,21 @@ export type Origin = { kind: "desktop" } | { kind: "remote"; deviceId: string; d
 export const DESKTOP_ORIGIN: Origin = { kind: "desktop" };
 
 export type Handler = (args: readonly unknown[], origin: Origin) => unknown | Promise<unknown>;
+
+const REMOTE_TAB_TITLE_MAX = 80;
+
+/** A title a remote origin may give a tab. */
+function isRemoteTabTitle(title: unknown): title is string {
+  return (
+    typeof title === "string" &&
+    title.trim() !== "" &&
+    title.length <= REMOTE_TAB_TITLE_MAX &&
+    !hasControlCharacter(title) &&
+    // Bidi override and isolate characters would let a title draw as
+    // something other than what it says on the laptop's tab strip.
+    !/[\u202A-\u202E\u2066-\u2069]/.test(title)
+  );
+}
 
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
@@ -180,6 +202,8 @@ export type ElectronBoundChannel =
   | "workspace:pip"
   | "dialog:pickFiles"
   | "plans:openLink"
+  // The app's own version and the app's own network request (update-check.ts).
+  | "app:checkUpdate"
   // Task 23: where the core runs is the host's to decide — these start,
   // stop and replace the core itself (daemon/mode.ts).
   | "background:status"
@@ -235,7 +259,21 @@ export type DispatchDeps = {
   sessionTranscript: ReturnType<typeof createTranscriptHandler>;
   sessionResume: ReturnType<typeof createResumeInTerminalHandler>;
   voice: { setTarget(sessionId: string | undefined): void };
-  git: Pick<GitHandlers, "changes" | "fileDiff" | "setStaged" | "commit">;
+  git: Pick<
+    GitHandlers,
+    | "changes"
+    | "fileDiff"
+    | "setStaged"
+    | "commit"
+    | "branches"
+    | "switchBranch"
+    | "pull"
+    | "push"
+    | "pullRequest"
+    | "worktree"
+    | "mergeWorktree"
+    | "removeWorktree"
+  >;
   /** The core's tab state (core/tab-host.ts). What only a hosted page's
    *  view can do — back, reload, DevTools, visibility — is not here: those
    *  channels are Electron-bound (desktop-only.ts). */
@@ -292,6 +330,8 @@ export type DispatchDeps = {
   bookmarks: BookmarksHandlers;
   settings: SettingsHandlers;
   providers: { refreshCapacity(options: { force: boolean }): Promise<unknown> };
+  // usage:history — usage-history.ts's builder over what is already kept.
+  usageHistory: () => UsageHistory;
   // startVoice / stopVoice from main.ts — the one voice implementation the
   // hotkey and the mic button both drive.
   voiceControl: { start(): void; stop(): void };
@@ -468,7 +508,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // Pulled on demand when the renderer's history panel opens, not
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
-    "history:list": () => sessionStore.history(),
+    // No argument: the whole list, as the desktop renderer reads it. A page
+    // request (history-page.ts) answers one page — a malformed one is
+    // treated as no request, never as an error.
+    "history:list": ([page]) => {
+      const request = parseHistoryPageRequest(page);
+      const all = sessionStore.history();
+      // The store's rows are Sessions (session-store.ts parses each one);
+      // the seam is typed loosely so test fakes can stay partial.
+      return request === undefined || !Array.isArray(all)
+        ? all
+        : historyPage(all as Session[], request);
+    },
     // Bug 5: ignores its args, same as sessions:list/sessions:refresh above
     // — the only "argument" is which laptop clicked "Use my location".
     "prayer:locateIp": () => deps.ipLocate.lookup(),
@@ -568,6 +619,22 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       if (typeof sessionId !== "string" || typeof data !== "string") return;
       sessions.write(sessionId, data);
     },
+    "session:prompt": ([sessionId]) =>
+      typeof sessionId === "string" ? (readPrompt(sessions.log(sessionId)) ?? null) : null,
+    // Read again at the moment of answering, never trusted from the call:
+    // the prompt shown a minute ago may have been answered in the terminal
+    // or replaced by another, and keys meant for one must never land in
+    // the other. The caller names the option by index *and* label, and both
+    // have to match what is on screen now.
+    "session:answer": ([sessionId, index, label]): SessionAnswerResult => {
+      if (typeof sessionId !== "string") return { ok: false, reason: "gone" };
+      const prompt = readPrompt(sessions.log(sessionId));
+      if (prompt === undefined) return { ok: false, reason: "gone" };
+      const option = typeof index === "number" ? prompt.options[index] : undefined;
+      if (option === undefined || option.label !== label) return { ok: false, reason: "changed" };
+      sessions.write(sessionId, option.keys);
+      return { ok: true };
+    },
     // Where a spoken utterance goes. Normally the brain, which decides what
     // to do with it; but while a session's terminal is open, speaking is
     // meant to talk to THAT agent — the same thing as typing into it — so
@@ -593,6 +660,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "git:setStaged": ([sessionId, path, staged]) =>
       git.setStaged(sessionId as string, path as string, staged as boolean),
     "git:commit": ([sessionId, message]) => git.commit(sessionId as string, message as string),
+    "git:branches": ([sessionId]) => git.branches(sessionId as string),
+    "git:switchBranch": ([sessionId, name, create]) =>
+      git.switchBranch(sessionId as string, name as string, create as boolean),
+    "git:pull": ([sessionId]) => git.pull(sessionId as string),
+    "git:push": ([sessionId]) => git.push(sessionId as string),
+    "git:pullRequest": ([sessionId]) => git.pullRequest(sessionId as string),
+    "git:worktree": ([sessionId]) => git.worktree(sessionId as string),
+    "git:mergeWorktree": ([sessionId]) => git.mergeWorktree(sessionId as string),
+    "git:removeWorktree": ([sessionId]) => git.removeWorktree(sessionId as string),
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one.
@@ -605,16 +681,24 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         typeof detail === "string" ? detail : undefined,
       );
     },
-    "workspace:close": ([id]) => {
-      if (typeof id !== "string") return;
+    "workspace:close": ([id], origin) => {
+      if (typeof id !== "string") {
+        if (origin.kind === "remote") throw new Error("workspace:close: invalid tab id");
+        return;
+      }
+      // A remote origin may only close a tab that exists: the id comes off
+      // the wire, and the reaping below acts on a shell and a follower by id.
+      if (origin.kind === "remote" && !workspace.state().tabs.some((tab) => tab.id === id)) {
+        throw new Error("workspace:close: unknown tab");
+      }
       // A terminal tab's shell and a Docker tab's `docker logs -f` are both
       // child processes of their own; closing the tab has to reap them.
       // Either call on a tab that has neither is a no-op, so this needs no
       // test of the tab's kind. The renderer unfollows too when it notices
       // the tab go away, but a guarantee about a live child process must not
-      // rest on the renderer alone. workspace:close is desktop-only by
-      // policy (remote-policy.ts), so the owner is always the desktop's own
-      // — never a phone's follower, which docker:unfollow reaps instead.
+      // rest on the renderer alone. The follower owner here is always the
+      // desktop's own — never a phone's follower, which docker:unfollow
+      // reaps instead — even when a phone asked for the close.
       deps.terminal.close(id);
       deps.followers.unfollow(id, DESKTOP_OWNER);
       workspace.close(id);
@@ -628,7 +712,21 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
     },
-    "workspace:rename": ([id, title]) => {
+    "workspace:rename": ([id, title], origin) => {
+      if (origin.kind === "remote") {
+        // A phone-supplied title is shown on the laptop's own tab strip:
+        // bound it the way the phone's own prompt does (80 characters, no
+        // control characters, not blank) rather than trusting the client.
+        if (typeof id !== "string" || !isRemoteTabTitle(title)) {
+          throw new Error("workspace:rename: invalid argument");
+        }
+        // Same as close: the id must name a tab that exists.
+        if (!workspace.state().tabs.some((tab) => tab.id === id)) {
+          throw new Error("workspace:rename: unknown tab");
+        }
+        workspace.rename(id, title);
+        return;
+      }
       if (typeof id === "string" && typeof title === "string") workspace.rename(id, title);
     },
     "workspace:move": ([id, targetId, after]) => {
@@ -876,11 +974,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       return deps.uploads.readJson(origin.deviceId, fileId);
     },
-    "api:curl": ([p, request, variables]) =>
+    "api:curl": ([p, request, variables, language]) =>
       api.curl(
         p as string,
         request as Record<string, unknown>,
         variables as Record<string, string>,
+        language as SnippetLanguage,
       ),
     "api:createRequest": ([p, folder, name, seq]) =>
       api.createRequest(p as string, folder as string, name as string, seq as number),
@@ -953,6 +1052,17 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:history": ([paneKey, limit]) => terminal.history(paneKey as string, limit as number),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
+    "terminal:createEntry": ([paneKey, parentPath, name, kind]) =>
+      terminal.createEntry(
+        paneKey as string,
+        parentPath as string,
+        name as string,
+        kind as EntryKind,
+      ),
+    "terminal:renameEntry": ([paneKey, path, newName]) =>
+      terminal.renameEntry(paneKey as string, path as string, newName as string),
+    "terminal:trashEntry": ([paneKey, path]) =>
+      terminal.trashEntry(paneKey as string, path as string),
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },
@@ -993,22 +1103,29 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "bookmarks:reorder": ([project, urls]) =>
       bookmarks.reorder(project as string, urls as string[]),
     "settings:read": () => settings.read(),
-    // A phone can propose the rest of jarvis.yaml, but never its own bridge
-    // configuration — a paired device deciding remote.enabled or its own
-    // idle timeout is the bridge granting itself more access than the
-    // laptop chose (ruling 28). So a remote-origin object draft has its
-    // `remote` key overwritten with whatever is on disk right now before
-    // the save, and only that key; every other origin/shape passes through
-    // exactly as it always has, including the desktop path, which must
-    // never call settings.read() (see settings:read for that path). If the
-    // read itself rejects, the save never runs — failing the same way a
-    // failed save already does today, rather than proceeding on stale trust.
+    // A phone may change one section of jarvis.yaml: `sessions`. Project
+    // roots, agent and binary paths, history locations and the bridge's own
+    // configuration (ruling 28) are the laptop's to decide, so a remote
+    // draft is read for `sessions` alone — field by field, with the rule the
+    // config parser applies — and everything else in it is ignored. The
+    // change is applied inside the serialized config write as an update of
+    // the file as it is then, so a laptop-side change made between the
+    // phone's read and this write is never undone. The desktop path is
+    // unchanged and never calls settings.read() (see settings:read).
     "settings:save": async ([draft], origin) => {
-      if (origin.kind === "remote" && typeof draft === "object" && draft !== null) {
-        const current = await settings.read();
-        return settings.save({ ...draft, remote: current.remote });
+      if (origin.kind !== "remote") return settings.save(draft);
+      if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
+        return invalidArgument(deps.language);
       }
-      return settings.save(draft);
+      const raw = (draft as Record<string, unknown>)["sessions"];
+      if (raw === undefined) return invalidArgument(deps.language);
+      let sessions: SessionsConfig;
+      try {
+        sessions = parseSessions(raw);
+      } catch {
+        return invalidArgument(deps.language);
+      }
+      return settings.saveSessions(sessions);
     },
     "settings:testAgent": ([agent]) => settings.testAgent(agent),
     "settings:restart": () => settings.restart(),
@@ -1160,6 +1277,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // so this handler never rejects on a normal per-account failure.
     "providers:refresh": (_args, origin) =>
       deps.providers.refreshCapacity({ force: origin.kind !== "remote" }),
+    "usage:history": () => deps.usageHistory(),
     // M-b: the renderer's mic button drives the exact same start/stop path
     // as the global hotkey, so voice has one implementation no matter which
     // control triggers it — never a second, unwired-looking "click to talk"
@@ -1403,7 +1521,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // delivered. `panes()` carries the live/exited distinction `has`
       // alone does not.
       const pane = deps.shells.panes().find((candidate) => candidate.paneKey === paneKeyArg);
-      if (pane === undefined || pane.exited) return { ok: false, reason: "no-pane" };
+      // Not a terminal pane: a session's own screen sends to the session
+      // itself, the same input path session:input writes through — but
+      // only while SessionManager still owns it, so a finished session is
+      // "no pane" exactly as an exited shell is.
+      const sessionTarget =
+        pane === undefined && sessions.get(paneKeyArg) !== undefined ? paneKeyArg : undefined;
+      if ((pane === undefined || pane.exited) && sessionTarget === undefined) {
+        return { ok: false, reason: "no-pane" };
+      }
 
       const read = await deps.plans.files.read(pathArg);
       const blocks = read.ok ? read.value.blocks : [];
@@ -1419,7 +1545,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // The same path terminal:input writes through — ShellManager.write —
       // so a plan comment lands in the pane exactly as if the user had
       // pasted it themselves.
-      deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+      if (sessionTarget !== undefined) sessions.write(sessionTarget, bracketedSubmit(feedback));
+      else deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
       try {
         await deps.plans.comments.markSent(selected.map((comment) => comment.id));
       } catch (error) {

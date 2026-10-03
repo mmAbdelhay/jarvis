@@ -71,7 +71,30 @@ export type PageDeps = {
    *  an accumulated touch-drag distance (device px) into whole
    *  `scrollLines()`/wheel steps, one per line-height of drag. */
   lineHeightPx(): number;
+  /** Getting around the scrollback: the viewport's position, a line's
+   *  text and scrolling to it. Optional so a host without it (or a test
+   *  that does not need it) still gets everything else. */
+  nav?: PageNav;
 };
+
+/** The parts of xterm's buffer the controller moves through. Lines are
+ *  absolute buffer rows, as xterm counts them. */
+export type PageNav = {
+  viewportY(): number;
+  baseY(): number;
+  lineCount(): number;
+  lineText(row: number): string;
+  scrollToLine(row: number): void;
+  scrollToBottom(): void;
+  select(column: number, row: number, length: number): void;
+};
+
+/** Where a command's prompt was drawn, as xterm tracks it through
+ *  scrollback trimming (an `IMarker`). */
+export type CommandMark = { readonly line: number; readonly isDisposed: boolean };
+
+/** The longest search the page accepts; longer is refused, not cut. */
+const MAX_FIND_CHARS = 200;
 
 export function createPageController(deps: PageDeps): {
   receive(raw: unknown): void;
@@ -86,6 +109,11 @@ export function createPageController(deps: PageDeps): {
   touchEnd(): void;
   // Wired to xterm's onSelectionChange in the browser build only.
   selectionChanged(): void;
+  /** A shell prompt began here (OSC 133;A from the laptop's shell
+   *  integration): one stop for "previous / next command". */
+  commandMark(mark: CommandMark): void;
+  /** The viewport moved or the buffer grew: re-reports the view state. */
+  viewChanged(): void;
 } {
   let lastCols = -1;
   let lastRows = -1;
@@ -97,6 +125,96 @@ export function createPageController(deps: PageDeps): {
   // since the last touchStart/whole line-height step.
   let touchAccumulator = 0;
   let lastSelection = "";
+  const marks: CommandMark[] = [];
+  let lastView = "";
+  // Where the last find matched, so the next one continues past it.
+  let findRow: number | undefined;
+  let findQuery = "";
+
+  function liveMarkLines(): number[] {
+    const lines: number[] = [];
+    for (let i = marks.length - 1; i >= 0; i--) {
+      const mark = marks[i];
+      if (mark === undefined || mark.isDisposed || mark.line < 0) marks.splice(i, 1);
+      else lines.unshift(mark.line);
+    }
+    return lines.sort((a, b) => a - b);
+  }
+
+  /**
+   * Whether the viewport is scrolled back from the newest line, and
+   * whether any command stops exist — the only things the page tells
+   * native about where it is. Both are geometry and one bit of "the shell
+   * marked its prompts", never any of the text itself.
+   */
+  function viewChanged(): void {
+    const nav = deps.nav;
+    if (nav === undefined) return;
+    const view = JSON.stringify({
+      t: "view",
+      back: nav.viewportY() < nav.baseY(),
+      commands: liveMarkLines().length > 0,
+    });
+    if (view === lastView) return;
+    lastView = view;
+    deps.post(view);
+  }
+
+  function jump(to: unknown): void {
+    const nav = deps.nav;
+    if (nav === undefined) return;
+    if (to === "latest") {
+      nav.scrollToBottom();
+    } else if (to === "prevCommand" || to === "nextCommand") {
+      const top = nav.viewportY();
+      const lines = liveMarkLines();
+      const target =
+        to === "prevCommand"
+          ? lines.filter((line) => line < top).at(-1)
+          : lines.find((line) => line > top);
+      if (target === undefined) {
+        // Past the newest prompt there is only the live end left.
+        if (to === "nextCommand") nav.scrollToBottom();
+      } else {
+        nav.scrollToLine(Math.min(target, nav.baseY()));
+      }
+    }
+    viewChanged();
+  }
+
+  /**
+   * The next line (in `direction`) holding `query`, ignoring case, from
+   * just past the last match — or from the viewport, for a new query. The
+   * match is selected and scrolled into view; native hears only whether
+   * there was one.
+   */
+  function find(query: unknown, direction: unknown): void {
+    const nav = deps.nav;
+    if (nav === undefined) return;
+    if (typeof query !== "string" || query === "" || query.length > MAX_FIND_CHARS) return;
+    if (direction !== "next" && direction !== "prev") return;
+    const needle = query.toLocaleLowerCase();
+    const count = nav.lineCount();
+    if (query !== findQuery || findRow === undefined) {
+      findQuery = query;
+      findRow = direction === "prev" ? nav.viewportY() + deps.term.rows : nav.viewportY() - 1;
+    }
+    const step = direction === "next" ? 1 : -1;
+    for (let scanned = 0, row = findRow + step; scanned < count; scanned++, row += step) {
+      const wrapped = ((row % count) + count) % count;
+      const column = nav.lineText(wrapped).toLocaleLowerCase().indexOf(needle);
+      if (column === -1) continue;
+      findRow = wrapped;
+      nav.select(column, wrapped, query.length);
+      nav.scrollToLine(
+        Math.max(0, Math.min(nav.baseY(), wrapped - Math.floor(deps.term.rows / 2))),
+      );
+      deps.post(JSON.stringify({ t: "found", ok: true }));
+      viewChanged();
+      return;
+    }
+    deps.post(JSON.stringify({ t: "found", ok: false }));
+  }
 
   function postModesIfChanged(): void {
     const current = deps.term.modes.applicationCursorKeysMode;
@@ -155,12 +273,22 @@ export function createPageController(deps: PageDeps): {
       const data = obj.data;
       deps.term.write(data, () => {
         postModesIfChanged();
+        viewChanged();
       });
       return;
     }
     if (obj.t === "reset") {
       deps.term.reset();
       postModesIfChanged();
+      return;
+    }
+    if (obj.t === "jump") {
+      jump((parsed as { to?: unknown }).to);
+      return;
+    }
+    if (obj.t === "find") {
+      const message = parsed as { query?: unknown; direction?: unknown };
+      find(message.query, message.direction);
       return;
     }
     if (obj.t === "clearSelection") {
@@ -227,5 +355,20 @@ export function createPageController(deps: PageDeps): {
     deps.post(JSON.stringify({ t: "selection", text }));
   }
 
-  return { receive, start, layoutChanged, touchStart, touchMove, touchEnd, selectionChanged };
+  function commandMark(mark: CommandMark): void {
+    marks.push(mark);
+    viewChanged();
+  }
+
+  return {
+    receive,
+    start,
+    layoutChanged,
+    touchStart,
+    touchMove,
+    touchEnd,
+    selectionChanged,
+    commandMark,
+    viewChanged,
+  };
 }

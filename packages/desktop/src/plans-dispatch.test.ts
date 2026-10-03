@@ -639,6 +639,30 @@ describe("plans:send", () => {
     expect(markSent).toHaveBeenCalledWith(["c1"]);
   });
 
+  it("sends to a live session by its id when no terminal pane has that key", async () => {
+    const { deps, write } = sendDeps();
+    const sessionWrite = vi.fn();
+    deps.sessions = {
+      ...deps.sessions,
+      get: vi.fn((id: string) => (id === "s1" ? { id } : undefined)),
+      write: sessionWrite,
+    };
+    const table = createDispatchTable(deps);
+
+    expect(await call(table, "plans:send", "s1", "/plans/x.md", ["c1"])).toEqual({
+      ok: true,
+      sent: 1,
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(sessionWrite).toHaveBeenCalledTimes(1);
+    expect((sessionWrite.mock.calls[0] as [string, string])[0]).toBe("s1");
+    // A session SessionManager no longer owns is no pane at all.
+    expect(await call(table, "plans:send", "gone", "/plans/x.md", ["c1"])).toEqual({
+      ok: false,
+      reason: "no-pane",
+    });
+  });
+
   // Final fix wave M2: the message numbers each comment the way the user's
   // own pins do — against every comment on the plan — not 1..n over the
   // subset being sent.

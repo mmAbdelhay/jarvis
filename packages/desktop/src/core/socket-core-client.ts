@@ -192,6 +192,11 @@ export async function connectSocketCoreClient(
         }).catch((error: unknown) => deps.log(`open in browser failed: ${describe(error)}`));
         return;
       }
+      case DAEMON_PUSHES.trashItem:
+        host
+          ?.trashItem(String(p.path))
+          .catch((error: unknown) => deps.log(`move to trash failed: ${describe(error)}`));
+        return;
       case DAEMON_PUSHES.restart:
         // Sent only to the app that asked. The daemon restarts itself for
         // the settings it reads; this app relaunches only if a setting it

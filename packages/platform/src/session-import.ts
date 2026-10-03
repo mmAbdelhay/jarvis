@@ -40,12 +40,8 @@ export function isWithin(child: string, parent: string): boolean {
  * Every directory holding transcripts Jarvis knows how to read, with the
  * agent each belongs to.
  *
- * Anthropic-only in v1, and the boundary is here rather than inside the
- * parser: Copilot keeps its sessions in a different format under
- * `~/.copilot/session-state`, and building one importer to serve both
- * formats — with exactly one of them actually written — would be an
- * abstraction designed against a sample size of one. When a second vendor
- * is genuinely wanted, the shape of what varies will be known.
+ * Two vendors, two formats: Claude Code's per-cwd JSONL transcripts, and
+ * Copilot's directory per session under `~/.copilot/session-state`.
  *
  * An agent with no `configDir` contributes nothing: there is no directory
  * to look in.
@@ -705,6 +701,90 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     entries.push({ role, ...turn });
   }
   return entries;
+}
+
+/**
+ * A Copilot session's `events.jsonl` as a conversation — the counterpart of
+ * parseTranscript() for the other format.
+ *
+ * Copilot records a typed event stream (its published
+ * `session-events.schema.json`): a session is `session.start`, then
+ * `user.message` and `assistant.message` events among dozens of others —
+ * deltas, tool progress, hooks, usage — none of which is the conversation.
+ * Only the two message types are read, and only `content` from each, plus
+ * the names in an assistant message's `toolRequests`.
+ *
+ * A user message carrying `source` was injected (a skill's instructions,
+ * by the schema's own description, "should be hidden"), and an autopilot
+ * continuation was written by the loop, not the user; neither is shown as
+ * the user's words. Wordless assistant turns fold into the one before, the
+ * same rule parseTranscript follows.
+ */
+export function parseCopilotTranscript(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof record !== "object" || record === null) continue;
+    const fields = record as Record<string, unknown>;
+    const data = fields["data"];
+    if (typeof data !== "object" || data === null) continue;
+    const body = data as Record<string, unknown>;
+
+    if (fields["type"] === "user.message") {
+      if (body["source"] !== undefined || body["isAutopilotContinuation"] === true) continue;
+      const content = body["content"];
+      if (typeof content !== "string" || content.trim() === "") continue;
+      entries.push({ role: "user", text: content.trim(), tools: [] });
+      continue;
+    }
+
+    if (fields["type"] !== "assistant.message") continue;
+    // A sub-agent's messages carry the tool call that spawned them; they are
+    // its conversation, not this one.
+    if (body["parentToolCallId"] !== undefined) continue;
+    const content = body["content"];
+    const textPart = typeof content === "string" ? content.trim() : "";
+    const tools: string[] = [];
+    const requests = body["toolRequests"];
+    if (Array.isArray(requests)) {
+      for (const request of requests) {
+        if (typeof request !== "object" || request === null) continue;
+        const name = (request as Record<string, unknown>)["name"];
+        tools.push(typeof name === "string" && name !== "" ? name : "tool");
+      }
+    }
+    if (textPart === "" && tools.length === 0) continue;
+
+    const previous = entries.at(-1);
+    if (textPart === "" && previous?.role === "assistant") {
+      previous.tools.push(...tools);
+      continue;
+    }
+    entries.push({ role: "assistant", text: textPart, tools });
+  }
+  return entries;
+}
+
+/**
+ * The file holding a session's conversation and the parser that reads it,
+ * from the path its row was imported from. A Copilot row points at the
+ * session's `workspace.yaml` — the metadata the importer reads — and its
+ * conversation is the `events.jsonl` beside it.
+ */
+export function transcriptSource(path: string): {
+  path: string;
+  parse: (text: string) => TranscriptEntry[];
+} {
+  if (basename(path) === "workspace.yaml") {
+    return { path: join(dirname(path), "events.jsonl"), parse: parseCopilotTranscript };
+  }
+  return { path, parse: parseTranscript };
 }
 
 /** One message's readable text and the tools it used. */

@@ -143,7 +143,28 @@ export function initApi(): void {
 
   $("api-send").addEventListener("click", () => void send());
   $("api-save").addEventListener("click", () => void save());
-  $("api-curl").addEventListener("click", () => void copyCurl());
+  // Copy as code: a menu of three when its markup is there, and plain Copy
+  // as cURL when it is not (a harness laying down only the older button).
+  const copyMenu = document.getElementById("api-copy-menu");
+  $("api-curl").addEventListener("click", () => {
+    if (copyMenu === null) {
+      void copyCurl("curl");
+      return;
+    }
+    copyMenu.hidden = !copyMenu.hidden;
+    $("api-curl").setAttribute("aria-expanded", String(!copyMenu.hidden));
+  });
+  for (const [id, language] of [
+    ["api-copy-curl", "curl"],
+    ["api-copy-fetch", "fetch"],
+    ["api-copy-python", "python"],
+  ] as const) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      if (copyMenu !== null) copyMenu.hidden = true;
+      $("api-curl").setAttribute("aria-expanded", "false");
+      void copyCurl(language);
+    });
+  }
   // The "+" menu. Each item still carries its own id and its own handler,
   // so what the menu changed is where the buttons live, not what they do.
   $("api-new").addEventListener("click", () => toggleNewMenu());
@@ -963,10 +984,10 @@ async function saveSettings(patch: Partial<ApiSettings>): Promise<void> {
   if (result.ok) settings = result.value;
 }
 
-async function copyCurl(): Promise<void> {
+async function copyCurl(language: "curl" | "fetch" | "python" = "curl"): Promise<void> {
   const { project, request } = state;
   if (project === undefined || request === undefined) return;
-  const result = await window.jarvis.apiCurl(project, request, variables());
+  const result = await window.jarvis.apiCurl(project, request, variables(), language);
   if (!result.ok) return;
   await navigator.clipboard?.writeText(result.value);
   setStatus(MESSAGES.apiCopied(PRIMARY_LANGUAGE));

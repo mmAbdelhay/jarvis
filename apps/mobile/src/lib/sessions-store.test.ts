@@ -101,6 +101,8 @@ describe("parseSessionList", () => {
         summary: "fixing tests",
         state: "running",
         agentId: "claude-main",
+        project: "acme",
+        projectPath: "/Users/x/acme",
         startedAt: 50,
         lastActivityAt: 100,
       },
@@ -131,7 +133,17 @@ describe("parseSessionList", () => {
     ]);
     expect(rows).toHaveLength(1);
     expect(Object.keys(rows[0] as object).sort()).toEqual(
-      ["agentId", "id", "label", "lastActivityAt", "startedAt", "state", "summary"].sort(),
+      [
+        "agentId",
+        "id",
+        "label",
+        "lastActivityAt",
+        "project",
+        "projectPath",
+        "startedAt",
+        "state",
+        "summary",
+      ].sort(),
     );
   });
 
