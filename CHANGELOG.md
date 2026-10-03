@@ -8,6 +8,28 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.7] — 2026-10-03
+
+- The phone and browser app now match the redesign: line icons and the
+  redesign's type and spacing on every screen.
+- Phone Home shows the laptop's name, the waiting question as a row of
+  answers, capacity cards with a 24-hour trend, and the sessions that are
+  working, with their +/− line counts.
+- Sessions includes finished and imported sessions from History, grouped
+  by day, with Resume on each and a New button and project filter.
+- The session screen has Live, Changes, Plan and Files tabs, a five-key bar
+  with the rest one tap away (adding Ctrl+R), and a message bar.
+- Changes opens on a session straight away, with the branch card, files
+  with stage checkboxes, the diff and a commit bar.
+- Workspace opens on a project, with a + Tab sheet, one row per laptop tab
+  and the project's files inline. The terminal screen gains a navigation
+  mode with the arrow pad.
+- In the browser and on tablets: a sidebar that becomes an icon rail for
+  the terminal, a Home with tiles and tables, Sessions beside the open
+  session, a two-pane Changes with a split diff, History as a chat, Settings
+  split into This browser and The laptop, and a Workspace with tabs, a
+  file tree and the plan beside the terminal.
+
 ## [0.1.6] — 2026-10-03
 
 - The phone's terminal key bar has an Alt key. Like Ctrl, it applies to the
