@@ -27,7 +27,9 @@ export type HomeView = {
 export type HomeStore = {
   get(): HomeView;
   subscribe(listener: (view: HomeView) => void): () => void;
-  focus(): void;
+  /** `capacity: false` polls prompts only: no `providers:update` push, no
+   *  `usage:history` read (the Sessions screen's "Asks:" line). */
+  focus(options?: { capacity?: boolean }): void;
   blur(): void;
   /** The sessions to ask about; asked at once, then on every tick. */
   setLiveSessions(ids: readonly string[]): void;
@@ -49,6 +51,7 @@ export function createHomeStore(deps: {
   const listeners = new Set<(view: HomeView) => void>();
   let view: HomeView = { capacity: [], trends: [], sessionsPerDay: [], waiting: [] };
   let focused = false;
+  let capacityOn = true;
   let live: string[] = [];
   let timer: unknown;
   let polling = false;
@@ -109,27 +112,30 @@ export function createHomeStore(deps: {
         listeners.delete(listener);
       };
     },
-    focus() {
+    focus(options) {
       if (focused) return;
       focused = true;
-      unsubscribeProviders = deps.client.onPush("providers:update", (payload) => {
-        setView({ capacity: parseProviderCapacity(payload) });
-      });
-      deps.client.subscribe("providers:update");
+      capacityOn = options?.capacity ?? true;
+      if (capacityOn) {
+        unsubscribeProviders = deps.client.onPush("providers:update", (payload) => {
+          setView({ capacity: parseProviderCapacity(payload) });
+        });
+        deps.client.subscribe("providers:update");
+      }
       unsubscribeState = deps.client.onState((state) => {
         if (state === "open") {
-          void loadTrends();
+          if (capacityOn) void loadTrends();
           void poll();
         }
       });
       timer = every(() => void poll(), PROMPT_POLL_MS);
-      void loadTrends();
+      if (capacityOn) void loadTrends();
       void poll();
     },
     blur() {
       if (!focused) return;
       focused = false;
-      deps.client.unsubscribe("providers:update");
+      if (capacityOn) deps.client.unsubscribe("providers:update");
       unsubscribeProviders?.();
       unsubscribeState?.();
       unsubscribeProviders = undefined;

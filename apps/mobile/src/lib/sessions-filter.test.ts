@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterRows, matchesQuery, statusCounts } from "./sessions-filter";
+import { filterRows, matchesQuery, projectsOf, statusCounts } from "./sessions-filter";
 import type { SessionRowView } from "./sessions-store";
 
 function row(over: Partial<SessionRowView>): SessionRowView {
@@ -71,5 +71,28 @@ describe("statusCounts", () => {
   it("counts each chip under the current query", () => {
     expect(statusCounts(ROWS, "")).toEqual({ all: 5, waiting: 1, running: 2, done: 2 });
     expect(statusCounts(ROWS, "codex")).toEqual({ all: 2, waiting: 0, running: 1, done: 1 });
+  });
+});
+
+describe("project filter", () => {
+  const rows = [
+    row({ id: "p1", project: "api", state: "running", summary: "migration" }),
+    row({ id: "p2", project: "web", state: "done", summary: "migration" }),
+    row({ id: "p3", project: "api", state: "dead", summary: "docker" }),
+    row({ id: "p4", project: null, state: "done" }),
+  ];
+
+  it("composes with the query and the status", () => {
+    expect(filterRows(rows, "migration", "all", "api").map((r) => r.id)).toEqual(["p1"]);
+    expect(filterRows(rows, "", "done", "api").map((r) => r.id)).toEqual(["p3"]);
+    expect(filterRows(rows, "", "all").length).toBe(4);
+  });
+
+  it("scopes the chip counts to the project", () => {
+    expect(statusCounts(rows, "", "api")).toEqual({ all: 2, waiting: 0, running: 1, done: 1 });
+  });
+
+  it("lists the distinct named projects, sorted", () => {
+    expect(projectsOf(rows)).toEqual(["api", "web"]);
   });
 });

@@ -1,45 +1,35 @@
-import { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Icon } from "@/components/Icon";
+import { IconButton } from "@/components/IconButton";
 import { t, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 import type { TerminalView } from "./TerminalWebView";
 
 /**
  * Getting around a terminal's scrollback on a phone: jump to the previous
- * or next command (when the shell marks its prompts), back to the live
- * end once scrolled away from it, and find text in the output. Shown only
- * when one of those has something to do, or while finding.
+ * or next command (when the shell marks its prompts), step through find
+ * matches, and — over the output, see TerminalLatestPill — back to the live
+ * end. The find field itself sits in the screen header (TerminalFindField).
+ * Shown only when one of those has something to do.
  */
 export function TerminalNavBar(props: {
   language: Language;
   view: TerminalView;
   finding: boolean;
+  /** The text being found; the field in the header owns it. */
+  query: string;
   /** Whether the last find matched; undefined before any. */
   found: boolean | undefined;
-  onJump(to: "latest" | "prevCommand" | "nextCommand"): void;
+  onJump(to: "prevCommand" | "nextCommand"): void;
   onFind(query: string, direction: "next" | "prev"): void;
   onCloseFind(): void;
 }) {
-  const [query, setQuery] = useState("");
   const { language, view } = props;
-  if (!props.finding && !view.back && !view.commands) return null;
+  if (!props.finding && !view.commands) return null;
   return (
     <View style={styles.bar}>
       {props.finding && (
         <View style={styles.findRow}>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            onSubmitEditing={() => query !== "" && props.onFind(query, "next")}
-            placeholder={t(language, "terminal.findPlaceholder")}
-            placeholderTextColor={theme.colors.textDim}
-            accessibilityLabel={t(language, "terminal.find")}
-            style={[styles.findInput, props.found === false && styles.findMissing]}
-          />
           {(["prev", "next"] as const).map((direction) => (
             <TouchableOpacity
               key={direction}
@@ -48,52 +38,53 @@ export function TerminalNavBar(props: {
                 language,
                 direction === "next" ? "terminal.findNext" : "terminal.findPrev",
               )}
-              disabled={query === ""}
-              onPress={() => props.onFind(query, direction)}
-              style={[styles.iconButton, query === "" && styles.disabled]}
+              disabled={props.query === ""}
+              onPress={() => props.onFind(props.query, direction)}
+              style={[styles.jump, props.query === "" && styles.disabled]}
             >
-              <Text style={styles.iconText}>{direction === "next" ? "↓" : "↑"}</Text>
+              <Icon
+                name={direction === "next" ? "chevronDown" : "chevronUp"}
+                size={14}
+                color={theme.colors.textSecondary}
+                strokeWidth={2.4}
+              />
+              <Text style={styles.jumpText}>
+                {t(language, direction === "next" ? "terminal.findNext" : "terminal.findPrev")}
+              </Text>
             </TouchableOpacity>
           ))}
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={t(language, "terminal.findClose")}
+          <IconButton
+            icon="close"
+            size={40}
+            iconSize={16}
+            label={t(language, "terminal.findClose")}
             onPress={props.onCloseFind}
-            style={styles.iconButton}
-          >
-            <Text style={styles.iconText}>×</Text>
-          </TouchableOpacity>
+          />
         </View>
       )}
-      {(view.commands || view.back) && (
+      {view.commands && (
         <View style={styles.jumpRow}>
-          {view.commands && (
-            <>
-              <TouchableOpacity
-                accessibilityRole="button"
-                onPress={() => props.onJump("prevCommand")}
-                style={styles.jump}
-              >
-                <Text style={styles.jumpText}>↑ {t(language, "terminal.prevCommand")}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                accessibilityRole="button"
-                onPress={() => props.onJump("nextCommand")}
-                style={styles.jump}
-              >
-                <Text style={styles.jumpText}>↓ {t(language, "terminal.nextCommand")}</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          {view.back && (
+          {(["prevCommand", "nextCommand"] as const).map((to) => (
             <TouchableOpacity
+              key={to}
               accessibilityRole="button"
-              onPress={() => props.onJump("latest")}
-              style={[styles.jump, styles.latest]}
+              onPress={() => props.onJump(to)}
+              style={styles.jump}
             >
-              <Text style={styles.latestText}>⤓ {t(language, "terminal.latest")}</Text>
+              <Icon
+                name={to === "prevCommand" ? "chevronUp" : "chevronDown"}
+                size={14}
+                color={theme.colors.textSecondary}
+                strokeWidth={2.4}
+              />
+              <Text style={styles.jumpText}>
+                {t(
+                  language,
+                  to === "prevCommand" ? "terminal.prevCommand" : "terminal.nextCommand",
+                )}
+              </Text>
             </TouchableOpacity>
-          )}
+          ))}
         </View>
       )}
       {props.finding && props.found === false && (
@@ -103,54 +94,108 @@ export function TerminalNavBar(props: {
   );
 }
 
+/** The find field in the screen header: 150 wide, a search icon, the query. */
+export function TerminalFindField(props: {
+  language: Language;
+  value: string;
+  found: boolean | undefined;
+  onChange(value: string): void;
+  onSubmit(): void;
+}) {
+  return (
+    <View style={[styles.field, props.found === false && styles.fieldMissing]}>
+      <Icon name="search" size={14} color={theme.colors.textMuted} strokeWidth={2.2} />
+      <TextInput
+        value={props.value}
+        onChangeText={props.onChange}
+        autoFocus
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        onSubmitEditing={props.onSubmit}
+        placeholder={t(props.language, "terminal.findPlaceholder")}
+        placeholderTextColor={theme.colors.textDim}
+        accessibilityLabel={t(props.language, "terminal.find")}
+        style={styles.fieldInput}
+      />
+    </View>
+  );
+}
+
+/** "Latest": a floating pill over the output, once scrolled away from the live end. */
+export function TerminalLatestPill(props: { language: Language; onPress(): void }) {
+  return (
+    <View pointerEvents="box-none" style={styles.pillLayer}>
+      <TouchableOpacity accessibilityRole="button" onPress={props.onPress} style={styles.pill}>
+        <Icon name="arrowDown" size={14} color={theme.colors.primaryText} strokeWidth={2.6} />
+        <Text style={styles.pillText}>{t(props.language, "terminal.latest")}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   bar: {
     gap: 8,
     paddingHorizontal: 10,
-    paddingTop: 8,
+    paddingVertical: 8,
     borderTopWidth: 1,
     borderTopColor: theme.colors.hairlineSoft,
     backgroundColor: theme.colors.ground,
   },
   findRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  findInput: {
-    flex: 1,
-    minHeight: 40,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    color: theme.colors.text,
-    fontFamily: theme.font.mono,
-    fontSize: 13,
-  },
-  findMissing: { borderColor: theme.colors.danger },
-  iconButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  iconText: { color: theme.colors.textSecondary, fontSize: 16 },
   disabled: { opacity: 0.4 },
   jumpRow: { flexDirection: "row", gap: 6 },
   jump: {
     flex: 1,
     minHeight: 40,
+    flexDirection: "row",
+    gap: 6,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 10,
+    borderRadius: theme.radius.small,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
   jumpText: { color: theme.colors.textSecondary, fontFamily: theme.font.bold, fontSize: 13 },
-  latest: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accent },
-  latestText: { color: theme.colors.primaryText, fontFamily: theme.font.bold, fontSize: 13 },
-  missing: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
+  missing: { color: theme.colors.dangerText, fontFamily: theme.font.body, fontSize: 12 },
+  field: {
+    width: 150,
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: theme.radius.small,
+    borderWidth: 1,
+    borderColor: theme.colors.accentBorder,
+    backgroundColor: theme.colors.surface,
+  },
+  fieldMissing: { borderColor: theme.colors.danger },
+  fieldInput: {
+    flex: 1,
+    minWidth: 0,
+    padding: 0,
+    color: theme.colors.text,
+    fontFamily: theme.font.mono,
+    fontSize: 12,
+  },
+  pillLayer: {
+    position: "absolute",
+    bottom: 14,
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
+    alignItems: "center",
+  },
+  pill: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  pillText: { color: theme.colors.primaryText, fontFamily: theme.font.extrabold, fontSize: 13 },
 });

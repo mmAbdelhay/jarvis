@@ -18,6 +18,8 @@ import {
   createSessionInput,
   latchesOf,
   toggleLatch,
+  anyLatch,
+  clearLatches,
 } from "./session-input";
 import type { KeyName, TerminalModes } from "./terminal-keys";
 import { keyBytes } from "./terminal-keys";
@@ -458,6 +460,16 @@ describe("session-input: Alt latch", () => {
     expect(toggleLatch(h.input, "ctrl")).toEqual({ ctrl: true, alt: true });
     expect(toggleLatch(h.input, "alt")).toEqual({ ctrl: true, alt: false });
     expect(latchesOf(undefined)).toEqual({ ctrl: false, alt: false });
+  });
+
+  it("clearLatches disarms both and anyLatch reports them", () => {
+    const h = createHarness();
+    toggleLatch(h.input, "ctrl");
+    toggleLatch(h.input, "alt");
+    expect(anyLatch(latchesOf(h.input))).toBe(true);
+    expect(clearLatches(h.input)).toEqual({ ctrl: false, alt: false });
+    expect(anyLatch(latchesOf(h.input))).toBe(false);
+    expect(clearLatches(undefined)).toEqual({ ctrl: false, alt: false });
   });
 });
 

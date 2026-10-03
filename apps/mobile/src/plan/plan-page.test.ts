@@ -4,12 +4,17 @@ import { buildPlanPage, parsePlanPageMessage } from "./plan-page";
 
 const colors = {
   surface: "rgb(1,2,3)",
+  surfaceAlt: "rgb(22,23,24)",
   ground: "rgb(4,5,6)",
   text: "rgb(7,8,9)",
   textSecondary: "rgb(10,11,12)",
   accent: "rgb(13,14,15)",
   warning: "rgb(16,17,18)",
   selected: "rgb(19,20,21)",
+  accentBorder: "rgb(25,26,27)",
+  success: "rgb(28,29,30)",
+  onSuccess: "rgb(31,32,33)",
+  checkboxOff: "rgb(34,35,36)",
 };
 
 const doc: PlanDoc = {
@@ -54,7 +59,8 @@ describe("buildPlanPage", () => {
     const page = buildPlanPage(doc, comments, "en", colors);
     expect(page).not.toContain("const comments=");
     expect(page).not.toContain("look < here");
-    expect(page).toContain(`background:${colors.surface}`);
+    expect(page).toContain(`background:${colors.ground}`);
+    expect(page).toContain(`border:2px solid ${colors.checkboxOff}`);
     expect(page).toContain(`background:${colors.warning}`);
   });
 
@@ -132,5 +138,18 @@ describe("plan page links", () => {
     });
     expect(parsePlanPageMessage("not json")).toBeUndefined();
     expect(parsePlanPageMessage(JSON.stringify({ type: "link", href: 5 }))).toBeUndefined();
+  });
+});
+
+// The redesign is a stylesheet change: the page still posts only these two
+// message types, and nothing else reaches native.
+describe("plan page messages", () => {
+  it("posts only block and link messages", () => {
+    const page = buildPlanPage(doc, [], "en", colors);
+    const types = [...page.matchAll(/postMessage\(JSON\.stringify\(\{type:"(\w+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(new Set(types)).toEqual(new Set(["link", "block"]));
+    expect(page.match(/postMessage/g)).toHaveLength(2);
   });
 });

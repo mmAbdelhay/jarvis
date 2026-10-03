@@ -5,6 +5,9 @@
 // `stale`/`loading`/`notice` instead of duplicating that logic in each
 // screen.
 import type { HistoryState } from "./history-store";
+import type { Session } from "@jarvis/core";
+import type { TranscriptEntry } from "@jarvis/wire";
+import { formatClockTime, formatSessionElapsed } from "./format";
 import { isRtl, t, type Language } from "./i18n";
 
 export type ListDisplay =
@@ -94,4 +97,66 @@ export function withLrmPrefixes(text: string, language: Language): string {
     .split("\n")
     .map((line) => (ARABIC_SCRIPT.test(line) || !STRONG_LTR.test(line) ? line : `‎${line}`))
     .join("\n");
+}
+
+/** "22:10 · 41m": the clock time of the last activity and how long it ran. */
+export function historyRowTime(row: Session): string {
+  const elapsed = Math.max(0, (row.endedAt ?? row.lastActivityAt) - row.startedAt);
+  return `${formatClockTime(row.lastActivityAt)} · ${formatSessionElapsed(elapsed)}`;
+}
+
+/** "api · claude-main" (+ "imported" for a session read from an agent's own
+ *  transcript). A session with no configured project drops that part. */
+export function historyRowSub(row: Session, importedLabel: string): string {
+  return [
+    row.project ?? undefined,
+    row.agentId,
+    row.transcriptPath !== undefined ? importedLabel : undefined,
+  ]
+    .filter((part): part is string => part !== undefined && part !== "")
+    .join(" · ");
+}
+
+/** Configured project names in the rows, unique and sorted. */
+export function projectsOf(rows: readonly Session[]): string[] {
+  return uniqueSorted(rows.map((row) => row.project));
+}
+
+/** Agent ids in the rows, unique and sorted. */
+export function agentsOf(rows: readonly Session[]): string[] {
+  return uniqueSorted(rows.map((row) => row.agentId));
+}
+
+function uniqueSorted(values: readonly (string | null)[]): string[] {
+  const names = new Set<string>();
+  for (const value of values) if (value !== null && value !== "") names.add(value);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/** The loaded rows narrowed to one project and/or agent (undefined = all).
+ *  Applied on top of whatever the server search returned. */
+export function filterHistory(
+  rows: readonly Session[],
+  project: string | undefined,
+  agent: string | undefined,
+): Session[] {
+  return rows.filter(
+    (row) =>
+      (project === undefined || row.project === project) &&
+      (agent === undefined || row.agentId === agent),
+  );
+}
+
+/** The detail header's sub line: "jarvis · copilot · yesterday 22:10 · 41m". */
+export function historyDetailSub(row: Session, dayText: string): string {
+  return [row.project ?? undefined, row.agentId, `${dayText} ${historyRowTime(row)}`]
+    .filter((part): part is string => part !== undefined && part !== "")
+    .join(" · ");
+}
+
+/** What a screen reader announces for one chat turn: the speaker, then the
+ *  text as data (the visible role label is dropped in the chat layout). */
+export function chatTurnLabel(entry: TranscriptEntry, language: Language): string {
+  const role = t(language, entry.role === "user" ? "history.user" : "history.assistant");
+  return entry.text === "" ? role : `${role}: ${entry.text}`;
 }

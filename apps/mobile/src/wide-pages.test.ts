@@ -40,7 +40,7 @@ describe.each(["app/unlock.tsx", "app/unlock.web.tsx", "app/pair.tsx", "app/pair
 );
 
 describe("app/_layout.tsx", () => {
-  it.each(["history", "transcript/[id]", "sidecars/[project]", "docker/[project]", "changes"])(
+  it.each(["history", "transcript/[id]", "sidecars/[project]", "docker/[project]"])(
     "hides %s's native header on a wide screen",
     (name) => {
       const source = read("app/_layout.tsx");
@@ -48,6 +48,18 @@ describe("app/_layout.tsx", () => {
       expect(start).toBeGreaterThan(-1);
       const entry = source.slice(start, source.indexOf("/>", start));
       expect(entry).toMatch(/headerShown: !wide/);
+    },
+  );
+});
+
+describe("app/_layout.tsx screens with their own ScreenHeader", () => {
+  it.each(["changes", "session/[id]", "terminal/[paneKey]"])(
+    "never shows %s's native header (phone draws ScreenHeader, wide its panel title)",
+    (name) => {
+      const source = read("app/_layout.tsx");
+      const start = source.indexOf(`name="${name}"`);
+      expect(start).toBeGreaterThan(-1);
+      expect(source.slice(start, source.indexOf("/>", start))).toMatch(/headerShown: false/);
     },
   );
 });

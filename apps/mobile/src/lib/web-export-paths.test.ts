@@ -86,7 +86,7 @@ describe("app fonts", () => {
   it("are the vendored files, each of which exists", () => {
     const source = readFileSync(join(mobileDir, "src", "lib", "app-fonts.ts"), "utf8");
     const files = [...source.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1] ?? "");
-    expect(files).toHaveLength(7);
+    expect(files).toHaveLength(8);
     for (const file of files) {
       expect(existsSync(join(mobileDir, "src", "lib", file)), file).toBe(true);
     }

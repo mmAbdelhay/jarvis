@@ -8,6 +8,12 @@ import type { RpcClient } from "./rpc-client";
 
 export type PhonePrompt = { question: string; options: string[] };
 
+/** One short row of buttons (Yes / No) when the agent offers two options or
+ *  fewer; longer lists keep the stacked, numbered buttons. */
+export function promptLayout(optionCount: number): "row" | "stacked" {
+  return optionCount <= 2 ? "row" : "stacked";
+}
+
 export function parsePhonePrompt(value: unknown): PhonePrompt | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;

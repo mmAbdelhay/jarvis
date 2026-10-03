@@ -1,51 +1,63 @@
-import type { SessionState } from "@jarvis/core";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useFocusEffect, useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   I18nManager,
+  Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/Icon";
+import { NewSessionSheet } from "@/components/NewSessionSheet";
+import { ResumeButton } from "@/components/ResumeButton";
 import { SessionRow } from "@/components/SessionRow";
-import { formatSessionElapsed } from "@/lib/format";
+import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
+import type { ProjectSummary } from "@/lib/dashboard-store";
+import { createHistoryStore, type HistoryState } from "@/lib/history-store";
+import { createHomeStore, type HomeView } from "@/lib/home-store";
 import type { Language, MessageKey } from "@/lib/i18n";
-import { t } from "@/lib/i18n";
+import { STRINGS, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
+import { loadProjectChoices } from "@/lib/new-session";
 import { useRpcClient } from "@/lib/rpc-context";
 import type { SessionDateGroup } from "@/lib/session-date-groups";
-import { groupEndedByDate } from "@/lib/session-date-groups";
+import { groupByDay } from "@/lib/session-date-groups";
 import {
   openSession,
-  SESSIONS_LIST_WIDTH,
   sessionTarget,
   sessionPresence,
   sessionsSplit,
   splitLayout,
 } from "@/lib/session-nav";
-import { sessionRouteId } from "@/lib/session-screen";
-import { filterRows, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
+import { isSearchHotkey, sessionRouteId } from "@/lib/session-screen";
+import { filterRows, projectsOf, type StatusFilter, statusCounts } from "@/lib/sessions-filter";
+import {
+  firstOpenableRow,
+  isActiveRow,
+  type MergedRow,
+  mergeSessions,
+  selectedRow,
+} from "@/lib/sessions-merge";
+import { resumable, rowCounts, rowSubtitle, rowTimeLabel, rowVariant } from "@/lib/sessions-row";
 import { usePhoneBack } from "@/lib/use-phone-back";
-import type { SessionRowView, SessionsView } from "@/lib/sessions-store";
+import type { SessionsView } from "@/lib/sessions-store";
 import { createSessionsStore } from "@/lib/sessions-store";
+import { openTerminal } from "@/lib/terminal-open";
 import { theme } from "@/lib/theme";
 import { useLayoutClass } from "@/lib/use-layout-class";
+import { contentWidth, sessionsListWidth } from "@/lib/wide-breakpoints";
 import { SessionDetail } from "@/screens/SessionDetail";
+import { TranscriptBody } from "@/screens/TranscriptView";
 
-const STATE_KEYS: Record<SessionState, MessageKey> = {
-  starting: "sessions.state.starting",
-  running: "sessions.state.running",
-  waiting: "sessions.state.waiting",
-  done: "sessions.state.done",
-  dead: "sessions.state.dead",
-};
-
-const ACTIVE_STATES = new Set<SessionState>(["starting", "running", "waiting"]);
+/** A search reaches the saved history once typing pauses, not on every key. */
+const SEARCH_DELAY_MS = 300;
 
 const STATUS_CHIPS: { status: StatusFilter; label: MessageKey }[] = [
   { status: "all", label: "sessions.filterAll" },
@@ -54,13 +66,8 @@ const STATUS_CHIPS: { status: StatusFilter; label: MessageKey }[] = [
   { status: "done", label: "sessions.filterDone" },
 ];
 
-/** The row's mono elapsed field (item 6): time since it started for an
- *  active row, or its total duration (end minus start) for an ended one —
- *  both from `startedAt`, added to `SessionRowView` for exactly this
- *  (sessions-store.ts). */
-function rowElapsed(row: SessionRowView, nowMs: number): string {
-  const end = ACTIVE_STATES.has(row.state) ? nowMs : (row.endedAt ?? row.lastActivityAt);
-  return formatSessionElapsed(Math.max(0, end - row.startedAt));
+function isMessageKey(value: string): value is MessageKey {
+  return Object.hasOwn(STRINGS, value);
 }
 
 /** The ended-group section header text (item 7): a real date label instead
@@ -79,37 +86,65 @@ function dateGroupLabelText(label: SessionDateGroup["label"], language: Language
     .toUpperCase();
 }
 
-// The full session table (Task 7): every session the laptop knows about,
-// grouped active/ended. Screen logic (subscribing on focus, parsing,
-// grouping) lives in sessions-store.ts; this file is layout only.
+// The full session table: the laptop's live sessions and its saved history
+// as one list (sessions-merge.ts), grouped by day with the active rows
+// first. Screen logic (subscribing on focus, parsing, merging, grouping)
+// lives in the stores and src/lib; this file is layout only.
 //
 // Wide layout (2026-09-28 spec §3): the list (360px) and the `?id=`
 // session's detail side by side, the list on the right in Arabic. The
 // detail is keyed by id only (session-nav.ts `sessionsSplit`), so crossing
 // the breakpoint keeps it mounted with its one subscription; a phone that
 // inherits a selection from a rotation shows that detail with a way back.
+// A session that is only in the saved history shows its transcript there.
 export default function SessionsScreen() {
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();
   const store = useMemo(() => createSessionsStore({ client }), [client]);
+  const historyStore = useMemo(() => createHistoryStore({ client }), [client]);
+  const countsStore = useMemo(() => createChangeCountsStore({ client }), [client]);
+  const homeStore = useMemo(() => createHomeStore({ client }), [client]);
   const [view, setView] = useState<SessionsView>(store.get());
+  const [history, setHistory] = useState<HistoryState>(historyStore.get());
+  const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
+  const [home, setHome] = useState<HomeView>(homeStore.get());
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [project, setProject] = useState<string | undefined>(undefined);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [resumeErrors, setResumeErrors] = useState<Record<string, string | undefined>>({});
+  const [newOpen, setNewOpen] = useState(false);
+  const [choices, setChoices] = useState<ProjectSummary[] | null | undefined>(undefined);
+  const [newBusy, setNewBusy] = useState(false);
+  const [newError, setNewError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
-  const { kind } = useLayoutClass();
+  const { kind, compact } = useLayoutClass();
   const wide = kind === "wide";
+  const { width: windowWidth } = useWindowDimensions();
+  const listWidth = sessionsListWidth(contentWidth(windowWidth, compact ? "rail" : "full"));
+  const searchRef = useRef<TextInput>(null);
   const selectedId = sessionRouteId(useLocalSearchParams().id);
   // Set once a `sessions:list` has answered since mount: until then an
   // empty list says nothing about whether the selected session exists.
   const [listed, setListed] = useState(false);
   const loadingSeen = useRef(false);
+
+  const rows = useMemo(
+    () => mergeSessions([...view.active, ...view.ended], history.sessions),
+    [view.active, view.ended, history.sessions],
+  );
+  // A selected history-only row stays on screen when a search drops it from
+  // the loaded history (the wide pane would read "not found" otherwise).
+  const rememberedRow = useRef<MergedRow | undefined>(undefined);
+  const selected = selectedRow(rows, selectedId, rememberedRow.current);
+  rememberedRow.current = selected;
   const presence = sessionPresence({
     listed,
-    loading: view.loading,
+    loading: view.loading || history.loading,
     failed: view.error !== undefined,
-    found: selectedId !== undefined && store.find(selectedId) !== undefined,
+    found: selected !== undefined,
   });
   const split = sessionsSplit(kind, selectedId, presence);
   const layout = splitLayout({ language, platformRtl: I18nManager.getConstants().isRTL });
@@ -128,12 +163,82 @@ export default function SessionsScreen() {
         else if (loadingSeen.current) setListed(true);
       });
       store.focus();
+      const unsubscribeHistory = historyStore.subscribe(setHistory);
+      historyStore.open();
+      setHistory(historyStore.get());
+      const unsubscribeCounts = countsStore.subscribe(setCounts);
+      countsStore.focus();
+      setCounts(countsStore.get());
+      // The "Asks:" line: the laptop reports a waiting question only when
+      // asked, so this polls, and only while this screen is on.
+      const unsubscribeHome = homeStore.subscribe(setHome);
+      homeStore.focus({ capacity: false });
+      setHome(homeStore.get());
       return () => {
         unsubscribe();
         store.blur();
+        unsubscribeHistory();
+        historyStore.close();
+        unsubscribeCounts();
+        countsStore.blur();
+        unsubscribeHome();
+        homeStore.blur();
       };
-    }, [store]),
+    }, [store, historyStore, countsStore, homeStore]),
   );
+
+  // Wide has no Project chip, so a project filter set on the phone layout
+  // would be invisible there: entering wide shows every project.
+  useEffect(() => {
+    if (!wide) return;
+    setProject(undefined);
+    setProjectsOpen(false);
+  }, [wide]);
+
+  // Web, wide: "/" focuses the search field unless typing somewhere already.
+  // Only while focused: wide tabs stay mounted behind the others.
+  const focused = useIsFocused();
+  useEffect(() => {
+    if (!focused || !wide || Platform.OS !== "web" || typeof document === "undefined") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : undefined;
+      if (
+        !isSearchHotkey({
+          key: event.key,
+          targetTag: target?.tagName,
+          editable: target?.isContentEditable === true,
+          modified: event.metaKey || event.ctrlKey || event.altKey,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [focused, wide]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => historyStore.search(query), SEARCH_DELAY_MS);
+    return () => clearTimeout(handle);
+  }, [historyStore, query]);
+
+  const liveIds = rows
+    .filter(
+      (row) =>
+        isActiveRow(row) &&
+        // The wide pane's own SessionDetail already polls this session.
+        !(wide && row.id === selectedId) &&
+        row.origin !== "external" &&
+        (row.state === "running" || row.state === "waiting"),
+    )
+    .map((row) => row.id);
+  const liveKey = liveIds.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the id list's contents, not its identity.
+  useEffect(() => {
+    homeStore.setLiveSessions(liveIds);
+  }, [homeStore, liveKey]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -141,53 +246,107 @@ export default function SessionsScreen() {
     // and re-scan the process table for agents running outside Jarvis
     // (process-scan.ts) — never a plain re-list, which could only repeat
     // whatever the laptop already had before the pull.
+    historyStore.refresh();
     void store.pullToRefresh().finally(() => setRefreshing(false));
-  }, [store]);
+  }, [store, historyStore]);
 
   const selectSession = useCallback(
-    (id: string) => openSession(router, sessionTarget(kind, id)),
+    (row: MergedRow) => openSession(router, sessionTarget(kind, row.id, "sessions", row.source)),
     [router, kind],
   );
 
-  const empty = view.active.length === 0 && view.ended.length === 0;
-  const now = Date.now();
-  const counts = statusCounts([...view.active, ...view.ended], query);
-  const activeRows = filterRows(view.active, query, status);
-  const endedRows = filterRows(view.ended, query, status);
-  const endedGroups = useMemo(() => groupEndedByDate(endedRows, now), [endedRows, now]);
+  const openNew = useCallback(() => {
+    setNewError(undefined);
+    setChoices(undefined);
+    setNewOpen(true);
+    void loadProjectChoices(client).then((loaded) =>
+      setChoices(loaded.ok ? loaded.projects : null),
+    );
+  }, [client]);
 
-  const renderRows = useCallback(
-    (rows: SessionRowView[]) =>
-      rows.length === 0 ? (
-        <Text style={styles.empty}>{t(language, "sessions.none")}</Text>
-      ) : (
-        <View style={styles.list}>
-          {rows.map((row) => (
-            <SessionRow
-              key={row.id}
-              summary={row.summary}
-              label={row.label}
-              state={row.state}
-              stateLabel={t(language, STATE_KEYS[row.state])}
-              elapsed={rowElapsed(row, now)}
-              externalLabel={
-                row.origin === "external" ? t(language, "sessions.external") : undefined
-              }
-              // A row outside Jarvis has no pty behind it — never navigate
-              // into a terminal nothing is attached to.
-              onPress={row.origin === "external" ? undefined : () => selectSession(row.id)}
-              selected={wide && row.id === selectedId}
-            />
-          ))}
-        </View>
-      ),
-    [language, selectSession, now, wide, selectedId],
+  const pickProject = useCallback(
+    async (name: string) => {
+      setNewError(undefined);
+      setNewBusy(true);
+      const outcome = await openTerminal(client, name);
+      setNewBusy(false);
+      if (!outcome.ok) {
+        setNewError(isMessageKey(outcome.text) ? t(language, outcome.text) : outcome.text);
+        return;
+      }
+      setNewOpen(false);
+      router.push({
+        pathname: "/terminal/[paneKey]",
+        params: { paneKey: outcome.tabId, tabId: outcome.tabId },
+      });
+    },
+    [client, router, language],
   );
+
+  const now = Date.now();
+  const projects = projectsOf(rows);
+  const chipCounts = statusCounts(rows, query, project);
+  const shown = filterRows(rows, query, status, project);
+  const groups = useMemo(() => groupByDay(shown, now), [shown, now]);
+
+  // Wide opens on the first row (waiting first) rather than an empty pane.
+  const firstId = firstOpenableRow(groups.flatMap((group) => group.rows))?.id;
+  useEffect(() => {
+    if (!focused || !wide || selectedId !== undefined || firstId === undefined) return;
+    router.setParams({ id: firstId });
+  }, [focused, wide, selectedId, firstId, router]);
+
+  const renderRow = (row: MergedRow) => {
+    const variant = rowVariant(row);
+    const question =
+      variant === "waiting" && !wide
+        ? home.waiting.find((entry) => entry.sessionId === row.id)?.prompt.question
+        : undefined;
+    const resumeError = resumeErrors[row.id];
+    return (
+      <View key={row.id} style={styles.rowBox}>
+        <SessionRow
+          title={row.summary}
+          subtitle={rowSubtitle(language, row)}
+          time={rowTimeLabel(row, now)}
+          variant={variant}
+          {...(question === undefined ? {} : { asks: t(language, "sessions.asks", { question }) })}
+          {...(rowCounts(row, counts) === undefined ? {} : { counts: rowCounts(row, counts) })}
+          // A row outside Jarvis has no pty behind it — never navigate
+          // into a terminal nothing is attached to.
+          {...(row.origin === "external" ? {} : { onPress: () => selectSession(row) })}
+          selected={wide && row.id === selectedId}
+          {...(wide ? { density: "compact" as const } : {})}
+          {...(resumable(row) && !wide
+            ? {
+                trailing: (
+                  <ResumeButton
+                    variant="inline"
+                    sessionId={row.id}
+                    project={row.project}
+                    state={row.state}
+                    onError={(text) => setResumeErrors((prev) => ({ ...prev, [row.id]: text }))}
+                  />
+                ),
+              }
+            : {})}
+        />
+        {!wide && resumeError !== undefined && (
+          <Text selectable style={styles.error}>
+            {resumeError}
+          </Text>
+        )}
+      </View>
+    );
+  };
 
   const list = (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[
+        styles.content,
+        wide ? styles.contentWide : { paddingTop: insets.top + 18 },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -196,88 +355,167 @@ export default function SessionsScreen() {
         />
       }
     >
-      <Text style={styles.title}>{t(language, "sessions.title")}</Text>
-      <View style={styles.search}>
-        <Text style={styles.searchGlyph} accessibilityElementsHidden importantForAccessibility="no">
-          ⌕
-        </Text>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={t(language, "sessions.searchPlaceholder")}
-          placeholderTextColor={theme.colors.textDim}
-          accessibilityLabel={t(language, "sessions.search")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          style={styles.searchInput}
-        />
-        {query !== "" && (
-          <TouchableOpacity
-            onPress={() => setQuery("")}
+      <View style={styles.header}>
+        <View style={styles.titleRow}>
+          <Text style={[styles.title, wide && styles.titleWide]}>
+            {t(language, "sessions.title")}
+          </Text>
+          <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t(language, "sessions.clearSearch")}
-            style={styles.clear}
+            onPress={openNew}
+            style={[styles.newButton, wide && styles.newButtonWide]}
           >
-            <Text style={styles.clearText}>×</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-        accessibilityRole="tablist"
-      >
-        {STATUS_CHIPS.map((chip) => {
-          const on = status === chip.status;
-          return (
+            {!wide && (
+              <Icon name="plus" size={16} strokeWidth={2.6} color={theme.colors.primaryText} />
+            )}
+            <Text style={[styles.newText, wide && styles.newTextWide]}>
+              {t(language, wide ? "sessions.newTitle" : "sessions.new")}
+            </Text>
+          </Pressable>
+        </View>
+        <View style={[styles.search, wide && styles.searchWide]}>
+          <Icon name="search" size={wide ? 16 : 18} color={theme.colors.textMuted} />
+          <TextInput
+            ref={searchRef}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t(
+              language,
+              wide && Platform.OS === "web" ? "sessions.searchHint" : "sessions.searchPlaceholder",
+            )}
+            placeholderTextColor={theme.colors.textDim}
+            accessibilityLabel={t(language, "sessions.search")}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            style={[styles.searchInput, wide && styles.searchInputWide]}
+          />
+          {query !== "" && (
             <TouchableOpacity
-              key={chip.status}
-              onPress={() => setStatus(chip.status)}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: on }}
-              style={[
-                styles.chip,
-                chip.status === "waiting" && counts.waiting > 0 && styles.chipWaiting,
-                on && styles.chipOn,
-              ]}
+              onPress={() => setQuery("")}
+              accessibilityRole="button"
+              accessibilityLabel={t(language, "sessions.clearSearch")}
+              style={styles.clear}
             >
-              <Text
+              <Icon name="close" size={16} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <ScrollView
+          horizontal={!wide}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={wide ? styles.chipsWide : styles.chips}
+          accessibilityRole="tablist"
+        >
+          {STATUS_CHIPS.map((chip) => {
+            const on = status === chip.status;
+            const amber = chip.status === "waiting" && chipCounts.waiting > 0;
+            return (
+              <TouchableOpacity
+                key={chip.status}
+                onPress={() => setStatus(chip.status)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
                 style={[
-                  styles.chipText,
-                  chip.status === "waiting" && counts.waiting > 0 && styles.chipTextWaiting,
-                  on && styles.chipTextOn,
+                  styles.chip,
+                  wide && styles.chipWide,
+                  amber && styles.chipWaiting,
+                  on && styles.chipOn,
                 ]}
               >
-                {t(language, chip.label)} {counts[chip.status]}
+                <Text
+                  style={[
+                    styles.chipText,
+                    amber && styles.chipTextWaiting,
+                    on && styles.chipTextOn,
+                    wide && styles.chipTextWide,
+                  ]}
+                >
+                  {t(language, chip.label)} {chipCounts[chip.status]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          {!wide && (projects.length > 0 || project !== undefined) && (
+            <TouchableOpacity
+              onPress={() => setProjectsOpen((open) => !open)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: projectsOpen }}
+              style={[styles.chip, styles.chipWithIcon, project !== undefined && styles.chipOn]}
+            >
+              <Text style={[styles.chipText, project !== undefined && styles.chipTextOn]}>
+                {project ?? t(language, "sessions.project")}
               </Text>
+              <Icon
+                name="chevronDown"
+                size={14}
+                color={
+                  project !== undefined ? theme.colors.primaryText : theme.colors.textSecondary
+                }
+              />
             </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-      {empty ? (
-        <Text style={styles.empty}>{t(language, "sessions.none")}</Text>
-      ) : activeRows.length === 0 && endedRows.length === 0 ? (
+          )}
+        </ScrollView>
+        {!wide && projectsOpen && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chips}
+          >
+            {[undefined, ...projects].map((name) => (
+              <TouchableOpacity
+                key={name ?? "all"}
+                onPress={() => {
+                  setProject(name);
+                  setProjectsOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: project === name }}
+                style={[styles.chip, project === name && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, project === name && styles.chipTextOn]}>
+                  {name ?? t(language, "sessions.allProjects")}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+      {rows.length === 0 ? (
+        <Text style={styles.empty}>
+          {t(language, view.loading || history.loading ? "history.loading" : "sessions.none")}
+        </Text>
+      ) : shown.length === 0 ? (
         <Text style={styles.empty}>{t(language, "sessions.noMatch")}</Text>
       ) : (
-        <>
-          {activeRows.length > 0 && (
-            <View>
-              <Text style={styles.sectionTitle}>{t(language, "sessions.now")}</Text>
-              {renderRows(activeRows)}
-            </View>
-          )}
-          {endedGroups.map((group) => (
-            <View key={group.rows[0]?.id ?? group.label.kind}>
-              <Text style={styles.sectionTitle}>{dateGroupLabelText(group.label, language)}</Text>
-              {renderRows(group.rows)}
-            </View>
-          ))}
-        </>
+        groups.map((group: SessionDateGroup<MergedRow>, index) => (
+          <Fragment key={group.rows[0]?.id ?? group.label.kind}>
+            <Text style={[styles.sectionTitle, index > 0 && styles.sectionTitleNext]}>
+              {dateGroupLabelText(group.label, language)}
+            </Text>
+            {group.rows.map(renderRow)}
+          </Fragment>
+        ))
+      )}
+      {history.more && rows.length > 0 && (
+        <TouchableOpacity
+          style={styles.more}
+          accessibilityRole="button"
+          disabled={history.loadingMore}
+          onPress={() => historyStore.loadMore()}
+        >
+          <Text style={styles.moreText}>
+            {t(language, history.loadingMore ? "history.loadingMore" : "sessions.loadMore")}
+          </Text>
+        </TouchableOpacity>
       )}
 
       {view.error?.kind === "remote" && <Text style={styles.error}>{view.error.text}</Text>}
+      {history.notice !== undefined && (
+        <Text selectable style={styles.error}>
+          {history.notice}
+        </Text>
+      )}
     </ScrollView>
   );
 
@@ -290,7 +528,9 @@ export default function SessionsScreen() {
         // Always wrapped, so a rotation never remounts the list either. The
         // pane, not the ScrollView, takes the width: on web the refresh
         // control repeats the ScrollView's style on an inner element.
-        <View style={[wide ? styles.listPane : styles.fill, paneDirection]}>{list}</View>
+        <View style={[wide ? { width: listWidth, flexShrink: 0 } : styles.fill, paneDirection]}>
+          {list}
+        </View>
       )}
       {wide && split.showList && <View style={styles.divider} />}
       {split.detailKey !== undefined && (
@@ -306,7 +546,11 @@ export default function SessionsScreen() {
               </Text>
             </TouchableOpacity>
           )}
-          <SessionDetail key={split.detailKey} id={split.detailKey} embedded store={store} />
+          {selected?.source === "history" ? (
+            <TranscriptBody key={split.detailKey} id={split.detailKey} embedded />
+          ) : (
+            <SessionDetail key={split.detailKey} id={split.detailKey} embedded store={store} />
+          )}
         </View>
       )}
       {split.showEmpty && (
@@ -314,6 +558,19 @@ export default function SessionsScreen() {
           <Text style={styles.empty}>{t(language, "sessions.pick")}</Text>
         </View>
       )}
+      <NewSessionSheet
+        language={language}
+        visible={newOpen}
+        projects={choices}
+        busy={newBusy}
+        error={newError}
+        onPick={(name) => void pickProject(name)}
+        onAskJarvis={() => {
+          setNewOpen(false);
+          router.push("/voice");
+        }}
+        onClose={() => setNewOpen(false)}
+      />
     </View>
   );
 }
@@ -321,7 +578,7 @@ export default function SessionsScreen() {
 const styles = StyleSheet.create({
   split: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.background },
   fill: { flex: 1 },
-  listPane: { width: SESSIONS_LIST_WIDTH, flexShrink: 0 },
+
   divider: { width: 1, backgroundColor: theme.colors.hairlineSoft },
   detailPane: { flex: 1, minWidth: 0 },
   emptyPane: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
@@ -332,11 +589,32 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   content: {
-    paddingHorizontal: 20,
+    paddingHorizontal: theme.spacing.gutter,
     paddingBottom: 20,
-    gap: 10,
+    gap: 8,
   },
-  title: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 26, marginBottom: 4 },
+  contentWide: { paddingHorizontal: 16, paddingVertical: 20 },
+  titleWide: { fontFamily: theme.font.extrabold, fontSize: 22, lineHeight: 28 },
+  newButtonWide: { minHeight: 38, paddingHorizontal: 12, borderRadius: theme.radius.small },
+  newTextWide: { fontSize: 13 },
+  searchWide: { minHeight: 40, paddingHorizontal: 12, borderRadius: theme.radius.small },
+  searchInputWide: { minHeight: 38, fontSize: 14 },
+  chipsWide: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chipWide: { minHeight: 30, paddingHorizontal: 10 },
+  chipTextWide: { fontSize: 12 },
+  header: { gap: 12, paddingBottom: 4 },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  title: { ...theme.type.display, color: theme.colors.text },
+  newButton: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.control,
+    backgroundColor: theme.colors.accent,
+  },
+  newText: { ...theme.type.button, color: theme.colors.primaryText },
   search: {
     minHeight: 46,
     flexDirection: "row",
@@ -348,7 +626,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  searchGlyph: { color: theme.colors.textMuted, fontSize: 18 },
   searchInput: {
     flex: 1,
     minHeight: 44,
@@ -357,34 +634,41 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   clear: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  clearText: { color: theme.colors.textMuted, fontSize: 20 },
   chips: { gap: 8, paddingVertical: 2 },
   chip: {
     minHeight: 36,
     paddingHorizontal: 14,
     justifyContent: "center",
-    borderRadius: 999,
+    borderRadius: theme.radius.full,
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
+  chipWithIcon: { flexDirection: "row", alignItems: "center", gap: 4 },
   chipWaiting: {
     borderColor: theme.colors.warningBorder,
     backgroundColor: theme.colors.warningSurface,
   },
   chipOn: { borderColor: theme.colors.text, backgroundColor: theme.colors.text },
-  chipText: { color: theme.colors.textSecondary, fontFamily: theme.font.semibold, fontSize: 13 },
-  chipTextWaiting: { color: theme.colors.warning, fontFamily: theme.font.bold },
-  chipTextOn: { color: theme.colors.ground, fontFamily: theme.font.bold },
+  chipText: { ...theme.type.chip, color: theme.colors.textSecondary },
+  chipTextWaiting: { fontFamily: theme.font.bold, color: theme.colors.warning },
+  chipTextOn: { ...theme.type.chipSelected, color: theme.colors.ground },
   sectionTitle: {
+    ...theme.type.sectionLabel,
     color: theme.colors.textDim,
-    fontFamily: theme.font.bold,
-    fontSize: 12,
-    letterSpacing: 1.2,
-    marginTop: 12,
+    marginTop: 6,
+    marginBottom: 2,
   },
-  list: {
-    gap: theme.spacing.sm,
+  sectionTitleNext: { marginTop: 10 },
+  rowBox: { gap: 4 },
+  more: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.radius.control,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
+  moreText: { ...theme.type.button, fontSize: 13, color: theme.colors.accentText },
   empty: {
     color: theme.colors.textMuted,
     fontSize: theme.font.size.sm,

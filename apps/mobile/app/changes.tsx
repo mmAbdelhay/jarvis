@@ -9,12 +9,12 @@ import { ChangesScreen } from "@/screens/ChangesScreen";
 export default function ChangesRoute() {
   const language = useLanguage();
   const sessionId = sessionRouteId(useLocalSearchParams().id);
-  // Wide layout: inside the shell as a centred panel (the Workspace tab
-  // shows the same screen inline).
+  // Wide layout: inside the shell as two panes, files and diff, with no
+  // panel frame (the Workspace tab shows the stacked screen inline).
   return (
     <WideShell>
-      <WidePanel title={t(language, "changes.title")}>
-        <ChangesScreen sessionId={sessionId} embedded={false} />
+      <WidePanel title={t(language, "changes.title")} bare>
+        <ChangesScreen sessionId={sessionId} embedded={false} layout="split" />
       </WidePanel>
     </WideShell>
   );

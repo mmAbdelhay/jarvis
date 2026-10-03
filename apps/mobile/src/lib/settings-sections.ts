@@ -50,3 +50,23 @@ export function settingsWideLayout(input: {
   const layout = splitLayout(input);
   return { ...layout, railSide: firstChildSide(layout.direction) };
 }
+
+export type SettingsScope = "browser" | "laptop";
+
+export const SETTINGS_SCOPES: readonly SettingsScope[] = ["browser", "laptop"];
+
+/** The wide layout splits the sections in two: the laptop's own
+ *  configuration, and everything about this browser (or app) itself. */
+export function sectionScope(id: string): SettingsScope {
+  return id === "laptop" ? "laptop" : "browser";
+}
+
+/** The sections of one scope, in screen order. */
+export function settingsScopes(
+  sections: readonly SettingsSection[],
+): Record<SettingsScope, SettingsSection[]> {
+  return {
+    browser: sections.filter((section) => sectionScope(section.id) === "browser"),
+    laptop: sections.filter((section) => sectionScope(section.id) === "laptop"),
+  };
+}

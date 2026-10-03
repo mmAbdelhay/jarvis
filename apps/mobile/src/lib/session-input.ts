@@ -324,6 +324,18 @@ export function toggleLatch(input: SessionInput, latch: Latch): Latches {
   return latchesOf(input);
 }
 
+/** Whether any latch is armed. */
+export function anyLatch(latches: Latches): boolean {
+  return latches.ctrl || latches.alt;
+}
+
+/** Disarms both latches, for when their caps leave the screen. */
+export function clearLatches(input: SessionInput | undefined): Latches {
+  input?.disarmCtrl();
+  input?.disarmAlt();
+  return latchesOf(input);
+}
+
 export function createSessionInput(deps: SessionInputDeps): SessionInput {
   return createRawInput({
     client: deps.client,

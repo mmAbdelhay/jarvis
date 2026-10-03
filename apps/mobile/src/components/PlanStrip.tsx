@@ -1,4 +1,6 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Icon } from "@/components/Icon";
+import { ProgressRing } from "@/components/ProgressRing";
 import { t, type Language } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 import type { PlanProgressView } from "@/plan/plan-progress";
@@ -24,6 +26,7 @@ export function PlanStrip(props: {
       onPress={props.onOpen}
       style={styles.strip}
     >
+      {progress !== undefined && <ProgressRing fraction={fraction} size={34} />}
       <View style={styles.text}>
         <Text style={styles.kicker}>
           {progress === undefined
@@ -38,18 +41,13 @@ export function PlanStrip(props: {
             ? t(props.language, "plans.stripOpen")
             : t(props.language, "plans.stripNow", { step: props.step })}
         </Text>
-        {progress !== undefined && (
-          <View style={styles.track}>
-            <View style={[styles.fill, { width: `${Math.round(fraction * 100)}%` }]} />
-          </View>
-        )}
       </View>
       {props.queuedNotes > 0 && (
         <Text style={styles.notes}>
           {t(props.language, "plans.notesCount", { count: props.queuedNotes })}
         </Text>
       )}
-      <Text style={styles.chevron}>⌃</Text>
+      <Icon name="chevronUp" size={16} color={theme.colors.textMuted} />
     </TouchableOpacity>
   );
 }
@@ -68,7 +66,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  text: { flex: 1, minWidth: 0, gap: 3 },
+  text: { flex: 1, minWidth: 0, gap: 2 },
   kicker: {
     color: theme.colors.textDim,
     fontFamily: theme.font.bold,
@@ -76,8 +74,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   step: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
-  track: { height: 4, borderRadius: 999, backgroundColor: theme.colors.selected },
-  fill: { height: 4, borderRadius: 999, backgroundColor: theme.colors.success },
   notes: {
     paddingHorizontal: 9,
     paddingVertical: 4,
@@ -88,5 +84,4 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.bold,
     fontSize: 12,
   },
-  chevron: { color: theme.colors.textMuted, fontSize: 16 },
 });

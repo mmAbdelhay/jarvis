@@ -362,9 +362,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="session/[id]"
                   options={{
-                    // Wide: this screen only redirects to the sessions
-                    // split, so it draws no header while it does.
-                    headerShown: layout.kind !== "wide",
+                    // The screen draws its own ScreenHeader on a phone; wide
+                    // only redirects to the sessions split.
+                    headerShown: false,
                     animation: layout.kind === "wide" ? "none" : "default",
                     // Fix round 1 (Important 1): `title`, not `headerTitle` — the
                     // screen's own `<Stack.Screen options={{ title: row.summary }} />`
@@ -381,8 +381,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="changes"
                   options={{
-                    // Wide: drawn inside the shell with its own panel header.
-                    headerShown: !wide,
+                    // Phone: ScreenHeader inside the screen. Wide: the shell's
+                    // panel header.
+                    headerShown: false,
                     animation: wide ? "none" : "default",
                     headerTitle: t(language, "changes.title"),
                     headerStyle: { backgroundColor: theme.colors.background },
@@ -451,9 +452,9 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="terminal/[paneKey]"
                   options={{
-                    // Wide: this screen only redirects to the Workspace
-                    // tab, so it draws no header while it does.
-                    headerShown: layout.kind !== "wide",
+                    // The screen draws its own ScreenHeader on a phone; wide
+                    // only redirects to the Workspace tab.
+                    headerShown: false,
                     animation: layout.kind === "wide" ? "none" : "default",
                     // The screen's own `<Stack.Screen options={{ title }} />`
                     // sets the pane key once mounted (docker/[project].tsx's

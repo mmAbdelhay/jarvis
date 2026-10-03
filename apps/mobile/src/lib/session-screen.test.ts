@@ -5,17 +5,21 @@ import { describe, expect, it } from "vitest";
 import { STRINGS, t, type MessageKey } from "./i18n";
 import {
   isEnded,
+  isSearchHotkey,
+  isSendChord,
   KEY_CAPS,
   KEY_LABEL_KEYS,
   notFoundText,
   sendResultKey,
   sendResultText,
   sessionRouteId,
+  sessionSubtitle,
+  sessionWideSubtitle,
   streamStatusKey,
   trimmedAmount,
 } from "./session-screen";
 import type { SessionStreamView } from "./session-stream";
-import { KEY_BAR } from "./terminal-keys";
+import { MORE_KEYS, SESSION_KEYS } from "./terminal-keys";
 
 const EMPTY_VIEW: SessionStreamView = {
   phase: "idle",
@@ -145,11 +149,31 @@ describe("notFoundText (final review M5)", () => {
   );
 });
 
+describe("sessionSubtitle", () => {
+  const base = { project: "api", agentId: "claude-main", startedAt: 0, state: "running" } as const;
+  const MIN = 60_000;
+
+  it("is project, agent and elapsed time", () => {
+    expect(sessionSubtitle(base, 18 * MIN)).toBe("api · claude-main · 18m");
+  });
+
+  it("leaves out a missing project", () => {
+    expect(sessionSubtitle({ ...base, project: null }, 5 * MIN)).toBe("claude-main · 5m");
+  });
+
+  it("stops the clock at the end of a finished session", () => {
+    expect(sessionSubtitle({ ...base, state: "done", endedAt: 62 * MIN }, 500 * MIN)).toBe(
+      "api · claude-main · 1h 02m",
+    );
+  });
+});
+
 describe("key-bar presentation metadata", () => {
   it("covers every key-bar control with a visible cap and localized label", () => {
-    expect(Object.keys(KEY_CAPS)).toEqual(KEY_BAR);
-    expect(Object.keys(KEY_LABEL_KEYS)).toEqual(KEY_BAR);
-    for (const key of KEY_BAR) {
+    const keys = [...SESSION_KEYS, ...MORE_KEYS];
+    expect(Object.keys(KEY_CAPS).sort()).toEqual([...keys].sort());
+    expect(Object.keys(KEY_LABEL_KEYS).sort()).toEqual([...keys].sort());
+    for (const key of keys) {
       const labelKey: MessageKey = KEY_LABEL_KEYS[key];
       expect(STRINGS[labelKey]).toBeDefined();
     }
@@ -245,4 +269,34 @@ describe("app/session/[id].tsx and app/terminal/[paneKey].tsx source scan: lands
       });
     });
   }
+});
+
+describe("wide session helpers", () => {
+  const row = { project: "api", agentId: "claude-main", startedAt: 0, state: "running" as const };
+
+  it("sessionWideSubtitle adds the branch only when there is one", () => {
+    expect(sessionWideSubtitle({ ...row, branch: "jarvis/orders" }, 18 * 60_000)).toEqual({
+      text: sessionSubtitle(row, 18 * 60_000),
+      branch: "jarvis/orders",
+    });
+    expect(sessionWideSubtitle(row, 60_000).branch).toBeUndefined();
+    expect(sessionWideSubtitle({ ...row, branch: "" }, 60_000).branch).toBeUndefined();
+  });
+
+  it("isSearchHotkey takes a bare slash and ignores text fields", () => {
+    expect(isSearchHotkey({ key: "/", targetTag: "BODY" })).toBe(true);
+    expect(isSearchHotkey({ key: "/", targetTag: undefined })).toBe(true);
+    expect(isSearchHotkey({ key: "/", targetTag: "input" })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "TEXTAREA" })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "DIV", editable: true })).toBe(false);
+    expect(isSearchHotkey({ key: "/", targetTag: "BODY", modified: true })).toBe(false);
+    expect(isSearchHotkey({ key: "a", targetTag: "BODY" })).toBe(false);
+  });
+
+  it("isSendChord is meta or ctrl with Enter only", () => {
+    expect(isSendChord({ key: "Enter", metaKey: true, ctrlKey: false })).toBe(true);
+    expect(isSendChord({ key: "Enter", metaKey: false, ctrlKey: true })).toBe(true);
+    expect(isSendChord({ key: "Enter", metaKey: false, ctrlKey: false })).toBe(false);
+    expect(isSendChord({ key: "a", metaKey: true, ctrlKey: false })).toBe(false);
+  });
 });

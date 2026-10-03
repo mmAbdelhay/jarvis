@@ -4,6 +4,7 @@ import {
   parseLaptopSettings,
   parseSaveReply,
   saveWorktreeMode,
+  worktreeDraft,
 } from "./laptop-settings";
 
 describe("parseLaptopSettings", () => {
@@ -81,5 +82,15 @@ describe("saving the worktree mode", () => {
       text: "laptopSettings.saveFailed",
     });
     expect(call).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("worktreeDraft", () => {
+  it("is clean while the chosen mode is the saved one", () => {
+    expect(worktreeDraft("parallel", "parallel")).toEqual({ dirty: false });
+  });
+
+  it("is dirty once another mode is chosen", () => {
+    expect(worktreeDraft("parallel", "always")).toEqual({ dirty: true });
   });
 });

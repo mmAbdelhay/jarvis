@@ -33,6 +33,9 @@ export type WorkspaceTabItem = {
     }
 );
 
+/** A tool opened here, with the project it was opened for. */
+export type WorkspaceOpenTool = { kind: WorkspaceToolKind; project: string };
+
 const TOOL_PREFIX = "tool:";
 const TOOL_KINDS: readonly WorkspaceToolKind[] = ["docker", "api", "changes"];
 const TOOL_TITLE_KEYS = {
@@ -65,7 +68,7 @@ function toolFromTabId(id: string | undefined): WorkspaceToolKind | undefined {
  *  the order they were opened. */
 export function workspaceTabsFrom(
   snapshot: { tabs: readonly MobileWorkspaceTab[] },
-  openTools: readonly WorkspaceToolKind[],
+  openTools: readonly WorkspaceOpenTool[],
   language: Language,
 ): WorkspaceTabItem[] {
   const tabs: WorkspaceTabItem[] = [];
@@ -77,7 +80,7 @@ export function workspaceTabsFrom(
       tabs.push({ id: tab.id, kind: tab.kind, inline: false, title: tab.title, closable: false });
     }
   }
-  for (const tool of new Set(openTools)) {
+  for (const { kind: tool } of openTools) {
     tabs.push({
       id: toolTabId(tool),
       kind: tool,
@@ -89,23 +92,86 @@ export function workspaceTabsFrom(
   return tabs;
 }
 
+/** A wide strip tab: any project's tab, labelled with its project. */
+export type WorkspaceStripTab = WorkspaceTabItem & {
+  project: string;
+  /** "project · title". */
+  label: string;
+};
+
+/** The wide strip, across every project: each project's tabs in the
+ *  snapshot's order (projects in their own order), then the tools opened
+ *  here, each labelled and routed by the project it was opened for. */
+export function workspaceTabsAll(
+  projects: readonly { name: string; tabs: readonly MobileWorkspaceTab[] }[],
+  openTools: readonly WorkspaceOpenTool[],
+  language: Language,
+): WorkspaceStripTab[] {
+  const all: WorkspaceStripTab[] = [];
+  for (const project of projects) {
+    for (const tab of workspaceTabsFrom({ tabs: project.tabs }, [], language)) {
+      all.push({ ...tab, project: project.name, label: `${project.name} · ${tab.title}` });
+    }
+  }
+  for (const tool of openTools) {
+    for (const tab of workspaceTabsFrom({ tabs: [] }, [tool], language)) {
+      all.push({ ...tab, project: tool.project, label: `${tool.project} · ${tab.title}` });
+    }
+  }
+  return all;
+}
+
+/** The dot on a strip tab: drawn only for a terminal tab whose panes have
+ *  been read and include one that exited (there is no tab-to-session link
+ *  for a "waiting" dot). */
+export function tabStatusDot(
+  tab: Pick<WorkspaceTabItem, "id" | "kind">,
+  panes: readonly TerminalPaneInfo[],
+  panesTabId: string | undefined,
+): "exited" | undefined {
+  if (tab.kind !== "terminal" || panesTabId !== tab.id) return undefined;
+  return panes.some((pane) => pane.exited) ? "exited" : undefined;
+}
+
 /** The open tools, plus the one a `?tab=` param names (a reload or a
- *  shared link keeps its tool open). */
+ *  shared link keeps its tool open, for `project`). */
 export function openToolsWith(
-  openTools: readonly WorkspaceToolKind[],
+  openTools: readonly WorkspaceOpenTool[],
   param: string | undefined,
-): WorkspaceToolKind[] {
+  project: string,
+): WorkspaceOpenTool[] {
   const tool = toolFromTabId(param);
-  if (tool === undefined || openTools.includes(tool)) return [...openTools];
-  return [...openTools, tool];
+  if (tool === undefined || openTools.some((open) => open.kind === tool)) return [...openTools];
+  return [...openTools, { kind: tool, project }];
+}
+
+/** Opens a tool for a project; a tool of the same kind opened for another
+ *  project is re-pointed there (a tool's tab id is its kind). */
+export function withTool(
+  openTools: readonly WorkspaceOpenTool[],
+  kind: WorkspaceToolKind,
+  project: string,
+): WorkspaceOpenTool[] {
+  const index = openTools.findIndex((open) => open.kind === kind);
+  if (index < 0) return [...openTools, { kind, project }];
+  return openTools.map((open, at) => (at === index ? { kind, project } : open));
 }
 
 export function withoutTool(
-  openTools: readonly WorkspaceToolKind[],
+  openTools: readonly WorkspaceOpenTool[],
   id: string,
-): WorkspaceToolKind[] {
+): WorkspaceOpenTool[] {
   const tool = toolFromTabId(id);
-  return openTools.filter((open) => open !== tool);
+  return openTools.filter((open) => open.kind !== tool);
+}
+
+/** The project a tool tab id was opened for. */
+export function toolProjectOf(
+  openTools: readonly WorkspaceOpenTool[],
+  id: string | undefined,
+): string | undefined {
+  const tool = toolFromTabId(id);
+  return openTools.find((open) => open.kind === tool)?.project;
 }
 
 /** The selected tab: the param when it names an inline tab, otherwise the

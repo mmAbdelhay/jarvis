@@ -46,7 +46,15 @@ export type Prefs = {
   // page load needs a passkey or the password (web-device-auth.ts).
   // The native app ignores it.
   keepSignedIn: boolean;
+  // Wide Changes: the diff's layout. Absent until the viewer picks one
+  // (read as "unified"); anything but a known value is dropped.
+  changesDiffMode?: DiffMode;
 };
+
+export type DiffMode = "unified" | "split";
+export function isDiffMode(value: unknown): value is DiffMode {
+  return value === "unified" || value === "split";
+}
 
 export const IDLE_LOCK_MINUTES = [5, 15, 30, 60] as const;
 export type IdleLockMinutes = (typeof IDLE_LOCK_MINUTES)[number];
@@ -155,8 +163,12 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     : DEFAULT_IDLE_LOCK_MINUTES;
   const refreshTokenStored = raw.refreshTokenStored === true;
   const keepSignedIn = raw.keepSignedIn === true;
+  const changesDiffMode = isDiffMode(raw.changesDiffMode)
+    ? { changesDiffMode: raw.changesDiffMode }
+    : {};
 
   return {
+    ...changesDiffMode,
     language,
     speakReplies,
     notifications,
@@ -199,4 +211,19 @@ export async function setKeepSignedIn(
 ): Promise<void> {
   const current = await loadPrefs(store, localeTag);
   await savePrefs(store, { ...current, keepSignedIn });
+}
+
+/** The saved diff layout for wide Changes ("unified" when none is saved). */
+export async function loadDiffMode(store: PrefsStore, localeTag: string): Promise<DiffMode> {
+  return (await loadPrefs(store, localeTag)).changesDiffMode ?? "unified";
+}
+
+/** Saves the diff layout (load, change one key, save). */
+export async function setDiffMode(
+  store: PrefsStore,
+  localeTag: string,
+  changesDiffMode: DiffMode,
+): Promise<void> {
+  const current = await loadPrefs(store, localeTag);
+  await savePrefs(store, { ...current, changesDiffMode });
 }

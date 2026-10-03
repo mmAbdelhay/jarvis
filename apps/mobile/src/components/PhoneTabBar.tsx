@@ -1,5 +1,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/Icon";
+import type { IconName } from "@/lib/icon-paths";
 import { t, type Language, type MessageKey } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 
@@ -10,9 +12,9 @@ export type TabBarInput = {
 };
 
 type Slot =
-  | { kind: "tab"; route: string; label: MessageKey; glyph: string }
+  | { kind: "tab"; route: string; label: MessageKey; icon: IconName }
   | { kind: "talk"; route: string }
-  | { kind: "link"; label: MessageKey; glyph: string; onPress(): void };
+  | { kind: "link"; label: MessageKey; icon: IconName; onPress(): void };
 
 /**
  * The phone's bottom bar: Home, Sessions, a raised Talk button in the
@@ -23,14 +25,14 @@ export function PhoneTabBar(props: TabBarInput & { language: Language; onChanges
   const insets = useSafeAreaInsets();
   const current = props.state.routes[props.state.index]?.name;
   const slots: Slot[] = [
-    { kind: "tab", route: "dashboard", label: "nav.dashboard", glyph: "⌂" },
-    { kind: "tab", route: "sessions", label: "nav.sessions", glyph: "≡" },
+    { kind: "tab", route: "dashboard", label: "nav.dashboard", icon: "home" },
+    { kind: "tab", route: "sessions", label: "nav.sessions", icon: "sessions" },
     { kind: "talk", route: "voice" },
-    { kind: "tab", route: "workspace", label: "nav.workspace", glyph: "⊞" },
-    { kind: "link", label: "nav.changes", glyph: "±", onPress: props.onChanges },
+    { kind: "tab", route: "workspace", label: "nav.workspace", icon: "workspace" },
+    { kind: "link", label: "nav.changes", icon: "changes", onPress: props.onChanges },
   ];
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 26) }]}>
       {slots.map((slot) => {
         if (slot.kind === "talk") {
           const active = current === slot.route;
@@ -41,10 +43,9 @@ export function PhoneTabBar(props: TabBarInput & { language: Language; onChanges
                 accessibilityLabel={t(props.language, "nav.talk")}
                 accessibilityState={{ selected: active }}
                 onPress={() => props.navigation.navigate(slot.route)}
-                style={[styles.talk, active && styles.talkActive]}
+                style={styles.talk}
               >
-                <View style={styles.micHead} />
-                <View style={styles.micStem} />
+                <Icon name="mic" size={24} strokeWidth={2.2} color={theme.colors.primaryText} />
               </TouchableOpacity>
             </View>
           );
@@ -61,7 +62,7 @@ export function PhoneTabBar(props: TabBarInput & { language: Language; onChanges
             }
             style={styles.slot}
           >
-            <Text style={[styles.glyph, { color }]}>{slot.glyph}</Text>
+            <Icon name={slot.icon} size={22} color={color} />
             <Text style={[styles.label, { color }, active && styles.labelActive]} numberOfLines={1}>
               {t(props.language, slot.label)}
             </Text>
@@ -77,29 +78,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingTop: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 10,
     borderTopWidth: 1,
     borderTopColor: theme.colors.hairlineSoft,
     backgroundColor: theme.colors.surfaceDim,
   },
-  slot: { flex: 1, minHeight: 48, alignItems: "center", justifyContent: "center", gap: 2 },
-  glyph: { fontFamily: theme.font.semibold, fontSize: 20, lineHeight: 24 },
+  slot: { flex: 1, minHeight: 48, alignItems: "center", justifyContent: "center", gap: 3 },
   label: { fontFamily: theme.font.semibold, fontSize: 11 },
   labelActive: { fontFamily: theme.font.bold },
   talk: {
     width: 58,
     height: 58,
-    marginTop: -24,
+    marginTop: -22,
     borderRadius: 999,
     borderWidth: 4,
     borderColor: theme.colors.ground,
     backgroundColor: theme.colors.accent,
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
   },
-  talkActive: { borderColor: theme.colors.accentSoft },
-  // A microphone from two views: a rounded capsule and its stand.
-  micHead: { width: 10, height: 16, borderRadius: 5, backgroundColor: theme.colors.primaryText },
-  micStem: { width: 2, height: 5, borderRadius: 1, backgroundColor: theme.colors.primaryText },
 });

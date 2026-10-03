@@ -114,3 +114,9 @@ export async function saveWorktreeMode(
   }
   return parseSaveReply(result.value);
 }
+
+/** Wide Settings edits the worktree mode as a draft: Save and Discard
+ *  are live only while the chosen mode differs from the saved one. */
+export function worktreeDraft(saved: WorktreeMode, chosen: WorktreeMode): { dirty: boolean } {
+  return { dirty: saved !== chosen };
+}

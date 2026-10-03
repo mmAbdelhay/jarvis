@@ -27,7 +27,9 @@ export const STRINGS = {
   "nav.voice": { en: "Voice", ar: "الصوت" },
   "nav.changes": { en: "Changes", ar: "التغييرات" },
   "nav.history": { en: "History", ar: "السجل" },
+  "nav.capacity": { en: "CAPACITY", ar: "السعة" },
   "nav.talk": { en: "Talk to Jarvis", ar: "تحدّث إلى جارفيس" },
+  "plans.close": { en: "Close the plan", ar: "أغلق الخطة" },
   "plans.openPlan": { en: "Open the plan", ar: "افتح الخطة" },
   "plans.stripTitle": { en: "PLAN", ar: "الخطة" },
   "plans.stripProgress": { en: "PLAN · {done} OF {total}", ar: "الخطة · {done} من {total}" },
@@ -43,6 +45,9 @@ export const STRINGS = {
   "terminal.prevCommand": { en: "Previous command", ar: "الأمر السابق" },
   "terminal.nextCommand": { en: "Next command", ar: "الأمر التالي" },
   "terminal.latest": { en: "Latest", ar: "الأحدث" },
+  "terminal.scrolledBack": { en: "Scrolled back", ar: "تم التمرير للخلف" },
+  "terminal.pane": { en: "Pane {n}", ar: "لوحة {n}" },
+  "terminal.typePlaceholder": { en: "Type a command or reply", ar: "اكتب أمرًا أو ردًّا" },
   "terminal.arrowPad": { en: "Arrow pad", ar: "لوحة الأسهم" },
   "terminal.arrowPadHint": {
     en: "drag to move the cursor",
@@ -147,6 +152,16 @@ export const STRINGS = {
   "home.sessionsDays": { en: "last {days} days", ar: "آخر {days} يومًا" },
   "home.sessionsTotal": { en: "{count} started", ar: "بدأت {count}" },
   "home.active": { en: "ACTIVE", ar: "النشطة" },
+  "home.running": { en: "running {time}", ar: "يعمل منذ {time}" },
+  "home.waiting": { en: "waiting", ar: "بانتظارك" },
+  "home.newTerminal": { en: "New terminal", ar: "طرفية جديدة" },
+  "home.newSession": { en: "New session", ar: "جلسة جديدة" },
+  "home.connectedTo": { en: "{name} connected", ar: "{name} متصل" },
+  "home.laptop": { en: "Laptop", ar: "الحاسوب" },
+  "home.sessions14": { en: "Sessions · 14 days", ar: "الجلسات · 14 يومًا" },
+  "home.activeSessions": { en: "ACTIVE SESSIONS", ar: "الجلسات النشطة" },
+  "home.capacityWindow": { en: "{name} · {window}", ar: "{name} — {window}" },
+  "home.resetsOn": { en: "resets {date}", ar: "يُعاد في {date}" },
   "nav.workspace": { en: "Workspace", ar: "مساحة العمل" },
   // The wide shell's top bar (desktop renderer's "N running" pill).
   "shell.running": { en: "{count} running", ar: "{count} قيد التشغيل" },
@@ -157,6 +172,7 @@ export const STRINGS = {
     en: "Search by task, project or agent",
     ar: "ابحث بالمهمة أو المشروع أو الوكيل",
   },
+  "sessions.searchHint": { en: "Search  ( / )", ar: "بحث  ( / )" },
   "sessions.clearSearch": { en: "Clear search", ar: "امسح البحث" },
   "sessions.noMatch": { en: "No sessions match.", ar: "لا جلسات مطابقة." },
   "sessions.filterAll": { en: "All", ar: "الكل" },
@@ -165,6 +181,19 @@ export const STRINGS = {
   "sessions.filterDone": { en: "Done", ar: "منتهية" },
   "sessions.today": { en: "TODAY", ar: "اليوم" },
   "sessions.yesterday": { en: "YESTERDAY", ar: "أمس" },
+  "sessions.new": { en: "New", ar: "جديدة" },
+  "sessions.newTitle": { en: "New session", ar: "جلسة جديدة" },
+  "sessions.newHint": {
+    en: "Open a terminal in a project",
+    ar: "افتح طرفية في أحد المشاريع",
+  },
+  "sessions.newAskJarvis": { en: "Ask Jarvis", ar: "اسأل جارفيس" },
+  "sessions.newNoProjects": { en: "No projects found.", ar: "لا توجد مشاريع." },
+  "sessions.project": { en: "Project", ar: "المشروع" },
+  "sessions.allProjects": { en: "All projects", ar: "كل المشاريع" },
+  "sessions.asks": { en: "Asks: {question}", ar: "يسأل: {question}" },
+  "sessions.imported": { en: "imported", ar: "مستورَدة" },
+  "sessions.loadMore": { en: "Load older sessions", ar: "حمّل جلسات أقدم" },
   "voice.readAloud": { en: "Read aloud", ar: "قراءة بصوت عالٍ" },
   "common.back": { en: "Back", ar: "رجوع" },
   "pair.title": {
@@ -179,10 +208,6 @@ export const STRINGS = {
     en: "Settings",
     ar: "الإعدادات",
   },
-  "settings.sectionNav": {
-    en: "Settings sections",
-    ar: "أقسام الإعدادات",
-  },
   "settings.section.general": {
     en: "General",
     ar: "عام",
@@ -195,6 +220,23 @@ export const STRINGS = {
     en: "Remote access",
     ar: "الوصول عن بُعد",
   },
+  "settings.thisDevice": { en: "This device", ar: "هذا الجهاز" },
+  "settings.thisDevice.web": { en: "This browser", ar: "هذا المتصفح" },
+  "settings.theLaptop": { en: "The laptop", ar: "الحاسوب" },
+  "settings.scopeTabs": { en: "Settings scope", ar: "نطاق الإعدادات" },
+  "settings.pairedDevices": { en: "Paired devices", ar: "الأجهزة المقترنة" },
+  "settings.devicesNote": {
+    en: "Pairing a new device and changing the owner password stay on the laptop.",
+    ar: "اقتران جهاز جديد وتغيير كلمة مرور المالك يبقيان على الحاسوب.",
+  },
+  "settings.current": { en: "current", ar: "الحالي" },
+  "settings.saveToLaptop": { en: "Save to the laptop", ar: "حفظ على الحاسوب" },
+  "settings.discard": { en: "Discard", ar: "تجاهل" },
+  "settings.worktreeHint": {
+    en: "Give parallel agents their own checkout",
+    ar: "امنح الوكلاء المتوازيين نسخة عمل خاصة بكل منهم",
+  },
+  "laptopSettings.worktreesLabel": { en: "Worktree per session", ar: "worktree لكل جلسة" },
   "settings.language": {
     en: "Language",
     ar: "اللغة",
@@ -703,6 +745,19 @@ export const STRINGS = {
   "key.ctrl": { en: "Control", ar: "تحكم" },
   "key.alt": { en: "Alt", ar: "بديل" },
   "key.ctrlC": { en: "Interrupt", ar: "مقاطعة" },
+  "key.ctrlR": { en: "Reverse search", ar: "بحث عكسي" },
+  "key.pipe": { en: "Pipe", ar: "الشريط العمودي" },
+  "key.tilde": { en: "Tilde", ar: "تيلدا" },
+  "keys.more": { en: "More keys", ar: "مفاتيح إضافية" },
+  "keys.less": { en: "Fewer keys", ar: "مفاتيح أقل" },
+  "session.more": { en: "More actions", ar: "المزيد من الإجراءات" },
+  "session.files": { en: "Files", ar: "الملفات" },
+  "session.sendHint": { en: "( {key} Enter to send )", ar: "( {key} Enter للإرسال )" },
+  "session.send": { en: "Send", ar: "إرسال" },
+  "session.branch": { en: "branch", ar: "الفرع" },
+  "session.keys": { en: "Keys", ar: "المفاتيح" },
+  "plans.ofTotal": { en: "{done} of {total}", ar: "{done} من {total}" },
+  "session.messagePlaceholder": { en: "Message {agent}", ar: "رسالة إلى {agent}" },
   "key.left": { en: "Left arrow", ar: "سهم لليسار" },
   "key.up": { en: "Up arrow", ar: "سهم للأعلى" },
   "key.down": { en: "Down arrow", ar: "سهم للأسفل" },
@@ -737,6 +792,11 @@ export const STRINGS = {
   "changes.fileCount": { en: "{count} FILES", ar: "{count} ملفات" },
   "changes.pull": { en: "Pull", ar: "سحب" },
   "changes.push": { en: "Push", ar: "دفع" },
+  "changes.openPr": { en: "Open PR", ar: "افتح طلب سحب" },
+  "changes.pushCount": { en: "Push {count}", ar: "دفع {count}" },
+  "changes.stageAll": { en: "Stage all", ar: "إضافة الكل" },
+  "changes.unstageAll": { en: "Unstage all", ar: "إزالة الكل" },
+  "changes.base": { en: "base", ar: "الأساس" },
   "changes.pullRequest": { en: "Pull request", ar: "طلب سحب" },
   "changes.noUpstream": { en: "not on a remote yet", ar: "ليس على البعيد بعد" },
   "changes.branches": { en: "Branch", ar: "الفرع" },
@@ -783,6 +843,17 @@ export const STRINGS = {
     en: "The server's reply couldn't be read.",
     ar: "تعذّرت قراءة رد الخادم.",
   },
+  // Wide Changes: grouped file lists, the diff mode switch, the commit box.
+  "changes.stagedCount": { en: "STAGED {count}", ar: "مُضاف {count}" },
+  "changes.notStaged": { en: "NOT STAGED {count}", ar: "غير مُضاف {count}" },
+  "changes.unified": { en: "Unified", ar: "موحّد" },
+  "changes.split": { en: "Split", ar: "متجاور" },
+  "changes.diffView": { en: "Diff view", ar: "عرض الفروقات" },
+  "changes.commitMessage": { en: "Commit message", ar: "رسالة الحفظ" },
+  "changes.commitOne": { en: "Commit 1 file", ar: "احفظ ملفًا واحدًا" },
+  "changes.commitTwo": { en: "Commit 2 files", ar: "احفظ ملفين" },
+  "changes.commitFiles": { en: "Commit {count} files", ar: "احفظ {count} ملفات" },
+  "changes.commitMany": { en: "Commit {count} files", ar: "احفظ {count} ملفًا" },
   "history.search": { en: "Search history", ar: "ابحث في السجل" },
   "history.searchPlaceholder": {
     en: "Search tasks, projects and agents",
@@ -800,6 +871,11 @@ export const STRINGS = {
   "history.empty": { en: "No saved sessions.", ar: "لا توجد جلسات محفوظة." },
   "history.emptyTranscript": { en: "No transcript entries.", ar: "لا توجد مدخلات نصية." },
   "history.notFound": { en: "Session not found.", ar: "الجلسة غير موجودة." },
+  "history.allProjects": { en: "All projects", ar: "كل المشاريع" },
+  "history.allAgents": { en: "All agents", ar: "كل الوكلاء" },
+  "history.resumeInTerminal": { en: "Resume in a terminal", ar: "استئناف في طرفية" },
+  "history.projectFilter": { en: "Filter by project", ar: "التصفية حسب المشروع" },
+  "history.agentFilter": { en: "Filter by agent", ar: "التصفية حسب الوكيل" },
   "history.user": { en: "User", ar: "المستخدم" },
   "history.assistant": { en: "Assistant", ar: "المساعد" },
   "voice.title": { en: "Voice", ar: "الصوت" },
@@ -1041,7 +1117,7 @@ export const STRINGS = {
     ar: "إصدار جارفيس على هذا الجهاز قديم — التحديثات المباشرة متوقفة. اسحب للتحديث بدلاً من ذلك.",
   },
   "workspace.noTabs": { en: "No open tabs.", ar: "لا توجد تبويبات مفتوحة." },
-  "workspace.openOnLaptop": { en: "Open on the laptop", ar: "مفتوح على الحاسوب" },
+  "workspace.openOnLaptop": { en: "OPEN ON THE LAPTOP", ar: "مفتوح على الحاسوب" },
   "workspace.newTerminal": { en: "New terminal", ar: "طرفية جديدة" },
   "workspace.openingTerminal": { en: "Opening…", ar: "جارٍ الفتح…" },
   "workspace.terminal": { en: "Terminal", ar: "الطرفية" },
@@ -1064,10 +1140,41 @@ export const STRINGS = {
     ar: "افتح أداة، أو افتح طرفية على الحاسوب.",
   },
   "workspace.closeTab": { en: "Close {title}", ar: "إغلاق {title}" },
-  "workspace.panes.title": { en: "Terminal panes", ar: "أجزاء الطرفية" },
-  "workspace.panes.empty": { en: "No panes.", ar: "لا توجد أجزاء." },
+  "workspace.panes.title": { en: "Terminal panes", ar: "لوحات الطرفية" },
+  "workspace.panes.empty": { en: "No panes.", ar: "لا توجد لوحات." },
   "workspace.panes.exited": { en: "Exited", ar: "منتهية" },
   "workspace.panes.live": { en: "Live", ar: "مباشرة" },
+  "workspace.addTab": { en: "Tab", ar: "تبويب" },
+  "workspace.addTabTitle": { en: "Add a tab", ar: "إضافة تبويب" },
+  "workspace.files": { en: "FILES", ar: "الملفات" },
+  "workspace.newTab": { en: "New tab", ar: "تبويب جديد" },
+  "workspace.tabActions": { en: "Tab actions: {title}", ar: "إجراءات التبويب: {title}" },
+  "workspace.newTabProject": { en: "Which project?", ar: "أي مشروع؟" },
+  "terminal.historyHint": { en: "⌃R history", ar: "⌃R السجل" },
+  "plans.sessionPlan": { en: "Session plan", ar: "خطة الجلسة" },
+  "workspace.filesNeedTerminal": {
+    en: "Open a terminal on the laptop to browse this project's files.",
+    ar: "افتح طرفية على الحاسوب لتصفح ملفات هذا المشروع.",
+  },
+  "workspace.kindWeb": { en: "Web", ar: "ويب" },
+  "workspace.kindSubtitle.terminal": { en: "tap to see its panes", ar: "المس لعرض لوحاتها" },
+  "workspace.kindSubtitle.docker": { en: "containers and logs", ar: "الحاويات والسجلات" },
+  "workspace.kindSubtitle.api": { en: "requests and collections", ar: "الطلبات والمجموعات" },
+  "workspace.kindSubtitle.editor": {
+    en: "opens through the secure proxy",
+    ar: "يفتح عبر الوسيط الآمن",
+  },
+  "workspace.kindSubtitle.database": {
+    en: "opens through the secure proxy",
+    ar: "يفتح عبر الوسيط الآمن",
+  },
+  "workspace.kindSubtitle.cluster": {
+    en: "opens through the secure proxy",
+    ar: "يفتح عبر الوسيط الآمن",
+  },
+  "workspace.kindSubtitle.browser": { en: "opens in the browser", ar: "يفتح في المتصفح" },
+  "workspace.kindSubtitle.chat": { en: "opens in the browser", ar: "يفتح في المتصفح" },
+  "files.trashShort": { en: "Trash", ar: "المهملات" },
   "terminal.notFound": {
     en: "This terminal pane is no longer available.",
     ar: "لم تعد هذه اللوحة الطرفية متاحة.",
@@ -1385,6 +1492,51 @@ export function t(
   return template.replace(PLACEHOLDER_PATTERN, (match, name: string) =>
     Object.hasOwn(params, name) ? String(params[name]) : match,
   );
+}
+
+/** "2 panes": a counted noun. Arabic takes the singular "لوحة واحدة", the
+ *  dual "لوحتان", the plural "N لوحات" for 3-10, and the singular again
+ *  after a number for 11 and up ("11 لوحة"). */
+export function paneCountText(language: Language, count: number): string {
+  if (language === "en") return count === 1 ? "1 pane" : `${count} panes`;
+  if (count === 1) return "لوحة واحدة";
+  if (count === 2) return "لوحتان";
+  const tail = count % 100;
+  return tail >= 3 && tail <= 10 ? `${count} لوحات` : `${count} لوحة`;
+}
+
+/** Arabic counted noun: singular for 1, dual for 2, plural for 3-10, and the
+ *  singular again after the number for 11 and up. */
+function arabicCounted(
+  count: number,
+  forms: { one: string; two: string; few: string; many: string },
+): string {
+  if (count === 1) return forms.one;
+  if (count === 2) return forms.two;
+  const tail = count % 100;
+  return tail >= 3 && tail <= 10 ? `${count} ${forms.few}` : `${count} ${forms.many}`;
+}
+
+/** The Home sessions tile's "today: 3 sessions". */
+export function todaySessionsText(language: Language, count: number): string {
+  if (language === "en") return `today: ${count} ${count === 1 ? "session" : "sessions"}`;
+  return `اليوم: ${arabicCounted(count, { one: "جلسة واحدة", two: "جلستان", few: "جلسات", many: "جلسة" })}`;
+}
+
+/** The plan sheet's send button: "Send 3 notes to Claude". */
+export function sendNotesText(language: Language, count: number): string {
+  if (language === "en") return `Send ${count} ${count === 1 ? "note" : "notes"} to Claude`;
+  return `إرسال ${arabicCounted(count, { one: "ملاحظة واحدة", two: "ملاحظتين", few: "ملاحظات", many: "ملاحظة" })} إلى Claude`;
+}
+
+/** Apple platforms send with Cmd; everything else with Ctrl. */
+export function isApplePlatform(navigatorLike: { platform?: string; userAgent?: string }): boolean {
+  return /mac|iphone|ipad|ipod/i.test(navigatorLike.platform || navigatorLike.userAgent || "");
+}
+
+/** The compose field's "( Cmd Enter to send )" hint. */
+export function sendHintText(language: Language, apple: boolean): string {
+  return t(language, "session.sendHint", { key: apple ? "⌘" : "Ctrl" });
 }
 
 export function languageFromLocale(localeTag: string): Language {
