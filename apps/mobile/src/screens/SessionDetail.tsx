@@ -17,7 +17,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { ActionSheet } from "@/components/ActionSheet";
 import { ComposeBar } from "@/components/ComposeBar";
+import { IconButton } from "@/components/IconButton";
 import { KeyBar } from "@/components/KeyBar";
 import { MicButton } from "@/components/MicButton";
 import { PromptCard } from "@/components/PromptCard";
@@ -25,6 +27,7 @@ import { ResumeButton } from "@/components/ResumeButton";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { SegmentTabs } from "@/components/SegmentTabs";
 import { TerminalWebView, type TerminalWebViewHandle } from "@/components/TerminalWebView";
+import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
@@ -48,6 +51,7 @@ import {
   isEnded,
   notFoundText,
   sendResultText,
+  sessionSubtitle,
   streamStatusKey,
   trimmedAmount,
 } from "@/lib/session-screen";
@@ -57,8 +61,14 @@ import {
   type SessionStreamView,
 } from "@/lib/session-stream";
 import { createSessionsStore, type SessionsStore, type SessionsView } from "@/lib/sessions-store";
-import type { KeyName, Latch } from "@/lib/terminal-keys";
-import { sgrWheelSequence } from "@/lib/terminal-keys";
+import {
+  type BarKey,
+  isTextKey,
+  MORE_KEYS,
+  SESSION_KEYS,
+  sgrWheelSequence,
+  TEXT_KEY_VALUE,
+} from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
 import type { VoiceView } from "@/lib/voice-controller";
@@ -96,6 +106,10 @@ export function SessionDetail(props: {
     ignoredCount: 0,
   });
   const [connection, setConnection] = useState(client.state());
+  const countsStore = useMemo(() => createChangeCountsStore({ client }), [client]);
+  const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
+  const [now, setNow] = useState(() => realClock.now());
+  const [menuOpen, setMenuOpen] = useState(false);
   const [armed, setArmed] = useState<Latches>(NO_LATCHES);
   const [keyNotice, setKeyNotice] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -194,12 +208,21 @@ export function SessionDetail(props: {
       setConnection(client.state());
       if (ownStore) store.focus();
       setSessions(store.get());
+      const unsubscribeCounts = countsStore.subscribe(setCounts);
+      countsStore.focus();
+      setCounts(countsStore.get());
+      // The header's elapsed time moves on by the minute.
+      setNow(realClock.now());
+      const tick = setInterval(() => setNow(realClock.now()), 30_000);
       return () => {
+        clearInterval(tick);
+        unsubscribeCounts();
+        countsStore.blur();
         unsubscribe();
         unsubscribeConnection();
         if (ownStore) store.blur();
       };
-    }, [store, client, ownStore]),
+    }, [store, client, ownStore, countsStore]),
   );
 
   // Bug 10: app/_layout.tsx locks PORTRAIT_UP globally; unlocks the moment
@@ -296,7 +319,7 @@ export function SessionDetail(props: {
   }, [ended]);
   const disabled = ended || connection !== "open";
 
-  async function onKey(key: KeyName | Latch) {
+  async function onKey(key: BarKey) {
     const input = inputRef.current;
     if (input === undefined || disabled) return;
     if (key === "ctrl" || key === "alt") {
@@ -304,7 +327,7 @@ export function SessionDetail(props: {
       return;
     }
     // The Alt latch is spent the moment the key goes, not when it lands.
-    const pending = input.sendKey(key);
+    const pending = isTextKey(key) ? input.sendText(TEXT_KEY_VALUE[key]) : input.sendKey(key);
     setArmed(latchesOf(input));
     const result = await pending;
     if (inputRef.current !== input) return;
@@ -316,20 +339,21 @@ export function SessionDetail(props: {
   if (!found) {
     const text = notFoundText(sessions, language);
     return (
-      <View style={styles.container}>
+      <View style={styles.missing}>
         {!embedded && <ScreenHeader title={t(language, "sessions.title")} onBack={router.back} />}
-        <Text style={styles.status}>{text}</Text>
+        <Text style={styles.missingText}>{text}</Text>
         <TouchableOpacity
           onPress={() => {
             void store.refresh();
           }}
         >
-          <Text style={styles.status}>{t(language, "common.retry")}</Text>
+          <Text style={styles.missingText}>{t(language, "common.retry")}</Text>
         </TouchableOpacity>
       </View>
     );
   }
   const statusKey = streamStatusKey(streamView);
+  const changedFiles = Object.hasOwn(counts, id) ? counts[id]?.files : undefined;
   const mic = micButtonState(voiceView, { sessionEnded: ended, forSession: true });
   const voiceNotice = voiceView.notice;
   const voiceNoticeKey =
@@ -346,45 +370,74 @@ export function SessionDetail(props: {
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      {embedded ? (
-        <>
-          <Text style={styles.title} numberOfLines={1}>
-            {row.summary}
-          </Text>
-          <Text style={styles.label}>{row.label}</Text>
-        </>
-      ) : (
-        <ScreenHeader title={row.summary} subtitle={row.label} subtitleMono onBack={router.back} />
-      )}
-      <View style={styles.tabs}>
-        <SegmentTabs
-          label={t(language, "session.views")}
-          tabs={[
-            { key: "live", label: t(language, "session.live"), selected: true, onPress: () => {} },
-            {
-              key: "changes",
-              label: t(language, "changes.title"),
-              selected: false,
-              onPress: () => router.push({ pathname: "/changes", params: { id } }),
-            },
-            {
-              key: "plan",
-              label: t(language, "plans.title"),
-              ...(planProgress === undefined
-                ? {}
-                : { badge: `${planProgress.done}/${planProgress.total}` }),
-              selected: planVisible,
-              onPress: () => setPlanVisible(true),
-            },
-            {
-              key: "transcript",
-              label: t(language, "history.transcript"),
-              selected: false,
-              onPress: () => router.push({ pathname: "/transcript/[id]", params: { id } }),
-            },
-          ]}
+      <View style={styles.header}>
+        <ScreenHeader
+          title={row.summary}
+          subtitle={sessionSubtitle(row, now)}
+          bordered={false}
+          {...(embedded ? {} : { onBack: router.back })}
+          trailing={
+            <IconButton
+              icon="more"
+              label={t(language, "session.more")}
+              iconSize={18}
+              onPress={() => setMenuOpen(true)}
+            />
+          }
         />
+        <View style={styles.tabs}>
+          <SegmentTabs
+            label={t(language, "session.views")}
+            tabs={[
+              {
+                key: "live",
+                label: t(language, "session.live"),
+                selected: true,
+                onPress: () => {},
+              },
+              {
+                key: "changes",
+                label: t(language, "changes.title"),
+                ...(changedFiles === undefined || changedFiles === 0
+                  ? {}
+                  : { badge: String(changedFiles), badgeTone: "success" as const }),
+                selected: false,
+                onPress: () => router.push({ pathname: "/changes", params: { id } }),
+              },
+              {
+                key: "plan",
+                label: t(language, "plans.title"),
+                ...(planProgress === undefined
+                  ? {}
+                  : {
+                      badge: `${planProgress.done}/${planProgress.total}`,
+                      badgeTone: "muted" as const,
+                    }),
+                selected: planVisible,
+                onPress: () => setPlanVisible(true),
+              },
+              {
+                key: "files",
+                label: t(language, "session.files"),
+                selected: false,
+                onPress: () => router.push("/workspace"),
+              },
+            ]}
+          />
+        </View>
       </View>
+      <ActionSheet
+        visible={menuOpen}
+        title={row.summary}
+        actions={[
+          {
+            key: "transcript",
+            label: t(language, "history.transcript"),
+            onPress: () => router.push({ pathname: "/transcript/[id]", params: { id } }),
+          },
+        ]}
+        onClose={() => setMenuOpen(false)}
+      />
       <PlanSheet
         visible={planVisible}
         store={plansStore}
@@ -392,155 +445,174 @@ export function SessionDetail(props: {
         tabTitle={row.summary}
         onClose={() => setPlanVisible(false)}
       />
-      {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
-      {/* The laptop refuses a resume that names no project of its own (it has
+      <View style={styles.body}>
+        {ended && <Text style={styles.status}>{t(language, "session.ended")}</Text>}
+        {/* The laptop refuses a resume that names no project of its own (it has
           no screen selection to fall back on), so a session without one gets
           no button rather than a guaranteed refusal. */}
-      {ended && row.project !== null && (
-        <View style={styles.resume}>
-          <ResumeButton sessionId={id} project={row.project} state={row.state} />
-        </View>
-      )}
-      {streamView.gapCount > 0 && (
-        <Text style={styles.badge}>
-          {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
-        </Text>
-      )}
-      {statusKey && (
-        <TouchableOpacity
-          disabled={streamView.phase !== "failed"}
-          onPress={() => streamRef.current?.retry()}
-        >
-          <Text style={styles.status}>
-            {streamView.error?.kind === "remote" ? streamView.error.text : t(language, statusKey)}
+        {ended && row.project !== null && (
+          <View style={styles.resume}>
+            <ResumeButton sessionId={id} project={row.project} state={row.state} />
+          </View>
+        )}
+        {streamView.gapCount > 0 && (
+          <Text style={styles.badge}>
+            {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
           </Text>
-        </TouchableOpacity>
-      )}
-      <TerminalWebView
-        ref={webRef}
-        onReady={({ cols, rows }) => {
-          inputRef.current?.resize(cols, rows);
-          inputRef.current?.reassert();
-        }}
-        onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
-        onModes={(modes) => inputRef.current?.setModes(modes)}
-        onNeedsReplay={() => streamRef.current?.restart(sink)}
-        fixedSize={streamView.size}
-        onWheel={(direction) => {
-          void inputRef.current?.sendText(sgrWheelSequence(direction));
-        }}
-      />
-      {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
-      <KeyBar
-        disabled={disabled}
-        armed={armed}
-        onKey={(key) => {
-          void onKey(key);
-        }}
-      />
-      {prompt !== undefined && (
-        <View style={styles.promptSlot}>
+        )}
+        {statusKey && (
+          <TouchableOpacity
+            disabled={streamView.phase !== "failed"}
+            onPress={() => streamRef.current?.retry()}
+          >
+            <Text style={styles.status}>
+              {streamView.error?.kind === "remote" ? streamView.error.text : t(language, statusKey)}
+            </Text>
+          </TouchableOpacity>
+        )}
+        <View style={styles.output}>
+          <TerminalWebView
+            ref={webRef}
+            onReady={({ cols, rows }) => {
+              inputRef.current?.resize(cols, rows);
+              inputRef.current?.reassert();
+            }}
+            onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
+            onModes={(modes) => inputRef.current?.setModes(modes)}
+            onNeedsReplay={() => streamRef.current?.restart(sink)}
+            fixedSize={streamView.size}
+            onWheel={(direction) => {
+              void inputRef.current?.sendText(sgrWheelSequence(direction));
+            }}
+          />
+        </View>
+        {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
+        {prompt !== undefined && (
           <PromptCard
             prompt={prompt}
             busy={promptBusy}
             note={promptNote}
             onAnswer={onAnswer}
             heading={t(language, "prompt.waiting")}
+            hideDot
           />
-        </View>
-      )}
-      <View style={styles.composeRow}>
-        <View style={styles.composeBarSlot}>
-          <ComposeBar
-            disabled={disabled}
-            onSend={(text) =>
-              inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
-            }
-            onSent={() => setArmed(latchesOf(inputRef.current))}
-          />
-        </View>
-        <MicButton compact enabled={mic.enabled} active={mic.active} labelKey={mic.labelKey} />
+        )}
       </View>
-      {voiceNotice && (
-        <View style={styles.voiceNotice}>
-          {voiceNotice.code === "server" && voiceNotice.server && (
-            <Text
-              style={[
-                styles.status,
-                { writingDirection: textDirection(voiceNotice.server.language) },
-              ]}
-            >
-              {voiceNotice.server.text}
-            </Text>
-          )}
-          {voiceNotice.code !== "server" && voiceNoticeKey && (
-            <Text style={styles.status}>
-              {t(language, platformKey(voiceNoticeKey, clientPlatformFor(Platform.OS)))}
-            </Text>
-          )}
-          {voiceNotice.code === "sentToSession" && voiceNotice.server && (
-            <Text
-              style={[
-                styles.status,
-                { writingDirection: textDirection(voiceNotice.server.language) },
-              ]}
-            >
-              {voiceNotice.server.text}
-            </Text>
-          )}
-          {voiceNotice.code === "micBlocked" && (
-            <TouchableOpacity
-              accessibilityRole="button"
-              onPress={() => {
-                void Linking.openSettings();
-              }}
-            >
-              <Text style={styles.status}>{t(language, "voice.openSettings")}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      <View style={styles.footer}>
+        <KeyBar
+          variant="footer"
+          keys={SESSION_KEYS}
+          moreKeys={MORE_KEYS}
+          disabled={disabled}
+          armed={armed}
+          onKey={(key) => {
+            void onKey(key);
+          }}
+        />
+        <ComposeBar
+          disabled={disabled}
+          placeholder={t(language, "session.messagePlaceholder", { agent: row.agentId })}
+          onSend={(text) =>
+            inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
+          }
+          onSent={() => setArmed(latchesOf(inputRef.current))}
+          beforeSend={
+            <MicButton
+              variant="square"
+              enabled={mic.enabled}
+              active={mic.active}
+              labelKey={mic.labelKey}
+            />
+          }
+        />
+        {voiceNotice && (
+          <View style={styles.voiceNotice}>
+            {voiceNotice.code === "server" && voiceNotice.server && (
+              <Text
+                style={[
+                  styles.status,
+                  { writingDirection: textDirection(voiceNotice.server.language) },
+                ]}
+              >
+                {voiceNotice.server.text}
+              </Text>
+            )}
+            {voiceNotice.code !== "server" && voiceNoticeKey && (
+              <Text style={styles.status}>
+                {t(language, platformKey(voiceNoticeKey, clientPlatformFor(Platform.OS)))}
+              </Text>
+            )}
+            {voiceNotice.code === "sentToSession" && voiceNotice.server && (
+              <Text
+                style={[
+                  styles.status,
+                  { writingDirection: textDirection(voiceNotice.server.language) },
+                ]}
+              >
+                {voiceNotice.server.text}
+              </Text>
+            )}
+            {voiceNotice.code === "micBlocked" && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={() => {
+                  void Linking.openSettings();
+                }}
+              >
+                <Text style={styles.status}>{t(language, "voice.openSettings")}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  resume: { paddingHorizontal: 12, paddingBottom: 6 },
-  promptSlot: { marginHorizontal: 12, marginBottom: 8 },
-  tabs: { paddingHorizontal: 12, paddingBottom: 8, backgroundColor: theme.colors.ground },
-  container: { flex: 1, backgroundColor: theme.colors.terminalGround },
-  status: {
-    color: theme.colors.warning,
+  resume: { paddingBottom: 6 },
+  header: {
+    backgroundColor: theme.colors.ground,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.hairlineSoft,
+  },
+  tabs: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 10 },
+  // The padded strip under the footer (keyboard, home indicator) is the
+  // footer's own colour.
+  container: { flex: 1, backgroundColor: theme.colors.surfaceDim },
+  body: {
+    flex: 1,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: theme.colors.ground,
+  },
+  // The xterm WebView stays; the card frames it.
+  output: {
+    flex: 1,
+    overflow: "hidden",
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.hairlineSoft,
+    backgroundColor: theme.colors.terminalGround,
+  },
+  footer: {
+    gap: 10,
+    paddingTop: 10,
     paddingHorizontal: 12,
+    paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.hairlineSoft,
+    backgroundColor: theme.colors.surfaceDim,
+  },
+  missing: { flex: 1, backgroundColor: theme.colors.ground },
+  missingText: {
+    ...theme.type.meta,
+    color: theme.colors.warning,
+    paddingHorizontal: 16,
     paddingVertical: 6,
-    fontFamily: theme.font.body,
-    fontSize: 12,
   },
-  title: {
-    color: theme.colors.text,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-    fontFamily: theme.font.semibold,
-    fontSize: 15,
-    backgroundColor: theme.colors.ground,
-  },
-  label: {
-    color: theme.colors.textDim,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    fontFamily: theme.font.mono,
-    fontSize: 11,
-    backgroundColor: theme.colors.ground,
-  },
-  badge: { color: theme.colors.warning, padding: theme.spacing.sm },
-  composeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing.sm,
-    paddingHorizontal: 4,
-    backgroundColor: theme.colors.ground,
-  },
-  composeBarSlot: { flex: 1 },
-  voiceNotice: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
+  status: { ...theme.type.meta, color: theme.colors.warning, paddingVertical: 6 },
+  badge: { color: theme.colors.warning, paddingVertical: theme.spacing.sm },
+  voiceNotice: { paddingBottom: theme.spacing.sm },
 });

@@ -47,7 +47,7 @@ import {
 import { sendResultText, streamStatusKey, trimmedAmount } from "@/lib/session-screen";
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
-import type { KeyName, Latch } from "@/lib/terminal-keys";
+import { type KeyName, type Latch, TERMINAL_KEYS } from "@/lib/terminal-keys";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
 import { createTerminalInput } from "@/lib/terminal-input";
@@ -431,6 +431,7 @@ function TerminalPaneBody({
         />
       )}
       <KeyBar
+        keys={TERMINAL_KEYS}
         disabled={disabled}
         armed={armed}
         onKey={(key) => {

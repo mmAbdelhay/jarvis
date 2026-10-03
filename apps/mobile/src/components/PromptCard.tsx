@@ -24,13 +24,15 @@ export function PromptCard(props: {
   /** "row": one row of equal buttons without numbers (Home, two options or
    *  fewer); "stacked" (default): one numbered button per line. */
   layout?: "row" | "stacked";
+  /** The Session screen's card has no dot before its heading. */
+  hideDot?: boolean;
 }) {
   const row = props.layout === "row";
   return (
     <View style={styles.card} accessibilityRole="summary">
       <View style={styles.top}>
         <View style={styles.headingRow}>
-          <View style={styles.dot} />
+          {props.hideDot !== true && <View style={styles.dot} />}
           <Text style={styles.heading}>{props.heading}</Text>
         </View>
         {props.context !== undefined && (

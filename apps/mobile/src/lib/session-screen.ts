@@ -5,7 +5,8 @@ import { platformKey, t, type Language, type MessageKey } from "./i18n";
 import type { RpcError } from "./rpc-client";
 import type { SendResult } from "./session-input";
 import type { SessionStreamView } from "./session-stream";
-import type { KeyName, Latch } from "./terminal-keys";
+import { formatSessionElapsed } from "./format";
+import type { BarKey } from "./terminal-keys";
 
 export function sessionRouteId(param: unknown): string | undefined {
   return isSubscriptionKey(param) ? param : undefined;
@@ -92,32 +93,56 @@ export function trimmedAmount(view: SessionStreamView): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-export const KEY_CAPS: Readonly<Record<KeyName | Latch, string>> = {
+export const KEY_CAPS: Readonly<Record<BarKey, string>> = {
   esc: "Esc",
   tab: "Tab",
   shiftTab: "⇧Tab",
   ctrl: "Ctrl",
   alt: "Alt",
   ctrlC: "^C",
+  ctrlR: "^R",
   left: "←",
   up: "↑",
   down: "↓",
   right: "→",
   backspace: "⌫",
   enter: "⏎",
+  pipe: "|",
+  tilde: "~",
 };
 
-export const KEY_LABEL_KEYS: Readonly<Record<KeyName | Latch, MessageKey>> = {
+export const KEY_LABEL_KEYS: Readonly<Record<BarKey, MessageKey>> = {
   esc: "key.esc",
   tab: "key.tab",
   shiftTab: "key.shiftTab",
   ctrl: "key.ctrl",
   alt: "key.alt",
   ctrlC: "key.ctrlC",
+  ctrlR: "key.ctrlR",
   left: "key.left",
   up: "key.up",
   down: "key.down",
   right: "key.right",
   backspace: "key.backspace",
   enter: "key.enter",
+  pipe: "key.pipe",
+  tilde: "key.tilde",
 };
+
+/** The header's sub line, "api · claude-main · 18m": where, which agent, how
+ *  long (to the end for a finished session). Parts that are empty are left out. */
+export function sessionSubtitle(
+  row: {
+    project: string | null;
+    agentId: string;
+    startedAt: number;
+    endedAt?: number | undefined;
+    state: SessionState;
+  },
+  now: number,
+): string {
+  const until = isEnded(row.state) && row.endedAt !== undefined ? row.endedAt : now;
+  return [row.project, row.agentId, formatSessionElapsed(until - row.startedAt)]
+    .filter((part): part is string => part !== null && part !== "")
+    .join(" · ");
+}

@@ -13,6 +13,7 @@ export type KeyName =
   | "tab"
   | "shiftTab"
   | "ctrlC"
+  | "ctrlR"
   | "left"
   | "up"
   | "down"
@@ -37,6 +38,38 @@ export const KEY_BAR: readonly (KeyName | Latch)[] = [
   "enter",
 ];
 
+/** Keys that type a character rather than send a control sequence. */
+export type TextKey = "pipe" | "tilde";
+
+/** Anything a key bar can show. */
+export type BarKey = KeyName | Latch | TextKey;
+
+export const TEXT_KEY_VALUE: Readonly<Record<TextKey, string>> = { pipe: "|", tilde: "~" };
+
+export function isTextKey(key: BarKey): key is TextKey {
+  return key === "pipe" || key === "tilde";
+}
+
+/** The Session screen's own bar: the mockup's five keys. */
+export const SESSION_KEYS: readonly BarKey[] = ["esc", "tab", "up", "down", "ctrlC"];
+
+/** What the session bar's "more keys" row adds, so no key is lost. */
+export const MORE_KEYS: readonly BarKey[] = [
+  "shiftTab",
+  "ctrl",
+  "alt",
+  "ctrlR",
+  "left",
+  "right",
+  "backspace",
+  "enter",
+  "pipe",
+  "tilde",
+];
+
+/** The terminal pane's bar (the full set, until the pane is redrawn). */
+export const TERMINAL_KEYS: readonly (KeyName | Latch)[] = KEY_BAR;
+
 export type TerminalModes = { applicationCursor: boolean };
 
 const CURSOR_KEY_LETTER: Record<"up" | "down" | "right" | "left", string> = {
@@ -56,6 +89,8 @@ export function keyBytes(key: KeyName, modes: TerminalModes): string {
       return "\x1b[Z";
     case "ctrlC":
       return "\x03";
+    case "ctrlR":
+      return "\x12";
     case "backspace":
       return "\x7f";
     case "enter":

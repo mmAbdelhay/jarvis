@@ -4,7 +4,18 @@
 
 import { describe, expect, it } from "vitest";
 import type { KeyName, TerminalModes } from "./terminal-keys";
-import { altKeyBytes, ctrlByte, KEY_BAR, keyBytes, sgrWheelSequence } from "./terminal-keys";
+import {
+  altKeyBytes,
+  ctrlByte,
+  KEY_BAR,
+  keyBytes,
+  MORE_KEYS,
+  SESSION_KEYS,
+  sgrWheelSequence,
+  TERMINAL_KEYS,
+  TEXT_KEY_VALUE,
+  isTextKey,
+} from "./terminal-keys";
 
 const NORMAL: TerminalModes = { applicationCursor: false };
 const APP_CURSOR: TerminalModes = { applicationCursor: true };
@@ -128,5 +139,37 @@ describe("altKeyBytes", () => {
   it("puts ESC before every other key's bytes", () => {
     expect(altKeyBytes("backspace", { applicationCursor: false })).toBe("\x1b\x7f");
     expect(altKeyBytes("enter", { applicationCursor: false })).toBe("\x1b\r");
+  });
+});
+
+describe("ctrlR", () => {
+  it("is DC2, and Alt+ctrlR follows the Alt rule (ESC first)", () => {
+    expect(keyBytes("ctrlR", NORMAL)).toBe("\x12");
+    expect(altKeyBytes("ctrlR", NORMAL)).toBe("\x1b\x12");
+  });
+});
+
+describe("key sets", () => {
+  const valid = new Set<string>([...KEY_BAR, "ctrlR", ...Object.keys(TEXT_KEY_VALUE)]);
+
+  it.each([
+    ["SESSION_KEYS", SESSION_KEYS],
+    ["MORE_KEYS", MORE_KEYS],
+    ["TERMINAL_KEYS", TERMINAL_KEYS],
+  ])("%s holds only known keys, each once", (_name, keys) => {
+    for (const key of keys) expect(valid.has(key)).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("the session bar and its more row together lose no former key-bar key", () => {
+    const shown = new Set<string>([...SESSION_KEYS, ...MORE_KEYS]);
+    for (const key of KEY_BAR) expect(shown.has(key)).toBe(true);
+    expect(SESSION_KEYS.filter((key) => MORE_KEYS.includes(key))).toEqual([]);
+  });
+
+  it("sends | and ~ as text, not as control keys", () => {
+    expect(TEXT_KEY_VALUE).toEqual({ pipe: "|", tilde: "~" });
+    expect(isTextKey("pipe")).toBe(true);
+    expect(isTextKey("esc")).toBe(false);
   });
 });

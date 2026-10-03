@@ -11,11 +11,12 @@ import {
   sendResultKey,
   sendResultText,
   sessionRouteId,
+  sessionSubtitle,
   streamStatusKey,
   trimmedAmount,
 } from "./session-screen";
 import type { SessionStreamView } from "./session-stream";
-import { KEY_BAR } from "./terminal-keys";
+import { MORE_KEYS, SESSION_KEYS } from "./terminal-keys";
 
 const EMPTY_VIEW: SessionStreamView = {
   phase: "idle",
@@ -145,11 +146,31 @@ describe("notFoundText (final review M5)", () => {
   );
 });
 
+describe("sessionSubtitle", () => {
+  const base = { project: "api", agentId: "claude-main", startedAt: 0, state: "running" } as const;
+  const MIN = 60_000;
+
+  it("is project, agent and elapsed time", () => {
+    expect(sessionSubtitle(base, 18 * MIN)).toBe("api · claude-main · 18m");
+  });
+
+  it("leaves out a missing project", () => {
+    expect(sessionSubtitle({ ...base, project: null }, 5 * MIN)).toBe("claude-main · 5m");
+  });
+
+  it("stops the clock at the end of a finished session", () => {
+    expect(sessionSubtitle({ ...base, state: "done", endedAt: 62 * MIN }, 500 * MIN)).toBe(
+      "api · claude-main · 1h 02m",
+    );
+  });
+});
+
 describe("key-bar presentation metadata", () => {
   it("covers every key-bar control with a visible cap and localized label", () => {
-    expect(Object.keys(KEY_CAPS)).toEqual(KEY_BAR);
-    expect(Object.keys(KEY_LABEL_KEYS)).toEqual(KEY_BAR);
-    for (const key of KEY_BAR) {
+    const keys = [...SESSION_KEYS, ...MORE_KEYS];
+    expect(Object.keys(KEY_CAPS).sort()).toEqual([...keys].sort());
+    expect(Object.keys(KEY_LABEL_KEYS).sort()).toEqual([...keys].sort());
+    for (const key of keys) {
       const labelKey: MessageKey = KEY_LABEL_KEYS[key];
       expect(STRINGS[labelKey]).toBeDefined();
     }

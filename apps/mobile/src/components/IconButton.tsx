@@ -5,14 +5,14 @@ import { theme } from "@/lib/theme";
 
 /**
  * A square icon button. Size 44 is the bordered header button (r12); size 40
- * is the borderless row action (r10). The label is the accessibility name,
+ * is the borderless row action (r10); 46 is the compose row's (r14). The label is the accessibility name,
  * since the icon itself is hidden from it.
  */
 export function IconButton(props: {
   icon: IconName;
   label: string;
   onPress(): void;
-  size?: 44 | 40;
+  size?: 46 | 44 | 40;
   color?: string;
   iconSize?: number;
   strokeWidth?: number;
@@ -22,7 +22,7 @@ export function IconButton(props: {
   mirrorInRtl?: boolean;
 }) {
   const size = props.size ?? 44;
-  const bordered = size === 44 && !props.filled;
+  const bordered = size !== 40 && !props.filled;
   return (
     <Pressable
       accessibilityRole="button"
@@ -33,7 +33,7 @@ export function IconButton(props: {
       hitSlop={size === 40 ? 4 : 0}
       style={[
         styles.base,
-        size === 40 ? styles.small : styles.regular,
+        size === 40 ? styles.small : size === 46 ? styles.large : styles.regular,
         bordered && styles.bordered,
         props.filled && styles.filled,
         props.disabled && styles.disabled,
@@ -55,6 +55,7 @@ export function IconButton(props: {
 const styles = StyleSheet.create({
   base: { alignItems: "center", justifyContent: "center" },
   regular: { width: 44, height: 44, borderRadius: theme.radius.control },
+  large: { width: 46, height: 46, borderRadius: theme.radius.lg },
   small: { width: 40, height: 40, borderRadius: theme.radius.small },
   bordered: {
     borderWidth: 1,
