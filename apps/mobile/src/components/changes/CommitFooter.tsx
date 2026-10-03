@@ -1,4 +1,5 @@
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { commitFilesLabel } from "@/lib/changes-screen";
 import { type Language, t } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
 
@@ -10,10 +11,38 @@ export function CommitFooter(props: {
   stagedCount: number;
   disabled: boolean;
   bottomPadding: number;
+  /** "column" (wide split): a labelled 3-row box and a full-width button at
+   *  the column's bottom, not a footer row. */
+  variant?: "footer" | "column";
   onCommit(): void;
 }) {
   const { language } = props;
   const off = props.disabled || props.message.trim() === "";
+  if (props.variant === "column") {
+    return (
+      <View style={styles.column}>
+        <Text style={styles.columnLabel}>{t(language, "changes.commitMessage")}</Text>
+        <TextInput
+          style={styles.columnInput}
+          value={props.message}
+          onChangeText={props.onChangeMessage}
+          accessibilityLabel={t(language, "changes.commitMessage")}
+          multiline
+          numberOfLines={3}
+        />
+        <TouchableOpacity
+          disabled={off}
+          accessibilityRole="button"
+          style={[styles.columnButton, off && styles.disabled]}
+          onPress={props.onCommit}
+        >
+          <Text style={styles.columnButtonText}>
+            {commitFilesLabel(props.stagedCount, language)}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   return (
     <View style={[styles.footer, { paddingBottom: props.bottomPadding }]}>
       <TextInput
@@ -77,4 +106,27 @@ const styles = StyleSheet.create({
   },
   buttonText: { ...theme.type.buttonStrong, color: theme.colors.onSuccess },
   disabled: { opacity: 0.45 },
+  column: { gap: 6 },
+  columnLabel: { fontFamily: theme.font.body, fontSize: 12, color: theme.colors.textMuted },
+  columnInput: {
+    minHeight: 84,
+    color: theme.colors.text,
+    fontFamily: theme.font.body,
+    fontSize: 14,
+    borderColor: theme.colors.border,
+    borderWidth: 1,
+    borderRadius: theme.radius.sm,
+    padding: 10,
+    backgroundColor: theme.colors.surface,
+    textAlignVertical: "top",
+  },
+  columnButton: {
+    minHeight: 42,
+    marginTop: 6,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: theme.colors.success,
+    borderRadius: theme.radius.md,
+  },
+  columnButtonText: { ...theme.type.buttonStrong, color: theme.colors.onSuccess },
 });

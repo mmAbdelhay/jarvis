@@ -831,6 +831,17 @@ export const STRINGS = {
     en: "The server's reply couldn't be read.",
     ar: "تعذّرت قراءة رد الخادم.",
   },
+  // Wide Changes: grouped file lists, the diff mode switch, the commit box.
+  "changes.stagedCount": { en: "STAGED {count}", ar: "مُضاف {count}" },
+  "changes.notStaged": { en: "NOT STAGED {count}", ar: "غير مُضاف {count}" },
+  "changes.unified": { en: "Unified", ar: "موحّد" },
+  "changes.split": { en: "Split", ar: "متجاور" },
+  "changes.diffView": { en: "Diff view", ar: "عرض الفروقات" },
+  "changes.commitMessage": { en: "Commit message", ar: "رسالة الحفظ" },
+  "changes.commitOne": { en: "Commit 1 file", ar: "احفظ ملفًا واحدًا" },
+  "changes.commitTwo": { en: "Commit 2 files", ar: "احفظ ملفين" },
+  "changes.commitFiles": { en: "Commit {count} files", ar: "احفظ {count} ملفات" },
+  "changes.commitMany": { en: "Commit {count} files", ar: "احفظ {count} ملفًا" },
   "history.search": { en: "Search history", ar: "ابحث في السجل" },
   "history.searchPlaceholder": {
     en: "Search tasks, projects and agents",

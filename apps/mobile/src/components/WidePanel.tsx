@@ -32,9 +32,15 @@ const PanelTitleContext = createContext<(title: string | undefined) => void>(() 
  *  bordered panel (max 1180) under the shell's top bar. The native stack
  *  header is hidden there, so `title` draws the panel's own header, with a
  *  Back button whenever there is somewhere to go back to. */
-export function WidePanel(props: { title?: string; children: React.ReactNode }) {
+export function WidePanel(props: {
+  title?: string;
+  /** No frame, header or width limit on a wide screen (a page that lays out
+   *  its own panes); the wrapper tree stays the same. */
+  bare?: boolean;
+  children: React.ReactNode;
+}) {
   const layout = useLayoutClass();
-  const frame = widePanelFrame(layout.kind);
+  const frame = props.bare ? widePanelFrame("phone") : widePanelFrame(layout.kind);
   const [pageTitle, setPageTitle] = useState<string | undefined>(undefined);
   return (
     <View style={[styles.root, frame.framed && styles.rootFramed]}>

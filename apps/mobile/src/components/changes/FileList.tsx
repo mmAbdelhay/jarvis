@@ -1,4 +1,5 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { FileGroups } from "@/components/changes/FileGroups";
 import { Icon } from "@/components/Icon";
 import { stageAllTargets } from "@/lib/changes-screen";
 import type { ChangesState, ChangesStore } from "@/lib/changes-store";
@@ -24,11 +25,14 @@ export function FileList(props: {
   state: ChangesState;
   store: ChangesStore;
   disabled: boolean;
+  /** "compact" (wide split column): staged and not-staged groups. */
+  density?: "regular" | "compact";
 }) {
   const { language, state, store, disabled } = props;
   const view = state.changes?.changes;
   const files = view?.files ?? [];
   if (view === undefined || files.length === 0) return null;
+  if (props.density === "compact") return <FileGroups {...{ language, state, store, disabled }} />;
   const all = stageAllTargets(files);
   return (
     <View style={styles.section}>

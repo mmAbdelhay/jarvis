@@ -13,9 +13,12 @@ export function BranchCard(props: {
   store: ChangesStore;
   disabled: boolean;
   showRepoPath: boolean;
+  /** "compact" (wide split column): smaller controls, as drawn. */
+  density?: "regular" | "compact";
   onOpenBranches(): void;
 }) {
   const { language, state, store, disabled } = props;
+  const compact = props.density === "compact";
   const changes = state.changes?.changes;
   if (changes === undefined) return null;
   const tracking = trackingParts(state);
@@ -37,7 +40,7 @@ export function BranchCard(props: {
     },
   ];
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, compact && styles.cardCompact]}>
       <View style={styles.top}>
         <TouchableOpacity
           accessibilityRole="button"
@@ -45,16 +48,20 @@ export function BranchCard(props: {
           accessibilityHint={changes.repoPath}
           disabled={state.branches === undefined}
           onPress={props.onOpenBranches}
-          style={styles.branchButton}
+          style={[styles.branchButton, compact && styles.branchButtonCompact]}
         >
           <Icon name="branch" size={14} color={theme.colors.textMuted} />
-          <Text style={styles.branchText} numberOfLines={1}>
+          <Text style={[styles.branchText, compact && styles.textCompact]} numberOfLines={1}>
             {branchName}
             {state.branches !== undefined && " ▾"}
           </Text>
         </TouchableOpacity>
         {tracking !== undefined && (
-          <Text selectable style={[styles.tracking, { writingDirection: "ltr" }]} numberOfLines={1}>
+          <Text
+            selectable
+            style={[styles.tracking, compact && styles.textCompact, { writingDirection: "ltr" }]}
+            numberOfLines={1}
+          >
             {tracking.kind === "none" ? (
               t(language, "changes.noUpstream")
             ) : (
@@ -71,7 +78,7 @@ export function BranchCard(props: {
           {changes.repoPath}
         </Text>
       )}
-      <View style={styles.syncGrid}>
+      <View style={[styles.syncGrid, compact && styles.syncGridCompact]}>
         {buttons.map((button) => (
           <TouchableOpacity
             key={button.key}
@@ -79,6 +86,7 @@ export function BranchCard(props: {
             accessibilityRole="button"
             style={[
               styles.syncButton,
+              compact && styles.syncButtonCompact,
               button.primary && styles.syncPrimary,
               disabled && styles.disabled,
             ]}
@@ -93,8 +101,8 @@ export function BranchCard(props: {
         ))}
       </View>
       {worktree && (
-        <View style={styles.worktreeRow}>
-          <Text selectable style={styles.meta} numberOfLines={2}>
+        <View style={[styles.worktreeRow, compact && styles.worktreeRowCompact]}>
+          <Text selectable style={[styles.meta, compact && styles.metaCompact]} numberOfLines={2}>
             {t(language, "changes.worktree")}
             {worktree.baseBranch !== "" && (
               <>
@@ -107,12 +115,16 @@ export function BranchCard(props: {
             <TouchableOpacity
               disabled={disabled}
               accessibilityRole="button"
-              style={[styles.mergeButton, disabled && styles.disabled]}
+              style={[
+                styles.mergeButton,
+                compact && styles.mergeButtonCompact,
+                disabled && styles.disabled,
+              ]}
               onPress={() => {
                 void store.mergeWorktree();
               }}
             >
-              <Text style={styles.mergeText}>
+              <Text style={[styles.mergeText, compact && styles.metaCompact]}>
                 {t(language, "changes.mergeInto", { branch: worktree.baseBranch })}
               </Text>
             </TouchableOpacity>
@@ -150,6 +162,19 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.hairline,
     backgroundColor: theme.colors.surface,
   },
+  cardCompact: { borderRadius: theme.radius.card },
+  branchButtonCompact: {
+    minHeight: 36,
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: theme.radius.chip,
+  },
+  textCompact: { fontSize: 12 },
+  syncGridCompact: { gap: 6 },
+  syncButtonCompact: { minHeight: 38, borderRadius: theme.radius.small },
+  worktreeRowCompact: { paddingTop: 8, borderTopColor: theme.colors.hairline },
+  metaCompact: { fontSize: 12 },
+  mergeButtonCompact: { minHeight: 32, paddingHorizontal: 10, borderRadius: theme.radius.chip },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   branchButton: {
     flexShrink: 1,

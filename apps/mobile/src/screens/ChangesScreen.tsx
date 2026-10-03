@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BranchCard } from "@/components/changes/BranchCard";
 import { BranchSheet } from "@/components/changes/BranchSheet";
 import { CommitFooter } from "@/components/changes/CommitFooter";
+import { DiffModeToggle } from "@/components/changes/DiffModeToggle";
 import { DiffView } from "@/components/changes/DiffView";
 import { FileList } from "@/components/changes/FileList";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -26,6 +27,8 @@ import {
   sessionIdToReopen,
   shouldClearDraft,
 } from "@/lib/changes-screen";
+import { loadDiffMode, setDiffMode, type DiffMode } from "@/lib/prefs";
+import { filePrefsStore } from "@/lib/prefs-file";
 import { createChangesStore, ENDED_SESSION_NOTICE, type ChangesState } from "@/lib/changes-store";
 import { t } from "@/lib/i18n";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
@@ -41,13 +44,20 @@ import { useLayoutClass } from "@/lib/use-layout-class";
  *  session a detail link names, else the most recent one), or an inline
  *  Workspace tab on a wide screen. On a phone the header's subtitle names
  *  the session and opens a picker; wide and embedded keep a chip strip. */
-export function ChangesScreen(props: { sessionId: string | undefined; embedded: boolean }) {
+export function ChangesScreen(props: {
+  sessionId: string | undefined;
+  embedded: boolean;
+  /** "split" (the wide /changes route): the files column beside the diff.
+   *  Default "stack": the phone screen and the Workspace tab. */
+  layout?: "stack" | "split";
+}) {
   const language = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   // The wide panel and the Workspace tab carry their own titles.
   const wideLayout = useLayoutClass().kind === "wide";
+  const split = props.layout === "split" && wideLayout;
   const phoneHeader = !props.embedded && !wideLayout;
   const client = useRpcClient();
   const routeSessionId = props.sessionId;
@@ -64,7 +74,23 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   // is consumed once, not on every refocus — otherwise it would keep
   // overriding any session the user picks afterward for the life of this
   // screen instance. See sessionIdToReopen's doc comment.
+  const [diffMode, setDiffModeState] = useState<DiffMode>("unified");
   const consumedRouteIdRef = useRef<string | undefined>(undefined);
+
+  // The viewer's saved diff layout; a failing read keeps "unified".
+  useEffect(() => {
+    if (!split) return;
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    loadDiffMode(filePrefsStore, locale)
+      .then(setDiffModeState)
+      .catch(() => undefined);
+  }, [split]);
+
+  function chooseDiffMode(mode: DiffMode): void {
+    setDiffModeState(mode);
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    setDiffMode(filePrefsStore, locale, mode).catch(() => undefined);
+  }
 
   // Fix round 1 (Important 2): the store's own `sessionId` survives
   // `close()` — only its subscriptions and visible data are torn down — so
@@ -139,117 +165,53 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
   const subtitle =
     selectedRow === undefined
       ? undefined
-      : phoneHeader && merged.length > 1
+      : (phoneHeader || split) && merged.length > 1
         ? `${selectedRow.summary} ▾`
         : selectedRow.summary;
   const footerBottom = phoneHeader ? (keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 26)) : 10;
 
-  return (
-    <KeyboardAvoidingView
-      style={[
-        styles.screen,
-        { paddingBottom: keyboardBottomPadding(Platform.OS, keyboardHeight, insets.bottom) },
-      ]}
-      behavior={keyboardAvoidingBehavior(Platform.OS)}
-    >
-      {phoneHeader && (
-        <ScreenHeader
-          title={t(language, "changes.title")}
-          size="page"
-          bordered={false}
-          onBack={router.back}
-          {...(subtitle === undefined ? {} : { subtitle })}
-          {...(merged.length > 1 ? { onSubtitlePress: () => setPickerOpen(true) } : {})}
-        />
+  const statusBlock = (
+    <>
+      {merged.length === 0 && !sessions.loading && (
+        <Text style={styles.empty}>{t(language, "changes.noSessions")}</Text>
       )}
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={theme.colors.primary}
-          />
-        }
-      >
-        {!phoneHeader && merged.length > 0 && (
-          <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
-            {merged.map((row) => (
-              <TouchableOpacity
-                key={row.id}
-                style={[styles.chip, changes.sessionId === row.id && styles.chipActive]}
-                onPress={() => changesStore.open(row.id)}
-              >
-                <Text style={styles.chipText}>{row.summary}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-        {merged.length === 0 && !sessions.loading && (
-          <Text style={styles.empty}>{t(language, "changes.noSessions")}</Text>
-        )}
 
-        {changes.phase === "loading" && (
-          <Text style={styles.empty}>{t(language, "changes.loading")}</Text>
-        )}
+      {changes.phase === "loading" && (
+        <Text style={styles.empty}>{t(language, "changes.loading")}</Text>
+      )}
 
-        {changes.phase === "failed" && (
-          <View style={styles.failedBlock}>
-            <Text selectable style={styles.error}>
-              {failedText(changes, language)}
-            </Text>
-            <TouchableOpacity onPress={() => changesStore.refresh()}>
-              <Text style={styles.retry}>{t(language, "common.retry")}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+      {changes.phase === "failed" && (
+        <View style={styles.failedBlock}>
+          <Text selectable style={styles.error}>
+            {failedText(changes, language)}
+          </Text>
+          <TouchableOpacity onPress={() => changesStore.refresh()}>
+            <Text style={styles.retry}>{t(language, "common.retry")}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-        {changes.notice === ENDED_SESSION_NOTICE && (
-          <Text style={styles.warning}>{t(language, "changes.endedWarning")}</Text>
+      {changes.notice === ENDED_SESSION_NOTICE && (
+        <Text style={styles.warning}>{t(language, "changes.endedWarning")}</Text>
+      )}
+      {changes.notice !== undefined &&
+        changes.notice !== ENDED_SESSION_NOTICE &&
+        changes.phase !== "failed" && (
+          <Text selectable style={styles.error}>
+            {noticeText(changes.notice, language)}
+          </Text>
         )}
-        {changes.notice !== undefined &&
-          changes.notice !== ENDED_SESSION_NOTICE &&
-          changes.phase !== "failed" && (
-            <Text selectable style={styles.error}>
-              {noticeText(changes.notice, language)}
-            </Text>
-          )}
-        {changes.stale && !changes.uncertain && changes.notice === undefined && (
-          <Text style={styles.empty}>{t(language, "common.stale")}</Text>
-        )}
-        {changes.uncertain && (
-          <Text style={styles.warning}>{t(language, "changes.uncertain")}</Text>
-        )}
-
-        <BranchCard
-          language={language}
-          state={changes}
-          store={changesStore}
-          disabled={disabled}
-          showRepoPath={!phoneHeader}
-          onOpenBranches={() => setBranchesOpen(true)}
-        />
-
-        <FileList language={language} state={changes} store={changesStore} disabled={disabled} />
-
-        {changes.changes && selectedFiles.length === 0 && (
-          <Text style={styles.empty}>{t(language, "changes.clean")}</Text>
-        )}
-
-        {diff && <DiffView language={language} diff={diff} />}
-      </ScrollView>
-      <CommitFooter
-        language={language}
-        message={message}
-        onChangeMessage={setMessage}
-        stagedCount={stagedCount}
-        disabled={disabled}
-        bottomPadding={footerBottom}
-        onCommit={() => {
-          void commit();
-        }}
-      />
+      {changes.stale && !changes.uncertain && changes.notice === undefined && (
+        <Text style={styles.empty}>{t(language, "common.stale")}</Text>
+      )}
+      {changes.uncertain && <Text style={styles.warning}>{t(language, "changes.uncertain")}</Text>}
+    </>
+  );
+  const cleanNote = changes.changes && selectedFiles.length === 0 && (
+    <Text style={styles.empty}>{t(language, "changes.clean")}</Text>
+  );
+  const sheets = (
+    <>
       <BranchSheet
         visible={branchesOpen}
         language={language}
@@ -265,6 +227,160 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
         onSelect={(id) => changesStore.open(id)}
         onClose={() => setPickerOpen(false)}
       />
+    </>
+  );
+  const refreshControl = (
+    <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.colors.primary} />
+  );
+  const screenStyle = [
+    styles.screen,
+    { paddingBottom: keyboardBottomPadding(Platform.OS, keyboardHeight, insets.bottom) },
+  ];
+
+  if (split) {
+    const openFile = diff && selectedFiles.find((file) => file.path === diff.path);
+    return (
+      <KeyboardAvoidingView
+        style={[screenStyle, styles.splitRow]}
+        behavior={keyboardAvoidingBehavior(Platform.OS)}
+      >
+        <View style={styles.filesColumn}>
+          <ScrollView
+            style={styles.container}
+            contentContainerStyle={styles.columnContent}
+            refreshControl={refreshControl}
+          >
+            <View>
+              <Text style={styles.wideTitle}>{t(language, "changes.title")}</Text>
+              {subtitle !== undefined &&
+                (merged.length > 1 ? (
+                  <TouchableOpacity accessibilityRole="button" onPress={() => setPickerOpen(true)}>
+                    <Text style={styles.wideSubtitle} numberOfLines={1}>
+                      {subtitle}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.wideSubtitle} numberOfLines={1}>
+                    {subtitle}
+                  </Text>
+                ))}
+            </View>
+            {statusBlock}
+            <BranchCard
+              language={language}
+              state={changes}
+              store={changesStore}
+              disabled={disabled}
+              showRepoPath={false}
+              density="compact"
+              onOpenBranches={() => setBranchesOpen(true)}
+            />
+            <FileList
+              language={language}
+              state={changes}
+              store={changesStore}
+              disabled={disabled}
+              density="compact"
+            />
+            {cleanNote}
+          </ScrollView>
+          <CommitFooter
+            language={language}
+            message={message}
+            onChangeMessage={setMessage}
+            stagedCount={stagedCount}
+            disabled={disabled}
+            bottomPadding={0}
+            variant="column"
+            onCommit={() => {
+              void commit();
+            }}
+          />
+        </View>
+        <View style={styles.diffPane}>
+          {diff && (
+            <>
+              <View style={styles.diffHeader}>
+                <Text selectable style={styles.diffPath} numberOfLines={1}>
+                  {diff.path}
+                  {openFile !== undefined && openFile.insertions > 0 && (
+                    <Text style={styles.added}> +{openFile.insertions}</Text>
+                  )}
+                  {openFile !== undefined && openFile.deletions > 0 && (
+                    <Text style={styles.removed}> −{openFile.deletions}</Text>
+                  )}
+                </Text>
+                <DiffModeToggle language={language} mode={diffMode} onChange={chooseDiffMode} />
+              </View>
+              <ScrollView style={styles.container}>
+                <DiffView language={language} diff={diff} density="wide" mode={diffMode} />
+              </ScrollView>
+            </>
+          )}
+        </View>
+        {sheets}
+      </KeyboardAvoidingView>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView style={screenStyle} behavior={keyboardAvoidingBehavior(Platform.OS)}>
+      {phoneHeader && (
+        <ScreenHeader
+          title={t(language, "changes.title")}
+          size="page"
+          bordered={false}
+          onBack={router.back}
+          {...(subtitle === undefined ? {} : { subtitle })}
+          {...(merged.length > 1 ? { onSubtitlePress: () => setPickerOpen(true) } : {})}
+        />
+      )}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={refreshControl}
+      >
+        {!phoneHeader && merged.length > 0 && (
+          <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
+            {merged.map((row) => (
+              <TouchableOpacity
+                key={row.id}
+                style={[styles.chip, changes.sessionId === row.id && styles.chipActive]}
+                onPress={() => changesStore.open(row.id)}
+              >
+                <Text style={styles.chipText}>{row.summary}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+        {statusBlock}
+        <BranchCard
+          language={language}
+          state={changes}
+          store={changesStore}
+          disabled={disabled}
+          showRepoPath={!phoneHeader}
+          onOpenBranches={() => setBranchesOpen(true)}
+        />
+
+        <FileList language={language} state={changes} store={changesStore} disabled={disabled} />
+
+        {cleanNote}
+
+        {diff && <DiffView language={language} diff={diff} />}
+      </ScrollView>
+      <CommitFooter
+        language={language}
+        message={message}
+        onChangeMessage={setMessage}
+        stagedCount={stagedCount}
+        disabled={disabled}
+        bottomPadding={footerBottom}
+        onCommit={() => {
+          void commit();
+        }}
+      />
+      {sheets}
     </KeyboardAvoidingView>
   );
 }
@@ -287,6 +403,32 @@ const styles = StyleSheet.create({
   empty: { color: theme.colors.textMuted, fontFamily: theme.font.body },
   warning: { color: theme.colors.warning, fontFamily: theme.font.body },
   error: { color: theme.colors.danger, fontFamily: theme.font.body },
+  splitRow: { flexDirection: "row" },
+  filesColumn: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 360,
+    maxWidth: 420,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    gap: 14,
+    borderEndWidth: 1,
+    borderEndColor: theme.colors.hairlineSoft,
+  },
+  columnContent: { gap: 14 },
+  wideTitle: { ...theme.type.cardValue, color: theme.colors.text },
+  wideSubtitle: { fontFamily: theme.font.body, fontSize: 13, color: theme.colors.textMuted },
+  diffPane: { flex: 1, minWidth: 0, paddingVertical: 20, paddingHorizontal: 24, gap: 12 },
+  diffHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  diffPath: { ...theme.type.mono, flexShrink: 1, fontSize: 14, color: theme.colors.text },
+  added: { color: theme.colors.success },
+  removed: { color: theme.colors.dangerText },
   failedBlock: { gap: theme.spacing.xs },
   retry: { color: theme.colors.accentText, fontFamily: theme.font.bold },
 });
