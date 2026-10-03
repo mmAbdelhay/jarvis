@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseCapacityTrends, parseProviderCapacity, resetsIn, TREND_BARS } from "./home-capacity";
+import {
+  parseCapacityTrends,
+  parseProviderCapacity,
+  parseSessionsPerDay,
+  resetsIn,
+  TREND_BARS,
+} from "./home-capacity";
 import { createHomeStore } from "./home-store";
 import type { ClientState, RpcClient, RpcResult } from "./rpc-client";
 
@@ -116,6 +122,23 @@ describe("parseCapacityTrends", () => {
   });
 });
 
+describe("parseSessionsPerDay", () => {
+  it("keeps the last 31 days' counts in order", () => {
+    const days = Array.from({ length: 40 }, (_, day) => ({ day, count: day }));
+    const counts = parseSessionsPerDay({ sessionsPerDay: days });
+    expect(counts).toHaveLength(31);
+    expect(counts[0]).toBe(9);
+    expect(counts[30]).toBe(39);
+  });
+
+  it("reads nothing from a malformed history rather than a gap-filled guess", () => {
+    expect(parseSessionsPerDay(null)).toEqual([]);
+    expect(parseSessionsPerDay({ sessionsPerDay: "x" })).toEqual([]);
+    expect(parseSessionsPerDay({ sessionsPerDay: [{ count: 1 }, { count: -1 }] })).toEqual([]);
+    expect(parseSessionsPerDay({ sessionsPerDay: [{ count: 1.5 }] })).toEqual([]);
+  });
+});
+
 describe("resetsIn", () => {
   it("says hours and minutes, minutes, days, or nothing once passed", () => {
     expect(resetsIn(100 * 60_000, 0)).toBe("1h 40m");
@@ -203,12 +226,22 @@ describe("createHomeStore", () => {
   it("loads the day's trend on focus", async () => {
     const fake = fakeClient((channel) =>
       channel === "usage:history"
-        ? { ok: true, value: { capacity: [{ id: "a", points: [{ at: 1, left: 40 }] }] } }
+        ? {
+            ok: true,
+            value: {
+              capacity: [{ id: "a", points: [{ at: 1, left: 40 }] }],
+              sessionsPerDay: [
+                { day: 1, count: 2 },
+                { day: 2, count: 0 },
+              ],
+            },
+          }
         : { ok: true, value: null },
     );
     const store = createHomeStore({ client: fake.client, ...fakeTimer() });
     store.focus();
     await flush();
     expect(store.get().trends).toEqual([{ id: "a", points: [40] }]);
+    expect(store.get().sessionsPerDay).toEqual([2, 0]);
   });
 });

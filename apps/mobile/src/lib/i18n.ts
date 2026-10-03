@@ -95,6 +95,9 @@ export const STRINGS = {
   "home.left": { en: "{percent}% left", ar: "متبقٍ {percent}%" },
   "home.resetsIn": { en: "resets in {time}", ar: "يُعاد بعد {time}" },
   "home.resetPassed": { en: "reset due", ar: "حان موعد الإعادة" },
+  "home.sessionsPerDay": { en: "SESSIONS", ar: "الجلسات" },
+  "home.sessionsDays": { en: "last {days} days", ar: "آخر {days} يومًا" },
+  "home.sessionsTotal": { en: "{count} started", ar: "بدأت {count}" },
   "home.active": { en: "ACTIVE", ar: "النشطة" },
   "nav.workspace": { en: "Workspace", ar: "مساحة العمل" },
   // The wide shell's top bar (desktop renderer's "N running" pill).

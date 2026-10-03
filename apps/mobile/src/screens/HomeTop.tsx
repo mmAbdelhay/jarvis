@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CapacityCards } from "@/components/CapacityCards";
+import { SessionsPerDay } from "@/components/SessionsPerDay";
 import { PromptCard } from "@/components/PromptCard";
 import type { SessionSummary } from "@/lib/dashboard-store";
 import { formatSessionElapsed } from "@/lib/format";
@@ -102,6 +103,7 @@ export function HomeTop(props: {
         trends={props.home.trends}
         now={props.now}
       />
+      <SessionsPerDay language={props.language} counts={props.home.sessionsPerDay} />
     </View>
   );
 }

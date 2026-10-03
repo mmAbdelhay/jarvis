@@ -101,3 +101,19 @@ export function resetsIn(resetsAt: number, now: number): string | undefined {
   if (hours >= 48) return `${Math.floor(hours / 24)}d`;
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
+
+/** Sessions started per day, oldest first, from usage:history — every day
+ *  present, 0 for a day with none. Counts only; days are kept in order. */
+export function parseSessionsPerDay(value: unknown): number[] {
+  if (typeof value !== "object" || value === null) return [];
+  const days = (value as Record<string, unknown>).sessionsPerDay;
+  if (!Array.isArray(days)) return [];
+  const counts: number[] = [];
+  for (const day of days.slice(-31)) {
+    if (typeof day !== "object" || day === null) return [];
+    const count = (day as Record<string, unknown>).count;
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 0) return [];
+    counts.push(count);
+  }
+  return counts;
+}

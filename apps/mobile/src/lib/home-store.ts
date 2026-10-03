@@ -9,6 +9,7 @@ import {
   type CapacityTrend,
   parseCapacityTrends,
   parseProviderCapacity,
+  parseSessionsPerDay,
 } from "./home-capacity";
 import type { RpcClient } from "./rpc-client";
 import { fetchPrompt, type PhonePrompt } from "./session-prompt";
@@ -18,6 +19,8 @@ export type WaitingSession = { sessionId: string; prompt: PhonePrompt };
 export type HomeView = {
   capacity: CapacityCard[];
   trends: CapacityTrend[];
+  /** Sessions started per day, oldest first (usage:history). */
+  sessionsPerDay: number[];
   waiting: WaitingSession[];
 };
 
@@ -44,7 +47,7 @@ export function createHomeStore(deps: {
   const stop =
     deps.clearInterval ?? ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
   const listeners = new Set<(view: HomeView) => void>();
-  let view: HomeView = { capacity: [], trends: [], waiting: [] };
+  let view: HomeView = { capacity: [], trends: [], sessionsPerDay: [], waiting: [] };
   let focused = false;
   let live: string[] = [];
   let timer: unknown;
@@ -62,7 +65,11 @@ export function createHomeStore(deps: {
 
   async function loadTrends(): Promise<void> {
     const result = await deps.client.call("usage:history", [], { whenNotOpen: "reject" });
-    if (result.ok && focused) setView({ trends: parseCapacityTrends(result.value) });
+    if (result.ok && focused)
+      setView({
+        trends: parseCapacityTrends(result.value),
+        sessionsPerDay: parseSessionsPerDay(result.value),
+      });
   }
 
   async function poll(): Promise<void> {
