@@ -16,6 +16,7 @@ import { allowTerminalNavigation, TERMINAL_WEBVIEW_PROPS } from "../lib/terminal
 import { theme } from "../lib/theme";
 import { PlanBlockSheet } from "./PlanBlockSheet";
 import { PlanCommentsScreen } from "./PlanCommentsScreen";
+import { IconButton } from "../components/IconButton";
 import { SegmentTabs } from "../components/SegmentTabs";
 import { planErrorText } from "./plan-error";
 import { planProgressOf } from "./plan-progress";
@@ -50,12 +51,17 @@ export function PlanSheet(props: {
         ? undefined
         : buildPlanPage(state.doc, state.comments, props.language, {
             surface: theme.colors.surface,
+            surfaceAlt: theme.colors.surfaceAlt,
             ground: theme.colors.ground,
             text: theme.colors.text,
             textSecondary: theme.colors.textSecondary,
             accent: theme.colors.accent,
             warning: theme.colors.warning,
             selected: theme.colors.selected,
+            accentBorder: theme.colors.accentBorder,
+            success: theme.colors.success,
+            onSuccess: theme.colors.onSuccess,
+            checkboxOff: theme.colors.checkboxOff,
           }),
     [state.doc, state.comments, props.language],
   );
@@ -80,19 +86,17 @@ export function PlanSheet(props: {
           <View style={styles.header}>
             <TouchableOpacity style={styles.planTitle} onPress={() => setPicker((value) => !value)}>
               <Text style={styles.fileName} numberOfLines={1}>
-                {activeEntry?.name ?? t(props.language, "plans.title")}
+                {activeEntry?.name ?? t(props.language, "plans.title")} ▾
               </Text>
               <Text style={styles.sourceLine}>
-                {activeEntry === undefined ? "" : sourceLabel(activeEntry, props.language)} ▾
+                {activeEntry === undefined ? "" : sourceLabel(activeEntry, props.language)}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.close}
+            <IconButton
+              icon="chevronDown"
+              label={t(props.language, "plans.close")}
               onPress={props.onClose}
-              accessibilityLabel={t(props.language, "common.cancel")}
-            >
-              <Text style={styles.closeText}>×</Text>
-            </TouchableOpacity>
+            />
           </View>
           <View style={styles.subheader}>
             {progress !== undefined && (
@@ -114,6 +118,7 @@ export function PlanSheet(props: {
               </View>
             )}
             <SegmentTabs
+              compact
               label={t(props.language, "plans.title")}
               tabs={[
                 {
@@ -259,19 +264,20 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: {
     backgroundColor: theme.colors.ground,
-    borderTopStartRadius: 22,
-    borderTopEndRadius: 22,
+    borderTopStartRadius: theme.radius.sheet,
+    borderTopEndRadius: theme.radius.sheet,
     borderTopWidth: 1,
     borderColor: theme.colors.border,
     overflow: "hidden",
   },
   grabber: {
-    width: 42,
-    height: 4,
+    width: 40,
+    height: 5,
     alignSelf: "center",
-    marginTop: 7,
-    borderRadius: 2,
-    backgroundColor: theme.colors.textFaint,
+    marginTop: 8,
+    marginBottom: 2,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.handle,
   },
   header: {
     minHeight: 62,
@@ -283,8 +289,8 @@ const styles = StyleSheet.create({
     gap: theme.spacing.sm,
   },
   planTitle: { flex: 1, minHeight: 48, justifyContent: "center" },
-  fileName: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 16 },
-  sourceLine: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
+  fileName: { color: theme.colors.text, fontFamily: theme.font.extrabold, fontSize: 17 },
+  sourceLine: { ...theme.type.meta, color: theme.colors.textMuted },
   subheader: {
     gap: 10,
     paddingHorizontal: theme.spacing.md,
@@ -296,9 +302,7 @@ const styles = StyleSheet.create({
   track: { flex: 1, height: 6, borderRadius: 999, backgroundColor: theme.colors.selected },
   fill: { height: 6, borderRadius: 999, backgroundColor: theme.colors.success },
   progressText: { color: theme.colors.textSecondary, fontFamily: theme.font.bold, fontSize: 12 },
-  close: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  closeText: { color: theme.colors.textMuted, fontSize: 30, lineHeight: 32 },
-  webview: { flex: 1, backgroundColor: theme.colors.surface },
+  webview: { flex: 1, backgroundColor: theme.colors.ground },
   errorBanner: {
     backgroundColor: theme.colors.surfaceAlt,
     borderBottomColor: theme.colors.warning,
@@ -335,7 +339,10 @@ const styles = StyleSheet.create({
     minHeight: 66,
     borderTopColor: theme.colors.hairline,
     borderTopWidth: 1,
-    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceDim,
+    paddingTop: 10,
+    paddingBottom: 26,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing.md,
@@ -344,12 +351,12 @@ const styles = StyleSheet.create({
   queued: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
   queuedHint: { color: theme.colors.textMuted, fontFamily: theme.font.body, fontSize: 12 },
   send: {
-    minHeight: 44,
+    minHeight: 46,
     justifyContent: "center",
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.control,
+    paddingHorizontal: 16,
+    borderRadius: theme.radius.lg,
     backgroundColor: theme.colors.accent,
   },
   disabled: { opacity: 0.4 },
-  sendText: { color: theme.colors.primaryText, fontFamily: theme.font.bold },
+  sendText: { ...theme.type.buttonStrong, color: theme.colors.primaryText },
 });

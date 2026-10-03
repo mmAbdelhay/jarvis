@@ -18,6 +18,8 @@ export function KeyBar<K extends BarKey>(props: {
   disabled: boolean;
   armed: Latches;
   variant?: "footer";
+  /** A "⋯" cap that the screen owns (a mode switch) rather than the extra row. */
+  modeToggle?: { open: boolean; onPress(): void };
   onKey(key: K): void;
 }) {
   const language = useLanguage();
@@ -62,6 +64,17 @@ export function KeyBar<K extends BarKey>(props: {
         contentContainerStyle={footer ? styles.footerContent : styles.content}
       >
         {props.keys.map(cap)}
+        {props.modeToggle !== undefined && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t(language, props.modeToggle.open ? "keys.less" : "keys.more")}
+            accessibilityState={{ expanded: props.modeToggle.open }}
+            onPress={props.modeToggle.onPress}
+            style={[styles.cap, props.modeToggle.open && styles.open]}
+          >
+            <Text style={[styles.text, props.modeToggle.open && styles.openText]}>⋯</Text>
+          </TouchableOpacity>
+        )}
         {more.length > 0 && (
           <TouchableOpacity
             accessibilityRole="button"

@@ -12,7 +12,9 @@ import {
   MORE_KEYS,
   SESSION_KEYS,
   sgrWheelSequence,
+  NAV_KEYS,
   TERMINAL_KEYS,
+  terminalFooterKeys,
   TEXT_KEY_VALUE,
   isTextKey,
 } from "./terminal-keys";
@@ -156,6 +158,7 @@ describe("key sets", () => {
     ["SESSION_KEYS", SESSION_KEYS],
     ["MORE_KEYS", MORE_KEYS],
     ["TERMINAL_KEYS", TERMINAL_KEYS],
+    ["NAV_KEYS", NAV_KEYS],
   ])("%s holds only known keys, each once", (_name, keys) => {
     for (const key of keys) expect(valid.has(key)).toBe(true);
     expect(new Set(keys).size).toBe(keys.length);
@@ -165,6 +168,14 @@ describe("key sets", () => {
     const shown = new Set<string>([...SESSION_KEYS, ...MORE_KEYS]);
     for (const key of KEY_BAR) expect(shown.has(key)).toBe(true);
     expect(SESSION_KEYS.filter((key) => MORE_KEYS.includes(key))).toEqual([]);
+  });
+
+  it("switches the terminal footer's key set on navigation mode", () => {
+    expect(terminalFooterKeys(false)).toBe(TERMINAL_KEYS);
+    expect(terminalFooterKeys(true)).toBe(NAV_KEYS);
+    expect(TERMINAL_KEYS).toEqual(["esc", "tab", "up", "down", "ctrlC", "ctrlR"]);
+    expect(NAV_KEYS).toContain("ctrl");
+    expect(NAV_KEYS).toContain("alt");
   });
 
   it("sends | and ~ as text, not as control keys", () => {

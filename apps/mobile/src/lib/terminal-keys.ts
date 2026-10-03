@@ -67,8 +67,24 @@ export const MORE_KEYS: readonly BarKey[] = [
   "tilde",
 ];
 
-/** The terminal pane's bar (the full set, until the pane is redrawn). */
-export const TERMINAL_KEYS: readonly (KeyName | Latch)[] = KEY_BAR;
+/** The terminal pane's footer: the mockup's six keys. */
+export const TERMINAL_KEYS: readonly BarKey[] = ["esc", "tab", "up", "down", "ctrlC", "ctrlR"];
+
+/** The footer in navigation mode (the arrow pad's ← → and ⌫ ⏎ live beside it). */
+export const NAV_KEYS: readonly BarKey[] = [
+  "ctrl",
+  "alt",
+  "esc",
+  "tab",
+  "shiftTab",
+  "pipe",
+  "tilde",
+];
+
+/** The keys the terminal footer shows for the current mode. */
+export function terminalFooterKeys(navMode: boolean): readonly BarKey[] {
+  return navMode ? NAV_KEYS : TERMINAL_KEYS;
+}
 
 export type TerminalModes = { applicationCursor: boolean };
 

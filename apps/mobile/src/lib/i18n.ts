@@ -28,6 +28,7 @@ export const STRINGS = {
   "nav.changes": { en: "Changes", ar: "التغييرات" },
   "nav.history": { en: "History", ar: "السجل" },
   "nav.talk": { en: "Talk to Jarvis", ar: "تحدّث إلى جارفيس" },
+  "plans.close": { en: "Close the plan", ar: "أغلق الخطة" },
   "plans.openPlan": { en: "Open the plan", ar: "افتح الخطة" },
   "plans.stripTitle": { en: "PLAN", ar: "الخطة" },
   "plans.stripProgress": { en: "PLAN · {done} OF {total}", ar: "الخطة · {done} من {total}" },
@@ -43,6 +44,9 @@ export const STRINGS = {
   "terminal.prevCommand": { en: "Previous command", ar: "الأمر السابق" },
   "terminal.nextCommand": { en: "Next command", ar: "الأمر التالي" },
   "terminal.latest": { en: "Latest", ar: "الأحدث" },
+  "terminal.scrolledBack": { en: "Scrolled back", ar: "تم التمرير للخلف" },
+  "terminal.pane": { en: "Pane {n}", ar: "اللوحة {n}" },
+  "terminal.typePlaceholder": { en: "Type a command or reply", ar: "اكتب أمرًا أو ردًّا" },
   "terminal.arrowPad": { en: "Arrow pad", ar: "لوحة الأسهم" },
   "terminal.arrowPadHint": {
     en: "drag to move the cursor",

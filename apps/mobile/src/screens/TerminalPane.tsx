@@ -21,10 +21,11 @@ import {
 import { ComposeBar } from "@/components/ComposeBar";
 import { ArrowPad } from "@/components/ArrowPad";
 import { FileBrowserSheet } from "@/components/FileBrowserSheet";
+import { IconButton } from "@/components/IconButton";
 import { KeyBar } from "@/components/KeyBar";
 import { PlanStrip } from "@/components/PlanStrip";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { TerminalNavBar } from "@/components/TerminalNavBar";
+import { TerminalFindField, TerminalLatestPill, TerminalNavBar } from "@/components/TerminalNavBar";
 import {
   TerminalWebView,
   type TerminalView,
@@ -47,7 +48,8 @@ import {
 import { sendResultText, streamStatusKey, trimmedAmount } from "@/lib/session-screen";
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
-import { type KeyName, type Latch, TERMINAL_KEYS } from "@/lib/terminal-keys";
+import { type BarKey, isTextKey, TEXT_KEY_VALUE, terminalFooterKeys } from "@/lib/terminal-keys";
+import { paneChips, terminalTitle } from "@/lib/terminal-header";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
 import { createTerminalInput } from "@/lib/terminal-input";
@@ -56,10 +58,11 @@ import { theme } from "@/lib/theme";
 import { useKeyboardHeight } from "@/lib/use-keyboard-height";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { createPlansStore } from "@/lib/plans-store";
-import { parseTerminalPanes, resolvePane } from "@/lib/workspace-store";
+import { parseTerminalPanes, parseWorkspaceSnapshot, resolvePane } from "@/lib/workspace-store";
 import { PlanSheet } from "@/plan/PlanSheet";
 import { currentStep, planProgressOf } from "@/plan/plan-progress";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { MobileWorkspaceTab, TerminalPaneInfo } from "@jarvis/wire";
 
 type ValidationPhase = "checking" | "notFound" | "ok";
 
@@ -112,7 +115,10 @@ function TerminalPaneBody({
   const [view, setView] = useState<TerminalView>({ back: false, commands: false });
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState<boolean | undefined>(undefined);
-  const [padOpen, setPadOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [navMode, setNavMode] = useState(false);
+  const [tab, setTab] = useState<MobileWorkspaceTab | undefined>(undefined);
+  const [panes, setPanes] = useState<TerminalPaneInfo[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
   const [, setPlanRevision] = useState(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -185,12 +191,19 @@ function TerminalPaneBody({
         if (cancelled) return;
         const panes = result.ok ? parseTerminalPanes(result.value) : [];
         const found = resolvePane(panes, paneKey);
+        if (found !== undefined) setPanes(panes);
         if (found === undefined) {
           setPhase("notFound");
           return;
         }
         setExited(found.exited);
         setPhase("ok");
+      });
+      // The tab's own title and project for the header; a failed read
+      // leaves the pane key as the title.
+      void client.call("workspace:snapshot", []).then((result) => {
+        if (cancelled || !result.ok) return;
+        setTab(parseWorkspaceSnapshot(result.value)?.tabs.find((item) => item.id === tabId));
       });
       return () => {
         cancelled = true;
@@ -267,7 +280,7 @@ function TerminalPaneBody({
     noticeTimer.current = setTimeout(() => setKeyNotice(""), 4000);
   }
 
-  async function onKey(key: KeyName | Latch) {
+  async function onKey(key: BarKey) {
     const input = inputRef.current;
     if (input === undefined || disabled) return;
     if (key === "ctrl" || key === "alt") {
@@ -275,7 +288,7 @@ function TerminalPaneBody({
       return;
     }
     // The Alt latch is spent the moment the key goes, not when it lands.
-    const pending = input.sendKey(key);
+    const pending = isTextKey(key) ? input.sendText(TEXT_KEY_VALUE[key]) : input.sendKey(key);
     setArmed(latchesOf(input));
     const result = await pending;
     showResult(input, result);
@@ -312,39 +325,40 @@ function TerminalPaneBody({
   const queuedNotes = plansStore.state.comments.filter(
     (comment) => comment.sentAt === undefined,
   ).length;
+  const closeFind = () => {
+    setFinding(false);
+    setFound(undefined);
+    setQuery("");
+  };
   const headerActions = (
     <View style={styles.headerActions}>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={t(language, "files.title")}
+      <IconButton
+        icon="folder"
+        label={t(language, "files.title")}
         onPress={() => setFilesOpen(true)}
-        style={styles.headerButton}
-      >
-        <Text style={styles.headerButtonText}>▤</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={t(language, "terminal.find")}
-        accessibilityState={{ selected: finding }}
-        onPress={() => {
-          setFinding((open) => !open);
-          setFound(undefined);
-        }}
-        style={[styles.headerButton, finding && styles.headerButtonOn]}
-      >
-        <Text style={styles.headerButtonText}>⌕</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={t(language, "terminal.arrowPad")}
-        accessibilityState={{ selected: padOpen }}
-        onPress={() => setPadOpen((open) => !open)}
-        style={[styles.headerButton, padOpen && styles.headerButtonOn]}
-      >
-        <Text style={styles.headerButtonText}>✥</Text>
-      </TouchableOpacity>
+      />
+      {finding ? (
+        <TerminalFindField
+          language={language}
+          value={query}
+          found={found}
+          onChange={setQuery}
+          onSubmit={() => query !== "" && webRef.current?.find(query, "next")}
+        />
+      ) : (
+        <IconButton
+          icon="search"
+          label={t(language, "terminal.find")}
+          onPress={() => {
+            setFinding(true);
+            setFound(undefined);
+          }}
+        />
+      )}
     </View>
   );
+  const chips = embedded ? [] : paneChips(panes, paneKey);
+  const showChips = chips.length > 1;
   return (
     // iOS: KeyboardAvoidingView's padding behavior, as before. Android: no
     // behavior (a plain View) and the screen pads itself from the measured
@@ -357,7 +371,43 @@ function TerminalPaneBody({
       ]}
       behavior={keyboardAvoidingBehavior(Platform.OS)}
     >
-      {!embedded && <ScreenHeader title={paneKey} onBack={router.back} trailing={headerActions} />}
+      {!embedded && (
+        <ScreenHeader
+          title={terminalTitle(tab, paneKey)}
+          {...(view.back
+            ? { subtitle: t(language, "terminal.scrolledBack"), subtitleTone: "warning" as const }
+            : tab === undefined
+              ? {}
+              : { subtitle: tab.project, subtitleMono: true })}
+          onBack={router.back}
+          trailing={headerActions}
+          bordered={!showChips}
+        />
+      )}
+      {showChips && (
+        <View style={styles.chips}>
+          {chips.map((chip) => (
+            <TouchableOpacity
+              key={chip.paneKey}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: chip.current }}
+              onPress={() => {
+                if (chip.current) return;
+                router.replace({
+                  pathname: "/terminal/[paneKey]",
+                  params: { paneKey: chip.paneKey, tabId },
+                });
+              }}
+              style={[styles.chip, chip.current && styles.chipOn]}
+            >
+              <View style={[styles.chipDot, chip.exited && styles.chipDotExited]} />
+              <Text style={[styles.chipText, chip.current && styles.chipTextOn]}>
+                {t(language, "terminal.pane", { n: chip.number })}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
       {/* Wide layout: no stack header, so the same button sits above the pane. */}
       {embedded && <View style={styles.planRow}>{headerActions}</View>}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
@@ -376,41 +426,44 @@ function TerminalPaneBody({
           </Text>
         </TouchableOpacity>
       )}
-      <TerminalWebView
-        ref={webRef}
-        onReady={({ cols, rows }) => {
-          inputRef.current?.resize(cols, rows);
-          inputRef.current?.reassert();
-        }}
-        onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
-        onModes={(modes) => inputRef.current?.setModes(modes)}
-        onNeedsReplay={() => streamRef.current?.restart(sink)}
-        fixedSize={streamView.size}
-        onWheel={(direction) => {
-          void inputRef.current?.sendText(sgrWheelSequence(direction));
-        }}
-        onView={setView}
-        onFound={setFound}
-        onHardwareInput={
-          hardwareKeys
-            ? (key) => {
-                void onHardwareInput(key);
-              }
-            : undefined
-        }
-      />
+      <View style={styles.output}>
+        <TerminalWebView
+          ref={webRef}
+          onReady={({ cols, rows }) => {
+            inputRef.current?.resize(cols, rows);
+            inputRef.current?.reassert();
+          }}
+          onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
+          onModes={(modes) => inputRef.current?.setModes(modes)}
+          onNeedsReplay={() => streamRef.current?.restart(sink)}
+          fixedSize={streamView.size}
+          onWheel={(direction) => {
+            void inputRef.current?.sendText(sgrWheelSequence(direction));
+          }}
+          onView={setView}
+          onFound={setFound}
+          onHardwareInput={
+            hardwareKeys
+              ? (key) => {
+                  void onHardwareInput(key);
+                }
+              : undefined
+          }
+        />
+        {view.back && (
+          <TerminalLatestPill language={language} onPress={() => webRef.current?.jump("latest")} />
+        )}
+      </View>
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
       <TerminalNavBar
         language={language}
         view={view}
         finding={finding}
+        query={query}
         found={found}
         onJump={(to) => webRef.current?.jump(to)}
-        onFind={(query, direction) => webRef.current?.find(query, direction)}
-        onCloseFind={() => {
-          setFinding(false);
-          setFound(undefined);
-        }}
+        onFind={(text, direction) => webRef.current?.find(text, direction)}
+        onCloseFind={closeFind}
       />
       {plansStore.state.doc !== undefined && (
         <PlanStrip
@@ -421,31 +474,39 @@ function TerminalPaneBody({
           onOpen={() => setPlanVisible(true)}
         />
       )}
-      {padOpen && (
-        <ArrowPad
-          language={language}
+      <View style={styles.footer}>
+        <KeyBar
+          variant="footer"
+          keys={terminalFooterKeys(navMode)}
           disabled={disabled}
-          onArrow={(arrow) => {
-            void onKey(arrow);
+          armed={armed}
+          modeToggle={{ open: navMode, onPress: () => setNavMode((open) => !open) }}
+          onKey={(key) => {
+            void onKey(key);
           }}
         />
-      )}
-      <KeyBar
-        keys={TERMINAL_KEYS}
-        disabled={disabled}
-        armed={armed}
-        onKey={(key) => {
-          void onKey(key);
-        }}
-      />
-      <View style={styles.composeRow}>
-        <ComposeBar
-          disabled={disabled}
-          onSend={(text) =>
-            inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
-          }
-          onSent={() => setArmed(latchesOf(inputRef.current))}
-        />
+        {navMode ? (
+          <ArrowPad
+            language={language}
+            disabled={disabled}
+            onArrow={(arrow) => {
+              void onKey(arrow);
+            }}
+            onKey={(key) => {
+              void onKey(key);
+            }}
+          />
+        ) : (
+          <ComposeBar
+            mono
+            disabled={disabled}
+            placeholder={t(language, "terminal.typePlaceholder")}
+            onSend={(text) =>
+              inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
+            }
+            onSent={() => setArmed(latchesOf(inputRef.current))}
+          />
+        )}
       </View>
       <FileBrowserSheet
         visible={filesOpen}
@@ -469,22 +530,49 @@ function TerminalPaneBody({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
+  container: { flex: 1, backgroundColor: theme.colors.terminalGround },
+  output: { flex: 1 },
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
-  composeRow: { paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.sm },
   planRow: { flexDirection: "row", justifyContent: "flex-end" },
-  headerActions: { flexDirection: "row", gap: 6, paddingHorizontal: theme.spacing.sm },
-  headerButton: {
-    width: 40,
-    height: 40,
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 6 },
+  chips: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: theme.colors.ground,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.hairlineSoft,
+  },
+  chip: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: theme.radius.full,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
   },
-  headerButtonOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
-  headerButtonText: { color: theme.colors.textSecondary, fontSize: 17 },
+  chipOn: { borderColor: theme.colors.selected, backgroundColor: theme.colors.selected },
+  chipDot: {
+    width: 7,
+    height: 7,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.success,
+  },
+  chipDotExited: { backgroundColor: theme.colors.disabledDot },
+  chipText: { ...theme.type.meta, color: theme.colors.textMuted, fontFamily: theme.font.semibold },
+  chipTextOn: { color: theme.colors.text, fontFamily: theme.font.bold },
+  footer: {
+    gap: 8,
+    paddingTop: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.hairlineSoft,
+    backgroundColor: theme.colors.ground,
+  },
 });
