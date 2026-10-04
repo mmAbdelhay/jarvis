@@ -22,7 +22,8 @@ export type SwapScriptOptions = {
   current: string;
   /** The verified copy next to it, moved over `current`. */
   staged: string;
-  /** One sh line that starts the app at "$app". */
+  /** One sh line that starts the app at "$app"; it always stands on a line
+   *  of its own, so it may end in `&`. */
   launchLine: string;
 };
 
@@ -49,7 +50,9 @@ while kill -0 "$pid" 2>/dev/null; do
 done
 
 if [ ! -e "$staged" ]; then
-  if [ -e "$app" ]; then ${opts.launchLine}; fi
+  if [ -e "$app" ]; then
+    ${opts.launchLine}
+  fi
   exit 1
 fi
 
