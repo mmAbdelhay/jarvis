@@ -85,7 +85,9 @@ function isPlainDest(dest: string): boolean {
 }
 
 /** Reads `body` chunk by chunk; `onChunk` returning false stops early.
- *  An abort on `signal` cancels a read that is still waiting. */
+ *  An abort on `signal` cancels a read that is still waiting, and any
+ *  failure (including `onChunk` throwing) cancels the stream before
+ *  rethrowing, so the connection behind it is released. */
 async function pump(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal | undefined,
@@ -105,6 +107,9 @@ async function pump(
         return;
       }
     }
+  } catch (err) {
+    cancel();
+    throw err;
   } finally {
     signal?.removeEventListener("abort", cancel);
   }
@@ -125,8 +130,14 @@ export async function downloadFile(opts: DownloadOptions): Promise<DownloadResul
   let oversize = false;
   let failure: DownloadFailure | undefined;
 
+  let file: Awaited<ReturnType<typeof open>>;
   try {
-    const file = await open(part, "w");
+    file = await open(part, "w");
+  } catch {
+    await response.body?.cancel().catch(() => undefined);
+    return { ok: false, reason: "io" };
+  }
+  try {
     try {
       if (response.body !== null) {
         await pump(response.body, opts.signal, async (chunk) => {
