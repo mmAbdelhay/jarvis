@@ -39,16 +39,30 @@ function isPlainHttps(parsed: URL, host: string): boolean {
   );
 }
 
+/** Whether `parsed` is on the development release server's origin. */
+function onTestOrigin(parsed: URL, opts: AllowOptions): boolean {
+  if (opts.testOrigin === undefined) return false;
+  // An opaque origin ("null", e.g. file:) would match every other opaque one.
+  const origin = parse(opts.testOrigin)?.origin;
+  return origin !== undefined && origin !== "null" && parsed.origin === origin;
+}
+
 export function isAllowedDownloadUrl(url: string, opts: AllowOptions = {}): boolean {
   const parsed = parse(url);
   if (parsed === undefined) return false;
-  if (opts.testOrigin !== undefined) {
-    // An opaque origin ("null", e.g. file:) would match every other opaque one.
-    const origin = parse(opts.testOrigin)?.origin;
-    if (origin !== undefined && origin !== "null" && parsed.origin === origin) return true;
-  }
+  if (onTestOrigin(parsed, opts)) return true;
   // URL has already resolved any "../", so the path check cannot be walked out of.
   return isPlainHttps(parsed, DOWNLOAD_HOST) && parsed.pathname.startsWith(DOWNLOAD_PATH);
+}
+
+/** An allowed download that is exactly this release's file: GitHub serves it
+ *  at `…/download/v<version>/<name>`, so an API answer that points the asset
+ *  at another tag's file (an older, vulnerable build) is refused. The local
+ *  test server lays its files out as it likes. */
+function isReleaseFile(url: string, version: string, name: string, opts: AllowOptions): boolean {
+  if (!isAllowedDownloadUrl(url, opts)) return false;
+  const parsed = parse(url) as URL;
+  return onTestOrigin(parsed, opts) || parsed.pathname === `${DOWNLOAD_PATH}v${version}/${name}`;
 }
 
 export function isAllowedRedirect(url: string): boolean {
@@ -76,7 +90,8 @@ export function pickAsset(
   arch: string,
   opts: AllowOptions = {},
 ): ReleaseAsset | undefined {
-  const name = assetName(version.replace(/^v/, ""), platform, arch);
+  const bare = version.replace(/^v/, "");
+  const name = assetName(bare, platform, arch);
   if (name === undefined) return undefined;
-  return assets.find((asset) => asset.name === name && isAllowedDownloadUrl(asset.url, opts));
+  return assets.find((asset) => asset.name === name && isReleaseFile(asset.url, bare, name, opts));
 }

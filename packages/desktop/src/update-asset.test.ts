@@ -43,6 +43,33 @@ describe("pickAsset", () => {
     );
   });
 
+  it("drops an asset whose URL is under another release's tag or name", () => {
+    const base = "https://github.com/mmAbdelhay/jarvis/releases/download/";
+    for (const url of [
+      `${base}v0.1.8/Jarvis-0.1.9-arm64.dmg`,
+      `${base}v0.1.9/Jarvis-0.1.8-arm64.dmg`,
+      `${base}0.1.9/Jarvis-0.1.9-arm64.dmg`,
+      `${base}v0.1.9/sub/Jarvis-0.1.9-arm64.dmg`,
+    ]) {
+      expect(
+        pickAsset([asset("Jarvis-0.1.9-arm64.dmg", url)], "0.1.9", "darwin", "arm64"),
+        url,
+      ).toBeUndefined();
+    }
+    expect(pickAsset(release, "v0.1.9", "darwin", "arm64")?.url).toBe(
+      `${DOWNLOAD}Jarvis-0.1.9-arm64.dmg`,
+    );
+  });
+
+  it("accepts any path on the local test origin", () => {
+    const local = [
+      asset("Jarvis-0.1.9-arm64.dmg", "http://127.0.0.1:4567/files/Jarvis-0.1.9-arm64.dmg"),
+    ];
+    expect(
+      pickAsset(local, "0.1.9", "darwin", "arm64", { testOrigin: "http://127.0.0.1:4567" })?.name,
+    ).toBe("Jarvis-0.1.9-arm64.dmg");
+  });
+
   it("accepts a local test origin only when one is given", () => {
     const local = [asset("Jarvis-0.1.9-arm64.dmg", "http://127.0.0.1:4567/Jarvis-0.1.9-arm64.dmg")];
     expect(pickAsset(local, "0.1.9", "darwin", "arm64")).toBeUndefined();
