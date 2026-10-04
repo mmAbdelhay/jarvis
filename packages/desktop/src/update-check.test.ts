@@ -25,6 +25,8 @@ describe("checkForUpdate", () => {
       current: "0.1.5",
       latest: "0.1.6",
       url: "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.6",
+      notes: "",
+      assets: [],
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(RELEASES_API, expect.anything());
@@ -51,5 +53,62 @@ describe("checkForUpdate", () => {
       throw new Error("offline");
     });
     expect((await checkForUpdate({ current: "0.1.5", fetch: offline })).kind).toBe("failed");
+  });
+
+  it("returns a newer release's notes and its downloadable assets", async () => {
+    const fetch = reply({
+      tag_name: "v0.1.9",
+      html_url: "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.9",
+      body: "Fixes things.",
+      assets: [
+        {
+          name: "Jarvis-0.1.9-arm64.dmg",
+          browser_download_url:
+            "https://github.com/mmAbdelhay/jarvis/releases/download/v0.1.9/Jarvis-0.1.9-arm64.dmg",
+          size: 123,
+        },
+        { name: "broken", size: 5 },
+        "not an asset",
+      ],
+    });
+    const result = await checkForUpdate({ current: "0.1.8", fetch });
+    expect(result).toMatchObject({
+      kind: "newer",
+      notes: "Fixes things.",
+      assets: [
+        {
+          name: "Jarvis-0.1.9-arm64.dmg",
+          url: "https://github.com/mmAbdelhay/jarvis/releases/download/v0.1.9/Jarvis-0.1.9-arm64.dmg",
+          size: 123,
+        },
+      ],
+    });
+  });
+
+  it("treats missing or malformed assets as none", async () => {
+    const page = "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.9";
+    for (const assets of [undefined, null, "x", { name: "a" }]) {
+      const fetch = reply({ tag_name: "v0.1.9", html_url: page, assets });
+      expect(await checkForUpdate({ current: "0.1.8", fetch })).toMatchObject({ assets: [] });
+    }
+  });
+
+  it("cuts release notes at 4000 characters", async () => {
+    const fetch = reply({
+      tag_name: "v0.1.9",
+      html_url: "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.9",
+      body: "x".repeat(5000),
+    });
+    const result = await checkForUpdate({ current: "0.1.8", fetch });
+    expect(result.kind === "newer" && result.notes.length).toBe(4000);
+  });
+
+  it("asks the given API instead when one is passed", async () => {
+    const fetch = reply({
+      tag_name: "v0.1.5",
+      html_url: "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.5",
+    });
+    await checkForUpdate({ current: "0.1.5", fetch, api: "http://127.0.0.1:4567/latest" });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/latest", expect.anything());
   });
 });

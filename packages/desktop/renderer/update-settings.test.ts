@@ -39,6 +39,8 @@ describe("Check for updates", () => {
       current: "0.1.5",
       latest: "0.1.6",
       url: "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.6",
+      notes: "",
+      assets: [],
     });
     byId("settings-update-check").click();
     await settle();
