@@ -40,12 +40,15 @@ export type LinuxSwapOptions = {
   pid: number;
   appImage: string;
   staged: string;
-  /** Command that starts the AppImage given as its last word; it is run in
-   *  the background with output discarded. `nohup` by default. */
+  /** Test only: command that starts the AppImage given as its last word, in
+   *  place of the default `nohup`. It runs in the background with output
+   *  discarded. */
   launch?: string;
 };
 
-/** The sh script that swaps `staged` in for `appImage` after `pid` exits. */
+/** The sh script that swaps `staged` in for `appImage` after `pid` exits.
+ *  Starting the new AppImage is best effort: `nohup … &` always reports
+ *  success, so a launch failure here does not roll the swap back. */
 export function linuxSwapScript(opts: LinuxSwapOptions): string {
   return swapScript({
     pid: opts.pid,

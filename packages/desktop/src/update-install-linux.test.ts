@@ -88,12 +88,19 @@ describe("linuxSwapScript text", () => {
     expect(script).toMatch(/if ! mv "\$staged" "\$app"; then[\s\S]*mv "\$old" "\$app"/);
   });
 
+  it("rejects an AppImage or staged path that is not absolute and normalised", () => {
+    for (const bad of ["Jarvis.AppImage", "", "/", "/home/me/../Jarvis.AppImage"]) {
+      expect(() => linuxSwapScript({ pid: 7, appImage: bad, staged: `${odd}.new` })).toThrow();
+      expect(() => linuxSwapScript({ pid: 7, appImage: odd, staged: bad })).toThrow();
+    }
+  });
+
   it("rejects a pid that is not a positive integer", () => {
     expect(() => linuxSwapScript({ pid: -3, appImage: odd, staged: `${odd}.new` })).toThrow();
   });
 });
 
-describe("linuxSwapScript run", () => {
+describe.skipIf(process.platform === "win32")("linuxSwapScript run", () => {
   let dir: string;
   afterEach(() => {
     if (dir !== undefined) {
@@ -148,6 +155,16 @@ describe("linuxSwapScript run", () => {
     expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
+  it("never touches a stale .old when there is no current AppImage", () => {
+    const { appImage, staged, launch } = setup();
+    rmSync(appImage);
+    writeFileSync(`${appImage}.old`, "stale");
+    const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
+    expect(result.status).toBe(0);
+    expect(readFileSync(appImage, "utf8")).toBe("new");
+    expect(readFileSync(`${appImage}.old`, "utf8")).toBe("stale");
+  });
+
   it("replaces a stale .old left by a failed earlier run", () => {
     const { appImage, staged, launch } = setup();
     writeFileSync(`${appImage}.old`, "stale");
@@ -157,18 +174,21 @@ describe("linuxSwapScript run", () => {
     expect(existsSync(`${appImage}.old`)).toBe(false);
   });
 
-  it("puts the old AppImage back and starts it when the new one cannot move in", async () => {
-    const { appImage, log, launch } = setup();
-    const locked = join(dir, "locked");
-    mkdirSync(locked);
-    const staged = join(locked, "Jarvis.AppImage.new");
-    writeFileSync(staged, "new");
-    spawnSync("/bin/chmod", ["555", locked]);
-    const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
-    expect(result.status).not.toBe(0);
-    expect(readFileSync(appImage, "utf8")).toBe("old");
-    expect(existsSync(`${appImage}.old`)).toBe(false);
-    expect(readFileSync(staged, "utf8")).toBe("new");
-    expect(await launched(log)).toBe(`${appImage}\n`);
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "puts the old AppImage back and starts it when the new one cannot move in",
+    async () => {
+      const { appImage, log, launch } = setup();
+      const locked = join(dir, "locked");
+      mkdirSync(locked);
+      const staged = join(locked, "Jarvis.AppImage.new");
+      writeFileSync(staged, "new");
+      spawnSync("/bin/chmod", ["555", locked]);
+      const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(appImage, "utf8")).toBe("old");
+      expect(existsSync(`${appImage}.old`)).toBe(false);
+      expect(readFileSync(staged, "utf8")).toBe("new");
+      expect(await launched(log)).toBe(`${appImage}\n`);
+    },
+  );
 });

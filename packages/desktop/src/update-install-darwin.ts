@@ -10,9 +10,12 @@ import { swapScript } from "./update-swap-script.js";
 
 const HDIUTIL = "/usr/bin/hdiutil";
 
-const BUNDLE = /^(.+\.app)\/Contents\/MacOS\/[^/]+$/;
+const BUNDLE = /^(.+?\.app)\/Contents\/(?:.+\/)?MacOS\/[^/]+$/;
 
-/** The `.app` bundle that holds `execPath`, or undefined when not in one. */
+/** The `.app` bundle that holds `execPath`, or undefined when not in one.
+ *  Meant for the main process's execPath only; for a helper app nested in
+ *  the bundle (`Jarvis.app/Contents/Frameworks/… Helper.app/…`) it returns
+ *  the outermost bundle, never the helper. */
 export function appBundleOf(execPath: string): string | undefined {
   return BUNDLE.exec(execPath)?.[1];
 }
@@ -108,7 +111,8 @@ export type DarwinSwapOptions = {
   pid: number;
   bundle: string;
   staged: string;
-  /** Command that starts a bundle given as its last word; `open` by default. */
+  /** Test only: command that starts a bundle given as its last word, in
+   *  place of the default `open`. A non-zero exit rolls the swap back. */
   launch?: string;
 };
 

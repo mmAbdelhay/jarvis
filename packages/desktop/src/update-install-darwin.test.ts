@@ -28,6 +28,14 @@ describe("appBundleOf", () => {
     );
   });
 
+  it("returns the outer Jarvis.app for a helper inside it", () => {
+    expect(
+      appBundleOf(
+        "/Applications/Jarvis.app/Contents/Frameworks/Jarvis Helper.app/Contents/MacOS/Jarvis Helper",
+      ),
+    ).toBe("/Applications/Jarvis.app");
+  });
+
   it("is undefined outside an app bundle", () => {
     expect(appBundleOf("/usr/local/bin/electron")).toBeUndefined();
     expect(appBundleOf("/Applications/Jarvis.app/Contents/Resources/x")).toBeUndefined();
@@ -178,6 +186,19 @@ describe("darwinSwapScript text", () => {
     expect(script).toContain(`open "$app"`);
   });
 
+  it("rejects a bundle or staged path that is not absolute and normalised", () => {
+    for (const bad of [
+      "Jarvis.app",
+      "",
+      "/",
+      "/Applications/../Jarvis.app",
+      "/Applications/Jarvis.app/",
+    ]) {
+      expect(() => darwinSwapScript({ pid: 42, bundle: bad, staged: `${odd}.new` })).toThrow();
+      expect(() => darwinSwapScript({ pid: 42, bundle: odd, staged: bad })).toThrow();
+    }
+  });
+
   it("rejects a pid that is not a positive integer", () => {
     for (const pid of [0, -1, 1.5, Number.NaN, 2 ** 53]) {
       expect(() => darwinSwapScript({ pid, bundle: odd, staged: `${odd}.new` })).toThrow();
@@ -185,7 +206,7 @@ describe("darwinSwapScript text", () => {
   });
 });
 
-describe("darwinSwapScript run", () => {
+describe.skipIf(process.platform === "win32")("darwinSwapScript run", () => {
   let dir: string;
   afterEach(() => {
     if (dir !== undefined) {
@@ -241,21 +262,24 @@ describe("darwinSwapScript run", () => {
     expect(existsSync(`${bundle}.old`)).toBe(false);
   });
 
-  it("puts the old bundle back and opens it when the new one cannot move in", () => {
-    const { bundle, log, launch } = setup();
-    // The staged copy exists but sits in a folder it cannot be moved out of.
-    const locked = join(dir, "locked");
-    const staged = join(locked, "Jarvis.app.new");
-    mkdirSync(join(staged, "Contents"), { recursive: true });
-    writeFileSync(join(staged, "Contents", "version"), "new");
-    chmodSync(locked, 0o555);
-    const result = run(darwinSwapScript({ pid: exitedPid(), bundle, staged, launch }));
-    expect(result.status).not.toBe(0);
-    expect(version(bundle)).toBe("old");
-    expect(existsSync(`${bundle}.old`)).toBe(false);
-    expect(version(staged)).toBe("new");
-    expect(readFileSync(log, "utf8")).toBe(`${bundle}\n`);
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "puts the old bundle back and opens it when the new one cannot move in",
+    () => {
+      const { bundle, log, launch } = setup();
+      // The staged copy exists but sits in a folder it cannot be moved out of.
+      const locked = join(dir, "locked");
+      const staged = join(locked, "Jarvis.app.new");
+      mkdirSync(join(staged, "Contents"), { recursive: true });
+      writeFileSync(join(staged, "Contents", "version"), "new");
+      chmodSync(locked, 0o555);
+      const result = run(darwinSwapScript({ pid: exitedPid(), bundle, staged, launch }));
+      expect(result.status).not.toBe(0);
+      expect(version(bundle)).toBe("old");
+      expect(existsSync(`${bundle}.old`)).toBe(false);
+      expect(version(staged)).toBe("new");
+      expect(readFileSync(log, "utf8")).toBe(`${bundle}\n`);
+    },
+  );
 
   it("leaves everything alone and reopens the app when the staged bundle is missing", () => {
     const { bundle, staged, log, launch } = setup();
@@ -265,6 +289,27 @@ describe("darwinSwapScript run", () => {
     expect(version(bundle)).toBe("old");
     expect(existsSync(`${bundle}.old`)).toBe(false);
     expect(readFileSync(log, "utf8")).toBe(`${bundle}\n`);
+  });
+
+  it("puts the original back when the new bundle fails to open", () => {
+    const { bundle, staged, launch } = setup();
+    const failing = `${launch}; false`;
+    const result = run(darwinSwapScript({ pid: exitedPid(), bundle, staged, launch: failing }));
+    expect(result.status).toBe(1);
+    expect(version(bundle)).toBe("old");
+    expect(version(staged)).toBe("new");
+    expect(existsSync(`${bundle}.old`)).toBe(false);
+  });
+
+  it("never touches a stale .old when there is no current bundle", () => {
+    const { bundle, staged, launch } = setup();
+    rmSync(bundle, { recursive: true });
+    mkdirSync(join(`${bundle}.old`, "Contents"), { recursive: true });
+    writeFileSync(join(`${bundle}.old`, "Contents", "version"), "stale");
+    const result = run(darwinSwapScript({ pid: exitedPid(), bundle, staged, launch }));
+    expect(result.status).toBe(0);
+    expect(version(bundle)).toBe("new");
+    expect(version(`${bundle}.old`)).toBe("stale");
   });
 
   it("waits for the app's process to exit before swapping", async () => {
