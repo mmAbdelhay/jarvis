@@ -379,6 +379,18 @@ describe("createUpdater", () => {
     expect(readFileSync(join(updatesDir(), "swap.sh"), "utf8")).toContain(`app='${bundle}'`);
   });
 
+  it("uses the development launch override in the swap script", async () => {
+    mkdirSync(join(root, "Apps"));
+    const launch = "/bin/sh -c 'echo launched >> /tmp/s/log' --";
+    const h = harness({ launch });
+    await h.updater.checkNow();
+    await h.updater.download();
+    await h.updater.install();
+    const text = readFileSync(join(updatesDir(), "swap.sh"), "utf8");
+    expect(text).toContain(`${launch} "$app"`);
+    expect(text).not.toContain(`open "$app"`);
+  });
+
   it("installs on Linux: stages the AppImage and strips the AppImage env", async () => {
     const appImage = join(root, "Jarvis.AppImage");
     writeFileSync(appImage, "old");
@@ -577,6 +589,7 @@ describe("devOverrides", () => {
   const env = {
     JARVIS_UPDATE_API: "http://127.0.0.1:4567/latest",
     JARVIS_UPDATE_BUNDLE: "/tmp/s/Jarvis.app",
+    JARVIS_UPDATE_LAUNCH: "/bin/echo",
   };
   it("is empty in a packaged app", () => {
     expect(devOverrides(env, true)).toEqual({});
@@ -586,6 +599,7 @@ describe("devOverrides", () => {
       api: "http://127.0.0.1:4567/latest",
       testOrigin: "http://127.0.0.1:4567",
       bundle: "/tmp/s/Jarvis.app",
+      launch: "/bin/echo",
     });
     expect(devOverrides({ JARVIS_UPDATE_API: "not a url" }, false)).toEqual({});
   });

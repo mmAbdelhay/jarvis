@@ -180,6 +180,9 @@ export type UpdaterDeps = {
   /** Development override of the macOS bundle to replace
    *  (JARVIS_UPDATE_BUNDLE, honoured only when not packaged). */
   bundle?: string;
+  /** Development override of the swap script's relaunch command
+   *  (JARVIS_UPDATE_LAUNCH, honoured only when not packaged). */
+  launch?: string;
   userData: string;
   /** The releases API; undefined means GitHub's (update-check.ts). */
   api?: string;
@@ -456,7 +459,14 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     if (blocker !== undefined) return fail(blocker);
     const prepared = await prepareDarwin({ dmg: file, bundle, workDir: dir, exec: deps.exec });
     if (!prepared.ok) return fail("swap");
-    await spawnSwap(darwinSwapScript({ pid: deps.pid, bundle, staged: prepared.staged }));
+    await spawnSwap(
+      darwinSwapScript({
+        pid: deps.pid,
+        bundle,
+        staged: prepared.staged,
+        ...(deps.launch === undefined ? {} : { launch: deps.launch }),
+      }),
+    );
     deps.quit();
     return { ...state };
   }
@@ -543,13 +553,13 @@ export function createUpdater(deps: UpdaterDeps): Updater {
 /** Development overrides, read only from an unpackaged run:
  *  JARVIS_UPDATE_API points the check at a local release server (whose
  *  origin then also passes the download allow-list), and
- *  JARVIS_UPDATE_BUNDLE names a scratch macOS bundle to replace. */
-export function devOverrides(
-  env: NodeJS.ProcessEnv,
-  packaged: boolean,
-): { api?: string; testOrigin?: string; bundle?: string } {
+ *  JARVIS_UPDATE_BUNDLE names a scratch macOS bundle to replace, and
+ *  JARVIS_UPDATE_LAUNCH replaces the swap script's `open` relaunch. */
+export type DevOverrides = { api?: string; testOrigin?: string; bundle?: string; launch?: string };
+
+export function devOverrides(env: NodeJS.ProcessEnv, packaged: boolean): DevOverrides {
   if (packaged) return {};
-  const out: { api?: string; testOrigin?: string; bundle?: string } = {};
+  const out: DevOverrides = {};
   const api = env["JARVIS_UPDATE_API"];
   if (api !== undefined && api !== "") {
     try {
@@ -562,6 +572,8 @@ export function devOverrides(
   }
   const bundle = env["JARVIS_UPDATE_BUNDLE"];
   if (bundle !== undefined && bundle !== "") out.bundle = bundle;
+  const launch = env["JARVIS_UPDATE_LAUNCH"];
+  if (launch !== undefined && launch !== "") out.launch = launch;
   return out;
 }
 
