@@ -92,7 +92,6 @@ import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
-import type { UpdateCheck } from "./update-check.js";
 import type { RunningCounts, UpdateState } from "./updater.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
@@ -642,9 +641,6 @@ export type RendererApi = {
    *  day, and sessions started per day over the last two weeks. Free — it
    *  reads only what was already recorded. */
   usageHistory(): Promise<UsageHistory>;
-  /** The pre-updater Check for updates, answered by the updater's own
-   *  checkNow (updater.ts's legacyCheck) for a renderer that still asks. */
-  checkForUpdate(): Promise<UpdateCheck>;
   /** The updater (updater.ts). Each resolves with the state after the
    *  call; every change along the way also arrives on onUpdateState. A call
    *  made while another operation is in flight changes nothing. */

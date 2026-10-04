@@ -24,6 +24,7 @@ import type { PrerequisiteId } from "@jarvis/platform";
 import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
 import type { AuthChannel, PushKind } from "@jarvis/wire";
 import type { RemoteWebState } from "./remote-web.js";
+import type { RunningCounts, UpdateError } from "./updater.js";
 
 export const PRIMARY_LANGUAGE = "en";
 
@@ -148,11 +149,15 @@ export const MESSAGES = {
     language === "ar"
       ? "تغيّر السؤال قبل الإجابة، فلم يُكتب شيء. انظر مجددًا."
       : "That prompt changed before the answer reached it, so nothing was typed. Look again.",
-  // Settings' Check for updates (update-settings.ts).
-  updateCheck: (language: "ar" | "en"): string =>
-    language === "ar" ? "التحقق من وجود تحديث" : "Check for updates",
+  // Settings → General → Updates (update-settings.ts).
+  updateCheckNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحقّق الآن" : "Check now",
   updateChecking: (language: "ar" | "en"): string =>
     language === "ar" ? "جارٍ التحقق…" : "Checking…",
+  updateVersion: (version: string, language: "ar" | "en"): string =>
+    language === "ar" ? `إصدارك الحالي ${version}` : `Jarvis ${version}`,
+  updateLastChecked: (ago: string, language: "ar" | "en"): string =>
+    language === "ar" ? `آخر تحقق ${ago}` : `last checked ${ago}`,
   updateCurrent: (version: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `هذا أحدث إصدار (${version}).`
@@ -161,10 +166,85 @@ export const MESSAGES = {
     language === "ar"
       ? `الإصدار ${latest} متاح، ولديك ${current}.`
       : `Jarvis ${latest} is available; you have ${current}.`,
-  updateFailed: (language: "ar" | "en"): string =>
-    language === "ar" ? "تعذّر الوصول إلى GitHub الآن." : "Couldn't reach GitHub just now.",
-  updateOpen: (language: "ar" | "en"): string =>
-    language === "ar" ? "افتح صفحة الإصدار" : "Open the release",
+  updateFullNotes: (language: "ar" | "en"): string =>
+    language === "ar" ? "الملاحظات كاملة" : "Full notes",
+  updateInstall: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثبّت التحديث" : "Install update",
+  updateDownloading: (received: string, total: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `جارٍ التنزيل: ${received} من ${total}`
+      : `Downloading ${received} of ${total}`,
+  updateVerifying: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التحقق من الملف…" : "Checking the download…",
+  updateCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  /** The confirm before a restart. Without counts (the core did not
+   *  answer) it still warns, without numbers. Arabic puts each count in
+   *  brackets after its noun, which reads naturally for any number. */
+  updateRestartEnds: (counts: RunningCounts | undefined, language: "ar" | "en"): string => {
+    if (counts === undefined) {
+      return language === "ar"
+        ? "سيُعاد تشغيل Jarvis، وستتوقف الطرفيات والوكلاء العاملة."
+        : "Jarvis will restart, ending any running terminals and agents.";
+    }
+    if (language === "ar") {
+      return `ستُنهي إعادة التشغيل الطرفيات العاملة (${counts.terminals}) والوكلاء العاملين (${counts.agents}).`;
+    }
+    const terminals = `${counts.terminals} running ${counts.terminals === 1 ? "terminal" : "terminals"}`;
+    const agents = `${counts.agents} ${counts.agents === 1 ? "agent" : "agents"}`;
+    return `Restarting ends ${terminals} and ${agents}.`;
+  },
+  updateReady: (latest: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `نُزِّل الإصدار ${latest} وتم التحقق منه.`
+      : `Jarvis ${latest} is downloaded and verified.`,
+  updateNavDot: (language: "ar" | "en"): string =>
+    language === "ar" ? "يوجد تحديث لـ Jarvis" : "A Jarvis update is available",
+  updateInstallNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثبّت الآن" : "Install now",
+  updateLater: (language: "ar" | "en"): string => (language === "ar" ? "لاحقًا" : "Later"),
+  updateInstalling: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التثبيت… سيُعاد تشغيل Jarvis." : "Installing… Jarvis will restart.",
+  /** One line per UpdateError (updater.ts). Every failure leaves the
+   *  installed app as it was. */
+  updateError: (error: UpdateError, language: "ar" | "en"): string => {
+    const ar = language === "ar";
+    switch (error) {
+      case "offline":
+        return ar
+          ? "فشل آخر تحقق: تعذّر الوصول إلى GitHub."
+          : "Last check failed: couldn't reach GitHub.";
+      case "no-asset":
+        return ar
+          ? "لا توجد نسخة لهذا الجهاز في هذا الإصدار."
+          : "No build for this computer in this release.";
+      case "no-sums":
+        return ar
+          ? "الإصدار بلا ملف بصمات (SHA256SUMS)، فلم يُنزَّل."
+          : "The release has no checksums (SHA256SUMS), so nothing was installed.";
+      case "mismatch":
+        return ar
+          ? "الملف المُنزَّل لا يطابق بصمته، فحُذف."
+          : "The download didn't match its checksum and was deleted.";
+      case "download":
+        return ar ? "فشل التنزيل. حاول مرة أخرى." : "The download failed. Try again.";
+      case "read-only":
+        return ar
+          ? "لا يستطيع Jarvis الكتابة في المجلد المثبَّت فيه."
+          : "Jarvis can't write to the folder it's installed in.";
+      case "translocated":
+        return ar
+          ? "انقل Jarvis إلى مجلد Applications أولًا، ثم حاول مجددًا."
+          : "Move Jarvis to the Applications folder first, then try again.";
+      case "not-appimage":
+        return ar
+          ? "لا يُحدِّث نفسه إلا إصدار AppImage."
+          : "Only the AppImage build can update itself.";
+      case "swap":
+        return ar
+          ? "فشل التثبيت، وبقي هذا الإصدار كما هو."
+          : "Installing failed; this version is unchanged.";
+    }
+  },
   // The API tab's find in response (api-response.ts).
   apiFindInResponse: (language: "ar" | "en"): string =>
     language === "ar" ? "ابحث في الاستجابة" : "Find in response",

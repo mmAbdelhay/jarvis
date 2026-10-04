@@ -203,8 +203,6 @@ export type ElectronBoundChannel =
   | "workspace:pip"
   | "dialog:pickFiles"
   | "plans:openLink"
-  // The app's own version and the app's own network request (update-check.ts).
-  | "app:checkUpdate"
   // The updater: downloads, swaps and quits this app (updater.ts).
   | "update:check"
   | "update:download"

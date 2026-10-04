@@ -12,7 +12,6 @@ import type { ReportedRect } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
-import type { UpdateCheck } from "./update-check.js";
 import type { Updater } from "./updater.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ViewReconciler } from "./view-reconciler.js";
@@ -38,7 +37,6 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "workspace:pip",
   "dialog:pickFiles",
   "plans:openLink",
-  "app:checkUpdate",
   "update:check",
   "update:download",
   "update:cancel",
@@ -119,9 +117,6 @@ export type DesktopOnlyDeps = {
   // plans:openLink's own way out of this process — Pick, not the whole
   // Electron `shell`, the same discipline `dialog` above follows.
   shell: Pick<Shell, "openExternal">;
-  /** Settings' Check for updates (update-check.ts): this app's own version
-   *  and one request to GitHub's releases API. */
-  checkForUpdate: () => Promise<UpdateCheck>;
   /** The updater (updater.ts); its state pushes go out from main.ts. */
   updater: Pick<Updater, "checkNow" | "download" | "cancel" | "counts" | "install">;
   language: "ar" | "en";
@@ -207,7 +202,6 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // target=_blank outright (main.ts's setWindowOpenHandler). A url that
   // fails isAllowedPlanLinkUrl is silently ignored, never thrown into the
   // renderer's own await.
-  deps.handle("app:checkUpdate", () => deps.checkForUpdate());
   // The updater takes no arguments: what to download and install is the
   // state it already holds, never something the renderer names.
   deps.handle("update:check", () => deps.updater.checkNow());

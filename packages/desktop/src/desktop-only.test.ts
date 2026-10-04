@@ -387,7 +387,6 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     startTabPlans: vi.fn(),
     isTerminalTab: vi.fn(() => true),
     shell: { openExternal: vi.fn(async () => {}) },
-    checkForUpdate: vi.fn(async () => ({ kind: "current" as const, current: "0.1.5" })),
     updater: {
       checkNow: vi.fn(async () => ({ phase: "current" as const, current: "0.1.5" })),
       download: vi.fn(async () => ({ phase: "ready" as const, current: "0.1.5" })),

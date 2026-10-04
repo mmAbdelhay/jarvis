@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CHECK_INTERVAL_MS,
   createUpdater,
-  legacyCheck,
   countRunning,
   devOverrides,
   nodeExec,
@@ -421,28 +420,65 @@ describe("createUpdater", () => {
     await h.updater.download();
     expect(await h.updater.checkNow()).toMatchObject({ phase: "ready" });
   });
-});
 
-describe("legacyCheck", () => {
-  it("maps states to the old app:checkUpdate answer", () => {
-    expect(legacyCheck({ phase: "current", current: "1.0.0" })).toEqual({
-      kind: "current",
-      current: "1.0.0",
+  it("forgets the verified file once a new download starts", async () => {
+    mkdirSync(join(root, "Apps"));
+    let assetFails = false;
+    const h = harness(
+      { exec: vi.fn(async () => ({ code: 1, stdout: "" })) },
+      {
+        [`${BASE}${DMG}`]: () =>
+          assetFails ? new Response("no", { status: 500 }) : new Response(PAYLOAD),
+      },
+    );
+    await h.updater.checkNow();
+    await h.updater.download();
+    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "swap" });
+    assetFails = true;
+    expect(await h.updater.download()).toMatchObject({ phase: "error", error: "download" });
+    // The retry deleted the old file, so the same release is not "ready".
+    expect(await h.updater.checkNow()).toMatchObject({ phase: "available" });
+  });
+
+  it("skips the daily re-check while an install is ready, and re-arms", async () => {
+    const h = harness();
+    await h.updater.start();
+    await h.updater.download();
+    const pushes = h.pushed.length;
+    h.advance(CHECK_INTERVAL_MS);
+    h.fireTimers();
+    await settle();
+    expect(h.calls.filter((url) => url === API)).toEqual([API]);
+    expect(h.updater.state().phase).toBe("ready");
+    expect(h.pushed.length).toBe(pushes);
+    expect(h.timers.size).toBe(1);
+  });
+
+  it("skips the daily re-check while a download is in flight", async () => {
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
     });
-    expect(
-      legacyCheck({ phase: "available", current: "1.0.0", latest: "1.0.1", url: PAGE, notes: "n" }),
-    ).toEqual({
-      kind: "newer",
-      current: "1.0.0",
-      latest: "1.0.1",
-      url: PAGE,
-      notes: "n",
-      assets: [],
-    });
-    expect(legacyCheck({ phase: "error", current: "1.0.0", error: "offline" })).toEqual({
-      kind: "failed",
-      current: "1.0.0",
-    });
+    const h = harness(
+      {},
+      {
+        [`${BASE}${DMG}`]: async () => {
+          await gate;
+          return new Response(PAYLOAD);
+        },
+      },
+    );
+    await h.updater.start();
+    const pending = h.updater.download();
+    await settle();
+    expect(h.updater.state().phase).toBe("downloading");
+    h.advance(CHECK_INTERVAL_MS);
+    h.fireTimers();
+    await settle();
+    expect(h.calls.filter((url) => url === API)).toEqual([API]);
+    expect(h.timers.size).toBe(1);
+    open();
+    expect(await pending).toMatchObject({ phase: "ready" });
   });
 });
 

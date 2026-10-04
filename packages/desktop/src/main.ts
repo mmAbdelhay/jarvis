@@ -37,14 +37,7 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
-import {
-  countRunning,
-  createUpdater,
-  devOverrides,
-  legacyCheck,
-  nodeExec,
-  nodeUpdaterFs,
-} from "./updater.js";
+import { countRunning, createUpdater, devOverrides, nodeExec, nodeUpdaterFs } from "./updater.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -642,7 +635,6 @@ app.whenReady().then(async () => {
       isTerminalTab: (tabId) =>
         client.workspace.state().tabs.some((tab) => tab.id === tabId && tab.kind === "terminal"),
       shell: electronShell,
-      checkForUpdate: async () => legacyCheck(await updater.checkNow()),
       updater,
       language: PRIMARY_LANGUAGE,
       background: {

@@ -1,8 +1,7 @@
-// "Is there a newer Jarvis?" — asked only when the user presses Check for
-// updates in Settings, never in the background: Jarvis's promise is that
-// nothing leaves the laptop that was not already going to, and a silent
-// call home on every launch would break it. One GET to GitHub's public
-// releases API, no token, nothing about this machine in it.
+// "Is there a newer Jarvis?" — asked once at launch and once a day while
+// the app runs (updater.ts), and from Settings' Check now. The user chose
+// automatic checks. It is one GET to GitHub's public releases API: no
+// token, nothing about this machine in it.
 
 export const RELEASES_API = "https://api.github.com/repos/mmAbdelhay/jarvis/releases/latest";
 

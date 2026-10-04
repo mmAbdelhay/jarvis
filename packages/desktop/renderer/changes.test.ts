@@ -57,7 +57,6 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     gitWorktree: vi.fn(async () => ({ ok: true as const, value: null })),
     usageHistory: vi.fn(async () => ({ capacity: [], sessionsPerDay: [] })),
     sessionPrompt: vi.fn(async () => null),
-    checkForUpdate: vi.fn(async () => ({ kind: "current" as const, current: "0.1.5" })),
     updateCheck: vi.fn(async () => ({ phase: "current" as const, current: "0.1.5" })),
     updateDownload: vi.fn(async () => ({ phase: "current" as const, current: "0.1.5" })),
     updateCancel: vi.fn(async () => ({ phase: "current" as const, current: "0.1.5" })),

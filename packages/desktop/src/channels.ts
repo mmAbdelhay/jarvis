@@ -280,7 +280,6 @@ export const INVOKE_CHANNELS = {
   // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
   // and length gate before shell.openExternal ever runs.
   plansOpenLink: "plans:openLink",
-  checkForUpdate: "app:checkUpdate",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",

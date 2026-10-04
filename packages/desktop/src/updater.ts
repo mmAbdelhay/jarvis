@@ -213,6 +213,14 @@ export type Updater = {
   state(): UpdateState;
 };
 
+/** Phases the daily background re-check leaves alone. */
+const QUIET_RECHECK: ReadonlySet<UpdatePhase> = new Set([
+  "downloading",
+  "verifying",
+  "ready",
+  "installing",
+]);
+
 type Release = { latest: string; url: string; notes: string; assets: ReleaseAsset[] };
 
 const BUSY: ReadonlySet<UpdatePhase> = new Set([
@@ -341,6 +349,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     const chosen = asset;
     const rel = release;
     if (chosen === undefined || rel === undefined) return { ...state };
+    // The download clears the updates dir, so an earlier verified file is gone.
+    readyFile = undefined;
     const controller = new AbortController();
     abort = controller;
     set({ ...base(), phase: "downloading", received: 0, total: chosen.size });
@@ -470,6 +480,12 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     if (stopped) return;
     timer = deps.setTimer(() => {
       timer = undefined;
+      // Never under a download or a pending install: the check would push
+      // "checking" and take the confirm away from the user.
+      if (QUIET_RECHECK.has(state.phase)) {
+        arm();
+        return;
+      }
       void checkNow().finally(arm);
     }, CHECK_INTERVAL_MS);
   }
@@ -558,22 +574,4 @@ export async function countRunning(source: {
       }).length
     : 0;
   return { terminals, agents };
-}
-
-/** The pre-updater `app:checkUpdate` answer, for a renderer that still asks
- *  for it. */
-export function legacyCheck(state: UpdateState): UpdateCheck {
-  const { current } = state;
-  if (state.phase === "current") return { kind: "current", current };
-  if (state.latest !== undefined && state.url !== undefined) {
-    return {
-      kind: "newer",
-      current,
-      latest: state.latest,
-      url: state.url,
-      notes: state.notes ?? "",
-      assets: [],
-    };
-  }
-  return { kind: "failed", current };
 }
