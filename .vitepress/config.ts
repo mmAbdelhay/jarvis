@@ -75,6 +75,7 @@ export default defineConfig({
           { text: "The API client", link: "/docs/guide/api-client" },
           { text: "Remote access", link: "/docs/guide/remote-access" },
           { text: "Background daemon", link: "/docs/guide/background-daemon" },
+          { text: "Updates", link: "/docs/guide/updates" },
           { text: "Troubleshooting", link: "/docs/guide/troubleshooting" },
         ],
       },

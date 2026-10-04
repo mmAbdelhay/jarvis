@@ -124,7 +124,7 @@ running session to apply it would be the wrong kind of helpful.
 A per-agent **Test** button runs the health probe against the *draft* command
 before it is ever saved.
 
-**Check for updates**, under General, asks GitHub's public releases API
-whether there is a newer Jarvis and, if there is, offers its release page in
-the Personal browser. It runs only when you press it: Jarvis never checks in
-the background, because nothing leaves the laptop that you did not ask to.
+**Updates**, under General, shows the version you are running, when Jarvis
+last asked GitHub for a newer one, and — when there is one — its notes and an
+**Install update** button. [Updates](updates.md) covers what it checks, when,
+and what installing does.

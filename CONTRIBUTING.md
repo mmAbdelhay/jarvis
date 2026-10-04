@@ -80,6 +80,26 @@ nothing in it spawns a real agent, opens a real pty, or reaches the network. If
 what you are changing seems untestable, say so in the pull request — that is
 usually a seam that wants injecting rather than a thing that cannot be tested.
 
+## Releasing
+
+A release is a tag, a GitHub release, and the files people download from it.
+Build the downloads with `pnpm --filter @jarvis/desktop package:mac` and
+`package:linux` (both land in `packages/desktop/release/`) and the phone's
+`.apk`, then write their checksums:
+
+```bash
+node scripts/release-sums.mjs --out SHA256SUMS \
+  packages/desktop/release/Jarvis-<version>-arm64.dmg \
+  packages/desktop/release/Jarvis-<version>.AppImage \
+  jarvis-mobile-<version>.apk
+```
+
+Upload `SHA256SUMS` with the release, beside the files it lists. The desktop
+app's **Install update** downloads it and refuses to install anything whose
+SHA-256 it cannot find there, so **a release without `SHA256SUMS` cannot be
+installed automatically** — people would have to download it by hand. Every
+file listed must be uploaded under exactly the name the line gives.
+
 ## Reporting a bug
 
 Open an issue. What helps most: your OS and `node --version`, what you expected,
