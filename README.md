@@ -9,7 +9,8 @@ it, and its APIs.
 Jarvis is a single Electron app over a pnpm workspace. It runs on macOS,
 Linux and Windows. It speaks Arabic and English, and it is built for one person on one
 machine — there is no server, no account, and nothing leaves the laptop that
-was not already going to. It opens full screen.
+was not already going to, apart from a daily
+[update check](docs/guide/updates.md) to GitHub. It opens full screen.
 
 Everything in the Workspace belongs to a project, except the **Personal**
 browser, which belongs to none: somewhere to keep tabs that are not work,

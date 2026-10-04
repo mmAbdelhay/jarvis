@@ -250,6 +250,13 @@ describe("Settings → General → Updates", () => {
     for (const error of ["read-only", "translocated", "not-appimage"] as const) {
       api.push({ ...available, phase: "error", error });
       expect(shown("settings-update-install")).toBe(false);
+      // The updater reports these at check time, so the card still names the
+      // release and links its page: the user's way to get it by hand.
+      expect(byId("settings-update-status").textContent).toBe(MESSAGES.updateError(error, "en"));
+      expect(byId("settings-update-title").textContent).toBe(
+        MESSAGES.updateNewer("0.1.9", "0.1.8", "en"),
+      );
+      expect(shown("settings-update-notes-link")).toBe(true);
     }
     for (const error of ["download", "mismatch", "no-sums", "swap", "offline"] as const) {
       api.push({ ...available, phase: "error", error });

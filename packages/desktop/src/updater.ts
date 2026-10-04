@@ -22,7 +22,7 @@ import {
   rm as fsRm,
   writeFile as fsWriteFile,
 } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pickAsset, SUMS_NAME } from "./update-asset.js";
 import { checkForUpdate, type ReleaseAsset, type UpdateCheck } from "./update-check.js";
 import { downloadFile, downloadText } from "./update-download.js";
@@ -294,6 +294,25 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     }
   }
 
+  /** What would stop the install on this machine, known before a byte is
+   *  downloaded: a translocated or unwritable macOS bundle, or a Linux run
+   *  that is not an AppImage or whose AppImage sits in a read-only folder.
+   *  Downloading the whole build only to fail at Install would waste it. */
+  function blocker(): UpdateError | undefined {
+    if (deps.platform === "darwin") {
+      const bundle = deps.bundle ?? appBundleOf(deps.execPath);
+      // No bundle at all is a swap failure, reported at install as before.
+      return bundle === undefined
+        ? undefined
+        : installBlocker(bundle, (path) => deps.fs.writable(path));
+    }
+    if (deps.platform === "linux") {
+      if (deps.appImage === undefined || deps.appImage === "") return "not-appimage";
+      if (!deps.fs.writable(dirname(deps.appImage))) return "read-only";
+    }
+    return undefined;
+  }
+
   async function checkNow(): Promise<UpdateState> {
     if (BUSY.has(state.phase)) return { ...state };
     const before = state.phase;
@@ -339,6 +358,11 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       readyFile = undefined;
       return fail("no-asset");
     }
+    const blocked = blocker();
+    if (blocked !== undefined) {
+      readyFile = undefined;
+      return fail(blocked);
+    }
     if (sameRelease && readyFile !== undefined) return set({ ...base(), phase: "ready" });
     readyFile = undefined;
     return set({ ...base(), phase: "available" });
@@ -349,6 +373,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     const chosen = asset;
     const rel = release;
     if (chosen === undefined || rel === undefined) return { ...state };
+    const blocked = blocker();
+    if (blocked !== undefined) return fail(blocked);
     // The download clears the updates dir, so an earlier verified file is gone.
     readyFile = undefined;
     const controller = new AbortController();

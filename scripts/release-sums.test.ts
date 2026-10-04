@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -42,6 +42,22 @@ describe("release-sums", () => {
       join(dir, "missing.apk"),
     ]);
     expect(result.status).not.toBe(0);
+    expect(() => readFileSync(out)).toThrow();
+  });
+
+  it("fails on two files with the same name and writes nothing", () => {
+    const out = join(dir, "SHA256SUMS");
+    mkdirSync(join(dir, "other"));
+    writeFileSync(join(dir, "other", "a.dmg"), "another mac build");
+    const result = spawnSync(process.execPath, [
+      script,
+      "--out",
+      out,
+      join(dir, "a.dmg"),
+      join(dir, "other", "a.dmg"),
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(String(result.stderr)).toContain("a.dmg");
     expect(() => readFileSync(out)).toThrow();
   });
 

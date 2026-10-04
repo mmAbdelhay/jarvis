@@ -27,6 +27,18 @@ if (files.length === 0 || (outAt !== -1 && !out)) {
   process.exit(1);
 }
 
+// Two files with one name would give the updater two lines for one asset,
+// and only one of them can be the file actually uploaded.
+const seen = new Set();
+for (const path of files) {
+  const name = basename(path);
+  if (seen.has(name)) {
+    console.error(`release-sums: two files are named ${name}`);
+    process.exit(1);
+  }
+  seen.add(name);
+}
+
 const hash = (path) =>
   new Promise((resolve, reject) => {
     const digest = createHash("sha256");

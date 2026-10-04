@@ -27,13 +27,17 @@ the full notes, and **Install update**.
 3. Asks before restarting, and says how many terminals and agents are running.
    **Restarting Jarvis ends every running terminal**, and the agents in them.
    **Later** keeps the verified download until you quit.
-4. Replaces the app, starts the new version, and restarts the background
-   daemon on the new build.
+4. Replaces the app and starts the new version. If the background service is
+   running, it restarts on the new build.
 
 If anything goes wrong at any step, the installed app is left as it was and the
 card says what failed in one line.
 
 ## Where it can install
+
+Jarvis checks these before it downloads anything. Where it cannot install,
+the card says why and links the release page instead of offering Install
+update, and nothing is downloaded.
 
 **macOS** — Jarvis replaces itself in the folder it runs from, so that folder
 has to be one you can write to, such as `/Applications`. Running it straight
@@ -41,8 +45,9 @@ from the mounted `.dmg`, or from Downloads (where macOS runs it from a
 read-only copy), it cannot update itself: drag it to Applications first.
 
 **Linux** — only the AppImage updates itself, in place, at the same path, so a
-systemd unit or launcher pointing at it keeps working. A Jarvis run any other
-way shows a link to the release page instead.
+systemd unit or launcher pointing at it keeps working. The AppImage's folder
+has to be one you can write to. A Jarvis run any other way gets the release
+page link.
 
 **Windows** — the release ships a `.zip`, which the updater does not install.
 The card links to the release page; download the new build from there.

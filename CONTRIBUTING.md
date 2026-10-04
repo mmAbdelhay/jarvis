@@ -84,17 +84,20 @@ usually a seam that wants injecting rather than a thing that cannot be tested.
 
 A release is a tag, a GitHub release, and the files people download from it.
 Build the downloads with `pnpm --filter @jarvis/desktop package:mac` and
-`package:linux` (both land in `packages/desktop/release/`) and the phone's
-`.apk`, then write their checksums:
+`package:linux` (and `package:win` for the Windows `.zip`; all land in
+`packages/desktop/release/`) and the phone's `.apk`, then write their
+checksums:
 
 ```bash
 node scripts/release-sums.mjs --out SHA256SUMS \
   packages/desktop/release/Jarvis-<version>-arm64.dmg \
   packages/desktop/release/Jarvis-<version>.AppImage \
+  packages/desktop/release/Jarvis-<version>-win-x64.zip \
   jarvis-mobile-<version>.apk
 ```
 
-Upload `SHA256SUMS` with the release, beside the files it lists. The desktop
+Upload `SHA256SUMS` with the release, beside the files it lists — and list
+every file the release uploads, so each one can be checked. The desktop
 app's **Install update** downloads it and refuses to install anything whose
 SHA-256 it cannot find there, so **a release without `SHA256SUMS` cannot be
 installed automatically** — people would have to download it by hand. Every

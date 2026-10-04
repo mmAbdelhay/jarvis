@@ -60,6 +60,9 @@ function release(opts: { tag?: string; names?: string[]; sums?: boolean } = {}) 
 }
 
 function harness(overrides: Partial<UpdaterDeps> = {}, routes: Record<string, Route> = {}) {
+  // The default macOS bundle's folder exists and is writable, so the install
+  // blockers checked before any download do not apply unless a test says so.
+  if (!existsSync(join(root, "Apps"))) mkdirSync(join(root, "Apps"));
   const table: Record<string, Route> = {
     [API]: () => Response.json(release()),
     [`${BASE}SHA256SUMS`]: () =>
@@ -314,24 +317,47 @@ describe("createUpdater", () => {
     expect(h.deps.quit).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a translocated app without running or spawning anything", async () => {
+  it("refuses a translocated app at check time, before downloading anything", async () => {
     const h = harness({
       execPath: "/private/var/folders/x/AppTranslocation/ABC/d/Jarvis.app/Contents/MacOS/Jarvis",
     });
-    await h.updater.checkNow();
-    await h.updater.download();
+    expect(await h.updater.checkNow()).toMatchObject({
+      phase: "error",
+      error: "translocated",
+      latest: "0.1.9",
+      url: PAGE,
+      notes: "Fixes.",
+    });
+    expect(await h.updater.download()).toMatchObject({ phase: "error", error: "translocated" });
     expect(await h.updater.install()).toMatchObject({ phase: "error", error: "translocated" });
+    expect(h.calls).toEqual([API]);
     expect(h.deps.exec).not.toHaveBeenCalled();
     expect(h.deps.spawnDetached).not.toHaveBeenCalled();
     expect(h.deps.quit).not.toHaveBeenCalled();
   });
 
-  it("refuses an install folder it cannot write to", async () => {
+  it("refuses an install folder it cannot write to, before downloading", async () => {
     const h = harness({ fs: { ...nodeUpdaterFs, writable: () => false } });
-    await h.updater.checkNow();
+    expect(await h.updater.checkNow()).toMatchObject({
+      phase: "error",
+      error: "read-only",
+      url: PAGE,
+    });
     await h.updater.download();
-    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "read-only" });
+    expect(h.calls).toEqual([API]);
+    expect(
+      existsSync(updatesDir()) && readdirSync(updatesDir()).some((n) => n !== "state.json"),
+    ).toBe(false);
     expect(h.deps.spawnDetached).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the blockers when the download starts", async () => {
+    let writable = true;
+    const h = harness({ fs: { ...nodeUpdaterFs, writable: () => writable } });
+    expect(await h.updater.checkNow()).toMatchObject({ phase: "available" });
+    writable = false;
+    expect(await h.updater.download()).toMatchObject({ phase: "error", error: "read-only" });
+    expect(h.calls).toEqual([API]);
   });
 
   it("reports swap when staging the bundle fails, and does not quit", async () => {
@@ -378,12 +404,30 @@ describe("createUpdater", () => {
     expect(h.deps.quit).toHaveBeenCalled();
   });
 
-  it("refuses on Linux when not running as an AppImage", async () => {
+  it("refuses on Linux when not running as an AppImage, before downloading", async () => {
     const h = harness({ platform: "linux", arch: "x64" });
-    await h.updater.checkNow();
-    await h.updater.download();
-    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "not-appimage" });
+    expect(await h.updater.checkNow()).toMatchObject({
+      phase: "error",
+      error: "not-appimage",
+      url: PAGE,
+    });
+    expect(await h.updater.download()).toMatchObject({ phase: "error", error: "not-appimage" });
+    expect(h.calls).toEqual([API]);
     expect(h.deps.spawnDetached).not.toHaveBeenCalled();
+  });
+
+  it("refuses on Linux when the AppImage's folder is read-only, before downloading", async () => {
+    const appImage = join(root, "Jarvis.AppImage");
+    writeFileSync(appImage, "old");
+    const h = harness({
+      platform: "linux",
+      arch: "x64",
+      appImage,
+      fs: { ...nodeUpdaterFs, writable: () => false },
+    });
+    expect(await h.updater.checkNow()).toMatchObject({ phase: "error", error: "read-only" });
+    await h.updater.download();
+    expect(h.calls).toEqual([API]);
   });
 
   it("opens the installer on Windows and quits nothing", async () => {
