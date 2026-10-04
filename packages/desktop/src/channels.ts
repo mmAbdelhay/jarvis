@@ -1,6 +1,7 @@
 import type { RemoteStatus } from "@jarvis/remote";
 import type { DevToolsDock } from "./browser-host.js";
 import type { IpcChannels, RendererApi } from "./ipc.js";
+import type { UpdateState } from "./updater.js";
 
 /**
  * Every channel main pushes to the renderer.
@@ -48,6 +49,9 @@ export type PushChannels = IpcChannels & {
   // follow — so the renderer (and, via REMOTE_PUSH_POLICY, a paired phone)
   // re-reads with plansRead/plansComments on receipt.
   "plans:changed": string;
+  // The updater's state (updater.ts), after every change. Local to this
+  // window: a phone has no business installing the laptop's app.
+  "update:state": UpdateState;
 };
 
 /**
@@ -277,6 +281,13 @@ export const INVOKE_CHANNELS = {
   // and length gate before shell.openExternal ever runs.
   plansOpenLink: "plans:openLink",
   checkForUpdate: "app:checkUpdate",
+  // The updater (updater.ts). Electron-bound and desktop-only: they act on
+  // this app's own install and quit it.
+  updateCheck: "update:check",
+  updateDownload: "update:download",
+  updateCancel: "update:cancel",
+  updateCounts: "update:counts",
+  updateInstall: "update:install",
   // Desktop-only (Phase 1): opens the browser client in the system
   // browser. Takes no URL — main builds it from the bridge's own status.
   openWebClient: "remote:openWebClient",
@@ -305,6 +316,7 @@ export const PUSH_CHANNELS = {
   onTabRename: "workspace:tabRename",
   onPlansChanged: "plans:changed",
   onTabPlans: "workspace:tabPlans",
+  onUpdateState: "update:state",
 } as const satisfies Record<PushKey, string>;
 
 /**

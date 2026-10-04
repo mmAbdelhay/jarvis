@@ -56,6 +56,7 @@ describe("the channel table", () => {
       "terminal:data",
       "terminal:exit",
       "turn:new",
+      "update:state",
       "voice:hotkeys",
       "voice:listening",
       "voice:notice",

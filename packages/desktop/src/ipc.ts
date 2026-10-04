@@ -93,6 +93,7 @@ import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
 import type { UpdateCheck } from "./update-check.js";
+import type { RunningCounts, UpdateState } from "./updater.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
@@ -641,8 +642,25 @@ export type RendererApi = {
    *  day, and sessions started per day over the last two weeks. Free — it
    *  reads only what was already recorded. */
   usageHistory(): Promise<UsageHistory>;
-  /** Settings' Check for updates — one request to GitHub, only when asked. */
+  /** The pre-updater Check for updates, answered by the updater's own
+   *  checkNow (updater.ts's legacyCheck) for a renderer that still asks. */
   checkForUpdate(): Promise<UpdateCheck>;
+  /** The updater (updater.ts). Each resolves with the state after the
+   *  call; every change along the way also arrives on onUpdateState. A call
+   *  made while another operation is in flight changes nothing. */
+  updateCheck(): Promise<UpdateState>;
+  /** Downloads and verifies the available release; resolves when it is
+   *  ready, cancelled or failed. */
+  updateDownload(): Promise<UpdateState>;
+  /** Aborts a download in flight; nothing otherwise. */
+  updateCancel(): Promise<UpdateState>;
+  /** What a restart would end: live terminal panes and live agent sessions. */
+  updateCounts(): Promise<RunningCounts>;
+  /** From "ready" only: swaps the app in and quits (macOS, Linux AppImage),
+   *  or opens the installer (Windows). */
+  updateInstall(): Promise<UpdateState>;
+  /** Returns the unsubscribe. */
+  onUpdateState(cb: (state: UpdateState) => void): () => void;
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.

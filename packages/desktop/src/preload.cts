@@ -126,13 +126,19 @@ for (const [method, channel] of Object.entries(invokeChannels)) {
 
 for (const [method, channel] of Object.entries(pushChannels)) {
   const adapt = adaptersByChannel[method as PushKey];
+  // Returns the unsubscribe; listeners typed `void` in RendererApi simply
+  // ignore it.
   api[method] = (callback: (...args: unknown[]) => void) => {
-    ipcRenderer.on(channel, (_event, payload: unknown) => {
+    const listener = (_event: unknown, payload: unknown) => {
       // Two channels splat their payload into two arguments; the rest pass it
       // through. See pushAdapters above.
       if (adapt === undefined) callback(payload);
       else callback(...adapt(payload as never));
-    });
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+    };
   };
 }
 

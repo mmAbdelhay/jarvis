@@ -17,6 +17,7 @@ const DESKTOP_ONLY = new Set([
   "workspace:tabRename",
   "workspace:tabPlans",
   "remote:update",
+  "update:state",
 ]);
 
 describe("REMOTE_PUSH_POLICY", () => {

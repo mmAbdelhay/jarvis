@@ -205,6 +205,12 @@ export type ElectronBoundChannel =
   | "plans:openLink"
   // The app's own version and the app's own network request (update-check.ts).
   | "app:checkUpdate"
+  // The updater: downloads, swaps and quits this app (updater.ts).
+  | "update:check"
+  | "update:download"
+  | "update:cancel"
+  | "update:counts"
+  | "update:install"
   // Task 23: where the core runs is the host's to decide — these start,
   // stop and replace the core itself (daemon/mode.ts).
   | "background:status"

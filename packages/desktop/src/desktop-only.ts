@@ -13,6 +13,7 @@ import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
 import type { UpdateCheck } from "./update-check.js";
+import type { Updater } from "./updater.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ViewReconciler } from "./view-reconciler.js";
 
@@ -38,6 +39,11 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "dialog:pickFiles",
   "plans:openLink",
   "app:checkUpdate",
+  "update:check",
+  "update:download",
+  "update:cancel",
+  "update:counts",
+  "update:install",
   "background:status",
   "background:setEnabled",
   "background:restart",
@@ -116,6 +122,8 @@ export type DesktopOnlyDeps = {
   /** Settings' Check for updates (update-check.ts): this app's own version
    *  and one request to GitHub's releases API. */
   checkForUpdate: () => Promise<UpdateCheck>;
+  /** The updater (updater.ts); its state pushes go out from main.ts. */
+  updater: Pick<Updater, "checkNow" | "download" | "cancel" | "counts" | "install">;
   language: "ar" | "en";
   /** Task 23: the background service (daemon/mode.ts, wired in main.ts). */
   background: {
@@ -200,6 +208,13 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // fails isAllowedPlanLinkUrl is silently ignored, never thrown into the
   // renderer's own await.
   deps.handle("app:checkUpdate", () => deps.checkForUpdate());
+  // The updater takes no arguments: what to download and install is the
+  // state it already holds, never something the renderer names.
+  deps.handle("update:check", () => deps.updater.checkNow());
+  deps.handle("update:download", () => deps.updater.download());
+  deps.handle("update:cancel", () => deps.updater.cancel());
+  deps.handle("update:counts", () => deps.updater.counts());
+  deps.handle("update:install", () => deps.updater.install());
   deps.handle("plans:openLink", (_event, url) => {
     if (typeof url !== "string" || !isAllowedPlanLinkUrl(url)) return;
     deps.shell.openExternal(url).catch((error: unknown) => {
