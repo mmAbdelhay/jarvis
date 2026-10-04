@@ -98,6 +98,8 @@ export const REMOTE_PUSH_POLICY: {
   // Task 8: nor a laptop-side plan panel of its own to toggle — a phone
   // reads and edits plans through its own plans-store.ts (mobile) instead.
   "workspace:tabPlans": "desktop-only",
+  // The laptop's own app updater (updater.ts).
+  "update:state": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",

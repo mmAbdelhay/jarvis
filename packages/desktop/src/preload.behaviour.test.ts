@@ -44,7 +44,7 @@ async function loadPreload(): Promise<void> {
 
 vi.mock("electron", () => ({
   contextBridge: { exposeInMainWorld: vi.fn() },
-  ipcRenderer: { invoke: vi.fn(), on: vi.fn() },
+  ipcRenderer: { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
 }));
 
 const ORIGINAL_ARGV = [...process.argv];
@@ -60,6 +60,7 @@ beforeEach(async () => {
   contextBridge.exposeInMainWorld.mockClear();
   ipcRenderer.invoke.mockClear();
   ipcRenderer.on.mockClear();
+  ipcRenderer.removeListener.mockClear();
 });
 
 afterEach(() => {
@@ -69,7 +70,11 @@ afterEach(() => {
 async function electronMocks() {
   const electron = (await import("electron")) as unknown as {
     contextBridge: { exposeInMainWorld: ReturnType<typeof vi.fn> };
-    ipcRenderer: { invoke: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
+    ipcRenderer: {
+      invoke: ReturnType<typeof vi.fn>;
+      on: ReturnType<typeof vi.fn>;
+      removeListener: ReturnType<typeof vi.fn>;
+    };
   };
   return electron;
 }
@@ -150,6 +155,19 @@ describe("preload.cts (the real file, run in Node)", () => {
     handler(undefined, payload);
 
     expect(callback).toHaveBeenCalledWith(payload);
+  });
+
+  it("(d2) a push listener returns an unsubscribe that removes exactly its handler", async () => {
+    process.argv.push(...preloadChannelArgs());
+    await loadPreload();
+    const api = await exposedApi();
+    const { ipcRenderer } = await electronMocks();
+
+    const unsubscribe = api.onUpdateState?.(vi.fn()) as () => void;
+    const handler = await pushHandler(PUSH_CHANNELS.onUpdateState);
+    unsubscribe();
+
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(PUSH_CHANNELS.onUpdateState, handler);
   });
 
   it("(e) throws naming the flag when it's missing entirely", async () => {

@@ -26,7 +26,7 @@
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
       <button id="nav-session" class="nav-btn" type="button">Session</button>
       <button id="nav-workspace" class="nav-btn" type="button">Workspace</button>
-      <button id="nav-settings" class="nav-btn" type="button">Settings</button>
+      <button id="nav-settings" class="nav-btn" type="button">Settings<span id="nav-settings-dot" class="nav-dot" hidden></span></button>
     </div>
     <div class="status-group">
     <!-- board 0 removed this ambient CPU/RAM/DISK/network readout in favour
@@ -676,11 +676,39 @@
           <button id="settings-daemon-restart" class="settings-add" type="button" hidden></button>
           <button id="settings-daemon-stop" class="settings-add" type="button" hidden></button>
         </div>
+        <!-- updates -->
+        <!-- Updates (update-settings.ts sets every string and toggles every
+             part from the updater's state). -->
         <div class="settings-update">
-          <button id="settings-update-check" class="settings-add" type="button"></button>
-          <span id="settings-update-result" class="settings-note"></span>
-          <button id="settings-update-open" class="settings-add" type="button" hidden></button>
+          <div class="settings-update-row">
+            <span id="settings-update-version" class="settings-note"></span>
+            <button id="settings-update-check" class="settings-add" type="button"></button>
+          </div>
+          <div id="settings-update-status" class="settings-note"></div>
+          <div id="settings-update-card" class="settings-update-card" hidden>
+            <div id="settings-update-title" class="settings-update-title"></div>
+            <div id="settings-update-notes" class="settings-note settings-update-notes"></div>
+            <div id="settings-update-progress" class="settings-update-progress" hidden>
+              <div class="settings-update-meter"><span id="settings-update-fill" class="settings-update-fill"></span></div>
+              <div class="settings-update-row">
+                <span id="settings-update-bytes" class="settings-note"></span>
+                <button id="settings-update-cancel" class="settings-add" type="button"></button>
+              </div>
+            </div>
+            <div id="settings-update-confirm" class="settings-update-confirm" hidden>
+              <span id="settings-update-confirm-text" class="settings-note settings-note--warning"></span>
+              <div class="settings-update-row">
+                <button id="settings-update-install-now" class="settings-add settings-add--primary" type="button"></button>
+                <button id="settings-update-later" class="settings-add" type="button"></button>
+              </div>
+            </div>
+            <div class="settings-update-row">
+              <button id="settings-update-install" class="settings-add settings-add--primary" type="button"></button>
+              <button id="settings-update-notes-link" class="settings-add" type="button"></button>
+            </div>
+          </div>
         </div>
+        <!-- /updates -->
       </section>
 
       <section class="settings-section" id="settings-section-agents">

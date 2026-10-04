@@ -5288,9 +5288,27 @@
 .plan-panel__progress-meter { display: inline-block; width: 48px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .plan-panel__progress-fill { display: block; height: 100%; background: var(--accent); }
 
-/* Settings → General's Check for updates (update-settings.ts). */
-.settings-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+/* Settings → General → Updates (update-settings.ts): version and Check now,
+   one status line, and a card for a newer release. */
+.settings-update { display: flex; flex-direction: column; gap: var(--s2); margin-top: 14px; }
 .settings-update .settings-note:empty { display: none; }
+.settings-update-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.settings-update-row:not(:has(> :not([hidden]))) { display: none; }
+.settings-update-card { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--border); border-radius: var(--r-control); }
+.settings-update-card[hidden] { display: none; }
+.settings-update-progress[hidden] { display: none; }
+.settings-update-confirm[hidden] { display: none; }
+.settings-update-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.settings-update-notes { white-space: pre-line; overflow-wrap: anywhere; }
+.settings-update-progress,
+.settings-update-confirm { display: flex; flex-direction: column; gap: var(--s1); }
+.settings-update-meter { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.settings-update-fill { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s linear; }
+#settings-update-bytes { font-variant-numeric: tabular-nums; }
+
+/* The Settings nav item's dot: a newer release is available or ready. */
+.nav-dot { display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 999px; background: var(--accent); vertical-align: middle; }
+.nav-dot[hidden] { display: none; }
 
 /* The API tab's Copy as code menu: cURL, fetch or Python. */
 .api-copy-wrap { position: relative; display: inline-flex; }

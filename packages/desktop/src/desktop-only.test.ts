@@ -53,6 +53,36 @@ describe("desktop-only registrations", () => {
     expect(deps.background.stopNow).toHaveBeenCalledOnce();
   });
 
+  it("routes the update channels to the updater, ignoring any arguments", async () => {
+    const deps = fakeDesktopDeps();
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    const listener = (channel: string) =>
+      handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => Promise<unknown>;
+
+    expect(await listener("update:check")({}, "evil")).toMatchObject({ phase: "current" });
+    expect(await listener("update:download")({}, "https://example.com/x")).toMatchObject({
+      phase: "ready",
+    });
+    expect(deps.updater.download).toHaveBeenCalledWith();
+    expect(await listener("update:cancel")({})).toMatchObject({ phase: "available" });
+    expect(await listener("update:counts")({})).toEqual({ terminals: 2, agents: 1 });
+    expect(await listener("update:install")({}, "/tmp/x")).toMatchObject({ phase: "installing" });
+    expect(deps.updater.install).toHaveBeenCalledWith();
+    for (const channel of [
+      "update:check",
+      "update:download",
+      "update:cancel",
+      "update:counts",
+      "update:install",
+    ] as const) {
+      expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
+    }
+  });
+
   it("keeps the background channels desktop-only and out of every core", () => {
     for (const channel of [
       "background:status",
@@ -357,7 +387,13 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     startTabPlans: vi.fn(),
     isTerminalTab: vi.fn(() => true),
     shell: { openExternal: vi.fn(async () => {}) },
-    checkForUpdate: vi.fn(async () => ({ kind: "current" as const, current: "0.1.5" })),
+    updater: {
+      checkNow: vi.fn(async () => ({ phase: "current" as const, current: "0.1.5" })),
+      download: vi.fn(async () => ({ phase: "ready" as const, current: "0.1.5" })),
+      cancel: vi.fn(async () => ({ phase: "available" as const, current: "0.1.5" })),
+      counts: vi.fn(async () => ({ terminals: 2, agents: 1 })),
+      install: vi.fn(async () => ({ phase: "installing" as const, current: "0.1.5" })),
+    },
     background: {
       status: vi.fn(async () => ({ enabled: false, inApp: true, state: { kind: "off" as const } })),
       setEnabled: vi.fn(async () => ({ ok: true as const })),

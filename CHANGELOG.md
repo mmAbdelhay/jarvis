@@ -8,6 +8,20 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.9] — 2026-10-04
+
+- Desktop: Jarvis checks for a new version when it starts and once a day,
+  with one request to GitHub that carries nothing about the machine.
+- Desktop: an Updates card in Settings → General shows the version, the
+  last check, the new release's notes and an Install update button. A dot
+  on the Settings icon says there is one waiting.
+- Install update downloads the new build, checks its SHA-256, asks before
+  restarting, and swaps the app in place — the `.dmg` on macOS, the
+  AppImage on Linux. Anything that fails leaves the installed app as it was.
+- Releases ship a `SHA256SUMS` file beside the downloads, written by
+  `scripts/release-sums.mjs`. A release without it cannot be installed from
+  Settings.
+
 ## [0.1.8] — 2026-10-04
 
 - Phone Home shows CPU, memory and disk, New session and New terminal,
