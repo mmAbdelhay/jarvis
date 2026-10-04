@@ -1,6 +1,6 @@
 {
   "name": "@jarvis/desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "A desktop workspace for running coding agents by voice",
   "desktopName": "jarvis.desktop",

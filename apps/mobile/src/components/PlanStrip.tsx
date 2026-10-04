@@ -8,46 +8,58 @@ import type { PlanProgressView } from "@/plan/plan-progress";
 /**
  * The plan, always in view above the terminal's keys: how far along it is,
  * the step it is on, and how many notes wait to be sent. Tapping it opens
- * the plan sheet. Drawn only when there is a plan to show.
+ * the plan sheet. Drawn only when there is a plan to show. `compact` (the
+ * phone) puts it all on one slim line, so the output keeps the screen.
  */
 export function PlanStrip(props: {
   language: Language;
   progress: PlanProgressView | undefined;
   step: string | undefined;
   queuedNotes: number;
+  compact?: boolean;
   onOpen(): void;
 }) {
   const { progress } = props;
+  const compact = props.compact === true;
   const fraction = progress === undefined ? 0 : progress.done / progress.total;
+  const kicker =
+    progress === undefined
+      ? t(props.language, "plans.stripTitle")
+      : t(props.language, "plans.stripProgress", { done: progress.done, total: progress.total });
+  const step =
+    props.step === undefined
+      ? t(props.language, "plans.stripOpen")
+      : t(props.language, "plans.stripNow", { step: props.step });
   return (
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel={t(props.language, "plans.openPlan")}
       onPress={props.onOpen}
-      style={styles.strip}
+      style={[styles.strip, compact && styles.stripCompact]}
     >
-      {progress !== undefined && <ProgressRing fraction={fraction} size={34} />}
-      <View style={styles.text}>
-        <Text style={styles.kicker}>
-          {progress === undefined
-            ? t(props.language, "plans.stripTitle")
-            : t(props.language, "plans.stripProgress", {
-                done: progress.done,
-                total: progress.total,
-              })}
+      {progress !== undefined && <ProgressRing fraction={fraction} size={compact ? 18 : 34} />}
+      {compact ? (
+        <Text style={styles.text} numberOfLines={1}>
+          <Text style={styles.kicker}>{kicker}</Text>
+          <Text style={[styles.step, styles.stepCompact]}>
+            {"  "}
+            {step}
+          </Text>
         </Text>
-        <Text style={styles.step} numberOfLines={1}>
-          {props.step === undefined
-            ? t(props.language, "plans.stripOpen")
-            : t(props.language, "plans.stripNow", { step: props.step })}
-        </Text>
-      </View>
+      ) : (
+        <View style={styles.text}>
+          <Text style={styles.kicker}>{kicker}</Text>
+          <Text style={styles.step} numberOfLines={1}>
+            {step}
+          </Text>
+        </View>
+      )}
       {props.queuedNotes > 0 && (
-        <Text style={styles.notes}>
+        <Text style={[styles.notes, compact && styles.notesCompact]}>
           {t(props.language, "plans.notesCount", { count: props.queuedNotes })}
         </Text>
       )}
-      <Icon name="chevronUp" size={16} color={theme.colors.textMuted} />
+      <Icon name="chevronUp" size={compact ? 14 : 16} color={theme.colors.textMuted} />
     </TouchableOpacity>
   );
 }
@@ -66,6 +78,13 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
+  stripCompact: {
+    marginBottom: 6,
+    minHeight: 32,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    gap: 8,
+  },
   text: { flex: 1, minWidth: 0, gap: 2 },
   kicker: {
     color: theme.colors.textDim,
@@ -74,6 +93,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   step: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
+  stepCompact: { fontSize: 13, letterSpacing: 0 },
   notes: {
     paddingHorizontal: 9,
     paddingVertical: 4,
@@ -84,4 +104,5 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.bold,
     fontSize: 12,
   },
+  notesCompact: { paddingHorizontal: 8, paddingVertical: 2, fontSize: 11 },
 });

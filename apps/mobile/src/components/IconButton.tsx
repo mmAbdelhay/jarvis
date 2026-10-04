@@ -20,6 +20,8 @@ export function IconButton(props: {
   filled?: boolean;
   disabled?: boolean;
   mirrorInRtl?: boolean;
+  /** A toggle that is on: accent-tinted, and announced as selected. */
+  selected?: boolean;
 }) {
   const size = props.size ?? 44;
   const bordered = size !== 40 && size !== 28 && !props.filled;
@@ -27,7 +29,10 @@ export function IconButton(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={props.label}
-      accessibilityState={{ disabled: props.disabled === true }}
+      accessibilityState={{
+        disabled: props.disabled === true,
+        ...(props.selected === undefined ? {} : { selected: props.selected }),
+      }}
       disabled={props.disabled}
       onPress={props.onPress}
       hitSlop={size === 40 || size === 28 ? 4 : 0}
@@ -42,6 +47,7 @@ export function IconButton(props: {
               : styles.regular,
         bordered && styles.bordered,
         props.filled && styles.filled,
+        props.selected === true && styles.selected,
         props.disabled && styles.disabled,
       ]}
     >
@@ -49,7 +55,12 @@ export function IconButton(props: {
         name={props.icon}
         size={props.iconSize ?? (size === 40 ? 18 : 20)}
         color={
-          props.color ?? (props.filled ? theme.colors.primaryText : theme.colors.textSecondary)
+          props.color ??
+          (props.filled
+            ? theme.colors.primaryText
+            : props.selected === true
+              ? theme.colors.link
+              : theme.colors.textSecondary)
         }
         {...(props.strokeWidth === undefined ? {} : { strokeWidth: props.strokeWidth })}
         {...(props.mirrorInRtl === undefined ? {} : { mirrorInRtl: props.mirrorInRtl })}
@@ -70,5 +81,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   filled: { backgroundColor: theme.colors.accent },
+  selected: {
+    borderWidth: 1,
+    borderColor: theme.colors.accentBorder,
+    backgroundColor: theme.colors.accentSoft,
+  },
   disabled: { opacity: 0.45 },
 });

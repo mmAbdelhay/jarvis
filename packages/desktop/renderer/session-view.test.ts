@@ -1018,6 +1018,58 @@ describe("session table", () => {
     expect(document.getElementById("session-terminal")?.hidden).toBe(true);
   });
 
+  it("marks an agent typed into a Jarvis terminal as such, and a click goes to its pane", async () => {
+    const getSessionTranscript = vi.fn(async () => []);
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({
+          id: "ext-96359",
+          origin: "external",
+          pid: 96359,
+          terminalPaneKey: "tab-3:p2",
+        }),
+      ]),
+      getSessionTranscript,
+    });
+    const { renderSessionTable, setTerminalPaneFocuser } = await import("./session-view.js");
+    const focus = vi.fn(() => true);
+    setTerminalPaneFocuser(focus);
+    await renderSessionTable();
+
+    const row = rows()[0];
+    expect(row?.querySelector(".session-chip--terminal")?.textContent).toBe("in Jarvis terminal");
+    expect(row?.querySelector(".session-chip--external")).toBeNull();
+    expect(row?.querySelector("button")).toBeNull();
+
+    row?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(focus).toHaveBeenCalledWith("tab-3:p2");
+    expect(getSessionTranscript).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the transcript view when the terminal pane is gone", async () => {
+    const getSessionTranscript = vi.fn(async () => []);
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({ id: "ext-96359", origin: "external", pid: 96359, terminalPaneKey: "tab-3" }),
+      ]),
+      getSessionTranscript,
+    });
+    const { renderSessionTable, setTerminalPaneFocuser } = await import("./session-view.js");
+    setTerminalPaneFocuser(() => false);
+    await renderSessionTable();
+
+    rows()[0]?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getSessionTranscript).toHaveBeenCalledWith("ext-96359");
+  });
+
   it("shows a notice, not a blank terminal, for an external row with no matched transcript", async () => {
     stubJarvis({
       getHistory: vi.fn(async () => []),

@@ -45,6 +45,11 @@ export const STRINGS = {
   "terminal.prevCommand": { en: "Previous command", ar: "الأمر السابق" },
   "terminal.nextCommand": { en: "Next command", ar: "الأمر التالي" },
   "terminal.latest": { en: "Latest", ar: "الأحدث" },
+  "terminal.fit": { en: "Fit to phone", ar: "ملاءمة للهاتف" },
+  "terminal.fitOn": {
+    en: "Desktop view is narrow while Fit is on",
+    ar: "عرض سطح المكتب ضيق ما دامت الملاءمة مفعّلة",
+  },
   "terminal.scrolledBack": { en: "Scrolled back", ar: "تم التمرير للخلف" },
   "terminal.pane": { en: "Pane {n}", ar: "لوحة {n}" },
   "terminal.typePlaceholder": { en: "Type a command or reply", ar: "اكتب أمرًا أو ردًّا" },
@@ -688,6 +693,12 @@ export const STRINGS = {
   "sessions.external": {
     en: "outside Jarvis",
     ar: "خارج جارفيس",
+  },
+  // One the user typed into a Jarvis Terminal pane on the laptop: live, but
+  // not a session Jarvis started — desktop's Sessions chip says the same.
+  "sessions.inJarvisTerminal": {
+    en: "in Jarvis terminal",
+    ar: "في طرفية جارفيس",
   },
   "session.views": { en: "Session views", ar: "عروض الجلسة" },
   "session.live": { en: "Live", ar: "مباشر" },

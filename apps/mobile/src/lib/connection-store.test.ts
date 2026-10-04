@@ -85,7 +85,7 @@ describe("createConnectionStore: staleness", () => {
     store.dispose();
   });
 
-  it("becomes stale when open, a subscription exists, and 10001ms pass with no frame", () => {
+  it("becomes stale when open, a subscription exists, and 20001ms pass with no frame", () => {
     const fake = createFakeClient();
     const clock = createFakeClock();
     const store = createConnectionStore({
@@ -99,8 +99,54 @@ describe("createConnectionStore: staleness", () => {
     fake.emit("open");
     expect(store.get().stale).toBe(false);
 
-    clock.advance(10_001);
+    clock.advance(20_001);
     expect(store.get().stale).toBe(true);
+    store.dispose();
+  });
+
+  // The laptop pings every PING_INTERVAL_MS (15s) and an idle pane sends
+  // nothing else, so a healthy quiet connection routinely goes 10-15s
+  // between frames. Opening a terminal 10s+ after the last ping used to
+  // flash the stale banner until the pane's first frame arrived.
+  it("stays fresh on a healthy idle connection whose only frames are the 15s pings", () => {
+    const fake = createFakeClient();
+    const clock = createFakeClock();
+    const store = createConnectionStore({
+      client: fake.client,
+      clock,
+      onUnpaired: async () => "cleared" as const,
+    });
+    const views: ConnectionView[] = [];
+    store.subscribe((view) => views.push(view));
+
+    fake.setSubscriptions([{ ch: "terminal:data", key: "tab-1" }]);
+    fake.setLastFrameAt(clock.now());
+    fake.emit("open");
+    for (let ping = 0; ping < 3; ping += 1) {
+      clock.advance(15_000);
+      fake.setLastFrameAt(clock.now());
+    }
+
+    expect(views.some((v) => v.stale)).toBe(false);
+    store.dispose();
+  });
+
+  it("is not stale the moment a subscription starts 14s after the last ping", () => {
+    const fake = createFakeClient();
+    const clock = createFakeClock();
+    const store = createConnectionStore({
+      client: fake.client,
+      clock,
+      onUnpaired: async () => "cleared" as const,
+    });
+
+    fake.setSubscriptions([]);
+    fake.setLastFrameAt(clock.now());
+    fake.emit("open");
+    clock.advance(14_000);
+    fake.setSubscriptions([{ ch: "terminal:data", key: "tab-1" }]);
+
+    expect(store.get().stale).toBe(false);
     store.dispose();
   });
 
@@ -153,7 +199,7 @@ describe("createConnectionStore: staleness", () => {
     views.length = 0;
 
     // No new state event — only the clock moves past the stale threshold.
-    clock.advance(11_000);
+    clock.advance(21_000);
 
     expect(store.get().stale).toBe(true);
     expect(views.some((v) => v.stale)).toBe(true);
@@ -316,9 +362,9 @@ describe("createConnectionStore: Minor 1 (dedup notify)", () => {
     });
 
     // Ticks land every 1000ms starting from t=0 (when "open" was emitted);
-    // the tick that first sees > 10000ms of silence fires at t=11000, so
-    // advancing to 11001 is what actually lets that tick run and notice.
-    clock.advance(11_001);
+    // the tick that first sees > 20000ms of silence fires at t=21000, so
+    // advancing to 21001 is what actually lets that tick run and notice.
+    clock.advance(21_001);
     expect(notifyCount).toBeGreaterThan(0);
     expect(store.get().stale).toBe(true);
     store.dispose();

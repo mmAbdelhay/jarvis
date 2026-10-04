@@ -19,6 +19,7 @@ import {
 } from "./changes.js";
 import { showView, syncHostedView } from "./views.js";
 import {
+  focusTerminalPane,
   initWorkspace,
   NEW_TAB_URL,
   refreshWorkspaceProjects,
@@ -62,6 +63,7 @@ import {
   renderVoiceTarget,
   setKnownAgents,
   setKnownProjects,
+  setTerminalPaneFocuser,
   updateSessionHeader,
   wireSessionsRefresh,
   wireSessionView,
@@ -384,6 +386,8 @@ wireCommitBar();
 wireSyncBar();
 wireProvidersPanel();
 wireSessionView();
+// A Sessions row for an agent typed into a Terminal pane opens that pane.
+setTerminalPaneFocuser(focusTerminalPane);
 // No afterRefresh: the Dashboard SESSIONS card already redraws itself from
 // the "sessions:update" push the scan broadcasts (onSessions below).
 wireSessionsRefresh($("dashboard-sessions-refresh"));

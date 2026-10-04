@@ -35,6 +35,11 @@ export type SessionRowView = {
   // found running outside Jarvis. Absent means "jarvis" — the ordinary row,
   // same default as the wire `Session` type itself.
   origin?: "jarvis" | "external";
+  /** An "external" row whose agent the user typed into one of the laptop's
+   *  own Jarvis Terminal panes — live, just not a session Jarvis started.
+   *  The wire row carries the pane key, but the row keeps only the fact:
+   *  the phone does not open a desktop pane from this row. */
+  inJarvisTerminal?: true;
   /** Set when the session was imported from an agent's own transcript. */
   transcriptPath?: string;
   /** Git totals the laptop recorded for the session (finished ones). */
@@ -126,6 +131,7 @@ export function parseSessionList(value: unknown): SessionRowView[] {
     if (session.origin !== undefined) {
       row.origin = session.origin;
     }
+    if (session.terminalPaneKey !== undefined) row.inJarvisTerminal = true;
     if (session.transcriptPath !== undefined) row.transcriptPath = session.transcriptPath;
     if (session.branch !== undefined) row.branch = session.branch;
     if (session.insertions !== undefined) row.insertions = session.insertions;

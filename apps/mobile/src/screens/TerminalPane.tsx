@@ -54,6 +54,7 @@ import { type BarKey, isTextKey, TEXT_KEY_VALUE, terminalFooterKeys } from "@/li
 import { paneChips, terminalTitle } from "@/lib/terminal-header";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
+import { createTerminalFit, type TerminalSize } from "@/lib/terminal-fit";
 import { createTerminalInput } from "@/lib/terminal-input";
 import { createTerminalStream, watchTerminalExit } from "@/lib/terminal-stream";
 import { theme } from "@/lib/theme";
@@ -148,6 +149,34 @@ function TerminalPaneBody({
   const streamRef = useRef<SessionStream | undefined>(undefined);
   const exitedRef = useRef(exited);
   exitedRef.current = exited;
+  // Fit toggle (terminal-fit.ts): on, the phone sizes the pty to its own
+  // fit; `ptySize` is the size the pty has as far as this screen knows —
+  // the attach snapshot's, or the desktop's size Fit just gave back.
+  const [fitOn, setFitOn] = useState(false);
+  const [ptySize, setPtySize] = useState<TerminalSize | undefined>(undefined);
+  const fit = useMemo(
+    () =>
+      createTerminalFit({
+        // Marked "fit"/"restore": the host applies it even to a pane the
+        // desktop sized. Straight to the host, not through the debounced
+        // input — the restore on blur must outlive the disposed input (a
+        // failed one is retried on the next open, terminal-fit.ts).
+        send: async ({ cols, rows }, mode) => {
+          const result = await client.call("terminal:resize", [paneKey, cols, rows, mode], {
+            whenNotOpen: "reject",
+          });
+          if (!result.ok) return { ok: false };
+          const size = parseTerminalSize(result.value);
+          return size === undefined ? { ok: true } : { ok: true, size };
+        },
+        watchOpen: (listener) =>
+          client.onState((state) => {
+            if (state === "open") listener();
+          }),
+        restored: setPtySize,
+      }),
+    [client, paneKey],
+  );
   const sink = useMemo(
     () => ({
       write: (data: string) => webRef.current?.write(data),
@@ -295,6 +324,46 @@ function TerminalPaneBody({
   useEffect(() => {
     inputRef.current?.setEnded(exited);
   }, [exited]);
+
+  // A pty size the host reports. Never answered with a resize of its own
+  // but the phone's fit again (terminal-fit.ts), so it cannot start a loop:
+  // a size Fit did not set means the desktop resized the pane meanwhile,
+  // and Fit simply goes off. A fresh attach's not-yet-known size keeps the
+  // last one, so refocusing does not reflow the page through a fit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the size's own cols/rows, not the view object, which changes on every stream update.
+  useEffect(() => {
+    if (streamView.size === undefined) return;
+    setPtySize(streamView.size);
+    if (fit.ptyReported(streamView.size)) setFitOn(false);
+  }, [streamView.size?.cols, streamView.size?.rows, fit]);
+
+  const fitOff = useCallback(() => {
+    const desktop = fit.disable();
+    if (desktop !== undefined) setPtySize(desktop);
+    setFitOn(false);
+  }, [fit]);
+
+  // Leaving the screen (blur or unmount), or the app going to the
+  // background, with Fit on gives the desktop its size back.
+  useFocusEffect(
+    useCallback(() => {
+      const appState = AppState.addEventListener("change", (state) => {
+        if (state === "background") fitOff();
+      });
+      return () => {
+        appState.remove();
+        fitOff();
+      };
+    }, [fitOff]),
+  );
+
+  function toggleFit(): void {
+    if (fit.isOn()) {
+      fitOff();
+      return;
+    }
+    if (fit.enable(ptySize)) setFitOn(true);
+  }
   const disabled = exited || phase !== "ok" || connection !== "open";
 
   function showResult(input: SessionInput, result: SendResult): void {
@@ -374,6 +443,16 @@ function TerminalPaneBody({
       }}
     />
   );
+  // The phone only: the wide layout keeps the desktop's size.
+  const fitButton = (
+    <IconButton
+      icon="fitWidth"
+      label={t(language, "terminal.fit")}
+      selected={fitOn}
+      disabled={!fitOn && (ptySize === undefined || disabled)}
+      onPress={toggleFit}
+    />
+  );
   const filesButton = (
     <IconButton
       icon="folder"
@@ -385,6 +464,7 @@ function TerminalPaneBody({
   // bar and shows the Files button only when no aside holds the tree.
   const headerActions = (
     <View style={styles.headerActions}>
+      {fitButton}
       {filesButton}
       {findControl}
     </View>
@@ -445,6 +525,11 @@ function TerminalPaneBody({
       {/* Wide layout: no stack header, so the Files button sits above the pane
           (unless the aside shows the tree); find is in the status bar. */}
       {embedded && !filesAside && <View style={styles.planRow}>{filesButton}</View>}
+      {fitOn && (
+        <Text style={styles.fitNote} numberOfLines={1}>
+          {t(language, "terminal.fitOn")}
+        </Text>
+      )}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
       {streamView.gapCount > 0 && (
         <Text style={styles.badge}>
@@ -467,11 +552,15 @@ function TerminalPaneBody({
           onReady={({ cols, rows }) => {
             inputRef.current?.resize(cols, rows);
             inputRef.current?.reassert();
+            fit.pageSize({ cols, rows });
           }}
-          onResize={({ cols, rows }) => inputRef.current?.resize(cols, rows)}
+          onResize={({ cols, rows }) => {
+            inputRef.current?.resize(cols, rows);
+            fit.pageSize({ cols, rows });
+          }}
           onModes={(modes) => inputRef.current?.setModes(modes)}
           onNeedsReplay={() => streamRef.current?.restart(sink)}
-          fixedSize={streamView.size}
+          fixedSize={fitOn ? undefined : ptySize}
           onWheel={(direction) => {
             void inputRef.current?.sendText(sgrWheelSequence(direction));
           }}
@@ -486,19 +575,23 @@ function TerminalPaneBody({
           }
         />
         {view.back && (
-          <TerminalLatestPill language={language} onPress={() => webRef.current?.jump("latest")} />
+          <TerminalLatestPill
+            language={language}
+            compact={!embedded}
+            onPress={() => webRef.current?.jump("latest")}
+          />
         )}
       </View>
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
       <TerminalNavBar
         language={language}
-        view={view}
         finding={finding}
         query={query}
         found={found}
-        onJump={(to) => webRef.current?.jump(to)}
         onFind={(text, direction) => webRef.current?.find(text, direction)}
         onCloseFind={closeFind}
+        // The wide layout keeps its own row; the phone's are key bar caps.
+        {...(embedded ? { jumps: { view, onJump: (to) => webRef.current?.jump(to) } } : {})}
       />
       {plansStore.state.doc !== undefined && !dockShown && (
         <PlanStrip
@@ -506,6 +599,7 @@ function TerminalPaneBody({
           progress={planProgressOf(plansStore.state.doc)}
           step={currentStep(plansStore.state.doc)}
           queuedNotes={queuedNotes}
+          compact={!embedded}
           onOpen={() => setPlanVisible(true)}
         />
       )}
@@ -526,6 +620,18 @@ function TerminalPaneBody({
           keys={terminalFooterKeys(navMode)}
           disabled={disabled}
           armed={armed}
+          // Previous / next command, when the shell marks its prompts (the
+          // phone's; the wide layout has its own row above).
+          actions={
+            view.commands && !embedded
+              ? (["prevCommand", "nextCommand"] as const).map((to) => ({
+                  id: to,
+                  icon: to === "prevCommand" ? ("chevronUp" as const) : ("chevronDown" as const),
+                  label: t(language, `terminal.${to}`),
+                  onPress: () => webRef.current?.jump(to),
+                }))
+              : undefined
+          }
           modeToggle={{
             open: navMode,
             onPress: () => {
@@ -606,6 +712,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.terminalGround },
   output: { flex: 1 },
   status: { color: theme.colors.warning, padding: theme.spacing.sm },
+  fitNote: {
+    ...theme.type.meta,
+    color: theme.colors.warning,
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+  },
   badge: { color: theme.colors.warning, padding: theme.spacing.sm },
   planRow: { flexDirection: "row", justifyContent: "flex-end" },
   embeddedColumn: { minWidth: 0 },
@@ -664,3 +776,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.ground,
   },
 });
+
+/** The host's answer to a restore: the pty's size, if it is one. */
+function parseTerminalSize(value: unknown): TerminalSize | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { cols, rows } = value as { cols?: unknown; rows?: unknown };
+  if (typeof cols !== "number" || typeof rows !== "number") return undefined;
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) return undefined;
+  return { cols, rows };
+}

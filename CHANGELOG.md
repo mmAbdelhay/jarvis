@@ -8,6 +8,24 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.8] — 2026-10-04
+
+- Phone Home shows CPU, memory and disk, New session and New terminal,
+  every project with its Terminal, Docker, API and Sidecars tools, and
+  counts agents running outside Jarvis in the headline.
+- The phone terminal is readable: an 11px floor with sideways panning
+  instead of shrinking to 6px, and compact controls that leave about
+  three quarters of the screen to the output.
+- Fit on the phone resizes the shared terminal to the phone and gives the
+  desktop its size back when Fit is turned off, the phone leaves or
+  disconnects.
+- No more "Connection may be stale" flash on a healthy connection.
+- Desktop: a Plan button on each terminal tab.
+- Desktop: Cmd+V pastes screenshots into Claude Code in a terminal tab.
+- Sessions no longer lists Codex's background service as running agents,
+  and shows agents typed into a Jarvis terminal as running, linked to
+  their own transcript; clicking one opens its tab.
+
 ## [0.1.7] — 2026-10-03
 
 - The phone and browser app now match the redesign: line icons and the

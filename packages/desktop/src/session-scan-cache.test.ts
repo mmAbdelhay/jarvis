@@ -28,6 +28,15 @@ describe("serializeScan / parseScan round trip", () => {
     expect(parseScan(serializeScan(rows))).toEqual(rows.map((r) => ({ ...r })));
   });
 
+  // A pane key names a tab of the core that wrote it; the next one may
+  // hand the same id to a different tab, so a read-back row never has one.
+  it("drops the Terminal pane of a row found inside Jarvis on read", () => {
+    const row = externalSession({ terminalPaneKey: "tab-3:p2" });
+    const [parsed] = parseScan(serializeScan([row]));
+    expect(parsed).toBeDefined();
+    expect(parsed?.terminalPaneKey).toBeUndefined();
+  });
+
   it("round-trips a row with no transcriptPath and no pid", () => {
     const row = externalSession({ pid: undefined });
     delete (row as { pid?: number }).pid;

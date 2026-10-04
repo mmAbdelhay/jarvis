@@ -1,6 +1,7 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,11 +16,13 @@ import { NewSessionSheet } from "@/components/NewSessionSheet";
 import { ProjectToolRow } from "@/components/ProjectToolRow";
 import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
+import { MetricStrip } from "@/components/MetricStrip";
 import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import type { ConnectionView } from "@/lib/connection-store";
 import { machinePillModel } from "@/lib/connection-pill";
 import type { DashboardView } from "@/lib/dashboard-store";
 import { createDashboardStore } from "@/lib/dashboard-store";
+import { workingCount } from "@/lib/home-active";
 import { createHomeStore, type HomeView } from "@/lib/home-store";
 import { PROJECT_TOOLS, type ProjectTool } from "@/lib/home-wide";
 import { STRINGS, t } from "@/lib/i18n";
@@ -63,13 +66,13 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalError, setTerminalError] = useState<string | undefined>(undefined);
-  // Wide: the New terminal / New session sheet.
+  // The New terminal / New session sheet (both layouts).
   const [sheet, setSheet] = useState<"session" | "terminal" | undefined>(undefined);
   const [choices, setChoices] = useState<ProjectSummary[] | null | undefined>(undefined);
   const insets = useSafeAreaInsets();
   // Wide: the WideShell top bar replaces the phone header (brand,
   // connection pill, History and Settings buttons) and the panels sit in a
-  // grid; phone keeps today's stacked screen unchanged.
+  // grid; phone stacks headline, metrics, quick actions, Active, Projects.
   const layout = useLayoutClass();
   const wide = layout.kind === "wide";
   const { width } = useWindowDimensions();
@@ -275,16 +278,40 @@ export default function DashboardScreen() {
         </View>
       ) : (
         <>
+          {/* Phone: the headline counts the agents found outside Jarvis too —
+              they are working, even though no question can come from them. */}
           <HomeTop
             language={language}
             home={home}
             sessions={view.sessions}
-            liveCount={liveIds.length}
+            liveCount={workingCount(view.sessions)}
             now={now}
             wide={undefined}
             onAnswer={answer}
             onOpen={openById}
           />
+          <MetricStrip language={language} metrics={view.metrics} />
+          <View style={styles.quickActions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => openSheet("session")}
+              style={[styles.quickAction, styles.quickActionPrimary]}
+            >
+              <Icon name="plus" size={16} color={theme.colors.primaryText} />
+              <Text style={[styles.quickActionText, styles.quickActionPrimaryText]}>
+                {t(language, "home.newSession")}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={terminalBusy}
+              onPress={newTerminal}
+              style={[styles.quickAction, terminalBusy && styles.quickActionBusy]}
+            >
+              <Icon name="terminal" size={16} color={theme.colors.text} />
+              <Text style={styles.quickActionText}>{t(language, "home.newTerminal")}</Text>
+            </Pressable>
+          </View>
           <ActiveList
             language={language}
             sessions={view.sessions}
@@ -293,31 +320,51 @@ export default function DashboardScreen() {
             onOpen={openById}
             onAll={() => router.push("/sessions")}
           />
+          <View style={styles.projectsCol}>
+            <Text style={styles.sectionTitle}>
+              {t(language, "dashboard.projects").toUpperCase()}
+            </Text>
+            {view.projects.length === 0 && (
+              <Text style={styles.empty}>{t(language, "dashboard.noProjects")}</Text>
+            )}
+            {view.projects.map((project) => (
+              <ProjectToolRow
+                key={project.name}
+                language={language}
+                name={project.name}
+                tools={PROJECT_TOOLS}
+                disabled={connection.state !== "open" || terminalBusy ? ["terminal"] : []}
+                onTool={(tool) => runTool(project.name, tool)}
+                stacked
+              />
+            ))}
+            {terminalError !== undefined && sheet === undefined && (
+              <Text style={styles.error}>{terminalError}</Text>
+            )}
+          </View>
         </>
       )}
       {view.error?.kind === "remote" && (
         <Text style={[styles.error, wide && styles.errorWide]}>{view.error.text}</Text>
       )}
-      {wide && (
-        <NewSessionSheet
-          language={language}
-          visible={sheet !== undefined}
-          mode={sheet}
-          projects={choices}
-          busy={terminalBusy}
-          error={terminalError}
-          onPick={(name) =>
-            void openProjectTerminal(name).then((ok) => {
-              if (ok) setSheet(undefined);
-            })
-          }
-          onAskJarvis={() => {
-            setSheet(undefined);
-            router.push("/voice");
-          }}
-          onClose={() => setSheet(undefined)}
-        />
-      )}
+      <NewSessionSheet
+        language={language}
+        visible={sheet !== undefined}
+        mode={sheet}
+        projects={choices}
+        busy={terminalBusy}
+        error={terminalError}
+        onPick={(name) =>
+          void openProjectTerminal(name).then((ok) => {
+            if (ok) setSheet(undefined);
+          })
+        }
+        onAskJarvis={() => {
+          setSheet(undefined);
+          router.push("/voice");
+        }}
+        onClose={() => setSheet(undefined)}
+      />
     </ScrollView>
   );
 }
@@ -376,4 +423,23 @@ const styles = StyleSheet.create({
   projectsColRow: { flex: 2 },
   sectionTitle: { ...theme.type.sectionLabelLarge, color: theme.colors.textMuted },
   empty: { ...theme.type.body, color: theme.colors.textMuted },
+  // Phone: New session (primary) and New terminal, side by side.
+  quickActions: { flexDirection: "row", gap: 8 },
+  quickAction: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.control,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  quickActionPrimary: { borderWidth: 0, backgroundColor: theme.colors.accent },
+  quickActionBusy: { opacity: 0.5 },
+  quickActionText: { color: theme.colors.text, fontFamily: theme.font.bold, fontSize: 14 },
+  quickActionPrimaryText: { color: theme.colors.primaryText },
 });

@@ -292,7 +292,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     // arriving before the page has ever loaded has nowhere to go yet.
     // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on fixedSize's own cols/rows, deliberately not the object itself — a new object with the same values must not re-post.
     useEffect(() => {
-      if (!readyRef.current || fixedSize === undefined) return;
+      if (!readyRef.current) return;
+      // Fit toggle: a size taken away again sends the page back to fitting.
+      if (fixedSize === undefined) {
+        postToPage({ t: "free" });
+        return;
+      }
       postToPage({ t: "size", cols: fixedSize.cols, rows: fixedSize.rows });
     }, [fixedSize?.cols, fixedSize?.rows, postToPage]);
 

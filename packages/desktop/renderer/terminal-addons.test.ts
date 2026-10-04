@@ -163,6 +163,35 @@ describe("enhanceTerminal — ⌘P claims the palette in every pane state", () =
   });
 });
 
+// Paste must reach xterm as a real paste event. xterm turns it into a
+// bracketed paste — ESC[200~ … ESC[201~ — and for a clipboard holding only an
+// image that is an *empty* bracketed paste, which is the signal Claude Code
+// reads as "fetch the image from the clipboard". Reading text here instead
+// sent nothing at all for an image, and unbracketed bytes for text.
+describe("enhanceTerminal — paste is left to xterm's paste event", () => {
+  for (const [platform, init] of [
+    ["darwin", { key: "v", metaKey: true }],
+    ["linux", { key: "V", ctrlKey: true, shiftKey: true }],
+  ] as const) {
+    it(`does not encode the ${platform} paste chord, and does not block its default`, () => {
+      const terminal = new FakeTerminal();
+      const sent: string[] = [];
+      enhanceTerminal(
+        terminal as never,
+        document.createElement("div"),
+        { sendInput: (data) => sent.push(data), openLink: () => {} },
+        platform,
+      );
+
+      const encoded = terminal.pressKey(init);
+
+      expect(encoded).toBe(false);
+      expect(terminal.defaultPrevented).toBe(false);
+      expect(sent).toEqual([]);
+    });
+  }
+});
+
 // The macOS cases above are the originals. These are the same behaviours in
 // the other spelling — the point of keys.ts is that one table drives both, so
 // a regression on either platform shows up on the machine that is not it.

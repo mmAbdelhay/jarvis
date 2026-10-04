@@ -10,7 +10,9 @@ const TOOL_LABELS: Record<ProjectTool, MessageKey> = {
   editor: "sidecars.editor",
 };
 
-/** Wide Home: one project, its name and a button per tool. */
+/** One project, its name and a button per tool: in one row on wide Home,
+ *  the name over the buttons on phone (`stacked`), where four buttons beside
+ *  the name would squeeze it to nothing. */
 export function ProjectToolRow(props: {
   language: Language;
   name: string;
@@ -18,26 +20,38 @@ export function ProjectToolRow(props: {
   /** Tools that cannot run right now (the terminal while offline or busy). */
   disabled: readonly ProjectTool[];
   onTool(tool: ProjectTool): void;
+  stacked?: boolean;
 }) {
+  const buttons = props.tools.map((tool) => {
+    const disabled = props.disabled.includes(tool);
+    return (
+      <Pressable
+        key={tool}
+        accessibilityRole="button"
+        disabled={disabled}
+        onPress={() => props.onTool(tool)}
+        style={[styles.button, disabled && styles.disabled]}
+      >
+        <Text style={styles.buttonText}>{t(props.language, TOOL_LABELS[tool])}</Text>
+      </Pressable>
+    );
+  });
+  const name = (
+    <Text style={[styles.name, props.stacked === true && styles.nameStacked]} numberOfLines={1}>
+      {props.name}
+    </Text>
+  );
+  if (props.stacked === true)
+    return (
+      <View style={[styles.row, styles.stacked]}>
+        {name}
+        <View style={styles.buttons}>{buttons}</View>
+      </View>
+    );
   return (
     <View style={styles.row}>
-      <Text style={styles.name} numberOfLines={1}>
-        {props.name}
-      </Text>
-      {props.tools.map((tool) => {
-        const disabled = props.disabled.includes(tool);
-        return (
-          <Pressable
-            key={tool}
-            accessibilityRole="button"
-            disabled={disabled}
-            onPress={() => props.onTool(tool)}
-            style={[styles.button, disabled && styles.disabled]}
-          >
-            <Text style={styles.buttonText}>{t(props.language, TOOL_LABELS[tool])}</Text>
-          </Pressable>
-        );
-      })}
+      {name}
+      {buttons}
     </View>
   );
 }
@@ -53,6 +67,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.hairline,
   },
+  stacked: { flexDirection: "column", alignItems: "stretch" },
+  // In a column, the row's flex: 1 would stretch the name's height instead.
+  // Spelled out rather than `flex: 0`: react-native-web turns that into
+  // `flex: 0 1 0%`, a zero basis that left the name 0px tall on phone Home.
+  nameStacked: { flexGrow: 0, flexShrink: 0, flexBasis: "auto" },
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   name: { flex: 1, minWidth: 0, ...theme.type.rowTitle, color: theme.colors.text },
   button: {
     minHeight: 34,

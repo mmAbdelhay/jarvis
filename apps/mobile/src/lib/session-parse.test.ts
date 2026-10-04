@@ -115,6 +115,13 @@ describe("parseSession", () => {
     expect(session?.pid).toBe(1234);
   });
 
+  it("keeps the Terminal pane of a row found inside Jarvis, dropping a non-string one", () => {
+    expect(parseSession(fullSession({ terminalPaneKey: "tab-3:p2" }))?.terminalPaneKey).toBe(
+      "tab-3:p2",
+    );
+    expect(parseSession(fullSession({ terminalPaneKey: 7 }))?.terminalPaneKey).toBeUndefined();
+  });
+
   it("drops an unknown origin value and a non-finite pid", () => {
     const session = parseSession(fullSession({ origin: "robot", pid: Number.NaN }));
     expect(session?.origin).toBeUndefined();

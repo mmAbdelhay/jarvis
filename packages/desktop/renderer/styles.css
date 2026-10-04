@@ -2204,6 +2204,18 @@
      them. */
   .terminal-split { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
     display: flex; }
+  /* The plan panel's own switch, floated in the panes' top corner (the
+     split is its positioned box). Quiet until hovered, accent while the
+     panel is open, and a dot when the tab's session has a plan to show. */
+  .plan-toggle { position: absolute; inset-block-start: 6px; inset-inline-end: 10px; z-index: 5;
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+    color: var(--text-muted); font: 13px/1 var(--font-mono); cursor: pointer; opacity: 0.7; }
+  .plan-toggle:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
+  .plan-toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+  .plan-toggle[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
+  .plan-toggle--has-plan::after { content: ""; position: absolute; inset-block-start: -3px;
+    inset-inline-end: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
   .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
     overflow: hidden; }
@@ -3004,6 +3016,14 @@
   .session-chip--external {
     color: var(--accent);
     border-color: var(--accent);
+    background: transparent;
+  }
+
+  /* One the user typed into a Jarvis Terminal pane: live in Jarvis, just not
+     a session it started — the same outline, in the "here" colour. */
+  .session-chip--terminal {
+    color: var(--good);
+    border-color: var(--good);
     background: transparent;
   }
 

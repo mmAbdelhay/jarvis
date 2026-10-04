@@ -128,6 +128,7 @@ import {
   createSessionImporter,
   listAgentProcesses,
   resolveProject,
+  transcriptsForProcesses,
   createShellManager,
   createCollection,
   createFolder,
@@ -217,6 +218,7 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
+import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
 
 /** The `performance:` section states its timeouts in minutes, because that is
  *  the unit anybody reasons about "leave a tab alone for a while" in. Every
@@ -1309,15 +1311,32 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         // running as also "running outside Jarvis".
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
+        // An agent typed into a Terminal pane runs under that pane's shell
+        // — reported, tagged with the pane, rather than dropped with the
+        // rest of this process's own tree.
+        terminalShells: () => shells.shellPids(),
         now: () => Date.now(),
+      });
+
+      // Sessions Jarvis itself ran — live, or recorded without an imported
+      // transcript (an imported row always carries transcriptPath) — whose
+      // transcripts sit in the same directories and are never a scanned
+      // process's own.
+      const jarvisIds = new Set([
+        ...sessions.list().map((session) => session.id),
+        ...sessionStore
+          .history()
+          .filter((session) => session.transcriptPath === undefined)
+          .map((session) => session.id),
+      ]);
+      const transcripts = await transcriptsForProcesses(processes, {
+        byPid: (agentId, pid) => sessionImporter.transcriptForPid(agentId, pid),
+        latestInDir: (agentId, cwd) => sessionImporter.latestTranscriptFor(agentId, cwd, jarvisIds),
       });
 
       const next = new Map<string, CoreSession>();
       for (const found of processes) {
-        const transcript =
-          found.cwd === null
-            ? null
-            : await sessionImporter.latestTranscriptFor(found.agentId, found.cwd);
+        const transcript = transcripts.get(found.pid) ?? null;
         const id = `ext-${found.pid}`;
         next.set(id, {
           id,
@@ -1328,12 +1347,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           summary:
             transcript !== null
               ? transcript.session.summary
-              : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
+              : found.terminalPaneKey !== undefined
+                ? MESSAGES.sessionRunningInJarvisTerminal(PRIMARY_LANGUAGE)
+                : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
           startedAt: found.startedAt,
           lastActivityAt: transcript?.session.lastActivityAt ?? Date.now(),
           ...(transcript === null ? {} : { transcriptPath: transcript.path }),
           origin: "external",
           pid: found.pid,
+          ...(found.terminalPaneKey === undefined
+            ? {}
+            : { terminalPaneKey: found.terminalPaneKey }),
         });
       }
       externalSessions = next;
@@ -1529,6 +1553,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // are (remote-access.ts's own per-device cleanup).
     onDeviceDisconnected: (deviceId) => {
       followers.unfollowOwnedBy(deviceId);
+      // A phone that drops off with Fit on gives the desktop its size back.
+      fitOverrides.deviceDisconnected(deviceId);
     },
     // M9 Task 3: a revoked device's staged files and quota reservation
     // are reclaimed here — never on a plain disconnect, which leaves them
@@ -2045,6 +2071,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     platform,
   };
 
+  // The phone's Fit toggle (terminal-fit-overrides.ts): shared with
+  // onDeviceDisconnected above, which runs only well after this is set.
+  const fitOverrides = createTerminalFitOverrides({
+    resize: (paneKey, cols, rows) => terminal.resize(paneKey, cols, rows),
+  });
   // Every request handler, in one table (dispatch.ts). Each host registers
   // it on its own transport; the remote bridge calls the same table with a
   // different Origin.
@@ -2095,6 +2126,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     git: gitHandlers,
     workspace,
     terminal,
+    fitOverrides,
     shells,
     followers,
     editor,

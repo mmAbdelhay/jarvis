@@ -2198,6 +2198,7 @@ describe("terminal handlers", () => {
         snapshot: () => ({ text: "", end: 0 }),
         has: () => false,
         panes: () => [],
+        shellPids: () => new Map(),
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
         kill: (tabId) => killed.push(tabId),
