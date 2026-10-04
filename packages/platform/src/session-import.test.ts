@@ -984,6 +984,29 @@ describe("createSessionImporter", () => {
       expect(found).toBeNull();
     });
 
+    // A Jarvis session running in the same directory writes the newest
+    // transcript there; it is that session's, never a scanned process's.
+    it("skips a transcript whose id is one of Jarvis's own sessions", async () => {
+      const { deps } = world({
+        [`${DIR}/-Users-u-work-notes/typed.jsonl`]: {
+          head: transcript({ id: "typed", cwd: "/Users/u/work/notes", prompt: "typed one" }),
+          mtime: NOW - 2 * DAY,
+        },
+        [`${DIR}/-Users-u-work-notes/jarvis-1.jsonl`]: {
+          head: transcript({ id: "jarvis-1", cwd: "/Users/u/work/notes", prompt: "jarvis one" }),
+          mtime: NOW - DAY,
+        },
+      });
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+        new Set(["jarvis-1"]),
+      );
+
+      expect(found?.session.summary).toBe("typed one");
+    });
+
     it("returns null for an agent with no configured transcript directory", async () => {
       const { deps } = world({});
 
@@ -1011,6 +1034,49 @@ describe("createSessionImporter", () => {
       );
 
       expect(found).toBeNull();
+    });
+  });
+
+  describe("transcriptForPid", () => {
+    // Claude Code writes <configDir>/sessions/<pid>.json naming the session
+    // a running process is in — the one exact link from a pid to its
+    // transcript, whatever else shares its directory.
+    const pidFile = join("/h/.claude-main", "sessions", "4242.json");
+
+    it("follows the pid file to that session's transcript, newest or not", async () => {
+      const { deps } = world({
+        [pidFile]: {
+          head: JSON.stringify({ pid: 4242, sessionId: "mine", cwd: "/Users/u/work/notes" }),
+          dir: "elsewhere",
+        },
+        [`${DIR}/-Users-u-work-notes/mine.jsonl`]: {
+          head: transcript({ id: "mine", cwd: "/Users/u/work/notes", prompt: "my prompt" }),
+          mtime: NOW - 2 * DAY,
+        },
+        [`${DIR}/-Users-u-work-notes/other.jsonl`]: {
+          head: transcript({ id: "other", cwd: "/Users/u/work/notes", prompt: "theirs" }),
+          mtime: NOW - DAY,
+        },
+      });
+
+      const found = await createSessionImporter(deps).transcriptForPid("claude-main", 4242);
+
+      expect(found?.session.summary).toBe("my prompt");
+      expect(found?.path).toBe(`${DIR}/-Users-u-work-notes/mine.jsonl`);
+    });
+
+    it("returns null with no pid file, or one written for another pid", async () => {
+      const { deps } = world({
+        [pidFile]: { head: JSON.stringify({ pid: 1, sessionId: "mine" }), dir: "elsewhere" },
+        [`${DIR}/-Users-u-work-notes/mine.jsonl`]: {
+          head: transcript({ id: "mine", cwd: "/Users/u/work/notes" }),
+        },
+      });
+      const importer = createSessionImporter(deps);
+
+      expect(await importer.transcriptForPid("claude-main", 4242)).toBeNull();
+      expect(await importer.transcriptForPid("claude-main", 7)).toBeNull();
+      expect(await importer.transcriptForPid("no-such-agent", 4242)).toBeNull();
     });
   });
 });

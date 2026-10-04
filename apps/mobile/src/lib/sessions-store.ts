@@ -37,8 +37,8 @@ export type SessionRowView = {
   origin?: "jarvis" | "external";
   /** An "external" row whose agent the user typed into one of the laptop's
    *  own Jarvis Terminal panes — live, just not a session Jarvis started.
-   *  Only the fact crosses over, not the pane key: the phone cannot go to
-   *  a desktop pane from this row. */
+   *  The wire row carries the pane key, but the row keeps only the fact:
+   *  the phone does not open a desktop pane from this row. */
   inJarvisTerminal?: true;
   /** Set when the session was imported from an agent's own transcript. */
   transcriptPath?: string;

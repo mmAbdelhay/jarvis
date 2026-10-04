@@ -434,10 +434,26 @@ export type SessionImporter = {
    * only link back to its conversation. Never bounded by
    * `importWindowDays` — a process still running is worth a transcript
    * however old the file, unlike backfill()'s own history import.
+   *
+   * `excludeIds` are sessions Jarvis itself ran: one running in the same
+   * directory writes the newest transcript there, and it is that
+   * session's, never the scanned process's.
    */
   latestTranscriptFor(
     agentId: string,
     cwd: string,
+    excludeIds?: ReadonlySet<string>,
+  ): Promise<{ session: TranscriptSession; path: string } | null>;
+  /**
+   * The transcript of the session process `pid` is in, by Claude Code's
+   * own record of it: `<configDir>/sessions/<pid>.json` names the session
+   * id. Exact where latestTranscriptFor guesses by directory — but only
+   * for a Claude-format agent, and only when the process runs under this
+   * agent's configDir; null otherwise, or when the file names another pid.
+   */
+  transcriptForPid(
+    agentId: string,
+    pid: number,
   ): Promise<{ session: TranscriptSession; path: string } | null>;
 };
 
@@ -590,7 +606,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
       watchers.length = 0;
     },
 
-    async latestTranscriptFor(agentId, cwd) {
+    async latestTranscriptFor(agentId, cwd, excludeIds) {
       const entry = dirs.find((candidate) => candidate.agentId === agentId);
       if (entry === undefined) return null;
 
@@ -616,11 +632,48 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
             ? sessionFromTranscript(head, file.path, file.mtime)
             : sessionFromCopilotWorkspace(head, file.path);
         if (session === null || session.cwd !== cwd) continue;
+        if (excludeIds?.has(session.id) === true) continue;
         if (best === null || session.lastActivityAt > best.session.lastActivityAt) {
           best = { session, path: file.path };
         }
       }
       return best;
+    },
+
+    async transcriptForPid(agentId, pid) {
+      const entry = dirs.find((candidate) => candidate.agentId === agentId);
+      if (entry === undefined || entry.format !== "claude") return null;
+
+      // Beside the transcripts directory, under the same configDir.
+      let sessionId: string;
+      try {
+        const record = JSON.parse(
+          await deps.readHead(join(dirname(entry.dir), "sessions", `${pid}.json`)),
+        ) as { pid?: unknown; sessionId?: unknown };
+        // A file left by an earlier process that held this pid names
+        // someone else's session.
+        if (record.pid !== pid || typeof record.sessionId !== "string") return null;
+        sessionId = record.sessionId;
+      } catch {
+        return null;
+      }
+
+      let files: TranscriptFile[];
+      try {
+        files = await deps.listFiles(entry.dir, entry.format);
+      } catch {
+        return null;
+      }
+      const file = files.find((candidate) => basename(candidate.path) === `${sessionId}.jsonl`);
+      if (file === undefined) return null;
+      let head: string;
+      try {
+        head = await deps.readHead(file.path);
+      } catch {
+        return null;
+      }
+      const session = sessionFromTranscript(head, file.path, file.mtime);
+      return session === null ? null : { session, path: file.path };
     },
   };
 }

@@ -128,6 +128,7 @@ import {
   createSessionImporter,
   listAgentProcesses,
   resolveProject,
+  transcriptsForProcesses,
   createShellManager,
   createCollection,
   createFolder,
@@ -1317,12 +1318,25 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         now: () => Date.now(),
       });
 
+      // Sessions Jarvis itself ran — live, or recorded without an imported
+      // transcript (an imported row always carries transcriptPath) — whose
+      // transcripts sit in the same directories and are never a scanned
+      // process's own.
+      const jarvisIds = new Set([
+        ...sessions.list().map((session) => session.id),
+        ...sessionStore
+          .history()
+          .filter((session) => session.transcriptPath === undefined)
+          .map((session) => session.id),
+      ]);
+      const transcripts = await transcriptsForProcesses(processes, {
+        byPid: (agentId, pid) => sessionImporter.transcriptForPid(agentId, pid),
+        latestInDir: (agentId, cwd) => sessionImporter.latestTranscriptFor(agentId, cwd, jarvisIds),
+      });
+
       const next = new Map<string, CoreSession>();
       for (const found of processes) {
-        const transcript =
-          found.cwd === null
-            ? null
-            : await sessionImporter.latestTranscriptFor(found.agentId, found.cwd);
+        const transcript = transcripts.get(found.pid) ?? null;
         const id = `ext-${found.pid}`;
         next.set(id, {
           id,

@@ -71,25 +71,44 @@ export function commandBasename(command: string): string {
 /**
  * Agent subcommands that start a long-lived service rather than a session
  * anyone is working in — Codex's background `app-server` daemon (and the
- * helper it forks), either agent's MCP server. Keyed by the executable's own
- * name, because the same word means different things to each: `codex mcp`
- * is a config command, `claude mcp serve` is a server.
+ * helper it forks), either agent's MCP server. Keyed by which CLI the agent
+ * is, because the same word means different things to each: `codex mcp` is
+ * a config command, `claude mcp serve` is a server.
  */
 const SERVICE_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["codex", new Set(["app-server", "mcp-server"])],
   ["claude", new Set(["mcp"])],
 ]);
 
+/** Which CLI an agent is, for SERVICE_SUBCOMMANDS: its vendor when it names
+ *  one (an account wrapper like `claude-acme` is still Claude Code), else
+ *  its command's own name. */
+const CLI_BY_VENDOR: Readonly<Record<string, string>> = { anthropic: "claude", openai: "codex" };
+
 /**
- * Whether a command line is an agent running as a service, not a session —
- * read from its first argument only. Never used to report anything: the
- * argument is looked at here and nowhere else, so it can never leave this
- * function (see the security note at the top of this file).
+ * Whether a command line is `agent` running as a service, not a session —
+ * read from its first argument that is not a flag (`claude --debug mcp
+ * serve` is still the MCP server). A flag's own value is not skipped, so
+ * `--model x mcp` reads as `x`: a missed service row, never a hidden
+ * session. Never used to report anything: the arguments are looked at here
+ * and nowhere else, so they can never leave this function (see the
+ * security note at the top of this file).
  */
-export function isAgentServiceCommand(command: string): boolean {
-  const [, firstArgument] = command.trim().split(/\s+/);
-  if (firstArgument === undefined) return false;
-  return SERVICE_SUBCOMMANDS.get(commandBasename(command))?.has(firstArgument) ?? false;
+export function isAgentServiceCommand(
+  agent: Pick<AgentConfig, "command" | "vendor">,
+  command: string,
+): boolean {
+  const cli =
+    (agent.vendor === undefined ? undefined : CLI_BY_VENDOR[agent.vendor]) ??
+    commandBasename(agent.command);
+  const services = SERVICE_SUBCOMMANDS.get(cli);
+  if (services === undefined) return false;
+  const subcommand = command
+    .trim()
+    .split(/\s+/)
+    .slice(1)
+    .find((argument) => !argument.startsWith("-"));
+  return subcommand !== undefined && services.has(subcommand);
 }
 
 /**
@@ -181,8 +200,10 @@ function ownProcessTree(rows: readonly PsRow[], jarvisPid: number): Set<number> 
 }
 
 /**
- * The Terminal pane an agent inside Jarvis's own tree was typed into: walks
- * the ppid chain up from `pid` until it meets one of the pane shells, and
+ * The Terminal pane an agent inside Jarvis's own tree was typed into: `pid`
+ * itself when it is a pane's process (`exec claude` replaces the shell in
+ * place), else the ppid chain walked up from it until it meets one of the
+ * pane shells, and
  * stops — undefined — at Jarvis itself, at a session SessionManager owns
  * (an agent that agent spawned is its business, not a terminal's), or at a
  * loop or a missing row. An agent under no shell (the brain's own SDK child)
@@ -195,6 +216,8 @@ function terminalPaneOf(
   owned: ReadonlySet<number>,
   jarvisPid: number,
 ): string | undefined {
+  const own = shells.get(pid);
+  if (own !== undefined) return own;
   const seen = new Set<number>();
   let current = parents.get(pid);
   while (current !== undefined && current !== jarvisPid && !seen.has(current)) {
@@ -260,9 +283,9 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   // Bare command name (never a full path) for each registered agent, so a
   // `claude` on PATH and `/opt/homebrew/bin/claude` in the config both
   // match a `claude` row.
-  const agentByCommand = new Map<string, string>();
+  const agentByCommand = new Map<string, AgentConfig>();
   for (const agent of deps.agents) {
-    agentByCommand.set(commandBasename(agent.command), agent.id);
+    agentByCommand.set(commandBasename(agent.command), agent);
   }
 
   const now = deps.now();
@@ -274,9 +297,10 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   }[] = [];
   for (const row of rows) {
     if (owned.has(row.pid)) continue;
-    const agentId = agentByCommand.get(commandBasename(row.command));
-    if (agentId === undefined) continue;
-    if (isAgentServiceCommand(row.command)) continue;
+    const agent = agentByCommand.get(commandBasename(row.command));
+    if (agent === undefined) continue;
+    if (isAgentServiceCommand(agent, row.command)) continue;
+    const agentId = agent.id;
     let terminalPaneKey: string | undefined;
     if (ownTree.has(row.pid)) {
       terminalPaneKey = terminalPaneOf(row.pid, parents, shells, owned, deps.jarvisPid);
@@ -313,4 +337,48 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     startedAt,
     ...(terminalPaneKey === undefined ? {} : { terminalPaneKey }),
   }));
+}
+
+/**
+ * Which transcript each scanned process gets, for its row's summary:
+ *
+ *  - its own, by pid (`byPid` — Claude Code's own pid → session record),
+ *    whenever that link exists;
+ *  - otherwise the newest in its directory (`latestInDir`), but only when
+ *    no other scanned process of the same agent shares that directory —
+ *    two `claude`s in one directory cannot be told apart that way, and
+ *    giving both the same transcript would be a guess shown as fact. Such a
+ *    row, or one with no cwd, gets none and keeps its generic summary.
+ *
+ * Generic over what a transcript is, so the rule is tested without a
+ * filesystem; `latestInDir` is where the caller leaves out Jarvis's own.
+ */
+export async function transcriptsForProcesses<T>(
+  processes: readonly ExternalAgentProcess[],
+  lookup: {
+    byPid: (agentId: string, pid: number) => Promise<T | null>;
+    latestInDir: (agentId: string, cwd: string) => Promise<T | null>;
+  },
+): Promise<Map<number, T>> {
+  const sharing = new Map<string, number>();
+  const dirKey = (agentId: string, cwd: string): string => `${agentId}\u0000${cwd}`;
+  for (const found of processes) {
+    if (found.cwd === null) continue;
+    const key = dirKey(found.agentId, found.cwd);
+    sharing.set(key, (sharing.get(key) ?? 0) + 1);
+  }
+
+  const transcripts = new Map<number, T>();
+  for (const found of processes) {
+    let transcript = await lookup.byPid(found.agentId, found.pid);
+    if (
+      transcript === null &&
+      found.cwd !== null &&
+      sharing.get(dirKey(found.agentId, found.cwd)) === 1
+    ) {
+      transcript = await lookup.latestInDir(found.agentId, found.cwd);
+    }
+    if (transcript !== null) transcripts.set(found.pid, transcript);
+  }
+  return transcripts;
 }
