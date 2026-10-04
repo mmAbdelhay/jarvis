@@ -37,7 +37,14 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
-import { countRunning, createUpdater, devOverrides, nodeExec, nodeUpdaterFs } from "./updater.js";
+import {
+  countRunning,
+  createUpdater,
+  devOverrides,
+  nodeExec,
+  nodeUpdaterFs,
+  replayStateOnLoad,
+} from "./updater.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -606,6 +613,7 @@ app.whenReady().then(async () => {
       push: (state) => local("update:state", state),
     });
     app.on("will-quit", () => updater.stop());
+    replayStateOnLoad(window.webContents, updater, (state) => local("update:state", state));
 
     registerDesktopOnly({
       handle: (channel, listener) => ipcMain.handle(channel, listener),

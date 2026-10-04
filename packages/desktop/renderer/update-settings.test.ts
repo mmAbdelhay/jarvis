@@ -245,6 +245,35 @@ describe("Settings → General → Updates", () => {
     expect(shown("settings-update-notes-link")).toBe(true);
   });
 
+  it("install blockers offer no download; retryable errors do", async () => {
+    const api = await setup();
+    for (const error of ["read-only", "translocated", "not-appimage"] as const) {
+      api.push({ ...available, phase: "error", error });
+      expect(shown("settings-update-install")).toBe(false);
+    }
+    for (const error of ["download", "mismatch", "no-sums", "swap", "offline"] as const) {
+      api.push({ ...available, phase: "error", error });
+      expect(shown("settings-update-install")).toBe(true);
+    }
+  });
+
+  it("Check now comes back when the first check fails outright", async () => {
+    const api = await setup();
+    api.updateCheck.mockImplementationOnce(async () => {
+      throw new Error("ipc gone");
+    });
+    byId("settings-update-check").click();
+    expect((byId("settings-update-check") as HTMLButtonElement).disabled).toBe(true);
+    await settle();
+    expect((byId("settings-update-check") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("installing hides Full notes", async () => {
+    const api = await setup();
+    api.push({ ...available, phase: "installing" });
+    expect(shown("settings-update-notes-link")).toBe(false);
+  });
+
   it("offline with nothing known: one line, no card", async () => {
     const api = await setup();
     api.push({ ...base, phase: "error", error: "offline" });

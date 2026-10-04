@@ -1,4 +1,4 @@
-import type { RunningCounts, UpdateState } from "../src/updater.js";
+import type { RunningCounts, UpdateError, UpdateState } from "../src/updater.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import { formatAgo, formatBytes } from "./format.js";
@@ -13,6 +13,17 @@ import { formatAgo, formatBytes } from "./format.js";
 const NOTE_LINES = 20;
 
 const language = PRIMARY_LANGUAGE;
+
+/** Errors a fresh download can get past. The install blockers (read-only,
+ *  translocated, not-appimage) need the user to move or rerun the app
+ *  first, so downloading again would only fail the same way. */
+const RETRYABLE: ReadonlySet<UpdateError | undefined> = new Set<UpdateError | undefined>([
+  "download",
+  "mismatch",
+  "no-sums",
+  "swap",
+  "offline",
+]);
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -143,7 +154,7 @@ export function initUpdateSettings(): void {
     // Plain text only: a release body is never parsed as markup.
     notes.textContent = (state.notes ?? "").split("\n").slice(0, NOTE_LINES).join("\n");
     notes.hidden = notes.textContent === "";
-    notesLink.hidden = state.url === undefined;
+    notesLink.hidden = state.url === undefined || phase === "installing";
 
     progress.hidden = !(phase === "downloading" || phase === "verifying");
     cancel.hidden = phase !== "downloading";
@@ -169,7 +180,7 @@ export function initUpdateSettings(): void {
     // retry. Ready after Later offers Install now, which asks again.
     const canDownload =
       latest !== undefined &&
-      (phase === "available" || (phase === "error" && state.error !== "no-asset"));
+      (phase === "available" || (phase === "error" && RETRYABLE.has(state.error)));
     install.hidden = !(canDownload || (phase === "ready" && !confirming));
     install.textContent =
       phase === "ready" ? MESSAGES.updateInstallNow(language) : MESSAGES.updateInstall(language);
@@ -215,7 +226,12 @@ export function initUpdateSettings(): void {
     void window.jarvis
       .updateCheck()
       .then(apply)
-      .catch(() => render());
+      .catch(() => {
+        // Before any state arrived, render() draws nothing, so the button
+        // must come back here.
+        check.disabled = false;
+        render();
+      });
   });
 
   install.addEventListener("click", () => {

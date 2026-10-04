@@ -545,6 +545,17 @@ const LIVE_SESSION: ReadonlySet<string> = new Set(["starting", "running", "waiti
  *  workspace's terminal tabs, each tab's panes (terminal:panes) and the
  *  session list (sessions:list). Exited panes and ended sessions do not
  *  count; a failed lookup counts as none. */
+/** Sends the updater's state to a page each time it finishes loading, so a
+ *  reloaded renderer (the menu's Reload, or a daemon-mode switch) draws the
+ *  Updates card again instead of waiting for a push that may never come. */
+export function replayStateOnLoad(
+  page: { on(event: "did-finish-load", listener: () => void): unknown },
+  updater: Pick<Updater, "state">,
+  push: (state: UpdateState) => void,
+): void {
+  page.on("did-finish-load", () => push(updater.state()));
+}
+
 export async function countRunning(source: {
   terminalTabs(): string[];
   panes(tabId: string): Promise<unknown>;

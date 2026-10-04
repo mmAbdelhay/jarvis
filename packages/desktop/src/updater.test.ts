@@ -18,6 +18,7 @@ import {
   devOverrides,
   nodeExec,
   nodeUpdaterFs,
+  replayStateOnLoad,
   swapEnv,
   type UpdaterDeps,
   type UpdateState,
@@ -479,6 +480,30 @@ describe("createUpdater", () => {
     expect(h.timers.size).toBe(1);
     open();
     expect(await pending).toMatchObject({ phase: "ready" });
+  });
+});
+
+describe("replayStateOnLoad", () => {
+  it("sends the updater's current state each time the page finishes loading", async () => {
+    const h = harness();
+    await h.updater.checkNow();
+    await h.updater.download();
+    const listeners: Record<string, () => void> = {};
+    const sent: UpdateState[] = [];
+    replayStateOnLoad(
+      {
+        on: (event, listener) => {
+          listeners[event] = listener;
+        },
+      },
+      h.updater,
+      (state) => sent.push(state),
+    );
+    expect(sent).toEqual([]);
+    listeners["did-finish-load"]?.();
+    listeners["did-finish-load"]?.();
+    expect(sent.map((state) => state.phase)).toEqual(["ready", "ready"]);
+    expect(sent[0]).toMatchObject({ latest: "0.1.9", url: PAGE });
   });
 });
 
