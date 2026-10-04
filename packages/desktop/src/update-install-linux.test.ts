@@ -18,6 +18,9 @@ function deps(overrides: Partial<Parameters<typeof prepareLinux>[0]> = {}) {
       chmod: async (path: string, mode: number) => {
         calls.push(`chmod ${path} ${mode.toString(8)}`);
       },
+      remove: async (path: string) => {
+        calls.push(`remove ${path}`);
+      },
       writable: (dir: string) => {
         calls.push(`writable ${dir}`);
         return true;
@@ -68,6 +71,36 @@ describe("prepareLinux", () => {
       },
     });
     expect(await prepareLinux(chmodFails.deps)).toEqual({ ok: false, reason: "io" });
+  });
+
+  it("removes the partial <appImage>.new when the copy or chmod fails", async () => {
+    const staged = "/home/me/Apps/Jarvis.AppImage.new";
+    const copyFails = deps({
+      copy: async () => {
+        throw new Error("ENOSPC");
+      },
+    });
+    await prepareLinux(copyFails.deps);
+    expect(copyFails.calls.at(-1)).toBe(`remove ${staged}`);
+    const chmodFails = deps({
+      chmod: async () => {
+        throw new Error("EPERM");
+      },
+    });
+    await prepareLinux(chmodFails.deps);
+    expect(chmodFails.calls.at(-1)).toBe(`remove ${staged}`);
+  });
+
+  it("still reports io when removing the partial copy fails too", async () => {
+    const { deps: d } = deps({
+      copy: async () => {
+        throw new Error("ENOSPC");
+      },
+      remove: async () => {
+        throw new Error("EBUSY");
+      },
+    });
+    expect(await prepareLinux(d)).toEqual({ ok: false, reason: "io" });
   });
 });
 

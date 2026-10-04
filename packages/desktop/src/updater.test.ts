@@ -30,6 +30,9 @@ const PAGE = "https://github.com/mmAbdelhay/jarvis/releases/tag/v0.1.9";
 const DMG = "Jarvis-0.1.9-arm64.dmg";
 const APPIMAGE = "Jarvis-0.1.9.AppImage";
 const PAYLOAD = "the installer bytes";
+/** A fixed POSIX bundle path, for blocker tests whose `writable` is stubbed:
+ *  a tmpdir path would be `C:\…` on Windows, which is no macOS bundle. */
+const APP_EXEC = "/Applications/Jarvis.app/Contents/MacOS/Jarvis";
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 type Route = () => Response | Promise<Response>;
@@ -84,6 +87,7 @@ function harness(overrides: Partial<UpdaterDeps> = {}, routes: Record<string, Ro
   const pushed: UpdateState[] = [];
   const deps: UpdaterDeps = {
     current: "0.1.8",
+    packaged: true,
     platform: "darwin",
     arch: "arm64",
     pid: 4242,
@@ -295,28 +299,6 @@ describe("createUpdater", () => {
     expect(await h.updater.download()).toMatchObject({ phase: "error", error: "download" });
   });
 
-  it("installs on macOS: stages the bundle, spawns the swap script and quits", async () => {
-    mkdirSync(join(root, "Apps"));
-    const h = harness();
-    await h.updater.checkNow();
-    await h.updater.download();
-    await h.updater.install();
-    const bundle = join(root, "Apps", "Jarvis.app");
-    expect(h.deps.exec).toHaveBeenCalledWith("/usr/bin/ditto", [
-      "/Volumes/Jarvis/Jarvis.app",
-      `${bundle}.new`,
-    ]);
-    const script = join(updatesDir(), "swap.sh");
-    expect(h.deps.spawnDetached).toHaveBeenCalledWith("/bin/sh", [script], {
-      cwd: updatesDir(),
-      env: { PATH: "/usr/bin" },
-    });
-    const text = readFileSync(script, "utf8");
-    expect(text).toContain("pid=4242");
-    expect(text).toContain(`app='${bundle}'`);
-    expect(h.deps.quit).toHaveBeenCalledTimes(1);
-  });
-
   it("refuses a translocated app at check time, before downloading anything", async () => {
     const h = harness({
       execPath: "/private/var/folders/x/AppTranslocation/ABC/d/Jarvis.app/Contents/MacOS/Jarvis",
@@ -337,7 +319,7 @@ describe("createUpdater", () => {
   });
 
   it("refuses an install folder it cannot write to, before downloading", async () => {
-    const h = harness({ fs: { ...nodeUpdaterFs, writable: () => false } });
+    const h = harness({ execPath: APP_EXEC, fs: { ...nodeUpdaterFs, writable: () => false } });
     expect(await h.updater.checkNow()).toMatchObject({
       phase: "error",
       error: "read-only",
@@ -353,67 +335,53 @@ describe("createUpdater", () => {
 
   it("re-checks the blockers when the download starts", async () => {
     let writable = true;
-    const h = harness({ fs: { ...nodeUpdaterFs, writable: () => writable } });
+    const h = harness({ execPath: APP_EXEC, fs: { ...nodeUpdaterFs, writable: () => writable } });
     expect(await h.updater.checkNow()).toMatchObject({ phase: "available" });
     writable = false;
     expect(await h.updater.download()).toMatchObject({ phase: "error", error: "read-only" });
     expect(h.calls).toEqual([API]);
   });
 
-  it("reports swap when staging the bundle fails, and does not quit", async () => {
-    mkdirSync(join(root, "Apps"));
-    const h = harness({ exec: vi.fn(async () => ({ code: 1, stdout: "" })) });
-    await h.updater.checkNow();
-    await h.updater.download();
-    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "swap" });
-    expect(h.deps.quit).not.toHaveBeenCalled();
-  });
-
-  it("uses the development bundle override on macOS", async () => {
-    const bundle = join(root, "Scratch", "Jarvis.app");
-    mkdirSync(join(root, "Scratch"));
-    const h = harness({ bundle, execPath: "/usr/local/bin/electron" });
-    await h.updater.checkNow();
-    await h.updater.download();
-    await h.updater.install();
-    expect(readFileSync(join(updatesDir(), "swap.sh"), "utf8")).toContain(`app='${bundle}'`);
-  });
-
-  it("uses the development launch override in the swap script", async () => {
-    mkdirSync(join(root, "Apps"));
-    const launch = "/bin/sh -c 'echo launched >> /tmp/s/log' --";
-    const h = harness({ launch });
-    await h.updater.checkNow();
-    await h.updater.download();
-    await h.updater.install();
-    const text = readFileSync(join(updatesDir(), "swap.sh"), "utf8");
-    expect(text).toContain(`${launch} "$app"`);
-    expect(text).not.toContain(`open "$app"`);
-  });
-
-  it("installs on Linux: stages the AppImage and strips the AppImage env", async () => {
-    const appImage = join(root, "Jarvis.AppImage");
-    writeFileSync(appImage, "old");
+  it("refuses an unpackaged run without a bundle override, before downloading", async () => {
+    // It would otherwise replace node_modules/electron/dist/Electron.app.
+    const electron = "/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron";
     const h = harness({
-      platform: "linux",
-      arch: "x64",
-      appImage,
-      env: {
-        PATH: "/usr/bin",
-        APPDIR: "/tmp/.mount",
-        LD_LIBRARY_PATH: "/tmp/.mount/lib",
-        HOME: "/h",
-      },
+      packaged: false,
+      execPath: electron,
+      fs: { ...nodeUpdaterFs, writable: () => true },
     });
-    await h.updater.checkNow();
-    await h.updater.download();
-    await h.updater.install();
-    expect(readFileSync(`${appImage}.new`, "utf8")).toBe(PAYLOAD);
-    expect(h.deps.spawnDetached).toHaveBeenCalledWith("/bin/sh", [join(updatesDir(), "swap.sh")], {
-      cwd: updatesDir(),
-      env: { PATH: "/usr/bin", HOME: "/h" },
+    expect(await h.updater.checkNow()).toMatchObject({
+      phase: "error",
+      error: "dev-build",
+      latest: "0.1.9",
+      url: PAGE,
     });
-    expect(h.deps.quit).toHaveBeenCalled();
+    expect(await h.updater.download()).toMatchObject({ phase: "error", error: "dev-build" });
+    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "dev-build" });
+    expect(h.calls).toEqual([API]);
+    expect(h.deps.exec).not.toHaveBeenCalled();
+    expect(h.deps.spawnDetached).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unpackaged run on Windows too", async () => {
+    const exe = "Jarvis-Setup-0.1.9.exe";
+    const h = harness(
+      { packaged: false, platform: "win32", arch: "x64" },
+      { [API]: () => Response.json(release({ names: [exe] })) },
+    );
+    expect(await h.updater.checkNow()).toMatchObject({ phase: "error", error: "dev-build" });
+    expect(h.deps.openPath).not.toHaveBeenCalled();
+  });
+
+  it("lets an unpackaged run with a bundle override download", async () => {
+    const h = harness({
+      packaged: false,
+      bundle: "/tmp/s/Jarvis.app",
+      execPath: "/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+      fs: { ...nodeUpdaterFs, writable: () => true },
+    });
+    expect(await h.updater.checkNow()).toMatchObject({ phase: "available" });
+    expect(await h.updater.download()).toMatchObject({ phase: "ready" });
   });
 
   it("refuses on Linux when not running as an AppImage, before downloading", async () => {
@@ -536,6 +504,88 @@ describe("createUpdater", () => {
     expect(h.timers.size).toBe(1);
     open();
     expect(await pending).toMatchObject({ phase: "ready" });
+  });
+});
+
+// These stage real files under a tmpdir and put its path in a sh script;
+// on Windows that path is not POSIX, so the swap script refuses it.
+describe.skipIf(process.platform === "win32")("createUpdater install (macOS, Linux)", () => {
+  it("installs on macOS: stages the bundle, spawns the swap script and quits", async () => {
+    mkdirSync(join(root, "Apps"));
+    const h = harness();
+    await h.updater.checkNow();
+    await h.updater.download();
+    await h.updater.install();
+    const bundle = join(root, "Apps", "Jarvis.app");
+    expect(h.deps.exec).toHaveBeenCalledWith("/usr/bin/ditto", [
+      "/Volumes/Jarvis/Jarvis.app",
+      `${bundle}.new`,
+    ]);
+    const script = join(updatesDir(), "swap.sh");
+    expect(h.deps.spawnDetached).toHaveBeenCalledWith("/bin/sh", [script], {
+      cwd: updatesDir(),
+      env: { PATH: "/usr/bin" },
+    });
+    const text = readFileSync(script, "utf8");
+    expect(text).toContain("pid=4242");
+    expect(text).toContain(`app='${bundle}'`);
+    expect(h.deps.quit).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports swap when staging the bundle fails, and does not quit", async () => {
+    mkdirSync(join(root, "Apps"));
+    const h = harness({ exec: vi.fn(async () => ({ code: 1, stdout: "" })) });
+    await h.updater.checkNow();
+    await h.updater.download();
+    expect(await h.updater.install()).toMatchObject({ phase: "error", error: "swap" });
+    expect(h.deps.quit).not.toHaveBeenCalled();
+  });
+
+  it("uses the development bundle override on macOS", async () => {
+    const bundle = join(root, "Scratch", "Jarvis.app");
+    mkdirSync(join(root, "Scratch"));
+    const h = harness({ packaged: false, bundle, execPath: "/usr/local/bin/electron" });
+    await h.updater.checkNow();
+    await h.updater.download();
+    await h.updater.install();
+    expect(readFileSync(join(updatesDir(), "swap.sh"), "utf8")).toContain(`app='${bundle}'`);
+  });
+
+  it("uses the development launch override in the swap script", async () => {
+    mkdirSync(join(root, "Apps"));
+    const launch = "/bin/sh -c 'echo launched >> /tmp/s/log' --";
+    const h = harness({ launch });
+    await h.updater.checkNow();
+    await h.updater.download();
+    await h.updater.install();
+    const text = readFileSync(join(updatesDir(), "swap.sh"), "utf8");
+    expect(text).toContain(`${launch} "$app"`);
+    expect(text).not.toContain(`open "$app"`);
+  });
+
+  it("installs on Linux: stages the AppImage and strips the AppImage env", async () => {
+    const appImage = join(root, "Jarvis.AppImage");
+    writeFileSync(appImage, "old");
+    const h = harness({
+      platform: "linux",
+      arch: "x64",
+      appImage,
+      env: {
+        PATH: "/usr/bin",
+        APPDIR: "/tmp/.mount",
+        LD_LIBRARY_PATH: "/tmp/.mount/lib",
+        HOME: "/h",
+      },
+    });
+    await h.updater.checkNow();
+    await h.updater.download();
+    await h.updater.install();
+    expect(readFileSync(`${appImage}.new`, "utf8")).toBe(PAYLOAD);
+    expect(h.deps.spawnDetached).toHaveBeenCalledWith("/bin/sh", [join(updatesDir(), "swap.sh")], {
+      cwd: updatesDir(),
+      env: { PATH: "/usr/bin", HOME: "/h" },
+    });
+    expect(h.deps.quit).toHaveBeenCalled();
   });
 });
 

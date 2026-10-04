@@ -247,7 +247,7 @@ describe("Settings → General → Updates", () => {
 
   it("install blockers offer no download; retryable errors do", async () => {
     const api = await setup();
-    for (const error of ["read-only", "translocated", "not-appimage"] as const) {
+    for (const error of ["read-only", "translocated", "not-appimage", "dev-build"] as const) {
       api.push({ ...available, phase: "error", error });
       expect(shown("settings-update-install")).toBe(false);
       // The updater reports these at check time, so the card still names the
@@ -299,6 +299,7 @@ describe("update error strings", () => {
     "read-only",
     "translocated",
     "not-appimage",
+    "dev-build",
     "swap",
   ];
   it("every UpdateError has its own English and Arabic line", () => {

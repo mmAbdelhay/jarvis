@@ -14,6 +14,8 @@ export type PrepareLinuxDeps = {
   appImage: string | undefined;
   copy(src: string, dest: string): Promise<void>;
   chmod(path: string, mode: number): Promise<void>;
+  /** Removes a file; a missing one is not an error. */
+  remove(path: string): Promise<void>;
   writable(dir: string): boolean;
 };
 
@@ -31,6 +33,8 @@ export async function prepareLinux(deps: PrepareLinuxDeps): Promise<PrepareLinux
     await deps.copy(deps.file, staged);
     await deps.chmod(staged, 0o755);
   } catch {
+    // A half-written or non-executable copy must not be left beside the app.
+    await deps.remove(staged).catch(() => undefined);
     return { ok: false, reason: "io" };
   }
   return { ok: true, staged };

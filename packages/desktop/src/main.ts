@@ -572,6 +572,7 @@ app.whenReady().then(async () => {
     // shown) and every 24h; installs only on the user's click.
     const updater = createUpdater({
       current: app.getVersion(),
+      packaged: app.isPackaged,
       platform,
       arch: process.arch,
       pid: process.pid,

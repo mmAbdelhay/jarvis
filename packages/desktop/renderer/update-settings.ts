@@ -15,7 +15,7 @@ const NOTE_LINES = 20;
 const language = PRIMARY_LANGUAGE;
 
 /** Errors a fresh download can get past. The install blockers (read-only,
- *  translocated, not-appimage) need the user to move or rerun the app
+ *  translocated, not-appimage, dev-build) need the user to move or rerun the app
  *  first, so downloading again would only fail the same way. */
 const RETRYABLE: ReadonlySet<UpdateError | undefined> = new Set<UpdateError | undefined>([
   "download",

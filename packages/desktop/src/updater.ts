@@ -56,6 +56,7 @@ export type UpdateError =
   | "read-only"
   | "translocated"
   | "not-appimage"
+  | "dev-build"
   | "swap";
 
 export type UpdateState = {
@@ -171,6 +172,9 @@ const SWAP_FILE = "swap.sh";
 
 export type UpdaterDeps = {
   current: string;
+  /** app.isPackaged. An unpackaged run installs only into JARVIS_UPDATE_BUNDLE:
+   *  its own bundle is node_modules' Electron.app. */
+  packaged: boolean;
   platform: NodeJS.Platform;
   arch: string;
   pid: number;
@@ -298,10 +302,16 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   }
 
   /** What would stop the install on this machine, known before a byte is
-   *  downloaded: a translocated or unwritable macOS bundle, or a Linux run
-   *  that is not an AppImage or whose AppImage sits in a read-only folder.
-   *  Downloading the whole build only to fail at Install would waste it. */
+   *  downloaded: an unpackaged run with nothing to install into, a
+   *  translocated or unwritable macOS bundle, or a Linux run that is not an
+   *  AppImage or whose AppImage sits in a read-only folder. Downloading the
+   *  whole build only to fail at Install would waste it. */
   function blocker(): UpdateError | undefined {
+    // Linux needs an AppImage, which an unpackaged run is not unless the
+    // developer set APPIMAGE on purpose; that case stays as it was.
+    if (!deps.packaged && deps.bundle === undefined && deps.platform !== "linux") {
+      return "dev-build";
+    }
     if (deps.platform === "darwin") {
       const bundle = deps.bundle ?? appBundleOf(deps.execPath);
       // No bundle at all is a swap failure, reported at install as before.
@@ -454,9 +464,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
 
   async function installDarwin(file: string): Promise<UpdateState> {
     const bundle = deps.bundle ?? appBundleOf(deps.execPath);
+    // install() has already checked the blockers.
     if (bundle === undefined) return fail("swap");
-    const blocker = installBlocker(bundle, (path) => deps.fs.writable(path));
-    if (blocker !== undefined) return fail(blocker);
     const prepared = await prepareDarwin({ dmg: file, bundle, workDir: dir, exec: deps.exec });
     if (!prepared.ok) return fail("swap");
     await spawnSwap(
@@ -477,6 +486,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       appImage: deps.appImage,
       copy: (src, dest) => deps.fs.copyFile(src, dest),
       chmod: (path, mode) => deps.fs.chmod(path, mode),
+      remove: (path) => deps.fs.rm(path),
       writable: (path) => deps.fs.writable(path),
     });
     if (!prepared.ok) {
@@ -497,6 +507,9 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   async function install(): Promise<UpdateState> {
     const file = readyFile;
     if (state.phase !== "ready" || file === undefined) return { ...state };
+    // The folder may have changed since the download (moved, made read-only).
+    const blocked = blocker();
+    if (blocked !== undefined) return fail(blocked);
     set({ ...base(), phase: "installing" });
     try {
       if (deps.platform === "darwin") return await installDarwin(file);
@@ -579,10 +592,6 @@ export function devOverrides(env: NodeJS.ProcessEnv, packaged: boolean): DevOver
 
 const LIVE_SESSION: ReadonlySet<string> = new Set(["starting", "running", "waiting"]);
 
-/** What a restart would end, from the core's existing answers: the
- *  workspace's terminal tabs, each tab's panes (terminal:panes) and the
- *  session list (sessions:list). Exited panes and ended sessions do not
- *  count; a failed lookup counts as none. */
 /** Sends the updater's state to a page each time it finishes loading, so a
  *  reloaded renderer (the menu's Reload, or a daemon-mode switch) draws the
  *  Updates card again instead of waiting for a push that may never come. */
@@ -594,6 +603,10 @@ export function replayStateOnLoad(
   page.on("did-finish-load", () => push(updater.state()));
 }
 
+/** What a restart would end, from the core's existing answers: the
+ *  workspace's terminal tabs, each tab's panes (terminal:panes) and the
+ *  session list (sessions:list). Exited panes and ended sessions do not
+ *  count; a failed lookup counts as none. */
 export async function countRunning(source: {
   terminalTabs(): string[];
   panes(tabId: string): Promise<unknown>;

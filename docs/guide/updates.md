@@ -52,5 +52,8 @@ page link.
 **Windows** — the release ships a `.zip`, which the updater does not install.
 The card links to the release page; download the new build from there.
 
+**From source** — a development run (not the packaged app) never installs an
+update; the card says so and links the release page.
+
 **Android** — the phone app does not update itself. Install the new
 `jarvis-mobile-<version>.apk` from the releases page.

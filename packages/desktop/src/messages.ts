@@ -229,8 +229,8 @@ export const MESSAGES = {
         return ar ? "فشل التنزيل. حاول مرة أخرى." : "The download failed. Try again.";
       case "read-only":
         return ar
-          ? "لا يستطيع Jarvis الكتابة في المجلد المثبَّت فيه."
-          : "Jarvis can't write to the folder it's installed in.";
+          ? "انقل Jarvis إلى مجلد تستطيع الكتابة فيه، مثل Applications، ثم حاول مجددًا."
+          : "Move Jarvis to a folder you can write to, such as Applications, then try again.";
       case "translocated":
         return ar
           ? "انقل Jarvis إلى مجلد Applications أولًا، ثم حاول مجددًا."
@@ -239,6 +239,10 @@ export const MESSAGES = {
         return ar
           ? "لا يُحدِّث نفسه إلا إصدار AppImage."
           : "Only the AppImage build can update itself.";
+      case "dev-build":
+        return ar
+          ? "لا تُثبَّت التحديثات إلا في النسخة المُجمَّعة من التطبيق."
+          : "Updates install only in the packaged app.";
       case "swap":
         return ar
           ? "فشل التثبيت، وبقي هذا الإصدار كما هو."
