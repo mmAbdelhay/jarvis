@@ -318,8 +318,8 @@ function attachSearch(terminal: Terminal, host: HTMLElement, hooks: TerminalHook
  * default delivers a carriage return to the textarea xterm listens on. So
  * Shift+Enter sent the ESC+CR it meant *and then* a bare CR behind it, and
  * Claude Code read the pair as "newline, then submit": every multi-line
- * message went off half-written. The same doubling would hit Cmd+V, which
- * reads the clipboard here and would have had the browser paste it again.
+ * message went off half-written. (Paste is the one chord that wants its
+ * default — see the paste branch below.)
  */
 function claim(event: KeyboardEvent): false {
   event.preventDefault();
@@ -400,13 +400,13 @@ function attachKeys(
       return claim(event);
     }
 
-    // Paste goes in as bytes, exactly as if typed.
-    if (action === "paste") {
-      void navigator.clipboard?.readText().then((text) => {
-        if (text !== "") hooks.sendInput(text);
-      });
-      return claim(event);
-    }
+    // Paste: xterm must not encode the chord, but its default must run — that
+    // default (the Edit menu's paste on macOS) fires a paste event on xterm's
+    // textarea, and xterm sends it as a bracketed paste. An image-only
+    // clipboard becomes an empty ESC[200~ESC[201~, which is how Claude Code
+    // knows to pull the image off the clipboard itself. Reading text here
+    // instead sent nothing for an image and unbracketed bytes for text.
+    if (action === "paste") return false;
 
     if (action === "clearScreen") {
       terminal.clear();
