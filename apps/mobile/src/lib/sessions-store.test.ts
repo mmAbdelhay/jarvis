@@ -114,6 +114,15 @@ describe("parseSessionList", () => {
     expect(rows[0]?.endedAt).toBe(500);
   });
 
+  it("marks a row the laptop found running in one of its own Terminal panes", () => {
+    const rows = parseSessionList([
+      rowPayload({ id: "ext-1", origin: "external", terminalPaneKey: "tab-3" }),
+      rowPayload({ id: "ext-2", origin: "external" }),
+    ]);
+    expect(rows[0]?.inJarvisTerminal).toBe(true);
+    expect(rows[1]?.inJarvisTerminal).toBeUndefined();
+  });
+
   it("keeps origin when present", () => {
     const rows = parseSessionList([rowPayload({ id: "ext-1", origin: "external" })]);
     expect(rows[0]?.origin).toBe("external");

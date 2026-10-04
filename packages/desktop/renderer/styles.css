@@ -3019,6 +3019,14 @@
     background: transparent;
   }
 
+  /* One the user typed into a Jarvis Terminal pane: live in Jarvis, just not
+     a session it started — the same outline, in the "here" colour. */
+  .session-chip--terminal {
+    color: var(--good);
+    border-color: var(--good);
+    background: transparent;
+  }
+
   .session-cell-agent,
   .session-cell-state,
   .session-cell-when {

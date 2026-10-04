@@ -61,5 +61,8 @@ export function parseSession(value: unknown): Session | undefined {
   }
   if (obj.origin === "jarvis" || obj.origin === "external") session.origin = obj.origin;
   if (typeof obj.pid === "number" && Number.isFinite(obj.pid)) session.pid = obj.pid;
+  if (typeof obj.terminalPaneKey === "string" && obj.terminalPaneKey !== "") {
+    session.terminalPaneKey = obj.terminalPaneKey;
+  }
   return session;
 }

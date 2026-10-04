@@ -1095,6 +1095,13 @@ export const MESSAGES = {
   // that it is "running" in a sense Jarvis observed).
   sessionRunningOutsideJarvis: (language: "ar" | "en"): string =>
     language === "ar" ? "قيد التشغيل خارج جارفيس" : "Running outside Jarvis",
+  // An external row whose agent the user typed into one of Jarvis's own
+  // Terminal panes — not a session Jarvis started, but not outside it
+  // either. The chip, and the summary before a transcript is matched.
+  sessionInJarvisTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "في طرفية جارفيس" : "in Jarvis terminal",
+  sessionRunningInJarvisTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "قيد التشغيل في طرفية جارفيس" : "Running in a Jarvis terminal",
   // Shown when an external row's process was found but no transcript could
   // be matched to it — distinct from sessionNone, which means no session is
   // open at all.

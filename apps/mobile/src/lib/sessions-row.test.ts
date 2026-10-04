@@ -51,6 +51,12 @@ describe("rowSubtitle", () => {
     );
     expect(rowSubtitle("en", row({ origin: "external" }))).toContain("outside Jarvis");
   });
+
+  it("says in Jarvis terminal for an agent typed into one of the laptop's terminals", () => {
+    const typed = row({ origin: "external", inJarvisTerminal: true });
+    expect(rowSubtitle("en", typed)).toBe("api · claude-main · in Jarvis terminal");
+    expect(rowSubtitle("ar", typed)).toContain("في طرفية جارفيس");
+  });
 });
 
 describe("rowVariant", () => {

@@ -1310,6 +1310,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         // running as also "running outside Jarvis".
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
+        // An agent typed into a Terminal pane runs under that pane's shell
+        // — reported, tagged with the pane, rather than dropped with the
+        // rest of this process's own tree.
+        terminalShells: () => shells.shellPids(),
         now: () => Date.now(),
       });
 
@@ -1329,12 +1333,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           summary:
             transcript !== null
               ? transcript.session.summary
-              : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
+              : found.terminalPaneKey !== undefined
+                ? MESSAGES.sessionRunningInJarvisTerminal(PRIMARY_LANGUAGE)
+                : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
           startedAt: found.startedAt,
           lastActivityAt: transcript?.session.lastActivityAt ?? Date.now(),
           ...(transcript === null ? {} : { transcriptPath: transcript.path }),
           origin: "external",
           pid: found.pid,
+          ...(found.terminalPaneKey === undefined
+            ? {}
+            : { terminalPaneKey: found.terminalPaneKey }),
         });
       }
       externalSessions = next;

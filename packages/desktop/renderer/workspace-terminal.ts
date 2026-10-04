@@ -432,6 +432,24 @@ export function initWorkspaceTerminals(): void {
 }
 
 /**
+ * Moves its tab's focus to the leaf drawing `paneKey`, by stepping the
+ * tree's own focus round — at most once per leaf, so a key no leaf holds
+ * (a split since closed) leaves the focus where it was found. The tab is
+ * not shown here; its next render focuses whichever leaf this left focused.
+ */
+export function focusTerminalLeaf(paneKey: string): void {
+  const colon = paneKey.indexOf(":");
+  const entry = panes.get(colon === -1 ? paneKey : paneKey.slice(0, colon));
+  if (entry === undefined) return;
+  const leaves = entry.tree.panes();
+  if (!leaves.some((leaf) => paneKeys.get(leaf) === paneKey)) return;
+  for (let step = 0; step < leaves.length; step += 1) {
+    if (paneKeys.get(entry.tree.focused()) === paneKey) return;
+    entry.tree.focus(1);
+  }
+}
+
+/**
  * The pane drawing `paneKey`'s shell, or undefined for a shell this window
  * has no pane for.
  *

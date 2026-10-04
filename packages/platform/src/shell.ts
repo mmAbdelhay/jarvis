@@ -13,6 +13,9 @@ import { JARVIS_COMMAND_LOG_ENV } from "./zsh-integration.js";
 const require = createRequire(import.meta.url);
 
 export type ShellProcess = {
+  /** The shell's OS pid, when the spawner knows it — read by the process
+   *  scan to tell which pane an agent was typed into. */
+  readonly pid?: number | undefined;
   onData(listener: (chunk: string) => void): void;
   onExit(listener: (code: number) => void): void;
   write(data: string): void;
@@ -66,6 +69,10 @@ export type ShellManager = {
   /** Every live or retained-exited pane the manager still knows about,
    *  without cwd, process handles or retained output. */
   panes(): readonly TerminalPaneInfo[];
+  /** Each live pane's shell pid → its pane key, for the process scan
+   *  (process-scan.ts) to find which pane an agent runs in. An exited pane,
+   *  or a shell whose spawner reported no pid, is not in it. */
+  shellPids(): ReadonlyMap<number, string>;
   write(tabId: string, data: string): void;
   resize(tabId: string, cols: number, rows: number): void;
   /** Kills a tab's shell and forgets it — for a closed tab. */
@@ -260,6 +267,16 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
         paneKey,
         exited: session.exited,
       }));
+    },
+
+    shellPids() {
+      const pids = new Map<number, string>();
+      for (const [paneKey, session] of sessions) {
+        if (!session.exited && session.process.pid !== undefined) {
+          pids.set(session.process.pid, paneKey);
+        }
+      }
+      return pids;
     },
 
     write(tabId, data) {
@@ -465,6 +482,7 @@ export function createRealShellSpawner(
   // node-pty's own shape: onExit hands over an event object, not a bare
   // code, which is the one place it differs from ShellProcess.
   type NodePtyProcess = {
+    pid: number;
     onData(listener: (data: string) => void): void;
     onExit(listener: (event: { exitCode: number; signal?: number | undefined }) => void): void;
     write(data: string): void;
@@ -489,6 +507,7 @@ export function createRealShellSpawner(
     });
 
     return {
+      pid: child.pid,
       onData: (listener) => child.onData(listener),
       // A pty reports a signalled child as exitCode 0 with a signal set,
       // which would otherwise read as "the shell finished successfully" —

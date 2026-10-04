@@ -28,6 +28,10 @@ export type ExternalAgentProcess = {
    *  on this machine, or the process exited before it could be read). */
   cwd: string | null;
   startedAt: number;
+  /** Set when this process runs inside one of Jarvis's own Terminal panes
+   *  (the user typed the agent into it): that pane's key, so a click can
+   *  take the user to it. Absent for a process outside Jarvis entirely. */
+  terminalPaneKey?: string;
 };
 
 /** One row of `ps -axo pid=,ppid=,etime=,command=`. */
@@ -62,6 +66,30 @@ export function commandBasename(command: string): string {
   const first = command.trim().split(/\s+/)[0] ?? "";
   const segments = first.split("/");
   return segments.at(-1) ?? "";
+}
+
+/**
+ * Agent subcommands that start a long-lived service rather than a session
+ * anyone is working in — Codex's background `app-server` daemon (and the
+ * helper it forks), either agent's MCP server. Keyed by the executable's own
+ * name, because the same word means different things to each: `codex mcp`
+ * is a config command, `claude mcp serve` is a server.
+ */
+const SERVICE_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["codex", new Set(["app-server", "mcp-server"])],
+  ["claude", new Set(["mcp"])],
+]);
+
+/**
+ * Whether a command line is an agent running as a service, not a session —
+ * read from its first argument only. Never used to report anything: the
+ * argument is looked at here and nowhere else, so it can never leave this
+ * function (see the security note at the top of this file).
+ */
+export function isAgentServiceCommand(command: string): boolean {
+  const [, firstArgument] = command.trim().split(/\s+/);
+  if (firstArgument === undefined) return false;
+  return SERVICE_SUBCOMMANDS.get(commandBasename(command))?.has(firstArgument) ?? false;
 }
 
 /**
@@ -128,8 +156,9 @@ export function parseLsofCwd(text: string): Map<number, string> {
  *  from the parent/child edges `ps` reports — Jarvis's shell-spawned
  *  children (a Terminal tab's shell, a `docker logs -f` follower, and every
  *  agent already tracked by pid via `ownedPids`) all live under this tree,
- *  but so does anything else this same process happened to spawn, and none
- *  of it is a session the user started outside Jarvis. */
+ *  but so does anything else this same process happened to spawn. Only an
+ *  agent under one of its Terminal shells is reported from here — see
+ *  terminalPaneOf. */
 function ownProcessTree(rows: readonly PsRow[], jarvisPid: number): Set<number> {
   const children = new Map<number, number[]>();
   for (const row of rows) {
@@ -151,6 +180,33 @@ function ownProcessTree(rows: readonly PsRow[], jarvisPid: number): Set<number> 
   return tree;
 }
 
+/**
+ * The Terminal pane an agent inside Jarvis's own tree was typed into: walks
+ * the ppid chain up from `pid` until it meets one of the pane shells, and
+ * stops — undefined — at Jarvis itself, at a session SessionManager owns
+ * (an agent that agent spawned is its business, not a terminal's), or at a
+ * loop or a missing row. An agent under no shell (the brain's own SDK child)
+ * is not something the user started, and is not reported at all.
+ */
+function terminalPaneOf(
+  pid: number,
+  parents: ReadonlyMap<number, number>,
+  shells: ReadonlyMap<number, string>,
+  owned: ReadonlySet<number>,
+  jarvisPid: number,
+): string | undefined {
+  const seen = new Set<number>();
+  let current = parents.get(pid);
+  while (current !== undefined && current !== jarvisPid && !seen.has(current)) {
+    const paneKey = shells.get(current);
+    if (paneKey !== undefined) return paneKey;
+    if (owned.has(current)) return undefined;
+    seen.add(current);
+    current = parents.get(current);
+  }
+  return undefined;
+}
+
 export type ProcessScanDeps = {
   /** Runs one command and resolves with its stdout — never rejects on a
    *  non-zero exit, so a scan can tell "ps failed" from "ps ran and found
@@ -166,12 +222,18 @@ export type ProcessScanDeps = {
    *  followers, and every pty child) can be excluded even where
    *  `ownedPids` alone would miss one — see ownProcessTree. */
   jarvisPid: number;
+  /** Each live Terminal pane's shell pid → its pane key. An agent in
+   *  Jarvis's own tree is reported only when it runs under one of these;
+   *  absent, nothing in that tree is. */
+  terminalShells?: (() => ReadonlyMap<number, string>) | undefined;
   now: () => number;
 };
 
 /**
  * Every running process whose command matches a registered agent's, minus
- * Jarvis's own. One bounded `ps` call, one batched `lsof` call for whatever
+ * Jarvis's own sessions and any agent running as a service
+ * (isAgentServiceCommand). An agent the user typed into one of Jarvis's
+ * Terminal panes is kept, tagged with that pane's key. One bounded `ps` call, one batched `lsof` call for whatever
  * is left — never one `lsof` per process, which would mean a syscall per
  * row on a machine with a dozen agents running.
  *
@@ -192,6 +254,8 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   const rows = parsePsOutput(psResult.stdout);
   const ownTree = ownProcessTree(rows, deps.jarvisPid);
   const owned = deps.ownedPids();
+  const shells = deps.terminalShells?.() ?? new Map<number, string>();
+  const parents = new Map(rows.map((row) => [row.pid, row.ppid]));
 
   // Bare command name (never a full path) for each registered agent, so a
   // `claude` on PATH and `/opt/homebrew/bin/claude` in the config both
@@ -202,14 +266,25 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   }
 
   const now = deps.now();
-  const candidates: { row: PsRow; agentId: string; startedAt: number }[] = [];
+  const candidates: {
+    row: PsRow;
+    agentId: string;
+    startedAt: number;
+    terminalPaneKey: string | undefined;
+  }[] = [];
   for (const row of rows) {
-    if (ownTree.has(row.pid) || owned.has(row.pid)) continue;
+    if (owned.has(row.pid)) continue;
     const agentId = agentByCommand.get(commandBasename(row.command));
     if (agentId === undefined) continue;
+    if (isAgentServiceCommand(row.command)) continue;
+    let terminalPaneKey: string | undefined;
+    if (ownTree.has(row.pid)) {
+      terminalPaneKey = terminalPaneOf(row.pid, parents, shells, owned, deps.jarvisPid);
+      if (terminalPaneKey === undefined) continue;
+    }
     const startedAt = parseEtime(row.etime, now);
     if (startedAt === null) continue;
-    candidates.push({ row, agentId, startedAt });
+    candidates.push({ row, agentId, startedAt, terminalPaneKey });
   }
 
   if (candidates.length === 0) return [];
@@ -230,11 +305,12 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     // reported unknown rather than the scan losing its rows entirely.
   }
 
-  return candidates.map(({ row, agentId, startedAt }) => ({
+  return candidates.map(({ row, agentId, startedAt, terminalPaneKey }) => ({
     pid: row.pid,
     agentId,
     command: commandBasename(row.command),
     cwd: cwds.get(row.pid) ?? null,
     startedAt,
+    ...(terminalPaneKey === undefined ? {} : { terminalPaneKey }),
   }));
 }

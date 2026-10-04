@@ -82,5 +82,8 @@ function toExternalSession(candidate: unknown): Session | undefined {
   };
   if (typeof row.transcriptPath === "string") session.transcriptPath = row.transcriptPath;
   if (typeof row.pid === "number") session.pid = row.pid;
+  if (typeof row.terminalPaneKey === "string" && row.terminalPaneKey !== "") {
+    session.terminalPaneKey = row.terminalPaneKey;
+  }
   return session;
 }

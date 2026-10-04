@@ -28,6 +28,11 @@ describe("serializeScan / parseScan round trip", () => {
     expect(parseScan(serializeScan(rows))).toEqual(rows.map((r) => ({ ...r })));
   });
 
+  it("round-trips the Terminal pane of a row found inside Jarvis", () => {
+    const row = externalSession({ terminalPaneKey: "tab-3:p2" });
+    expect(parseScan(serializeScan([row]))).toEqual([row]);
+  });
+
   it("round-trips a row with no transcriptPath and no pid", () => {
     const row = externalSession({ pid: undefined });
     delete (row as { pid?: number }).pid;

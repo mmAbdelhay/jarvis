@@ -694,6 +694,12 @@ export const STRINGS = {
     en: "outside Jarvis",
     ar: "خارج جارفيس",
   },
+  // One the user typed into a Jarvis Terminal pane on the laptop: live, but
+  // not a session Jarvis started — desktop's Sessions chip says the same.
+  "sessions.inJarvisTerminal": {
+    en: "in Jarvis terminal",
+    ar: "في طرفية جارفيس",
+  },
   "session.views": { en: "Session views", ar: "عروض الجلسة" },
   "session.live": { en: "Live", ar: "مباشر" },
   "session.notFound": { en: "Session not found.", ar: "الجلسة غير موجودة." },

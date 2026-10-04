@@ -42,7 +42,10 @@ export function rowSubtitle(language: Language, row: MergedRow): string {
   const status = row.imported
     ? t(language, "sessions.imported").toLocaleLowerCase()
     : row.origin === "external" && isActiveRow(row)
-      ? t(language, "sessions.external")
+      ? t(
+          language,
+          row.inJarvisTerminal === true ? "sessions.inJarvisTerminal" : "sessions.external",
+        )
       : isActiveRow(row)
         ? undefined
         : t(

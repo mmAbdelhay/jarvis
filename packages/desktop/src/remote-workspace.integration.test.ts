@@ -277,6 +277,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
         snapshot: () => ({ text: "", end: 0 }),
         has: () => false,
         panes: () => [],
+        shellPids: () => new Map(),
         write: () => {},
         resize: () => {},
         kill: () => {},

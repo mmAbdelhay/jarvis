@@ -91,6 +91,15 @@ try {
   // A preload without the channel — the same fallback.
 }
 
+/** Takes the Workspace to a Terminal pane by key; false when no open tab
+ *  holds it. Registered by app.ts (workspace.ts owns the tabs) rather than
+ *  imported here, so this module stays loadable without the Workspace. */
+let focusTerminalPane: (paneKey: string) => boolean = () => false;
+
+export function setTerminalPaneFocuser(focus: (paneKey: string) => boolean): void {
+  focusTerminalPane = focus;
+}
+
 /** Which session the terminal is showing, if any. */
 export function openSessionId(): string | undefined {
   return currentId;
@@ -572,11 +581,18 @@ function buildSessionTableRow(session: Session): HTMLElement {
   // gets a chip in place of the state Jarvis cannot actually observe for
   // it, and no Resume button — there is no transcript id Jarvis minted to
   // resume, and the process is already running.
+  //
+  // One the user typed into a Jarvis Terminal pane is just as read-only here
+  // (no session Jarvis minted), but it is not outside Jarvis: its own chip,
+  // and a click goes to its pane (openSession).
   const external = session.origin === "external";
   if (external) {
+    const inTerminal = session.terminalPaneKey !== undefined;
     const chip = document.createElement("span");
-    chip.className = "session-chip session-chip--external";
-    chip.textContent = MESSAGES.sessionOutsideJarvis(PRIMARY_LANGUAGE);
+    chip.className = `session-chip ${inTerminal ? "session-chip--terminal" : "session-chip--external"}`;
+    chip.textContent = inTerminal
+      ? MESSAGES.sessionInJarvisTerminal(PRIMARY_LANGUAGE)
+      : MESSAGES.sessionOutsideJarvis(PRIMARY_LANGUAGE);
     meta.append(chip);
   }
 
@@ -900,6 +916,16 @@ function showTerminal(): void {
 }
 
 export async function openSession(session: Session): Promise<void> {
+  // An agent typed into a Terminal pane is already on screen there — that
+  // pane is the session, so go to it. A pane since closed falls through to
+  // the transcript view an external row gets.
+  if (
+    session.origin === "external" &&
+    session.terminalPaneKey !== undefined &&
+    focusTerminalPane(session.terminalPaneKey)
+  ) {
+    return;
+  }
   currentId = session.id;
   // Reopening the same id must close the gate again: settledId otherwise
   // still equals this session's id from the last time it was open, so a

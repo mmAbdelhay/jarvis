@@ -596,6 +596,24 @@ describe("reassertVisibleWorkspaceTerminal", () => {
     expect(calls.some((entry) => entry.call === "resizeTerminal")).toBe(false);
   });
 
+  // The Sessions table's way into an agent typed into one split of a tab:
+  // the leaf with that key is the one focused when the tab next shows.
+  it("moves the tab's focus to the leaf a pane key names", async () => {
+    const { renderWorkspaceTerminals, focusTerminalLeaf } = await load();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [first, second] = FakeTerminal.instances;
+    if (first === undefined || second === undefined) throw new Error("expected two panes");
+
+    focusTerminalLeaf("tab-1");
+    const before = { first: first.focused, second: second.focused };
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+    expect(first.focused).toBeGreaterThan(before.first);
+    expect(second.focused).toBe(before.second);
+  });
+
   // Only the visible leaf of the visible tab — a background pane of a split
   // tab is never resized merely because its sibling is on screen.
   it("resizes only the focused pane's own leaf when a split tab is visible", async () => {
@@ -646,7 +664,10 @@ describe("terminal key bindings and addons", () => {
     expect(FakeTerminal.instances[0]?.pressKey({ key: "c", metaKey: true })).toBe(true);
   });
 
-  it("pastes the clipboard into the pty on Cmd+V", async () => {
+  // Cmd+V is left to the browser's paste, which xterm turns into a bracketed
+  // paste — the only form that carries an image-only clipboard (as an empty
+  // paste) through to Claude Code. Nothing is read or sent from here.
+  it("leaves Cmd+V to xterm's own paste event", async () => {
     const { renderWorkspaceTerminals } = await load();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
     Object.defineProperty(navigator, "clipboard", {
@@ -654,12 +675,14 @@ describe("terminal key bindings and addons", () => {
       configurable: true,
     });
 
-    const handled = FakeTerminal.instances[0]?.pressKey({ key: "v", metaKey: true });
+    const terminal = FakeTerminal.instances[0]!;
+    const handled = terminal.pressKey({ key: "v", metaKey: true });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(handled).toBe(false);
-    expect(calls).toContainEqual({ call: "sendTerminalInput", args: ["tab-1", "pasted"] });
+    expect(terminal.defaultPrevented).toBe(false);
+    expect(calls).not.toContainEqual({ call: "sendTerminalInput", args: ["tab-1", "pasted"] });
   });
 
   it("clears the screen on Cmd+K", async () => {
