@@ -45,12 +45,18 @@ for pkg in jarvis-ui jarvis-installer jarvis-greeter; do
 done
 g=$(d jarvis-greeter)
 check "greeter binary" deb_has "$g" usr/bin/jarvis-greeter
-cfg=$(dpkg-deb --fsys-tarfile "$g" | tar -xO ./etc/greetd/config.toml)
+tpl=usr/share/jarvis-greeter/greetd-config.toml
+cfg=$(dpkg-deb --fsys-tarfile "$g" | tar -xO "./$tpl")
 check "greetd runs the greeter in cage (contracts §7)" grep -qx 'command = "cage -s -- jarvis-greeter"' <<<"$cfg"
 check "greetd greeter user" grep -qx 'user = "_greetd"' <<<"$cfg"
 check "no autologin in the package" bash -c '! grep -v "^[[:space:]]*#" <<<"$1" | grep -q initial_session' _ "$cfg"
-check "greetd config is a conffile" grep -qx /etc/greetd/config.toml <<<"$(dpkg-deb --ctrl-tarfile "$g" | tar -xO ./conffiles)"
+# A conffile over greetd's diverted conffile prompts (and fails unattended),
+# and purge would delete greetd's file: ship a template, not a conffile.
+not() { ! "$@"; }
+check "greeter ships no file at greetd's path" not deb_has "$g" etc/greetd/config.toml
+check "greeter has no conffiles" bash -c '! dpkg-deb --ctrl-tarfile "$1" | tar -t | grep -qx ./conffiles' _ "$g"
 check "preinst diverts greetd's config" grep -q 'dpkg-divert --package jarvis-greeter --add --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml' <<<"$(deb_script "$g" preinst)"
+check "postinst installs the template at greetd's path" grep -q "/$tpl /etc/greetd/config.toml" <<<"$(deb_script "$g" postinst)"
 check "postrm removes the diversion" grep -q 'dpkg-divert --package jarvis-greeter --remove' <<<"$(deb_script "$g" postrm)"
 for dep in greetd cage "jarvis-ui (= $OS_VERSION)" "jarvis-branding (= $OS_VERSION)"; do
   check "greeter depends on $dep" grep -qF "$dep" <<<"$(deb_field "$g" Depends)"
@@ -71,22 +77,42 @@ check "shell now depends on jarvis-ui" grep -q 'jarvis-ui (= @VERSION@)' "$PACKA
 check "version line is M2" grep -q "0.2.0~m2" "$PACKAGING_DIR/version.sh"
 check "tag prefix stripped" test "$(OS_VERSION=os-v0.2.1 "$PACKAGING_DIR/version.sh")" = 0.2.1
 # Real maintainer-script lifecycle, opt-in only in a disposable trixie container.
-# Missing removal of our retained conffile makes dpkg-divert refuse restoration.
+# Unattended: no prompt answers, stdin closed, as an image build runs dpkg.
 if [ "${JARVIS_TEST_DPKG_ROUNDTRIP:-0}" != 1 ] || [ "$(id -u)" != 0 ] ||
    ! command -v dpkg >/dev/null || [ ! -f /.dockerenv ]; then
   echo "SKIP greeter dpkg round trip (needs root/dpkg in an opted-in disposable container)"
 elif [ "$(dpkg-query -W -f='${Status}' greetd 2>/dev/null || true)" != 'install ok installed' ]; then
   echo "SKIP greeter dpkg round trip (needs installed greetd)"
 else
-  cp /etc/greetd/config.toml "$tmp/greetd-original.toml"
+  orig=$tmp/greetd-original.toml
+  cp /etc/greetd/config.toml "$orig"
   # Fake E outputs do not require Qt: force only their unsatisfied Depends.
-  # greetd owns this conffile; its diversion requires accepting our new config.
-  dpkg --force-depends --force-confnew -i "$g"
-  check "greeter install diverts original greetd config" cmp "$tmp/greetd-original.toml" /etc/greetd/config.toml.greetd
+  install_greeter() { DEBIAN_FRONTEND=noninteractive dpkg --force-depends -i "$g" </dev/null; }
+  check "greeter installs unattended" install_greeter
+  check "greeter install diverts original greetd config" cmp "$orig" /etc/greetd/config.toml.greetd
   check "greeter install activates packaged config" grep -qx 'command = "cage -s -- jarvis-greeter"' /etc/greetd/config.toml
-  dpkg -r jarvis-greeter
-  check "greeter removal restores greetd config" cmp "$tmp/greetd-original.toml" /etc/greetd/config.toml
+  # The installer appends [initial_session] (contracts §10); upgrades keep it.
+  printf '[initial_session]\ncommand = "x"\nuser = "u"\n' >> /etc/greetd/config.toml
+  cp /etc/greetd/config.toml "$tmp/edited.toml"
+  check "greeter reinstalls unattended" install_greeter
+  check "greeter upgrade keeps the installed config" cmp "$tmp/edited.toml" /etc/greetd/config.toml
+  greetd_deb=$(find /var/cache/apt/archives -maxdepth 1 -name 'greetd_*.deb' 2>/dev/null | head -n1)
+  if [ -n "$greetd_deb" ]; then
+    check "greetd reinstalls unattended under the diversion" \
+      env DEBIAN_FRONTEND=noninteractive dpkg -i "$greetd_deb" </dev/null
+    check "greetd reinstall keeps our config" cmp "$tmp/edited.toml" /etc/greetd/config.toml
+    check "greetd reinstall keeps its own config diverted" cmp "$orig" /etc/greetd/config.toml.greetd
+  else
+    echo "SKIP greetd reinstall under the diversion (no greetd .deb in apt cache)"
+  fi
+  dpkg -r jarvis-greeter </dev/null
+  check "greeter removal restores greetd config" cmp "$orig" /etc/greetd/config.toml
   check "greeter removal clears diversion" test -z "$(dpkg-divert --list /etc/greetd/config.toml)"
+  check "greeter reinstalls after removal" install_greeter
+  dpkg -P jarvis-greeter </dev/null
+  check "greeter purge keeps greetd config" cmp "$orig" /etc/greetd/config.toml
+  check "greeter purge clears diversion" test -z "$(dpkg-divert --list /etc/greetd/config.toml)"
+  check "greetd still owns its config" grep -qx ' /etc/greetd/config.toml [0-9a-f]*' <<<"$(dpkg-query -W -f='${Conffiles}\n' greetd)"
 fi
 
 rm "$tmp/build/greeter/CMakeCache.txt"

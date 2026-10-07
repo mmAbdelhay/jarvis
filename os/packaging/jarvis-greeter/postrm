@@ -1,13 +1,13 @@
 #!/bin/sh
 set -e
 case "$1" in
-  remove)
-    # dpkg retains conffiles on remove; clear ours before restoring greetd's.
-    rm -f /etc/greetd/config.toml
-    dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
-    ;;
-  abort-install|disappear)
-    dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
+  remove|abort-install|disappear)
+    # While our diversion stands, the file at greetd's path is ours (postinst):
+    # drop it and restore greetd's. Purge has nothing to do: no conffile.
+    if [ "$(dpkg-divert --listpackage /etc/greetd/config.toml)" = jarvis-greeter ]; then
+      rm -f /etc/greetd/config.toml
+      dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
+    fi
     ;;
 esac
 exit 0
