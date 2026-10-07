@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Installed to /usr/share/polkit-1/actions/os.jarvis.helper.policy.
+     packages/services are allow_active=yes: the Jarvis confirm card is the
+     gate (design §6.4). jarvisd's children run outside any logind session,
+     so Plan D also ships rules.d/50-jarvis.rules granting both actions to
+     group jarvis-admins (contracts §6.19). admin is reserved for future
+     "password" tools. -->
+<policyconfig>
+  <vendor>Jarvis OS</vendor>
+  <vendor_url>https://github.com/mmAbdelhay/jarvis</vendor_url>
+
+  <action id="os.jarvis.helper.packages">
+    <description>Install or remove applications</description>
+    <description xml:lang="ar">تثبيت التطبيقات أو إزالتها</description>
+    <message>Jarvis needs permission to install or remove applications</message>
+    <message xml:lang="ar">يحتاج Jarvis إلى إذن لتثبيت التطبيقات أو إزالتها</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="os.jarvis.helper.services">
+    <description>Restart a system service</description>
+    <description xml:lang="ar">إعادة تشغيل خدمة نظام</description>
+    <message>Jarvis needs permission to restart a system service</message>
+    <message xml:lang="ar">يحتاج Jarvis إلى إذن لإعادة تشغيل خدمة نظام</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="os.jarvis.helper.admin">
+    <description>Make an administrative change</description>
+    <description xml:lang="ar">إجراء تغيير إداري</description>
+    <message>Jarvis needs an administrator password to change the system</message>
+    <message xml:lang="ar">يحتاج Jarvis إلى كلمة مرور المسؤول لتغيير النظام</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
