@@ -1,0 +1,6 @@
+The APT archive's PUBLIC key lives here, put here by the owner (runbook:
+os/repo/README.md, "One-time key setup"):
+  jarvis-archive-keyring.asc   ASCII-armored public key (Ed25519, signing)
+  FINGERPRINT                  its 40-hex fingerprint, one line
+Never put a private key in this repository. Until these files exist, CI
+builds the keyring package from a throwaway key and skips publishing.
