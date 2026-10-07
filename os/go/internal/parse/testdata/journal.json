@@ -1,0 +1,7 @@
+{"__CURSOR":"s=1;i=a1","__REALTIME_TIMESTAMP":"1759831200123456","__MONOTONIC_TIMESTAMP":"812345","_BOOT_ID":"b1","PRIORITY":"3","SYSLOG_IDENTIFIER":"NetworkManager","_SYSTEMD_UNIT":"NetworkManager.service","_PID":"612","_COMM":"NetworkManager","MESSAGE":"<error> [1759831200.1234] device (wlp2s0): Activation: failed for connection 'Home'"}
+{"__CURSOR":"s=1;i=a2","__REALTIME_TIMESTAMP":"1759831201000000","PRIORITY":"4","SYSLOG_IDENTIFIER":"wpa_supplicant","_SYSTEMD_UNIT":"wpa_supplicant.service","MESSAGE":"wlp2s0: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY"}
+{"__CURSOR":"s=1;i=a3","__REALTIME_TIMESTAMP":"1759831202000000","PRIORITY":"4","_TRANSPORT":"kernel","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"iwlwifi 0000:02:00.0: Direct firmware load for iwlwifi-so-a0-gf-a0-89.ucode failed with error -2"}
+{"__CURSOR":"s=1;i=a4","__REALTIME_TIMESTAMP":"1759831203000000","PRIORITY":"5","_SYSTEMD_USER_UNIT":"pipewire.service","_COMM":"pipewire","MESSAGE":[109,111,100,32,108,111,97,100,101,100,0,255]}
+{"__CURSOR":"s=1;i=a5","__REALTIME_TIMESTAMP":"1759831204000000","PRIORITY":"6","_COMM":"myapp","MESSAGE":["first value","second value"]}
+{"__CURSOR":"s=1;i=a6","__REALTIME_TIMESTAMP":"1759831205000000","SYSLOG_IDENTIFIER":"app","MESSAGE":null}
+not json at all

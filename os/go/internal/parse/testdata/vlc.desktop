@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Name=VLC media player
+GenericName=Media player
+Comment=Read, capture, broadcast your multimedia streams
+Name[ar]=مشغل الوسائط VLC
+Exec=/usr/bin/vlc --started-from-file %U
+TryExec=/usr/bin/vlc
+Icon=vlc
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Recorder;
+
+[Desktop Action play]
+Name=Play

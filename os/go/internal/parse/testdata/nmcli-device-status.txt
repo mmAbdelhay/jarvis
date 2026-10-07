@@ -1,0 +1,4 @@
+enp1s0:ethernet:connected:Wired connection 1
+wlp2s0:wifi:disconnected:
+p2p-dev-wlp2s0:wifi-p2p:disconnected:
+lo:loopback:connected (externally):lo

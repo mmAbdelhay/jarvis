@@ -1,0 +1,12 @@
+00:00.0 Host bridge: Intel Corporation 440FX - 82441FX PMC [Natoma] (rev 02)
+	Subsystem: Red Hat, Inc. Qemu virtual machine
+00:01.0 VGA compatible controller: Device 1234:1111 (rev 02)
+	Subsystem: Red Hat, Inc. Device 1100
+	Kernel driver in use: bochs-drm
+	Kernel modules: bochs
+00:02.0 Ethernet controller: Red Hat, Inc. Virtio network device
+	Subsystem: Red Hat, Inc. Device 0001
+	Kernel driver in use: virtio-pci
+02:00.0 Network controller: Intel Corporation Wi-Fi 6E(802.11ax) AX211 160MHz
+	Subsystem: Intel Corporation Device 0094
+	Kernel modules: iwlwifi

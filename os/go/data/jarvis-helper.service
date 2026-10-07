@@ -1,0 +1,13 @@
+# Installed to /usr/lib/systemd/system/jarvis-helper.service.
+# Started on demand by D-Bus activation (no [Install] section); exits after
+# five idle minutes. No ProtectSystem/ProtectHome: its whole job is to run
+# apt-get, flatpak and systemctl, which write /usr, /etc and /var.
+[Unit]
+Description=Jarvis root helper (validated package installs and allowlisted restarts)
+
+[Service]
+Type=dbus
+BusName=os.jarvis.Helper1
+ExecStart=/usr/libexec/jarvis/jarvis-helper
+# A shutdown waits for an install in progress rather than killing dpkg midway.
+TimeoutStopSec=35min

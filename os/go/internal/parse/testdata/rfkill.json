@@ -1,0 +1,13 @@
+{
+   "rfkilldevices": [
+      {
+         "type": "bluetooth",
+         "soft": "unblocked",
+         "hard": "unblocked"
+      },{
+         "type": "wlan",
+         "soft": "blocked",
+         "hard": "unblocked"
+      }
+   ]
+}

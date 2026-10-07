@@ -1,0 +1,7 @@
+# Installed to /usr/share/dbus-1/system-services/os.jarvis.Helper1.service.
+# D-Bus activation hands off to systemd; Exec is never used.
+[D-BUS Service]
+Name=os.jarvis.Helper1
+Exec=/bin/false
+User=root
+SystemdService=jarvis-helper.service
