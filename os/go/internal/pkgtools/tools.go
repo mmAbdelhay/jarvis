@@ -17,6 +17,9 @@ type Deps struct {
 	FS     fs.FS            // the root filesystem ("/" → "."), for .desktop files and disk.usage
 	Home   string           // $HOME, the default disk.usage path
 	Now    func() time.Time // nil means time.Now (tests set a clock)
+	// Updates caches the last updates.list result for the updates.apply
+	// card; Tools creates it when nil.
+	Updates *UpdateCache
 }
 
 func (d Deps) now() time.Time {
@@ -30,7 +33,11 @@ const queryTimeout = 20 * time.Second
 
 // Tools returns every jarvis-pkg tool.
 func Tools(d Deps) []mcp.Tool {
-	return append(d.readTools(), d.changeTools()...)
+	if d.Updates == nil {
+		d.Updates = &UpdateCache{}
+	}
+	tools := append(d.readTools(), d.changeTools()...)
+	return append(tools, d.updateTools()...)
 }
 
 func (d Deps) readTools() []mcp.Tool {
