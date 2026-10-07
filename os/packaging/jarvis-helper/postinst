@@ -1,0 +1,20 @@
+#!/bin/sh
+# jarvis-helper is started by D-Bus activation (SystemdService=jarvis-helper.service),
+# so nothing is enabled here. On a running system, make systemd and the system
+# bus see the new unit and policy now rather than at next boot. In the
+# live-build chroot neither runs, and both checks skip.
+#
+# jarvis-admins is the group the polkit rule (50-jarvis.rules) trusts; the
+# live user joins it through live-config's user-default-groups.
+set -e
+if [ "$1" = configure ]; then
+  getent group jarvis-admins >/dev/null || groupadd --system jarvis-admins
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+  fi
+  if [ -S /run/dbus/system_bus_socket ]; then
+    dbus-send --system --type=method_call --dest=org.freedesktop.DBus \
+      /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+  fi
+fi
+exit 0

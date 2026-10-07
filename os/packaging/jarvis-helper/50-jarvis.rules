@@ -1,0 +1,15 @@
+// Jarvis OS (contracts §6 #19). jarvisd runs as a systemd user service, so
+// the MCP servers it starts (jarvis-pkg, jarvis-diag) are outside any logind
+// session and the policy's allow_active may not match them. Members of
+// jarvis-admins (the live user "jarvis") may use the helper's package and
+// service actions without a password: the confirm card is the gate (design
+// §6.4). The reserved admin action is deliberately absent.
+polkit.addRule(function (action, subject) {
+  if (
+    (action.id === "os.jarvis.helper.packages" || action.id === "os.jarvis.helper.services") &&
+    subject.isInGroup("jarvis-admins")
+  ) {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});
