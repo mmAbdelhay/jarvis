@@ -30,3 +30,10 @@ if(JARVIS_UI_DBUS)
   target_link_libraries(jarvis_installer_core PUBLIC Qt6::DBus)
 endif()
 add_dependencies(jarvis_installer_core jarvis_ui)
+
+qt_add_executable(jarvis-installer main.cpp)
+target_link_libraries(jarvis-installer PRIVATE jarvis_installer_core jarvis_installer_coreplugin)
+target_compile_definitions(jarvis-installer PRIVATE JARVIS_INSTALLER_VERSION="${PROJECT_VERSION}")
+install(TARGETS jarvis-installer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../data/jarvis-installer.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

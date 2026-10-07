@@ -64,3 +64,11 @@ target_compile_definitions(tst_qml PRIVATE
 add_dependencies(tst_qml jarvis_ui)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 180)
+
+# The real binary starts, loads its QML against the fake backend, and quits.
+add_test(NAME installer_smoke
+  COMMAND $<TARGET_FILE:jarvis-installer> --windowed --quit-after 1500
+          --fake-backend ${CMAKE_CURRENT_SOURCE_DIR}/../data/demo.json)
+set_tests_properties(installer_smoke PROPERTIES LABELS smoke TIMEOUT 30
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY};JARVIS_OS_RELEASE=${CMAKE_CURRENT_SOURCE_DIR}/data/os-release"
+  FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError")

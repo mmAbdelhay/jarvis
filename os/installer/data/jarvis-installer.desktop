@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install to this computer
+Comment=Install the system from this USB stick
+Exec=jarvis-installer
+Icon=jarvis
+Terminal=false
+Categories=System;
