@@ -256,7 +256,14 @@ describe("createOsAgent", () => {
       memUsedBytes: 500_000_000,
       disk: { mount: "/", sizeBytes: 64_000_000_000, usedBytes: 6_000_000_000 },
       failedUnits: ["cups.service"],
-      model: { kind: "ollama", model: "qwen3:8b", local: true, supportsTools: true },
+      model: {
+        kind: "ollama",
+        model: "qwen3:8b",
+        local: true,
+        supportsTools: true,
+        download: null,
+      },
+      updates: { count: 0, security: 0, checkedAt: null },
     });
   });
 

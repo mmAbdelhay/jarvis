@@ -18,6 +18,8 @@ export const OS_CONTROL_REQUESTS = {
   doctorStart: "doctor:start",
   doctorSkip: "doctor:skip",
   auditList: "audit:list",
+  /** M2 contracts §2: run updates.list now. a: [], v: UpdatesCheckResult. */
+  updatesCheck: "updates:check",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -42,7 +44,15 @@ export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[
 export type ProviderListResult = { active: ProviderConfig | null; kinds: ProviderKind[] };
 export type ProviderStatusPush = { reachable: boolean; error?: string };
 
-/** Contracts §6 #8. The shell offers the Network doctor only when
+/** M2 contracts §2: pending updates as of checkedAt (epoch ms, null before the first check). */
+export type UpdatesSummary = { count: number; security: number; checkedAt: number | null };
+/** M2 contracts §5: /var/lib/jarvis/model-state.json, as the shell sees it. */
+export type ModelDownloadState = "pending" | "downloading" | "ready" | "failed";
+export type ModelDownload = { state: ModelDownloadState; percent: number };
+/** The updates:check answer. */
+export type UpdatesCheckResult = { count: number; security: number };
+
+/** Contracts §6 #8 + M2 §2, §5. The shell offers the Network doctor only when
  *  provider:status.reachable === false AND online === false. */
 export type SysSnapshot = {
   online: boolean;
@@ -51,7 +61,15 @@ export type SysSnapshot = {
   memUsedBytes: number;
   disk: { mount: "/"; sizeBytes: number; usedBytes: number };
   failedUnits: string[];
-  model: { kind: ProviderKind; model: string; local: boolean; supportsTools: boolean } | null;
+  model: {
+    kind: ProviderKind;
+    model: string;
+    local: boolean;
+    supportsTools: boolean;
+    /** Non-null only for loopback ollama with a matching tag (:latest normalised). */
+    download: ModelDownload | null;
+  } | null;
+  updates: UpdatesSummary;
 };
 
 export type CardSource = "debian" | "flathub" | "system" | "network";
@@ -122,7 +140,8 @@ export type AuditQuery = { limit: number; beforeTs?: number };
 
 export const CARD_TIMEOUT_MS = 300_000;
 export const MAX_PROMPT_CHARS = 8_000;
-const MAX_TICKED = 50;
+// updates.apply takes 1-200 items, each its own card item (M2 contracts §2).
+const MAX_TICKED = 200;
 const MAX_SECRET_FIELDS = 8;
 const MAX_SECRET_CHARS = 1_024;
 const MAX_MODEL_CHARS = 200;

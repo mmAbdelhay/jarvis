@@ -13,7 +13,7 @@ import {
   parseProviderDraft,
 } from "./os-control.js";
 
-describe("OS control channel names (contracts §3)", () => {
+describe("OS control channel names (contracts §3, M2 §2)", () => {
   it("are exactly the contract's", () => {
     expect(Object.values(OS_CONTROL_REQUESTS).sort()).toEqual(
       [
@@ -26,6 +26,7 @@ describe("OS control channel names (contracts §3)", () => {
         "provider:list",
         "provider:probe",
         "provider:save",
+        "updates:check",
       ].sort(),
     );
     expect(Object.values(OS_CONTROL_PUSHES).sort()).toEqual(
@@ -82,6 +83,12 @@ describe("parseAgentConfirm", () => {
     ticked: ["item-1", "item-3"],
     secrets: { "item-3": { password: "hunter2" } },
   };
+
+  it("accepts up to 200 ticked items (updates.apply, M2 contracts §2) and refuses 201", () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `item-${i + 1}`);
+    expect(parseAgentConfirm([{ ...good, ticked: ids(200), secrets: {} }]).ok).toBe(true);
+    expect(parseAgentConfirm([{ ...good, ticked: ids(201), secrets: {} }]).ok).toBe(false);
+  });
 
   it("parses a full answer", () => {
     const parsed = parseAgentConfirm([good]);

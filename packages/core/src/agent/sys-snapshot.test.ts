@@ -55,7 +55,14 @@ describe("buildSysSnapshot", () => {
       memUsedBytes: 3_000,
       disk: { mount: "/", sizeBytes: 64_000, usedBytes: 6_000 },
       failedUnits: ["cups.service", "foo.service"],
-      model: { kind: "anthropic", model: "claude-sonnet-4-5", local: false, supportsTools: true },
+      model: {
+        kind: "anthropic",
+        model: "claude-sonnet-4-5",
+        local: false,
+        supportsTools: true,
+        download: null,
+      },
+      updates: { count: 0, security: 0, checkedAt: null },
     });
   });
 
@@ -68,7 +75,30 @@ describe("buildSysSnapshot", () => {
       disk: { mount: "/", sizeBytes: 0, usedBytes: 0 },
       failedUnits: [],
       model: null,
+      updates: { count: 0, security: 0, checkedAt: null },
     });
+  });
+
+  it("carries the updates summary and the model download (M2 contracts §2, §5)", () => {
+    const snapshot = buildSysSnapshot({
+      failedUnits: [],
+      model: {
+        kind: "ollama",
+        model: "qwen3:8b",
+        baseUrl: "http://127.0.0.1:11434",
+        supportsTools: true,
+        download: { state: "downloading", percent: 42 },
+      },
+      updates: { count: 3, security: 1, checkedAt: 1_760_000_000_000 },
+    });
+    expect(snapshot.model).toEqual({
+      kind: "ollama",
+      model: "qwen3:8b",
+      local: true,
+      supportsTools: true,
+      download: { state: "downloading", percent: 42 },
+    });
+    expect(snapshot.updates).toEqual({ count: 3, security: 1, checkedAt: 1_760_000_000_000 });
   });
 
   it("is not online with limited or portal connectivity", () => {

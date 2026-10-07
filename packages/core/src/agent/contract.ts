@@ -15,7 +15,15 @@ export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
 export type ProviderReachability = { reachable: boolean; error?: string };
 
-/** The sys:snapshot push (contracts §6 #8). */
+/** M2 contracts §2: pending updates as of checkedAt (epoch ms, null before the first check). */
+export type UpdatesSummary = { count: number; security: number; checkedAt: number | null };
+/** M2 contracts §5: /var/lib/jarvis/model-state.json, as the shell sees it. */
+export type ModelDownloadState = "pending" | "downloading" | "ready" | "failed";
+export type ModelDownload = { state: ModelDownloadState; percent: number };
+/** The updates:check answer. */
+export type UpdatesCheckResult = { count: number; security: number };
+
+/** The sys:snapshot push (contracts §6 #8, M2 §2, §5). */
 export type SysSnapshot = {
   online: boolean;
   network: { connectivity: string; wifiSsid: string | null };
@@ -23,7 +31,15 @@ export type SysSnapshot = {
   memUsedBytes: number;
   disk: { mount: "/"; sizeBytes: number; usedBytes: number };
   failedUnits: string[];
-  model: { kind: ProviderKind; model: string; local: boolean; supportsTools: boolean } | null;
+  model: {
+    kind: ProviderKind;
+    model: string;
+    local: boolean;
+    supportsTools: boolean;
+    /** Non-null only for loopback ollama with a matching tag (:latest normalised). */
+    download: ModelDownload | null;
+  } | null;
+  updates: UpdatesSummary;
 };
 
 export type CardSource = "debian" | "flathub" | "system" | "network";

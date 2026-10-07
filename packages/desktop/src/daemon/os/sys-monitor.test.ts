@@ -10,6 +10,7 @@ const snapshot = (online: boolean): SysSnapshot => ({
   disk: { mount: "/", sizeBytes: 1, usedBytes: 1 },
   failedUnits: [],
   model: null,
+  updates: { count: 0, security: 0, checkedAt: null },
 });
 
 describe("createSysMonitor", () => {
