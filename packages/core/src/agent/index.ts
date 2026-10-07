@@ -8,3 +8,4 @@ export * from "./tool-registry.js";
 export * from "./risk-gate.js";
 export * from "./tool-loop.js";
 export * from "./doctor.js";
+export * from "./sys-snapshot.js";
