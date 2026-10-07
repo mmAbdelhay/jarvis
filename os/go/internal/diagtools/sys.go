@@ -10,6 +10,7 @@ import (
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/parse"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/redact"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/validate"
 )
 
@@ -151,6 +152,11 @@ func (d Deps) logs(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	entries := parse.Journal(string(res.Stdout))
 	truncated := len(entries) >= fetch
+	// Redact before filtering: a grep over the raw text would answer "does
+	// the hidden secret contain X?" one query at a time.
+	for i := range entries {
+		entries[i].Message = redact.String(entries[i].Message)
+	}
 	if in.Grep != "" {
 		needle := strings.ToLower(in.Grep)
 		kept := entries[:0]

@@ -6,7 +6,10 @@
 // server's job (internal/mcp), so no tool can forget it.
 package redact
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Pattern is one secret shape. When Keep is true the regexp's first group is
 // a label (e.g. "password=") that stays in the output; only the value goes.
@@ -19,8 +22,9 @@ type Pattern struct {
 // Patterns is applied in order. Order matters: the PEM block goes first so a
 // key body is never half-eaten by a token pattern, Anthropic keys before the
 // generic sk- shape, the Authorization header before the bare Bearer form.
-// A value that already starts with "[" is not re-redacted by the key=value
-// pattern, so String is idempotent ("psk=[redacted:wifi_psk]" stays put).
+// A labelled value that is already "[redacted:...]" is left alone, so String
+// is idempotent ("psk=[redacted:wifi_psk]" stays put) while any other value,
+// including one that starts with "[", is still redacted.
 var Patterns = []Pattern{
 	{Kind: "private_key", Re: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`)},
 	{Kind: "anthropic_key", Re: regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{16,}`)},
@@ -33,17 +37,46 @@ var Patterns = []Pattern{
 	{Kind: "authorization", Re: regexp.MustCompile(`(?i)(\bauthorization\s*:\s*)[^\r\n]+`), Keep: true},
 	{Kind: "bearer", Re: regexp.MustCompile(`(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}`), Keep: true},
 	{Kind: "wifi_psk", Re: regexp.MustCompile(`(?i)(\b(?:802-11-wireless-security|wifi-sec)\.psk\s*[:=]\s*)\S+`), Keep: true},
-	{Kind: "secret", Re: regexp.MustCompile(`(?i)((?:^|[^A-Za-z0-9])(?:password|passwd|secret|token|api[_-]?key|psk)\s*=\s*)("[^"]*"|'[^']*'|[^\s&;,\[][^\s&;,]*)`), Keep: true},
+	// key=value, JSON ("password": "x") and YAML (token: x). The key may be
+	// quoted; the value is a quoted string (JSON escapes allowed), a [...]
+	// list, or a bare word. Spacing never crosses a line, so an empty YAML
+	// value does not swallow the next line.
+	{Kind: "secret", Re: regexp.MustCompile(`(?i)((?:^|[^A-Za-z0-9])["']?(?:password|passwd|secret|token|api[_-]?key|psk)["']?[ \t]*[:=][ \t]*)("(?:[^"\\\r\n]|\\.)*"|'[^'\r\n]*'|\[[^\]\r\n]*\]|[^\s&;,]+)`), Keep: true},
 }
+
+const redactedPrefix = "[redacted:"
 
 // String returns s with every secret replaced.
 func String(s string) string {
 	for _, p := range Patterns {
-		repl := "[redacted:" + p.Kind + "]"
+		repl := redactedPrefix + p.Kind + "]"
 		if p.Keep {
-			repl = "${1}" + repl
+			s = replaceKeepingLabel(p.Re, s, repl)
+		} else {
+			s = p.Re.ReplaceAllString(s, repl)
 		}
-		s = p.Re.ReplaceAllString(s, repl)
 	}
 	return s
+}
+
+// replaceKeepingLabel replaces what follows group 1 of each match with repl,
+// unless it is already a redaction marker.
+func replaceKeepingLabel(re *regexp.Regexp, s, repl string) string {
+	matches := re.FindAllStringSubmatchIndex(s, -1)
+	if matches == nil {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		valueStart := m[3] // end of group 1
+		if strings.HasPrefix(s[valueStart:m[1]], redactedPrefix) {
+			continue
+		}
+		b.WriteString(s[last:valueStart])
+		b.WriteString(repl)
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }

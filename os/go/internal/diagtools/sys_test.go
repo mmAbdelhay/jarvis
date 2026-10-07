@@ -90,6 +90,37 @@ func TestLogsQuerySecretsAreRedactedByTheServer(t *testing.T) {
 	}
 }
 
+// The grep filter must see only what the caller may see: matching on the raw
+// message would let a caller probe a redacted secret one guess at a time.
+func TestLogsQueryGrepMatchesTheRedactedMessage(t *testing.T) {
+	line := `{"__REALTIME_TIMESTAMP":"1759831200000000","PRIORITY":"3","_SYSTEMD_UNIT":"app.service","MESSAGE":"login password=hunter2 failed"}` + "\n"
+	for _, tc := range []struct {
+		grep string
+		want int
+	}{
+		{"hunter2", 0},
+		{"HUNTER", 0},
+		{"password=h", 0},
+		{"password=[redacted", 1},
+		{"login", 1},
+	} {
+		run := (&execx.Fake{}).On(execx.OK(line), "journalctl", logsArgs(4, grepWindow)...)
+		v, err := call(t, Deps{Run: run, Now: func() time.Time { return now }}, "logs.query", `{"grep":"`+tc.grep+`"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := asJSON(t, v)["lines"].([]any)
+		if len(lines) != tc.want {
+			t.Errorf("grep %q: %d lines, want %d", tc.grep, len(lines), tc.want)
+		}
+		for _, l := range lines {
+			if msg := l.(map[string]any)["message"].(string); strings.Contains(msg, "hunter2") {
+				t.Errorf("grep %q leaked %q", tc.grep, msg)
+			}
+		}
+	}
+}
+
 func TestLogsQueryRejectsBadInput(t *testing.T) {
 	for _, args := range []string{`{"priority":8}`, `{"sinceMinutes":0}`, `{"sinceMinutes":1441}`, `{"limit":201}`, `{"unit":"x; reboot"}`, `{"unit":"-k"}`, `{"grep":"` + strings.Repeat("a", 101) + `"}`} {
 		if _, err := call(t, Deps{Run: &execx.Fake{}}, "logs.query", args); code(err) != mcp.CodeInvalid {

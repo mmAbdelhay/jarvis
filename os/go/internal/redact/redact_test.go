@@ -55,6 +55,23 @@ func TestPatterns(t *testing.T) {
 		{"secret near-miss: prose", "password changed for jarvis", "password changed for jarvis"},
 		{"secret near-miss: tokens count", "tokens=5", "tokens=5"},
 
+		{"secret value starting with [", "password=[hunter2] ok", "password=[redacted:secret] ok"},
+		{"secret value starting with [ unbracketed", "token=[abc next", "token=[redacted:secret] next"},
+		{"secret json", `{"password": "hunter2", "user": "ali"}`, `{"password": [redacted:secret], "user": "ali"}`},
+		{"secret json api_key", `{"api_key":"abc123def"}`, `{"api_key":[redacted:secret]}`},
+		{"secret json escaped quote", `{"secret": "a\"b", "n": 1}`, `{"secret": [redacted:secret], "n": 1}`},
+		{"secret json array value", `{"token": ["a", "b"], "n": 1}`, `{"token": [redacted:secret], "n": 1}`},
+		{"secret json single-quoted", `{'passwd': 'x y'}`, `{'passwd': [redacted:secret]}`},
+		{"secret yaml", "token: abc123\nuser: ali", "token: [redacted:secret]\nuser: ali"},
+		{"secret yaml indented api-key", "  api-key: zzz", "  api-key: [redacted:secret]"},
+		{"secret yaml psk", "psk: correcthorse", "psk: [redacted:secret]"},
+		{"secret near-miss: yaml empty value keeps next line", "password:\nuser: ali", "password:\nuser: ali"},
+		{"secret near-miss: json key with suffix", `{"token_count": 5}`, `{"token_count": 5}`},
+		{"secret near-miss: plural key", "secrets: 3 loaded", "secrets: 3 loaded"},
+		{"secret near-miss: passwordless yaml", "passwordless: true", "passwordless: true"},
+		{"secret near-miss: key inside a word", "mytoken: abc", "mytoken: abc"},
+		{"secret near-miss: no separator", `"password" "x"`, `"password" "x"`},
+
 		{"addresses are kept", "eth0 192.168.1.20/24 aa:bb:cc:dd:ee:ff gw fe80::1", "eth0 192.168.1.20/24 aa:bb:cc:dd:ee:ff gw fe80::1"},
 	}
 	for _, c := range cases {
@@ -101,9 +118,14 @@ func TestPartialLineIsRedactedNotDropped(t *testing.T) {
 }
 
 func TestStringIsIdempotent(t *testing.T) {
-	in := "password=x Authorization: Bearer abcdefghijklmnop1234 sk-ant-api03-AbCdEf0123456789xyz"
-	once := String(in)
-	if twice := String(once); twice != once {
-		t.Fatalf("not idempotent:\n%q\n%q", once, twice)
+	for _, in := range []string{
+		"password=x Authorization: Bearer abcdefghijklmnop1234 sk-ant-api03-AbCdEf0123456789xyz",
+		`{"password": "x", "token": ["a"], "api_key": 'k'}`,
+		"token: [abc]\npsk: x\nwifi-sec.psk:abcdefgh",
+	} {
+		once := String(in)
+		if twice := String(once); twice != once {
+			t.Fatalf("not idempotent:\n%q\n%q", once, twice)
+		}
 	}
 }
