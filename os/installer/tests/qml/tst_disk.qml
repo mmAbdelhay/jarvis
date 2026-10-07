@@ -84,6 +84,20 @@ TestCase {
         verify(!encrypt.checked)
     }
 
+    function test_manualRootFormatStaysCheckedAfterClick() {
+        const c = make()
+        mouseClick(findChild(c.s, "option_manual"))
+        const mount = findChild(c.s, "mount_/dev/nvme0n1p2")
+        mount.forceActiveFocus()
+        keyClick(Qt.Key_Down)                          // "Not used" → "/"
+        compare(c.m.disk.manualRows[1].mount, "/")
+        const format = findChild(c.s, "format_/dev/nvme0n1p2")
+        verify(format.checked)
+        mouseClick(format)
+        verify(format.checked)
+        verify(c.m.disk.manualRows[1].format)
+    }
+
     function test_manualTableAssignsMounts() {
         const c = make()
         mouseClick(findChild(c.s, "option_manual"))

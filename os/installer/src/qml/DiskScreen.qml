@@ -150,7 +150,7 @@ ColumnLayout {
                 CheckRow {
                     objectName: "format_" + modelData.path
                     text: "Format"
-                    enabled: modelData.mount.length > 0
+                    enabled: modelData.mount.length > 0 && modelData.mount !== "/"
                     checked: modelData.format
                     onToggled: root.disk.setManualFormat(modelData.path, checked)
                 }
