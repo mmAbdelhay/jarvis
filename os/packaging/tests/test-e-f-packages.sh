@@ -39,12 +39,16 @@ check "installer binary" deb_has "$(d jarvis-installer)" usr/bin/jarvis-installe
 check "installer desktop file" deb_has "$(d jarvis-installer)" usr/share/applications/jarvis-installer.desktop
 check "installer needs same-version backend" grep -qF "jarvis-installer-backend (= $OS_VERSION)" <<<"$(deb_field "$(d jarvis-installer)" Depends)"
 check "installer needs same-version ui" grep -qF "jarvis-ui (= $OS_VERSION)" <<<"$(deb_field "$(d jarvis-installer)" Depends)"
+for pkg in jarvis-ui jarvis-installer jarvis-greeter; do
+  check "$pkg merges runtime Depends" grep -qF qml6-module-qtquick <<<"$(deb_field "$(d "$pkg")" Depends)"
+  check "$pkg excludes stage dependency metadata" bash -c '! dpkg-deb --fsys-tarfile "$1" | tar -tf - | grep -qx ./\.extra-depends' _ "$(d "$pkg")"
+done
 g=$(d jarvis-greeter)
 check "greeter binary" deb_has "$g" usr/bin/jarvis-greeter
 cfg=$(dpkg-deb --fsys-tarfile "$g" | tar -xO ./etc/greetd/config.toml)
 check "greetd runs the greeter in cage (contracts §7)" grep -qx 'command = "cage -s -- jarvis-greeter"' <<<"$cfg"
 check "greetd greeter user" grep -qx 'user = "_greetd"' <<<"$cfg"
-check "no autologin in the package" bash -c "! grep -q initial_session <<<\"\$1\"" _ "$cfg"
+check "no autologin in the package" bash -c '! grep -v "^[[:space:]]*#" <<<"$1" | grep -q initial_session' _ "$cfg"
 check "greetd config is a conffile" grep -qx /etc/greetd/config.toml <<<"$(dpkg-deb --ctrl-tarfile "$g" | tar -xO ./conffiles)"
 check "preinst diverts greetd's config" grep -q 'dpkg-divert --package jarvis-greeter --add --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml' <<<"$(deb_script "$g" preinst)"
 check "postrm removes the diversion" grep -q 'dpkg-divert --package jarvis-greeter --remove' <<<"$(deb_script "$g" postrm)"
@@ -66,7 +70,30 @@ check "model-fetch postinst enables the unit" grep -q 'systemctl enable jarvis-m
 check "shell now depends on jarvis-ui" grep -q 'jarvis-ui (= @VERSION@)' "$PACKAGING_DIR/jarvis-shell/control.in"
 check "version line is M2" grep -q "0.2.0~m2" "$PACKAGING_DIR/version.sh"
 check "tag prefix stripped" test "$(OS_VERSION=os-v0.2.1 "$PACKAGING_DIR/version.sh")" = 0.2.1
+# Real maintainer-script lifecycle, opt-in only in a disposable trixie container.
+# Missing removal of our retained conffile makes dpkg-divert refuse restoration.
+if [ "${JARVIS_TEST_DPKG_ROUNDTRIP:-0}" != 1 ] || [ "$(id -u)" != 0 ] ||
+   ! command -v dpkg >/dev/null || [ ! -f /.dockerenv ]; then
+  echo "SKIP greeter dpkg round trip (needs root/dpkg in an opted-in disposable container)"
+elif [ "$(dpkg-query -W -f='${Status}' greetd 2>/dev/null || true)" != 'install ok installed' ]; then
+  echo "SKIP greeter dpkg round trip (needs installed greetd)"
+else
+  cp /etc/greetd/config.toml "$tmp/greetd-original.toml"
+  # Fake E outputs do not require Qt: force only their unsatisfied Depends.
+  # greetd owns this conffile; its diversion requires accepting our new config.
+  dpkg --force-depends --force-confnew -i "$g"
+  check "greeter install diverts original greetd config" cmp "$tmp/greetd-original.toml" /etc/greetd/config.toml.greetd
+  check "greeter install activates packaged config" grep -qx 'command = "cage -s -- jarvis-greeter"' /etc/greetd/config.toml
+  dpkg -r jarvis-greeter
+  check "greeter removal restores greetd config" cmp "$tmp/greetd-original.toml" /etc/greetd/config.toml
+  check "greeter removal clears diversion" test -z "$(dpkg-divert --list /etc/greetd/config.toml)"
+fi
+
 rm "$tmp/build/greeter/CMakeCache.txt"
-err=$("$PACKAGING_DIR/build.sh" --out "$tmp/o2" jarvis-greeter 2>&1 || true)
+if err=$("$PACKAGING_DIR/build.sh" --out "$tmp/o2" jarvis-greeter 2>&1); then
+  fail "missing CMakeCache rejects build"
+else
+  pass "missing CMakeCache rejects build"
+fi
 check "missing E build names the command" grep -q 'cmake -S os/greeter' <<<"$err"
 finish

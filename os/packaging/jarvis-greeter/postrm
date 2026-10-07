@@ -1,7 +1,12 @@
 #!/bin/sh
 set -e
 case "$1" in
-  remove|abort-install|disappear)
+  remove)
+    # dpkg retains conffiles on remove; clear ours before restoring greetd's.
+    rm -f /etc/greetd/config.toml
+    dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
+    ;;
+  abort-install|disappear)
     dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
     ;;
 esac
