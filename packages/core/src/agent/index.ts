@@ -5,3 +5,4 @@ export * from "./fence.js";
 export * from "./audit.js";
 export * from "./fake-provider.js";
 export * from "./tool-registry.js";
+export * from "./risk-gate.js";
