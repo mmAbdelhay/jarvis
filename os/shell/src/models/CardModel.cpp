@@ -171,10 +171,16 @@ void CardModel::setTicked(int row, bool ticked)
     if (m_items[row].ticked == ticked)
         return;
     m_items[row].ticked = ticked;
+    // An unticked item forgets what was typed for it, so ticking it again
+    // cannot resend a stale secret (e.g. a Wi-Fi password).
+    if (!ticked)
+        wipeSecrets(m_items[row]);
     if (m_exclusive && ticked)
         for (int other = 0; other < m_items.size(); ++other)
-            if (other != row)
+            if (other != row && m_items[other].ticked) {
                 m_items[other].ticked = false;
+                wipeSecrets(m_items[other]);
+            }
     emit dataChanged(index(0), index(int(m_items.size()) - 1), {TickedRole});
     emit changed();
 }
@@ -220,13 +226,17 @@ QJsonObject CardModel::decision(bool approve) const
     return {{"cardId", m_cardId}, {"approve", runs}, {"ticked", ticked}, {"secrets", secrets}};
 }
 
+void CardModel::wipeSecrets(Item& item)
+{
+    for (auto it = item.secrets.begin(); it != item.secrets.end(); ++it)
+        it->fill(QChar(u'\0'));
+    item.secrets.clear();
+}
+
 void CardModel::wipeSecrets()
 {
-    for (Item& item : m_items) {
-        for (auto it = item.secrets.begin(); it != item.secrets.end(); ++it)
-            it->fill(QChar(u'\0'));
-        item.secrets.clear();
-    }
+    for (Item& item : m_items)
+        wipeSecrets(item);
 }
 
 void CardModel::close()

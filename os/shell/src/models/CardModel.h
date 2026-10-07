@@ -72,6 +72,7 @@ private:
         bool ticked = true;
         QHash<QString, QString> secrets;
     };
+    static void wipeSecrets(Item& item);
     void wipeSecrets();
 
     QList<Item> m_items;

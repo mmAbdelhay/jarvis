@@ -113,6 +113,36 @@ private slots:
         QCOMPARE(model.decision(true)["ticked"].toArray(), QJsonArray{"nm"});
     }
 
+    void untickingClearsThatItemsSecrets()
+    {
+        CardModel model;
+        model.setClockForTest(kNow);
+        QJsonArray items = wifi({u"home"_s});
+        items.append(item(u"nm"_s, u"svc.restart"_s, u"Restart NetworkManager"_s, u"system"_s));
+        QVERIFY(model.load(card(items)));
+        model.setSecret(0, u"password"_s, u"stale-pass"_s);
+        model.setTicked(0, false);
+        model.setTicked(0, true); // re-ticking must not resend the old password
+        QCOMPARE(model.decision(true)["ticked"].toArray(), (QJsonArray{"home", "nm"}));
+        QCOMPARE(model.decision(true)["secrets"].toObject(), QJsonObject());
+        model.toggle(0);
+        model.toggle(0);
+        QCOMPARE(model.decision(true)["secrets"].toObject(), QJsonObject());
+    }
+
+    void pickingAnotherNetworkClearsTheFirstPassword()
+    {
+        CardModel model;
+        model.setClockForTest(kNow);
+        QVERIFY(model.load(card(wifi({u"a"_s, u"b"_s}), QJsonValue::Null)));
+        model.setTicked(0, true);
+        model.setSecret(0, u"password"_s, u"pass-a"_s);
+        model.setTicked(1, true); // exclusive: unticks a
+        model.setTicked(0, true); // back to a
+        QCOMPARE(model.decision(true)["ticked"].toArray(), QJsonArray{"a"});
+        QCOMPARE(model.decision(true)["secrets"].toObject(), QJsonObject());
+    }
+
     void nothingTickedCannotApprove()
     {
         CardModel model;
