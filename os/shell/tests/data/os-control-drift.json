@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "frame": { "headerBytes": 5, "kinds": { "json": 0, "binary": 1 } },
+  "handshake": { "serverLabel": "jarvisd-server", "clientLabel": "jarvisd-client" },
+  "requests": [
+    "agent:prompt",
+    "agent:stop",
+    "agent:confirm",
+    "provider:list",
+    "provider:probe",
+    "provider:save",
+    "doctor:start",
+    "doctor:skip",
+    "audit:query"
+  ],
+  "pushes": ["agent:events", "provider:status", "doctor:state", "sys:snapshot"]
+}

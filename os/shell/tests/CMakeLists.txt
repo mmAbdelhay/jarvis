@@ -36,6 +36,20 @@ add_test(NAME qml_imports_listed
           -P ${CMAKE_CURRENT_SOURCE_DIR}/check_qml_imports.cmake)
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
 
+# Design §3.1: the channels the shell hard-codes match @jarvis/wire's list.
+# (cmake -P reads only the -D options that come before it.)
+set(JARVIS_CHANNEL_CHECK ${CMAKE_COMMAND} -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src)
+set(JARVIS_CHANNEL_SCRIPT -P ${CMAKE_CURRENT_SOURCE_DIR}/check_control_channels.cmake)
+add_test(NAME control_channels_match_wire
+  COMMAND ${JARVIS_CHANNEL_CHECK} -DWIRE_JSON=${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/wire/os-control.json
+          ${JARVIS_CHANNEL_SCRIPT})
+set_tests_properties(control_channels_match_wire PROPERTIES LABELS unit)
+# ...and the check really fails on drift (a renamed audit:list).
+add_test(NAME control_channels_detect_drift
+  COMMAND ${JARVIS_CHANNEL_CHECK} -DWIRE_JSON=${CMAKE_CURRENT_SOURCE_DIR}/data/os-control-drift.json
+          ${JARVIS_CHANNEL_SCRIPT})
+set_tests_properties(control_channels_detect_drift PROPERTIES LABELS unit WILL_FAIL TRUE)
+
 # The labwc relaunch loop: backoff and exit when the Wayland socket is gone.
 if(UNIX)
   add_test(NAME relaunch_loop
