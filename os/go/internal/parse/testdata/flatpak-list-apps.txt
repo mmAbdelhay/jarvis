@@ -1,0 +1,3 @@
+org.videolan.VLC	3.0.21	flathub
+com.spotify.Client	1.2.59.514	flathub
+org.example.Beta	1.9	flathub-beta
