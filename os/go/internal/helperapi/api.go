@@ -8,6 +8,7 @@ package helperapi
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // D-Bus names (contracts §2).
@@ -32,6 +33,12 @@ const (
 	ErrDenied     = "os.jarvis.Helper1.Error.Denied"
 	ErrNotAllowed = "os.jarvis.Helper1.Error.NotAllowed"
 )
+
+// PackageCallTimeout is the client's ceiling for one package call. It sits
+// above the helper's worst case for one call (apt-get update 5 min +
+// apt-cache show 1 min + install 30 min), so the helper, not the client,
+// reports a hung apt-get.
+const PackageCallTimeout = 38 * time.Minute
 
 // StderrTailMax bounds the stderr tail in every reply (contracts §2: ≤ 4 KiB).
 const StderrTailMax = 4096

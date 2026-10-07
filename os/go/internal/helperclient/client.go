@@ -16,7 +16,7 @@ import (
 // Per-call ceilings. They sit just above the helper's own command timeouts
 // so the helper, not the client, reports a hung apt-get.
 const (
-	packageCallTimeout = 35 * time.Minute
+	packageCallTimeout = helperapi.PackageCallTimeout
 	restartCallTimeout = 2 * time.Minute
 )
 

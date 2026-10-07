@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
@@ -167,5 +168,37 @@ func TestDescribeEachBatchElementOnItsOwn(t *testing.T) {
 		if err != nil || d.Title != c.title || d.Source != c.source || strings.Contains(d.Detail, "\n") {
 			t.Errorf("%s %s: %+v, %v", c.tool, c.element, d, err)
 		}
+	}
+}
+
+// Review focus: jarvisd gives an action tool a fixed time. A batch must not
+// start an item that could still be running when jarvisd gives up, or the
+// user hears "failed" while apt-get carries on.
+func TestBatchStopsStartingItemsNearTheTimeBudget(t *testing.T) {
+	now := time.Unix(0, 0)
+	helper := &helperapi.Fake{Reply: func(method string, args []string) (helperapi.Outcome, error) {
+		now = now.Add(BatchBudget - helperapi.PackageCallTimeout + time.Second) // a slow first install
+		return helperapi.Outcome{OK: true}, nil
+	}}
+	d := Deps{Run: &execx.Fake{}, Helper: helper, Now: func() time.Time { return now }}
+	v, err := call(t, d, "pkg.install", `{"items":[{"source":"flatpak","id":"org.gimp.GIMP"},{"source":"flatpak","id":"org.videolan.VLC"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := asJSON(t, v)
+	if len(helper.Calls) != 1 || len(m["installed"].([]any)) != 1 {
+		t.Fatalf("calls=%v result=%v", helper.Called(), m)
+	}
+	f := m["failed"].([]any)[0].(map[string]any)
+	if f["id"] != "org.videolan.VLC" || !strings.Contains(f["message"].(string), "not started") {
+		t.Fatalf("failed = %v", f)
+	}
+}
+
+func TestBatchBudgetFitsInsideJarvisdActionTimeout(t *testing.T) {
+	// packages/core/src/agent/tool-registry.ts ACTION_TOOL_TIMEOUT_MS.
+	const jarvisdActionTimeout = 85 * time.Minute
+	if BatchBudget >= jarvisdActionTimeout || BatchBudget < 2*helperapi.PackageCallTimeout {
+		t.Fatalf("BatchBudget %v must be < %v and >= 2x %v", BatchBudget, jarvisdActionTimeout, helperapi.PackageCallTimeout)
 	}
 }

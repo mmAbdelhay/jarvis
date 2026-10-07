@@ -15,8 +15,11 @@ import {
 export const TRUSTED_MCP_SERVERS = ["jarvis-pkg", "jarvis-diag"] as const;
 export const DESCRIBE_TOOL = "jarvis.describe";
 export const SAFE_TOOL_TIMEOUT_MS = 60_000;
-/** Installs and restarts may take minutes; they are never cut short. */
-export const ACTION_TOOL_TIMEOUT_MS = 900_000;
+/** Installs and restarts may take minutes; they are never cut short. Kept
+ *  above jarvis-pkg's BatchBudget (80 min, os/go/internal/pkgtools), which
+ *  stops starting items while a full helper call no longer fits, so a slow
+ *  install is never reported as failed while it is still running. */
+export const ACTION_TOOL_TIMEOUT_MS = 5_100_000;
 const DESCRIBE_TIMEOUT_MS = 10_000;
 const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const CARD_SOURCES: ReadonlySet<string> = new Set(["debian", "flathub", "system", "network"]);

@@ -199,7 +199,7 @@ describe("loadToolRegistry", () => {
       text: "no network",
       code: "offline",
     });
-    expect(pkg.calls.map((c) => c.timeoutMs)).toEqual([60_000, 900_000]);
+    expect(pkg.calls.map((c) => c.timeoutMs)).toEqual([60_000, 5_100_000]);
     await expect(registry.call("nope", {})).resolves.toMatchObject({
       ok: false,
       code: "not_found",

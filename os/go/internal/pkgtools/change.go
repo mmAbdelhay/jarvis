@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
@@ -83,6 +84,13 @@ type Failed struct {
 	Message string `json:"message"`
 }
 
+// BatchBudget is the longest one pkg.install or pkg.remove call may run. An
+// item is started only while a full helper call (PackageCallTimeout) still
+// fits, so the batch always ends before jarvisd's action timeout
+// (ACTION_TOOL_TIMEOUT_MS, 85 min, packages/core/src/agent/tool-registry.ts)
+// and jarvisd never reports "failed" for an install that is still running.
+const BatchBudget = 80 * time.Minute
+
 // change installs or removes items one at a time, so one app failing does
 // not hide that the others worked. Once a helper call starts it is never
 // cancelled (design §5: a running install is not killed midway); a Stop
@@ -93,9 +101,14 @@ func (d Deps) change(ctx context.Context, raw json.RawMessage, install bool) (an
 		return nil, err
 	}
 	installed, removed, failed := []Installed{}, []pkgRef{}, []Failed{}
+	start := d.now()
 	for _, it := range items {
 		if ctx.Err() != nil {
 			failed = append(failed, Failed{it.Source, it.ID, string(mcp.CodeFailed), "stopped before this app was started"})
+			continue
+		}
+		if d.now().Sub(start) > BatchBudget-helperapi.PackageCallTimeout {
+			failed = append(failed, Failed{it.Source, it.ID, string(mcp.CodeFailed), "not started: the earlier apps took too long; ask again to install it"})
 			continue
 		}
 		out, err := d.callHelper(context.WithoutCancel(ctx), it, install)

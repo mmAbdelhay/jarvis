@@ -14,8 +14,16 @@ import (
 type Deps struct {
 	Run    execx.Runner
 	Helper helperapi.Helper
-	FS     fs.FS  // the root filesystem ("/" → "."), for .desktop files and disk.usage
-	Home   string // $HOME, the default disk.usage path
+	FS     fs.FS            // the root filesystem ("/" → "."), for .desktop files and disk.usage
+	Home   string           // $HOME, the default disk.usage path
+	Now    func() time.Time // nil means time.Now (tests set a clock)
+}
+
+func (d Deps) now() time.Time {
+	if d.Now == nil {
+		return time.Now()
+	}
+	return d.Now()
 }
 
 const queryTimeout = 20 * time.Second
