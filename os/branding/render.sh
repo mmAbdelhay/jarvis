@@ -29,5 +29,15 @@ install -D -m0644 "$here/wallpaper/wallpaper.svg" "$bg/wallpaper.svg"
 svg2png "$here/wallpaper/wallpaper.svg" 3840 2160 "$bg/wallpaper-3840x2160.png"
 svg2png "$here/wallpaper/wallpaper.svg" 1920 1080 "$bg/wallpaper-1920x1080.png"
 
-# Tasks 3-5 append their sections below this line.
+# Plymouth theme "jarvis" (Task 3).
+pt=$out/usr/share/plymouth/themes/jarvis
+mkdir -p "$pt"
+brand_render "$here/plymouth/jarvis.plymouth.in" "$pt/jarvis.plymouth"
+brand_render "$here/plymouth/jarvis.script.in" "$pt/jarvis.script"
+svg2png "$here/logo/jarvis-ring.svg" 160 160 "$pt/logo.png"
+rsvg-convert "$here/plymouth/entry.svg" -o "$pt/entry.png"
+rsvg-convert "$here/plymouth/bullet.svg" -o "$pt/bullet.png"
+chmod 0644 "$pt"/*
+
+# Tasks 4-5 append their sections below this line.
 echo "render: $out"
