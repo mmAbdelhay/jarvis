@@ -14,6 +14,11 @@ HELPER_WAS_ACTIVATED = (
     "[ \"$(systemctl show -p ActiveEnterTimestampMonotonic --value jarvis-helper.service)\" != 0 ]"
 )
 # apt-get, run as root by the helper, recorded installing hello.
+# The doctor (via "doctor" in the audit log) restarted NetworkManager.
+DOCTOR_RESTARTED_NM = (
+    "grep -F '\"via\":\"doctor\"' /home/jarvis/.local/state/jarvis/audit.jsonl"
+    " | grep -F '\"unit\":\"NetworkManager\"' | grep -qF '\"result\":\"ok\"'"
+)
 APT_HISTORY_HELLO = "grep -Eq '^Commandline: .*apt-get install .*hello' /var/log/apt/history.log"
 
 

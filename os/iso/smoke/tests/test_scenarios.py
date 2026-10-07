@@ -30,6 +30,7 @@ class CommandsTest(unittest.TestCase):
             scenarios.polkit_grants(1000, "os.jarvis.helper.packages"),
             scenarios.HELPER_WAS_ACTIVATED,
             scenarios.APT_HISTORY_HELLO,
+            scenarios.DOCTOR_RESTARTED_NM,
             scenarios.shell_relaunches(20),
         ]
 

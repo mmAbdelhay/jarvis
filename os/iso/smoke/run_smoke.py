@@ -77,6 +77,8 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
         assert not missing, f"jarvis lacks groups {sorted(missing)} (has {sorted(have)})"
 
     run.check("session user groups", groups)
+    # Before the first jarvisctl call: it runs from the assets disk.
+    run.check("smoke assets mounted", lambda: sh(scenarios.mount_assets()))
     def control_socket():
         sh(scenarios.wait_for_socket(60), 70)
         return sh(ctl("wait --timeout 60"), 70)
@@ -105,7 +107,6 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
 
     run.check("criterion 2: idle RAM", idle_ram)
     run.check("shell relaunches after a crash", lambda: sh(scenarios.shell_relaunches(20), 40))
-    run.check("smoke assets mounted", lambda: sh(scenarios.mount_assets()))
     run.check(
         "connectivity baseline is full",
         lambda: sh(f"{scenarios.connectivity_setup(args.port)} && {scenarios.wait_connectivity_full(90)}", 200),
@@ -143,7 +144,14 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     def doctor():
         sh(scenarios.use_fake_provider(uid, None), 150)
         sh("systemctl stop NetworkManager")
-        out = sh(ctl("doctor --approve-all --timeout 300"), 330)
+        # No provider is configured in the VM and none is faked here, so the
+        # doctor ends "unfixed" (design §7 step 6: provider still unreachable,
+        # exit 1). §11.3 asserts the network result: the doctor's own
+        # NetworkManager restart brings connectivity back to full. 2 is a
+        # timeout or connection failure.
+        status, out = run.shell.run(ctl("doctor --approve-all --timeout 300"), 330 * run.factor)
+        assert status in (0, 1), f"jarvisctl doctor exited {status}: {out[-1500:]}"
+        sh(scenarios.DOCTOR_RESTARTED_NM)
         sh(scenarios.wait_connectivity_full(90), 100)
         return out[-1500:]
 

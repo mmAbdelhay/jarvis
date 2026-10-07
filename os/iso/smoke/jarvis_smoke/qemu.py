@@ -16,7 +16,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-HARNESS_APPEND = "console=ttyS0,115200n8 systemd.debug_shell=ttyS0 loglevel=3"
+# console=ttyS0 makes systemd's getty generator start serial-getty@ttyS0,
+# whose agetty hangs up ttyS0 and kills the debug shell mid-command; mask it.
+HARNESS_APPEND = (
+    "console=ttyS0,115200n8 systemd.debug_shell=ttyS0 systemd.mask=serial-getty@ttyS0.service loglevel=3"
+)
 
 
 def detect_accel(kvm: str = "/dev/kvm") -> str:

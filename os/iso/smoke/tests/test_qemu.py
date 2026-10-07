@@ -18,7 +18,8 @@ class QemuTest(unittest.TestCase):
         line = qemu.kernel_append("boot=live components quiet\n")
         self.assertEqual(
             line,
-            "boot=live components quiet console=ttyS0,115200n8 systemd.debug_shell=ttyS0 loglevel=3",
+            "boot=live components quiet console=ttyS0,115200n8 systemd.debug_shell=ttyS0"
+            " systemd.mask=serial-getty@ttyS0.service loglevel=3",
         )
 
     def test_append_refuses_a_release_line_that_already_opens_a_shell(self):
