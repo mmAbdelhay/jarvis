@@ -14,4 +14,5 @@ qt_add_qml_module(jarvis_ui
   SOURCES Brand.h Brand.cpp
   QML_FILES ${JARVIS_UI_QML}
 )
-target_link_libraries(jarvis_ui PRIVATE Qt6::Core Qt6::Qml Qt6::Quick jarvis_ui_native)
+target_link_libraries(jarvis_ui PRIVATE Qt6::Core Qt6::Qml Qt6::Quick)
+target_include_directories(jarvis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../native) # OsRelease.h only
