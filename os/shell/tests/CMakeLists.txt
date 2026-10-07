@@ -35,3 +35,11 @@ add_test(NAME qml_imports_listed
           -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/../deps/qml-runtime.txt
           -P ${CMAKE_CURRENT_SOURCE_DIR}/check_qml_imports.cmake)
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
+
+# The labwc relaunch loop: backoff and exit when the Wayland socket is gone.
+if(UNIX)
+  add_test(NAME relaunch_loop
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/data/test_relaunch_loop.sh
+               ${CMAKE_CURRENT_SOURCE_DIR}/../data/jarvis-shell-loop)
+  set_tests_properties(relaunch_loop PROPERTIES LABELS unit TIMEOUT 30)
+endif()
