@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Installed to /usr/share/polkit-1/actions/os.jarvis.installer.policy. Only
+     on the live ISO (jarvis-installer-backend is never installed on targets),
+     where the live user is the person installing (M2 contracts §1). -->
+<policyconfig>
+  <vendor>Rafiq</vendor>
+  <vendor_url>https://github.com/mmAbdelhay/jarvis</vendor_url>
+
+  <action id="os.jarvis.installer.run">
+    <description>Install Rafiq</description>
+    <description xml:lang="ar">تثبيت Rafiq</description>
+    <message>The Rafiq installer needs permission to change disks</message>
+    <message xml:lang="ar">يحتاج مثبّت Rafiq إلى إذن لتغيير الأقراص</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
