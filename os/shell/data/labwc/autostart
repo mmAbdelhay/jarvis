@@ -1,0 +1,3 @@
+# jarvis-shell line for labwc's autostart (Plan D owns /etc/xdg/labwc/autostart).
+# The loop relaunches a crashed shell with backoff and stops when labwc exits.
+/usr/share/jarvis-shell/jarvis-shell-loop &

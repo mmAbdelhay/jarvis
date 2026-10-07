@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!--
+  jarvis-shell keybinds for labwc. Plan D merges this <keyboard> block into
+  /etc/xdg/labwc/rc.xml. Super alone (on release) focuses the chat; Ctrl+Alt+T
+  opens foot even when an app window has focus (spec §8).
+-->
+<labwc_config>
+  <keyboard>
+    <default />
+    <keybind key="Super_L" onRelease="yes">
+      <action name="Execute" command="jarvis-shell --focus" />
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute" command="foot" />
+    </keybind>
+  </keyboard>
+</labwc_config>

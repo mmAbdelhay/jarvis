@@ -1,0 +1,31 @@
+#!/bin/sh
+# Keeps jarvis-shell running inside a labwc session (spec §10: labwc's
+# autostart runs once, so this loop is what relaunches a crashed shell).
+#  - Backoff between launches: 1 s, doubling up to 30 s, so a shell that
+#    cannot start does not spin; reset to 1 s after a run that lasted 60 s.
+#  - Exits when the compositor's Wayland socket
+#    ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY) is gone, so the loop ends with labwc.
+# Test hooks (tests/data/test_relaunch_loop.sh): JARVIS_SHELL_BIN, and
+# JARVIS_LOOP_SLEEP / JARVIS_LOOP_NOW replace `sleep` and `date +%s`.
+set -u
+
+shell_bin="${JARVIS_SHELL_BIN:-jarvis-shell}"
+sleep_cmd="${JARVIS_LOOP_SLEEP:-sleep}"
+now_cmd="${JARVIS_LOOP_NOW:-date +%s}"
+socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY:-wayland-0}"
+
+delay=1
+while [ -e "$socket" ]; do
+    started=$($now_cmd)
+    "$shell_bin"
+    ended=$($now_cmd)
+    [ -e "$socket" ] || break          # labwc is gone: do not relaunch
+    if [ $((ended - started)) -ge 60 ]; then
+        delay=1                        # it ran a while: start the backoff over
+    fi
+    $sleep_cmd "$delay"
+    delay=$((delay * 2))
+    if [ "$delay" -gt 30 ]; then
+        delay=30
+    fi
+done
