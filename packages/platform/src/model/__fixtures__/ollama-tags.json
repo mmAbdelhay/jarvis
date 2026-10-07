@@ -1,0 +1,6 @@
+{
+  "models": [
+    { "name": "qwen3:8b", "model": "qwen3:8b", "size": 5225388164 },
+    { "name": "gemma3:4b", "model": "gemma3:4b", "size": 3338801804 }
+  ]
+}
