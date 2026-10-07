@@ -78,10 +78,12 @@ func TestGreetdPreservesUnrelatedBytes(t *testing.T) {
 
 func TestLoggerSecretThreshold(t *testing.T) {
 	l := NewLogger(nil, nil)
+	l.AddSecret("xyz")
+	l.AddSecret("wxyz")
 	l.AddSecret("abcdefg")
-	l.AddSecret("abcdefgh")
-	l.Printf("abcdefg abcdefgh")
-	if got := l.Tail(1); len(got) != 1 || got[0] != "abcdefg [redacted:secret]" {
+	l.AddSecret("ijklmnop")
+	l.Printf("xyz wxyz abcdefg ijklmnop")
+	if got := l.Tail(1); len(got) != 1 || got[0] != "xyz [redacted:secret] [redacted:secret] [redacted:secret]" {
 		t.Fatalf("tail = %q", got)
 	}
 }

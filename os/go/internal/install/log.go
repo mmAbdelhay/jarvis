@@ -18,11 +18,14 @@ const LogPath = RunDir + "/install.log"
 // TargetLogPath is where the installed system keeps it (design §5.2).
 const TargetLogPath = "/target/var/log/jarvis-installer.log"
 
-// minSecretLen: secrets shorter than this are not searched for in argv or
-// log text — a 3-letter password equal to the username would otherwise
+// minSecretLen: secrets shorter than this are not searched for in argv
+// — a 3-letter password equal to the username would otherwise
 // "match" every useradd argument. Secrets never reach argv or the log by
 // construction (stdin only); the search is a second line of defence.
 const minSecretLen = 8
+
+// minLogSecretLen is the minimum secret length scrubbed from log text.
+const minLogSecretLen = 4
 
 // Logger is the redacted install log. Every line passes redact.String and
 // has every registered secret replaced, then goes to w and to memory.
@@ -47,7 +50,7 @@ func NewLogger(w io.Writer, now func() time.Time) *Logger {
 func (l *Logger) AddSecret(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(s) >= minSecretLen {
+	if len(s) >= minLogSecretLen {
 		l.secrets = append(l.secrets, s)
 	}
 }
