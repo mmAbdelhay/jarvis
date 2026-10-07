@@ -1,0 +1,145 @@
+{
+  "uefi": true,
+  "secureBoot": true,
+  "ramBytes": 16679329792,
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 3060",
+    "vramBytes": 6442450944
+  },
+  "online": true,
+  "geoTimezone": "Africa/Cairo",
+  "liveDevice": "/dev/sda",
+  "minRootBytes": 32212254720,
+  "disks": [
+    {
+      "path": "/dev/nvme0n1",
+      "model": "Samsung 980 NVMe",
+      "sizeBytes": 512110190592,
+      "removable": false,
+      "esp": "/dev/nvme0n1p1",
+      "partitions": [
+        {
+          "path": "/dev/nvme0n1p1",
+          "fs": "vfat",
+          "label": "SYSTEM",
+          "sizeBytes": 272629760,
+          "usedBytes": 33554432
+        },
+        {
+          "path": "/dev/nvme0n1p2",
+          "fs": "ntfs",
+          "label": "Windows",
+          "sizeBytes": 510000000000,
+          "usedBytes": 210000000000,
+          "ntfs": {
+            "dirty": false,
+            "hibernated": false,
+            "bitlocker": false,
+            "minSizeBytes": 215000000000
+          }
+        },
+        {
+          "path": "/dev/nvme0n1p3",
+          "fs": "ntfs",
+          "label": "Recovery",
+          "sizeBytes": 734003200,
+          "usedBytes": 600000000,
+          "ntfs": {
+            "dirty": false,
+            "hibernated": false,
+            "bitlocker": false,
+            "minSizeBytes": 650000000
+          }
+        }
+      ],
+      "windowsPartition": "/dev/nvme0n1p2",
+      "alongsideBounds": {
+        "minBytes": 32212254720,
+        "maxBytes": 295000000000
+      }
+    },
+    {
+      "path": "/dev/sda",
+      "model": "SanDisk Ultra",
+      "sizeBytes": 32015679488,
+      "removable": true,
+      "esp": null,
+      "partitions": [
+        {
+          "path": "/dev/sda1",
+          "fs": "iso9660",
+          "label": "RAFIQ",
+          "sizeBytes": 2000000000,
+          "usedBytes": 2000000000
+        }
+      ],
+      "windowsPartition": null,
+      "alongsideBounds": null
+    }
+  ],
+  "catalog": [
+    {
+      "id": "qwen3-4b",
+      "ollamaTag": "qwen3:4b",
+      "displayName": "Qwen3 4B",
+      "sizeBytes": 2600000000,
+      "minRamGB": 8,
+      "minVramGB": null,
+      "tier": "small",
+      "toolCalling": "verified",
+      "languages": [
+        "en",
+        "ar"
+      ],
+      "recommendedFor": "Quick answers on modest laptops",
+      "fits": true
+    },
+    {
+      "id": "qwen3-8b",
+      "ollamaTag": "qwen3:8b",
+      "displayName": "Qwen3 8B",
+      "sizeBytes": 5200000000,
+      "minRamGB": 16,
+      "minVramGB": null,
+      "tier": "medium",
+      "toolCalling": "verified",
+      "languages": [
+        "en",
+        "ar"
+      ],
+      "recommendedFor": "Everyday help",
+      "fits": true
+    },
+    {
+      "id": "qwen3-14b",
+      "ollamaTag": "qwen3:14b",
+      "displayName": "Qwen3 14B",
+      "sizeBytes": 9300000000,
+      "minRamGB": 32,
+      "minVramGB": null,
+      "tier": "large",
+      "toolCalling": "verified",
+      "languages": [
+        "en",
+        "ar"
+      ],
+      "recommendedFor": "Harder questions",
+      "fits": false
+    },
+    {
+      "id": "gpt-oss-20b",
+      "ollamaTag": "gpt-oss:20b",
+      "displayName": "gpt-oss 20B",
+      "sizeBytes": 14000000000,
+      "minRamGB": 16,
+      "minVramGB": 16,
+      "tier": "gpu",
+      "toolCalling": "verified",
+      "languages": [
+        "en"
+      ],
+      "recommendedFor": "Best quality with a big GPU",
+      "fits": false
+    }
+  ]
+}

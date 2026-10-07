@@ -1,0 +1,23 @@
+{
+  "planId": "from-fixture",
+  "summary": [
+    "Language: English · English (US) keyboard · Africa/Cairo",
+    "Shrink Windows from 510 GB to 362 GB, create 148 GB encrypted Rafiq",
+    "Account: Mohamed (mohamed) on mohamed-computer, password needed at login",
+    "Brain: Qwen3 8B on this computer (5.2 GB download)"
+  ],
+  "steps": [
+    { "stepId": "partition", "title": "Partition the disk" },
+    { "stepId": "encrypt", "title": "Encrypt the disk" },
+    { "stepId": "format", "title": "Create file systems" },
+    { "stepId": "copy", "title": "Copy system files" },
+    { "stepId": "configure", "title": "Create account mohamed" },
+    { "stepId": "bootloader", "title": "Install bootloader" },
+    { "stepId": "model", "title": "Download Qwen3 8B" }
+  ],
+  "diskAfter": [
+    { "label": "Windows", "sizeBytes": 362000000000, "encrypted": false },
+    { "label": "Rafiq", "sizeBytes": 148000000000, "encrypted": true }
+  ],
+  "warnings": ["Windows and its files are kept. Back up anything important first."]
+}
