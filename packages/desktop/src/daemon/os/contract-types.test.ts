@@ -1,0 +1,23 @@
+// Core keeps its own copy of the contract types (it may import no workspace
+// package); this file fails `pnpm typecheck` the moment the copies differ.
+import type * as Core from "@jarvis/core";
+import type * as Wire from "@jarvis/wire";
+import { describe, expectTypeOf, it } from "vitest";
+
+describe("core's agent types are exactly the contract's (@jarvis/wire)", () => {
+  it("matches every §3.3 type", () => {
+    expectTypeOf<Core.AgentEvent>().toEqualTypeOf<Wire.AgentEvent>();
+    expectTypeOf<Core.Card>().toEqualTypeOf<Wire.Card>();
+    expectTypeOf<Core.CardItem>().toEqualTypeOf<Wire.CardItem>();
+    expectTypeOf<Core.DoctorState>().toEqualTypeOf<Wire.DoctorState>();
+    expectTypeOf<Core.DoctorStep>().toEqualTypeOf<Wire.DoctorStep>();
+    expectTypeOf<Core.AuditEntry>().toEqualTypeOf<Wire.AuditEntry>();
+    expectTypeOf<Core.ProbeResult>().toEqualTypeOf<Wire.ProbeResult>();
+    expectTypeOf<Core.ProviderConfig>().toEqualTypeOf<Wire.ProviderConfig>();
+    expectTypeOf<Core.ProviderDraft>().toEqualTypeOf<Wire.ProviderDraft>();
+    expectTypeOf<Core.ConfirmAnswer>().toEqualTypeOf<Wire.ConfirmAnswer>();
+    expectTypeOf<Core.AuditQuery>().toEqualTypeOf<Wire.AuditQuery>();
+    expectTypeOf<Core.ProviderReachability>().toEqualTypeOf<Wire.ProviderStatusPush>();
+    expectTypeOf<Core.SysSnapshot>().toEqualTypeOf<Wire.SysSnapshot>();
+  });
+});
