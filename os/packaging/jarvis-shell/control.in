@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: jarvisd (= @VERSION@)
+Depends: jarvisd (= @VERSION@), jarvis-ui (= @VERSION@)
 Section: x11
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis

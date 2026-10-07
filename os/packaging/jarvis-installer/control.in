@@ -1,0 +1,11 @@
+Package: jarvis-installer
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-ui (= @VERSION@), jarvis-installer-backend (= @VERSION@)
+Section: admin
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ installer (live session only)
+ Puts @DISTRO_NAME@ on this computer: disk, account and the Jarvis model.

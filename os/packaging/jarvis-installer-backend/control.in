@@ -1,0 +1,11 @@
+Package: jarvis-installer-backend
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: dbus, polkitd, jarvis-ollama (= @VERSION@), jarvis-models-catalog (= @VERSION@), gdisk, cryptsetup, e2fsprogs, dosfstools, ntfs-3g, squashfs-tools, util-linux, efibootmgr, os-prober, grub-efi-amd64-signed, shim-signed
+Section: admin
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ installer backend (system D-Bus os.jarvis.Installer1)
+ Probes disks, plans and runs the install as root. Live session only.

@@ -1,0 +1,11 @@
+Package: jarvis-model-fetch
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-ollama (= @VERSION@), jarvis-models-catalog (= @VERSION@)
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: Finishes the Jarvis local model download on first boot
+ Used by @DISTRO_NAME@ when the install could not download the model.

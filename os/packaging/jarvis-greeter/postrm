@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+case "$1" in
+  remove|abort-install|disappear)
+    dpkg-divert --package jarvis-greeter --remove --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
+    ;;
+esac
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/sh
+# greetd owns /etc/greetd/config.toml; move it aside so ours is the config.
+set -e
+if [ "$1" = install ] || [ "$1" = upgrade ]; then
+  dpkg-divert --package jarvis-greeter --add --rename --divert /etc/greetd/config.toml.greetd /etc/greetd/config.toml
+fi
+exit 0

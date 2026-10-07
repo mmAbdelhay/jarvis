@@ -1,0 +1,9 @@
+# greetd on installed systems: the login screen (design §6, contracts §7, §8).
+# The installer adds an [initial_session] only if the user chose automatic
+# login. The live ISO replaces this file at boot (live-config 2000-jarvis-live-session).
+[terminal]
+vt = 7
+
+[default_session]
+command = "cage -s -- jarvis-greeter"
+user = "_greetd"
