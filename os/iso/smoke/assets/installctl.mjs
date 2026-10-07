@@ -65,10 +65,13 @@ function activeSession(user) {
   const gid = Number(sh(["id", "-g", user]));
   const ids = sh(["loginctl", "show-user", user, "-p", "Sessions", "--value"]).split(/\s+/);
   for (const id of ids.filter(Boolean)) {
-    const properties = Object.fromEntries(sh([
-      "loginctl", "show-session", id, "-p", "Active", "-p", "Scope", "-p", "Class", "-p", "Type",
-    ]).split("\n").map((line) => line.split("=")));
-    if (properties.Active === "yes" && properties.Class === "user" && ["wayland", "x11"].includes(properties.Type)) return { uid, gid, scope: properties.Scope };
+    const properties = Object.fromEntries(
+      sh(["loginctl", "show-session", id, "-p", "Active", "-p", "Scope", "-p", "Class"])
+        .split("\n")
+        .map((line) => line.split("=")),
+    );
+    if (properties.Active === "yes" && properties.Class === "user")
+      return { uid, gid, scope: properties.Scope };
   }
   throw new Error(`no active graphical session for ${user}`);
 }
@@ -76,13 +79,28 @@ function activeSession(user) {
 export function inSession(session, argv) {
   // sh writes its own pid into the session scope, then becomes the user.
   return [
-    "sh", "-c", 'echo $$ > "$1" && shift && uid=$1 gid=$2 && shift 2 && exec setpriv --reuid="$uid" --regid="$gid" --init-groups -- "$@"', "sh",
-    sessionCgroup(session.uid, session.scope), String(session.uid), String(session.gid), ...argv,
+    "sh",
+    "-c",
+    'echo $$ > "$1" && shift && uid=$1 gid=$2 && shift 2 && exec setpriv --reuid="$uid" --regid="$gid" --init-groups -- "$@"',
+    "sh",
+    sessionCgroup(session.uid, session.scope),
+    String(session.uid),
+    String(session.gid),
+    ...argv,
   ];
 }
 
 function call(session, method, signature, args) {
-  const argv = inSession(session, ["busctl", "--system", "--json=short", "call", ...BUS, method, signature, ...args]);
+  const argv = inSession(session, [
+    "busctl",
+    "--system",
+    "--json=short",
+    "call",
+    ...BUS,
+    method,
+    signature,
+    ...args,
+  ]);
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1));
     let out = "";
@@ -95,22 +113,33 @@ function call(session, method, signature, args) {
 
 async function main(argv) {
   let parsed;
-  try { parsed = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      choices: { type: "string" },
-      out: { type: "string" },
-      plan: { type: "string" },
-      secrets: { type: "string" },
-      timeout: { type: "string", default: "1800" },
-      "as-user": { type: "string", default: "jarvis" },
-    },
-  });
-  } catch { return 64; }
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        choices: { type: "string" },
+        out: { type: "string" },
+        plan: { type: "string" },
+        secrets: { type: "string" },
+        timeout: { type: "string", default: "1800" },
+        "as-user": { type: "string", default: "jarvis" },
+      },
+    });
+  } catch {
+    return 64;
+  }
   const { values, positionals } = parsed;
   const command = positionals[0];
-  if (positionals.length !== 1 || !(command === "probe" || (command === "plan" && values.choices && values.out) || (command === "execute" && values.plan && values.secrets && Number(values.timeout) > 0))) return 64;
+  if (
+    positionals.length !== 1 ||
+    !(
+      command === "probe" ||
+      (command === "plan" && values.choices && values.out) ||
+      (command === "execute" && values.plan && values.secrets && Number(values.timeout) > 0)
+    )
+  )
+    return 64;
   const log = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
   const fail = (event, code) => {
     log(event);
@@ -138,7 +167,9 @@ async function main(argv) {
   if (command === "execute" && values.plan && values.secrets) {
     const planId = JSON.parse(readFileSync(values.plan, "utf8")).planId;
     const monitor = spawn("busctl", [
-      "--system", "--json=short", "monitor",
+      "--system",
+      "--json=short",
+      "monitor",
       "--match=type='signal',interface='os.jarvis.Installer1'",
     ]);
     const finished = new Promise((resolve) => {
@@ -163,7 +194,9 @@ async function main(argv) {
       return fail({ error: r.err.trim() }, 1);
     }
     let timer;
-    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), Number(values.timeout) * 1000); });
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), Number(values.timeout) * 1000);
+    });
     const result = await Promise.race([finished, timeout]);
     clearTimeout(timer);
     monitor.kill();
@@ -172,7 +205,9 @@ async function main(argv) {
     log({ result: ok ? "ok" : "failed", errorStep, message });
     return ok ? 0 : 1;
   }
-  process.stderr.write("usage: installctl probe | plan --choices F --out F | execute --plan F --secrets F [--timeout S]\n");
+  process.stderr.write(
+    "usage: installctl probe | plan --choices F --out F | execute --plan F --secrets F [--timeout S]\n",
+  );
   return 64;
 }
 
