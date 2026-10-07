@@ -13,6 +13,7 @@
       "!design",
       "!pnpm-lock.yaml",
       "!**/*.jsonl",
+      "!os/go/**/testdata",
       "!apps/mobile/ios",
       "!apps/mobile/android",
       "!apps/mobile/.expo",
